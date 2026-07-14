@@ -110,9 +110,11 @@ struct TabBarView: View {
                 }
             },
             onClose: {
-                withAnimation(.easeInOut(duration: TabBarMetrics.closeDuration)) {
-                    _ = controller.closeTab(TabID(id: tab.id), inPane: pane.id)
-                }
+                // Close is not animated: the tab's content pane lives inside this
+                // transaction, so animating close holds the visible content for
+                // the whole duration and reads as a freeze. Snappy beats smooth
+                // here. (Reorder and split stay animated; only close is instant.)
+                _ = controller.closeTab(TabID(id: tab.id), inPane: pane.id)
             },
             onRename: { newTitle in
                 _ = controller.renameTab(TabID(id: tab.id), to: newTitle)

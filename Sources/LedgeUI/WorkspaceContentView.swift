@@ -37,8 +37,6 @@ private struct PaneContentView: View {
     @State private var focusToken = 0
     @State private var runtime = NoteRuntime(cwd: "~/Projects/ledge")
     @State private var preflight: RunPreflight?
-    /// Bumped whenever any run advances, so the editor re-lays-out its output.
-    @State private var decorationRevision = 0
 
     private var isFocusedPane: Bool { session.focusedPane == paneId }
 
@@ -52,7 +50,9 @@ private struct PaneContentView: View {
             },
             onBlocksChanged: { _ in },
             onRunBlock: requestRun,
-            decorationRevision: decorationRevision,
+            // Reading `layoutRevision` here subscribes the pane to run-state
+            // changes; the editor re-lays-out its output only when this moves.
+            decorationRevision: runtime.layoutRevision,
             runProvider: { runtime.run(forBlockAt: $0) }
         )
         // Inactive panes recede. The focused pane is the one that will receive a
@@ -69,15 +69,6 @@ private struct PaneContentView: View {
                 },
                 onCancel: { preflight = nil }
             )
-        }
-        // A cheap poll that ticks the decoration revision while anything runs.
-        // Streamed output arrives on the runtime's observable state; this nudges
-        // the editor to re-place the output views as they grow.
-        .task(id: text) {
-            while !Task.isCancelled {
-                decorationRevision &+= 1
-                try? await Task.sleep(for: .milliseconds(80))
-            }
         }
         .onDisappear { runtime.shutdown() }
         .onChange(of: session.focusedPane) { _, focused in

@@ -18,14 +18,63 @@ struct TabItemView: View {
 
     var body: some View {
         HStack(spacing: TabBarMetrics.contentSpacing) {
-            // Icon
+            // The selectable / renamable region. The close button is deliberately
+            // NOT inside it: an ancestor tap gesture (especially the double-click
+            // rename) competes with the close Button for every click and makes it
+            // fire only intermittently. Keeping the gestures off the button is
+            // what makes closing reliable.
+            selectableContent
+
+            // Close button or dirty indicator, with no select/rename gesture over
+            // it.
+            closeOrDirtyIndicator
+        }
+        .padding(.horizontal, TabBarMetrics.tabHorizontalPadding)
+        .offset(y: isSelected ? 0.5 : 0)
+        .frame(
+            minWidth: TabBarMetrics.tabMinWidth,
+            maxWidth: TabBarMetrics.tabMaxWidth,
+            minHeight: TabBarMetrics.tabHeight,
+            maxHeight: TabBarMetrics.tabHeight
+        )
+        .padding(.bottom, isSelected ? 1 : 0)
+        .background(tabBackground)
+        .contentShape(Rectangle())
+        .contextMenu {
+            if allowRename {
+                Button("Rename") { beginRename() }
+            }
+            if allowClose {
+                Button("Close Tab") { onClose() }
+            }
+        }
+        .onHover { hovering in
+            withAnimation(.easeInOut(duration: TabBarMetrics.hoverDuration)) {
+                isHovered = hovering
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(tab.title)
+        .accessibilityValue(tab.isDirty ? "Modified" : "")
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+    }
+
+    // MARK: - Selectable content
+
+    /// Icon plus title (or the rename field), carrying the select and rename
+    /// gestures. Uses `simultaneousGesture` so a single click selects at once
+    /// instead of waiting out the double-click window, while a double click still
+    /// renames. Both are gated on `!isRenaming` so clicks inside the text field
+    /// position the caret instead of re-triggering.
+    @ViewBuilder
+    private var selectableContent: some View {
+        HStack(spacing: TabBarMetrics.contentSpacing) {
             if let iconName = tab.icon {
                 Image(systemName: iconName)
                     .font(.system(size: TabBarMetrics.iconSize))
                     .foregroundStyle(isSelected ? TabBarColors.activeText : TabBarColors.inactiveText)
             }
 
-            // Title, or the rename field when editing in place
             if isRenaming {
                 TextField("", text: $draftTitle)
                     .textFieldStyle(.plain)
@@ -47,46 +96,14 @@ struct TabItemView: View {
             }
 
             Spacer(minLength: 4)
-
-            // Close button or dirty indicator
-            closeOrDirtyIndicator
         }
-        .padding(.horizontal, TabBarMetrics.tabHorizontalPadding)
-        .offset(y: isSelected ? 0.5 : 0)
-        .frame(
-            minWidth: TabBarMetrics.tabMinWidth,
-            maxWidth: TabBarMetrics.tabMaxWidth,
-            minHeight: TabBarMetrics.tabHeight,
-            maxHeight: TabBarMetrics.tabHeight
-        )
-        .padding(.bottom, isSelected ? 1 : 0)
-        .background(tabBackground)
         .contentShape(Rectangle())
-        // Double-click must be declared before the single-click, or the single
-        // tap consumes the event and the second click never arrives.
-        .onTapGesture(count: 2) {
-            beginRename()
-        }
-        .onTapGesture {
-            onSelect()
-        }
-        .contextMenu {
-            if allowRename {
-                Button("Rename") { beginRename() }
-            }
-            if allowClose {
-                Button("Close Tab") { onClose() }
-            }
-        }
-        .onHover { hovering in
-            withAnimation(.easeInOut(duration: TabBarMetrics.hoverDuration)) {
-                isHovered = hovering
-            }
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(tab.title)
-        .accessibilityValue(tab.isDirty ? "Modified" : "")
-        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+        .simultaneousGesture(TapGesture(count: 2).onEnded {
+            if !isRenaming { beginRename() }
+        })
+        .simultaneousGesture(TapGesture(count: 1).onEnded {
+            if !isRenaming { onSelect() }
+        })
     }
 
     // MARK: - Rename

@@ -33,7 +33,28 @@ gesture is reachable from outside the library. Added:
 - `TabItemView`: inline `TextField` editing, a Rename/Close context menu, and a
   double-click to begin. Blur commits, Esc cancels, matching Finder and Xcode.
 
-Note: the double-click gesture must be declared before the single-click one, or the
-single tap consumes the event and the second click never arrives.
-
 Tests: `TabRenameTests` in `Tests/BonsplitTests/BonsplitTests.swift`.
+
+### 2. Reliable close, instant select
+
+Upstream put the select and double-click-rename tap gestures on the whole tab,
+including the area over the close button. That had two costs:
+
+- The close `Button` had to win gesture arbitration against an ancestor
+  double-click recognizer on every click, so it fired only intermittently: you
+  had to click the x several times.
+- A single tap to select waited out the double-click window before it took
+  effect, so selecting a tab felt sluggish.
+
+Fixed in `TabItemView`: the select and rename gestures now live on an inner
+`selectableContent` region that excludes the close button, and they are attached
+with `simultaneousGesture` (a single tap selects immediately; a double tap still
+renames). The close button, no longer under any tap gesture, fires on the first
+click.
+
+### 3. Close is not animated
+
+`TabBarView` wrapped `closeTab` in `withAnimation(closeDuration)`. Because a tab's
+content pane is torn down inside that transaction, the visible content was held
+for the animation's full duration (~200ms), which read as a freeze on close. Close
+is now immediate. Reorder and split stay animated.

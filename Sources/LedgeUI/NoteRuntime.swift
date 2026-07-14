@@ -13,6 +13,19 @@ public final class BlockRun: Identifiable {
         case running
         case finished(exitCode: Int32)
         case sessionEnded
+
+        /// A stable per-case number, so a layout signature can notice a state
+        /// transition (which changes what the decoration draws) without caring
+        /// about the exit code.
+        var ordinal: Int {
+            switch self {
+            case .idle: 0
+            case .queued: 1
+            case .running: 2
+            case .finished: 3
+            case .sessionEnded: 4
+            }
+        }
     }
 
     public let id: String
@@ -71,6 +84,18 @@ public final class NoteRuntime {
     public func run(forBlockAt index: Int) -> BlockRun? {
         guard let id = runIndexForBlock[index] else { return nil }
         return runs[id]
+    }
+
+    /// A value that changes whenever anything a decoration draws changes: new
+    /// output, a state transition, or a fresh run appearing. Reading this from a
+    /// view body subscribes the view (via `@Observable`) to exactly those
+    /// changes, so the editor re-lays-out its output when it must and stays idle
+    /// otherwise. This is what replaces a polling timer.
+    public var layoutRevision: Int {
+        runs.values.reduce(into: 0) { acc, run in
+            acc &+= run.revision
+            acc &+= run.state.ordinal
+        }
     }
 
     /// Whether the session is currently alive.
