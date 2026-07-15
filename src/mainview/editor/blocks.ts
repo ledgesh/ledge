@@ -40,6 +40,16 @@ const appendOutput = StateEffect.define<{ id: string; text: string }>();
 const removeRun = StateEffect.define<string>();
 // A full document replace from native (loading a note) drops all inline output.
 export const clearRunsEffect = StateEffect.define<null>();
+// A no-op effect whose only purpose is to nudge the overlay plugin to re-measure
+// (it treats any effect as a trigger). Dispatched when a pooled editor is
+// re-parented between panes/tabs, so its overlay re-pins or collapses at once.
+const pingOverlayEffect = StateEffect.define<null>();
+
+// Force the block-chrome overlay to re-measure now. Used by the editor pool when
+// an editor's DOM host is attached to (or detached from) a visible pane.
+export function pingOverlay(view: EditorView): void {
+  view.dispatch({ effects: pingOverlayEffect.of(null) });
+}
 
 const runsField = StateField.define<RunInfo[]>({
   create: () => [],
@@ -391,6 +401,13 @@ const overlayPlugin = ViewPlugin.fromClass(
 
     read(): Measured {
       const view = this.view;
+      // A pooled editor for an inactive tab is detached from the DOM (kept alive
+      // off-screen; see editorPool.ts). Measuring it would leave the last set of
+      // floating buttons stranded on screen, so collapse the overlay entirely
+      // until its host is re-parented into a visible pane.
+      if (!view.dom.isConnected) {
+        return { rect: { top: 0, left: 0, width: 0, height: 0 }, controls: [], closes: [], sig: "detached" };
+      }
       // The layer is a fixed box pinned over the editor's rect, so measure every
       // button against the editor's viewport rect and position it relative to that.
       const base = view.dom.getBoundingClientRect();

@@ -52,17 +52,19 @@ export function toNative(message: unknown): void {
   if (m.id) handlers.runInline?.(m.id, m.code);
 }
 
-// Bun -> web run events. The editor registers a sink bound to its EditorView and
-// main.tsx forwards each RPC `runEvent` message here.
-let runEventSink: ((ev: RunEvent) => void) | null = null;
+// Bun -> web run events. Every mounted editor registers a sink bound to its own
+// EditorView; a run event carries a globally-unique block id, and handleRunEvent
+// is a silent no-op for ids a view doesn't own, so broadcasting to all sinks is
+// safe and lets several editor tabs/panes coexist without routing bookkeeping.
+const runEventSinks = new Set<(ev: RunEvent) => void>();
 
 export function onRunEvent(sink: (ev: RunEvent) => void): () => void {
-  runEventSink = sink;
+  runEventSinks.add(sink);
   return () => {
-    if (runEventSink === sink) runEventSink = null;
+    runEventSinks.delete(sink);
   };
 }
 
 export function dispatchRunEvent(ev: RunEvent): void {
-  runEventSink?.(ev);
+  for (const sink of runEventSinks) sink(ev);
 }

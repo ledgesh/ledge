@@ -106,6 +106,14 @@ body {
 }
 
 /* --- CodeMirror surface ----------------------------------------------------- */
+/* The pooled editor host (created in editorPool.ts and re-parented between panes)
+   must fill its pane so `.cm-editor { height: 100% }` has a definite parent.
+   Without this the editor grows to its content height: it never scrolls
+   internally, and the block-chrome overlay pins to the wrong rect. */
+.ledge-editor-host {
+  height: 100%;
+  width: 100%;
+}
 .cm-editor {
   height: 100%;
 }
