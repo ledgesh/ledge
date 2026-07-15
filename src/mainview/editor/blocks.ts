@@ -10,6 +10,7 @@ import {
   WidgetType,
 } from "@codemirror/view";
 import { toNative, type RunDestination } from "./bridge";
+import { parseAnsi } from "./ansi";
 
 // One inline run of a code block. Output accumulates as bytes arrive from native.
 export interface RunInfo {
@@ -232,7 +233,18 @@ class OutputWidget extends WidgetType {
 
     const pre = document.createElement("pre");
     pre.className = "ledge-output-body";
-    pre.textContent = stripAnsi(this.run.text);
+    // Render ANSI colour as styled spans instead of stripping it: block output
+    // comes from a real pty, so colour-aware tools emit escape sequences.
+    for (const chunk of parseAnsi(this.run.text)) {
+      if (chunk.style) {
+        const span = document.createElement("span");
+        span.setAttribute("style", chunk.style);
+        span.textContent = chunk.text;
+        pre.appendChild(span);
+      } else {
+        pre.appendChild(document.createTextNode(chunk.text));
+      }
+    }
     panel.appendChild(pre);
     return panel;
   }
@@ -606,12 +618,6 @@ function statusText(run: RunInfo): string {
 
 function formatDuration(ms: number): string {
   return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`;
-}
-
-// eslint-disable-next-line no-control-regex
-const ANSI = /\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)/g;
-function stripAnsi(text: string): string {
-  return text.replace(ANSI, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 }
 
 function decodeBase64(b64: string): string {

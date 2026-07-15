@@ -76,6 +76,22 @@
   --ok: #34c759;
   --err: #ff3b30;
   --busy: #0a84ff;
+  /* Code-block syntax palette (light). Consumed by the CodeMirror highlight in
+     editor/setup.ts; the code inside fenced blocks is parsed by its language
+     (codeLanguages) and these colour its tokens. */
+  --code-keyword: #cf222e;
+  --code-string: #0a3069;
+  --code-comment: #6e7781;
+  --code-number: #0550ae;
+  --code-atom: #0550ae;
+  --code-function: #8250df;
+  --code-type: #953800;
+  --code-property: #116329;
+  --code-operator: #0550ae;
+  --code-punct: #57606a;
+  --code-meta: #6e7781;
+  --code-regexp: #0a3069;
+  --code-variable: var(--fg);
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -91,6 +107,20 @@
     --ok: #30d158;
     --err: #ff453a;
     --busy: #0a84ff;
+    /* Code-block syntax palette (dark), One-Dark-ish. */
+    --code-keyword: #c678dd;
+    --code-string: #98c379;
+    --code-comment: #7d8590;
+    --code-number: #d19a66;
+    --code-atom: #d19a66;
+    --code-function: #61afef;
+    --code-type: #e5c07b;
+    --code-property: #56b6c2;
+    --code-operator: #abb2bf;
+    --code-meta: #56b6c2;
+    --code-punct: #8b949e;
+    --code-regexp: #98c379;
+    --code-variable: var(--fg);
   }
 }
 

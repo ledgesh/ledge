@@ -32,6 +32,24 @@ const highlight = HighlightStyle.define([
   { tag: tags.contentSeparator, color: "var(--ed-muted)" }, // Thematic break (---).
   // The recessive markers: heading #, list/quote marks, emphasis/code/link marks.
   { tag: tags.processingInstruction, color: "var(--ed-muted)" },
+
+  // Code-block syntax. Fenced blocks are parsed by their language (codeLanguages
+  // below), so these colour the nested tokens. Colours are CSS vars (index.css)
+  // for light/dark. Note markdown's inline markers above still win where they
+  // apply; these only match tokens the code parsers emit.
+  { tag: [tags.keyword, tags.controlKeyword, tags.operatorKeyword, tags.definitionKeyword, tags.moduleKeyword, tags.modifier], color: "var(--code-keyword)" },
+  { tag: [tags.string, tags.special(tags.string), tags.docString, tags.character, tags.escape], color: "var(--code-string)" },
+  { tag: [tags.comment, tags.lineComment, tags.blockComment, tags.docComment], color: "var(--code-comment)", fontStyle: "italic" },
+  { tag: [tags.number, tags.integer, tags.float], color: "var(--code-number)" },
+  { tag: [tags.bool, tags.null, tags.atom], color: "var(--code-atom)" },
+  { tag: [tags.function(tags.variableName), tags.function(tags.propertyName), tags.standard(tags.variableName), tags.definition(tags.variableName)], color: "var(--code-function)" },
+  { tag: [tags.typeName, tags.className, tags.namespace, tags.tagName], color: "var(--code-type)" },
+  { tag: [tags.propertyName, tags.attributeName, tags.special(tags.variableName)], color: "var(--code-property)" },
+  { tag: [tags.operator, tags.derefOperator, tags.compareOperator, tags.arithmeticOperator, tags.logicOperator, tags.bitwiseOperator], color: "var(--code-operator)" },
+  { tag: [tags.punctuation, tags.separator, tags.bracket, tags.paren, tags.brace, tags.squareBracket, tags.angleBracket], color: "var(--code-punct)" },
+  { tag: [tags.meta, tags.annotation], color: "var(--code-meta)" },
+  { tag: tags.regexp, color: "var(--code-regexp)" },
+  { tag: tags.variableName, color: "var(--code-variable)" },
 ]);
 
 // Report focus and every document change up to the bridge. `updateListener`
