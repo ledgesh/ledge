@@ -93,9 +93,6 @@ function Shell() {
         <span className="h-2 w-2 rounded-full bg-primary" />
         <span className="text-sm font-semibold">Ledge</span>
         <div className="flex-1" />
-        <span className="rounded bg-secondary px-1.5 py-0.5 text-[11px] font-medium text-secondary-foreground">
-          Electrobun
-        </span>
         <Button
           variant={termOpen ? "secondary" : "ghost"}
           size="sm"

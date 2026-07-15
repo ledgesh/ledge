@@ -8,15 +8,30 @@ import { tags } from "@lezer/highlight";
 import { toNative } from "./bridge";
 import { ledgeBlocks } from "./blocks";
 
-// Syntax colors that read as "styled plain text", using the OS label colors so
-// the editor tracks light/dark without us shipping two themes.
+// Ledge shows raw Markdown and styles it, rather than hiding the syntax the way
+// a live-preview editor does: the text you edit is the text on disk, which
+// matters when a note's code blocks have to be exact. So the markers stay
+// visible and go dim (tags.processingInstruction covers #, **, >, -, `, and the
+// ``` fence marks); the content they mark gets the weight. Ported from the Swift
+// build's MarkdownTheme. Colors come from CSS vars so the editor tracks the OS
+// appearance without a second theme.
 const highlight = HighlightStyle.define([
-  { tag: tags.heading, fontWeight: "600" },
-  { tag: tags.strong, fontWeight: "600" },
+  { tag: tags.heading1, fontSize: "1.5em", fontWeight: "700" },
+  { tag: tags.heading2, fontSize: "1.3em", fontWeight: "700" },
+  { tag: tags.heading3, fontSize: "1.15em", fontWeight: "700" },
+  { tag: tags.heading4, fontSize: "1.05em", fontWeight: "600" },
+  { tag: tags.heading5, fontWeight: "600" },
+  { tag: tags.heading6, fontWeight: "600", color: "var(--ed-muted)" },
+  { tag: tags.heading, fontWeight: "700" }, // Setext and any unlevelled heading.
+  { tag: tags.strong, fontWeight: "700" },
   { tag: tags.emphasis, fontStyle: "italic" },
-  { tag: [tags.monospace], fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" },
-  { tag: [tags.link, tags.url], color: "var(--link)" },
-  { tag: tags.quote, color: "var(--ed-muted)" },
+  { tag: tags.link, color: "var(--link)" },
+  { tag: tags.url, color: "var(--ed-muted)" },
+  { tag: tags.quote, color: "var(--ed-muted)", fontStyle: "italic" },
+  { tag: tags.labelName, color: "var(--ed-muted)" }, // Code-fence language, link labels.
+  { tag: tags.contentSeparator, color: "var(--ed-muted)" }, // Thematic break (---).
+  // The recessive markers: heading #, list/quote marks, emphasis/code/link marks.
+  { tag: tags.processingInstruction, color: "var(--ed-muted)" },
 ]);
 
 // Report focus and every document change up to the bridge. `updateListener`
