@@ -238,6 +238,7 @@ const svg = (body: string) =>
 const PLAY_ICON = svg('<path d="M5 3.4 12.5 8 5 12.6 Z" fill="currentColor" stroke="none"/>');
 const TERMINAL_ICON = svg('<rect x="1.5" y="2.5" width="13" height="11" rx="2"/><path d="M4.5 6.3l2 1.7-2 1.7"/><path d="M8.5 10h3"/>');
 const COPY_ICON = svg('<rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 5.5V4A1.5 1.5 0 0 0 9 2.5H4A1.5 1.5 0 0 0 2.5 4v5A1.5 1.5 0 0 0 4 10.5h1.5"/>');
+const CHECK_ICON = svg('<path d="M3.5 8.4l3 3 6-6.8"/>');
 const CLOSE_ICON = svg('<path d="M4 4l8 8M12 4l-8 8"/>');
 
 function iconButton(markup: string, title: string, onDown: (e: MouseEvent) => void): HTMLButtonElement {
@@ -248,6 +249,49 @@ function iconButton(markup: string, title: string, onDown: (e: MouseEvent) => vo
   // mousedown, not click: run before the editor moves the selection or steals focus.
   b.addEventListener("mousedown", onDown);
   return b;
+}
+
+// navigator.clipboard needs a secure context, which the views:// scheme is not,
+// so it is undefined (or rejects) here. Fall back to the temporary-textarea +
+// execCommand path, which works in this WebView without a secure context.
+function copyText(text: string): void {
+  const clip = navigator.clipboard;
+  if (clip && typeof clip.writeText === "function") {
+    clip.writeText(text).catch(() => execCopy(text));
+  } else {
+    execCopy(text);
+  }
+}
+
+function execCopy(text: string): void {
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.style.position = "fixed";
+  ta.style.top = "0";
+  ta.style.left = "0";
+  ta.style.opacity = "0";
+  ta.style.pointerEvents = "none";
+  document.body.appendChild(ta);
+  ta.focus();
+  ta.select();
+  try {
+    document.execCommand("copy");
+  } catch {
+    // Nothing more we can do; leave the clipboard untouched.
+  }
+  ta.remove();
+}
+
+// Swap the copy glyph for a checkmark for a beat, as click feedback.
+function flashCopied(btn: HTMLButtonElement): void {
+  btn.innerHTML = CHECK_ICON;
+  btn.title = "Copied";
+  btn.classList.add("copied");
+  window.setTimeout(() => {
+    btn.innerHTML = COPY_ICON;
+    btn.title = "Copy";
+    btn.classList.remove("copied");
+  }, 1100);
 }
 
 // --- Overlay layer ---------------------------------------------------------
@@ -442,13 +486,14 @@ const overlayPlugin = ViewPlugin.fromClass(
             }),
           );
         }
-        group.appendChild(
-          iconButton(COPY_ICON, "Copy", (e) => {
-            e.preventDefault();
-            const block = blockAt(this.view.state, c.from);
-            if (block) navigator.clipboard.writeText(block.code);
-          }),
-        );
+        const copyBtn = iconButton(COPY_ICON, "Copy", (e) => {
+          e.preventDefault();
+          const block = blockAt(this.view.state, c.from);
+          if (!block) return;
+          copyText(block.code);
+          flashCopied(copyBtn);
+        });
+        group.appendChild(copyBtn);
         this.layer.appendChild(group);
       }
       for (const c of m.closes) {

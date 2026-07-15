@@ -178,6 +178,11 @@ body {
   background: var(--btn-hover);
   color: var(--fg);
 }
+/* Copy-confirmed flash: the checkmark stays green even on hover for its beat. */
+.ledge-btn.copied,
+.ledge-btn.copied:hover {
+  color: var(--ok);
+}
 
 /* --- Inline output panel (block widget under a code block) ------------------ */
 .ledge-output {
