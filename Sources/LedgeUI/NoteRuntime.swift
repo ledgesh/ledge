@@ -3,6 +3,21 @@ import LedgeMarkdown
 import Observation
 import SessionKit
 
+/// Where a block's output goes when it runs.
+public enum RunDestination: Sendable {
+    /// Sliced by the marker protocol and shown in a panel under the block.
+    case inline
+    /// Typed into the note's shell like a command, shown in the terminal drawer.
+    case terminalPane
+
+    public var label: String {
+        switch self {
+        case .inline: "Inline"
+        case .terminalPane: "Terminal"
+        }
+    }
+}
+
 /// The run state of a single code block.
 @MainActor
 @Observable
@@ -72,9 +87,26 @@ public final class NoteRuntime {
     /// The seed the session starts from. Later this comes from frontmatter.
     public var cwd: String?
 
+    /// The whole shell transcript, verbatim, for the terminal drawer. This is the
+    /// raw PTY torrent (prompt, echo, block output, anything typed) accumulated so
+    /// a drawer opened late still shows the history, then fed new bytes as they
+    /// arrive. Reset when the shell restarts, so it reflects the live process.
+    public private(set) var terminalOutput = Data()
+
+    /// Bumped on every appended chunk (and reset), so the drawer can observe "new
+    /// terminal bytes" without diffing Data.
+    public private(set) var terminalRevision = 0
+
+    /// Forwarded every run event, so the web editor can render inline output.
+    /// The web owns the editor surface now; this is how native run state reaches
+    /// it. Runs started via `runForWeb` are keyed by the web's own id.
+    public var onRunEvent: ((RunEvent) -> Void)?
+
     private var session: ShellSession?
     private var eventTask: Task<Void, Never>?
+    private var rawTask: Task<Void, Never>?
     private var runIndexForBlock: [Int: String] = [:]
+    private var webTerminalCounter = 0
 
     public init(cwd: String? = nil) {
         self.cwd = cwd
@@ -118,14 +150,76 @@ public final class NoteRuntime {
         session.run(RunRequest(blockId: runId, code: code, language: block.language))
     }
 
+    /// Run a block for the web editor, tagged with the web's own id so the events
+    /// it streams back can be matched to the right inline panel. Not tracked as a
+    /// `BlockRun`; the web holds the output. Output still flows through the marker
+    /// protocol, so it is sliced per id and forwarded via `onRunEvent`.
+    public func runForWeb(id: String, code: String, language: String?) {
+        ensureSession().run(RunRequest(blockId: id, code: code, language: language))
+    }
+
+    /// Run a block in the terminal drawer for the web editor: types the runner
+    /// command into the shell, output appears in the drawer, no inline panel.
+    public func runInTerminalForWeb(code: String, language: String?) {
+        webTerminalCounter += 1
+        let request = RunRequest(blockId: "term-web-\(webTerminalCounter)", code: code, language: language)
+        ensureSession().runInTerminal(request)
+    }
+
+    /// Run a block in the terminal drawer instead of inline: the runner command
+    /// is typed into the shell like any other command, so its output (and any
+    /// prompt it shows) lives in the drawer and can be interacted with. Unlike
+    /// `run`, this is not tracked as a `BlockRun`; the terminal is the output.
+    public func runInTerminal(_ block: CodeBlock, index: Int, code: String) {
+        // The block's output now lives in the drawer, so drop any inline panel
+        // left over from a previous inline run of the same block.
+        if let stale = runIndexForBlock.removeValue(forKey: index) {
+            runs.removeValue(forKey: stale)
+        }
+        let request = RunRequest(
+            blockId: "term-\(index)-\(runs.count)",
+            code: code,
+            language: block.language
+        )
+        ensureSession().runInTerminal(request)
+    }
+
+    /// Dismiss a block's inline output. Drops the run so the panel and its
+    /// reserved space go away; the block can be run again to bring it back.
+    public func clearRun(forBlockAt index: Int) {
+        guard let id = runIndexForBlock.removeValue(forKey: index) else { return }
+        runs.removeValue(forKey: id)
+    }
+
     /// Interrupt whatever is currently running.
     public func interrupt() {
         session?.interrupt()
     }
 
+    // MARK: - Terminal drawer
+
+    /// Bring the shell up so the drawer has a live prompt to talk to, even before
+    /// any block has run. Opening the drawer calls this.
+    public func activateTerminal() {
+        _ = ensureSession()
+    }
+
+    /// Raw keystrokes from the drawer straight to the shell. Starts the shell if
+    /// the drawer is the first thing the user touches.
+    public func sendToTerminal(_ data: Data) {
+        ensureSession().send(data)
+    }
+
+    /// The drawer's terminal was resized; tell the shell its new dimensions.
+    public func resizeTerminal(columns: UInt16, rows: UInt16) {
+        session?.resize(columns: columns, rows: rows)
+    }
+
     public func shutdown() {
         eventTask?.cancel()
         eventTask = nil
+        rawTask?.cancel()
+        rawTask = nil
         session?.close()
         session = nil
     }
@@ -139,11 +233,24 @@ public final class NoteRuntime {
         let new = ShellSession(configuration: .init(cwd: expanded))
         session = new
 
+        // A fresh shell means a fresh transcript: the drawer should show this
+        // process, not the ghost of a previous one that ended.
+        terminalOutput.removeAll(keepingCapacity: true)
+        terminalRevision &+= 1
+
         // Drain the event stream on the main actor: every field it touches is
         // main-actor isolated observable state.
         eventTask = Task { [weak self] in
             for await event in new.events {
                 self?.apply(event)
+            }
+        }
+
+        // The raw torrent feeds the terminal drawer. Kept separate from `events`
+        // so the drawer's verbatim mirror and the per-block slicing never contend.
+        rawTask = Task { [weak self] in
+            for await chunk in new.rawOutput {
+                self?.appendTerminal(chunk)
             }
         }
 
@@ -158,7 +265,15 @@ public final class NoteRuntime {
         return new
     }
 
+    private func appendTerminal(_ chunk: Data) {
+        terminalOutput.append(chunk)
+        terminalRevision &+= 1
+    }
+
     private func apply(_ event: RunEvent) {
+        // The web editor is the inline-output surface; forward everything to it.
+        onRunEvent?(event)
+
         switch event {
         case let .queued(id):
             runs[id]?.state = .queued

@@ -35,10 +35,17 @@ public struct RunRequest: Sendable {
 public final class ShellSession: @unchecked Sendable {
     public let events: AsyncStream<RunEvent>
 
+    /// Every byte the PTY emits, un-sliced, in arrival order. The marker parser
+    /// pulls per-block output out of `events`; this is the same torrent with
+    /// nothing removed, so the terminal drawer can be a faithful mirror of the
+    /// shell: prompt, echo, block output, and anything typed directly.
+    public let rawOutput: AsyncStream<Data>
+
     private let nonce: String
     private let runners: RunnerTable
     private let scratch: URL
     private let continuation: AsyncStream<RunEvent>.Continuation
+    private let rawContinuation: AsyncStream<Data>.Continuation
 
     /// Serializes all mutable state below. Every field after this line is only
     /// touched on this queue.
@@ -94,6 +101,10 @@ public final class ShellSession: @unchecked Sendable {
         var cont: AsyncStream<RunEvent>.Continuation!
         events = AsyncStream { cont = $0 }
         continuation = cont
+
+        var rawCont: AsyncStream<Data>.Continuation!
+        rawOutput = AsyncStream { rawCont = $0 }
+        rawContinuation = rawCont
     }
 
     // MARK: - Lifecycle
@@ -138,6 +149,7 @@ public final class ShellSession: @unchecked Sendable {
             try? FileManager.default.removeItem(at: scratch)
             continuation.yield(.sessionEnded)
             continuation.finish()
+            rawContinuation.finish()
         }
     }
 
@@ -153,6 +165,11 @@ public final class ShellSession: @unchecked Sendable {
     /// Type into the running block, for a command that prompts.
     public func send(_ input: String) {
         queue.sync { process?.write(input) }
+    }
+
+    /// Raw keystrokes from the terminal drawer, straight to the PTY.
+    public func send(_ data: Data) {
+        queue.sync { _ = process?.write(data) }
     }
 
     // MARK: - Running blocks
@@ -202,8 +219,9 @@ public final class ShellSession: @unchecked Sendable {
         process.write(command)
     }
 
-    /// Write the block body to a file and build the line we type at the shell.
-    private func submission(for request: RunRequest) -> String? {
+    /// Write the block body to a file and build the runner invocation for it, or
+    /// nil if the language has no runner. The bare command, without markers.
+    private func runnerCommand(for request: RunRequest) -> String? {
         let ext = runners.fileExtension(for: request.language)
         let file = scratch.appendingPathComponent("block-\(request.blockId).\(ext)")
         do {
@@ -211,14 +229,33 @@ public final class ShellSession: @unchecked Sendable {
         } catch {
             return nil
         }
-        guard let runner = runners.command(for: request.language, path: file.path) else {
-            return nil
-        }
+        return runners.command(for: request.language, path: file.path)
+    }
+
+    /// Write the block body to a file and build the line we type at the shell,
+    /// wrapped in the markers that let the reader slice its output back out.
+    private func submission(for request: RunRequest) -> String? {
+        guard let runner = runnerCommand(for: request) else { return nil }
         return MarkerProtocol.command(
             runner: runner,
             nonce: nonce,
             blockId: request.blockId
         )
+    }
+
+    /// Type a block's runner command straight at the prompt, unmarked, as if the
+    /// user typed it. Used by the terminal drawer: the output is not sliced, it
+    /// just appears in the terminal, and the block can read from the drawer's
+    /// keyboard. Returns false if the language has no runner or the shell is down.
+    @discardableResult
+    public func runInTerminal(_ request: RunRequest) -> Bool {
+        queue.sync {
+            guard !isClosed, let process, let runner = runnerCommand(for: request) else {
+                return false
+            }
+            process.write(runner + "\n")
+            return true
+        }
     }
 
     // MARK: - Reading
@@ -238,6 +275,9 @@ public final class ShellSession: @unchecked Sendable {
 
         isReady = true
         let chunk = Data(buffer[0 ..< n])
+        // The drawer mirrors the shell verbatim, so it sees every byte before the
+        // parser gets a chance to drop prompt noise and marker sequences.
+        rawContinuation.yield(chunk)
         if ProcessInfo.processInfo.environment["LEDGE_TRACE"] == "1" {
             // The raw byte channel. Debugging the marker protocol without this is
             // guesswork, so it is built in rather than added when needed.
@@ -273,6 +313,7 @@ public final class ShellSession: @unchecked Sendable {
         running = nil
         continuation.yield(.sessionEnded)
         continuation.finish()
+        rawContinuation.finish()
     }
 
     deinit {

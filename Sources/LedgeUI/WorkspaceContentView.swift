@@ -36,39 +36,44 @@ private struct PaneContentView: View {
     @State private var text = Sample.note
     @State private var focusToken = 0
     @State private var runtime = NoteRuntime(cwd: "~/Projects/ledge")
-    @State private var preflight: RunPreflight?
+    @State private var showTerminal = false
+    @State private var terminalHeight: CGFloat = 220
 
     private var isFocusedPane: Bool { session.focusedPane == paneId }
 
     var body: some View {
-        MarkdownEditor(
-            text: $text,
-            focusToken: focusToken,
-            onFocus: {
-                guard session.focusedPane != paneId else { return }
-                session.controller.focusPane(paneId)
-            },
-            onBlocksChanged: { _ in },
-            onRunBlock: requestRun,
-            // Reading `layoutRevision` here subscribes the pane to run-state
-            // changes; the editor re-lays-out its output only when this moves.
-            decorationRevision: runtime.layoutRevision,
-            runProvider: { runtime.run(forBlockAt: $0) }
-        )
+        VStack(spacing: 0) {
+            // Phase 1 of the editor pivot: CodeMirror in a WKWebView. Text sync,
+            // focus, and the terminal toggle are bridged; run affordances (block
+            // decorations and the run hotkeys) return in Phase 2 once the web side
+            // parses code blocks.
+            WebEditorView(
+                text: $text,
+                focusToken: focusToken,
+                onFocus: {
+                    guard session.focusedPane != paneId else { return }
+                    session.controller.focusPane(paneId)
+                },
+                onToggleTerminal: { showTerminal.toggle() },
+                onOpenTerminal: { showTerminal = true },
+                runtime: runtime
+            )
+
+            if showTerminal {
+                TerminalResizeHandle(height: $terminalHeight)
+                TerminalDrawer(runtime: runtime, onClose: { showTerminal = false })
+                    .frame(height: terminalHeight)
+            }
+        }
         // Inactive panes recede. The focused pane is the one that will receive a
         // keystroke, and later the one a run command targets, so it has to be
         // unmistakable at a glance.
         .opacity(isFocusedPane ? 1 : 0.45)
         .background(Color(nsColor: .textBackgroundColor))
-        .sheet(item: $preflight) { request in
-            RunPreflightSheet(
-                request: request,
-                onRun: {
-                    preflight = nil
-                    runtime.run(request.block, index: request.index, code: request.code)
-                },
-                onCancel: { preflight = nil }
-            )
+        .onChange(of: runtime.isSessionLive) { _, live in
+            // Typing `exit`, or a shell that dies on its own, ends the session.
+            // Fold the drawer away rather than leave it showing a dead terminal.
+            if !live { showTerminal = false }
         }
         .onDisappear { runtime.shutdown() }
         .onChange(of: session.focusedPane) { _, focused in
@@ -85,9 +90,10 @@ private struct PaneContentView: View {
         }
     }
 
-    /// The preflight gate. Every run passes through here: it is the whole of the
-    /// "never auto-run, show exactly what will run and where" model.
-    private func requestRun(_ index: Int) {
+    /// Run the block at `index`, inline or in the terminal drawer. Runs go
+    /// straight to the shell: the confirm sheet in `RunPreflight.swift` is kept
+    /// for a future opt-in "confirm before running" setting, off by default.
+    private func requestRun(_ index: Int, destination: RunDestination) {
         // Re-scan rather than trust `blocks`: `onBlocksChanged` fires inside a
         // SwiftUI update pass, where a state mutation is dropped, so the cached
         // array can be empty. The scan is cheap and is the source of truth.
@@ -97,15 +103,13 @@ private struct PaneContentView: View {
         guard !block.isUnterminated else { return }
 
         let code = (text as NSString).substring(with: block.body)
-        let runners = RunnerTable.default
-        preflight = RunPreflight(
-            index: index,
-            block: block,
-            code: code,
-            shell: (ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"),
-            cwd: (runtime.cwd ?? "~"),
-            runnable: runners.canRun(block.language)
-        )
+        switch destination {
+        case .inline:
+            runtime.run(block, index: index, code: code)
+        case .terminalPane:
+            runtime.runInTerminal(block, index: index, code: code)
+            showTerminal = true
+        }
     }
 }
 

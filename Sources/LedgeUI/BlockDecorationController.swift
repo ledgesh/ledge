@@ -23,6 +23,8 @@ final class BlockDecorationController {
     /// decides whether to show the preflight and, eventually, whether the note
     /// is trusted.
     var onRun: ((Int) -> Void)?
+    /// Called when the user dismisses a block's inline output.
+    var onDismiss: ((Int) -> Void)?
 
     private weak var textView: NSTextView?
     private var blocks: [CodeBlock] = []
@@ -43,6 +45,11 @@ final class BlockDecorationController {
 
     /// Height reserved for each block's output, keyed by document index.
     private var reservedHeights: [Int: CGFloat] = [:]
+
+    /// The dismiss (x) button rect inside each visible output panel, in text-view
+    /// coordinates. Fed to the cursor logic so it shows a pointing hand there
+    /// rather than the text view's I-beam.
+    private var dismissRects: [Int: NSRect] = [:]
 
     private var hoveredIndex: Int?
     private var caretIndex: Int?
@@ -109,6 +116,17 @@ final class BlockDecorationController {
         hoveredIndex == index || caretIndex == index
     }
 
+    /// The runnable block containing `characterIndex`, or nil. The run hotkey
+    /// targets the block the caret is in and does nothing when the caret is not
+    /// inside one that can actually run, so a stray Cmd+Return in prose is inert.
+    func runnableBlockIndex(atCharacter characterIndex: Int) -> Int? {
+        guard let index = blocks.indices.first(where: { i in
+            let range = blocks[i].range
+            return characterIndex >= range.location && characterIndex <= NSMaxRange(range)
+        }) else { return nil }
+        return RunnerTable.default.canRun(blocks[index].language) ? index : nil
+    }
+
     private func refreshControlVisibility() {
         for (index, host) in controlHosts {
             applyControlView(index: index, host: host)
@@ -128,13 +146,18 @@ final class BlockDecorationController {
             next[index] = outputHeight(for: run)
         }
 
-        guard next != reservedHeights else { return }
+        // Nothing reserved now or before: the highlighter's attribute reset has
+        // already left the storage clean, so there is nothing to undo or add.
+        if next.isEmpty, reservedHeights.isEmpty { return }
         reservedHeights = next
 
         storage.beginEditing()
-        // Reset any spacing we previously added, then re-apply. We only touch the
-        // final line of each block, so this does not fight the highlighter, which
-        // sets foreground and background but not paragraph spacing.
+        // Reset any spacing we previously added, then re-apply. This runs on every
+        // keystroke because `highlight` rewrites all attributes and wipes our
+        // spacing; re-applying unconditionally is what keeps the reserved gap from
+        // collapsing under the output panel after an edit. We only touch each
+        // block's final line, so this does not fight the foreground/background the
+        // highlighter sets.
         let full = NSRange(location: 0, length: storage.length)
         storage.enumerateAttribute(.paragraphStyle, in: full) { value, range, _ in
             if let style = value as? NSParagraphStyle, style.paragraphSpacing > 0 {
@@ -176,6 +199,7 @@ final class BlockDecorationController {
         let contentRight = textView.bounds.width - inset.width
         var liveIndices = Set<Int>()
         blockRects.removeAll(keepingCapacity: true)
+        dismissRects.removeAll(keepingCapacity: true)
 
         for (index, block) in blocks.enumerated() {
             liveIndices.insert(index)
@@ -217,19 +241,21 @@ final class BlockDecorationController {
             // Output, parked in the reserved gap under the block.
             if let run = runProvider(index), hasContent(run) {
                 let outputHost = outputViews[index] ?? {
-                    let created = OutputHost(run: run)
+                    let created = OutputHost(run: run, onClose: { [weak self] in self?.onDismiss?(index) })
                     textView.addSubview(created)
                     outputViews[index] = created
                     return created
                 }()
                 outputHost.setRun(run)
                 let height = outputHeight(for: run)
-                outputHost.frame = NSRect(
+                let frame = NSRect(
                     x: blockRect.minX,
                     y: blockRect.maxY + Metrics.outputGap,
                     width: blockRect.width,
                     height: height
                 )
+                outputHost.frame = frame
+                dismissRects[index] = dismissButtonRect(in: frame)
             } else if let stale = outputViews.removeValue(forKey: index) {
                 stale.removeFromSuperview()
             }
@@ -257,9 +283,25 @@ final class BlockDecorationController {
         host.rootView = makeControls(index: index, runState: signature.runState, visible: signature.visible)
     }
 
-    /// Frames (text-view coordinates) of controls that are currently shown.
+    /// Frames (text-view coordinates) where the cursor should be a pointing hand
+    /// rather than the text view's I-beam: the shown control clusters and every
+    /// output panel's dismiss button.
     func visibleControlFrames() -> [NSRect] {
-        controlHosts.compactMap { index, host in isVisible(index) ? host.frame : nil }
+        let controls = controlHosts.compactMap { index, host in isVisible(index) ? host.frame : nil }
+        return controls + Array(dismissRects.values)
+    }
+
+    /// The dismiss (x) button rect within an output panel of `frame`. Mirrors the
+    /// header layout in `BlockOutputPanel`: an 18pt button with 4pt trailing
+    /// padding, vertically centered in the 22pt header. Padded slightly so a
+    /// pixel of rounding never leaves the corner showing an I-beam.
+    private func dismissButtonRect(in frame: NSRect) -> NSRect {
+        let size: CGFloat = 18
+        let trailing: CGFloat = 4
+        let headerHeight: CGFloat = 22
+        let x = frame.maxX - trailing - size
+        let y = frame.minY + (headerHeight - size) / 2
+        return NSRect(x: x, y: y, width: size, height: size).insetBy(dx: -2, dy: -2)
     }
 
     private func makeControls(index: Int, runState: BlockRun.State?, visible: Bool) -> BlockControls {
@@ -332,9 +374,11 @@ final class BlockDecorationController {
 @MainActor
 final class OutputHost: NSView {
     private let hosting: NSHostingView<BlockOutputPanel>
+    private let onClose: () -> Void
 
-    init(run: BlockRun) {
-        hosting = NSHostingView(rootView: BlockOutputPanel(run: run))
+    init(run: BlockRun, onClose: @escaping () -> Void) {
+        self.onClose = onClose
+        hosting = NSHostingView(rootView: BlockOutputPanel(run: run, onClose: onClose))
         super.init(frame: .zero)
         addSubview(hosting)
         hosting.translatesAutoresizingMaskIntoConstraints = false
@@ -350,6 +394,6 @@ final class OutputHost: NSView {
     required init?(coder: NSCoder) { fatalError() }
 
     func setRun(_ run: BlockRun) {
-        hosting.rootView = BlockOutputPanel(run: run)
+        hosting.rootView = BlockOutputPanel(run: run, onClose: onClose)
     }
 }

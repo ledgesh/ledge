@@ -1,0 +1,18 @@
+{
+  "name": "ledge-editor",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bun build src/editor.ts --outdir ../Resources/editor --entry-naming editor.js --format=iife --minify && bun run copy",
+    "copy": "cp index.html ../Resources/editor/index.html"
+  },
+  "dependencies": {
+    "@codemirror/commands": "^6.7.1",
+    "@codemirror/lang-markdown": "^6.3.1",
+    "@codemirror/language": "^6.10.8",
+    "@codemirror/language-data": "^6.5.1",
+    "@codemirror/state": "^6.5.0",
+    "@codemirror/view": "^6.36.1",
+    "@lezer/highlight": "^1.2.1"
+  }
+}

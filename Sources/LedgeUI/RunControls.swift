@@ -83,6 +83,7 @@ private struct CodeBlockButton: View {
 /// The status header plus the terminal surface for one block's output.
 struct BlockOutputPanel: View {
     let run: BlockRun
+    let onClose: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -97,8 +98,18 @@ struct BlockOutputPanel: View {
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(.tertiary)
                 }
+                Button(action: onClose) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 18, height: 18)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Dismiss output")
             }
-            .padding(.horizontal, 8)
+            .padding(.leading, 8)
+            .padding(.trailing, 4)
             .frame(height: 22)
 
             BlockOutputView(run: run)

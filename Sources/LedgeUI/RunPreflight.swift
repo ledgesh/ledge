@@ -3,11 +3,11 @@ import SwiftUI
 
 /// What the user is about to run, shown before anything executes.
 ///
-/// "Never auto-run" and "show exactly what will run and where" are not polish,
-/// they are the security model. No code path reaches the session without passing
-/// through this sheet. The one relaxation allowed later is a per-note "trusted"
-/// flag for self-authored local notes, and even then only for notes that never
-/// arrived from sync or import.
+/// Not wired into the run path by default: runs currently go straight to the
+/// shell. This sheet is kept for an opt-in "confirm before running" setting
+/// (global, or a per-note flag for notes that arrived from sync or import), so
+/// the "show exactly what will run and where" affordance is ready when we want
+/// it without rebuilding it.
 struct RunPreflight: Identifiable {
     let id = UUID()
     let index: Int
@@ -16,6 +16,7 @@ struct RunPreflight: Identifiable {
     let shell: String
     let cwd: String
     let runnable: Bool
+    let destination: RunDestination
 }
 
 struct RunPreflightSheet: View {
@@ -26,14 +27,14 @@ struct RunPreflightSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
-                Image(systemName: "play.circle.fill")
+                Image(systemName: request.destination == .terminalPane ? "terminal.fill" : "play.circle.fill")
                     .foregroundStyle(.tint)
-                Text("Run this block?")
+                Text(request.destination == .terminalPane ? "Run in terminal?" : "Run this block?")
                     .font(.headline)
             }
             .padding(.bottom, 12)
 
-            Text("Ledge is about to run the following in this note's shell.")
+            Text(subtitle)
                 .foregroundStyle(.secondary)
                 .font(.callout)
                 .padding(.bottom, 12)
@@ -53,6 +54,7 @@ struct RunPreflightSheet: View {
                 detail("Language", request.block.language ?? "shell")
                 detail("Shell", request.shell)
                 detail("Directory", request.cwd)
+                detail("Output", request.destination.label)
             }
             .font(.callout)
             .padding(.bottom, 4)
@@ -80,6 +82,15 @@ struct RunPreflightSheet: View {
         }
         .padding(20)
         .frame(width: 480)
+    }
+
+    private var subtitle: String {
+        switch request.destination {
+        case .inline:
+            "Ledge is about to run the following in this note's shell."
+        case .terminalPane:
+            "Ledge is about to run the following in this note's shell, in the terminal drawer."
+        }
     }
 
     @ViewBuilder

@@ -21,9 +21,16 @@ struct MarkdownEditor: NSViewRepresentable {
     /// will hang off this.
     let onBlocksChanged: ([CodeBlock]) -> Void
 
-    /// Runs the block at a document index. Wired to the run buttons the
-    /// decoration controller places over the text.
+    /// Runs the block at a document index inline. Wired to the run buttons the
+    /// decoration controller places over the text, and to Cmd+Return.
     let onRunBlock: (Int) -> Void
+
+    /// Runs the block at a document index in the terminal drawer. Wired to
+    /// Cmd+Shift+Return.
+    let onRunBlockInTerminal: (Int) -> Void
+
+    /// Dismisses the inline output of the block at a document index.
+    let onDismissBlock: (Int) -> Void
 
     /// Bumped by the host whenever a run's state changes, so the editor knows to
     /// re-lay-out its output decorations.
@@ -31,6 +38,9 @@ struct MarkdownEditor: NSViewRepresentable {
 
     /// Looks up the latest run for a block index.
     let runProvider: (Int) -> BlockRun?
+
+    /// Toggles the note's terminal drawer (Ctrl+`).
+    let onToggleTerminal: () -> Void
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -66,6 +76,7 @@ struct MarkdownEditor: NSViewRepresentable {
 
         context.coordinator.decorations.attach(to: textView)
         context.coordinator.decorations.onRun = onRunBlock
+        context.coordinator.decorations.onDismiss = onDismissBlock
 
         // Hovering a block, or scrolling/resizing, drives the decorations without
         // a polling timer. Hover only toggles visibility; layout repositions.
@@ -77,6 +88,18 @@ struct MarkdownEditor: NSViewRepresentable {
         }
         textView.controlRects = { [weak coordinator = context.coordinator] in
             coordinator?.decorations.visibleControlFrames() ?? []
+        }
+        textView.onRunShortcut = { [weak coordinator = context.coordinator, weak textView] destination in
+            guard let coordinator, let textView else { return }
+            let caret = textView.selectedRange().location
+            guard let index = coordinator.decorations.runnableBlockIndex(atCharacter: caret) else { return }
+            switch destination {
+            case .inline: coordinator.parent.onRunBlock(index)
+            case .terminalPane: coordinator.parent.onRunBlockInTerminal(index)
+            }
+        }
+        textView.onToggleTerminal = { [weak coordinator = context.coordinator] in
+            coordinator?.parent.onToggleTerminal()
         }
 
         textView.string = text
@@ -101,6 +124,7 @@ struct MarkdownEditor: NSViewRepresentable {
         context.coordinator.parent = self
         textView.onBecomeFirstResponder = onFocus
         context.coordinator.decorations.onRun = onRunBlock
+        context.coordinator.decorations.onDismiss = onDismissBlock
 
         // Only touch the text when it changed underneath us. Assigning `string`
         // unconditionally would reset the selection on every SwiftUI update.
@@ -206,6 +230,11 @@ final class LedgeTextView: NSTextView {
     /// Frames (view coordinates) of controls that should show a pointing-hand
     /// cursor. Consulted on every mouse move.
     var controlRects: (() -> [NSRect])?
+    /// The user pressed a run hotkey. Carries where the output should go:
+    /// Cmd+Return is inline, Cmd+Shift+Return is the terminal drawer.
+    var onRunShortcut: ((RunDestination) -> Void)?
+    /// The user pressed the terminal-drawer toggle (Ctrl+`).
+    var onToggleTerminal: (() -> Void)?
 
     private var hoverTracking: NSTrackingArea?
 
@@ -244,6 +273,32 @@ final class LedgeTextView: NSTextView {
     override func mouseExited(with event: NSEvent) {
         super.mouseExited(with: event)
         onHoverPoint?(nil)
+    }
+
+    /// Command-modified keys are offered to the view tree as key equivalents
+    /// before `keyDown` is ever called, and something in the hierarchy was eating
+    /// Cmd+Return there, so it never reached `keyDown`. Handling the run shortcuts
+    /// here, where command shortcuts belong, is what makes them fire reliably.
+    /// Only the focused editor acts, so a Cmd+Return in another pane is ignored.
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let isReturn = event.keyCode == 36 || event.keyCode == 76
+        let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if isReturn, mods.contains(.command), window?.firstResponder === self {
+            onRunShortcut?(mods.contains(.shift) ? .terminalPane : .inline)
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
+
+    override func keyDown(with event: NSEvent) {
+        let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        // Ctrl+` toggles the terminal drawer (keyCode 50 is the grave/tilde key).
+        // Control keys are not key equivalents, so this stays in keyDown.
+        if event.keyCode == 50, mods == .control {
+            onToggleTerminal?()
+            return
+        }
+        super.keyDown(with: event)
     }
 
     override func setFrameSize(_ newSize: NSSize) {
