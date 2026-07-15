@@ -1,8 +1,9 @@
-// Ledge main process (Electrobun spike).
+// Ledge main process.
 //
-// Proves the assembled architecture end to end: one native window loads the
-// editor webview, the shell runs in this Bun process via the bun:ffi PTY (a port
-// of the Swift SessionKit core), and block output streams back over typed RPC.
+// One native window loads the editor webview. Two shells run in this Bun process
+// via the bun:ffi PTY (a port of the Swift SessionKit core): the inline-run shell
+// (block output sliced per block by OSC 133 markers) and the terminal-drawer
+// shell (raw, driving xterm.js). Both talk to the view over typed RPC.
 import { BrowserView, BrowserWindow, Updater } from "electrobun/bun";
 import { PtyProcess } from "./pty";
 import { MarkerParser, markerCommand } from "./markers";
@@ -28,15 +29,54 @@ async function mainViewUrl(): Promise<string> {
 // end marker (see markers.ts).
 const NONCE = Math.random().toString(36).slice(2) + Date.now().toString(36);
 
+const shellEnv = { ...process.env, TERM: "xterm-256color" } as Record<string, string>;
+
+// The inline-run shell: block bodies are sourced into it with OSC 133 markers so
+// output can be sliced per block.
 const shell = new PtyProcess({
   executable: "/bin/zsh",
   args: ["-i"],
-  env: { ...process.env, TERM: "xterm-256color" } as Record<string, string>,
+  env: shellEnv,
   cwd: process.env["HOME"],
 });
 const parser = new MarkerParser(NONCE);
 
+// The terminal drawer's shell: a separate, plain interactive session with no
+// marker protocol. Its raw byte stream drives xterm.js in the view, and the
+// view's keystrokes and resizes come back over the RPC below.
+const term = new PtyProcess({
+  executable: "/bin/zsh",
+  args: ["-i"],
+  env: shellEnv,
+  cwd: process.env["HOME"],
+});
+
 const toB64 = (bytes: Uint8Array) => Buffer.from(bytes).toString("base64");
+const fromB64 = (b64: string) => new Uint8Array(Buffer.from(b64, "base64"));
+
+// Terminal scrollback. The terminal shell prints its prompt at launch, long
+// before the drawer is ever opened, so we keep a capped rolling buffer of its
+// raw output and replay it when the view attaches. `attached` gates live
+// streaming: bytes still accumulate while the drawer is closed, so re-opening
+// replays the full history.
+let attached = false;
+const SB_CAP = 256 * 1024;
+let sbChunks: Uint8Array[] = [];
+let sbLen = 0;
+function sbPush(d: Uint8Array): void {
+  sbChunks.push(d);
+  sbLen += d.length;
+  while (sbLen > SB_CAP && sbChunks.length > 1) sbLen -= sbChunks.shift()!.length;
+}
+function sbSnapshot(): Uint8Array {
+  const out = new Uint8Array(sbLen);
+  let o = 0;
+  for (const c of sbChunks) {
+    out.set(c, o);
+    o += c.length;
+  }
+  return out;
+}
 
 const rpc = BrowserView.defineRPC<LedgeRPC>({
   maxRequestTime: 10_000,
@@ -51,24 +91,51 @@ const rpc = BrowserView.defineRPC<LedgeRPC>({
         shell.write(markerCommand(`source ${path}`, NONCE, id));
         return { accepted: true };
       },
+      terminalInput: ({ dataB64 }) => {
+        term.write(fromB64(dataB64));
+        return { ok: true };
+      },
+      terminalResize: ({ cols, rows }) => {
+        term.resize(cols, rows);
+        return { ok: true };
+      },
+      // Synchronous so no drain tick can interleave between the snapshot and
+      // enabling live streaming: the snapshot is everything up to now, live is
+      // everything after, with no gap or overlap.
+      terminalAttach: () => {
+        attached = true;
+        return { dataB64: toB64(sbSnapshot()) };
+      },
+      terminalDetach: () => {
+        attached = false;
+        return { ok: true };
+      },
     },
     messages: {},
   },
 });
 
-// Drain the PTY on a short interval, slice it into per-block events, and push
-// each event to the webview. (poll()-gated reads never block; see pty.ts.)
+// Drain both shells on a short interval. (poll()-gated reads never block; see
+// pty.ts.) The inline shell is sliced into per-block events; the terminal shell
+// streams raw to the drawer.
 setInterval(() => {
   const data = shell.drain();
-  if (!data) return;
-  for (const ev of parser.feed(data)) {
-    if (ev.type === "began") {
-      rpc.send.runEvent({ id: ev.blockId, kind: "began" });
-    } else if (ev.type === "output") {
-      rpc.send.runEvent({ id: ev.blockId, kind: "output", dataB64: toB64(ev.data) });
-    } else if (ev.type === "ended") {
-      rpc.send.runEvent({ id: ev.blockId, kind: "ended", exitCode: ev.exitCode });
+  if (data) {
+    for (const ev of parser.feed(data)) {
+      if (ev.type === "began") {
+        rpc.send.runEvent({ id: ev.blockId, kind: "began" });
+      } else if (ev.type === "output") {
+        rpc.send.runEvent({ id: ev.blockId, kind: "output", dataB64: toB64(ev.data) });
+      } else if (ev.type === "ended") {
+        rpc.send.runEvent({ id: ev.blockId, kind: "ended", exitCode: ev.exitCode });
+      }
     }
+  }
+
+  const termData = term.drain();
+  if (termData) {
+    sbPush(termData);
+    if (attached) rpc.send.terminalOutput({ dataB64: toB64(termData) });
   }
 }, 8);
 
@@ -79,8 +146,11 @@ const mainWindow = new BrowserWindow({
   frame: { width: 940, height: 700, x: 200, y: 120 },
 });
 
-process.on("exit", () => shell.close());
+process.on("exit", () => {
+  shell.close();
+  term.close();
+});
 
-console.log("[bun] Ledge started, shell pid", shell.pid);
+console.log("[bun] Ledge started, shell pid", shell.pid, "terminal pid", term.pid);
 void mainWindow;
 

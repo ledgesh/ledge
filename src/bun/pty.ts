@@ -7,7 +7,10 @@
 // safe. Why poll() instead of setting O_NONBLOCK: fcntl/ioctl are variadic and
 // mis-marshal under bun:ffi on arm64, so we never change the fd's flags and
 // instead gate every read on poll() with a zero timeout.
-import { dlopen, ptr, CString } from "bun:ffi";
+import { dlopen, ptr, CString, cc } from "bun:ffi";
+import { writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const libc = dlopen("libSystem.B.dylib", {
   openpty: { args: ["ptr", "ptr", "ptr", "ptr", "ptr"], returns: "i32" },
@@ -34,6 +37,45 @@ const POLLIN = 0x0001;
 const SIGINT = 2;
 const SIGTERM = 15;
 const SIGKILL = 9;
+
+// Resizing a live pty means ioctl(fd, TIOCSWINSZ, &winsize), but ioctl is
+// variadic and bun:ffi mis-marshals variadic calls on arm64 (see the header
+// comment). So we compile a fixed-arity C trampoline with Bun's bundled TinyCC
+// (bun:ffi `cc`) and call that instead. The source is written to a temp file at
+// runtime rather than shipped as a .c, so it works the same in dev and in the
+// bundled app. ioctl(TIOCSWINSZ) also raises SIGWINCH on the child, so zsh and
+// any running program re-read the new size.
+const WINSIZE_C = `#include <sys/ioctl.h>
+#include <termios.h>
+int ledge_set_winsize(int fd, unsigned short cols, unsigned short rows) {
+  struct winsize ws;
+  ws.ws_row = rows;
+  ws.ws_col = cols;
+  ws.ws_xpixel = 0;
+  ws.ws_ypixel = 0;
+  return ioctl(fd, TIOCSWINSZ, &ws);
+}
+`;
+
+// Compiled lazily and cached: null means the trampoline could not be built (very
+// old Bun, no TinyCC), in which case resize is a silent no-op.
+let setWinsize: ((fd: number, cols: number, rows: number) => number) | null | undefined;
+function winsizeFn(): ((fd: number, cols: number, rows: number) => number) | null {
+  if (setWinsize !== undefined) return setWinsize;
+  try {
+    const src = join(tmpdir(), "ledge-winsize.c");
+    writeFileSync(src, WINSIZE_C);
+    const { symbols } = cc({
+      source: src,
+      symbols: { ledge_set_winsize: { args: ["int", "u16", "u16"], returns: "int" } },
+    });
+    setWinsize = (fd, cols, rows) => symbols.ledge_set_winsize(fd, cols, rows) as number;
+  } catch (err) {
+    console.warn("[pty] resize trampoline unavailable:", (err as Error).message);
+    setWinsize = null;
+  }
+  return setWinsize;
+}
 
 export interface PtyOptions {
   executable: string;
@@ -79,7 +121,9 @@ export class PtyProcess {
     }
     const masterFD = master[0];
     const slaveFD = slave[0];
-    const slavePath = new CString(s.ttyname(slaveFD)).toString();
+    const namePtr = s.ttyname(slaveFD);
+    if (!namePtr) throw new Error("ttyname failed");
+    const slavePath = new CString(namePtr).toString();
 
     // The child opens the slave itself as fd 0 (dup'd to 1/2). Combined with
     // SETSID below, the first tty a session leader opens becomes its controlling
@@ -154,6 +198,12 @@ export class PtyProcess {
     if (this.closed) return;
     const bytes = typeof data === "string" ? new TextEncoder().encode(data) : data;
     s.write(this.masterFD, ptr(bytes), BigInt(bytes.length));
+  }
+
+  /** Tell the pty its new dimensions (raises SIGWINCH on the child). */
+  resize(cols: number, rows: number): void {
+    if (this.closed || cols <= 0 || rows <= 0) return;
+    winsizeFn()?.(this.masterFD, cols, rows);
   }
 
   interrupt(): void {

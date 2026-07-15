@@ -22,26 +22,34 @@ type NativeMessage =
       destination: RunDestination;
     };
 
-// Set by main.tsx once the RPC channel is live.
-let runInline: ((id: string, code: string) => void) | null = null;
-
-export function configureBridge(fns: {
+// Handlers are set from two places: main.tsx wires runInline (needs the RPC),
+// and App wires the terminal-drawer callbacks (need React state). configureBridge
+// merges, so either can set its own fields without clobbering the other.
+interface BridgeHandlers {
   runInline: (id: string, code: string) => void;
-}): void {
-  runInline = fns.runInline;
+  toggleTerminal: () => void;
+  runInTerminal: (code: string) => void;
+}
+const handlers: Partial<BridgeHandlers> = {};
+
+export function configureBridge(fns: Partial<BridgeHandlers>): void {
+  Object.assign(handlers, fns);
 }
 
-// Web -> Bun. Only inline runs are wired in this build; the other message types
-// belonged to features (note persistence, the terminal drawer) that land in
-// later steps, so they are intentional no-ops for now.
+// Web -> Bun. Note persistence (ready/textChanged/focus) has no native side yet,
+// so those stay no-ops; run and terminal toggle are wired.
 export function toNative(message: unknown): void {
   const m = message as NativeMessage;
-  if (m.type !== "run") return;
-  if (m.destination === "terminal") {
-    console.info("[ledge] terminal-destination run is not wired yet");
+  if (m.type === "toggleTerminal") {
+    handlers.toggleTerminal?.();
     return;
   }
-  if (m.id) runInline?.(m.id, m.code);
+  if (m.type !== "run") return;
+  if (m.destination === "terminal") {
+    handlers.runInTerminal?.(m.code);
+    return;
+  }
+  if (m.id) handlers.runInline?.(m.id, m.code);
 }
 
 // Bun -> web run events. The editor registers a sink bound to its EditorView and
