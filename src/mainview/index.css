@@ -1,0 +1,238 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* --- shadcn/ui design tokens ------------------------------------------------
+   darkMode is "media" (tailwind.config.js), so the dark palette lives under a
+   prefers-color-scheme query and the app tracks the OS appearance. */
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 240 10% 3.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 3.9%;
+    --primary: 240 5.9% 10%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 240 4.8% 95.9%;
+    --secondary-foreground: 240 5.9% 10%;
+    --muted: 240 4.8% 95.9%;
+    --muted-foreground: 240 3.8% 46.1%;
+    --accent: 240 4.8% 95.9%;
+    --accent-foreground: 240 5.9% 10%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 5.9% 90%;
+    --input: 240 5.9% 90%;
+    --ring: 240 10% 3.9%;
+    --radius: 0.5rem;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --background: 240 10% 3.9%;
+      --foreground: 0 0% 98%;
+      --card: 240 10% 3.9%;
+      --card-foreground: 0 0% 98%;
+      --primary: 0 0% 98%;
+      --primary-foreground: 240 5.9% 10%;
+      --secondary: 240 3.7% 15.9%;
+      --secondary-foreground: 0 0% 98%;
+      --muted: 240 3.7% 15.9%;
+      --muted-foreground: 240 5% 64.9%;
+      --accent: 240 3.7% 15.9%;
+      --accent-foreground: 0 0% 98%;
+      --destructive: 0 62.8% 30.6%;
+      --destructive-foreground: 0 0% 98%;
+      --border: 240 3.7% 15.9%;
+      --input: 240 3.7% 15.9%;
+      --ring: 240 4.9% 83.9%;
+    }
+  }
+
+  * {
+    border-color: hsl(var(--border));
+  }
+  body {
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+  }
+}
+
+/* --- Editor color variables -------------------------------------------------
+   Consumed by the CodeMirror theme (editor/setup.ts) and the block/overlay CSS
+   below. Kept distinct from the shadcn tokens; the editor's muted color is
+   `--ed-muted` because shadcn already owns `--muted`. */
+:root {
+  color-scheme: light dark;
+  --fg: #1d1d1f;
+  --gutter: #b0b0b5;
+  --cursor: #1d1d1f;
+  --selection: rgba(0, 122, 255, 0.25);
+  --link: #2563eb;
+  --ed-muted: rgba(60, 60, 67, 0.55);
+  --panel-bg: rgba(0, 0, 0, 0.03);
+  --panel-border: rgba(0, 0, 0, 0.12);
+  --btn-hover: rgba(0, 0, 0, 0.08);
+  --ok: #34c759;
+  --err: #ff3b30;
+  --busy: #0a84ff;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fg: #e8e8ea;
+    --gutter: #5a5a60;
+    --cursor: #e8e8ea;
+    --selection: rgba(10, 132, 255, 0.35);
+    --link: #6cb2ff;
+    --ed-muted: rgba(235, 235, 245, 0.55);
+    --panel-bg: rgba(255, 255, 255, 0.04);
+    --panel-border: rgba(255, 255, 255, 0.14);
+    --btn-hover: rgba(255, 255, 255, 0.12);
+    --ok: #30d158;
+    --err: #ff453a;
+    --busy: #0a84ff;
+  }
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  font: 14px -apple-system, system-ui, sans-serif;
+}
+#root {
+  height: 100%;
+}
+
+/* --- CodeMirror surface ----------------------------------------------------- */
+.cm-editor {
+  height: 100%;
+}
+.cm-scroller {
+  overflow: auto;
+}
+
+/* --- Block chrome overlay ---------------------------------------------------
+   Interactive block controls (run/terminal/copy per block, dismiss per output)
+   are drawn in this layer. It is parented to <body>, NOT to the editor, and
+   pinned over the editor's rect (top/left/size set from JS). WebKit forces the
+   text I-beam on anything inside the `.cm-editor` editing context regardless of
+   `cursor`; living outside that subtree lets the control buttons honour
+   `cursor: pointer`. The layer never eats pointer events, only its buttons do. */
+.ledge-overlay {
+  position: fixed;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 100;
+}
+.ledge-ctl-group {
+  position: absolute;
+  display: inline-flex;
+  gap: 1px;
+  padding: 2px;
+  border-radius: 6px;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.ledge-ctl-group.hover,
+.ledge-ctl-group.caret {
+  opacity: 1;
+}
+.ledge-close-wrap {
+  position: absolute;
+}
+.ledge-close-wrap .ledge-btn {
+  pointer-events: auto;
+}
+.ledge-btn {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--ed-muted);
+  line-height: 1;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* Hidden groups must not swallow clicks; only lit controls are live. */
+  pointer-events: none;
+}
+.ledge-ctl-group.hover .ledge-btn,
+.ledge-ctl-group.caret .ledge-btn {
+  pointer-events: auto;
+}
+/* WebKit does not honour `cursor` on inline SVG `<path>` elements: hovering the
+   glyph would show the I-beam even here in the body overlay. Making the icon
+   transparent to hit-testing resolves the cursor (and the click, which still
+   bubbles) to the HTML <button> behind it, which honours pointer. */
+.ledge-btn svg {
+  pointer-events: none;
+}
+.ledge-btn:hover {
+  background: var(--btn-hover);
+  color: var(--fg);
+}
+
+/* --- Inline output panel (block widget under a code block) ------------------ */
+.ledge-output {
+  margin: 4px 12px 10px 12px;
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  background: var(--panel-bg);
+  overflow: hidden;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.ledge-output-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 4px 0 8px;
+  border-bottom: 1px solid var(--panel-border);
+  cursor: default;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.ledge-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ed-muted);
+}
+.ledge-dot-running {
+  background: var(--busy);
+}
+.ledge-dot-done {
+  background: var(--ok);
+}
+.ledge-dot-error {
+  background: var(--err);
+}
+.ledge-status {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--ed-muted);
+}
+.ledge-duration {
+  font-size: 11px;
+  color: var(--ed-muted);
+  opacity: 0.7;
+}
+.ledge-output-body {
+  margin: 0;
+  padding: 8px;
+  max-height: 320px;
+  overflow: auto;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--fg);
+  white-space: pre-wrap;
+  word-break: break-word;
+  cursor: text;
+}
