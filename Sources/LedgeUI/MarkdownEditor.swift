@@ -67,6 +67,18 @@ struct MarkdownEditor: NSViewRepresentable {
         context.coordinator.decorations.attach(to: textView)
         context.coordinator.decorations.onRun = onRunBlock
 
+        // Hovering a block, or scrolling/resizing, drives the decorations without
+        // a polling timer. Hover only toggles visibility; layout repositions.
+        textView.onHoverPoint = { [weak coordinator = context.coordinator] point in
+            coordinator?.decorations.updateHover(point: point)
+        }
+        textView.onLayout = { [weak coordinator = context.coordinator] in
+            coordinator?.decorations.relayout()
+        }
+        textView.controlRects = { [weak coordinator = context.coordinator] in
+            coordinator?.decorations.visibleControlFrames() ?? []
+        }
+
         textView.string = text
         context.coordinator.highlight(textView)
 
@@ -77,18 +89,9 @@ struct MarkdownEditor: NSViewRepresentable {
         scrollView.backgroundColor = .textBackgroundColor
         scrollView.borderType = .noBorder
 
-        // Re-place decorations as the text scrolls: subviews are in the document
-        // view's coordinate space, so they move with content, but a run whose
-        // output height changed needs a fresh layout pass.
-        scrollView.contentView.postsBoundsChangedNotifications = true
-        NotificationCenter.default.addObserver(
-            forName: NSView.boundsDidChangeNotification,
-            object: scrollView.contentView,
-            queue: .main
-        ) { [weak coordinator = context.coordinator, weak textView] _ in
-            guard let coordinator, let textView else { return }
-            coordinator.relayoutDecorations(textView)
-        }
+        // Decorations are subviews of the document view, so they scroll with the
+        // content for free. Only a size change needs a reposition, and the text
+        // view reports that through `onLayout`.
 
         return scrollView
     }
@@ -147,9 +150,16 @@ struct MarkdownEditor: NSViewRepresentable {
             highlight(textView)
         }
 
-        /// Move the run buttons and output views without re-scanning the text.
+        /// Reveal a block's controls when the caret lands in it.
+        func textViewDidChangeSelection(_ notification: Notification) {
+            guard let textView = notification.object as? LedgeTextView else { return }
+            decorations.updateCaret(characterIndex: textView.selectedRange().location)
+        }
+
+        /// Re-place the output views (and their reserved space) without
+        /// re-scanning the text. Used when a run advances.
         func relayoutDecorations(_ textView: NSTextView) {
-            decorations.update(blocks: lastBlocks, runProvider: parent.runProvider)
+            decorations.update(blocks: lastBlocks, text: textView.string, runProvider: parent.runProvider)
         }
 
         /// Re-scan and restyle the whole document.
@@ -179,19 +189,65 @@ struct MarkdownEditor: NSViewRepresentable {
 
             lastBlocks = document.codeBlocks
             parent.onBlocksChanged(document.codeBlocks)
-            decorations.update(blocks: document.codeBlocks, runProvider: parent.runProvider)
+            decorations.update(blocks: document.codeBlocks, text: textView.string, runProvider: parent.runProvider)
         }
     }
 }
 
-/// An NSTextView that reports when it takes focus, so pane focus and the caret
-/// cannot drift apart.
+/// An NSTextView that reports focus, mouse movement, and layout, so pane focus
+/// and the caret cannot drift apart and the block decorations know when to
+/// reveal and reposition themselves.
 final class LedgeTextView: NSTextView {
     var onBecomeFirstResponder: (() -> Void)?
+    /// The mouse moved to this point in view coordinates, or `nil` on exit.
+    var onHoverPoint: ((NSPoint?) -> Void)?
+    /// The view was (re)sized, so decorations pinned to glyph geometry must move.
+    var onLayout: (() -> Void)?
+    /// Frames (view coordinates) of controls that should show a pointing-hand
+    /// cursor. Consulted on every mouse move.
+    var controlRects: (() -> [NSRect])?
+
+    private var hoverTracking: NSTrackingArea?
 
     override func becomeFirstResponder() -> Bool {
         let accepted = super.becomeFirstResponder()
         if accepted { onBecomeFirstResponder?() }
         return accepted
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverTracking { removeTrackingArea(hoverTracking) }
+        let area = NSTrackingArea(
+            rect: .zero,
+            options: [.activeInKeyWindow, .inVisibleRect, .mouseMoved, .mouseEnteredAndExited],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        hoverTracking = area
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        // Over a control, set the pointing hand and skip `super`: NSTextView
+        // re-asserts its I-beam inside its own `mouseMoved`, which is what has
+        // been overriding every cursor rect we set.
+        if controlRects?().contains(where: { $0.contains(point) }) == true {
+            NSCursor.pointingHand.set()
+        } else {
+            super.mouseMoved(with: event)
+        }
+        onHoverPoint?(point)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        onHoverPoint?(nil)
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        onLayout?()
     }
 }

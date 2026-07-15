@@ -1,37 +1,82 @@
 import SwiftUI
 
-/// The run affordance pinned to a code block.
-struct RunButton: View {
-    let state: BlockRun.State
-    let action: () -> Void
+/// The controls pinned to a code block's top-right: run (when the block can be
+/// run) and copy. Hidden until the block is hovered or holds the caret.
+struct BlockControls: View {
+    /// The run state, or nil when the block is not runnable (copy only).
+    let runState: BlockRun.State?
+    let isVisible: Bool
+    let onRun: () -> Void
+    let onCopy: () -> Void
+
+    @State private var didCopy = false
 
     var body: some View {
-        Button(action: action) {
-            Label(title, systemImage: symbol)
-                .labelStyle(.iconOnly)
-                .font(.system(size: 11, weight: .semibold))
-                .frame(width: 20, height: 20)
-                .background(.thinMaterial, in: .circle)
-                .overlay(Circle().strokeBorder(.separator))
+        HStack(spacing: 1) {
+            if let runState {
+                CodeBlockButton(symbol: runSymbol(runState), help: runHelp(runState), action: onRun)
+            }
+            CodeBlockButton(
+                symbol: didCopy ? "checkmark" : "square.on.square",
+                help: didCopy ? "Copied" : "Copy"
+            ) {
+                onCopy()
+                withAnimation(.easeInOut(duration: 0.1)) { didCopy = true }
+            }
         }
-        .buttonStyle(.plain)
-        .help(title)
+        .padding(2)
+        .background(.regularMaterial, in: .rect(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.separator.opacity(0.7)))
+        .opacity(isVisible ? 1 : 0)
+        .allowsHitTesting(isVisible)
+        .animation(.easeInOut(duration: 0.12), value: isVisible)
+        // Reset the copied checkmark once the cluster hides, so it reads "copy"
+        // again next time it appears.
+        .onChange(of: isVisible) { _, visible in
+            if !visible { didCopy = false }
+        }
     }
 
-    private var title: String {
+    private func runSymbol(_ state: BlockRun.State) -> String {
+        switch state {
+        case .idle, .finished, .sessionEnded: "play.fill"
+        case .queued: "clock"
+        case .running: "circle.dotted"
+        }
+    }
+
+    private func runHelp(_ state: BlockRun.State) -> String {
         switch state {
         case .idle, .finished, .sessionEnded: "Run"
         case .queued: "Queued"
         case .running: "Running"
         }
     }
+}
 
-    private var symbol: String {
-        switch state {
-        case .idle, .finished, .sessionEnded: "play.fill"
-        case .queued: "clock"
-        case .running: "circle.dotted"
+/// One small icon button in a block's control cluster, with a subtle hover fill.
+private struct CodeBlockButton: View {
+    let symbol: String
+    let help: String
+    let action: () -> Void
+
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 22, height: 22)
+                .background(
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color.primary.opacity(hovering ? 0.1 : 0))
+                )
+                .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help(help)
     }
 }
 
