@@ -1,7 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import Electrobun, { Electroview } from "electrobun/view";
-import type { LedgeRPC, NoteMeta } from "../shared/rpc-schema";
+import type { LedgeRPC, NoteMeta, TrashMeta } from "../shared/rpc-schema";
 import { configureBridge, dispatchRunEvent } from "./editor/bridge";
 import { bytesToB64, configureTerminal, dispatchTerminalOutput, dispatchTerminalExit } from "./terminal/channel";
 import { configureNotes } from "./notes/channel";
@@ -76,9 +76,10 @@ configureNotes({
   },
   create: (text) => electrobun.rpc!.request.noteCreate({ text }).then((r) => r.note),
   retitle: (path, text) => electrobun.rpc!.request.noteRetitle({ path, text }).then((r) => r.note),
-  remove: async (path) => {
-    await electrobun.rpc!.request.noteDelete({ path });
-  },
+  remove: (path) => electrobun.rpc!.request.noteDelete({ path }).then((r) => r.trashed),
+  trash: () => electrobun.rpc!.request.trashList({}).then((r) => r.items),
+  restore: (path) => electrobun.rpc!.request.trashRestore({ path }).then((r) => r.note),
+  empty: () => electrobun.rpc!.request.trashEmpty({}).then((r) => r.removed),
 });
 
 // Read the notes folder before the first render, so the app opens straight into
@@ -87,14 +88,20 @@ configureNotes({
 // the no-notes state, which is a fresh unsaved note.
 async function boot(): Promise<void> {
   let notes: NoteMeta[] = [];
+  let trash: TrashMeta[] = [];
   try {
-    notes = (await electrobun.rpc!.request.noteList({})).notes;
+    // One round trip each, in parallel: the trash count is part of the first
+    // paint (it is a sidebar section), so fetching it after mount would flash.
+    [notes, trash] = await Promise.all([
+      electrobun.rpc!.request.noteList({}).then((r) => r.notes),
+      electrobun.rpc!.request.trashList({}).then((r) => r.items),
+    ]);
   } catch (err) {
     console.error("[notes] could not list the notes folder", err);
   }
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
-      <App initial={initialState(notes)} />
+      <App initial={initialState(notes, trash)} />
     </StrictMode>,
   );
 }

@@ -10,7 +10,19 @@
 import { BrowserView, BrowserWindow, Updater } from "electrobun/bun";
 import { PtyProcess } from "./pty";
 import { MarkerParser, markerCommand } from "./markers";
-import { createNote, deleteNote, listNotes, NOTES_ROOT, readNote, retitleNote, writeNote } from "./notes";
+import {
+  createNote,
+  deleteNote,
+  emptyTrash,
+  listNotes,
+  listTrash,
+  NOTES_ROOT,
+  purgeTrash,
+  readNote,
+  restoreNote,
+  retitleNote,
+  writeNote,
+} from "./notes";
 import type { LedgeRPC } from "../shared/rpc-schema";
 
 // In the dev channel, prefer a running Vite dev server (bun run dev:hmr) so the
@@ -158,10 +170,10 @@ const rpc = BrowserView.defineRPC<LedgeRPC>({
       },
       noteCreate: async ({ text }) => ({ note: await createNote(text) }),
       noteRetitle: async ({ path, text }) => ({ note: await retitleNote(path, text) }),
-      noteDelete: async ({ path }) => {
-        await deleteNote(path);
-        return { ok: true };
-      },
+      noteDelete: async ({ path }) => ({ trashed: await deleteNote(path) }),
+      trashList: async () => ({ items: await listTrash() }),
+      trashRestore: async ({ path }) => ({ note: await restoreNote(path) }),
+      trashEmpty: async () => ({ removed: await emptyTrash() }),
 
       runBlock: async ({ sessionId, id, code }) => {
         // The block body goes to a file that we source, rather than being inlined
@@ -320,6 +332,14 @@ setInterval(() => {
     }
   }
 }, 8);
+
+// Age old deletions out of the trash, once per launch. Deliberately not awaited:
+// it is housekeeping, and the window should not wait on a folder scan to open.
+// Doing it here rather than on a timer means a trashed note never disappears
+// out from under a Trash section the user is looking at.
+void purgeTrash()
+  .then((n) => n > 0 && console.log(`[notes] purged ${n} trashed note(s) past the 30-day limit`))
+  .catch((err) => console.error("[notes] trash purge failed", err));
 
 const mainWindow = new BrowserWindow({
   title: "Ledge",

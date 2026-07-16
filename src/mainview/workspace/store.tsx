@@ -23,7 +23,7 @@ import {
   type TabState,
   type Workspace,
 } from "./tree";
-import type { NoteMeta } from "../../shared/rpc-schema";
+import type { NoteMeta, TrashMeta } from "../../shared/rpc-schema";
 
 // Icons a new workspace cycles through (keys resolved in Sidebar.tsx).
 const WORKSPACE_SYMBOLS = ["inbox", "layers", "boxes", "folder", "terminal"];
@@ -36,6 +36,11 @@ export interface AppState {
   // picks the note to open at boot; the browser sorts a copy by title for
   // display, since re-sorting by mtime would make rows jump around as you type.
   notes: NoteMeta[];
+  // The deleted notes still sitting in ~/.ledge/.trash, newest deletion first.
+  // Held here rather than fetched by the Trash section when it opens, so the
+  // count shows on the collapsed header: a trash you have to open to discover
+  // is the one we already had, and it filled up silently.
+  trash: TrashMeta[];
 }
 
 function makeWorkspace(name: string, symbol: string, tab: TabState): Workspace {
@@ -50,11 +55,11 @@ function makeWorkspace(name: string, symbol: string, tab: TabState): Workspace {
 // first launch you do not type in still leaves the folder empty.
 //
 // Exported for unit tests (store.test.ts); the app goes through WorkspaceProvider.
-export function initialState(notes: NoteMeta[] = []): AppState {
+export function initialState(notes: NoteMeta[] = [], trash: TrashMeta[] = []): AppState {
   const newest = notes[0];
   const tab = newest ? makeNoteTab(newest.path, newest.title) : makeTab("demo", "Welcome");
   const first = makeWorkspace("Scratch", "inbox", tab);
-  return { workspaces: [first], selectedId: first.id, notes };
+  return { workspaces: [first], selectedId: first.id, notes, trash };
 }
 
 // --- actions ---------------------------------------------------------------
@@ -87,6 +92,12 @@ export type Action =
   | { type: "noteRenamed"; path: string; note: NoteMeta }
   // A note's file is gone (trashed). Closes its tabs wherever they are.
   | { type: "noteDeleted"; path: string }
+  // The trash was re-read (at boot and at every folder refresh).
+  | { type: "trashLoaded"; items: TrashMeta[] }
+  // A trashed note came back, via Undo or the Restore button. `note` is where it
+  // landed, which need not be where it was deleted from: its old name may have
+  // been taken since. Its tabs are NOT reopened; it simply rejoins the browser.
+  | { type: "noteRestored"; note: NoteMeta }
   // What a note is called on screen changed: its H1 was edited (or removed, and
   // the label fell back to the filename). Separate from noteRenamed because a
   // heading can change without the slug changing, and then no file moves at all.
@@ -293,6 +304,19 @@ export function reducer(state: AppState, action: Action): AppState {
       // what App's reconciliation effect turns into an editor teardown and a
       // closeSession for the note's shells.
       return { ...state, workspaces, notes: state.notes.filter((n) => n.path !== action.path) };
+    }
+
+    case "trashLoaded":
+      return { ...state, trash: action.items };
+
+    case "noteRestored": {
+      if (state.notes.some((n) => n.path === action.note.path)) return state;
+      // Re-sorted rather than pushed to the front: a restored note keeps its real
+      // last-edited time (the trash records the deletion in ctime and leaves mtime
+      // alone), so it belongs wherever that puts it. This list is held in listNotes
+      // order, and a refresh would put it there anyway.
+      const notes = [...state.notes, action.note].sort((a, b) => b.mtimeMs - a.mtimeMs);
+      return { ...state, notes };
     }
 
     case "openNote": {

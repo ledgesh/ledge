@@ -1,7 +1,7 @@
 import { test, expect, describe } from "bun:test";
 import { reducer, initialState, allDocIds, openNotePaths, type AppState, type Action } from "./store";
 import { firstLeaf, leafIds, findLeaf, countTabs, focusedTab, type SplitNode } from "./tree";
-import type { NoteMeta } from "../../shared/rpc-schema";
+import type { NoteMeta, TrashMeta } from "../../shared/rpc-schema";
 
 // Apply a sequence of actions from a fresh state.
 function run(...actions: Action[]): AppState {
@@ -470,5 +470,55 @@ describe("labels", () => {
       { type: "noteTitled", docId, label: "Shipping Notes" },
     );
     expect(focusedTab(s.workspaces[0])!.title).toBe("Shipping Notes");
+  });
+});
+
+describe("trash", () => {
+  const note = (title: string, mtimeMs = 1): NoteMeta => ({ path: `/notes/${title}.md`, title, mtimeMs });
+  const trashed = (title: string, deletedAt: number): TrashMeta => ({
+    path: `/notes/.trash/${title}.md`,
+    title,
+    deletedAt,
+  });
+
+  test("initialState carries an empty trash", () => {
+    expect(initialState().trash).toEqual([]);
+    expect(initialState([note("a")], [trashed("b", 5)]).trash).toHaveLength(1);
+  });
+
+  test("trashLoaded replaces the list", () => {
+    const s = reducer(initialState([], [trashed("old", 1)]), {
+      type: "trashLoaded",
+      items: [trashed("new", 2)],
+    });
+    expect(s.trash.map((t) => t.title)).toEqual(["new"]);
+  });
+
+  test("noteRestored puts the note back in the browser", () => {
+    const s = reducer(initialState([note("a")]), { type: "noteRestored", note: note("b") });
+    expect(s.notes.map((n) => n.title).sort()).toEqual(["a", "b"]);
+  });
+
+  test("a restored note lands in mtime order, not at the front", () => {
+    // It keeps its real last-edited time (the trash records the deletion in
+    // ctime and leaves mtime alone), so an old note restored today is still old.
+    const s = reducer(initialState([note("recent", 100), note("older", 10)]), {
+      type: "noteRestored",
+      note: note("ancient", 1),
+    });
+    expect(s.notes.map((n) => n.title)).toEqual(["recent", "older", "ancient"]);
+  });
+
+  test("restoring a note that is somehow already listed changes nothing", () => {
+    const before = initialState([note("a")]);
+    expect(reducer(before, { type: "noteRestored", note: note("a") })).toBe(before);
+  });
+
+  test("noteRestored does not reopen the note's tab", () => {
+    // Restore puts a file back; it does not decide you want to look at it.
+    const before = initialState();
+    const s = reducer(before, { type: "noteRestored", note: note("a") });
+    expect(countTabs(selected(s).root)).toBe(countTabs(selected(before).root));
+    expect(openNotePaths(s).has("/notes/a.md")).toBe(false);
   });
 });

@@ -75,7 +75,12 @@ function fakeBridge() {
       const slug = slugOf(text) ?? "untitled";
       return { path: `/notes/${slug}.md`, title: slug, mtimeMs: 0 };
     },
-    remove: async () => {},
+    // The trash half of the bridge: nothing in the save controller touches it,
+    // but the shim is one interface and it has to be whole.
+    remove: async () => null,
+    trash: async () => [],
+    restore: async (path: string) => ({ path, title: "", mtimeMs: 0 }),
+    empty: async () => 0,
   });
 
   return state;

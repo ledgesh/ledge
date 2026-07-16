@@ -9,6 +9,7 @@ import { Sidebar } from "@/workspace/Sidebar";
 import { WorkspaceView } from "@/workspace/WorkspaceView";
 import { flushAll } from "@/notes/store";
 import { listNotes } from "@/notes/channel";
+import { refreshTrash } from "@/notes/actions";
 import { QuickOpen } from "@/notes/QuickOpen";
 import { allDocIds, useWorkspace, WorkspaceProvider, type AppState } from "@/workspace/store";
 import { findLeaf, focusedDocId } from "@/workspace/tree";
@@ -121,6 +122,9 @@ function Shell() {
       void listNotes()
         .then((notes) => dispatch({ type: "notesLoaded", notes }))
         .catch((err) => console.error("[notes] refresh failed", err));
+      // The trash is read on the same trip: it is a folder like any other, and a
+      // note deleted (or restored) from a shell should not leave a stale count.
+      void refreshTrash(dispatch);
     };
     window.addEventListener("blur", flushAll);
     window.addEventListener("pagehide", flushAll);

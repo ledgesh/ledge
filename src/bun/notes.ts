@@ -11,7 +11,8 @@
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { mkdir, readdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
-import type { NoteMeta } from "../shared/rpc-schema";
+import type { Stats } from "node:fs";
+import type { NoteMeta, TrashMeta } from "../shared/rpc-schema";
 import { headingOf, labelOf, slugOf, titleOf } from "../shared/slug";
 
 // Overridable so a test (or a throwaway run) can point the store at a scratch
@@ -31,6 +32,12 @@ export const NOTES_ROOT = process.env["LEDGE_NOTES_ROOT"] ?? join(homedir(), ".l
 // the move is an atomic rename that cannot fail with EXDEV. The UI calls this
 // "Delete" and does not claim otherwise.
 export const TRASH_DIR = join(NOTES_ROOT, ".trash");
+
+// How long a deleted note stays recoverable. Long enough that "I deleted that
+// last week" is still true, short enough that the folder stops being an
+// unbounded leak. The browser's Trash section says so out loud: an eviction
+// nobody was told about is just delayed data loss.
+export const TRASH_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 // --- pure helpers (unit-tested in notes.test.ts) ----------------------------
 
@@ -78,6 +85,12 @@ async function metaFor(path: string, text: string): Promise<NoteMeta> {
   return { path, title: labelOf(headingOf(text), path), mtimeMs: (await stat(path)).mtimeMs };
 }
 
+// The same, for a note whose text we do not already have in hand: read just
+// enough of the file to label it.
+async function metaAt(path: string): Promise<NoteMeta> {
+  return { path, title: labelOf(await headingAt(path), path), mtimeMs: (await stat(path)).mtimeMs };
+}
+
 // Enough of a note to read its first line. Notes are small, but a note carrying a
 // big pasted blob is not worth reading whole just to label it, and listNotes does
 // this once per note on every refresh.
@@ -114,10 +127,7 @@ export async function listNotes(): Promise<NoteMeta[]> {
       if (entry.name.startsWith(".")) continue;
       const path = join(dir, entry.name);
       if (entry.isDirectory()) await walk(path);
-      else if (entry.isFile() && /\.md$/i.test(entry.name)) {
-        const heading = await headingAt(path);
-        out.push({ path, title: labelOf(heading, path), mtimeMs: (await stat(path)).mtimeMs });
-      }
+      else if (entry.isFile() && /\.md$/i.test(entry.name)) out.push(await metaAt(path));
     }
   };
   await walk(NOTES_ROOT);
@@ -216,19 +226,125 @@ export async function retitleNote(path: string, text: string): Promise<NoteMeta>
 
 // Delete a note by moving it aside rather than unlinking it. Same rename(2)
 // primitive as a save, so it is atomic and cheap, and it means a misclick costs
-// a trip to ~/.ledge/.trash (see TRASH_DIR, which is not the system trash) rather
-// than the note. Nothing empties that folder yet; it is a deliberate omission
-// until there is a UI to do it from.
-export async function deleteNote(path: string): Promise<void> {
+// a trip to the Trash section rather than the note.
+//
+// Returns where the note landed, so the caller can offer to undo it, or null if
+// there was nothing to delete.
+export async function deleteNote(path: string): Promise<string | null> {
   assertInRoot(path);
-  if (isInside(TRASH_DIR, path)) return; // already trashed
+  if (isInside(TRASH_DIR, path)) return null; // already trashed
   await mkdir(TRASH_DIR, { recursive: true });
   const taken = new Set(await readdir(TRASH_DIR));
-  const name = uniqueName(titleOf(path), taken);
+  const dest = join(TRASH_DIR, uniqueName(titleOf(path), taken));
   try {
-    await rename(path, join(TRASH_DIR, name));
+    await rename(path, dest);
   } catch (err) {
     // Already gone (deleted in Finder, say) is the outcome the caller wanted.
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    return null;
   }
+  return dest;
+}
+
+// --- trash ------------------------------------------------------------------
+
+// Only .md files sitting directly in the trash count. Anything else in there
+// arrived by some route other than a delete, and is left strictly alone: Empty
+// removes exactly what the list showed, and nothing it did not.
+async function trashFiles(): Promise<Array<{ path: string; stat: Stats }>> {
+  let names: string[];
+  try {
+    names = await readdir(TRASH_DIR);
+  } catch {
+    return []; // no trash folder yet: nothing has ever been deleted
+  }
+  const out: Array<{ path: string; stat: Stats }> = [];
+  for (const name of names) {
+    if (name.startsWith(".") || !/\.md$/i.test(name)) continue;
+    const path = join(TRASH_DIR, name);
+    const s = await stat(path).catch(() => null);
+    if (s?.isFile()) out.push({ path, stat: s });
+  }
+  return out;
+}
+
+// A trashed note, newest deletion first.
+//
+// `deletedAt` is the file's ctime: the inode's change time, which rename(2)
+// updates and nothing afterwards touches, so for a file sitting in the trash it
+// IS the moment it was deleted. mtime cannot answer this (it is the last edit,
+// so a note written months ago and deleted today would look ancient and be
+// evicted on the spot), and stamping mtime with utimes on the way in would
+// destroy the note's real last-edited time to store a fact ctime already has:
+// a restored note would come back claiming it was edited the instant you deleted
+// it. ctime cannot be set at all, which is precisely what makes it trustworthy
+// here. Copying the folder wholesale (restoring a backup) does reset it, and
+// those entries then get another 30 days: the failure leans toward keeping notes.
+export async function listTrash(): Promise<TrashMeta[]> {
+  const files = await trashFiles();
+  const out: TrashMeta[] = [];
+  for (const { path, stat: s } of files) {
+    out.push({ path, title: labelOf(await headingAt(path), path), deletedAt: s.ctimeMs });
+  }
+  return out.sort((a, b) => b.deletedAt - a.deletedAt);
+}
+
+// A trashed note must be a .md file directly inside the trash. Stricter than the
+// isInside check the notes root gets, because restore and empty are the two
+// calls that can move or unlink a file, and "inside .trash" would also accept
+// the folder itself.
+function assertTrashed(path: string): string {
+  if (dirname(resolve(path)) !== resolve(TRASH_DIR) || !/\.md$/i.test(path)) {
+    throw new Error(`not a trashed note: ${path}`);
+  }
+  return path;
+}
+
+// Move a note back out of the trash. Its old name may have been taken by a note
+// created since, so the name is allocated fresh rather than assumed free: this
+// is a rename(2) like any other, and rename(2) clobbers silently.
+//
+// It goes back to the notes root, not to whatever subfolder it may have been
+// deleted from: nothing records the original path, and the root is where notes
+// are created anyway. Worth revisiting if nested notes ever become a real thing.
+export async function restoreNote(path: string): Promise<NoteMeta> {
+  assertTrashed(path);
+  await ensureRoot();
+  const taken = new Set(await readdir(NOTES_ROOT));
+  for (const name of reserved) taken.add(name);
+  const target = assertInRoot(join(NOTES_ROOT, uniqueName(titleOf(path), taken)));
+  await rename(path, target);
+  return metaAt(target);
+}
+
+// Unlink every trashed note, for real and for good. The one genuinely
+// destructive call in this file, which is why the UI puts a confirmation in
+// front of it and nothing else.
+export async function emptyTrash(): Promise<number> {
+  return removeAll(await trashFiles());
+}
+
+// Drop trashed notes past the TTL. Called once at startup: a delete you have
+// forgotten about is exactly the kind that should age out, and doing it on a
+// timer while the app runs would mean a note vanishing from the list under the
+// pointer.
+export async function purgeTrash(ttlMs: number = TRASH_TTL_MS): Promise<number> {
+  const cutoff = Date.now() - ttlMs;
+  const files = await trashFiles();
+  return removeAll(files.filter((f) => f.stat.ctimeMs < cutoff));
+}
+
+// Best-effort: a file that vanished under us (or that we cannot unlink) must not
+// abort the rest. Returns how many actually went.
+async function removeAll(files: Array<{ path: string }>): Promise<number> {
+  let n = 0;
+  for (const { path } of files) {
+    try {
+      await unlink(assertTrashed(path));
+      n += 1;
+    } catch (err) {
+      console.error("[notes] could not remove a trashed note", path, err);
+    }
+  }
+  return n;
 }

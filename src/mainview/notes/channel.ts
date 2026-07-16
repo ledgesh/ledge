@@ -2,7 +2,7 @@
 // and the editor pool call these, and main.tsx binds them to the Electroview RPC
 // once it exists. Keeping the shim separate means the persistence logic
 // (notes/store.ts) is testable without an RPC or a webview.
-import type { NoteMeta } from "../../shared/rpc-schema";
+import type { NoteMeta, TrashMeta } from "../../shared/rpc-schema";
 
 interface NoteHandlers {
   list: () => Promise<NoteMeta[]>;
@@ -10,7 +10,10 @@ interface NoteHandlers {
   write: (path: string, text: string) => Promise<void>;
   create: (text: string) => Promise<NoteMeta>;
   retitle: (path: string, text: string) => Promise<NoteMeta>;
-  remove: (path: string) => Promise<void>;
+  remove: (path: string) => Promise<string | null>;
+  trash: () => Promise<TrashMeta[]>;
+  restore: (path: string) => Promise<NoteMeta>;
+  empty: () => Promise<number>;
 }
 
 let handlers: NoteHandlers | null = null;
@@ -46,8 +49,24 @@ export function retitleNote(path: string, text: string): Promise<NoteMeta> {
   return bridge().retitle(path, text);
 }
 
-export function deleteNote(path: string): Promise<void> {
+// Resolves to where the note landed in the trash (the handle Undo restores
+// from), or null if the file was already gone.
+export function deleteNote(path: string): Promise<string | null> {
   return bridge().remove(path);
 }
 
-export type { NoteMeta };
+export function listTrash(): Promise<TrashMeta[]> {
+  return bridge().trash();
+}
+
+// Takes a path Bun handed out via listTrash, and Bun re-checks that it really is
+// a trashed note before moving it.
+export function restoreNote(path: string): Promise<NoteMeta> {
+  return bridge().restore(path);
+}
+
+export function emptyTrash(): Promise<number> {
+  return bridge().empty();
+}
+
+export type { NoteMeta, TrashMeta };

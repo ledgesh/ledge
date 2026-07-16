@@ -9,11 +9,25 @@ export type RunEvent =
   | { id: string; kind: "output"; dataB64: string }
   | { id: string; kind: "ended"; exitCode: number };
 
-/** One note on disk. `path` is the note's identity; `title` is its filename. */
+/**
+ * One note on disk. `path` is the note's identity; `title` is what to call it on
+ * screen (its first-line H1, or its filename if it has none).
+ */
 export interface NoteMeta {
   path: string;
   title: string;
   mtimeMs: number;
+}
+
+/**
+ * One deleted note, sitting in ~/.ledge/.trash. `path` is where it is now, which
+ * is the handle restore and undo are given. `deletedAt` is when it was trashed
+ * (see listTrash in bun/notes.ts for where that number comes from).
+ */
+export interface TrashMeta {
+  path: string;
+  title: string;
+  deletedAt: number;
 }
 
 export type LedgeRPC = {
@@ -41,9 +55,23 @@ export type LedgeRPC = {
       // the note's editor and shell live through it.
       noteRetitle: { params: { path: string; text: string }; response: { note: NoteMeta } };
       // Delete a note by moving it to ~/.ledge/.trash. Not an unlink: a misclick
-      // should cost a trip to that folder, not the note. It is an app-private
-      // folder, not the system trash (see TRASH_DIR in notes.ts for why).
-      noteDelete: { params: { path: string }; response: { ok: boolean } };
+      // should cost a trip to the Trash section, not the note. It is an
+      // app-private folder, not the system trash (see TRASH_DIR in notes.ts).
+      // Responds with where the note landed, which is the handle Undo restores
+      // from, or null if there was nothing there to delete.
+      noteDelete: { params: { path: string }; response: { trashed: string | null } };
+      // The deleted notes still recoverable, newest first. Read at boot and at
+      // every folder refresh, alongside noteList: the count is on screen whether
+      // or not the section is expanded, so the trash cannot quietly fill up.
+      trashList: { params: {}; response: { items: TrashMeta[] } };
+      // Move a trashed note back to the notes root, returning where it landed
+      // (its old name may be taken by now). Backs both Undo and the Restore
+      // button, which are the same operation: Undo is just the shortcut to the
+      // one that stays available in the Trash section.
+      trashRestore: { params: { path: string }; response: { note: NoteMeta } };
+      // Unlink every trashed note. The only call in the app that destroys a note
+      // outright, hence the one confirmation prompt in the app.
+      trashEmpty: { params: {}; response: { removed: number } };
       // Shells are per note: `sessionId` is the tab's stable docId. The Bun side
       // lazily spawns that note's inline-run shell on first runBlock and closes it
       // on closeSession, so a `cd` in one note never leaks into another.
