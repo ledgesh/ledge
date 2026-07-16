@@ -185,17 +185,14 @@ export class InlineTerm {
     // so usedRows() measures the settled buffer.
     this.term.write("", () => {
       if (this.disposed) return;
-      const content = this.contentRows();
-      const rows = Math.min(content, RUN_ROWS);
+      const needed = this.neededRows();
+      const rows = Math.min(needed, RUN_ROWS);
       if (rows !== this.term.rows) this.term.resize(this.term.cols, rows);
-      // Resizing to fewer rows than the buffer holds leaves the viewport anchored to
-      // the cursor (usually a line below the last output, from a trailing newline),
-      // scrolling the first line out of view. Anchor to the top so the output reads
-      // from its start; longer-than-grid output stays scrollable.
+      // Belt and braces: output that fits now sizes the grid to hold the cursor too,
+      // so there is nothing to scroll to. Only a run taller than the grid clamps,
+      // and that one keeps its scrollbar.
       this.term.scrollToTop();
-      // Output that fit only overflows by trailing blank lines we never scroll to,
-      // so suppress the scrollbar; output taller than the grid keeps it.
-      this.wrap.classList.toggle("ledge-term-clamped", content > RUN_ROWS);
+      this.wrap.classList.toggle("ledge-term-clamped", needed > RUN_ROWS);
       this.opts.onHeightChange?.();
     });
   }
@@ -225,11 +222,17 @@ export class InlineTerm {
     if (this.disposed || !this.host.isConnected || this.host.clientWidth === 0) return;
     const dims = this.fit.proposeDimensions();
     if (!dims || !Number.isFinite(dims.cols) || dims.cols < 2) return;
-    const rows = this.live ? RUN_ROWS : Math.min(this.contentRows(), RUN_ROWS);
+    const rows = this.live ? RUN_ROWS : Math.min(this.neededRows(), RUN_ROWS);
     if (dims.cols !== this.term.cols || rows !== this.term.rows) {
       this.term.resize(dims.cols, rows);
       if (this.live) this.opts.onResize?.(dims.cols, rows);
     }
+  }
+
+  // Rows this run wants once it is finished, before the RUN_ROWS cap.
+  private neededRows(): number {
+    const buf = this.term.buffer.active;
+    return neededRows(this.contentRows(), buf.baseY + buf.cursorY);
   }
 
   // The number of rows up to and including the last non-empty line (>= 1). Not
@@ -242,6 +245,25 @@ export class InlineTerm {
     }
     return Math.max(1, last);
   }
+}
+
+// --- row maths --------------------------------------------------------------
+
+// How many rows a finished run needs, given its output and where its cursor
+// ended up (both absolute buffer rows, cursor 0-based).
+//
+// The cursor's own line counts, even when it is blank. xterm will not shrink the
+// grid past the cursor: asked for fewer rows than that, it stops discarding blank
+// lines and scrolls instead, pushing the top of the output into scrollback (see
+// Buffer.resize). The run then shows a scrollbar and opens on its second line,
+// which is exactly the wrong shape for output that fits.
+//
+// A shell leaves the cursor one line below the last output (the trailing newline
+// of the final command), so this usually means one blank row at the bottom, which
+// is what a terminal looks like anyway. A program that ends without a newline
+// leaves the cursor on the last line and costs nothing.
+export function neededRows(contentRows: number, cursorRow: number): number {
+  return Math.max(contentRows, cursorRow + 1);
 }
 
 // --- pool ------------------------------------------------------------------
