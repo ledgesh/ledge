@@ -47,6 +47,16 @@ Rules:
   double up for either. A row kind with a verb missing from its context menu is
   a bug: the menu is the canonical home (R2) and the only place the verb is
   discoverable.
+- **R7.** Lists select exactly one row, and a verb acts on the focused row —
+  deliberately, not for want of the feature. Multi-select would force every row
+  verb to answer "focused row, or the selection?", and answering it wrong once
+  means `d` deletes five notes when you meant one. The verbs that would want it
+  are few (delete notes, restore/purge trashed ones) and are already served by
+  Undo and Empty Trash. If it is ever added, selection splits from focus in
+  `useListNav` (an anchor for ⇧-click, a set for ⌘-click), rows publish
+  `data-selected` for the dispatcher to collect the way it already collects
+  `data-target-kind`, and commands opt in explicitly — a verb without the flag
+  keeps acting on one row.
 
 ## 2. Hotkey allocation policy
 

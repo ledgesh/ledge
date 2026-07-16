@@ -596,6 +596,16 @@ const decorationsField = StateField.define<DecorationSet>({
 // --- Native -> web ---------------------------------------------------------
 
 export function handleRunEvent(view: EditorView, id: string, kind: string, payload: unknown): void {
+  // Every open note's editor gets every run event (bridge.ts broadcasts to all
+  // sinks), so the first question is whether this view is the one that started the
+  // run. Only the view that dispatched addRun has the id in its runsField.
+  //
+  // The state effects below already no-op for a foreign id, but the terminal pool
+  // is keyed by run id alone and so is reachable from any view: without this,
+  // output would be written once per open editor, and one `echo hi` would print
+  // as many lines as you had notes open.
+  if (!view.state.field(runsField).some((r) => r.id === id)) return;
+
   switch (kind) {
     case "started":
       view.dispatch({ effects: setRunState.of({ id, state: "running", exitCode: null }) });

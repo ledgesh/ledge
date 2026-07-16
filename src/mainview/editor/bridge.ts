@@ -74,8 +74,10 @@ export function toNative(message: unknown): void {
 
 // Bun -> web run events. Every mounted editor registers a sink bound to its own
 // EditorView; a run event carries a globally-unique block id, and handleRunEvent
-// is a silent no-op for ids a view doesn't own, so broadcasting to all sinks is
-// safe and lets several editor tabs/panes coexist without routing bookkeeping.
+// drops ids the view doesn't own, so broadcasting to all sinks is safe and lets
+// several editor tabs/panes coexist without routing bookkeeping. That check is
+// what makes the broadcast safe rather than merely convenient: without it every
+// open note re-writes the same output into the one panel that shows it.
 const runEventSinks = new Set<(ev: RunEvent) => void>();
 
 export function onRunEvent(sink: (ev: RunEvent) => void): () => void {
