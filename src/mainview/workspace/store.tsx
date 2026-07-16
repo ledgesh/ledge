@@ -29,7 +29,9 @@ function makeWorkspace(name: string, symbol: string, seed: "demo" | "scratch"): 
   return { id: uid("ws"), name, symbol, root: leaf, focusedPaneId: leaf.id };
 }
 
-function initialState(): AppState {
+// Exported for unit tests (store.test.ts); the app itself goes through
+// WorkspaceProvider, which seeds useReducer from initialState.
+export function initialState(): AppState {
   const first = makeWorkspace("Scratch", "inbox", "demo");
   return { workspaces: [first], selectedId: first.id };
 }
@@ -58,7 +60,8 @@ function withSelected(state: AppState, fn: (ws: Workspace) => Workspace): AppSta
   };
 }
 
-function reducer(state: AppState, action: Action): AppState {
+// Exported for unit tests (store.test.ts).
+export function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
     case "selectWorkspace":
       return state.workspaces.some((w) => w.id === action.id)
