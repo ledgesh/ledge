@@ -28,9 +28,9 @@ interface BridgeHandlers {
   runInline: (sessionId: string, id: string, code: string) => void;
   toggleTerminal: () => void;
   runInTerminal: (sessionId: string, code: string) => void;
-  cancelRun: (sessionId: string) => void;
-  resizeInline: (sessionId: string, cols: number, rows: number) => void;
-  inputInline: (sessionId: string, data: string) => void;
+  cancelRun: (sessionId: string, id: string) => void;
+  resizeInline: (sessionId: string, id: string, cols: number, rows: number) => void;
+  inputInline: (sessionId: string, id: string, data: string) => void;
 }
 const handlers: Partial<BridgeHandlers> = {};
 
@@ -38,22 +38,23 @@ export function configureBridge(fns: Partial<BridgeHandlers>): void {
   Object.assign(handlers, fns);
 }
 
-// Interrupt a note's inline run (Ctrl-C). Called by blocks.ts when it detects an
-// inline block launched a full-screen program it cannot render.
-export function cancelRun(sessionId: string): void {
-  handlers.cancelRun?.(sessionId);
+// Interrupt one inline run (Ctrl-C to its shell's foreground job). Runs can be
+// concurrent, each on its own shell, so the run id names which one dies. Called
+// when a still-running block's output panel is dismissed.
+export function cancelRun(sessionId: string, id: string): void {
+  handlers.cancelRun?.(sessionId, id);
 }
 
-// Match a note's inline shell winsize to a block's rendered terminal grid. Called
-// by the inline terminal as it fits to the editor width.
-export function resizeInline(sessionId: string, cols: number, rows: number): void {
-  handlers.resizeInline?.(sessionId, cols, rows);
+// Match the winsize of the shell executing run `id` to the block's rendered
+// terminal grid. Called by the inline terminal as it fits to the editor width.
+export function resizeInline(sessionId: string, id: string, cols: number, rows: number): void {
+  handlers.resizeInline?.(sessionId, id, cols, rows);
 }
 
-// Forward keystrokes from a live block's inline terminal to the note's inline
-// shell. Called by the inline terminal's onData while the block is running.
-export function inputInline(sessionId: string, data: string): void {
-  handlers.inputInline?.(sessionId, data);
+// Forward keystrokes from a live block's inline terminal to the shell executing
+// that run. Called by the inline terminal's onData while the block is running.
+export function inputInline(sessionId: string, id: string, data: string): void {
+  handlers.inputInline?.(sessionId, id, data);
 }
 
 // Web -> Bun. Note edits do not come through here: persistence is a direct

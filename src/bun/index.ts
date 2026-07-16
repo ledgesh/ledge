@@ -1,15 +1,16 @@
 // Ledge main process.
 //
 // One native window loads the editor webview. Shells are per note: each tab
-// (keyed by its stable docId, `sessionId` on the wire) gets its own pair of
-// shells, run in this Bun process via the bun:ffi PTY (a port of the Swift
-// SessionKit core) and spawned lazily on first use. The inline-run shell slices
-// block output per block via OSC 133 markers; the terminal-drawer shell is raw,
-// driving xterm.js. Keeping them per note means a `cd` in one note never leaks
-// into another. Both talk to the view over typed RPC.
+// (keyed by its stable docId, `sessionId` on the wire) gets its own shells, run
+// in this Bun process via the bun:ffi PTY (a port of the Swift SessionKit core)
+// and spawned lazily on first use. Inline-run shells (a persistent one per note,
+// plus ephemeral overflow shells so blocks can run concurrently; inlinePool.ts)
+// slice block output per block via OSC 133 markers; the terminal-drawer shell is
+// raw, driving xterm.js. Keeping them per note means a `cd` in one note never
+// leaks into another. All of them talk to the view over typed RPC.
 import { BrowserView, BrowserWindow, Updater } from "electrobun/bun";
 import { PtyProcess } from "./pty";
-import { MarkerParser, markerCommand, markerInit } from "./markers";
+import { InlinePool } from "./inlinePool";
 import {
   createNote,
   deleteNote,
@@ -67,25 +68,11 @@ function spawnShell(): PtyProcess {
 }
 
 // --- per-note inline-run shells --------------------------------------------
-// Block bodies are sourced into a note's own shell with OSC 133 markers so output
-// can be sliced per block. Each note keeps its own MarkerParser (the parser is a
-// stateful stream slicer, one per shell). Spawned on the note's first runBlock.
-interface Inline {
-  shell: PtyProcess;
-  parser: MarkerParser;
-}
-const inlines = new Map<string, Inline>();
-function inlineFor(sessionId: string): Inline {
-  let it = inlines.get(sessionId);
-  if (!it) {
-    it = { shell: spawnShell(), parser: new MarkerParser(NONCE) };
-    // Install the end-marker hook before any block can run. Its own echo lands
-    // outside every C..D pair, so the parser drops it and no block ever sees it.
-    it.shell.write(markerInit(NONCE));
-    inlines.set(sessionId, it);
-  }
-  return it;
-}
+// Block bodies are sourced into shells with OSC 133 markers so output can be
+// sliced per block. The pool owns the whole policy — a persistent shell per note
+// (spawned on its first runBlock) so cwd/env carry across blocks, plus an
+// ephemeral overflow shell per additional concurrent run; see inlinePool.ts.
+const inlinePool = new InlinePool(spawnShell, NONCE);
 
 // --- per-note terminal-drawer shells ---------------------------------------
 // A separate, plain interactive session per note with no marker protocol. Its raw
@@ -184,10 +171,9 @@ function sbSnapshot(t: Term): Uint8Array {
   return out;
 }
 
-// Tear down both of a note's shells when its tab closes.
+// Tear down all of a note's shells when its tab closes.
 function closeSession(sessionId: string): void {
-  inlines.get(sessionId)?.shell.close();
-  inlines.delete(sessionId);
+  inlinePool.closeSession(sessionId);
   terms.get(sessionId)?.term.close();
   terms.delete(sessionId);
 }
@@ -217,40 +203,40 @@ const rpc = BrowserView.defineRPC<LedgeRPC>({
         // The block body goes to a file that we source, rather than being inlined
         // into the command line. That sidesteps quoting, heredocs, and line
         // continuations, and sourcing keeps cwd/env changes across blocks within
-        // the note (its shell is reused; a fresh note gets a fresh shell).
+        // the note (its persistent shell is reused; a run started while it is busy
+        // gets an overflow shell whose state dies with the run — inlinePool.ts).
         const path = `/tmp/ledge-spike-${id}.sh`;
         await Bun.write(path, code);
-        inlineFor(sessionId).shell.write(markerCommand(`source ${path}`, NONCE, id));
+        inlinePool.run(sessionId, id, `source ${path}`);
         return { accepted: true };
       },
-      cancelRun: ({ sessionId }) => {
-        // SIGINT whatever the note's inline shell is running, from outside the tty.
+      cancelRun: ({ sessionId, id }) => {
+        // SIGINT whatever the run's shell is executing, from outside the tty.
         // A signal rather than a 0x03 byte: 0x03 only becomes SIGINT if the tty is
         // in canonical mode, so a program that put it in raw mode (a REPL, vim,
         // claude) would just read the byte as input and keep going. This path is
-        // used to force-cancel exactly those. .get, not inlineFor, so a note with no
-        // shell never spawns one just to be cancelled.
+        // used to force-cancel exactly those.
         //
         // The signal goes to the tty's foreground process group, which the shell's
         // job control gives the running job (see PtyProcess.interrupt). zsh is not
-        // in that group and ignores SIGINT anyway, so the shell survives with its
-        // cwd/env intact for the note's next block, and the run ends on the D marker
-        // its precmd hook prints when the prompt comes back.
-        inlines.get(sessionId)?.shell.interrupt();
+        // in that group and ignores SIGINT anyway, so a persistent shell survives
+        // with its cwd/env intact for the note's next block, and the run ends on
+        // the D marker its precmd hook prints when the prompt comes back.
+        inlinePool.cancel(sessionId, id);
         return { ok: true };
       },
-      inlineResize: ({ sessionId, cols, rows }) => {
-        // Resize the note's inline shell so block output renders at the grid the
-        // view shows. inlineFor (not .get) so a resize that arrives just before the
-        // run still targets the same shell the run will reuse.
-        inlineFor(sessionId).shell.resize(cols, rows);
+      inlineResize: ({ sessionId, id, cols, rows }) => {
+        // Resize the run's shell so block output renders at the grid the view
+        // shows. The pool stashes a resize that beats its runBlock across the RPC
+        // (the panel fits itself the moment it renders) and applies it when the
+        // run picks its shell.
+        inlinePool.resize(sessionId, id, cols, rows);
         return { ok: true };
       },
-      inlineInput: ({ sessionId, dataB64 }) => {
-        // Feed keystrokes to the note's inline shell (only sent while a block's
-        // program is the running foreground process). .get, not inlineFor: never
-        // spawn a shell just to receive input for a note that has none.
-        inlines.get(sessionId)?.shell.write(fromB64(dataB64));
+      inlineInput: ({ sessionId, id, dataB64 }) => {
+        // Feed keystrokes to the run's shell (only sent while the block's program
+        // is the running foreground process).
+        inlinePool.input(sessionId, id, fromB64(dataB64));
         return { ok: true };
       },
       terminalInput: ({ sessionId, dataB64 }) => {
@@ -326,33 +312,18 @@ const rpc = BrowserView.defineRPC<LedgeRPC>({
 // see pty.ts.) Inline shells are sliced into per-block events (block ids are
 // globally unique, so the view routes each event to the editor that owns it with
 // no per-note bookkeeping here); terminal shells stream raw to whichever drawer
-// is attached to that note.
+// is attached to that note. Inline lifecycle — overflow teardown on a run's end,
+// closing out the run of a shell that died mid-block — lives in the pool.
 setInterval(() => {
-  for (const [sessionId, it] of inlines) {
-    const data = it.shell.drain();
-    if (data) {
-      for (const ev of it.parser.feed(data)) {
-        if (ev.type === "began") {
-          rpc.send.runEvent({ id: ev.blockId, kind: "began" });
-        } else if (ev.type === "output") {
-          rpc.send.runEvent({ id: ev.blockId, kind: "output", dataB64: toB64(ev.data) });
-        } else if (ev.type === "ended") {
-          rpc.send.runEvent({ id: ev.blockId, kind: "ended", exitCode: ev.exitCode });
-        }
-      }
+  inlinePool.drain((ev) => {
+    if (ev.type === "began") {
+      rpc.send.runEvent({ id: ev.blockId, kind: "began" });
+    } else if (ev.type === "output") {
+      rpc.send.runEvent({ id: ev.blockId, kind: "output", dataB64: toB64(ev.data) });
+    } else {
+      rpc.send.runEvent({ id: ev.blockId, kind: "ended", exitCode: ev.exitCode });
     }
-    // A block that quit the shell (e.g. `exit`) leaves it dead; drop it so the
-    // note's next run spawns a fresh one.
-    if (it.shell.exited) {
-      // The shell died mid-block, so there was no prompt, no precmd, and no end
-      // marker. Close the block out by hand: nobody else can now, and a panel left
-      // on "Running" would keep the note's run button disabled for good.
-      const open = it.parser.openBlockId;
-      if (open) rpc.send.runEvent({ id: open, kind: "ended", exitCode: null });
-      it.shell.close();
-      inlines.delete(sessionId);
-    }
-  }
+  });
 
   for (const [sessionId, t] of terms) {
     const termData = t.term.drain();
@@ -409,7 +380,7 @@ const mainWindow = new BrowserWindow({
 });
 
 process.on("exit", () => {
-  for (const it of inlines.values()) it.shell.close();
+  inlinePool.closeAll();
   for (const t of terms.values()) t.term.close();
 });
 

@@ -52,8 +52,8 @@ const setRunState = StateEffect.define<{ id: string; state: RunInfo["state"]; ex
 const removeRun = StateEffect.define<string>();
 // A full document replace from native (loading a note) drops all inline output.
 // Not dispatched yet (note persistence is unwired); when it is, it must interrupt
-// any still-running run first (see the dismiss button) or it will orphan a program
-// in the note's shared shell.
+// any still-running runs first (see the dismiss button) or it will orphan their
+// programs in the note's shells.
 export const clearRunsEffect = StateEffect.define<null>();
 // A no-op effect whose only purpose is to nudge the overlay plugin to re-measure
 // (it treats any effect as a trigger). Dispatched when a pooled editor is
@@ -158,35 +158,30 @@ function nextId(): string {
   return `web-${idCounter}-${Date.now()}`;
 }
 
-// Whether this note's inline shell is mid-block. A note has one inline shell, so
-// any running block closes every block in the note, not just the one that is going.
-//
-// Known gap, and a real one: the blocks of a note are not independent, and this is
-// the blunt way to say so. Letting a second block through while the first runs does
-// not queue it politely. The shell is mid-job, so the tty echoes the second block's
-// marker command straight into the FIRST block's output, and the parser, which can
-// only go by markers, files that echo under the running block. You get the other
-// block's plumbing printed inside the panel you are watching.
-//
-// The fix is not on this side: Bun should hold the bytes until the shell is back at
-// a prompt, rather than writing them into a busy one. It already does exactly this
-// for the drawer (pasteQueue / promptReady in bun/index.ts), and the inline shell
-// wants the same treatment. Until then, one block at a time per note.
-export function isInlineBusy(state: EditorState): boolean {
-  return state.field(runsField).some((r) => r.state === "running");
+// Whether one of THIS block's runs is still going. Inline concurrency is per
+// block, not per note: each run gets its own shell on the Bun side (a busy note
+// shell diverts the run to a fresh overflow shell; see bun/inlinePool.ts), so
+// another block running is no reason to gate this one. The same block is
+// different: addRun replaces any earlier run anchored inside it, and replacing a
+// live run's panel would orphan its process — still running, nothing on screen
+// to show or stop it. So one live run per block; re-running waits for (or
+// dismisses) the current one.
+export function isBlockRunning(state: EditorState, from: number, to: number): boolean {
+  const end = state.doc.lineAt(Math.min(to, state.doc.length)).to;
+  return state.field(runsField).some((r) => r.state === "running" && r.pos >= from && r.pos <= end);
 }
 
-// Whether a block can be sent to `destination` right now. Both shells are single
-// and serial: a second block sent while one is running does not run, it waits, and
-// the wait is not something either shell can currently show.
+// Whether a block can be sent to `destination` right now. The terminal drawer is
+// one serial shell per note — a block sent while it is busy queues invisibly, so
+// that gate is note-wide. Inline runs gate per block (above).
 //
-// Runs are per editor and an editor is per note, and terminal busy is keyed by the
-// note's session, so neither rule reaches across notes: their shells are separate
-// and so is their state.
-export function canRun(view: EditorView, destination: RunDestination): boolean {
+// Runs are per editor and an editor is per note, and terminal busy is keyed by
+// the note's session, so neither rule reaches across notes: their shells are
+// separate and so is their state.
+export function canRun(view: EditorView, block: { from: number; to: number }, destination: RunDestination): boolean {
   return destination === "terminal"
     ? !isTerminalBusy(view.state.facet(sessionIdFacet))
-    : !isInlineBusy(view.state);
+    : !isBlockRunning(view.state, block.from, block.to);
 }
 
 export function runBlock(view: EditorView, pos: number, destination: RunDestination): boolean {
@@ -195,7 +190,7 @@ export function runBlock(view: EditorView, pos: number, destination: RunDestinat
   // Checked here rather than only on the buttons, so the keymap and the palette
   // are held to the same rule: a disabled-looking button and a live Cmd+Enter
   // would just move the invisible queue somewhere else.
-  if (!canRun(view, destination)) return false;
+  if (!canRun(view, block, destination)) return false;
 
   // This note's id, so the run reaches this note's own shell (see bridge.ts).
   const sessionId = view.state.facet(sessionIdFacet);
@@ -250,12 +245,12 @@ class OutputWidget extends WidgetType {
   toDOM(view: EditorView): HTMLElement {
     const sessionId = view.state.facet(sessionIdFacet);
     const it = acquireInlineTerm(this.run.id, {
-      // Keep the note's inline shell winsize matched to the rendered grid, so
+      // Keep the run's shell winsize matched to the rendered grid, so
       // size-aware programs lay out correctly inline.
-      onResize: (cols, rows) => resizeInline(sessionId, cols, rows),
-      // Keystrokes from the live block go to the note's inline shell, so an
+      onResize: (cols, rows) => resizeInline(sessionId, this.run.id, cols, rows),
+      // Keystrokes from the live block go to the run's shell, so an
       // interactive program running inline can be typed into.
-      onInput: (data) => inputInline(sessionId, data),
+      onInput: (data) => inputInline(sessionId, this.run.id, data),
       // The terminal changes height out of band (first output, freeze); ask
       // CodeMirror to re-measure so following content sits at the right offset.
       onHeightChange: () => view.requestMeasure(),
@@ -292,7 +287,7 @@ const CLOSE_ICON = svg('<path d="M4 4l8 8M12 4l-8 8"/>');
 // Why a run button is off. Worth spelling out on the button itself: "nothing
 // happened when I clicked" is the problem we are fixing, and a gray button with no
 // reason is a quieter version of the same mystery.
-const INLINE_BUSY = "This note's shell is running a block";
+const INLINE_BUSY = "This block is still running";
 const TERM_BUSY = "This note's terminal is busy";
 
 // Gray out a run button while its shell cannot take a block. The native `disabled`
@@ -346,8 +341,10 @@ interface ControlSpec {
   top: number;
   right: number;
   caret: boolean;
-  // Per destination, because a note's two shells are independent: a block can be
-  // running inline and still free to send to the drawer.
+  // Per destination, because the shells are independent: a block can be running
+  // inline and still free to send to the drawer. runBusy is also per BLOCK —
+  // concurrent inline runs each get their own shell, so only the block's own
+  // live run gates it.
   runBusy: boolean;
   termBusy: boolean;
 }
@@ -480,9 +477,9 @@ const overlayPlugin = ViewPlugin.fromClass(
       const padRight = parseFloat(getComputedStyle(view.contentDOM).paddingRight) || 0;
       const cardInset = base.right - (content.right - padRight);
 
-      // Both shells are per note, so their busy state is the same for every block
-      // in this editor: measure it once, not once per block.
-      const runBusy = isInlineBusy(view.state);
+      // The drawer shell is per note, so its busy state is the same for every
+      // block in this editor. Inline runs are per block (each gets its own
+      // shell), so that gate is measured inside the loop.
       const termBusy = isTerminalBusy(view.state.facet(sessionIdFacet));
 
       const controls: ControlSpec[] = [];
@@ -506,7 +503,7 @@ const overlayPlugin = ViewPlugin.fromClass(
           // Sit inside the card's top-right corner rather than flush against it.
           right: cardInset + 10,
           caret: head >= from && head <= to,
-          runBusy,
+          runBusy: isBlockRunning(view.state, from, to),
           termBusy,
         });
       });
@@ -611,13 +608,13 @@ const overlayPlugin = ViewPlugin.fromClass(
         wrap.appendChild(
           iconButton(CLOSE_ICON, tooltip("block.dismissOutput"), (e) => {
             e.preventDefault();
-            // Dismissing a still-running block must not orphan its process: the
-            // note's shell is shared, so a program left in the foreground would
-            // keep it busy forever and silently swallow every later block. Only
-            // interrupt if THIS run is the running one; dismissing an old finished
-            // panel must not cancel whatever is running now.
+            // Dismissing a still-running block must not orphan its process: with
+            // the panel gone there is nothing on screen to show it or stop it, so
+            // interrupt it on the way out. The cancel is addressed by run id, so
+            // it reaches exactly this run's shell and no other block's; the state
+            // check keeps dismissing an old finished panel from touching anything.
             const run = this.view.state.field(runsField).find((r) => r.id === c.id);
-            if (run?.state === "running") cancelRun(this.view.state.facet(sessionIdFacet));
+            if (run?.state === "running") cancelRun(this.view.state.facet(sessionIdFacet), c.id);
             this.view.dispatch({ effects: removeRun.of(c.id) });
           }),
         );

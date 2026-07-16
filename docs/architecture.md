@@ -84,7 +84,8 @@ other:
 - **`path`** is the identity of the *file*. It changes on retitle and on
   trash/restore.
 - **`docId`** is the identity of the *live session*: the pooled CodeMirror
-  editor and the note's two shells (inline-run and terminal drawer). It is
+  editor and the note's shells (the persistent inline-run shell plus any
+  overflow shells for concurrent runs, and the terminal drawer). It is
   born when a tab opens — before the note has a file at all — and dies when
   the tab closes.
 

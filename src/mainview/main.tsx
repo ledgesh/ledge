@@ -33,14 +33,14 @@ configureBridge({
   runInline: (sessionId, id, code) => {
     void electrobun.rpc!.request.runBlock({ sessionId, id, code });
   },
-  cancelRun: (sessionId) => {
-    void electrobun.rpc!.request.cancelRun({ sessionId });
+  cancelRun: (sessionId, id) => {
+    void electrobun.rpc!.request.cancelRun({ sessionId, id });
   },
-  resizeInline: (sessionId, cols, rows) => {
-    void electrobun.rpc!.request.inlineResize({ sessionId, cols, rows });
+  resizeInline: (sessionId, id, cols, rows) => {
+    void electrobun.rpc!.request.inlineResize({ sessionId, id, cols, rows });
   },
-  inputInline: (sessionId, data) => {
-    void electrobun.rpc!.request.inlineInput({ sessionId, dataB64: bytesToB64(new TextEncoder().encode(data)) });
+  inputInline: (sessionId, id, data) => {
+    void electrobun.rpc!.request.inlineInput({ sessionId, id, dataB64: bytesToB64(new TextEncoder().encode(data)) });
   },
 });
 

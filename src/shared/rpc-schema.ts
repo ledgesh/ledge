@@ -12,7 +12,7 @@ export type RunEvent =
   // `exitCode: null` means the shell died with the block still running (the block
   // ran `exit`, or the shell was killed): there is no status to report, only the
   // fact that it is over. Without this the panel would sit on "Running" forever,
-  // and with it the note's run button, which is disabled while a block runs.
+  // and with it the block's run button, which is disabled while its run is going.
   | { id: string; kind: "ended"; exitCode: number | null };
 
 /**
@@ -83,24 +83,30 @@ export type LedgeRPC = {
       // confirmation in front of it.
       trashEmpty: { params: {}; response: { removed: number } };
       // Shells are per note: `sessionId` is the tab's stable docId. The Bun side
-      // lazily spawns that note's inline-run shell on first runBlock and closes it
-      // on closeSession, so a `cd` in one note never leaks into another.
+      // lazily spawns that note's persistent inline-run shell on first runBlock and
+      // closes it on closeSession, so a `cd` in one note never leaks into another.
+      // A block run while that shell is mid-block gets an ephemeral overflow shell
+      // of its own (concurrent inline runs; see bun/inlinePool.ts), torn down when
+      // the run ends.
       runBlock: { params: { sessionId: string; id: string; code: string }; response: { accepted: boolean } };
-      // Interrupt whatever a note's inline-run shell is currently running (SIGINT to
-      // its process group). Sent when a still-running block's output panel is
-      // dismissed: the note's shell is shared, so leaving the program in the
-      // foreground would keep that shell busy forever and swallow every later block.
-      // The shell itself ignores SIGINT and survives with its cwd/env.
-      cancelRun: { params: { sessionId: string }; response: { ok: boolean } };
-      // Match a note's inline-run shell winsize to the block's rendered terminal
-      // grid, so size-aware programs (paging, full-screen redraws) lay out correctly
-      // in the inline panel. The inline shell renders through xterm.js in the view.
-      inlineResize: { params: { sessionId: string; cols: number; rows: number }; response: { ok: boolean } };
-      // Keystrokes / pasted text from a block's inline terminal to the note's
-      // inline-run shell, so an interactive program running inline (a REPL, vim,
+      // Interrupt one running block (SIGINT to its shell's foreground process
+      // group). `id` names the run; Bun routes the signal to whichever shell is
+      // executing it. Sent when a still-running block's output panel is dismissed:
+      // with the panel gone there is nothing on screen to see or stop the program,
+      // so it must not keep running invisibly. A persistent shell ignores SIGINT
+      // itself and survives with its cwd/env.
+      cancelRun: { params: { sessionId: string; id: string }; response: { ok: boolean } };
+      // Match the winsize of the shell executing run `id` to the block's rendered
+      // terminal grid, so size-aware programs (paging, full-screen redraws) lay out
+      // correctly in the inline panel. May arrive before runBlock (the panel fits
+      // itself as soon as it renders); Bun stashes it and applies it when the run
+      // picks its shell.
+      inlineResize: { params: { sessionId: string; id: string; cols: number; rows: number }; response: { ok: boolean } };
+      // Keystrokes / pasted text from a block's inline terminal to the shell
+      // executing run `id`, so an interactive program running inline (a REPL, vim,
       // claude) can be driven in place. Base64 like terminalInput. The view only
       // sends this while the block's command is the running foreground process.
-      inlineInput: { params: { sessionId: string; dataB64: string }; response: { ok: boolean } };
+      inlineInput: { params: { sessionId: string; id: string; dataB64: string }; response: { ok: boolean } };
       // Terminal drawer input and resize, targeting one note's terminal shell.
       // Keystrokes and pasted text go through terminalInput; the drawer's fit
       // computes cols/rows for terminalResize. This shell is separate from the
