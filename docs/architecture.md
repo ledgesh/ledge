@@ -50,11 +50,13 @@ Bun therefore validates everything and derives anything derivable:
 - **`rename(2)` is the primitive; `unlink` is the exception.** Saves are a
   temp-file-plus-rename (atomic within a filesystem: a crash mid-save leaves
   the old note or the new one, never half). Delete is a rename into `.trash`.
-  Retitle is a rename. Restore is a rename. Exactly three code paths unlink —
-  `deleteTrashed`, `emptyTrash`, `purgeTrash` — all in `bun/notes.ts`, all
+  Retitle is a rename. Restore is a rename. Exactly three code paths unlink a
+  *note* — `deleteTrashed`, `emptyTrash`, `purgeTrash` — all in `bun/notes.ts`, all
   gated by `assertTrashed`, and the first two sit behind a confirmation
   (interactions.md §4). **Anything new that unlinks a file joins all three
-  lists: the guard, the confirm, and this sentence.**
+  lists: the guard, the confirm, and this sentence.** (The one other `unlink`
+  in the repo is `writeNote` discarding its own temp file after a failed
+  save — a dotted file it created moments earlier that no listing ever shows.)
 - **Name allocation is where clobber-safety lives.** `rename(2)` overwrites
   silently, so no call site may pick its own destination name: `uniqueName`
   (case-insensitive, because APFS is) allocates against a `readdir` snapshot
