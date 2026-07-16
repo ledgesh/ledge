@@ -25,6 +25,7 @@ import {
   retitleNote,
   writeNote,
 } from "./notes";
+import { runnerFor } from "./runner";
 import { loadSettings, openSettingsFile } from "./settings";
 import type { LedgeRPC } from "../shared/rpc-schema";
 
@@ -122,6 +123,9 @@ function isBusy(t: Term): boolean {
   return t.everReady && (!t.promptReady || t.pasteQueue.length > 0);
 }
 const terms = new Map<string, Term>();
+// Names the temp files behind interpreted blocks pasted to the terminal
+// (inline runs use the view's block id instead; see runBlock).
+let nextTermRunId = 1;
 function termFor(sessionId: string): Term {
   let t = terms.get(sessionId);
   if (!t) {
@@ -199,15 +203,18 @@ const rpc = BrowserView.defineRPC<LedgeRPC>({
       trashDelete: async ({ path }) => ({ removed: await deleteTrashed(path) }),
       trashEmpty: async () => ({ removed: await emptyTrash() }),
 
-      runBlock: async ({ sessionId, id, code }) => {
-        // The block body goes to a file that we source, rather than being inlined
-        // into the command line. That sidesteps quoting, heredocs, and line
-        // continuations, and sourcing keeps cwd/env changes across blocks within
-        // the note (its persistent shell is reused; a run started while it is busy
-        // gets an overflow shell whose state dies with the run — inlinePool.ts).
-        const path = `/tmp/ledge-spike-${id}.sh`;
-        await Bun.write(path, code);
-        inlinePool.run(sessionId, id, `source ${path}`);
+      runBlock: async ({ sessionId, id, code, language }) => {
+        // The block body goes to a file, rather than being inlined into the
+        // command line. That sidesteps quoting, heredocs, and line continuations.
+        // What runs the file is the language's business (runner.ts): shell blocks
+        // are sourced so cwd/env changes carry across blocks within the note (its
+        // persistent shell is reused; a run started while it is busy gets an
+        // overflow shell whose state dies with the run — inlinePool.ts), other
+        // languages exec their interpreter on it. process.execPath is the app's
+        // bundled bun, backing the "bun" interpreter for TypeScript.
+        const spec = runnerFor(id, language, code, settings.blocks.interpreters, process.execPath);
+        await Bun.write(spec.path, spec.contents);
+        inlinePool.run(sessionId, id, spec.command);
         return { accepted: true };
       },
       cancelRun: ({ sessionId, id }) => {
@@ -243,12 +250,24 @@ const rpc = BrowserView.defineRPC<LedgeRPC>({
         termFor(sessionId).term.write(fromB64(dataB64));
         return { ok: true };
       },
-      terminalPaste: ({ sessionId, text }) => {
+      terminalPaste: async ({ sessionId, text, language }) => {
         const t = termFor(sessionId);
+        // A fenced block in an interpreted language cannot be pasted as-is —
+        // zsh would run it as shell. Its runner line is pasted instead (same
+        // runner as inline; the temp file is written here). Shell blocks keep
+        // pasting their literal code: visible, editable, in shell history.
+        let paste = text;
+        if (language != null) {
+          const spec = runnerFor(`term-${nextTermRunId++}`, language, text, settings.blocks.interpreters, process.execPath);
+          if (spec.kind === "interpreter") {
+            await Bun.write(spec.path, spec.contents);
+            paste = spec.command;
+          }
+        }
         // Always queue, then try to release immediately. If the shell is idle at a
         // prompt the paste goes out now; if it is cold or mid-command it waits for
         // the next prompt, so pastes never echo raw or run out of order.
-        t.pasteQueue.push(bracketedPaste(text));
+        t.pasteQueue.push(bracketedPaste(paste));
         flushPaste(t);
         return { ok: true };
       },

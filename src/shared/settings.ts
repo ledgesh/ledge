@@ -18,7 +18,18 @@ export interface Settings {
   trash: { ttlDays: number };
   // Code-fence languages that get a Run button (editor/blocks.ts). Matched
   // case-insensitively against the fence's info string.
-  blocks: { runnable: string[] };
+  //
+  // `interpreters` maps a fence language to the command that runs its temp
+  // file (bun/runner.ts). A language with no entry is sourced into the note's
+  // shell — that is what makes ```sh blocks carry cwd/env across runs, and it
+  // is also the extension point: add `"lua": "lua"` here (and to `runnable`)
+  // and lua fences run. Values are inserted verbatim into a shell command
+  // line, so they may carry flags ("python3 -u") and must be quoted by the
+  // user if the path has spaces. The literal value "bun" is special-cased to
+  // the bun runtime bundled with the app, so TypeScript runs without a bun on
+  // PATH. User entries MERGE over these defaults (a venv python should not
+  // cost you node), so to un-map a language remove it from `runnable` instead.
+  blocks: { runnable: string[]; interpreters: Record<string, string> };
 }
 
 export const DEFAULT_SETTINGS: Settings = Object.freeze({
@@ -27,7 +38,21 @@ export const DEFAULT_SETTINGS: Settings = Object.freeze({
   terminal: { fontSize: 12 },
   trash: { ttlDays: 30 },
   blocks: {
-    runnable: ["sh", "bash", "zsh", "shell", "console", "python", "python3", "py", "ruby", "rb", "node", "js", "javascript"],
+    runnable: [
+      "sh", "bash", "zsh", "shell", "console",
+      "python", "python3", "py",
+      "ruby", "rb",
+      "node", "js", "javascript",
+      "ts", "typescript",
+      "php",
+    ],
+    interpreters: {
+      python: "python3", python3: "python3", py: "python3",
+      ruby: "ruby", rb: "ruby",
+      node: "node", js: "node", javascript: "node",
+      ts: "bun", typescript: "bun",
+      php: "php",
+    },
   },
 });
 
@@ -69,6 +94,12 @@ export function parseSettings(raw: unknown): { settings: Settings; problems: str
         runnable: strings(blocks, "runnable", "blocks.runnable", d.blocks.runnable, problems).map((l) =>
           l.toLowerCase(),
         ),
+        // Merged, not replaced: setting one interpreter must not un-map the
+        // rest (see the field comment on Settings).
+        interpreters: {
+          ...d.blocks.interpreters,
+          ...stringMap(blocks, "interpreters", "blocks.interpreters", problems),
+        },
       },
     },
     problems,
@@ -113,6 +144,29 @@ function strings(
   if (Array.isArray(v) && v.every((x) => typeof x === "string")) return v;
   problems.push(`"${label}" must be an array of strings`);
   return fallback;
+}
+
+// Validates per ENTRY, not per map: one bad value costs that language alone,
+// matching the file's per-field degradation everywhere else. Keys are fence
+// info strings, matched case-insensitively like `runnable`, so lowercase them.
+function stringMap(
+  o: Record<string, unknown>,
+  key: string,
+  label: string,
+  problems: string[],
+): Record<string, string> {
+  const v = o[key];
+  if (v === undefined) return {};
+  if (!isRecord(v)) {
+    problems.push(`"${label}" must be an object of language -> command strings`);
+    return {};
+  }
+  const out: Record<string, string> = {};
+  for (const [k, val] of Object.entries(v)) {
+    if (typeof val === "string" && val.length > 0) out[k.toLowerCase()] = val;
+    else problems.push(`"${label}.${k}" must be a non-empty string`);
+  }
+  return out;
 }
 
 function num(

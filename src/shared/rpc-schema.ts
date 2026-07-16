@@ -88,7 +88,13 @@ export type LedgeRPC = {
       // A block run while that shell is mid-block gets an ephemeral overflow shell
       // of its own (concurrent inline runs; see bun/inlinePool.ts), torn down when
       // the run ends.
-      runBlock: { params: { sessionId: string; id: string; code: string }; response: { accepted: boolean } };
+      // `language` is the fence's info string ("python", "node", ...): Bun picks
+      // the runner from it — source into the shell, or exec an interpreter on the
+      // temp file (bun/runner.ts). The view never decides how code runs.
+      runBlock: {
+        params: { sessionId: string; id: string; code: string; language: string | null };
+        response: { accepted: boolean };
+      };
       // Interrupt one running block (SIGINT to its shell's foreground process
       // group). `id` names the run; Bun routes the signal to whichever shell is
       // executing it. Sent when a still-running block's output panel is dismissed:
@@ -117,7 +123,11 @@ export type LedgeRPC = {
       // enabled bracketed-paste mode, so zsh buffers every line into one command
       // (all echo together, then all output, under one prompt) instead of running
       // line-by-line, and the markers never leak as literal text on a cold shell.
-      terminalPaste: { params: { sessionId: string; text: string }; response: { ok: boolean } };
+      // `language` rides along when the paste is a fenced block sent to the
+      // terminal: an interpreted language (see runBlock) pastes its runner line
+      // (`python3 /tmp/...py`) instead of the raw code, which zsh could not run.
+      // Shell blocks and the drawer's own Cmd+V (no language) paste text as-is.
+      terminalPaste: { params: { sessionId: string; text: string; language?: string | null }; response: { ok: boolean } };
       terminalResize: { params: { sessionId: string; cols: number; rows: number }; response: { ok: boolean } };
       // Attach lazily spawns the note's terminal shell (if needed), returns the
       // scrollback so far (so a freshly opened drawer shows the existing prompt and

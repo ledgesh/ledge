@@ -25,9 +25,9 @@ type NativeMessage =
 // and App wires the terminal-drawer callbacks (need React state). configureBridge
 // merges, so either can set its own fields without clobbering the other.
 interface BridgeHandlers {
-  runInline: (sessionId: string, id: string, code: string) => void;
+  runInline: (sessionId: string, id: string, code: string, language: string | null) => void;
   toggleTerminal: () => void;
-  runInTerminal: (sessionId: string, code: string) => void;
+  runInTerminal: (sessionId: string, code: string, language: string | null) => void;
   cancelRun: (sessionId: string, id: string) => void;
   resizeInline: (sessionId: string, id: string, cols: number, rows: number) => void;
   inputInline: (sessionId: string, id: string, data: string) => void;
@@ -67,10 +67,10 @@ export function toNative(message: unknown): void {
   }
   if (m.type !== "run") return;
   if (m.destination === "terminal") {
-    handlers.runInTerminal?.(m.sessionId, m.code);
+    handlers.runInTerminal?.(m.sessionId, m.code, m.language);
     return;
   }
-  if (m.id) handlers.runInline?.(m.sessionId, m.id, m.code);
+  if (m.id) handlers.runInline?.(m.sessionId, m.id, m.code, m.language);
 }
 
 // Bun -> web run events. Every mounted editor registers a sink bound to its own

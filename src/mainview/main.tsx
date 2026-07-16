@@ -30,8 +30,8 @@ const rpc = Electroview.defineRPC<LedgeRPC>({
 const electrobun = new Electrobun.Electroview({ rpc });
 
 configureBridge({
-  runInline: (sessionId, id, code) => {
-    void electrobun.rpc!.request.runBlock({ sessionId, id, code });
+  runInline: (sessionId, id, code, language) => {
+    void electrobun.rpc!.request.runBlock({ sessionId, id, code, language });
   },
   cancelRun: (sessionId, id) => {
     void electrobun.rpc!.request.cancelRun({ sessionId, id });
@@ -48,8 +48,8 @@ configureTerminal({
   sendInput: (sessionId, dataB64) => {
     void electrobun.rpc!.request.terminalInput({ sessionId, dataB64 });
   },
-  sendPaste: (sessionId, text) => {
-    void electrobun.rpc!.request.terminalPaste({ sessionId, text });
+  sendPaste: (sessionId, text, language) => {
+    void electrobun.rpc!.request.terminalPaste({ sessionId, text, language });
   },
   sendResize: (sessionId, cols, rows) => {
     void electrobun.rpc!.request.terminalResize({ sessionId, cols, rows });

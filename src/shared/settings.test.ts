@@ -8,16 +8,22 @@ describe("parseSettings", () => {
     expect(problems).toEqual([]);
   });
 
-  test("a full valid file round-trips", () => {
+  test("a full valid file round-trips (interpreters merge over the defaults)", () => {
     const input = {
       shell: { path: "/opt/homebrew/bin/fish", args: ["-l"] },
       editor: { fontSize: 16 },
       terminal: { fontSize: 13 },
       trash: { ttlDays: 7 },
-      blocks: { runnable: ["sh", "python"] },
+      blocks: { runnable: ["sh", "python"], interpreters: { python: "/venv/bin/python" } },
     };
     const { settings, problems } = parseSettings(input);
-    expect(settings).toEqual(input);
+    expect(settings).toEqual({
+      ...input,
+      blocks: {
+        runnable: ["sh", "python"],
+        interpreters: { ...DEFAULT_SETTINGS.blocks.interpreters, python: "/venv/bin/python" },
+      },
+    });
     expect(problems).toEqual([]);
   });
 
@@ -62,6 +68,36 @@ describe("parseSettings", () => {
   test("runnable languages are normalized to lowercase", () => {
     const { settings } = parseSettings({ blocks: { runnable: ["Python", "SH"] } });
     expect(settings.blocks.runnable).toEqual(["python", "sh"]);
+  });
+
+  test("overriding one interpreter does not un-map the rest", () => {
+    const { settings, problems } = parseSettings({
+      blocks: { interpreters: { python: "/venv/bin/python", lua: "lua" } },
+    });
+    expect(settings.blocks.interpreters["python"]).toBe("/venv/bin/python");
+    expect(settings.blocks.interpreters["lua"]).toBe("lua"); // user-added language
+    expect(settings.blocks.interpreters["node"]).toBe(DEFAULT_SETTINGS.blocks.interpreters["node"]!);
+    expect(problems).toEqual([]);
+  });
+
+  test("interpreter keys are normalized to lowercase, like runnable", () => {
+    const { settings } = parseSettings({ blocks: { interpreters: { Python: "/venv/bin/python" } } });
+    expect(settings.blocks.interpreters["python"]).toBe("/venv/bin/python");
+  });
+
+  test("a bad interpreter entry costs that language alone", () => {
+    const { settings, problems } = parseSettings({
+      blocks: { interpreters: { python: "", ruby: "/opt/ruby" } },
+    });
+    expect(settings.blocks.interpreters["python"]).toBe(DEFAULT_SETTINGS.blocks.interpreters["python"]!);
+    expect(settings.blocks.interpreters["ruby"]).toBe("/opt/ruby");
+    expect(problems).toEqual(['"blocks.interpreters.python" must be a non-empty string']);
+  });
+
+  test("a non-object interpreters field is reported and defaults survive", () => {
+    const { settings, problems } = parseSettings({ blocks: { interpreters: ["python3"] } });
+    expect(settings.blocks.interpreters).toEqual(DEFAULT_SETTINGS.blocks.interpreters);
+    expect(problems).toEqual(['"blocks.interpreters" must be an object of language -> command strings']);
   });
 
   test("a misspelled section is reported, not silently ignored", () => {

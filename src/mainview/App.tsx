@@ -62,16 +62,16 @@ function Shell() {
   // A "run in terminal" fired while the drawer is closed (or for a note other than
   // the one shown) queues its command here and flushes once the terminal for that
   // note has mounted, so its output is not dropped.
-  const pending = useRef<{ sessionId: string; cmd: string } | null>(null);
+  const pending = useRef<{ sessionId: string; cmd: string; language: string | null } | null>(null);
 
   const runInTerminal = useCallback(
-    (sessionId: string, code: string) => {
+    (sessionId: string, code: string, language: string | null) => {
       // Bun wraps this as a bracketed paste and gates it on the shell being ready,
       // so it is safe to fire even the instant a lazily-spawned shell starts.
       if (termOpen && sessionId === activeDocId) {
-        sendTerminalPaste(sessionId, code);
+        sendTerminalPaste(sessionId, code, language);
       } else {
-        pending.current = { sessionId, cmd: code };
+        pending.current = { sessionId, cmd: code, language };
         setTermOpen(true);
       }
     },
@@ -101,7 +101,7 @@ function Shell() {
 
   const onTerminalReady = useCallback(() => {
     if (pending.current) {
-      sendTerminalPaste(pending.current.sessionId, pending.current.cmd);
+      sendTerminalPaste(pending.current.sessionId, pending.current.cmd, pending.current.language);
       pending.current = null;
     }
   }, []);
