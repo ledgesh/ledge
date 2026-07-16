@@ -49,6 +49,7 @@ export const COMMANDS = {
   "workspace.new": { title: "New Workspace", keys: ["Mod-Shift-n"] },
   "workspace.open": { title: "Switch to Workspace", listKeys: ["Enter"] },
   "workspace.rename": { title: "Rename Workspace…", listKeys: ["r"] },
+  "workspace.icon": { title: "Change Icon…", listKeys: ["i"] },
   "workspace.close": { title: "Close Workspace", listKeys: ["Backspace"] },
 
   // Chrome.

@@ -30,6 +30,8 @@ export interface UiHooks {
   toggleSidebar(): void;
   openOverlay(mode: "notes" | "commands"): void;
   beginRenameWorkspace(id: string): void;
+  // Open the icon picker on a workspace, anchored to its row in the strip.
+  pickWorkspaceIcon(id: string): void;
   // Trash the note and offer the Undo strip — the same path as the note list's
   // Delete, so ⌘⌫ and the menu item are one behavior.
   deleteNoteWithUndo(note: NoteMeta): void;

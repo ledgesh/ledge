@@ -24,6 +24,7 @@ import {
   Rows2,
   Save,
   Search,
+  Shapes,
   SquareX,
   TerminalSquare,
   Trash2,
@@ -177,6 +178,11 @@ export function buildCommands(deps: RegistryDeps): Command[] {
       icon: Pencil,
       targetKind: "workspace",
       run: (ctx) => ctx.ui.beginRenameWorkspace?.(targetWorkspaceId(ctx)),
+    }),
+    cmd("workspace.icon", {
+      icon: Shapes,
+      targetKind: "workspace",
+      run: (ctx) => ctx.ui.pickWorkspaceIcon?.(targetWorkspaceId(ctx)),
     }),
     cmd("workspace.close", {
       icon: Trash2,

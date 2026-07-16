@@ -115,6 +115,7 @@ CodeMirror and never at the window level.
 | Run Block Inline      | ⌘↩                        | cursor inside a runnable block |
 | Run Block in Terminal | ⇧⌘↩                       | |
 | Rename Workspace…     | `r` (also menu / palette / double-click) | |
+| Change Icon…          | `i` (also menu / palette) | opens the icon grid on the workspace's row |
 | Close Workspace       | `⌫` (also menu / hover ✕) | |
 | Copy Path             | `c` (also note context menu) | |
 | Empty Trash…          | — (button / palette, confirmed) | |
@@ -126,7 +127,7 @@ Row verbs, by row kind. Each fires only while a row of that kind has focus
 | --------- | ----------------- | -------------------------- | ----- |
 | Note      | Open              | Delete (to trash, undoable) | `c` Copy Path |
 | Trash     | —                 | Delete Permanently… (confirmed) | `r` Restore |
-| Workspace | Switch to it      | Close Workspace            | `r` Rename |
+| Workspace | Switch to it      | Close Workspace            | `r` Rename, `i` Change Icon |
 
 ## 4. Destructive actions
 
@@ -159,7 +160,8 @@ items render the key as a right-aligned chip.
 One LIFO layer stack (`commands/layers.ts`); Escape always addresses the
 topmost layer only:
 
-1. Context menu
+1. Context menu, and the popovers that behave like one (the workspace icon
+   picker: anchored, dismissed by a pick or a press outside)
 2. Confirm dialog
 3. Palette / quick-open overlay
 4. Editor find panel (CodeMirror-internal, editor focus only)

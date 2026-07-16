@@ -1,6 +1,7 @@
 import { test, expect, describe } from "bun:test";
 import { reducer, initialState, allDocIds, openNotePaths, type AppState, type Action } from "./store";
 import { firstLeaf, leafIds, findLeaf, countTabs, focusedTab, type SplitNode } from "./tree";
+import { DEFAULT_ICON } from "./icons";
 import type { NoteMeta, TrashMeta } from "../../shared/rpc-schema";
 
 // Apply a sequence of actions from a fresh state.
@@ -175,6 +176,33 @@ describe("workspaces", () => {
     const id = s0.selectedId;
     expect(selected(reducer(s0, { type: "renameWorkspace", id, name: "  Notes  " })).name).toBe("Notes");
     expect(selected(reducer(s0, { type: "renameWorkspace", id, name: "   " })).name).toBe(selected(s0).name);
+  });
+
+  test("every workspace starts on the default icon, whatever its position", () => {
+    // Icons used to be handed out by index, which made the strip look like the
+    // app knew something about a workspace when it only knew its birth order.
+    const s = run({ type: "newWorkspace" }, { type: "newWorkspace" });
+    expect(s.workspaces.map((w) => w.symbol)).toEqual([DEFAULT_ICON, DEFAULT_ICON, DEFAULT_ICON]);
+  });
+
+  test("setWorkspaceIcon changes one workspace's icon", () => {
+    const s0 = run({ type: "newWorkspace" });
+    const s = reducer(s0, { type: "setWorkspaceIcon", id: s0.workspaces[0].id, symbol: "rocket" });
+    expect(s.workspaces.map((w) => w.symbol)).toEqual(["rocket", DEFAULT_ICON]);
+  });
+
+  test("setWorkspaceIcon ignores a key the catalog doesn't have", () => {
+    // iconFor would render the default for it, so storing it would pretend the
+    // choice took.
+    const s0 = initialState();
+    expect(reducer(s0, { type: "setWorkspaceIcon", id: s0.selectedId, symbol: "aardvark" })).toBe(s0);
+  });
+
+  test("setWorkspaceIcon ignores an unknown workspace", () => {
+    const s0 = initialState();
+    expect(selected(reducer(s0, { type: "setWorkspaceIcon", id: "ghost", symbol: "rocket" })).symbol).toBe(
+      DEFAULT_ICON,
+    );
   });
 
   test("selectWorkspace ignores an unknown id", () => {

@@ -23,10 +23,8 @@ import {
   type TabState,
   type Workspace,
 } from "./tree";
+import { DEFAULT_ICON, isIconKey } from "./icons";
 import type { NoteMeta, TrashMeta } from "../../shared/rpc-schema";
-
-// Icons a new workspace cycles through (keys resolved in Sidebar.tsx).
-const WORKSPACE_SYMBOLS = ["inbox", "layers", "boxes", "folder", "terminal"];
 
 export interface AppState {
   workspaces: Workspace[];
@@ -43,9 +41,9 @@ export interface AppState {
   trash: TrashMeta[];
 }
 
-function makeWorkspace(name: string, symbol: string, tab: TabState): Workspace {
+function makeWorkspace(name: string, tab: TabState): Workspace {
   const leaf = makeLeaf(tab);
-  return { id: uid("ws"), name, symbol, root: leaf, focusedPaneId: leaf.id };
+  return { id: uid("ws"), name, symbol: DEFAULT_ICON, root: leaf, focusedPaneId: leaf.id };
 }
 
 // The launch state, built from the notes already on disk (newest first, as
@@ -58,7 +56,7 @@ function makeWorkspace(name: string, symbol: string, tab: TabState): Workspace {
 export function initialState(notes: NoteMeta[] = [], trash: TrashMeta[] = []): AppState {
   const newest = notes[0];
   const tab = newest ? makeNoteTab(newest.path, newest.title) : makeTab("demo", "Welcome");
-  const first = makeWorkspace("Scratch", "inbox", tab);
+  const first = makeWorkspace("Scratch", tab);
   return { workspaces: [first], selectedId: first.id, notes, trash };
 }
 
@@ -69,6 +67,7 @@ export type Action =
   | { type: "newWorkspace" }
   | { type: "closeWorkspace"; id: string }
   | { type: "renameWorkspace"; id: string; name: string }
+  | { type: "setWorkspaceIcon"; id: string; symbol: string }
   | { type: "moveWorkspace"; id: string; toIndex: number }
   | { type: "focusPane"; paneId: string }
   | { type: "newTab"; paneId?: string }
@@ -122,7 +121,7 @@ export function reducer(state: AppState, action: Action): AppState {
 
     case "newWorkspace": {
       const n = state.workspaces.length + 1;
-      const ws = makeWorkspace(`Workspace ${n}`, WORKSPACE_SYMBOLS[n % WORKSPACE_SYMBOLS.length], makeTab("scratch"));
+      const ws = makeWorkspace(`Workspace ${n}`, makeTab("scratch"));
       return { ...state, workspaces: [...state.workspaces, ws], selectedId: ws.id };
     }
 
@@ -144,6 +143,18 @@ export function reducer(state: AppState, action: Action): AppState {
       return {
         ...state,
         workspaces: state.workspaces.map((w) => (w.id === action.id ? { ...w, name } : w)),
+      };
+    }
+
+    case "setWorkspaceIcon": {
+      // An unknown key would render as the default anyway (iconFor), so storing
+      // one would silently pretend the choice took.
+      if (!isIconKey(action.symbol)) return state;
+      return {
+        ...state,
+        workspaces: state.workspaces.map((w) =>
+          w.id === action.id ? { ...w, symbol: action.symbol } : w,
+        ),
       };
     }
 

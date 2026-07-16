@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState, type ComponentType } from "react";
-import { Boxes, Folder, Inbox, Layers, Plus, Terminal, X } from "lucide-react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Plus, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useCmdHeld } from "@/lib/useCmdHeld";
 import { useListNav } from "@/lib/useListNav";
@@ -13,6 +13,8 @@ import { configureUi } from "@/commands/glue";
 import { tooltip } from "@/commands/format";
 import { targetAttrs } from "@/commands/target";
 import { useWorkspace } from "./store";
+import { IconPicker } from "./IconPicker";
+import { iconFor } from "./icons";
 import { countTabs, leafIds, type Workspace } from "./tree";
 
 // How the sidebar splits between its two sections, and the room each keeps when
@@ -49,13 +51,7 @@ export function Sidebar() {
 // The vertical workspace strip. Workspaces stack and scroll down the side; each
 // carries its own pane tree, so switching preserves every workspace's splits,
 // tabs, and selection (the tree lives in the store, the editors in the pool).
-const ICONS: Record<string, ComponentType<{ className?: string }>> = {
-  inbox: Inbox,
-  layers: Layers,
-  boxes: Boxes,
-  folder: Folder,
-  terminal: Terminal,
-};
+// Row icons come from the catalog in icons.ts and are chosen per workspace.
 
 // The workspace id being dragged, read synchronously inside drop handlers. Kept
 // outside React state (like the tab drag in PaneTree) so drag start needs no
@@ -69,16 +65,36 @@ function WorkspaceStrip() {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   // The right-click menu: which workspace, and where to anchor it. Null when closed.
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
+  // The workspace whose icon is being picked, and the row the popover hangs off.
+  const [pickingId, setPickingId] = useState<string | null>(null);
+  const [pickAnchor, setPickAnchor] = useState<HTMLElement | null>(null);
 
-  // The strip owns the inline-rename state, so it registers the hook the
-  // workspace.rename command (menu item, palette entry) reaches it through.
+  // The strip owns the inline-rename state and the icon picker, so it registers
+  // the hooks those commands (menu item, row verb, palette entry) reach it
+  // through.
   useEffect(() => {
-    configureUi({ beginRenameWorkspace: setRenamingId });
+    configureUi({ beginRenameWorkspace: setRenamingId, pickWorkspaceIcon: setPickingId });
   }, []);
+
   // Where an in-flight drop would land, as an index into the workspace list.
   const [dropIndex, setDropIndex] = useState<number | null>(null);
   const nav = useListNav();
   const listRef = nav.containerProps.ref;
+
+  // The picker anchors to a row, and only the DOM knows where the rows are. A
+  // workspace with no row on screen has nothing to anchor to, so the open is
+  // dropped rather than left as an invisible popover holding the Escape layer.
+  useLayoutEffect(() => {
+    if (!pickingId) {
+      setPickAnchor(null);
+      return;
+    }
+    const row = listRef.current?.querySelector<HTMLElement>(
+      `[data-ws][data-target-id="${CSS.escape(pickingId)}"]`,
+    );
+    if (row) setPickAnchor(row);
+    else setPickingId(null);
+  }, [pickingId, listRef]);
 
   // The slot the cursor is over: the count of rows whose vertical midpoint sits
   // above it (0..workspaces.length). Measured off the live DOM so it tracks the
@@ -174,11 +190,25 @@ function WorkspaceStrip() {
             onClose={() => setMenu(null)}
           />
           <CommandMenuItem
+            id="workspace.icon"
+            target={{ kind: "workspace", id: menu.id }}
+            onClose={() => setMenu(null)}
+          />
+          <CommandMenuItem
             id="workspace.close"
             target={{ kind: "workspace", id: menu.id }}
             onClose={() => setMenu(null)}
           />
         </ContextMenu>
+      )}
+
+      {pickingId && pickAnchor && (
+        <IconPicker
+          anchor={pickAnchor}
+          current={state.workspaces.find((w) => w.id === pickingId)?.symbol ?? ""}
+          onPick={(symbol) => dispatch({ type: "setWorkspaceIcon", id: pickingId, symbol })}
+          onClose={() => setPickingId(null)}
+        />
       )}
     </>
   );
@@ -220,7 +250,7 @@ function WorkspaceRow({
   onDragEnd: () => void;
   onContextMenu: (x: number, y: number) => void;
 }) {
-  const Icon = ICONS[ws.symbol] ?? Layers;
+  const Icon = iconFor(ws.symbol);
   const tabs = countTabs(ws.root);
   const panes = leafIds(ws.root).length;
   const summary = `${tabs} ${tabs === 1 ? "tab" : "tabs"}, ${panes} ${panes === 1 ? "pane" : "panes"}`;
