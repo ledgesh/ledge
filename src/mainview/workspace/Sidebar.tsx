@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
 import { Boxes, Folder, Inbox, Layers, Pencil, Plus, Terminal, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useCmdHeld } from "@/lib/useCmdHeld";
 import { useWorkspace } from "./store";
 import { countTabs, leafIds, type Workspace } from "./tree";
 
@@ -22,6 +23,7 @@ let draggingWs: string | null = null;
 
 export function Sidebar() {
   const { state, dispatch } = useWorkspace();
+  const cmdHeld = useCmdHeld();
   const [renamingId, setRenamingId] = useState<string | null>(null);
   // The right-click menu: which workspace, and where to anchor it. Null when closed.
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
@@ -86,6 +88,7 @@ export function Sidebar() {
               selected={ws.id === state.selectedId}
               renaming={renamingId === ws.id}
               canClose={state.workspaces.length > 1}
+              hint={cmdHeld && i < 9 ? i + 1 : null}
               onSelect={() => dispatch({ type: "selectWorkspace", id: ws.id })}
               onBeginRename={() => setRenamingId(ws.id)}
               onEndRename={() => setRenamingId(null)}
@@ -149,6 +152,7 @@ function WorkspaceRow({
   selected,
   renaming,
   canClose,
+  hint,
   onSelect,
   onBeginRename,
   onEndRename,
@@ -162,6 +166,7 @@ function WorkspaceRow({
   selected: boolean;
   renaming: boolean;
   canClose: boolean;
+  hint: number | null;
   onSelect: () => void;
   onBeginRename: () => void;
   onEndRename: () => void;
@@ -182,7 +187,7 @@ function WorkspaceRow({
       // Don't arm the drag while renaming, or the pointer can't reach the input.
       draggable={!renaming}
       className={cn(
-        "group flex cursor-default items-center gap-2 rounded-md px-2 py-1.5",
+        "group relative flex cursor-default items-center gap-2 rounded-md px-2 py-1.5",
         selected ? "bg-accent" : "hover:bg-accent/50",
       )}
       onClick={onSelect}
@@ -219,6 +224,11 @@ function WorkspaceRow({
         >
           <X className="size-3.5" />
         </button>
+      )}
+      {hint != null && (
+        <span className="pointer-events-none absolute right-1.5 top-1 rounded bg-foreground/10 px-1 text-[10px] font-medium leading-tight text-foreground/80">
+          ⌘{hint}
+        </span>
       )}
     </div>
   );

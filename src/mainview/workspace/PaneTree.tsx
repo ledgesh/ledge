@@ -1,6 +1,7 @@
 import { Fragment, useLayoutEffect, useRef, useState } from "react";
 import { Columns2, FilePlus, Plus, Rows2, SquareX, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useCmdHeld, useCtrlHeld } from "@/lib/useCmdHeld";
 import { useWorkspace } from "./store";
 import { attachEditor, detachEditor, focusEditor } from "./editorPool";
 import { leafIds, type LeafNode, type PaneNode, type SplitNode, type TabState } from "./tree";
@@ -128,6 +129,12 @@ function PaneBody({ leaf, focused }: { leaf: LeafNode; focused: boolean }) {
 
 function TabBar({ leaf, focused }: { leaf: LeafNode; focused: boolean }) {
   const { dispatch, selected } = useWorkspace();
+  // Tab quick-jump is Ctrl+number, but cmux shows the badge on either modifier.
+  // Ctrl+number targets the FOCUSED pane, so only its tab bar gets badges (with
+  // multiple tab groups, badging the others would be misleading).
+  const cmdHeld = useCmdHeld();
+  const ctrlHeld = useCtrlHeld();
+  const badges = focused && (cmdHeld || ctrlHeld);
   const canClosePane = leafIds(selected.root).length > 1;
   const stripRef = useRef<HTMLDivElement>(null);
   // Where an in-flight drop would land, as an index into the current tab list.
@@ -189,7 +196,7 @@ function TabBar({ leaf, focused }: { leaf: LeafNode; focused: boolean }) {
         {leaf.tabs.map((tab, i) => (
           <Fragment key={tab.id}>
             {dropIndex === i && <DropMarker />}
-            <TabItem leaf={leaf} tab={tab} paneFocused={focused} />
+            <TabItem leaf={leaf} tab={tab} paneFocused={focused} hint={badges && i < 9 ? i + 1 : null} />
           </Fragment>
         ))}
         {dropIndex === leaf.tabs.length && <DropMarker />}
@@ -256,10 +263,12 @@ function TabItem({
   leaf,
   tab,
   paneFocused,
+  hint,
 }: {
   leaf: LeafNode;
   tab: TabState;
   paneFocused: boolean;
+  hint: number | null;
 }) {
   const { dispatch } = useWorkspace();
   const active = leaf.activeTabId === tab.id;
@@ -269,7 +278,7 @@ function TabItem({
       data-tab
       draggable
       className={cn(
-        "group flex min-w-0 max-w-[180px] shrink-0 cursor-default items-center gap-1.5 border-r px-2.5 text-xs",
+        "group relative flex min-w-0 max-w-[180px] shrink-0 cursor-default items-center gap-1.5 border-r px-2.5 text-xs",
         active
           ? cn("bg-background", paneFocused ? "text-foreground" : "text-muted-foreground")
           : "text-muted-foreground hover:bg-background/60",
@@ -299,6 +308,11 @@ function TabItem({
       >
         <X className="size-3" />
       </button>
+      {hint != null && (
+        <span className="pointer-events-none absolute right-1 top-1/2 -translate-y-1/2 rounded bg-foreground/10 px-1 text-[10px] font-medium leading-tight text-foreground/80">
+          ^{hint}
+        </span>
+      )}
     </div>
   );
 }

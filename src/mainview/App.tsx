@@ -8,7 +8,7 @@ import { sendTerminalText, closeSession, onTerminalExit } from "@/terminal/chann
 import { Sidebar } from "@/workspace/Sidebar";
 import { WorkspaceView } from "@/workspace/WorkspaceView";
 import { allDocIds, useWorkspace, WorkspaceProvider } from "@/workspace/store";
-import { focusedDocId } from "@/workspace/tree";
+import { findLeaf, focusedDocId } from "@/workspace/tree";
 import { releaseEditor } from "@/workspace/editorPool";
 
 export default function App() {
@@ -135,6 +135,33 @@ function Shell() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [dispatch]);
+
+  // Quick-jump number shortcuts (advertised by the ⌘N / ^N badges that appear
+  // while Cmd is held): Cmd+1..9 selects workspace N; Ctrl+1..9 selects tab N in
+  // the focused pane. Kept separate from the layout handler above because it needs
+  // the live workspace/selection.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!/^[1-9]$/.test(e.key)) return;
+      const n = Number(e.key) - 1;
+      if (e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+        const ws = state.workspaces[n];
+        if (ws) {
+          e.preventDefault();
+          dispatch({ type: "selectWorkspace", id: ws.id });
+        }
+      } else if (e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+        const leaf = findLeaf(selected.root, selected.focusedPaneId);
+        const tab = leaf?.tabs[n];
+        if (leaf && tab) {
+          e.preventDefault();
+          dispatch({ type: "selectTab", paneId: leaf.id, tabId: tab.id });
+        }
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [state, selected, dispatch]);
 
   return (
     <div className="flex h-screen flex-col bg-background text-foreground">
