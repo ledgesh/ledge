@@ -6,6 +6,9 @@ action in Ledge is a **command**, defined once in `src/mainview/commands/`
 icon buttons, tooltips, and the command palette all derive from that single
 definition. If a surface disagrees with the registry, the surface is wrong.
 
+Sibling standards: `architecture.md` (boundaries, invariants, state
+ownership), `testing.md` (what gets tested, and how behavior is verified).
+
 ## 1. Affordance matrix
 
 Which affordances each class of action gets. "✓" is required, "–" is forbidden,
