@@ -12,17 +12,25 @@ export type RunEvent =
 export type LedgeRPC = {
   bun: {
     requests: {
-      runBlock: { params: { id: string; code: string }; response: { accepted: boolean } };
-      // Terminal drawer input and resize. Keystrokes and pasted text go through
-      // terminalInput; the drawer's fit computes cols/rows for terminalResize.
-      // These target a dedicated shell, separate from the inline-run shell.
-      terminalInput: { params: { dataB64: string }; response: { ok: boolean } };
-      terminalResize: { params: { cols: number; rows: number }; response: { ok: boolean } };
-      // Attach returns the scrollback so far (so a freshly opened drawer shows the
-      // existing prompt and history) and turns on live streaming; detach turns it
-      // off while the drawer is closed. Scrollback keeps accumulating either way.
-      terminalAttach: { params: {}; response: { dataB64: string } };
-      terminalDetach: { params: {}; response: { ok: boolean } };
+      // Shells are per note: `sessionId` is the tab's stable docId. The Bun side
+      // lazily spawns that note's inline-run shell on first runBlock and closes it
+      // on closeSession, so a `cd` in one note never leaks into another.
+      runBlock: { params: { sessionId: string; id: string; code: string }; response: { accepted: boolean } };
+      // Terminal drawer input and resize, targeting one note's terminal shell.
+      // Keystrokes and pasted text go through terminalInput; the drawer's fit
+      // computes cols/rows for terminalResize. This shell is separate from the
+      // note's inline-run shell (the marker protocol stays isolated from raw xterm).
+      terminalInput: { params: { sessionId: string; dataB64: string }; response: { ok: boolean } };
+      terminalResize: { params: { sessionId: string; cols: number; rows: number }; response: { ok: boolean } };
+      // Attach lazily spawns the note's terminal shell (if needed), returns the
+      // scrollback so far (so a freshly opened drawer shows the existing prompt and
+      // history) and turns on live streaming; detach turns it off while the drawer
+      // is closed or shows another note. Scrollback keeps accumulating either way.
+      terminalAttach: { params: { sessionId: string }; response: { dataB64: string } };
+      terminalDetach: { params: { sessionId: string }; response: { ok: boolean } };
+      // Tear down both of a note's shells; sent when its tab (or pane, or
+      // workspace) closes and its docId drops out of the live set.
+      closeSession: { params: { sessionId: string }; response: { ok: boolean } };
       // System clipboard, routed through the Bun process (pbcopy/pbpaste). The
       // webview runs under the views:// scheme, which is not a secure context, so
       // navigator.clipboard is unavailable and execCommand / native Cmd+V paste
@@ -37,8 +45,14 @@ export type LedgeRPC = {
     requests: {};
     messages: {
       runEvent: RunEvent;
-      // Raw pty output for the terminal drawer, base64-encoded.
-      terminalOutput: { dataB64: string };
+      // Raw pty output for one note's terminal drawer, base64-encoded. `sessionId`
+      // lets the mounted drawer ignore output from a note other than the one it
+      // currently shows (e.g. brief overlap during a tab switch).
+      terminalOutput: { sessionId: string; dataB64: string };
+      // A note's terminal shell exited on its own (the user typed `exit`). The Bun
+      // side has already torn the shell down; the view closes the drawer if it is
+      // showing that note. Reopening the drawer spawns a fresh shell.
+      terminalExit: { sessionId: string };
     };
   };
 };

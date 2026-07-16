@@ -12,8 +12,10 @@ import {
   removeLeaf,
   setRatio,
   moveTab,
+  focusedDocId,
   type LeafNode,
   type SplitNode,
+  type Workspace,
 } from "./tree";
 
 describe("factories", () => {
@@ -217,5 +219,36 @@ describe("moveTab", () => {
     const { leaf, ids } = leafWith(2);
     expect(moveTab(leaf, "ghost-pane", ids[0], leaf.id, 0)).toBe(leaf);
     expect(moveTab(leaf, leaf.id, "ghost-tab", leaf.id, 0)).toBe(leaf);
+  });
+});
+
+describe("focusedDocId", () => {
+  const ws = (root: LeafNode | SplitNode, focusedPaneId: string): Workspace => ({
+    id: "ws",
+    name: "W",
+    symbol: "inbox",
+    root,
+    focusedPaneId,
+  });
+
+  test("returns the active tab's docId in the focused pane", () => {
+    const a = makeLeaf(makeTab("scratch"));
+    const b = makeLeaf(makeTab("scratch"));
+    const root = splitLeaf(a, a.id, "row", b) as SplitNode;
+    expect(focusedDocId(ws(root, a.id))).toBe(a.tabs[0].docId);
+    expect(focusedDocId(ws(root, b.id))).toBe(b.tabs[0].docId);
+  });
+
+  test("follows the active tab, not just the first tab, of the focused pane", () => {
+    const t0 = makeTab("scratch");
+    const t1 = makeTab("scratch");
+    const leaf: LeafNode = { kind: "leaf", id: "p", tabs: [t0, t1], activeTabId: t1.id };
+    expect(focusedDocId(ws(leaf, "p"))).toBe(t1.docId);
+  });
+
+  test("is null when the focused pane is empty or missing", () => {
+    const empty: LeafNode = { kind: "leaf", id: "p", tabs: [], activeTabId: "" };
+    expect(focusedDocId(ws(empty, "p"))).toBeNull();
+    expect(focusedDocId(ws(makeLeaf(makeTab("scratch")), "ghost"))).toBeNull();
   });
 });

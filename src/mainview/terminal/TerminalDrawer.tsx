@@ -18,10 +18,28 @@ function xtermTheme(dark: boolean) {
     : { background: "#fbfbfd", foreground: "#1d1d1f", cursor: "#1d1d1f", selectionBackground: "#cfe0ff" };
 }
 
-// Fires once the terminal has mounted and subscribed to output, so a queued
-// "run in terminal" command can be flushed without racing the first output.
-export function TerminalDrawer({ onReady }: { onReady?: () => void }) {
+// The drawer shows one note's terminal shell, named by `sessionId` (the focused
+// note's docId). App keys this component by sessionId, so switching notes cleanly
+// unmounts (detaching the old note's shell, which keeps running) and remounts
+// (attaching the new note's, replaying its scrollback).
+//
+// `onReady` fires once the terminal has mounted and subscribed to output, so a
+// queued "run in terminal" command can be flushed without racing the first output.
+// `onClose` hides the drawer (Escape); the shell keeps running for next open.
+export function TerminalDrawer({
+  sessionId,
+  onReady,
+  onClose,
+}: {
+  sessionId: string;
+  onReady?: () => void;
+  onClose?: () => void;
+}) {
   const hostRef = useRef<HTMLDivElement>(null);
+  // Keep the latest onClose reachable from the key handler without re-running the
+  // mount effect (which builds the terminal once).
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     const host = hostRef.current;
@@ -39,10 +57,10 @@ export function TerminalDrawer({ onReady }: { onReady?: () => void }) {
     term.loadAddon(fit);
     term.open(host);
     fit.fit();
-    sendTerminalResize(term.cols, term.rows);
+    sendTerminalResize(sessionId, term.cols, term.rows);
 
     // Keystrokes / pasted text -> Bun.
-    const dataSub = term.onData((data) => sendTerminalText(data));
+    const dataSub = term.onData((data) => sendTerminalText(sessionId, data));
 
     // Clipboard, matching a normal terminal. xterm draws its own selection (not a
     // DOM selection the browser can copy) and the native paste event does not fire
@@ -51,6 +69,14 @@ export function TerminalDrawer({ onReady }: { onReady?: () => void }) {
     // still sends SIGINT; Cmd+A selects the whole buffer.
     term.attachCustomKeyEventHandler((e) => {
       if (e.type !== "keydown") return true;
+      // Escape hides the drawer rather than sending ESC to the shell. (Tradeoff:
+      // full-screen TUIs in the drawer can't receive a bare Escape; acceptable
+      // for a notes-app scratch terminal.)
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onCloseRef.current?.();
+        return false;
+      }
       const cmd = e.metaKey && !e.ctrlKey && !e.altKey;
       // preventDefault on the keys we handle: otherwise the unhandled Cmd-key
       // reaches AppKit's key-equivalent path, which rings the system alert (the
@@ -80,13 +106,14 @@ export function TerminalDrawer({ onReady }: { onReady?: () => void }) {
     let ready = false;
     let disposed = false;
     const queue: Uint8Array[] = [];
-    const off = onTerminalOutput((dataB64) => {
+    const off = onTerminalOutput((sid, dataB64) => {
+      if (sid !== sessionId) return; // output for another note's drawer
       const bytes = b64ToBytes(dataB64);
       if (ready) term.write(bytes);
       else queue.push(bytes);
     });
 
-    void terminalAttach().then((snapshot) => {
+    void terminalAttach(sessionId).then((snapshot) => {
       if (disposed) return;
       if (snapshot.length) term.write(snapshot);
       for (const q of queue) term.write(q);
@@ -98,7 +125,7 @@ export function TerminalDrawer({ onReady }: { onReady?: () => void }) {
     // Keep the pty's winsize matched to the rendered grid.
     const ro = new ResizeObserver(() => {
       fit.fit();
-      sendTerminalResize(term.cols, term.rows);
+      sendTerminalResize(sessionId, term.cols, term.rows);
     });
     ro.observe(host);
 
@@ -109,7 +136,7 @@ export function TerminalDrawer({ onReady }: { onReady?: () => void }) {
 
     return () => {
       disposed = true;
-      terminalDetach();
+      terminalDetach(sessionId);
       ro.disconnect();
       media.removeEventListener("change", onScheme);
       off();
@@ -117,6 +144,8 @@ export function TerminalDrawer({ onReady }: { onReady?: () => void }) {
       term.dispose();
     };
     // onReady is intentionally not a dep: the terminal is created once per mount.
+    // App remounts (via key=sessionId) to switch notes, so sessionId is fixed for
+    // a given mount and safe to close over.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

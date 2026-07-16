@@ -9,6 +9,7 @@ import { toNative } from "./bridge";
 import { ledgeBlocks } from "./blocks";
 import { wrapping } from "./wrap";
 import { findReplace } from "./find";
+import { sessionIdFacet } from "./session";
 import { copyText, readClipboard } from "../lib/clipboard";
 
 // Ledge shows raw Markdown and styles it, rather than hiding the syntax the way
@@ -239,13 +240,15 @@ const theme = EditorView.theme({
   ".ledge-search-close:hover": { color: "var(--fg)" },
 });
 
-// Build a fully-wired editor into `parent`, seeded with `doc`.
-export function createEditor(parent: HTMLElement, doc: string): EditorView {
+// Build a fully-wired editor into `parent`, seeded with `doc`. `sessionId` is the
+// note's docId; it rides in a facet so a block run can target this note's shell.
+export function createEditor(parent: HTMLElement, doc: string, sessionId: string): EditorView {
   return new EditorView({
     parent,
     state: EditorState.create({
       doc,
       extensions: [
+        sessionIdFacet.of(sessionId),
         history(),
         drawSelection(),
         lineNumbers(),

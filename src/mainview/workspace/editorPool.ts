@@ -67,7 +67,7 @@ function acquire(docId: string, seed: "demo" | "scratch"): Entry {
 
   const host = document.createElement("div");
   host.className = "ledge-editor-host";
-  const view = createEditor(host, seedDoc(seed));
+  const view = createEditor(host, seedDoc(seed), docId);
   const offRun = onRunEvent((ev) => applyRunEvent(view, ev));
   // CodeMirror does not watch its container for size changes; a pane resize (a
   // divider drag, the terminal drawer opening) needs an explicit re-measure.

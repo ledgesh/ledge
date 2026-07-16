@@ -90,6 +90,7 @@ export class PtyProcess {
   readonly pid: number;
   readonly masterFD: number;
   private closed = false;
+  private ended = false;
   private pollBuf: Uint8Array;
   private readBuf = new Uint8Array(65536);
   private readBufPtr: ReturnType<typeof ptr>;
@@ -173,6 +174,15 @@ export class PtyProcess {
     this.readBufPtr = ptr(this.readBuf);
   }
 
+  /**
+   * True once the child has exited: `poll` reports the fd readable (a hangup)
+   * but `read` returns 0 (EOF), which is how a shell quitting (e.g. the user
+   * types `exit`) shows up on the master fd. Latches; cleared only by close.
+   */
+  get exited(): boolean {
+    return this.ended;
+  }
+
   /** Drain everything currently readable. Never blocks (poll gates the read). */
   drain(): Uint8Array | null {
     if (this.closed) return null;
@@ -180,7 +190,11 @@ export class PtyProcess {
     while (s.poll(ptr(this.pollBuf), 1n, 0) > 0) {
       const n = Number(s.read(this.masterFD, this.readBufPtr, BigInt(this.readBuf.length)));
       if (n > 0) chunks.push(this.readBuf.slice(0, n));
-      else break; // EOF or would-block
+      else {
+        // poll said readable but read yielded nothing: the child closed its end.
+        if (n === 0) this.ended = true;
+        break;
+      }
     }
     if (chunks.length === 0) return null;
     if (chunks.length === 1) return chunks[0];

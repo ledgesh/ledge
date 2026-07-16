@@ -1,6 +1,8 @@
 // The terminal drawer's side of the RPC, kept as a small module singleton so the
 // xterm component and main.tsx can meet without prop-drilling through App. Input
-// and resize go webview -> Bun; raw output comes back Bun -> webview.
+// and resize go webview -> Bun; raw output comes back Bun -> webview. Every call
+// carries the note's `sessionId` (its docId): shells are per note, so the drawer
+// attaches to, types into, and resizes one note's terminal shell.
 
 const encoder = new TextEncoder();
 
@@ -17,58 +19,83 @@ export function b64ToBytes(b64: string): Uint8Array {
   return out;
 }
 
-let sendInputFn: ((dataB64: string) => void) | null = null;
-let sendResizeFn: ((cols: number, rows: number) => void) | null = null;
-let attachFn: (() => Promise<{ dataB64: string }>) | null = null;
-let detachFn: (() => void) | null = null;
+let sendInputFn: ((sessionId: string, dataB64: string) => void) | null = null;
+let sendResizeFn: ((sessionId: string, cols: number, rows: number) => void) | null = null;
+let attachFn: ((sessionId: string) => Promise<{ dataB64: string }>) | null = null;
+let detachFn: ((sessionId: string) => void) | null = null;
+let closeSessionFn: ((sessionId: string) => void) | null = null;
 
 // Wired by main.tsx once the Electroview RPC exists.
 export function configureTerminal(fns: {
-  sendInput: (dataB64: string) => void;
-  sendResize: (cols: number, rows: number) => void;
-  attach: () => Promise<{ dataB64: string }>;
-  detach: () => void;
+  sendInput: (sessionId: string, dataB64: string) => void;
+  sendResize: (sessionId: string, cols: number, rows: number) => void;
+  attach: (sessionId: string) => Promise<{ dataB64: string }>;
+  detach: (sessionId: string) => void;
+  closeSession: (sessionId: string) => void;
 }): void {
   sendInputFn = fns.sendInput;
   sendResizeFn = fns.sendResize;
   attachFn = fns.attach;
   detachFn = fns.detach;
+  closeSessionFn = fns.closeSession;
 }
 
-// Enable live streaming and return the scrollback bytes to replay.
-export async function terminalAttach(): Promise<Uint8Array> {
+// Enable live streaming for a note and return its scrollback bytes to replay.
+export async function terminalAttach(sessionId: string): Promise<Uint8Array> {
   if (!attachFn) return new Uint8Array(0);
-  const { dataB64 } = await attachFn();
+  const { dataB64 } = await attachFn(sessionId);
   return b64ToBytes(dataB64);
 }
 
-export function terminalDetach(): void {
-  detachFn?.();
+export function terminalDetach(sessionId: string): void {
+  detachFn?.(sessionId);
 }
 
-export function sendTerminalInput(dataB64: string): void {
-  sendInputFn?.(dataB64);
+export function sendTerminalInput(sessionId: string, dataB64: string): void {
+  sendInputFn?.(sessionId, dataB64);
 }
 
 /** Convenience for sending literal text (keystrokes, a "run in terminal" body). */
-export function sendTerminalText(text: string): void {
-  sendTerminalInput(bytesToB64(encoder.encode(text)));
+export function sendTerminalText(sessionId: string, text: string): void {
+  sendTerminalInput(sessionId, bytesToB64(encoder.encode(text)));
 }
 
-export function sendTerminalResize(cols: number, rows: number): void {
-  sendResizeFn?.(cols, rows);
+export function sendTerminalResize(sessionId: string, cols: number, rows: number): void {
+  sendResizeFn?.(sessionId, cols, rows);
 }
 
-// Bun -> webview raw pty output. The mounted xterm registers a sink.
-let outputSink: ((dataB64: string) => void) | null = null;
+/** Tear down both of a note's shells (its tab closed). */
+export function closeSession(sessionId: string): void {
+  closeSessionFn?.(sessionId);
+}
 
-export function onTerminalOutput(sink: (dataB64: string) => void): () => void {
+// Bun -> webview raw pty output, tagged with the note it came from. The mounted
+// xterm registers a sink and ignores output for a note other than the one it
+// shows (harmless overlap during a tab switch).
+let outputSink: ((sessionId: string, dataB64: string) => void) | null = null;
+
+export function onTerminalOutput(sink: (sessionId: string, dataB64: string) => void): () => void {
   outputSink = sink;
   return () => {
     if (outputSink === sink) outputSink = null;
   };
 }
 
-export function dispatchTerminalOutput(dataB64: string): void {
-  outputSink?.(dataB64);
+export function dispatchTerminalOutput(sessionId: string, dataB64: string): void {
+  outputSink?.(sessionId, dataB64);
+}
+
+// Bun -> webview: a note's terminal shell exited on its own (the user typed
+// `exit`). App subscribes and closes the drawer when the shown note's shell quits.
+let exitSink: ((sessionId: string) => void) | null = null;
+
+export function onTerminalExit(sink: (sessionId: string) => void): () => void {
+  exitSink = sink;
+  return () => {
+    if (exitSink === sink) exitSink = null;
+  };
+}
+
+export function dispatchTerminalExit(sessionId: string): void {
+  exitSink?.(sessionId);
 }

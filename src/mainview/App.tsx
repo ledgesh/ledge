@@ -3,10 +3,11 @@ import { TerminalSquare, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { TerminalDrawer } from "@/terminal/TerminalDrawer";
 import { configureBridge } from "@/editor/bridge";
-import { sendTerminalText } from "@/terminal/channel";
+import { sendTerminalText, closeSession, onTerminalExit } from "@/terminal/channel";
 import { Sidebar } from "@/workspace/Sidebar";
 import { WorkspaceView } from "@/workspace/WorkspaceView";
 import { allDocIds, useWorkspace, WorkspaceProvider } from "@/workspace/store";
+import { focusedDocId } from "@/workspace/tree";
 import { releaseEditor } from "@/workspace/editorPool";
 
 export default function App() {
@@ -18,23 +19,27 @@ export default function App() {
 }
 
 function Shell() {
-  const { state, dispatch } = useWorkspace();
+  const { state, dispatch, selected } = useWorkspace();
   const [termOpen, setTermOpen] = useState(false);
-  // A "run in terminal" fired while the drawer is closed queues its command here
-  // and flushes once the terminal has mounted, so its output is not dropped.
-  const pending = useRef<string | null>(null);
+  // The note whose terminal the drawer shows: the focused pane's active tab. Its
+  // docId is the sessionId for that note's per-note terminal shell.
+  const activeDocId = focusedDocId(selected);
+  // A "run in terminal" fired while the drawer is closed (or for a note other than
+  // the one shown) queues its command here and flushes once the terminal for that
+  // note has mounted, so its output is not dropped.
+  const pending = useRef<{ sessionId: string; cmd: string } | null>(null);
 
   const runInTerminal = useCallback(
-    (code: string) => {
+    (sessionId: string, code: string) => {
       const cmd = code.endsWith("\n") ? code : code + "\n";
-      if (termOpen) {
-        sendTerminalText(cmd);
+      if (termOpen && sessionId === activeDocId) {
+        sendTerminalText(sessionId, cmd);
       } else {
-        pending.current = cmd;
+        pending.current = { sessionId, cmd };
         setTermOpen(true);
       }
     },
-    [termOpen],
+    [termOpen, activeDocId],
   );
 
   // The editor bridges Ctrl+` (toggle) and "run in terminal" here; main.tsx wires
@@ -48,18 +53,30 @@ function Shell() {
 
   const onTerminalReady = useCallback(() => {
     if (pending.current) {
-      sendTerminalText(pending.current);
+      sendTerminalText(pending.current.sessionId, pending.current.cmd);
       pending.current = null;
     }
   }, []);
 
-  // Tear down a pooled editor once its tab (or pane, or workspace) is gone. One
-  // reconciliation point covers every close path: diff the live docId set against
-  // the previous one and release whatever dropped out.
+  // When the shown note's terminal shell exits (the user typed `exit`), close the
+  // drawer; Bun has already torn the shell down, so reopening spawns a fresh one.
+  useEffect(
+    () => onTerminalExit((sid) => { if (sid === activeDocId) setTermOpen(false); }),
+    [activeDocId],
+  );
+
+  // Tear down a pooled editor AND its per-note shells once the tab (or pane, or
+  // workspace) is gone. One reconciliation point covers every close path: diff the
+  // live docId set against the previous one and release whatever dropped out.
   const prevDocs = useRef<Set<string>>(new Set());
   useEffect(() => {
     const live = new Set(allDocIds(state));
-    for (const id of prevDocs.current) if (!live.has(id)) releaseEditor(id);
+    for (const id of prevDocs.current) {
+      if (!live.has(id)) {
+        releaseEditor(id);
+        closeSession(id);
+      }
+    }
     prevDocs.current = live;
   }, [state]);
 
@@ -129,7 +146,20 @@ function Shell() {
               </Button>
             </div>
             <div className="min-h-0 flex-1 overflow-hidden p-1.5">
-              <TerminalDrawer onReady={onTerminalReady} />
+              {activeDocId ? (
+                // Keyed by the note: switching tabs remounts, detaching the old
+                // note's shell (it keeps running) and attaching the new note's.
+                <TerminalDrawer
+                  key={activeDocId}
+                  sessionId={activeDocId}
+                  onReady={onTerminalReady}
+                  onClose={() => setTermOpen(false)}
+                />
+              ) : (
+                <div className="flex h-full items-center justify-center text-[11px] text-muted-foreground">
+                  No note selected
+                </div>
+              )}
             </div>
           </section>
         )}

@@ -85,6 +85,15 @@ export function countTabs(node: PaneNode): number {
   return countTabs(node.children[0]) + countTabs(node.children[1]);
 }
 
+// The docId of the tab active in the focused pane, or null when that pane is
+// empty. This is the note whose per-note shell the terminal drawer shows and the
+// note "run in terminal" targets.
+export function focusedDocId(ws: Workspace): string | null {
+  const leaf = findLeaf(ws.root, ws.focusedPaneId);
+  const tab = leaf?.tabs.find((t) => t.id === leaf.activeTabId);
+  return tab ? tab.docId : null;
+}
+
 // --- transforms (all return a new tree) ------------------------------------
 
 // Replace the leaf `paneId` with `fn(leaf)`, rebuilding only the spine to it.

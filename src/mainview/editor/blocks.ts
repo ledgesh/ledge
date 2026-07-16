@@ -10,6 +10,7 @@ import {
   WidgetType,
 } from "@codemirror/view";
 import { toNative, type RunDestination } from "./bridge";
+import { sessionIdFacet } from "./session";
 import { parseAnsi } from "./ansi";
 import { copyText } from "../lib/clipboard";
 
@@ -151,9 +152,12 @@ function runBlock(view: EditorView, pos: number, destination: RunDestination): b
   const block = blockAt(view.state, pos);
   if (!block || !isRunnable(block.lang)) return false;
 
+  // This note's id, so the run reaches this note's own shell (see bridge.ts).
+  const sessionId = view.state.facet(sessionIdFacet);
+
   if (destination === "terminal") {
     // Output goes to the drawer; no inline panel is created here.
-    toNative({ type: "run", code: block.code, language: block.lang, destination: "terminal" });
+    toNative({ type: "run", sessionId, code: block.code, language: block.lang, destination: "terminal" });
     return true;
   }
 
@@ -171,7 +175,7 @@ function runBlock(view: EditorView, pos: number, destination: RunDestination): b
       durationMs: null,
     }),
   });
-  toNative({ type: "run", id, code: block.code, language: block.lang, destination: "inline" });
+  toNative({ type: "run", sessionId, id, code: block.code, language: block.lang, destination: "inline" });
   return true;
 }
 

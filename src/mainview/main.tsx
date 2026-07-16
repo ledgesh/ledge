@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import Electrobun, { Electroview } from "electrobun/view";
 import type { LedgeRPC } from "../shared/rpc-schema";
 import { configureBridge, dispatchRunEvent } from "./editor/bridge";
-import { configureTerminal, dispatchTerminalOutput } from "./terminal/channel";
+import { configureTerminal, dispatchTerminalOutput, dispatchTerminalExit } from "./terminal/channel";
 import { configureClipboard } from "./lib/clipboard";
 import "./index.css";
 import App from "./App";
@@ -16,7 +16,8 @@ const rpc = Electroview.defineRPC<LedgeRPC>({
     requests: {},
     messages: {
       runEvent: (ev) => dispatchRunEvent(ev),
-      terminalOutput: ({ dataB64 }) => dispatchTerminalOutput(dataB64),
+      terminalOutput: ({ sessionId, dataB64 }) => dispatchTerminalOutput(sessionId, dataB64),
+      terminalExit: ({ sessionId }) => dispatchTerminalExit(sessionId),
     },
   },
 });
@@ -24,21 +25,24 @@ const rpc = Electroview.defineRPC<LedgeRPC>({
 const electrobun = new Electrobun.Electroview({ rpc });
 
 configureBridge({
-  runInline: (id, code) => {
-    void electrobun.rpc!.request.runBlock({ id, code });
+  runInline: (sessionId, id, code) => {
+    void electrobun.rpc!.request.runBlock({ sessionId, id, code });
   },
 });
 
 configureTerminal({
-  sendInput: (dataB64) => {
-    void electrobun.rpc!.request.terminalInput({ dataB64 });
+  sendInput: (sessionId, dataB64) => {
+    void electrobun.rpc!.request.terminalInput({ sessionId, dataB64 });
   },
-  sendResize: (cols, rows) => {
-    void electrobun.rpc!.request.terminalResize({ cols, rows });
+  sendResize: (sessionId, cols, rows) => {
+    void electrobun.rpc!.request.terminalResize({ sessionId, cols, rows });
   },
-  attach: () => electrobun.rpc!.request.terminalAttach({}),
-  detach: () => {
-    void electrobun.rpc!.request.terminalDetach({});
+  attach: (sessionId) => electrobun.rpc!.request.terminalAttach({ sessionId }),
+  detach: (sessionId) => {
+    void electrobun.rpc!.request.terminalDetach({ sessionId });
+  },
+  closeSession: (sessionId) => {
+    void electrobun.rpc!.request.closeSession({ sessionId });
   },
 });
 
