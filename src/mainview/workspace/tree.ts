@@ -129,3 +129,55 @@ export function setRatio(node: PaneNode, splitId: string, ratio: number): PaneNo
   if (a === node.children[0] && b === node.children[1]) return node;
   return { ...node, children: [a, b] };
 }
+
+function clampIndex(i: number, len: number): number {
+  return Math.max(0, Math.min(i, len));
+}
+
+// Move `tabId` out of `fromPaneId` and drop it into `toPaneId` at `toIndex`.
+// Within one pane this is a reorder; across panes it detaches from the source and
+// inserts into the destination. The docId travels with the tab, so the pooled
+// editor (undo/scroll/inline output) survives the move untouched.
+//
+// `toIndex` counts the destination pane's tabs *as displayed at drop time*: when
+// reordering within a pane that array still contains the dragged tab, so an index
+// past the tab's own slot is shifted down by one after removal. The moved tab
+// becomes active in the destination; if it was the active tab in a *different*
+// source pane, that pane falls to the neighbour that slid into its slot (the same
+// rule closeTab uses), or empties if it was the last tab.
+export function moveTab(
+  root: PaneNode,
+  fromPaneId: string,
+  tabId: string,
+  toPaneId: string,
+  toIndex: number,
+): PaneNode {
+  const from = findLeaf(root, fromPaneId);
+  const moving = from?.tabs.find((t) => t.id === tabId);
+  if (!from || !moving) return root;
+
+  if (fromPaneId === toPaneId) {
+    const oldIndex = from.tabs.findIndex((t) => t.id === tabId);
+    const without = from.tabs.filter((t) => t.id !== tabId);
+    const idx = clampIndex(toIndex > oldIndex ? toIndex - 1 : toIndex, without.length);
+    if (idx === oldIndex) return root; // dropped back onto its own slot
+    const tabs = [...without.slice(0, idx), moving, ...without.slice(idx)];
+    return updateLeaf(root, fromPaneId, (leaf) => ({ ...leaf, tabs, activeTabId: tabId }));
+  }
+
+  const detached = updateLeaf(root, fromPaneId, (leaf) => {
+    const idx = leaf.tabs.findIndex((t) => t.id === tabId);
+    const tabs = leaf.tabs.filter((t) => t.id !== tabId);
+    let activeTabId = leaf.activeTabId;
+    if (activeTabId === tabId) {
+      const next = tabs[idx] ?? tabs[idx - 1];
+      activeTabId = next ? next.id : "";
+    }
+    return { ...leaf, tabs, activeTabId };
+  });
+  return updateLeaf(detached, toPaneId, (leaf) => {
+    const idx = clampIndex(toIndex, leaf.tabs.length);
+    const tabs = [...leaf.tabs.slice(0, idx), moving, ...leaf.tabs.slice(idx)];
+    return { ...leaf, tabs, activeTabId: tabId };
+  });
+}

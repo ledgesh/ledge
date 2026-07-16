@@ -5,6 +5,7 @@ import {
   leafIds,
   makeLeaf,
   makeTab,
+  moveTab,
   removeLeaf,
   setRatio,
   splitLeaf,
@@ -47,6 +48,7 @@ export type Action =
   | { type: "newTab"; paneId?: string }
   | { type: "closeTab"; paneId: string; tabId: string }
   | { type: "selectTab"; paneId: string; tabId: string }
+  | { type: "moveTab"; fromPaneId: string; tabId: string; toPaneId: string; toIndex: number }
   | { type: "splitPane"; dir: SplitDir; paneId?: string }
   | { type: "closePane"; paneId?: string }
   | { type: "setRatio"; splitId: string; ratio: number };
@@ -139,6 +141,14 @@ export function reducer(state: AppState, action: Action): AppState {
           return { ...leaf, tabs, activeTabId };
         }),
       }));
+
+    case "moveTab":
+      return withSelected(state, (ws) => {
+        const root = moveTab(ws.root, action.fromPaneId, action.tabId, action.toPaneId, action.toIndex);
+        if (root === ws.root) return ws;
+        // The destination pane gains focus, as if the moved tab were clicked there.
+        return { ...ws, root, focusedPaneId: action.toPaneId };
+      });
 
     case "splitPane":
       return withSelected(state, (ws) => {

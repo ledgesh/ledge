@@ -62,6 +62,47 @@ describe("tabs", () => {
   });
 });
 
+describe("moveTab", () => {
+  test("reordering within a pane keeps focus and activates the moved tab", () => {
+    let s = run({ type: "newTab" }, { type: "newTab" }); // 3 tabs, [0,1,2]
+    const leaf = firstLeaf(selected(s).root);
+    const ids = leaf.tabs.map((t) => t.id);
+    s = reducer(s, { type: "moveTab", fromPaneId: leaf.id, tabId: ids[0], toPaneId: leaf.id, toIndex: 3 });
+    const after = firstLeaf(selected(s).root);
+    expect(after.tabs.map((t) => t.id)).toEqual([ids[1], ids[2], ids[0]]);
+    expect(after.activeTabId).toBe(ids[0]);
+    expect(selected(s).focusedPaneId).toBe(leaf.id);
+  });
+
+  test("moving a tab to another pane focuses the destination", () => {
+    let s = run({ type: "splitPane", dir: "row" }); // panes A | B, focus on B
+    const a = firstLeaf(selected(s).root);
+    const b = findLeaf(selected(s).root, selected(s).focusedPaneId)!;
+    // Focus A, then drag A's tab into B.
+    s = reducer(s, { type: "focusPane", paneId: a.id });
+    const tabId = a.tabs[0].id;
+    s = reducer(s, { type: "moveTab", fromPaneId: a.id, tabId, toPaneId: b.id, toIndex: 0 });
+    const destB = findLeaf(selected(s).root, b.id)!;
+    expect(destB.tabs.some((t) => t.id === tabId)).toBe(true);
+    expect(destB.activeTabId).toBe(tabId);
+    expect(selected(s).focusedPaneId).toBe(b.id);
+    expect(findLeaf(selected(s).root, a.id)!.tabs).toHaveLength(0);
+  });
+
+  test("a no-op move (dropped on its own slot) leaves the workspace untouched", () => {
+    const s0 = run({ type: "newTab" });
+    const leaf = firstLeaf(selected(s0).root);
+    const s = reducer(s0, {
+      type: "moveTab",
+      fromPaneId: leaf.id,
+      tabId: leaf.tabs[0].id,
+      toPaneId: leaf.id,
+      toIndex: 0,
+    });
+    expect(selected(s).root).toBe(selected(s0).root);
+  });
+});
+
 describe("splits", () => {
   test("splitPane creates a split and focuses the new pane", () => {
     const s = run({ type: "splitPane", dir: "row" });

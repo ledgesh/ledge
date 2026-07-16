@@ -11,6 +11,7 @@ import {
   splitLeaf,
   removeLeaf,
   setRatio,
+  moveTab,
   type LeafNode,
   type SplitNode,
 } from "./tree";
@@ -138,5 +139,83 @@ describe("setRatio", () => {
   test("no-op for an unknown split id", () => {
     const { root } = twoPane();
     expect(setRatio(root, "missing", 0.3)).toBe(root);
+  });
+});
+
+describe("moveTab", () => {
+  // A leaf with `n` tabs, the first active. Returns the leaf and its tab ids.
+  function leafWith(n: number) {
+    let leaf = makeLeaf(makeTab("scratch"));
+    for (let i = 1; i < n; i++) leaf = { ...leaf, tabs: [...leaf.tabs, makeTab("scratch")] };
+    return { leaf, ids: leaf.tabs.map((t) => t.id) };
+  }
+  const tabIds = (leaf: LeafNode) => leaf.tabs.map((t) => t.id);
+
+  describe("reorder within one pane", () => {
+    test("moving right: drop index counts the tab's own slot, so it lands before the target", () => {
+      const { leaf, ids } = leafWith(3); // [0,1,2]
+      const out = moveTab(leaf, leaf.id, ids[0], leaf.id, 2) as LeafNode;
+      expect(out.tabs.map((t) => t.id)).toEqual([ids[1], ids[0], ids[2]]);
+      expect(out.activeTabId).toBe(ids[0]); // moved tab stays active
+    });
+
+    test("moving to the far right end", () => {
+      const { leaf, ids } = leafWith(3);
+      const out = moveTab(leaf, leaf.id, ids[0], leaf.id, 3) as LeafNode;
+      expect(out.tabs.map((t) => t.id)).toEqual([ids[1], ids[2], ids[0]]);
+    });
+
+    test("moving left", () => {
+      const { leaf, ids } = leafWith(3);
+      const out = moveTab(leaf, leaf.id, ids[2], leaf.id, 0) as LeafNode;
+      expect(out.tabs.map((t) => t.id)).toEqual([ids[2], ids[0], ids[1]]);
+    });
+
+    test("dropping onto its own slot is a no-op (same tree reference)", () => {
+      const { leaf, ids } = leafWith(3);
+      expect(moveTab(leaf, leaf.id, ids[1], leaf.id, 1)).toBe(leaf);
+      expect(moveTab(leaf, leaf.id, ids[1], leaf.id, 2)).toBe(leaf); // just past itself, adjusted back
+    });
+  });
+
+  describe("move across panes", () => {
+    // split A[0,1] | B[x]
+    function twoLeaves() {
+      const a = leafWith(2);
+      const b = leafWith(1);
+      const root = splitLeaf(a.leaf, a.leaf.id, "row", b.leaf) as SplitNode;
+      return { a, b, root };
+    }
+
+    test("detaches from source and inserts into destination at the given index, active there", () => {
+      const { a, b, root } = twoLeaves();
+      const out = moveTab(root, a.leaf.id, a.ids[1], b.leaf.id, 0);
+      expect(tabIds(findLeaf(out, a.leaf.id)!)).toEqual([a.ids[0]]);
+      const dest = findLeaf(out, b.leaf.id)!;
+      expect(dest.tabs.map((t) => t.id)).toEqual([a.ids[1], b.ids[0]]);
+      expect(dest.activeTabId).toBe(a.ids[1]);
+    });
+
+    test("moving the active source tab falls the source to the slid-in neighbour", () => {
+      const { a, b, root } = twoLeaves(); // A active tab is ids[0]
+      const out = moveTab(root, a.leaf.id, a.ids[0], b.leaf.id, 1);
+      const src = findLeaf(out, a.leaf.id)!;
+      expect(src.tabs.map((t) => t.id)).toEqual([a.ids[1]]);
+      expect(src.activeTabId).toBe(a.ids[1]);
+    });
+
+    test("moving the last tab out empties the source pane", () => {
+      const { b, root } = twoLeaves();
+      const out = moveTab(root, b.leaf.id, b.ids[0], (root.children[0] as LeafNode).id, 0);
+      const src = findLeaf(out, b.leaf.id)!;
+      expect(src.tabs).toHaveLength(0);
+      expect(src.activeTabId).toBe("");
+    });
+  });
+
+  test("no-op when the tab or source pane is absent", () => {
+    const { leaf, ids } = leafWith(2);
+    expect(moveTab(leaf, "ghost-pane", ids[0], leaf.id, 0)).toBe(leaf);
+    expect(moveTab(leaf, leaf.id, "ghost-tab", leaf.id, 0)).toBe(leaf);
   });
 });

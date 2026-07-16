@@ -1,9 +1,14 @@
-import { useLayoutEffect, useRef } from "react";
+import { Fragment, useLayoutEffect, useRef, useState } from "react";
 import { Columns2, FilePlus, Plus, Rows2, SquareX, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useWorkspace } from "./store";
 import { attachEditor, detachEditor, focusEditor } from "./editorPool";
 import { leafIds, type LeafNode, type PaneNode, type SplitNode, type TabState } from "./tree";
+
+// The tab being dragged, shared across every tab bar so a drop can name its
+// source pane. Kept outside React state because it only ever needs to be read
+// synchronously inside drag handlers; a re-render on drag start would be wasted.
+let dragging: { fromPaneId: string; tabId: string } | null = null;
 
 // Recursive renderer: a split node draws two children and a draggable divider; a
 // leaf node draws a tab bar over a keep-alive editor host.
@@ -124,13 +129,70 @@ function PaneBody({ leaf, focused }: { leaf: LeafNode; focused: boolean }) {
 function TabBar({ leaf, focused }: { leaf: LeafNode; focused: boolean }) {
   const { dispatch, selected } = useWorkspace();
   const canClosePane = leafIds(selected.root).length > 1;
+  const stripRef = useRef<HTMLDivElement>(null);
+  // Where an in-flight drop would land, as an index into the current tab list.
+  // Null when no tab is hovering this bar.
+  const [dropIndex, setDropIndex] = useState<number | null>(null);
+
+  // The slot the cursor is over: the count of tabs whose horizontal midpoint sits
+  // left of it (0..tabs.length). Measured off the live DOM so it tracks the real
+  // rendered widths, including truncated titles and the scroll offset.
+  const slotAt = (clientX: number): number => {
+    const strip = stripRef.current;
+    if (!strip) return leaf.tabs.length;
+    const items = strip.querySelectorAll<HTMLElement>("[data-tab]");
+    let i = 0;
+    for (const item of items) {
+      const r = item.getBoundingClientRect();
+      if (clientX < r.left + r.width / 2) return i;
+      i += 1;
+    }
+    return items.length;
+  };
+
+  const onDragOver = (e: React.DragEvent) => {
+    if (!dragging) return;
+    e.preventDefault(); // allow the drop
+    e.dataTransfer.dropEffect = "move";
+    setDropIndex(slotAt(e.clientX));
+  };
+
+  const onDrop = (e: React.DragEvent) => {
+    if (!dragging) return;
+    e.preventDefault();
+    dispatch({
+      type: "moveTab",
+      fromPaneId: dragging.fromPaneId,
+      tabId: dragging.tabId,
+      toPaneId: leaf.id,
+      toIndex: slotAt(e.clientX),
+    });
+    dragging = null;
+    setDropIndex(null);
+  };
+
+  // Only clear the marker when the pointer truly leaves the strip, not when it
+  // crosses between child tabs (those fire dragleave on the parent too).
+  const onDragLeave = (e: React.DragEvent) => {
+    if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropIndex(null);
+  };
 
   return (
     <div className="flex h-8 shrink-0 items-stretch border-b bg-muted/30">
-      <div className="flex min-w-0 flex-1 items-stretch overflow-x-auto">
-        {leaf.tabs.map((tab) => (
-          <TabItem key={tab.id} leaf={leaf} tab={tab} paneFocused={focused} />
+      <div
+        ref={stripRef}
+        className="flex min-w-0 flex-1 items-stretch overflow-x-auto"
+        onDragOver={onDragOver}
+        onDrop={onDrop}
+        onDragLeave={onDragLeave}
+      >
+        {leaf.tabs.map((tab, i) => (
+          <Fragment key={tab.id}>
+            {dropIndex === i && <DropMarker />}
+            <TabItem leaf={leaf} tab={tab} paneFocused={focused} />
+          </Fragment>
         ))}
+        {dropIndex === leaf.tabs.length && <DropMarker />}
         <button
           className="flex w-7 shrink-0 items-center justify-center text-muted-foreground hover:text-foreground"
           title="New tab (⌘T)"
@@ -165,6 +227,11 @@ function TabBar({ leaf, focused }: { leaf: LeafNode; focused: boolean }) {
   );
 }
 
+// The insertion caret shown between tabs while a drag hovers the bar.
+function DropMarker() {
+  return <div className="w-0.5 shrink-0 self-stretch bg-primary" />;
+}
+
 function PaneAction({
   title,
   onClick,
@@ -196,15 +263,30 @@ function TabItem({
 }) {
   const { dispatch } = useWorkspace();
   const active = leaf.activeTabId === tab.id;
+  const [dragged, setDragged] = useState(false);
   return (
     <div
+      data-tab
+      draggable
       className={cn(
-        "group flex min-w-0 max-w-[180px] shrink-0 items-center gap-1.5 border-r px-2.5 text-xs",
+        "group flex min-w-0 max-w-[180px] shrink-0 cursor-default items-center gap-1.5 border-r px-2.5 text-xs",
         active
           ? cn("bg-background", paneFocused ? "text-foreground" : "text-muted-foreground")
           : "text-muted-foreground hover:bg-background/60",
+        dragged && "opacity-40",
       )}
       onClick={() => dispatch({ type: "selectTab", paneId: leaf.id, tabId: tab.id })}
+      onDragStart={(e) => {
+        dragging = { fromPaneId: leaf.id, tabId: tab.id };
+        // Firefox refuses to start a drag unless some data is set.
+        e.dataTransfer.setData("text/plain", tab.id);
+        e.dataTransfer.effectAllowed = "move";
+        setDragged(true);
+      }}
+      onDragEnd={() => {
+        dragging = null;
+        setDragged(false);
+      }}
     >
       <span className="truncate">{tab.title}</span>
       <button
