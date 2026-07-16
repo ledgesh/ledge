@@ -8,6 +8,7 @@ import { tags } from "@lezer/highlight";
 import { toNative } from "./bridge";
 import { ledgeBlocks } from "./blocks";
 import { wrapping } from "./wrap";
+import { findReplace } from "./find";
 import { copyText, readClipboard } from "../lib/clipboard";
 
 // Ledge shows raw Markdown and styles it, rather than hiding the syntax the way
@@ -149,6 +150,93 @@ const theme = EditorView.theme({
     { backgroundColor: "var(--selection)" },
   ".cm-activeLine": { backgroundColor: "transparent" },
   ".cm-activeLineGutter": { backgroundColor: "transparent", color: "var(--fg)" },
+
+  // Find / replace toolbar (our custom panel in editor/find.ts). Styled to the
+  // app chrome: shadcn tokens for surfaces/borders, the editor's own vars for
+  // hover/muted, so it reads as part of Ledge in light or dark.
+  ".cm-panels": {
+    backgroundColor: "hsl(var(--background))",
+    color: "var(--fg)",
+    borderBottom: "1px solid hsl(var(--border))",
+  },
+  ".ledge-search": {
+    padding: "7px 8px",
+    fontFamily: "-apple-system, system-ui, sans-serif",
+  },
+  ".ledge-search-row": { display: "flex", alignItems: "center", gap: "5px" },
+  // An explicit display wins over the UA [hidden] rule, so restore it for the
+  // collapsed replace row.
+  ".ledge-search-row[hidden]": { display: "none" },
+  ".ledge-search-row + .ledge-search-row:not([hidden])": { marginTop: "5px" },
+  // Left gutter under the chevron that keeps the replace field aligned with find.
+  ".ledge-search-gutter": { flex: "0 0 24px" },
+  ".ledge-search-field": {
+    flex: "0 0 220px",
+    minWidth: "0",
+    height: "26px",
+    padding: "0 8px",
+    borderRadius: "6px",
+    border: "1px solid hsl(var(--input))",
+    backgroundColor: "hsl(var(--background))",
+    color: "var(--fg)",
+    fontSize: "12px",
+    outline: "none",
+  },
+  ".ledge-search-field:focus": { borderColor: "hsl(var(--ring))" },
+  ".ledge-search-btn": {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    height: "26px",
+    minWidth: "26px",
+    padding: "0 8px",
+    borderRadius: "6px",
+    border: "1px solid hsl(var(--border))",
+    backgroundColor: "transparent",
+    color: "var(--fg)",
+    fontSize: "12px",
+    lineHeight: "1",
+    cursor: "pointer",
+  },
+  ".ledge-search-btn:hover": { backgroundColor: "var(--btn-hover)" },
+  // Lit state for the "All" toggle (all matches currently selected).
+  ".ledge-search-btn.active": {
+    backgroundColor: "hsl(var(--primary))",
+    color: "hsl(var(--primary-foreground))",
+    borderColor: "transparent",
+  },
+  ".ledge-search-btn.active:hover": { backgroundColor: "hsl(var(--primary))" },
+  ".ledge-search-toggle": {
+    flex: "0 0 24px",
+    padding: "0",
+    border: "none",
+    color: "var(--ed-muted)",
+    fontSize: "14px",
+    transition: "transform 0.12s ease",
+  },
+  ".ledge-search-toggle.open": { transform: "rotate(90deg)" },
+  ".ledge-search-toggles": { display: "inline-flex", alignItems: "center", gap: "3px", marginLeft: "2px" },
+  ".ledge-search-check": {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "3px",
+    height: "26px",
+    padding: "0 6px",
+    borderRadius: "6px",
+    fontSize: "11px",
+    color: "var(--ed-muted)",
+    cursor: "pointer",
+    userSelect: "none",
+  },
+  ".ledge-search-check:hover": { backgroundColor: "var(--btn-hover)" },
+  ".ledge-search-check input": { margin: "0", cursor: "pointer" },
+  ".ledge-search-close": {
+    marginLeft: "auto",
+    border: "none",
+    color: "var(--ed-muted)",
+    fontSize: "16px",
+  },
+  ".ledge-search-close:hover": { color: "var(--fg)" },
 });
 
 // Build a fully-wired editor into `parent`, seeded with `doc`.
@@ -162,6 +250,7 @@ export function createEditor(parent: HTMLElement, doc: string): EditorView {
         drawSelection(),
         lineNumbers(),
         wrapping(),
+        findReplace(),
         appKeymap,
         clipboardKeymap,
         ledgeBlocks(),
