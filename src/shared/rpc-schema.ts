@@ -33,6 +33,17 @@ export type LedgeRPC = {
       // returning the note the view then saves to (and titles its tab from). Sent
       // on a note's first edit, so a tab opened and never typed in creates nothing.
       noteCreate: { params: { text: string }; response: { note: NoteMeta } };
+      // Move a note's file to match its first-line H1, returning where it now
+      // lives (possibly unmoved). The view sends the note's TEXT, not a name: Bun
+      // slugs the heading itself, so the name is safe by construction and there is
+      // nothing for a buggy view to smuggle through. Sent only when a note's slug
+      // actually changes, never on an ordinary edit. The docId is untouched, so
+      // the note's editor and shell live through it.
+      noteRetitle: { params: { path: string; text: string }; response: { note: NoteMeta } };
+      // Delete a note by moving it to ~/.ledge/.trash. Not an unlink: a misclick
+      // should cost a trip to that folder, not the note. It is an app-private
+      // folder, not the system trash (see TRASH_DIR in notes.ts for why).
+      noteDelete: { params: { path: string }; response: { ok: boolean } };
       // Shells are per note: `sessionId` is the tab's stable docId. The Bun side
       // lazily spawns that note's inline-run shell on first runBlock and closes it
       // on closeSession, so a `cd` in one note never leaks into another.

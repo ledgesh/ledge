@@ -1,9 +1,44 @@
-import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
+import { useCallback, useRef, useState, type ComponentType } from "react";
 import { Boxes, Folder, Inbox, Layers, Pencil, Plus, Terminal, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useCmdHeld } from "@/lib/useCmdHeld";
+import { ResizeHandle } from "@/components/ResizeHandle";
+import { ContextMenu, MenuItem } from "@/components/ContextMenu";
+import { RenameField } from "@/components/RenameField";
+import { NoteBrowser } from "@/notes/NoteBrowser";
 import { useWorkspace } from "./store";
 import { countTabs, leafIds, type Workspace } from "./tree";
+
+// How the sidebar splits between its two sections, and the room each keeps when
+// the divider is dragged to an extreme.
+const STRIP_DEFAULT = 200;
+const STRIP_MIN = 88;
+const NOTES_MIN = 120;
+
+// The sidebar: the workspace strip on top, the note list below, divided by a
+// draggable handle. Notes are global to ~/.ledge while workspaces are collections
+// of tabs, so the two are independent lists and both stay visible at once.
+export function Sidebar() {
+  const [stripHeight, setStripHeight] = useState(STRIP_DEFAULT);
+  const ref = useRef<HTMLDivElement>(null);
+
+  // Clamp against the live height so neither section can be collapsed away, the
+  // same measure-the-container rule App uses for the terminal drawer.
+  const resize = useCallback((h: number) => {
+    const avail = ref.current?.clientHeight ?? window.innerHeight;
+    setStripHeight(Math.max(STRIP_MIN, Math.min(h, avail - NOTES_MIN)));
+  }, []);
+
+  return (
+    <aside ref={ref} className="flex h-full w-full min-w-0 flex-col bg-muted/20">
+      <div style={{ height: stripHeight }} className="flex min-h-0 shrink-0 flex-col">
+        <WorkspaceStrip />
+      </div>
+      <ResizeHandle axis="y" current={stripHeight} onResize={resize} title="Drag to resize" />
+      <NoteBrowser />
+    </aside>
+  );
+}
 
 // The vertical workspace strip. Workspaces stack and scroll down the side; each
 // carries its own pane tree, so switching preserves every workspace's splits,
@@ -21,7 +56,7 @@ const ICONS: Record<string, ComponentType<{ className?: string }>> = {
 // re-render.
 let draggingWs: string | null = null;
 
-export function Sidebar() {
+function WorkspaceStrip() {
   const { state, dispatch } = useWorkspace();
   const cmdHeld = useCmdHeld();
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -69,7 +104,7 @@ export function Sidebar() {
   };
 
   return (
-    <aside className="flex h-full w-full min-w-0 flex-col bg-muted/20">
+    <>
       <div className="px-3 pb-1 pt-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
         Workspaces
       </div>
@@ -138,7 +173,7 @@ export function Sidebar() {
           )}
         </ContextMenu>
       )}
-    </aside>
+    </>
   );
 }
 
@@ -231,122 +266,5 @@ function WorkspaceRow({
         </span>
       )}
     </div>
-  );
-}
-
-function RenameField({
-  initial,
-  onCommit,
-  onDone,
-}: {
-  initial: string;
-  onCommit: (name: string) => void;
-  onDone: () => void;
-}) {
-  const [draft, setDraft] = useState(initial);
-  const ref = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    ref.current?.focus();
-    ref.current?.select();
-  }, []);
-
-  const commit = () => {
-    onCommit(draft);
-    onDone();
-  };
-
-  return (
-    <input
-      ref={ref}
-      value={draft}
-      onChange={(e) => setDraft(e.target.value)}
-      onClick={(e) => e.stopPropagation()}
-      onBlur={commit}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") commit();
-        else if (e.key === "Escape") onDone();
-      }}
-      className="w-full rounded border bg-background px-1 py-0.5 text-sm outline-none"
-    />
-  );
-}
-
-// A small floating menu anchored at (x, y). Closes on any outside pointer press,
-// Escape, scroll, or window blur. We render our own instead of the native
-// WebView menu (which offers only debug items like Reload / Inspect Element,
-// suppressed app-wide in App.tsx).
-function ContextMenu({
-  x,
-  y,
-  onClose,
-  children,
-}: {
-  x: number;
-  y: number;
-  onClose: () => void;
-  children: ReactNode;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const onDown = (e: PointerEvent) => {
-      if (!ref.current?.contains(e.target as Node | null)) onClose();
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    // Capture so a press anywhere (including inside other handlers) closes first.
-    window.addEventListener("pointerdown", onDown, true);
-    window.addEventListener("keydown", onKey, true);
-    window.addEventListener("blur", onClose);
-    window.addEventListener("scroll", onClose, true);
-    return () => {
-      window.removeEventListener("pointerdown", onDown, true);
-      window.removeEventListener("keydown", onKey, true);
-      window.removeEventListener("blur", onClose);
-      window.removeEventListener("scroll", onClose, true);
-    };
-  }, [onClose]);
-
-  // Keep the menu on-screen: flip above / nudge left when it would overflow.
-  const W = 176;
-  const left = Math.min(x, window.innerWidth - W - 8);
-  const top = Math.min(y, window.innerHeight - 88);
-
-  return (
-    <div
-      ref={ref}
-      role="menu"
-      style={{ left, top, width: W }}
-      className="fixed z-50 rounded-md border bg-card p-1 text-card-foreground shadow-md"
-    >
-      {children}
-    </div>
-  );
-}
-
-function MenuItem({
-  onSelect,
-  destructive,
-  children,
-}: {
-  onSelect: () => void;
-  destructive?: boolean;
-  children: ReactNode;
-}) {
-  return (
-    <button
-      role="menuitem"
-      className={cn(
-        "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm",
-        destructive
-          ? "text-destructive hover:bg-destructive/10"
-          : "hover:bg-accent hover:text-accent-foreground",
-      )}
-      onClick={onSelect}
-    >
-      {children}
-    </button>
   );
 }

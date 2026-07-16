@@ -10,7 +10,7 @@
 import { BrowserView, BrowserWindow, Updater } from "electrobun/bun";
 import { PtyProcess } from "./pty";
 import { MarkerParser, markerCommand } from "./markers";
-import { createNote, listNotes, NOTES_ROOT, readNote, writeNote } from "./notes";
+import { createNote, deleteNote, listNotes, NOTES_ROOT, readNote, retitleNote, writeNote } from "./notes";
 import type { LedgeRPC } from "../shared/rpc-schema";
 
 // In the dev channel, prefer a running Vite dev server (bun run dev:hmr) so the
@@ -157,6 +157,11 @@ const rpc = BrowserView.defineRPC<LedgeRPC>({
         return { ok: true };
       },
       noteCreate: async ({ text }) => ({ note: await createNote(text) }),
+      noteRetitle: async ({ path, text }) => ({ note: await retitleNote(path, text) }),
+      noteDelete: async ({ path }) => {
+        await deleteNote(path);
+        return { ok: true };
+      },
 
       runBlock: async ({ sessionId, id, code }) => {
         // The block body goes to a file that we source, rather than being inlined

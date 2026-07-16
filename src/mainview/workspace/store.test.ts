@@ -1,6 +1,7 @@
 import { test, expect, describe } from "bun:test";
-import { reducer, initialState, allDocIds, type AppState, type Action } from "./store";
-import { firstLeaf, leafIds, findLeaf, countTabs, type SplitNode } from "./tree";
+import { reducer, initialState, allDocIds, openNotePaths, type AppState, type Action } from "./store";
+import { firstLeaf, leafIds, findLeaf, countTabs, focusedTab, type SplitNode } from "./tree";
+import type { NoteMeta } from "../../shared/rpc-schema";
 
 // Apply a sequence of actions from a fresh state.
 function run(...actions: Action[]): AppState {
@@ -217,6 +218,93 @@ describe("moveWorkspace", () => {
   });
 });
 
+describe("notes", () => {
+  const note = (title: string): NoteMeta => ({ path: `/notes/${title}.md`, title, mtimeMs: 1 });
+
+  // A state seeded from two notes on disk: `a` is the newest, so boot opens it.
+  const withNotes = (...actions: Action[]): AppState =>
+    actions.reduce(reducer, initialState([note("a"), note("b")]));
+
+  test("boot opens the most recently modified note", () => {
+    const s = initialState([note("a"), note("b")]);
+    expect(focusedTab(selected(s))!.path).toBe("/notes/a.md");
+    expect(focusedTab(selected(s))!.title).toBe("a");
+  });
+
+  test("boot with no notes on disk opens an unsaved demo note", () => {
+    const s = initialState([]);
+    expect(focusedTab(selected(s))!.path).toBeNull();
+    expect(s.notes).toEqual([]);
+  });
+
+  test("openNote on a closed note opens it in the focused pane", () => {
+    const s = withNotes({ type: "openNote", note: note("b") });
+    expect(countTabs(selected(s).root)).toBe(2);
+    expect(focusedTab(selected(s))!.path).toBe("/notes/b.md");
+  });
+
+  test("openNote on an already-open note focuses that tab, never opening it twice", () => {
+    // Two tabs on one path would mean two docIds and two autosaves racing to
+    // write the same file, so this is the rule the whole browser rests on.
+    let s = withNotes({ type: "openNote", note: note("b") }); // a and b now open
+    const before = countTabs(selected(s).root);
+    const bTabId = focusedTab(selected(s))!.id;
+
+    // Switch away to a, then ask for b again.
+    const leaf = firstLeaf(selected(s).root);
+    s = reducer(s, { type: "selectTab", paneId: leaf.id, tabId: leaf.tabs[0].id });
+    expect(focusedTab(selected(s))!.path).toBe("/notes/a.md");
+
+    s = reducer(s, { type: "openNote", note: note("b") });
+    expect(countTabs(selected(s).root)).toBe(before); // no new tab
+    expect(focusedTab(selected(s))!.id).toBe(bTabId); // the original tab, refocused
+  });
+
+  test("openNote finds the note in another workspace and selects it", () => {
+    let s = withNotes({ type: "openNote", note: note("b") });
+    const home = s.selectedId;
+    s = reducer(s, { type: "newWorkspace" });
+    expect(s.selectedId).not.toBe(home);
+
+    s = reducer(s, { type: "openNote", note: note("b") });
+    expect(s.selectedId).toBe(home); // jumped back to where b lives
+    expect(focusedTab(selected(s))!.path).toBe("/notes/b.md");
+    // ...and did not open a second copy in the new workspace.
+    expect(allDocIds(s).length).toBe(3); // a, b, and the new workspace's seeded tab
+  });
+
+  test("noteCreated binds the file to its tab and lists it", () => {
+    const s = withNotes();
+    const docId = focusedTab(selected(s))!.docId;
+    const created = note("fresh");
+    const next = reducer(s, { type: "noteCreated", docId, note: created });
+
+    expect(focusedTab(selected(next))!.path).toBe(created.path);
+    expect(focusedTab(selected(next))!.title).toBe("fresh");
+    expect(next.notes[0]).toEqual(created); // newest first
+  });
+
+  test("noteCreated for a note already listed does not duplicate it", () => {
+    const s = withNotes();
+    const docId = focusedTab(selected(s))!.docId;
+    const next = reducer(s, { type: "noteCreated", docId, note: note("a") });
+    expect(next.notes.filter((n) => n.path === "/notes/a.md")).toHaveLength(1);
+  });
+
+  test("notesLoaded replaces the list without touching the tabs", () => {
+    const s = withNotes();
+    const next = reducer(s, { type: "notesLoaded", notes: [note("c")] });
+    expect(next.notes.map((n) => n.title)).toEqual(["c"]);
+    expect(next.workspaces).toBe(s.workspaces);
+  });
+
+  test("openNotePaths reports every open note, ignoring unsaved tabs", () => {
+    // newTab adds an unsaved (pathless) tab, which must not appear.
+    const s = withNotes({ type: "openNote", note: note("b") }, { type: "newTab" });
+    expect(openNotePaths(s)).toEqual(new Set(["/notes/a.md", "/notes/b.md"]));
+  });
+});
+
 describe("allDocIds", () => {
   test("collects every tab's docId across all workspaces", () => {
     const s = run({ type: "newTab" }, { type: "newWorkspace" });
@@ -224,5 +312,163 @@ describe("allDocIds", () => {
     expect(new Set(ids).size).toBe(ids.length); // unique
     // Two tabs in the first workspace + one seeded tab in the new one.
     expect(ids).toHaveLength(3);
+  });
+});
+
+describe("rename and delete", () => {
+  const note = (title: string): NoteMeta => ({ path: `/notes/${title}.md`, title, mtimeMs: 1 });
+  const withNotes = (...actions: Action[]): AppState =>
+    actions.reduce(reducer, initialState([note("a"), note("b")]));
+  const renamed: NoteMeta = { path: "/notes/renamed.md", title: "renamed", mtimeMs: 2 };
+
+  test("a rename moves the tab's path and title but keeps its session", () => {
+    const before = withNotes();
+    const docId = focusedTab(selected(before))!.docId;
+
+    const s = reducer(before, { type: "noteRenamed", path: "/notes/a.md", note: renamed });
+    const tab = focusedTab(selected(s))!;
+
+    expect(tab.path).toBe("/notes/renamed.md");
+    expect(tab.title).toBe("renamed");
+    // The point of the whole path/docId split: the editor and the note's shells
+    // are keyed by docId, so renaming the file must not disturb them.
+    expect(tab.docId).toBe(docId);
+    expect(allDocIds(s)).toEqual(allDocIds(before));
+  });
+
+  test("a rename updates the note in the browser's list, in place", () => {
+    const s = withNotes({ type: "noteRenamed", path: "/notes/a.md", note: renamed });
+    expect(s.notes.map((n) => n.title).sort()).toEqual(["b", "renamed"]);
+  });
+
+  test("renaming a note that is not open touches only the list", () => {
+    const before = withNotes();
+    const s = reducer(before, {
+      type: "noteRenamed",
+      path: "/notes/b.md",
+      note: { path: "/notes/c.md", title: "c", mtimeMs: 2 },
+    });
+    expect(s.notes.map((n) => n.title).sort()).toEqual(["a", "c"]);
+    expect(s.workspaces).toEqual(before.workspaces); // no tab was on b
+  });
+
+  test("a rename reaches the note wherever its tab was dragged to", () => {
+    // The note opens in workspace 1; a second workspace is added and selected, so
+    // the tab holding /notes/a.md is no longer in the selected workspace.
+    const s = withNotes({ type: "newWorkspace" }, {
+      type: "noteRenamed",
+      path: "/notes/a.md",
+      note: renamed,
+    });
+    const home = s.workspaces[0];
+    expect(focusedTab(home)!.title).toBe("renamed");
+  });
+
+  test("deleting a note closes its tab and drops it from the list", () => {
+    const before = withNotes();
+    const docId = focusedTab(selected(before))!.docId;
+
+    const s = reducer(before, { type: "noteDeleted", path: "/notes/a.md" });
+
+    expect(s.notes.map((n) => n.title)).toEqual(["b"]);
+    expect(countTabs(selected(s).root)).toBe(0);
+    // The docId leaving the live set is what makes App tear the editor down and
+    // close the note's shells; nothing else does it.
+    expect(allDocIds(s)).not.toContain(docId);
+  });
+
+  test("deleting a note leaves the other tabs in its pane alone", () => {
+    const before = withNotes({ type: "openNote", note: note("b") });
+    expect(countTabs(selected(before).root)).toBe(2);
+
+    const s = reducer(before, { type: "noteDeleted", path: "/notes/a.md" });
+    const ws = selected(s);
+    expect(countTabs(ws.root)).toBe(1);
+    expect(focusedTab(ws)!.path).toBe("/notes/b.md");
+    expect(openNotePaths(s)).toEqual(new Set(["/notes/b.md"]));
+  });
+
+  test("deleting the active tab falls to a neighbour, as closing it would", () => {
+    // b opens second and is active; deleting it should leave a active, not empty.
+    const before = withNotes({ type: "openNote", note: note("b") });
+    const s = reducer(before, { type: "noteDeleted", path: "/notes/b.md" });
+    expect(focusedTab(selected(s))!.path).toBe("/notes/a.md");
+  });
+
+  test("deleting a note that is not open only touches the list", () => {
+    const before = withNotes();
+    const s = reducer(before, { type: "noteDeleted", path: "/notes/b.md" });
+    expect(s.notes.map((n) => n.title)).toEqual(["a"]);
+    expect(s.workspaces).toEqual(before.workspaces);
+  });
+
+  test("an unsaved tab is untouched by any rename or delete", () => {
+    // A new note has no path yet, so no note operation can match it.
+    const before = withNotes({ type: "newTab" });
+    const s = reducer(
+      reducer(before, { type: "noteRenamed", path: "/notes/a.md", note: renamed }),
+      { type: "noteDeleted", path: "/notes/renamed.md" },
+    );
+    const tab = focusedTab(selected(s))!;
+    expect(tab.path).toBeNull();
+    expect(allDocIds(s)).toContain(tab.docId);
+  });
+});
+
+describe("labels", () => {
+  const note = (title: string): NoteMeta => ({ path: `/notes/${title}.md`, title, mtimeMs: 1 });
+  const withNotes = (...actions: Action[]): AppState =>
+    actions.reduce(reducer, initialState([note("a"), note("b")]));
+
+  test("a heading edit relabels the tab", () => {
+    const before = withNotes();
+    const docId = focusedTab(selected(before))!.docId;
+
+    const s = reducer(before, { type: "noteTitled", docId, label: "Shipping Notes" });
+    expect(focusedTab(selected(s))!.title).toBe("Shipping Notes");
+  });
+
+  test("a heading edit relabels the browser row too, not just the tab", () => {
+    // Otherwise the list would sit on the stale heading until the next folder
+    // refresh (window focus), which is a long time to look wrong.
+    const before = withNotes();
+    const docId = focusedTab(selected(before))!.docId;
+
+    const s = reducer(before, { type: "noteTitled", docId, label: "Shipping Notes" });
+    expect(s.notes.find((n) => n.path === "/notes/a.md")!.title).toBe("Shipping Notes");
+    expect(s.notes.find((n) => n.path === "/notes/b.md")!.title).toBe("b"); // untouched
+  });
+
+  test("relabelling an unsaved note touches no browser row", () => {
+    const before = withNotes({ type: "newTab" });
+    const docId = focusedTab(selected(before))!.docId;
+
+    const s = reducer(before, { type: "noteTitled", docId, label: "Fresh Thought" });
+    expect(focusedTab(selected(s))!.title).toBe("Fresh Thought");
+    expect(s.notes).toEqual(before.notes); // it has no path, so no row is its own
+  });
+
+  test("relabelling to the same label changes nothing", () => {
+    const before = withNotes();
+    const docId = focusedTab(selected(before))!.docId;
+    const s = reducer(before, { type: "noteTitled", docId, label: "a" });
+    expect(s.workspaces).toEqual(before.workspaces);
+  });
+
+  test("an unknown docId is ignored", () => {
+    const before = withNotes();
+    const s = reducer(before, { type: "noteTitled", docId: "nobody", label: "x" });
+    expect(s.workspaces).toEqual(before.workspaces);
+    expect(s.notes).toEqual(before.notes);
+  });
+
+  test("a relabel reaches a tab in another workspace", () => {
+    const before = withNotes();
+    const docId = focusedTab(selected(before))!.docId;
+    const s = reducer(
+      reducer(before, { type: "newWorkspace" }),
+      { type: "noteTitled", docId, label: "Shipping Notes" },
+    );
+    expect(focusedTab(s.workspaces[0])!.title).toBe("Shipping Notes");
   });
 });

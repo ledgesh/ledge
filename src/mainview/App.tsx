@@ -8,6 +8,8 @@ import { sendTerminalPaste, closeSession, onTerminalExit } from "@/terminal/chan
 import { Sidebar } from "@/workspace/Sidebar";
 import { WorkspaceView } from "@/workspace/WorkspaceView";
 import { flushAll } from "@/notes/store";
+import { listNotes } from "@/notes/channel";
+import { QuickOpen } from "@/notes/QuickOpen";
 import { allDocIds, useWorkspace, WorkspaceProvider, type AppState } from "@/workspace/store";
 import { findLeaf, focusedDocId } from "@/workspace/tree";
 import { releaseEditor } from "@/workspace/editorPool";
@@ -35,6 +37,7 @@ function Shell() {
   const [termHeight, setTermHeight] = useState(280);
   const [sidebarWidth, setSidebarWidth] = useState(224);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [quickOpen, setQuickOpen] = useState(false);
   // The vertical stack (below the header) that holds the editor row and the
   // terminal drawer; its height bounds how tall the terminal can grow.
   const stackRef = useRef<HTMLDivElement>(null);
@@ -109,14 +112,25 @@ function Shell() {
   // Notes autosave on a short debounce, so the only real exposure is quitting (or
   // crashing) inside that window. Flushing when the window loses focus and on
   // pagehide narrows it to the case where you edit and quit in the same instant.
+  //
+  // Re-reading the folder on the way back in is the mirror image: there is no file
+  // watcher yet, so this is what notices a note you created or deleted in the
+  // terminal while Ledge was in the background.
   useEffect(() => {
+    const refresh = () => {
+      void listNotes()
+        .then((notes) => dispatch({ type: "notesLoaded", notes }))
+        .catch((err) => console.error("[notes] refresh failed", err));
+    };
     window.addEventListener("blur", flushAll);
     window.addEventListener("pagehide", flushAll);
+    window.addEventListener("focus", refresh);
     return () => {
       window.removeEventListener("blur", flushAll);
       window.removeEventListener("pagehide", flushAll);
+      window.removeEventListener("focus", refresh);
     };
-  }, []);
+  }, [dispatch]);
 
   // Suppress the WebView's native context menu app-wide. In this dev WKWebView it
   // carries only debug items (Reload, Inspect Element), unwanted in a notes app.
@@ -137,6 +151,9 @@ function Shell() {
       if (k === "t" && !e.shiftKey) {
         e.preventDefault();
         dispatch({ type: "newTab" });
+      } else if (k === "p" && !e.shiftKey) {
+        e.preventDefault();
+        setQuickOpen(true);
       } else if (k === "d" && !e.shiftKey) {
         e.preventDefault();
         dispatch({ type: "splitPane", dir: "row" });
@@ -269,6 +286,8 @@ function Shell() {
           </section>
         )}
       </div>
+
+      {quickOpen && <QuickOpen onClose={() => setQuickOpen(false)} />}
     </div>
   );
 }

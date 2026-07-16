@@ -9,6 +9,8 @@ interface NoteHandlers {
   read: (path: string) => Promise<string | null>;
   write: (path: string, text: string) => Promise<void>;
   create: (text: string) => Promise<NoteMeta>;
+  retitle: (path: string, text: string) => Promise<NoteMeta>;
+  remove: (path: string) => Promise<void>;
 }
 
 let handlers: NoteHandlers | null = null;
@@ -36,6 +38,16 @@ export function writeNote(path: string, text: string): Promise<void> {
 
 export function createNote(text: string): Promise<NoteMeta> {
   return bridge().create(text);
+}
+
+// Ask Bun to move a note's file to match its heading. Takes the note's text, not
+// a name: Bun derives the slug, so it cannot be handed a path.
+export function retitleNote(path: string, text: string): Promise<NoteMeta> {
+  return bridge().retitle(path, text);
+}
+
+export function deleteNote(path: string): Promise<void> {
+  return bridge().remove(path);
 }
 
 export type { NoteMeta };

@@ -6,6 +6,14 @@ describe("uniqueName", () => {
     expect(uniqueName("untitled", new Set())).toBe("untitled.md");
   });
 
+  // APFS is case-insensitive by default, so "Foo.md" and "foo.md" are ONE file on
+  // macOS: a case-sensitive check would hand back a name whose rename silently
+  // clobbers the other note.
+  test("comparison is case-insensitive, so a name cannot collide by case alone", () => {
+    expect(uniqueName("untitled", new Set(["UNTITLED.md"]))).toBe("untitled-2.md");
+    expect(uniqueName("notes", new Set(["Notes.md", "notes-2.MD"]))).toBe("notes-3.md");
+  });
+
   test("suffixes from 2 upward, skipping every taken name", () => {
     const taken = new Set(["untitled.md", "untitled-2.md", "untitled-3.md"]);
     expect(uniqueName("untitled", taken)).toBe("untitled-4.md");

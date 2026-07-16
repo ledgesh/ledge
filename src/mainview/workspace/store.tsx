@@ -1,6 +1,7 @@
 import { createContext, useContext, useMemo, useReducer, type ReactNode } from "react";
 import {
   findLeaf,
+  findTabBy,
   firstLeaf,
   leafIds,
   makeLeaf,
@@ -9,9 +10,12 @@ import {
   mapTabs,
   moveTab,
   removeLeaf,
+  removeTabsBy,
   setRatio,
   splitLeaf,
   tabDocIds,
+  tabPaths,
+  tabsBy,
   updateLeaf,
   uid,
   type PaneNode,
@@ -27,6 +31,11 @@ const WORKSPACE_SYMBOLS = ["inbox", "layers", "boxes", "folder", "terminal"];
 export interface AppState {
   workspaces: Workspace[];
   selectedId: string;
+  // Every note in ~/.ledge, as the note browser and quick-open palette see it.
+  // Held in listNotes order (most recently modified first) because that is what
+  // picks the note to open at boot; the browser sorts a copy by title for
+  // display, since re-sorting by mtime would make rows jump around as you type.
+  notes: NoteMeta[];
 }
 
 function makeWorkspace(name: string, symbol: string, tab: TabState): Workspace {
@@ -45,7 +54,7 @@ export function initialState(notes: NoteMeta[] = []): AppState {
   const newest = notes[0];
   const tab = newest ? makeNoteTab(newest.path, newest.title) : makeTab("demo", "Welcome");
   const first = makeWorkspace("Scratch", "inbox", tab);
-  return { workspaces: [first], selectedId: first.id };
+  return { workspaces: [first], selectedId: first.id, notes };
 }
 
 // --- actions ---------------------------------------------------------------
@@ -66,7 +75,22 @@ export type Action =
   | { type: "setRatio"; splitId: string; ratio: number }
   // A note's first save allocated it a file. Fired from notes/store.ts, so the
   // tab picks up its path and shows the filename it was saved under.
-  | { type: "noteCreated"; docId: string; note: NoteMeta };
+  | { type: "noteCreated"; docId: string; note: NoteMeta }
+  // Open a note from the browser or the palette, or focus its tab if it is
+  // already open somewhere.
+  | { type: "openNote"; note: NoteMeta }
+  // The notes folder was re-read (at window focus). Replaces the known list.
+  | { type: "notesLoaded"; notes: NoteMeta[] }
+  // A note's file moved. `path` is where it was; `note` is where it is now. Fired
+  // from notes/actions.ts once Bun has done the rename, never before: the tab must
+  // not show a name the file does not have.
+  | { type: "noteRenamed"; path: string; note: NoteMeta }
+  // A note's file is gone (trashed). Closes its tabs wherever they are.
+  | { type: "noteDeleted"; path: string }
+  // What a note is called on screen changed: its H1 was edited (or removed, and
+  // the label fell back to the filename). Separate from noteRenamed because a
+  // heading can change without the slug changing, and then no file moves at all.
+  | { type: "noteTitled"; docId: string; label: string };
 
 // Rewrite the selected workspace via `fn`; workspace-list actions are handled
 // separately below.
@@ -100,7 +124,7 @@ export function reducer(state: AppState, action: Action): AppState {
         state.selectedId === action.id
           ? workspaces[Math.min(idx, workspaces.length - 1)].id
           : state.selectedId;
-      return { workspaces, selectedId };
+      return { ...state, workspaces, selectedId };
     }
 
     case "renameWorkspace": {
@@ -217,7 +241,93 @@ export function reducer(state: AppState, action: Action): AppState {
         touched = true;
         return { ...ws, root };
       });
-      return touched ? { ...state, workspaces } : state;
+      // The new file belongs in the browser immediately, not at the next refresh.
+      // Newest first, matching listNotes order.
+      const known = state.notes.some((n) => n.path === action.note.path);
+      const notes = known ? state.notes : [action.note, ...state.notes];
+      return touched || !known ? { ...state, workspaces, notes } : state;
+    }
+
+    case "notesLoaded":
+      return { ...state, notes: action.notes };
+
+    case "noteRenamed": {
+      // The docId is untouched, so the editor, its undo history, and the note's
+      // shells carry straight through the rename: only the path and the tab label
+      // move. That separation is the whole reason the two are different keys.
+      const workspaces = state.workspaces.map((ws) => {
+        const root = mapTabs(ws.root, (t) =>
+          t.path === action.path ? { ...t, path: action.note.path, title: action.note.title } : t,
+        );
+        return root === ws.root ? ws : { ...ws, root };
+      });
+      const notes = state.notes.map((n) => (n.path === action.path ? action.note : n));
+      return { ...state, workspaces, notes };
+    }
+
+    case "noteTitled": {
+      // The tab is found by docId (the live session), and the browser row by the
+      // path that tab holds: one edit, both surfaces, so the list does not sit on
+      // a stale heading until the next folder refresh.
+      let path: string | null = null;
+      const workspaces = state.workspaces.map((ws) => {
+        const root = mapTabs(ws.root, (t) => {
+          if (t.docId !== action.docId) return t;
+          path = t.path;
+          return t.title === action.label ? t : { ...t, title: action.label };
+        });
+        return root === ws.root ? ws : { ...ws, root };
+      });
+      const notes = path === null
+        ? state.notes
+        : state.notes.map((n) => (n.path === path ? { ...n, title: action.label } : n));
+      return { ...state, workspaces, notes };
+    }
+
+    case "noteDeleted": {
+      const workspaces = state.workspaces.map((ws) => {
+        const root = removeTabsBy(ws.root, (t) => t.path === action.path);
+        return root === ws.root ? ws : { ...ws, root };
+      });
+      // Closing the tabs is what drops their docIds out of the live set, which is
+      // what App's reconciliation effect turns into an editor teardown and a
+      // closeSession for the note's shells.
+      return { ...state, workspaces, notes: state.notes.filter((n) => n.path !== action.path) };
+    }
+
+    case "openNote": {
+      // Already open? Focus that tab wherever it lives, rather than opening the
+      // note twice: two tabs on one path means two docIds, two editors, and two
+      // autosaves racing to write the same file.
+      for (const ws of state.workspaces) {
+        const hit = findTabBy(ws.root, (t) => t.path === action.note.path);
+        if (!hit) continue;
+        return {
+          ...state,
+          selectedId: ws.id,
+          workspaces: state.workspaces.map((w) =>
+            w.id === ws.id
+              ? {
+                  ...w,
+                  focusedPaneId: hit.paneId,
+                  root: updateLeaf(w.root, hit.paneId, (leaf) => ({ ...leaf, activeTabId: hit.tabId })),
+                }
+              : w,
+          ),
+        };
+      }
+      // Not open: a new tab in the selected workspace's focused pane.
+      return withSelected(state, (ws) => {
+        const paneId = ws.focusedPaneId;
+        if (!findLeaf(ws.root, paneId)) return ws;
+        const tab = makeNoteTab(action.note.path, action.note.title);
+        const root = updateLeaf(ws.root, paneId, (leaf) => ({
+          ...leaf,
+          tabs: [...leaf.tabs, tab],
+          activeTabId: tab.id,
+        }));
+        return { ...ws, root, focusedPaneId: paneId };
+      });
     }
 
     default:
@@ -261,6 +371,18 @@ export function useWorkspace(): Store {
 // previous set to release editors whose tab (or pane, or workspace) was closed.
 export function allDocIds(state: AppState): string[] {
   return state.workspaces.flatMap((ws) => tabDocIds(ws.root));
+}
+
+// Every note file open in a tab anywhere. The browser marks these rows as open.
+export function openNotePaths(state: AppState): Set<string> {
+  return new Set(state.workspaces.flatMap((ws) => tabPaths(ws.root)));
+}
+
+// The live sessions a note is open under. Normally one (openNote focuses an
+// existing tab rather than opening a second), but a rename or a delete has to
+// reach every one of them, and asking the tree beats assuming.
+export function docIdsForPath(state: AppState, path: string): string[] {
+  return state.workspaces.flatMap((ws) => tabsBy(ws.root, (t) => t.path === path).map((t) => t.docId));
 }
 
 export type { PaneNode, Workspace };

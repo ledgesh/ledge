@@ -14,8 +14,8 @@ import { handleRunEvent, pingOverlay } from "../editor/blocks";
 import { onRunEvent } from "../editor/bridge";
 import { fromDisk } from "../editor/session";
 import { readNote } from "../notes/channel";
-import { bindDoc, releaseDoc } from "../notes/store";
-import type { NoteMeta, RunEvent } from "../../shared/rpc-schema";
+import { bindDoc, releaseDoc, seedSlug, type DocHandlers } from "../notes/store";
+import type { RunEvent } from "../../shared/rpc-schema";
 import type { TabState } from "./tree";
 
 // Seed content for a note with no file yet. The very first tab shows the demo
@@ -77,6 +77,11 @@ const pool = new Map<string, Entry>();
 async function loadNote(docId: string, path: string): Promise<void> {
   const text = await readNote(path);
   if (text === null) return; // note is gone; leave the editor empty rather than guess
+  // Before the text reaches the editor, tell the save controller which heading this
+  // note ALREADY has. Filenames follow the H1 from here on, and without this the
+  // load itself would look like the heading appearing from nowhere and move the
+  // file. A note only gets renamed by a heading you edit, never by one you open.
+  seedSlug(docId, text);
   const entry = pool.get(docId);
   if (!entry) return; // the tab closed while the read was in flight
   entry.view.dispatch({
@@ -87,11 +92,11 @@ async function loadNote(docId: string, path: string): Promise<void> {
 
 // Get (creating on first use) the pooled editor for a tab's note. The returned
 // host is a detached <div> until attachEditor parents it into a pane.
-function acquire(tab: TabState, onCreated: (note: NoteMeta) => void): Entry {
+function acquire(tab: TabState, handlers: DocHandlers): Entry {
   const { docId } = tab;
   // Rebind on every acquire: the entry may predate this callback's closure, and
-  // an already-open note keeps whatever dirty state and path it has.
-  bindDoc(docId, tab.path, onCreated);
+  // an already-open note keeps whatever dirty state, path, and seeded slug it has.
+  bindDoc(docId, tab.path, handlers);
   const existing = pool.get(docId);
   if (existing) return existing;
 
@@ -111,14 +116,11 @@ function acquire(tab: TabState, onCreated: (note: NoteMeta) => void): Entry {
 }
 
 // Parent the editor's host into `container` and re-pin its overlay. Returns the
-// live EditorView so the caller can focus it. `onCreated` fires if this note's
-// first save allocates it a file, so the tab can bind to it.
-export function attachEditor(
-  container: HTMLElement,
-  tab: TabState,
-  onCreated: (note: NoteMeta) => void,
-): EditorView {
-  const entry = acquire(tab, onCreated);
+// live EditorView so the caller can focus it. `handlers` carries the two ways a
+// note's name can move: its file appearing or being renamed to follow its H1
+// (onFile), and its on-screen label changing (onTitle).
+export function attachEditor(container: HTMLElement, tab: TabState, handlers: DocHandlers): EditorView {
+  const entry = acquire(tab, handlers);
   if (entry.host.parentElement !== container) container.appendChild(entry.host);
   entry.view.requestMeasure();
   pingOverlay(entry.view);

@@ -75,6 +75,10 @@ configureNotes({
     await electrobun.rpc!.request.noteWrite({ path, text });
   },
   create: (text) => electrobun.rpc!.request.noteCreate({ text }).then((r) => r.note),
+  retitle: (path, text) => electrobun.rpc!.request.noteRetitle({ path, text }).then((r) => r.note),
+  remove: async (path) => {
+    await electrobun.rpc!.request.noteDelete({ path });
+  },
 });
 
 // Read the notes folder before the first render, so the app opens straight into

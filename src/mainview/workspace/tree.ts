@@ -96,18 +96,75 @@ export function tabDocIds(node: PaneNode): string[] {
   return [...tabDocIds(node.children[0]), ...tabDocIds(node.children[1])];
 }
 
+// Every note file open anywhere in this tree. Unsaved tabs have no path yet and
+// contribute nothing.
+export function tabPaths(node: PaneNode): string[] {
+  if (node.kind === "leaf") return node.tabs.flatMap((t) => (t.path ? [t.path] : []));
+  return [...tabPaths(node.children[0]), ...tabPaths(node.children[1])];
+}
+
+// Locate the first tab matching `pred`, with the pane holding it. Used to answer
+// "is this note already open?": a note must never be opened twice, since the two
+// tabs would get separate docIds and their autosaves would clobber one another.
+export function findTabBy(
+  node: PaneNode,
+  pred: (tab: TabState) => boolean,
+): { paneId: string; tabId: string } | null {
+  if (node.kind === "leaf") {
+    const tab = node.tabs.find(pred);
+    return tab ? { paneId: node.id, tabId: tab.id } : null;
+  }
+  return findTabBy(node.children[0], pred) ?? findTabBy(node.children[1], pred);
+}
+
+// Every tab matching `pred`, anywhere in the tree. Used to collect the docIds a
+// note is open under before its file is renamed or deleted.
+export function tabsBy(node: PaneNode, pred: (tab: TabState) => boolean): TabState[] {
+  if (node.kind === "leaf") return node.tabs.filter(pred);
+  return [...tabsBy(node.children[0], pred), ...tabsBy(node.children[1], pred)];
+}
+
+// Drop every tab matching `pred`, fixing up each affected pane's active tab the
+// same way closeTab does: fall to the neighbour that slid into the slot, else the
+// new last, else empty. A pane emptied this way is left standing rather than
+// collapsed; that is what closing a pane's last tab already does, and a note being
+// deleted is not a reason to rearrange the user's layout.
+export function removeTabsBy(node: PaneNode, pred: (tab: TabState) => boolean): PaneNode {
+  if (node.kind === "leaf") {
+    if (!node.tabs.some(pred)) return node;
+    const idx = node.tabs.findIndex((t) => t.id === node.activeTabId);
+    const tabs = node.tabs.filter((t) => !pred(t));
+    let activeTabId = node.activeTabId;
+    if (tabs.every((t) => t.id !== activeTabId)) {
+      const next = tabs[idx] ?? tabs[tabs.length - 1];
+      activeTabId = next ? next.id : "";
+    }
+    return { ...node, tabs, activeTabId };
+  }
+  const a = removeTabsBy(node.children[0], pred);
+  const b = removeTabsBy(node.children[1], pred);
+  if (a === node.children[0] && b === node.children[1]) return node;
+  return { ...node, children: [a, b] };
+}
+
 export function countTabs(node: PaneNode): number {
   if (node.kind === "leaf") return node.tabs.length;
   return countTabs(node.children[0]) + countTabs(node.children[1]);
+}
+
+// The tab active in the focused pane, or null when that pane is empty. This is
+// the note the terminal drawer shows, "run in terminal" targets, and the note
+// browser marks as current.
+export function focusedTab(ws: Workspace): TabState | null {
+  const leaf = findLeaf(ws.root, ws.focusedPaneId);
+  return leaf?.tabs.find((t) => t.id === leaf.activeTabId) ?? null;
 }
 
 // The docId of the tab active in the focused pane, or null when that pane is
 // empty. This is the note whose per-note shell the terminal drawer shows and the
 // note "run in terminal" targets.
 export function focusedDocId(ws: Workspace): string | null {
-  const leaf = findLeaf(ws.root, ws.focusedPaneId);
-  const tab = leaf?.tabs.find((t) => t.id === leaf.activeTabId);
-  return tab ? tab.docId : null;
+  return focusedTab(ws)?.docId ?? null;
 }
 
 // --- transforms (all return a new tree) ------------------------------------

@@ -98,7 +98,20 @@ function PaneBody({ leaf, focused }: { leaf: LeafNode; focused: boolean }) {
   useLayoutEffect(() => {
     const container = hostRef.current;
     if (!container || !active) return;
-    attachEditor(container, active, (note) => dispatch({ type: "noteCreated", docId: active.docId, note }));
+    attachEditor(container, active, {
+      // The note's file appeared (first save) or moved to follow its H1. Both reach
+      // the tab the same way; only which action carries it differs, since a create
+      // is identified by the docId that owns it and a move by the path it left.
+      onFile: (note, prevPath) =>
+        dispatch(
+          prevPath === null
+            ? { type: "noteCreated", docId: active.docId, note }
+            : { type: "noteRenamed", path: prevPath, note },
+        ),
+      // The heading changed. Not the same event as the file moving: a heading can
+      // change without the slug doing so, and then only the label moves.
+      onTitle: (label) => dispatch({ type: "noteTitled", docId: active.docId, label }),
+    });
     return () => detachEditor(active.docId);
     // Re-parent only when the active doc changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
