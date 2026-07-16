@@ -9,7 +9,8 @@ import { toNative } from "./bridge";
 import { ledgeBlocks } from "./blocks";
 import { wrapping } from "./wrap";
 import { findReplace } from "./find";
-import { sessionIdFacet } from "./session";
+import { fromDisk, sessionIdFacet } from "./session";
+import { noteChanged, saveNow } from "../notes/store";
 import { copyText, readClipboard } from "../lib/clipboard";
 
 // Ledge shows raw Markdown and styles it, rather than hiding the syntax the way
@@ -56,17 +57,14 @@ const highlight = HighlightStyle.define([
   { tag: tags.variableName, color: "var(--code-variable)" },
 ]);
 
-// Report focus and every document change up to the bridge. `updateListener`
-// fires for any transaction; we only care about doc edits and focus changes.
-// (Both are no-ops in this build until note persistence lands; wiring them now
-// keeps the editor code identical to the note-backed version.)
+// Every edit marks the note dirty and arms its autosave debounce (notes/store.ts
+// does the throttling; this fires per keystroke). The load that pours a note's
+// saved text in at open is annotated fromDisk and skipped, so opening a note is
+// not itself an edit that saves it straight back.
 const reporting = EditorView.updateListener.of((update) => {
-  if (update.docChanged) {
-    toNative({ type: "textChanged", text: update.state.doc.toString() });
-  }
-  if (update.focusChanged && update.view.hasFocus) {
-    toNative({ type: "focus" });
-  }
+  if (!update.docChanged) return;
+  if (update.transactions.some((t) => t.annotation(fromDisk))) return;
+  noteChanged(update.state.facet(sessionIdFacet), update.state.doc.toString());
 });
 
 // App-level shortcuts that bridge out. High precedence so they win over
@@ -77,6 +75,15 @@ const appKeymap = Prec.highest(
       key: "Ctrl-`",
       run: () => {
         toNative({ type: "toggleTerminal" });
+        return true;
+      },
+    },
+    {
+      // Notes autosave, so Cmd+S only skips the debounce. It still binds: the
+      // habit is universal, and an unhandled Cmd-key rings the AppKit alert.
+      key: "Mod-s",
+      run: (view) => {
+        void saveNow(view.state.facet(sessionIdFacet));
         return true;
       },
     },

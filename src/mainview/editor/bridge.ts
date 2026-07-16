@@ -10,9 +10,6 @@ import type { RunEvent } from "../../shared/rpc-schema";
 export type RunDestination = "inline" | "terminal";
 
 type NativeMessage =
-  | { type: "ready" }
-  | { type: "textChanged"; text: string }
-  | { type: "focus" }
   | { type: "toggleTerminal" }
   | {
       type: "run";
@@ -31,6 +28,9 @@ interface BridgeHandlers {
   runInline: (sessionId: string, id: string, code: string) => void;
   toggleTerminal: () => void;
   runInTerminal: (sessionId: string, code: string) => void;
+  cancelRun: (sessionId: string) => void;
+  resizeInline: (sessionId: string, cols: number, rows: number) => void;
+  inputInline: (sessionId: string, data: string) => void;
 }
 const handlers: Partial<BridgeHandlers> = {};
 
@@ -38,8 +38,26 @@ export function configureBridge(fns: Partial<BridgeHandlers>): void {
   Object.assign(handlers, fns);
 }
 
-// Web -> Bun. Note persistence (ready/textChanged/focus) has no native side yet,
-// so those stay no-ops; run and terminal toggle are wired.
+// Interrupt a note's inline run (Ctrl-C). Called by blocks.ts when it detects an
+// inline block launched a full-screen program it cannot render.
+export function cancelRun(sessionId: string): void {
+  handlers.cancelRun?.(sessionId);
+}
+
+// Match a note's inline shell winsize to a block's rendered terminal grid. Called
+// by the inline terminal as it fits to the editor width.
+export function resizeInline(sessionId: string, cols: number, rows: number): void {
+  handlers.resizeInline?.(sessionId, cols, rows);
+}
+
+// Forward keystrokes from a live block's inline terminal to the note's inline
+// shell. Called by the inline terminal's onData while the block is running.
+export function inputInline(sessionId: string, data: string): void {
+  handlers.inputInline?.(sessionId, data);
+}
+
+// Web -> Bun. Note edits do not come through here: persistence is a direct
+// call from the editor into notes/store.ts, which owns its own RPC (notes/channel).
 export function toNative(message: unknown): void {
   const m = message as NativeMessage;
   if (m.type === "toggleTerminal") {

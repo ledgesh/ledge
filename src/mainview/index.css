@@ -319,3 +319,26 @@ body {
   user-select: text;
   -webkit-user-select: text;
 }
+
+/* --- Inline terminal (xterm.js in the output panel) ------------------------
+   A normal run renders through a real terminal emulator pooled by run id (see
+   inlineTerm.ts). The xterm instance sizes itself (cols to the panel width, rows
+   to the run grid, shrunk to content on finish); the body just gives it a little
+   inset and its own background so it reads as a terminal within the card. */
+.ledge-term-body {
+  padding: 6px 8px;
+}
+.ledge-term-host {
+  width: 100%;
+}
+/* xterm draws its own scrollbar; keep it from forcing the card wider. */
+.ledge-term-host .xterm {
+  padding: 0;
+}
+/* A finished run whose output fit the grid only overflows by the trailing blank
+   line under the cursor, so hide the scrollbar. Output taller than the grid keeps
+   `.ledge-term-clamped` and stays scrollable. */
+.ledge-output:not(.ledge-term-clamped) .ledge-term-host .xterm-viewport {
+  overflow-y: hidden;
+}
+

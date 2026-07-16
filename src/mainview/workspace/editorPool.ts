@@ -7,15 +7,22 @@
 // `docId`, outside the React tree: switching tabs only re-parents a view's DOM
 // host into the newly-visible pane; it never destroys the view. A view is torn
 // down only when its tab is closed (releaseEditor).
+import { Transaction } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
 import { createEditor } from "../editor/setup";
 import { handleRunEvent, pingOverlay } from "../editor/blocks";
 import { onRunEvent } from "../editor/bridge";
-import type { RunEvent } from "../../shared/rpc-schema";
+import { fromDisk } from "../editor/session";
+import { readNote } from "../notes/channel";
+import { bindDoc, releaseDoc } from "../notes/store";
+import type { NoteMeta, RunEvent } from "../../shared/rpc-schema";
+import type { TabState } from "./tree";
 
-// Seed content. The very first tab shows the demo note (the whole run loop on
-// first launch); every other tab opens as a near-empty scratch note. Built from
-// lines so the ``` fences don't collide with JS backticks.
+// Seed content for a note with no file yet. The very first tab shows the demo
+// note (the whole run loop on first launch); every other new tab opens as a
+// near-empty scratch note. A tab whose note is already on disk ignores these and
+// loads the file instead. Built from lines so the ``` fences don't collide with
+// JS backticks.
 const DEMO_DOC = [
   "# Ledge",
   "",
@@ -59,15 +66,38 @@ interface Entry {
 
 const pool = new Map<string, Entry>();
 
-// Get (creating on first use) the pooled editor for `docId`. The returned host is
-// a detached <div> until attachEditor parents it into a pane.
-function acquire(docId: string, seed: "demo" | "scratch"): Entry {
+// Pour a note's saved text into its (empty, freshly-created) editor. The read is
+// async, so the editor exists first and the content arrives a beat later; the
+// alternative, holding the pane blank until the file lands, would make every tab
+// switch to an unopened note flicker.
+//
+// `fromDisk` keeps the change listener from treating the load as an edit and
+// saving it straight back, and it stays out of the undo history so the first
+// Cmd+Z in a note cannot wipe it back to empty.
+async function loadNote(docId: string, path: string): Promise<void> {
+  const text = await readNote(path);
+  if (text === null) return; // note is gone; leave the editor empty rather than guess
+  const entry = pool.get(docId);
+  if (!entry) return; // the tab closed while the read was in flight
+  entry.view.dispatch({
+    changes: { from: 0, to: entry.view.state.doc.length, insert: text },
+    annotations: [fromDisk.of(true), Transaction.addToHistory.of(false)],
+  });
+}
+
+// Get (creating on first use) the pooled editor for a tab's note. The returned
+// host is a detached <div> until attachEditor parents it into a pane.
+function acquire(tab: TabState, onCreated: (note: NoteMeta) => void): Entry {
+  const { docId } = tab;
+  // Rebind on every acquire: the entry may predate this callback's closure, and
+  // an already-open note keeps whatever dirty state and path it has.
+  bindDoc(docId, tab.path, onCreated);
   const existing = pool.get(docId);
   if (existing) return existing;
 
   const host = document.createElement("div");
   host.className = "ledge-editor-host";
-  const view = createEditor(host, seedDoc(seed), docId);
+  const view = createEditor(host, tab.path ? "" : seedDoc(tab.seed), docId);
   const offRun = onRunEvent((ev) => applyRunEvent(view, ev));
   // CodeMirror does not watch its container for size changes; a pane resize (a
   // divider drag, the terminal drawer opening) needs an explicit re-measure.
@@ -76,13 +106,19 @@ function acquire(docId: string, seed: "demo" | "scratch"): Entry {
 
   const entry: Entry = { host, view, offRun, ro };
   pool.set(docId, entry);
+  if (tab.path) void loadNote(docId, tab.path);
   return entry;
 }
 
 // Parent the editor's host into `container` and re-pin its overlay. Returns the
-// live EditorView so the caller can focus it.
-export function attachEditor(container: HTMLElement, docId: string, seed: "demo" | "scratch"): EditorView {
-  const entry = acquire(docId, seed);
+// live EditorView so the caller can focus it. `onCreated` fires if this note's
+// first save allocates it a file, so the tab can bind to it.
+export function attachEditor(
+  container: HTMLElement,
+  tab: TabState,
+  onCreated: (note: NoteMeta) => void,
+): EditorView {
+  const entry = acquire(tab, onCreated);
   if (entry.host.parentElement !== container) container.appendChild(entry.host);
   entry.view.requestMeasure();
   pingOverlay(entry.view);
@@ -98,8 +134,11 @@ export function detachEditor(docId: string): void {
   pingOverlay(entry.view);
 }
 
-// Tear an editor down for good. Called when a tab is closed.
+// Tear an editor down for good. Called when a tab is closed. releaseDoc first:
+// the view is about to go, and any edit still sitting in the autosave debounce
+// has to reach disk rather than die with it.
 export function releaseEditor(docId: string): void {
+  releaseDoc(docId);
   const entry = pool.get(docId);
   if (!entry) return;
   entry.offRun();

@@ -4,7 +4,9 @@ import {
   firstLeaf,
   leafIds,
   makeLeaf,
+  makeNoteTab,
   makeTab,
+  mapTabs,
   moveTab,
   removeLeaf,
   setRatio,
@@ -14,8 +16,10 @@ import {
   uid,
   type PaneNode,
   type SplitDir,
+  type TabState,
   type Workspace,
 } from "./tree";
+import type { NoteMeta } from "../../shared/rpc-schema";
 
 // Icons a new workspace cycles through (keys resolved in Sidebar.tsx).
 const WORKSPACE_SYMBOLS = ["inbox", "layers", "boxes", "folder", "terminal"];
@@ -25,15 +29,22 @@ export interface AppState {
   selectedId: string;
 }
 
-function makeWorkspace(name: string, symbol: string, seed: "demo" | "scratch"): Workspace {
-  const leaf = makeLeaf(makeTab(seed, seed === "demo" ? "Welcome" : "Untitled"));
+function makeWorkspace(name: string, symbol: string, tab: TabState): Workspace {
+  const leaf = makeLeaf(tab);
   return { id: uid("ws"), name, symbol, root: leaf, focusedPaneId: leaf.id };
 }
 
-// Exported for unit tests (store.test.ts); the app itself goes through
-// WorkspaceProvider, which seeds useReducer from initialState.
-export function initialState(): AppState {
-  const first = makeWorkspace("Scratch", "inbox", "demo");
+// The launch state, built from the notes already on disk (newest first, as
+// listNotes returns them). The pane layout is not persisted yet, so a launch
+// opens exactly one note: the one you edited last, or the demo note when the
+// notes folder is empty. That demo note is unsaved like any other new note, so a
+// first launch you do not type in still leaves the folder empty.
+//
+// Exported for unit tests (store.test.ts); the app goes through WorkspaceProvider.
+export function initialState(notes: NoteMeta[] = []): AppState {
+  const newest = notes[0];
+  const tab = newest ? makeNoteTab(newest.path, newest.title) : makeTab("demo", "Welcome");
+  const first = makeWorkspace("Scratch", "inbox", tab);
   return { workspaces: [first], selectedId: first.id };
 }
 
@@ -52,7 +63,10 @@ export type Action =
   | { type: "moveTab"; fromPaneId: string; tabId: string; toPaneId: string; toIndex: number }
   | { type: "splitPane"; dir: SplitDir; paneId?: string }
   | { type: "closePane"; paneId?: string }
-  | { type: "setRatio"; splitId: string; ratio: number };
+  | { type: "setRatio"; splitId: string; ratio: number }
+  // A note's first save allocated it a file. Fired from notes/store.ts, so the
+  // tab picks up its path and shows the filename it was saved under.
+  | { type: "noteCreated"; docId: string; note: NoteMeta };
 
 // Rewrite the selected workspace via `fn`; workspace-list actions are handled
 // separately below.
@@ -73,7 +87,7 @@ export function reducer(state: AppState, action: Action): AppState {
 
     case "newWorkspace": {
       const n = state.workspaces.length + 1;
-      const ws = makeWorkspace(`Workspace ${n}`, WORKSPACE_SYMBOLS[n % WORKSPACE_SYMBOLS.length], "scratch");
+      const ws = makeWorkspace(`Workspace ${n}`, WORKSPACE_SYMBOLS[n % WORKSPACE_SYMBOLS.length], makeTab("scratch"));
       return { ...state, workspaces: [...state.workspaces, ws], selectedId: ws.id };
     }
 
@@ -191,6 +205,21 @@ export function reducer(state: AppState, action: Action): AppState {
         root: setRatio(ws.root, action.splitId, clampRatio(action.ratio)),
       }));
 
+    case "noteCreated": {
+      // Not withSelected: a save can land while you are in another workspace, and
+      // the tab that owns the docId is wherever it has been dragged to by now.
+      let touched = false;
+      const workspaces = state.workspaces.map((ws) => {
+        const root = mapTabs(ws.root, (t) =>
+          t.docId === action.docId ? { ...t, path: action.note.path, title: action.note.title } : t,
+        );
+        if (root === ws.root) return ws;
+        touched = true;
+        return { ...ws, root };
+      });
+      return touched ? { ...state, workspaces } : state;
+    }
+
     default:
       return state;
   }
@@ -210,8 +239,10 @@ interface Store {
 
 const WorkspaceContext = createContext<Store | null>(null);
 
-export function WorkspaceProvider({ children }: { children: ReactNode }) {
-  const [state, dispatch] = useReducer(reducer, undefined, initialState);
+// `initial` is built at boot from the notes on disk (main.tsx), so the first
+// render already has the right note in its tab: no empty-then-populate flash.
+export function WorkspaceProvider({ initial, children }: { initial: AppState; children: ReactNode }) {
+  const [state, dispatch] = useReducer(reducer, initial);
   const selected = useMemo(
     () => state.workspaces.find((w) => w.id === state.selectedId) ?? state.workspaces[0],
     [state],

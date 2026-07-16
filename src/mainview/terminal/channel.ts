@@ -20,6 +20,7 @@ export function b64ToBytes(b64: string): Uint8Array {
 }
 
 let sendInputFn: ((sessionId: string, dataB64: string) => void) | null = null;
+let sendPasteFn: ((sessionId: string, text: string) => void) | null = null;
 let sendResizeFn: ((sessionId: string, cols: number, rows: number) => void) | null = null;
 let attachFn: ((sessionId: string) => Promise<{ dataB64: string }>) | null = null;
 let detachFn: ((sessionId: string) => void) | null = null;
@@ -28,12 +29,14 @@ let closeSessionFn: ((sessionId: string) => void) | null = null;
 // Wired by main.tsx once the Electroview RPC exists.
 export function configureTerminal(fns: {
   sendInput: (sessionId: string, dataB64: string) => void;
+  sendPaste: (sessionId: string, text: string) => void;
   sendResize: (sessionId: string, cols: number, rows: number) => void;
   attach: (sessionId: string) => Promise<{ dataB64: string }>;
   detach: (sessionId: string) => void;
   closeSession: (sessionId: string) => void;
 }): void {
   sendInputFn = fns.sendInput;
+  sendPasteFn = fns.sendPaste;
   sendResizeFn = fns.sendResize;
   attachFn = fns.attach;
   detachFn = fns.detach;
@@ -55,9 +58,18 @@ export function sendTerminalInput(sessionId: string, dataB64: string): void {
   sendInputFn?.(sessionId, dataB64);
 }
 
-/** Convenience for sending literal text (keystrokes, a "run in terminal" body). */
+/** Convenience for sending literal text (keystrokes). */
 export function sendTerminalText(sessionId: string, text: string): void {
   sendTerminalInput(sessionId, bytesToB64(encoder.encode(text)));
+}
+
+/**
+ * Run a block in the terminal as if pasted. The Bun side wraps it in
+ * bracketed-paste markers and holds it until the shell is ready, so all commands
+ * echo together then run under one prompt (see rpc-schema terminalPaste).
+ */
+export function sendTerminalPaste(sessionId: string, text: string): void {
+  sendPasteFn?.(sessionId, text);
 }
 
 export function sendTerminalResize(sessionId: string, cols: number, rows: number): void {

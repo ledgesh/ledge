@@ -98,7 +98,7 @@ function PaneBody({ leaf, focused }: { leaf: LeafNode; focused: boolean }) {
   useLayoutEffect(() => {
     const container = hostRef.current;
     if (!container || !active) return;
-    attachEditor(container, active.docId, active.seed);
+    attachEditor(container, active, (note) => dispatch({ type: "noteCreated", docId: active.docId, note }));
     return () => detachEditor(active.docId);
     // Re-parent only when the active doc changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps

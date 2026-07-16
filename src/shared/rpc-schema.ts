@@ -9,18 +9,60 @@ export type RunEvent =
   | { id: string; kind: "output"; dataB64: string }
   | { id: string; kind: "ended"; exitCode: number };
 
+/** One note on disk. `path` is the note's identity; `title` is its filename. */
+export interface NoteMeta {
+  path: string;
+  title: string;
+  mtimeMs: number;
+}
+
 export type LedgeRPC = {
   bun: {
     requests: {
+      // The note store (notes.ts). Bun owns every path: the view holds paths only
+      // as opaque handles it got from here, and Bun rejects any that fall outside
+      // the notes root. Notes are plain .md files; `path` identifies the file,
+      // while `sessionId` (the docId) identifies the live editor and its shells.
+      noteList: { params: {}; response: { notes: NoteMeta[] } };
+      // null when the note is gone (deleted behind the app's back).
+      noteRead: { params: { path: string }; response: { text: string | null } };
+      // Atomic overwrite (temp file plus rename), so a crash mid-save can never
+      // truncate a note. Sent on a debounce as you type and on Cmd+S.
+      noteWrite: { params: { path: string; text: string }; response: { ok: boolean } };
+      // Allocate a file for a note that has none and write its first content,
+      // returning the note the view then saves to (and titles its tab from). Sent
+      // on a note's first edit, so a tab opened and never typed in creates nothing.
+      noteCreate: { params: { text: string }; response: { note: NoteMeta } };
       // Shells are per note: `sessionId` is the tab's stable docId. The Bun side
       // lazily spawns that note's inline-run shell on first runBlock and closes it
       // on closeSession, so a `cd` in one note never leaks into another.
       runBlock: { params: { sessionId: string; id: string; code: string }; response: { accepted: boolean } };
+      // Interrupt whatever a note's inline-run shell is currently running (SIGINT to
+      // its process group). Sent when a still-running block's output panel is
+      // dismissed: the note's shell is shared, so leaving the program in the
+      // foreground would keep that shell busy forever and swallow every later block.
+      // The shell itself ignores SIGINT and survives with its cwd/env.
+      cancelRun: { params: { sessionId: string }; response: { ok: boolean } };
+      // Match a note's inline-run shell winsize to the block's rendered terminal
+      // grid, so size-aware programs (paging, full-screen redraws) lay out correctly
+      // in the inline panel. The inline shell renders through xterm.js in the view.
+      inlineResize: { params: { sessionId: string; cols: number; rows: number }; response: { ok: boolean } };
+      // Keystrokes / pasted text from a block's inline terminal to the note's
+      // inline-run shell, so an interactive program running inline (a REPL, vim,
+      // claude) can be driven in place. Base64 like terminalInput. The view only
+      // sends this while the block's command is the running foreground process.
+      inlineInput: { params: { sessionId: string; dataB64: string }; response: { ok: boolean } };
       // Terminal drawer input and resize, targeting one note's terminal shell.
       // Keystrokes and pasted text go through terminalInput; the drawer's fit
       // computes cols/rows for terminalResize. This shell is separate from the
       // note's inline-run shell (the marker protocol stays isolated from raw xterm).
       terminalInput: { params: { sessionId: string; dataB64: string }; response: { ok: boolean } };
+      // Run a (possibly multi-line) block in the terminal AS IF PASTED: the Bun
+      // side wraps it in bracketed-paste markers and holds it until the shell has
+      // enabled bracketed-paste mode, so zsh buffers every line into one command
+      // (all echo together, then all output, under one prompt) instead of running
+      // line-by-line, and the markers never leak as literal text on a cold shell.
+      terminalPaste: { params: { sessionId: string; text: string }; response: { ok: boolean } };
       terminalResize: { params: { sessionId: string; cols: number; rows: number }; response: { ok: boolean } };
       // Attach lazily spawns the note's terminal shell (if needed), returns the
       // scrollback so far (so a freshly opened drawer shows the existing prompt and

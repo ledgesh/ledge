@@ -4,16 +4,19 @@ import { Button } from "@/components/ui/button";
 import { ResizeHandle } from "@/components/ResizeHandle";
 import { TerminalDrawer } from "@/terminal/TerminalDrawer";
 import { configureBridge } from "@/editor/bridge";
-import { sendTerminalText, closeSession, onTerminalExit } from "@/terminal/channel";
+import { sendTerminalPaste, closeSession, onTerminalExit } from "@/terminal/channel";
 import { Sidebar } from "@/workspace/Sidebar";
 import { WorkspaceView } from "@/workspace/WorkspaceView";
-import { allDocIds, useWorkspace, WorkspaceProvider } from "@/workspace/store";
+import { flushAll } from "@/notes/store";
+import { allDocIds, useWorkspace, WorkspaceProvider, type AppState } from "@/workspace/store";
 import { findLeaf, focusedDocId } from "@/workspace/tree";
 import { releaseEditor } from "@/workspace/editorPool";
 
-export default function App() {
+// `initial` is built in main.tsx from the notes already on disk, so the very
+// first render has the right note in its tab.
+export default function App({ initial }: { initial: AppState }) {
   return (
-    <WorkspaceProvider>
+    <WorkspaceProvider initial={initial}>
       <Shell />
     </WorkspaceProvider>
   );
@@ -53,11 +56,12 @@ function Shell() {
 
   const runInTerminal = useCallback(
     (sessionId: string, code: string) => {
-      const cmd = code.endsWith("\n") ? code : code + "\n";
+      // Bun wraps this as a bracketed paste and gates it on the shell being ready,
+      // so it is safe to fire even the instant a lazily-spawned shell starts.
       if (termOpen && sessionId === activeDocId) {
-        sendTerminalText(sessionId, cmd);
+        sendTerminalPaste(sessionId, code);
       } else {
-        pending.current = { sessionId, cmd };
+        pending.current = { sessionId, cmd: code };
         setTermOpen(true);
       }
     },
@@ -75,7 +79,7 @@ function Shell() {
 
   const onTerminalReady = useCallback(() => {
     if (pending.current) {
-      sendTerminalText(pending.current.sessionId, pending.current.cmd);
+      sendTerminalPaste(pending.current.sessionId, pending.current.cmd);
       pending.current = null;
     }
   }, []);
@@ -101,6 +105,18 @@ function Shell() {
     }
     prevDocs.current = live;
   }, [state]);
+
+  // Notes autosave on a short debounce, so the only real exposure is quitting (or
+  // crashing) inside that window. Flushing when the window loses focus and on
+  // pagehide narrows it to the case where you edit and quit in the same instant.
+  useEffect(() => {
+    window.addEventListener("blur", flushAll);
+    window.addEventListener("pagehide", flushAll);
+    return () => {
+      window.removeEventListener("blur", flushAll);
+      window.removeEventListener("pagehide", flushAll);
+    };
+  }, []);
 
   // Suppress the WebView's native context menu app-wide. In this dev WKWebView it
   // carries only debug items (Reload, Inspect Element), unwanted in a notes app.

@@ -9,9 +9,9 @@ import {
   type ViewUpdate,
   WidgetType,
 } from "@codemirror/view";
-import { toNative, type RunDestination } from "./bridge";
+import { toNative, cancelRun, resizeInline, inputInline, type RunDestination } from "./bridge";
 import { sessionIdFacet } from "./session";
-import { parseAnsi } from "./ansi";
+import { acquireInlineTerm, getInlineTerm, releaseInlineTerm } from "./inlineTerm";
 import { copyText } from "../lib/clipboard";
 
 // One inline run of a code block. Output accumulates as bytes arrive from native.
@@ -22,7 +22,6 @@ export interface RunInfo {
   lang: string | null;
   state: "running" | "done" | "error";
   exitCode: number | null;
-  text: string; // decoded output (plain text in phase 2a; xterm.js in 2b)
   startedAt: number;
   durationMs: number | null;
 }
@@ -39,9 +38,11 @@ interface Block {
 
 const addRun = StateEffect.define<RunInfo>();
 const setRunState = StateEffect.define<{ id: string; state: RunInfo["state"]; exitCode: number | null }>();
-const appendOutput = StateEffect.define<{ id: string; text: string }>();
 const removeRun = StateEffect.define<string>();
 // A full document replace from native (loading a note) drops all inline output.
+// Not dispatched yet (note persistence is unwired); when it is, it must interrupt
+// any still-running run first (see the dismiss button) or it will orphan a program
+// in the note's shared shell.
 export const clearRunsEffect = StateEffect.define<null>();
 // A no-op effect whose only purpose is to nudge the overlay plugin to re-measure
 // (it treats any effect as a trigger). Dispatched when a pooled editor is
@@ -79,8 +80,6 @@ const runsField = StateField.define<RunInfo[]>({
             ? { ...r, state: e.value.state, exitCode: e.value.exitCode, durationMs: r.startedAt ? Date.now() - r.startedAt : null }
             : r,
         );
-      } else if (e.is(appendOutput)) {
-        next = next.map((r) => (r.id === e.value.id ? { ...r, text: r.text + e.value.text } : r));
       } else if (e.is(removeRun)) {
         next = next.filter((r) => r.id !== e.value);
       }
@@ -170,7 +169,6 @@ function runBlock(view: EditorView, pos: number, destination: RunDestination): b
       lang: block.lang,
       state: "running",
       exitCode: null,
-      text: "",
       startedAt: Date.now(),
       durationMs: null,
     }),
@@ -181,83 +179,55 @@ function runBlock(view: EditorView, pos: number, destination: RunDestination): b
 
 // --- Output widget ---------------------------------------------------------
 //
-// The output panel is a block widget: it has to reserve vertical space and push
-// the following text down, which only an in-content block widget can do. It holds
-// no interactive controls, though. Its dismiss button lives in the overlay layer
-// (see `overlayPlugin`) so it sits outside the editable surface, where the browser
-// honours `cursor: pointer` instead of forcing the editing I-beam. The panel body
-// keeps the text I-beam on purpose: the output is selectable.
+// The output panel is a block widget: it reserves vertical space and pushes the
+// following text down, which only an in-content block widget can do. For a normal
+// run it renders the note's output through a real terminal emulator (xterm.js),
+// which lives in a pool keyed by run id (see inlineTerm.ts) because a widget is
+// rebuilt on every change but a terminal must persist and be written to
+// incrementally. The widget only re-parents the pooled DOM; handleRunEvent writes
+// bytes and updates the header imperatively. `eq` therefore only distinguishes id:
+// state/duration changes are pushed to the live DOM, so CodeMirror keeps the
+// terminal mounted across them. A block that launches a full-screen or interactive
+// program (vim, claude, a REPL) renders and is driven inline; the block's terminal
+// button stays the escape hatch to the full drawer.
+//
+// Its dismiss/copy buttons live in the overlay layer (see `overlayPlugin`) so they
+// sit outside the editable surface, where the browser honours `cursor: pointer`.
 
 class OutputWidget extends WidgetType {
   constructor(readonly run: RunInfo) {
     super();
   }
   eq(other: OutputWidget) {
-    return (
-      other.run.id === this.run.id &&
-      other.run.state === this.run.state &&
-      other.run.durationMs === this.run.durationMs &&
-      other.run.text.length === this.run.text.length
-    );
+    return other.run.id === this.run.id;
   }
-  toDOM(): HTMLElement {
-    const panel = document.createElement("div");
-    panel.className = "ledge-output";
-    panel.contentEditable = "false";
-    // Lets the overlay find this panel to anchor the dismiss button.
-    panel.dataset.ledgeRun = this.run.id;
-
-    const header = document.createElement("div");
-    header.className = "ledge-output-header";
-
-    const dot = document.createElement("span");
-    dot.className = `ledge-dot ledge-dot-${this.run.state}`;
-    header.appendChild(dot);
-
-    const status = document.createElement("span");
-    status.className = "ledge-status";
-    status.textContent = statusText(this.run);
-    header.appendChild(status);
-
-    const spacer = document.createElement("span");
-    spacer.style.flex = "1";
-    header.appendChild(spacer);
-
-    if (this.run.durationMs != null) {
-      const dur = document.createElement("span");
-      dur.className = "ledge-duration";
-      dur.textContent = formatDuration(this.run.durationMs);
-      header.appendChild(dur);
-    }
-    // Reserve room on the right so the overlaid copy + dismiss buttons never sit
-    // on top of the duration text.
-    const gap = document.createElement("span");
-    gap.style.width = "48px";
-    header.appendChild(gap);
-    panel.appendChild(header);
-
-    const pre = document.createElement("pre");
-    pre.className = "ledge-output-body";
-    // Render ANSI colour as styled spans instead of stripping it: block output
-    // comes from a real pty, so colour-aware tools emit escape sequences.
-    for (const chunk of parseAnsi(this.run.text)) {
-      if (chunk.style) {
-        const span = document.createElement("span");
-        span.setAttribute("style", chunk.style);
-        span.textContent = chunk.text;
-        pre.appendChild(span);
-      } else {
-        pre.appendChild(document.createTextNode(chunk.text));
-      }
-    }
-    panel.appendChild(pre);
-    return panel;
+  toDOM(view: EditorView): HTMLElement {
+    const sessionId = view.state.facet(sessionIdFacet);
+    const it = acquireInlineTerm(this.run.id, {
+      // Keep the note's inline shell winsize matched to the rendered grid, so
+      // size-aware programs lay out correctly inline.
+      onResize: (cols, rows) => resizeInline(sessionId, cols, rows),
+      // Keystrokes from the live block go to the note's inline shell, so an
+      // interactive program running inline can be typed into.
+      onInput: (data) => inputInline(sessionId, data),
+      // The terminal changes height out of band (first output, freeze); ask
+      // CodeMirror to re-measure so following content sits at the right offset.
+      onHeightChange: () => view.requestMeasure(),
+      // When the command finishes, hand focus back to the prose editor.
+      onFocusEditor: () => view.focus(),
+    });
+    it.setState(this.run);
+    return it.wrap;
   }
-  // Let the browser own events inside the panel. CodeMirror would otherwise treat
-  // a mousedown here as a click into the document and collapse the selection, so
-  // returning true is what makes the output body drag-selectable (and Cmd+C then
-  // copies the native selection). The panel is contenteditable=false, so nothing
-  // in it needs CodeMirror's handling.
+
+  // CodeMirror removed this widget (run dismissed, block deleted, note reloaded):
+  // drop the pooled terminal so it does not leak. Idempotent.
+  destroy() {
+    releaseInlineTerm(this.run.id);
+  }
+  // Let the browser own events inside the panel: xterm manages its own selection
+  // and focus, and CodeMirror would otherwise treat a mousedown here as a click
+  // into the document. The panel is contenteditable=false.
   ignoreEvent() {
     return true;
   }
@@ -281,14 +251,6 @@ function iconButton(markup: string, title: string, onDown: (e: MouseEvent) => vo
   // mousedown, not click: run before the editor moves the selection or steals focus.
   b.addEventListener("mousedown", onDown);
   return b;
-}
-
-// Output text with ANSI escapes removed, for copying to the clipboard (the panel
-// renders colour, but the clipboard should get plain text).
-function plainOutput(text: string): string {
-  return parseAnsi(text)
-    .map((c) => c.text)
-    .join("");
 }
 
 // Swap the copy glyph for a checkmark for a beat, as click feedback.
@@ -452,7 +414,11 @@ const overlayPlugin = ViewPlugin.fromClass(
         controls.push({
           from,
           lang,
-          top: c.top - base.top + 1,
+          // Anchor to the opening fence line's glyph (coordsAtPos), nudged up so the
+          // group sits in the panel's top padding at the card's top-right corner.
+          // Glyph-based (not the line's DOM rect) so it lands identically whether or
+          // not an output panel is present, in every engine.
+          top: c.top - base.top - 3,
           // The panel's right border sits ~12px in from the editor edge (the
           // .cm-content padding), so add a bit more to inset the buttons inside
           // the card instead of flush against its edge.
@@ -550,15 +516,22 @@ const overlayPlugin = ViewPlugin.fromClass(
         wrap.dataset.close = c.id;
         const copyBtn = iconButton(COPY_ICON, "Copy output", (e) => {
           e.preventDefault();
-          const run = this.view.state.field(runsField).find((r) => r.id === c.id);
-          if (!run) return;
-          copyText(plainOutput(run.text));
+          const text = getInlineTerm(c.id)?.plainText();
+          if (!text) return;
+          copyText(text);
           flashCopied(copyBtn);
         });
         wrap.appendChild(copyBtn);
         wrap.appendChild(
           iconButton(CLOSE_ICON, "Dismiss", (e) => {
             e.preventDefault();
+            // Dismissing a still-running block must not orphan its process: the
+            // note's shell is shared, so a program left in the foreground would
+            // keep it busy forever and silently swallow every later block. Only
+            // interrupt if THIS run is the running one; dismissing an old finished
+            // panel must not cancel whatever is running now.
+            const run = this.view.state.field(runsField).find((r) => r.id === c.id);
+            if (run?.state === "running") cancelRun(this.view.state.facet(sessionIdFacet));
             this.view.dispatch({ effects: removeRun.of(c.id) });
           }),
         );
@@ -626,13 +599,22 @@ export function handleRunEvent(view: EditorView, id: string, kind: string, paylo
       view.dispatch({ effects: setRunState.of({ id, state: "running", exitCode: null }) });
       break;
     case "output": {
-      const text = decodeBase64(String(payload));
-      view.dispatch({ effects: appendOutput.of({ id, text }) });
+      // Write raw bytes to the block's terminal (xterm owns the UTF-8 decode, so a
+      // multi-byte character split across chunks is handled). No state effect: the
+      // terminal renders incrementally, so output must not rebuild the widget.
+      getInlineTerm(id)?.write(bytesFromBase64(String(payload)));
       break;
     }
     case "finished": {
       const code = typeof payload === "number" ? payload : (payload as { exitCode?: number })?.exitCode ?? 0;
       view.dispatch({ effects: setRunState.of({ id, state: code === 0 ? "done" : "error", exitCode: code }) });
+      // Push the final state to the terminal header and shrink it to the used rows.
+      const run = view.state.field(runsField).find((r) => r.id === id);
+      const it = getInlineTerm(id);
+      if (run && it) {
+        it.setState(run);
+        it.freeze();
+      }
       break;
     }
   }
@@ -642,6 +624,12 @@ export function failAllRuns(view: EditorView): void {
   for (const r of view.state.field(runsField)) {
     if (r.state === "running") {
       view.dispatch({ effects: setRunState.of({ id: r.id, state: "error", exitCode: null }) });
+      const it = getInlineTerm(r.id);
+      if (it) {
+        const updated = view.state.field(runsField).find((x) => x.id === r.id);
+        if (updated) it.setState(updated);
+        it.freeze();
+      }
     }
   }
 }
@@ -653,22 +641,11 @@ function isRunnable(lang: string | null): boolean {
   return lang != null && RUNNABLE.has(lang.toLowerCase());
 }
 
-function statusText(run: RunInfo): string {
-  if (run.state === "running") return "Running";
-  if (run.state === "error") return run.exitCode != null ? `Exited ${run.exitCode}` : "Session ended";
-  return "Done";
-}
-
-function formatDuration(ms: number): string {
-  return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`;
-}
-
-function decodeBase64(b64: string): string {
+function bytesFromBase64(b64: string): Uint8Array {
   try {
-    const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
-    return new TextDecoder().decode(bytes);
+    return Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
   } catch {
-    return "";
+    return new Uint8Array(0);
   }
 }
 

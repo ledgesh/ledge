@@ -10,6 +10,7 @@
 import { BrowserView, BrowserWindow, Updater } from "electrobun/bun";
 import { PtyProcess } from "./pty";
 import { MarkerParser, markerCommand } from "./markers";
+import { createNote, listNotes, NOTES_ROOT, readNote, writeNote } from "./notes";
 import type { LedgeRPC } from "../shared/rpc-schema";
 
 // In the dev channel, prefer a running Vite dev server (bun run dev:hmr) so the
@@ -70,20 +71,54 @@ function inlineFor(sessionId: string): Inline {
 // live streaming: bytes still accumulate while detached, so re-attaching replays
 // the full history.
 const SB_CAP = 256 * 1024;
+// zsh toggles bracketed-paste mode around every prompt cycle: it emits BP_ENABLE
+// (CSI ? 2004 h) when its line editor is ready for input, and BP_DISABLE (2004 l)
+// the moment a foreground command starts running. A bracketed paste is only
+// interpreted while it is enabled; sent at any other time (cold shell, or mid
+// command) the markers echo raw (the `^[[200~` noise) and the text runs out of
+// order. So terminalPaste queues pastes and the drain loop releases them one per
+// prompt, tracking this live `promptReady` state from the two sequences.
+const BP_ENABLE = "\x1b[?2004h";
+const BP_DISABLE = "\x1b[?2004l";
 interface Term {
   term: PtyProcess;
   attached: boolean;
   chunks: Uint8Array[];
   len: number;
+  // Bracketed-paste sequencing: `promptReady` mirrors the shell's current mode
+  // (true only at an idle prompt). Pastes wait in `pasteQueue` and are released
+  // one at a time, each on a fresh prompt, so multiple queued commands never
+  // stack up inside one command's run. `scanTail` carries the last few output
+  // bytes across drain ticks so a toggle sequence split across a read boundary is
+  // still matched.
+  promptReady: boolean;
+  pasteQueue: string[];
+  scanTail: string;
 }
 const terms = new Map<string, Term>();
 function termFor(sessionId: string): Term {
   let t = terms.get(sessionId);
   if (!t) {
-    t = { term: spawnShell(), attached: false, chunks: [], len: 0 };
+    t = { term: spawnShell(), attached: false, chunks: [], len: 0, promptReady: false, pasteQueue: [], scanTail: "" };
     terms.set(sessionId, t);
   }
   return t;
+}
+
+// Wrap a block as a bracketed paste + trailing Enter, exactly what a terminal
+// emulator sends on paste. Trailing newlines are trimmed so they do not add blank
+// buffer lines.
+function bracketedPaste(text: string): string {
+  return `\x1b[200~${text.replace(/\n+$/, "")}\x1b[201~\r`;
+}
+// Release the next queued paste if the shell is idle at a prompt. Sending it
+// submits the command (the trailing \r), which drops the shell out of prompt
+// mode, so we optimistically clear `promptReady`: the remaining queue then waits
+// for the shell's next BP_ENABLE, giving exactly one command per prompt.
+function flushPaste(t: Term): void {
+  if (!t.promptReady || t.pasteQueue.length === 0) return;
+  t.term.write(t.pasteQueue.shift()!);
+  t.promptReady = false;
 }
 function sbPush(t: Term, d: Uint8Array): void {
   t.chunks.push(d);
@@ -112,6 +147,17 @@ const rpc = BrowserView.defineRPC<LedgeRPC>({
   maxRequestTime: 10_000,
   handlers: {
     requests: {
+      // --- note store ------------------------------------------------------
+      // Every path these take is checked against the notes root inside notes.ts,
+      // so a compromised or buggy view cannot read or write outside ~/.ledge.
+      noteList: async () => ({ notes: await listNotes() }),
+      noteRead: async ({ path }) => ({ text: await readNote(path) }),
+      noteWrite: async ({ path, text }) => {
+        await writeNote(path, text);
+        return { ok: true };
+      },
+      noteCreate: async ({ text }) => ({ note: await createNote(text) }),
+
       runBlock: async ({ sessionId, id, code }) => {
         // The block body goes to a file that we source, rather than being inlined
         // into the command line. That sidesteps quoting, heredocs, and line
@@ -122,8 +168,46 @@ const rpc = BrowserView.defineRPC<LedgeRPC>({
         inlineFor(sessionId).shell.write(markerCommand(`source ${path}`, NONCE, id));
         return { accepted: true };
       },
+      cancelRun: ({ sessionId }) => {
+        // SIGINT the note's inline shell's process group, interrupting whatever
+        // block is running in the foreground. killpg rather than writing a 0x03
+        // byte: the tty only turns Ctrl-C into a signal in canonical mode, so a
+        // program that put the terminal in raw mode (a REPL, vim, claude) would
+        // just read the byte as input and keep running. .get, not inlineFor, so a
+        // note with no shell never spawns one just to be cancelled.
+        //
+        // The foreground job shares the shell's process group here (job control is
+        // off on this pty), so killpg reaches it; interactive zsh ignores SIGINT,
+        // so the shell survives with its cwd/env intact for the note's next block.
+        // The wrapped `source` then returns and the run ends on its D marker.
+        inlines.get(sessionId)?.shell.interrupt();
+        return { ok: true };
+      },
+      inlineResize: ({ sessionId, cols, rows }) => {
+        // Resize the note's inline shell so block output renders at the grid the
+        // view shows. inlineFor (not .get) so a resize that arrives just before the
+        // run still targets the same shell the run will reuse.
+        inlineFor(sessionId).shell.resize(cols, rows);
+        return { ok: true };
+      },
+      inlineInput: ({ sessionId, dataB64 }) => {
+        // Feed keystrokes to the note's inline shell (only sent while a block's
+        // program is the running foreground process). .get, not inlineFor: never
+        // spawn a shell just to receive input for a note that has none.
+        inlines.get(sessionId)?.shell.write(fromB64(dataB64));
+        return { ok: true };
+      },
       terminalInput: ({ sessionId, dataB64 }) => {
         termFor(sessionId).term.write(fromB64(dataB64));
+        return { ok: true };
+      },
+      terminalPaste: ({ sessionId, text }) => {
+        const t = termFor(sessionId);
+        // Always queue, then try to release immediately. If the shell is idle at a
+        // prompt the paste goes out now; if it is cold or mid-command it waits for
+        // the next prompt, so pastes never echo raw or run out of order.
+        t.pasteQueue.push(bracketedPaste(text));
+        flushPaste(t);
         return { ok: true };
       },
       terminalResize: ({ sessionId, cols, rows }) => {
@@ -209,6 +293,19 @@ setInterval(() => {
     if (termData) {
       sbPush(t, termData);
       if (t.attached) rpc.send.terminalOutput({ sessionId, dataB64: toB64(termData) });
+      // Track the shell's bracketed-paste mode from its enable/disable sequences
+      // and release a queued paste whenever a fresh prompt appears. The last
+      // occurrence in the chunk wins (a chunk can carry a full prompt cycle). Carry
+      // one char less than a full sequence so a completed toggle at the boundary is
+      // not re-matched next tick, while a genuinely split sequence still is.
+      const scan = t.scanTail + Buffer.from(termData).toString("latin1");
+      const iEnable = scan.lastIndexOf(BP_ENABLE);
+      const iDisable = scan.lastIndexOf(BP_DISABLE);
+      if (iEnable !== -1 || iDisable !== -1) {
+        t.promptReady = iEnable > iDisable;
+        flushPaste(t);
+      }
+      t.scanTail = scan.slice(-(BP_ENABLE.length - 1));
     }
     // The user typed `exit`: tear the shell down and tell the drawer to close.
     if (t.term.exited) {
@@ -231,6 +328,6 @@ process.on("exit", () => {
   for (const t of terms.values()) t.term.close();
 });
 
-console.log("[bun] Ledge started (per-note shells, spawned on first use)");
+console.log("[bun] Ledge started (per-note shells, spawned on first use); notes root:", NOTES_ROOT);
 void mainWindow;
 

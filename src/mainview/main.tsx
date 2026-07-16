@@ -1,10 +1,12 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import Electrobun, { Electroview } from "electrobun/view";
-import type { LedgeRPC } from "../shared/rpc-schema";
+import type { LedgeRPC, NoteMeta } from "../shared/rpc-schema";
 import { configureBridge, dispatchRunEvent } from "./editor/bridge";
-import { configureTerminal, dispatchTerminalOutput, dispatchTerminalExit } from "./terminal/channel";
+import { bytesToB64, configureTerminal, dispatchTerminalOutput, dispatchTerminalExit } from "./terminal/channel";
+import { configureNotes } from "./notes/channel";
 import { configureClipboard } from "./lib/clipboard";
+import { initialState } from "./workspace/store";
 import "./index.css";
 import App from "./App";
 
@@ -28,11 +30,23 @@ configureBridge({
   runInline: (sessionId, id, code) => {
     void electrobun.rpc!.request.runBlock({ sessionId, id, code });
   },
+  cancelRun: (sessionId) => {
+    void electrobun.rpc!.request.cancelRun({ sessionId });
+  },
+  resizeInline: (sessionId, cols, rows) => {
+    void electrobun.rpc!.request.inlineResize({ sessionId, cols, rows });
+  },
+  inputInline: (sessionId, data) => {
+    void electrobun.rpc!.request.inlineInput({ sessionId, dataB64: bytesToB64(new TextEncoder().encode(data)) });
+  },
 });
 
 configureTerminal({
   sendInput: (sessionId, dataB64) => {
     void electrobun.rpc!.request.terminalInput({ sessionId, dataB64 });
+  },
+  sendPaste: (sessionId, text) => {
+    void electrobun.rpc!.request.terminalPaste({ sessionId, text });
   },
   sendResize: (sessionId, cols, rows) => {
     void electrobun.rpc!.request.terminalResize({ sessionId, cols, rows });
@@ -53,8 +67,32 @@ configureClipboard({
   read: () => electrobun.rpc!.request.clipboardRead({}).then((r) => r.text),
 });
 
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-);
+// Bun owns the notes folder; the view only ever holds paths it got from here.
+configureNotes({
+  list: () => electrobun.rpc!.request.noteList({}).then((r) => r.notes),
+  read: (path) => electrobun.rpc!.request.noteRead({ path }).then((r) => r.text),
+  write: async (path, text) => {
+    await electrobun.rpc!.request.noteWrite({ path, text });
+  },
+  create: (text) => electrobun.rpc!.request.noteCreate({ text }).then((r) => r.note),
+});
+
+// Read the notes folder before the first render, so the app opens straight into
+// the note you last edited instead of flashing an empty tab and swapping it out.
+// A failure here (Bun unreachable) must not leave a blank window: fall through to
+// the no-notes state, which is a fresh unsaved note.
+async function boot(): Promise<void> {
+  let notes: NoteMeta[] = [];
+  try {
+    notes = (await electrobun.rpc!.request.noteList({})).notes;
+  } catch (err) {
+    console.error("[notes] could not list the notes folder", err);
+  }
+  createRoot(document.getElementById("root")!).render(
+    <StrictMode>
+      <App initial={initialState(notes)} />
+    </StrictMode>,
+  );
+}
+
+void boot();

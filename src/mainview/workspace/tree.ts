@@ -9,10 +9,17 @@ export type SplitDir = "row" | "col"; // row: children sit left|right; col: top|
 // One tab in a pane. `docId` is the stable key into the editor pool
 // (editorPool.ts): it outlives tab moves and re-parenting, which is what keeps a
 // CodeMirror instance (and its undo/scroll/inline output) alive across switches.
+//
+// `path` is the note's file, and is null until the note's first edit allocates
+// one (notes/store.ts). It is kept apart from docId on purpose: docId identifies
+// the live session (the pooled editor and the note's two shells), path identifies
+// the bytes on disk. `seed` supplies the starting text and only means anything
+// while `path` is null; a tab with a path loads its content from the file.
 export interface TabState {
   id: string;
   title: string;
   docId: string;
+  path: string | null;
   seed: "demo" | "scratch";
 }
 
@@ -51,8 +58,17 @@ export function uid(prefix: string): string {
 
 // --- tab / leaf factories --------------------------------------------------
 
+// A new, unsaved note: no file until it is typed in.
 export function makeTab(seed: "demo" | "scratch", title = "Untitled"): TabState {
-  return { id: uid("tab"), title, docId: uid("doc"), seed };
+  return { id: uid("tab"), title, docId: uid("doc"), path: null, seed };
+}
+
+// A tab onto a note that already exists on disk. Its seed is never used (the
+// content comes from the file), and its docId is fresh: opening the same note
+// twice would give two independent sessions, which is why path and docId are
+// separate keys.
+export function makeNoteTab(path: string, title: string): TabState {
+  return { id: uid("tab"), title, docId: uid("doc"), path, seed: "scratch" };
 }
 
 export function makeLeaf(tab: TabState): LeafNode {
@@ -101,6 +117,26 @@ export function updateLeaf(node: PaneNode, paneId: string, fn: (leaf: LeafNode) 
   if (node.kind === "leaf") return node.id === paneId ? fn(node) : node;
   const a = updateLeaf(node.children[0], paneId, fn);
   const b = updateLeaf(node.children[1], paneId, fn);
+  if (a === node.children[0] && b === node.children[1]) return node;
+  return { ...node, children: [a, b] };
+}
+
+// Rewrite every tab in the tree through `fn`, rebuilding only the branches that
+// actually changed (so panes whose tabs are untouched keep their identity and
+// React skips them). Used to bind a note's freshly-allocated file to its tab,
+// which can be in any pane of any workspace by the time the save lands.
+export function mapTabs(node: PaneNode, fn: (tab: TabState) => TabState): PaneNode {
+  if (node.kind === "leaf") {
+    let changed = false;
+    const tabs = node.tabs.map((t) => {
+      const next = fn(t);
+      if (next !== t) changed = true;
+      return next;
+    });
+    return changed ? { ...node, tabs } : node;
+  }
+  const a = mapTabs(node.children[0], fn);
+  const b = mapTabs(node.children[1], fn);
   if (a === node.children[0] && b === node.children[1]) return node;
   return { ...node, children: [a, b] };
 }
