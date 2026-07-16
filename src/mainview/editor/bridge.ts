@@ -90,3 +90,34 @@ export function onRunEvent(sink: (ev: RunEvent) => void): () => void {
 export function dispatchRunEvent(ev: RunEvent): void {
   for (const sink of runEventSinks) sink(ev);
 }
+
+// --- terminal-shell busy state ----------------------------------------------
+//
+// Which notes' terminal shells are mid-job, pushed from Bun (see terminalBusy in
+// rpc-schema.ts). The block chrome reads this to gray out its terminal button:
+// a block sent to a busy shell waits in a queue, and a queue nobody can see is
+// what makes people click the button again.
+//
+// Absent means free, so a note whose shell has never been opened, or whose shell
+// is gone, reads as ready without needing an entry.
+const termBusy = new Set<string>();
+const busySinks = new Set<() => void>();
+
+export function setTerminalBusy(sessionId: string, busy: boolean): void {
+  if (busy === termBusy.has(sessionId)) return;
+  if (busy) termBusy.add(sessionId);
+  else termBusy.delete(sessionId);
+  for (const sink of busySinks) sink();
+}
+
+export function isTerminalBusy(sessionId: string): boolean {
+  return termBusy.has(sessionId);
+}
+
+// Ping me when any shell's busy state changes, so the chrome can re-render.
+export function onTerminalBusyChange(sink: () => void): () => void {
+  busySinks.add(sink);
+  return () => {
+    busySinks.delete(sink);
+  };
+}

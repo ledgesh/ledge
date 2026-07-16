@@ -1,5 +1,5 @@
 import { syntaxTree } from "@codemirror/language";
-import { StateEffect, StateField, type Extension, type Range } from "@codemirror/state";
+import { StateEffect, StateField, type EditorState, type Extension, type Range } from "@codemirror/state";
 import {
   Decoration,
   type DecorationSet,
@@ -9,11 +9,19 @@ import {
   type ViewUpdate,
   WidgetType,
 } from "@codemirror/view";
-import { toNative, cancelRun, resizeInline, inputInline, type RunDestination } from "./bridge";
+import {
+  toNative,
+  cancelRun,
+  isTerminalBusy,
+  onTerminalBusyChange,
+  resizeInline,
+  inputInline,
+  type RunDestination,
+} from "./bridge";
 import { sessionIdFacet } from "./session";
 import { acquireInlineTerm, getInlineTerm, releaseInlineTerm } from "./inlineTerm";
 import { copyText } from "../lib/clipboard";
-import { keyOf } from "../commands/keys";
+import { keyOf, type CommandId } from "../commands/keys";
 import { tooltip } from "../commands/format";
 
 // One inline run of a code block. Output accumulates as bytes arrive from native.
@@ -149,9 +157,44 @@ function nextId(): string {
   return `web-${idCounter}-${Date.now()}`;
 }
 
+// Whether this note's inline shell is mid-block. A note has one inline shell, so
+// any running block closes every block in the note, not just the one that is going.
+//
+// Known gap, and a real one: the blocks of a note are not independent, and this is
+// the blunt way to say so. Letting a second block through while the first runs does
+// not queue it politely. The shell is mid-job, so the tty echoes the second block's
+// marker command straight into the FIRST block's output, and the parser, which can
+// only go by markers, files that echo under the running block. You get the other
+// block's plumbing printed inside the panel you are watching.
+//
+// The fix is not on this side: Bun should hold the bytes until the shell is back at
+// a prompt, rather than writing them into a busy one. It already does exactly this
+// for the drawer (pasteQueue / promptReady in bun/index.ts), and the inline shell
+// wants the same treatment. Until then, one block at a time per note.
+export function isInlineBusy(state: EditorState): boolean {
+  return state.field(runsField).some((r) => r.state === "running");
+}
+
+// Whether a block can be sent to `destination` right now. Both shells are single
+// and serial: a second block sent while one is running does not run, it waits, and
+// the wait is not something either shell can currently show.
+//
+// Runs are per editor and an editor is per note, and terminal busy is keyed by the
+// note's session, so neither rule reaches across notes: their shells are separate
+// and so is their state.
+export function canRun(view: EditorView, destination: RunDestination): boolean {
+  return destination === "terminal"
+    ? !isTerminalBusy(view.state.facet(sessionIdFacet))
+    : !isInlineBusy(view.state);
+}
+
 export function runBlock(view: EditorView, pos: number, destination: RunDestination): boolean {
   const block = blockAt(view.state, pos);
   if (!block || !isRunnable(block.lang)) return false;
+  // Checked here rather than only on the buttons, so the keymap and the palette
+  // are held to the same rule: a disabled-looking button and a live Cmd+Enter
+  // would just move the invisible queue somewhere else.
+  if (!canRun(view, destination)) return false;
 
   // This note's id, so the run reaches this note's own shell (see bridge.ts).
   const sessionId = view.state.facet(sessionIdFacet);
@@ -245,6 +288,21 @@ const COPY_ICON = svg('<rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><pat
 const CHECK_ICON = svg('<path d="M3.5 8.4l3 3 6-6.8"/>');
 const CLOSE_ICON = svg('<path d="M4 4l8 8M12 4l-8 8"/>');
 
+// Why a run button is off. Worth spelling out on the button itself: "nothing
+// happened when I clicked" is the problem we are fixing, and a gray button with no
+// reason is a quieter version of the same mystery.
+const INLINE_BUSY = "This note's shell is running a block";
+const TERM_BUSY = "This note's terminal is busy";
+
+// Gray out a run button while its shell cannot take a block. The native `disabled`
+// does the work: it stops the mousedown, so the click cannot queue anything, and
+// there is no second code path to keep in step with the CSS.
+function setBusy(btn: HTMLButtonElement | null, busy: boolean, id: CommandId, why: string): void {
+  if (!btn) return;
+  btn.disabled = busy;
+  btn.title = busy ? why : tooltip(id);
+}
+
 function iconButton(markup: string, title: string, onDown: (e: MouseEvent) => void): HTMLButtonElement {
   const b = document.createElement("button");
   b.className = "ledge-btn";
@@ -287,6 +345,10 @@ interface ControlSpec {
   top: number;
   right: number;
   caret: boolean;
+  // Per destination, because a note's two shells are independent: a block can be
+  // running inline and still free to send to the drawer.
+  runBusy: boolean;
+  termBusy: boolean;
 }
 interface CloseSpec {
   id: string;
@@ -308,6 +370,7 @@ const overlayPlugin = ViewPlugin.fromClass(
     onMove: (e: MouseEvent) => void;
     onScroll: () => void;
     onKeyDown: (e: KeyboardEvent) => void;
+    offBusy: () => void;
 
     constructor(readonly view: EditorView) {
       this.layer = document.createElement("div");
@@ -329,6 +392,10 @@ const overlayPlugin = ViewPlugin.fromClass(
       // handling. Scoped to this editor's panels, so with pooled editors only the
       // one holding the selection acts.
       this.onKeyDown = (e) => this.handleCopyKey(e);
+      // The terminal drawer's shell going busy or idle is invisible to the editor's
+      // own update cycle (no doc, geometry, or run-state change), so the chrome has
+      // to be told. Every editor subscribes; read() filters by its own note.
+      this.offBusy = onTerminalBusyChange(() => this.schedule());
       document.addEventListener("keydown", this.onKeyDown, true);
       view.scrollDOM.addEventListener("mousemove", this.onMove);
       view.scrollDOM.addEventListener("scroll", this.onScroll, { passive: true });
@@ -412,6 +479,11 @@ const overlayPlugin = ViewPlugin.fromClass(
       const padRight = parseFloat(getComputedStyle(view.contentDOM).paddingRight) || 0;
       const cardInset = base.right - (content.right - padRight);
 
+      // Both shells are per note, so their busy state is the same for every block
+      // in this editor: measure it once, not once per block.
+      const runBusy = isInlineBusy(view.state);
+      const termBusy = isTerminalBusy(view.state.facet(sessionIdFacet));
+
       const controls: ControlSpec[] = [];
       eachBlock(view.state, (from, to, lang) => {
         const openLine = view.state.doc.lineAt(from);
@@ -433,6 +505,8 @@ const overlayPlugin = ViewPlugin.fromClass(
           // Sit inside the card's top-right corner rather than flush against it.
           right: cardInset + 10,
           caret: head >= from && head <= to,
+          runBusy,
+          termBusy,
         });
       });
 
@@ -478,6 +552,8 @@ const overlayPlugin = ViewPlugin.fromClass(
         el.style.top = `${c.top}px`;
         el.style.right = `${c.right}px`;
         el.classList.toggle("caret", c.caret);
+        setBusy(el.querySelector('[data-act="run"]'), c.runBusy, "block.runInline", INLINE_BUSY);
+        setBusy(el.querySelector('[data-act="term"]'), c.termBusy, "block.runInTerminal", TERM_BUSY);
       }
       for (const c of m.closes) {
         const el = this.layer.querySelector<HTMLElement>(`.ledge-close-wrap[data-close="${c.id}"]`);
@@ -494,18 +570,18 @@ const overlayPlugin = ViewPlugin.fromClass(
         group.className = "ledge-ctl-group";
         group.dataset.block = String(c.from);
         if (isRunnable(c.lang)) {
-          group.appendChild(
-            iconButton(PLAY_ICON, tooltip("block.runInline"), (e) => {
-              e.preventDefault();
-              runBlock(this.view, c.from, "inline");
-            }),
-          );
-          group.appendChild(
-            iconButton(TERMINAL_ICON, tooltip("block.runInTerminal"), (e) => {
-              e.preventDefault();
-              runBlock(this.view, c.from, "terminal");
-            }),
-          );
+          const runBtn = iconButton(PLAY_ICON, tooltip("block.runInline"), (e) => {
+            e.preventDefault();
+            runBlock(this.view, c.from, "inline");
+          });
+          runBtn.dataset.act = "run";
+          group.appendChild(runBtn);
+          const termBtn = iconButton(TERMINAL_ICON, tooltip("block.runInTerminal"), (e) => {
+            e.preventDefault();
+            runBlock(this.view, c.from, "terminal");
+          });
+          termBtn.dataset.act = "term";
+          group.appendChild(termBtn);
         }
         const copyBtn = iconButton(COPY_ICON, tooltip("block.copy"), (e) => {
           e.preventDefault();
@@ -554,6 +630,7 @@ const overlayPlugin = ViewPlugin.fromClass(
     }
 
     destroy() {
+      this.offBusy();
       document.removeEventListener("keydown", this.onKeyDown, true);
       this.view.scrollDOM.removeEventListener("mousemove", this.onMove);
       this.view.scrollDOM.removeEventListener("scroll", this.onScroll);

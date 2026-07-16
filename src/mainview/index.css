@@ -246,6 +246,16 @@ body {
 .ledge-btn svg {
   pointer-events: none;
 }
+/* A run button whose shell is mid-job. Dimmed rather than hidden, so the control
+   stays where it was and reads as "not now" instead of vanishing under the
+   pointer. `disabled` already swallows the click. */
+.ledge-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+.ledge-btn:disabled:hover {
+  background: transparent;
+}
 .ledge-btn:hover {
   background: var(--btn-hover);
   color: var(--fg);

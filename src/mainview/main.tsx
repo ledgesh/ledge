@@ -2,7 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import Electrobun, { Electroview } from "electrobun/view";
 import type { LedgeRPC, NoteMeta, TrashMeta } from "../shared/rpc-schema";
-import { configureBridge, dispatchRunEvent } from "./editor/bridge";
+import { configureBridge, dispatchRunEvent, setTerminalBusy } from "./editor/bridge";
 import { bytesToB64, configureTerminal, dispatchTerminalOutput, dispatchTerminalExit } from "./terminal/channel";
 import { configureNotes } from "./notes/channel";
 import { configureClipboard } from "./lib/clipboard";
@@ -19,6 +19,7 @@ const rpc = Electroview.defineRPC<LedgeRPC>({
     messages: {
       runEvent: (ev) => dispatchRunEvent(ev),
       terminalOutput: ({ sessionId, dataB64 }) => dispatchTerminalOutput(sessionId, dataB64),
+      terminalBusy: ({ sessionId, busy }) => setTerminalBusy(sessionId, busy),
       terminalExit: ({ sessionId }) => dispatchTerminalExit(sessionId),
     },
   },

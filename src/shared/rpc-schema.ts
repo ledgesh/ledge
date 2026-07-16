@@ -134,6 +134,12 @@ export type LedgeRPC = {
       // lets the mounted drawer ignore output from a note other than the one it
       // currently shows (e.g. brief overlap during a tab switch).
       terminalOutput: { sessionId: string; dataB64: string };
+      // Whether a note's terminal shell is mid-job: false only when it is sitting
+      // at an idle prompt with nothing queued behind it. Only Bun can know this (it
+      // reads the shell's bracketed-paste mode; see BP_ENABLE in index.ts), and the
+      // view needs it because a block sent to a busy shell is queued rather than
+      // run: without this the queue is invisible and the button lies.
+      terminalBusy: { sessionId: string; busy: boolean };
       // A note's terminal shell exited on its own (the user typed `exit`). The Bun
       // side has already torn the shell down; the view closes the drawer if it is
       // showing that note. Reopening the drawer spawns a fresh shell.

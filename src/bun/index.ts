@@ -107,12 +107,34 @@ interface Term {
   promptReady: boolean;
   pasteQueue: string[];
   scanTail: string;
+  // `promptReady` is false for two very different reasons: a job is running, or the
+  // shell has not printed its first prompt yet. Only the first means busy, so the
+  // drawer's button is not dead for the ~ms a cold shell takes to come up.
+  everReady: boolean;
+  // Last busy state pushed to the view, so the drain loop only sends on a change.
+  sentBusy: boolean;
+}
+
+// A shell is busy when it cannot take a block right now: something is running, or
+// pastes are already waiting on the prompt behind it.
+function isBusy(t: Term): boolean {
+  return t.everReady && (!t.promptReady || t.pasteQueue.length > 0);
 }
 const terms = new Map<string, Term>();
 function termFor(sessionId: string): Term {
   let t = terms.get(sessionId);
   if (!t) {
-    t = { term: spawnShell(), attached: false, chunks: [], len: 0, promptReady: false, pasteQueue: [], scanTail: "" };
+    t = {
+      term: spawnShell(),
+      attached: false,
+      chunks: [],
+      len: 0,
+      promptReady: false,
+      pasteQueue: [],
+      scanTail: "",
+      everReady: false,
+      sentBusy: false,
+    };
     terms.set(sessionId, t);
   }
   return t;
@@ -322,13 +344,24 @@ setInterval(() => {
       const iDisable = scan.lastIndexOf(BP_DISABLE);
       if (iEnable !== -1 || iDisable !== -1) {
         t.promptReady = iEnable > iDisable;
+        if (t.promptReady) t.everReady = true;
         flushPaste(t);
       }
       t.scanTail = scan.slice(-(BP_ENABLE.length - 1));
     }
+    // Push busy on every tick, not just when bytes arrive: queueing a paste changes
+    // it with no output at all, and the button has to gray out the moment it does.
+    const busy = isBusy(t);
+    if (busy !== t.sentBusy) {
+      t.sentBusy = busy;
+      rpc.send.terminalBusy({ sessionId, busy });
+    }
     // The user typed `exit`: tear the shell down and tell the drawer to close.
     if (t.term.exited) {
       if (t.attached) rpc.send.terminalExit({ sessionId });
+      // The shell is gone, so nothing is running on it. Without this the note's
+      // terminal button would stay grayed out forever on a shell that died mid-job.
+      if (busy) rpc.send.terminalBusy({ sessionId, busy: false });
       t.term.close();
       terms.delete(sessionId);
     }
