@@ -182,6 +182,41 @@ describe("workspaces", () => {
   });
 });
 
+describe("moveWorkspace", () => {
+  // Build a state with three workspaces; ids [0,1,2].
+  function three(): AppState {
+    return run({ type: "newWorkspace" }, { type: "newWorkspace" });
+  }
+
+  test("reorders a workspace to a later slot (index counts the pre-removal list)", () => {
+    const s0 = three();
+    const ids = s0.workspaces.map((w) => w.id);
+    // Drop the first workspace at the end (toIndex 3, past its own slot).
+    const s = reducer(s0, { type: "moveWorkspace", id: ids[0], toIndex: 3 });
+    expect(s.workspaces.map((w) => w.id)).toEqual([ids[1], ids[2], ids[0]]);
+    expect(s.selectedId).toBe(s0.selectedId); // selection is unchanged by a move
+  });
+
+  test("reorders a workspace to an earlier slot", () => {
+    const s0 = three();
+    const ids = s0.workspaces.map((w) => w.id);
+    const s = reducer(s0, { type: "moveWorkspace", id: ids[2], toIndex: 0 });
+    expect(s.workspaces.map((w) => w.id)).toEqual([ids[2], ids[0], ids[1]]);
+  });
+
+  test("dropping onto its own slot is a no-op", () => {
+    const s0 = three();
+    const ids = s0.workspaces.map((w) => w.id);
+    expect(reducer(s0, { type: "moveWorkspace", id: ids[1], toIndex: 1 })).toBe(s0);
+    expect(reducer(s0, { type: "moveWorkspace", id: ids[1], toIndex: 2 })).toBe(s0);
+  });
+
+  test("ignores an unknown id", () => {
+    const s0 = three();
+    expect(reducer(s0, { type: "moveWorkspace", id: "ghost", toIndex: 0 })).toBe(s0);
+  });
+});
+
 describe("allDocIds", () => {
   test("collects every tab's docId across all workspaces", () => {
     const s = run({ type: "newTab" }, { type: "newWorkspace" });

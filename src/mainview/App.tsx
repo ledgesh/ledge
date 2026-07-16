@@ -80,6 +80,16 @@ function Shell() {
     prevDocs.current = live;
   }, [state]);
 
+  // Suppress the WebView's native context menu app-wide. In this dev WKWebView it
+  // carries only debug items (Reload, Inspect Element), unwanted in a notes app.
+  // Our own right-click menus (e.g. the workspace strip) call preventDefault in
+  // their handlers and render custom menus, so this doesn't interfere with them.
+  useEffect(() => {
+    const onCtx = (e: MouseEvent) => e.preventDefault();
+    window.addEventListener("contextmenu", onCtx);
+    return () => window.removeEventListener("contextmenu", onCtx);
+  }, []);
+
   // Layout commands, mirroring the Swift menu bar. The editor doesn't bind these,
   // so they bubble to the window.
   useEffect(() => {

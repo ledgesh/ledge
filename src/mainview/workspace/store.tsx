@@ -44,6 +44,7 @@ export type Action =
   | { type: "newWorkspace" }
   | { type: "closeWorkspace"; id: string }
   | { type: "renameWorkspace"; id: string; name: string }
+  | { type: "moveWorkspace"; id: string; toIndex: number }
   | { type: "focusPane"; paneId: string }
   | { type: "newTab"; paneId?: string }
   | { type: "closeTab"; paneId: string; tabId: string }
@@ -95,6 +96,19 @@ export function reducer(state: AppState, action: Action): AppState {
         ...state,
         workspaces: state.workspaces.map((w) => (w.id === action.id ? { ...w, name } : w)),
       };
+    }
+
+    case "moveWorkspace": {
+      const from = state.workspaces.findIndex((w) => w.id === action.id);
+      if (from < 0) return state;
+      // `toIndex` counts the strip as displayed at drop time, so the list still
+      // contains the dragged row: an index past its own slot shifts down one
+      // after removal (the same bookkeeping moveTab does within a pane).
+      const without = state.workspaces.filter((w) => w.id !== action.id);
+      const idx = Math.max(0, Math.min(action.toIndex > from ? action.toIndex - 1 : action.toIndex, without.length));
+      if (idx === from) return state; // dropped back onto its own slot
+      const workspaces = [...without.slice(0, idx), state.workspaces[from], ...without.slice(idx)];
+      return { ...state, workspaces };
     }
 
     case "focusPane":
