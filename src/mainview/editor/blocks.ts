@@ -403,6 +403,15 @@ const overlayPlugin = ViewPlugin.fromClass(
       const base = view.dom.getBoundingClientRect();
       const head = view.state.selection.main.head;
 
+      // The card's right border, measured rather than assumed. A block's card is a
+      // line decoration, so it spans `.cm-content`'s content box: its right edge
+      // moves whenever that box narrows, and a note long enough to scroll narrows it
+      // by the scrollbar's width. Deriving the inset from the editor's outer rect
+      // instead would leave the buttons where the card used to end, hanging off it.
+      const content = view.contentDOM.getBoundingClientRect();
+      const padRight = parseFloat(getComputedStyle(view.contentDOM).paddingRight) || 0;
+      const cardInset = base.right - (content.right - padRight);
+
       const controls: ControlSpec[] = [];
       eachBlock(view.state, (from, to, lang) => {
         const openLine = view.state.doc.lineAt(from);
@@ -421,10 +430,8 @@ const overlayPlugin = ViewPlugin.fromClass(
           // Glyph-based (not the line's DOM rect) so it lands identically whether or
           // not an output panel is present, in every engine.
           top: c.top - base.top - 3,
-          // The panel's right border sits ~12px in from the editor edge (the
-          // .cm-content padding), so add a bit more to inset the buttons inside
-          // the card instead of flush against its edge.
-          right: 22,
+          // Sit inside the card's top-right corner rather than flush against it.
+          right: cardInset + 10,
           caret: head >= from && head <= to,
         });
       });
