@@ -7,6 +7,7 @@ import { syntaxHighlighting, HighlightStyle } from "@codemirror/language";
 import { tags } from "@lezer/highlight";
 import { toNative } from "./bridge";
 import { ledgeBlocks } from "./blocks";
+import { wrapping } from "./wrap";
 import { copyText, readClipboard } from "../lib/clipboard";
 
 // Ledge shows raw Markdown and styles it, rather than hiding the syntax the way
@@ -160,6 +161,7 @@ export function createEditor(parent: HTMLElement, doc: string): EditorView {
         history(),
         drawSelection(),
         lineNumbers(),
+        wrapping(),
         appKeymap,
         clipboardKeymap,
         ledgeBlocks(),
