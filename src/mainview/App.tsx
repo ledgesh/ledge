@@ -10,17 +10,22 @@ import { WorkspaceView } from "@/workspace/WorkspaceView";
 import { flushAll } from "@/notes/store";
 import { listNotes } from "@/notes/channel";
 import { refreshTrash } from "@/notes/actions";
-import { QuickOpen } from "@/notes/QuickOpen";
 import { allDocIds, useWorkspace, WorkspaceProvider, type AppState } from "@/workspace/store";
-import { findLeaf, focusedDocId } from "@/workspace/tree";
+import { focusedDocId } from "@/workspace/tree";
 import { releaseEditor } from "@/workspace/editorPool";
+import { CommandProvider, useCommands } from "@/commands/CommandProvider";
+import { configureUi } from "@/commands/glue";
+import { tooltip } from "@/commands/format";
+import { Overlay, type OverlayMode } from "@/commands/Overlay";
 
 // `initial` is built in main.tsx from the notes already on disk, so the very
 // first render has the right note in its tab.
 export default function App({ initial }: { initial: AppState }) {
   return (
     <WorkspaceProvider initial={initial}>
-      <Shell />
+      <CommandProvider>
+        <Shell />
+      </CommandProvider>
     </WorkspaceProvider>
   );
 }
@@ -34,11 +39,12 @@ const EDITOR_MIN = 160; // space the editor row keeps when the terminal grows
 
 function Shell() {
   const { state, dispatch, selected } = useWorkspace();
+  const { exec } = useCommands();
   const [termOpen, setTermOpen] = useState(false);
   const [termHeight, setTermHeight] = useState(280);
   const [sidebarWidth, setSidebarWidth] = useState(224);
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [quickOpen, setQuickOpen] = useState(false);
+  const [overlay, setOverlay] = useState<OverlayMode | null>(null);
   // The vertical stack (below the header) that holds the editor row and the
   // terminal drawer; its height bounds how tall the terminal can grow.
   const stackRef = useRef<HTMLDivElement>(null);
@@ -72,14 +78,26 @@ function Shell() {
     [termOpen, activeDocId],
   );
 
-  // The editor bridges Ctrl+` (toggle) and "run in terminal" here; main.tsx wires
-  // the RPC-backed inline-run handler separately, and configureBridge merges.
+  // Shell owns the chrome state (terminal drawer, sidebar, overlay), so it
+  // registers the ui hooks the command registry reaches them through. The
+  // editor bridge routes its Ctrl+` through the same command, so the header
+  // button, the editor keymap, the window hotkey, and the palette all converge
+  // on one implementation; main.tsx wires the RPC-backed inline-run handler
+  // separately, and configureBridge merges.
+  useEffect(() => {
+    configureUi({
+      toggleTerminal: () => setTermOpen((o) => !o),
+      closeTerminal: () => setTermOpen(false),
+      toggleSidebar: () => setSidebarOpen((o) => !o),
+      openOverlay: setOverlay,
+    });
+  }, []);
   useEffect(() => {
     configureBridge({
-      toggleTerminal: () => setTermOpen((o) => !o),
+      toggleTerminal: () => exec("terminal.toggle"),
       runInTerminal,
     });
-  }, [runInTerminal]);
+  }, [exec, runInTerminal]);
 
   const onTerminalReady = useCallback(() => {
     if (pending.current) {
@@ -146,59 +164,9 @@ function Shell() {
     return () => window.removeEventListener("contextmenu", onCtx);
   }, []);
 
-  // Layout commands, mirroring the Swift menu bar. The editor doesn't bind these,
-  // so they bubble to the window.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey)) return;
-      const k = e.key.toLowerCase();
-      if (k === "t" && !e.shiftKey) {
-        e.preventDefault();
-        dispatch({ type: "newTab" });
-      } else if (k === "p" && !e.shiftKey) {
-        e.preventDefault();
-        setQuickOpen(true);
-      } else if (k === "d" && !e.shiftKey) {
-        e.preventDefault();
-        dispatch({ type: "splitPane", dir: "row" });
-      } else if (k === "d" && e.shiftKey) {
-        e.preventDefault();
-        dispatch({ type: "splitPane", dir: "col" });
-      } else if (k === "w" && e.shiftKey) {
-        e.preventDefault();
-        dispatch({ type: "closePane" });
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [dispatch]);
-
-  // Quick-jump number shortcuts (advertised by the ⌘N / ^N badges that appear
-  // while Cmd is held): Cmd+1..9 selects workspace N; Ctrl+1..9 selects tab N in
-  // the focused pane. Kept separate from the layout handler above because it needs
-  // the live workspace/selection.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (!/^[1-9]$/.test(e.key)) return;
-      const n = Number(e.key) - 1;
-      if (e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
-        const ws = state.workspaces[n];
-        if (ws) {
-          e.preventDefault();
-          dispatch({ type: "selectWorkspace", id: ws.id });
-        }
-      } else if (e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
-        const leaf = findLeaf(selected.root, selected.focusedPaneId);
-        const tab = leaf?.tabs[n];
-        if (leaf && tab) {
-          e.preventDefault();
-          dispatch({ type: "selectTab", paneId: leaf.id, tabId: tab.id });
-        }
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [state, selected, dispatch]);
+  // Hotkeys live in the command registry (commands/keys.ts); CommandProvider
+  // installs the single window-level dispatcher that replaced the ad-hoc
+  // keydown handlers that used to sit here.
 
   return (
     <div className="flex h-screen flex-col bg-background text-foreground">
@@ -207,8 +175,8 @@ function Shell() {
           variant={sidebarOpen ? "secondary" : "ghost"}
           size="icon"
           className="size-7"
-          onClick={() => setSidebarOpen((o) => !o)}
-          title={sidebarOpen ? "Hide workspaces" : "Show workspaces"}
+          onClick={() => exec("sidebar.toggle")}
+          title={tooltip("sidebar.toggle")}
         >
           <PanelLeft className="size-4" />
         </Button>
@@ -218,8 +186,8 @@ function Shell() {
         <Button
           variant={termOpen ? "secondary" : "ghost"}
           size="sm"
-          onClick={() => setTermOpen((o) => !o)}
-          title="Toggle terminal (Ctrl+`)"
+          onClick={() => exec("terminal.toggle")}
+          title={tooltip("terminal.toggle")}
         >
           <TerminalSquare />
           Terminal
@@ -265,8 +233,8 @@ function Shell() {
                 variant="ghost"
                 size="icon"
                 className="size-6"
-                onClick={() => setTermOpen(false)}
-                title="Close terminal"
+                onClick={() => exec("terminal.close")}
+                title={tooltip("terminal.close")}
               >
                 <X className="size-3.5" />
               </Button>
@@ -291,7 +259,7 @@ function Shell() {
         )}
       </div>
 
-      {quickOpen && <QuickOpen onClose={() => setQuickOpen(false)} />}
+      {overlay && <Overlay initialMode={overlay} onClose={() => setOverlay(null)} />}
     </div>
   );
 }

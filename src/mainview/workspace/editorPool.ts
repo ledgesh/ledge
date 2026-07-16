@@ -153,3 +153,9 @@ export function releaseEditor(docId: string): void {
 export function focusEditor(docId: string): void {
   pool.get(docId)?.view.focus();
 }
+
+// Read-only access to a pooled view, for commands invoked from outside the
+// editor (the palette's Find/Run entries refocus and then drive the view).
+export function getEditorView(docId: string): EditorView | null {
+  return pool.get(docId)?.view ?? null;
+}

@@ -2,10 +2,13 @@
 //
 // Delete does not use this and should not: it moves a note to the trash, where
 // Undo and Restore are waiting, so a prompt would cost a click every time to
-// guard against something already reversible. Emptying the trash is the one
-// action in the app that destroys a note outright, and it is the only caller.
+// guard against something already reversible. The callers are the two actions
+// that destroy a note outright — Empty Trash, and Delete Permanently on one
+// trashed note — and nothing else should join them without also being an
+// unlink (docs/interactions.md §4).
 import { useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
+import { pushLayer } from "@/commands/layers";
 
 export function ConfirmDialog({
   title,
@@ -28,16 +31,10 @@ export function ConfirmDialog({
     cancelRef.current?.focus();
   }, []);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      e.stopPropagation();
-      onCancel();
-    };
-    // Capture: the editor and the terminal both bind Escape, and this is modal.
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
-  }, [onCancel]);
+  // Escape goes through the shared modal layer stack: only the topmost layer
+  // (this dialog, unless a menu sits above it) sees it, and the window command
+  // dispatcher is suppressed while the dialog is up.
+  useEffect(() => pushLayer("dialog", onCancel), [onCancel]);
 
   return (
     <div

@@ -69,8 +69,12 @@ export type LedgeRPC = {
       // button, which are the same operation: Undo is just the shortcut to the
       // one that stays available in the Trash section.
       trashRestore: { params: { path: string }; response: { note: NoteMeta } };
-      // Unlink every trashed note. The only call in the app that destroys a note
-      // outright, hence the one confirmation prompt in the app.
+      // Unlink ONE trashed note, for good. Like trashEmpty this destroys a note
+      // outright, so the view confirms first; unlike it, the note named is the
+      // only one that can go. Responds false if it was already gone.
+      trashDelete: { params: { path: string }; response: { removed: boolean } };
+      // Unlink every trashed note. Destroys notes outright, hence the
+      // confirmation in front of it.
       trashEmpty: { params: {}; response: { removed: number } };
       // Shells are per note: `sessionId` is the tab's stable docId. The Bun side
       // lazily spawns that note's inline-run shell on first runBlock and closes it

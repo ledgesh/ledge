@@ -14,6 +14,7 @@ import {
   selectMatches,
   setSearchQuery,
 } from "@codemirror/search";
+import { COMMANDS, keyOf } from "../commands/keys";
 
 // Find / replace on top of @codemirror/search. The stock panel always shows both
 // a find and a replace row in a loose inline layout; we supply a custom `Panel`
@@ -252,7 +253,9 @@ class SearchPanel implements Panel {
 
 // Open the panel (if closed) and expand its replace row. openSearchPanel dispatches
 // synchronously, so by the time it returns the panel is mounted and registered.
-function openReplace(view: EditorView): boolean {
+// Exported for the command registry: the palette's "Find and Replace" runs this
+// after refocusing the note's editor (commands/glue.ts).
+export function openReplace(view: EditorView): boolean {
   openSearchPanel(view);
   panels.get(view)?.showReplace();
   return true;
@@ -274,10 +277,10 @@ function openReplace(view: EditorView): boolean {
 // is CM's intended mechanism for this (the same pattern as Mod-g's shift below).
 const findKeymap = Prec.highest(
   keymap.of([
-    { key: "Mod-f", run: openSearchPanel, shift: openReplace },
-    { key: "Mod-Alt-f", run: openReplace },
-    { key: "Mod-g", run: findNext, shift: findPrevious, preventDefault: true },
-    { key: "F3", run: findNext, shift: findPrevious, preventDefault: true },
+    { key: keyOf("editor.find")!, run: openSearchPanel, shift: openReplace },
+    { key: COMMANDS["editor.replace"].keys[0], run: openReplace },
+    { key: keyOf("editor.findNext")!, run: findNext, shift: findPrevious, preventDefault: true },
+    { key: COMMANDS["editor.findNext"].keys[1], run: findNext, shift: findPrevious, preventDefault: true },
     { key: "Escape", run: closeSearchPanel },
   ]),
 );

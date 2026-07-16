@@ -13,6 +13,7 @@ interface NoteHandlers {
   remove: (path: string) => Promise<string | null>;
   trash: () => Promise<TrashMeta[]>;
   restore: (path: string) => Promise<NoteMeta>;
+  removeTrashed: (path: string) => Promise<boolean>;
   empty: () => Promise<number>;
 }
 
@@ -63,6 +64,13 @@ export function listTrash(): Promise<TrashMeta[]> {
 // a trashed note before moving it.
 export function restoreNote(path: string): Promise<NoteMeta> {
   return bridge().restore(path);
+}
+
+// Unlink one trashed note for good. Same deal as restore: the path came from
+// listTrash, and Bun re-checks it really is a trashed note before unlinking.
+// Resolves false if it was already gone.
+export function deleteTrashed(path: string): Promise<boolean> {
+  return bridge().removeTrashed(path);
 }
 
 export function emptyTrash(): Promise<number> {

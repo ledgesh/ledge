@@ -12,6 +12,7 @@ import { findReplace } from "./find";
 import { fromDisk, sessionIdFacet } from "./session";
 import { noteChanged, saveNow } from "../notes/store";
 import { copyText, readClipboard } from "../lib/clipboard";
+import { keyOf } from "../commands/keys";
 
 // Ledge shows raw Markdown and styles it, rather than hiding the syntax the way
 // a live-preview editor does: the text you edit is the text on disk, which
@@ -67,12 +68,13 @@ const reporting = EditorView.updateListener.of((update) => {
   noteChanged(update.state.facet(sessionIdFacet), update.state.doc.toString());
 });
 
-// App-level shortcuts that bridge out. High precedence so they win over
-// CodeMirror's own bindings.
+// App-level shortcuts that bridge out, with key strings sourced from the
+// command table (commands/keys.ts) so the editor can never drift from the
+// advertised bindings. High precedence so they win over CodeMirror's own.
 const appKeymap = Prec.highest(
   keymap.of([
     {
-      key: "Ctrl-`",
+      key: keyOf("terminal.toggle")!,
       run: () => {
         toNative({ type: "toggleTerminal" });
         return true;
@@ -81,7 +83,7 @@ const appKeymap = Prec.highest(
     {
       // Notes autosave, so Cmd+S only skips the debounce. It still binds: the
       // habit is universal, and an unhandled Cmd-key rings the AppKit alert.
-      key: "Mod-s",
+      key: keyOf("editor.save")!,
       run: (view) => {
         void saveNow(view.state.facet(sessionIdFacet));
         return true;

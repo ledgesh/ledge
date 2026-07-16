@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { isInside, titleOf, uniqueName } from "./notes";
+import { join } from "node:path";
+import { NOTES_ROOT, TRASH_DIR, deleteTrashed, isInside, titleOf, uniqueName } from "./notes";
 
 describe("uniqueName", () => {
   test("takes the bare name when nothing is taken", () => {
@@ -65,5 +66,24 @@ describe("titleOf", () => {
 
   test("keeps inner dots", () => {
     expect(titleOf("/Users/x/.ledge/v1.2.notes.md")).toBe("v1.2.notes");
+  });
+});
+
+describe("deleteTrashed", () => {
+  // The guard is the whole safety story for permanent delete: it unlinks, so
+  // "which paths does it accept" is the only thing standing between a Trash
+  // row and an arbitrary file the view named. It throws before touching the
+  // filesystem, so these cases never reach a real path.
+  test("refuses anything that is not a .md directly inside the trash", async () => {
+    for (const path of [
+      "/etc/passwd",
+      join(NOTES_ROOT, "live-note.md"), // a live note, not a trashed one
+      join(TRASH_DIR, "sub", "nested.md"), // not directly inside
+      join(TRASH_DIR, "notes.txt"), // not a note
+      TRASH_DIR, // the folder itself
+      join(TRASH_DIR, "..", "escape.md"),
+    ]) {
+      expect(deleteTrashed(path)).rejects.toThrow(/not a trashed note/);
+    }
   });
 });

@@ -80,6 +80,7 @@ function fakeBridge() {
     remove: async () => null,
     trash: async () => [],
     restore: async (path: string) => ({ path, title: "", mtimeMs: 0 }),
+    removeTrashed: async () => true,
     empty: async () => 0,
   });
 

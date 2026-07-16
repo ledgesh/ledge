@@ -11,6 +11,8 @@ import {
   terminalDetach,
 } from "./channel";
 import { copyText, readClipboard } from "../lib/clipboard";
+import { eventToChord, matchesKey } from "../commands/keymap";
+import { keyOf } from "../commands/keys";
 
 function xtermTheme(dark: boolean) {
   return dark
@@ -73,6 +75,14 @@ export function TerminalDrawer({
       // full-screen TUIs in the drawer can't receive a bare Escape; acceptable
       // for a notes-app scratch terminal.)
       if (e.key === "Escape") {
+        e.preventDefault();
+        onCloseRef.current?.();
+        return false;
+      }
+      // Ctrl+` (the Toggle Terminal key, from commands/keys.ts) closes the
+      // drawer from inside it too; the shell never sees the chord. Without
+      // this, the key that opens the terminal is dead while you're in it.
+      if (matchesKey(keyOf("terminal.toggle")!, eventToChord(e))) {
         e.preventDefault();
         onCloseRef.current?.();
         return false;

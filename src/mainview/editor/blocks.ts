@@ -13,6 +13,8 @@ import { toNative, cancelRun, resizeInline, inputInline, type RunDestination } f
 import { sessionIdFacet } from "./session";
 import { acquireInlineTerm, getInlineTerm, releaseInlineTerm } from "./inlineTerm";
 import { copyText } from "../lib/clipboard";
+import { keyOf } from "../commands/keys";
+import { tooltip } from "../commands/format";
 
 // One inline run of a code block. Output accumulates as bytes arrive from native.
 export interface RunInfo {
@@ -147,7 +149,7 @@ function nextId(): string {
   return `web-${idCounter}-${Date.now()}`;
 }
 
-function runBlock(view: EditorView, pos: number, destination: RunDestination): boolean {
+export function runBlock(view: EditorView, pos: number, destination: RunDestination): boolean {
   const block = blockAt(view.state, pos);
   if (!block || !isRunnable(block.lang)) return false;
 
@@ -486,19 +488,19 @@ const overlayPlugin = ViewPlugin.fromClass(
         group.dataset.block = String(c.from);
         if (isRunnable(c.lang)) {
           group.appendChild(
-            iconButton(PLAY_ICON, "Run inline (⌘⏎)", (e) => {
+            iconButton(PLAY_ICON, tooltip("block.runInline"), (e) => {
               e.preventDefault();
               runBlock(this.view, c.from, "inline");
             }),
           );
           group.appendChild(
-            iconButton(TERMINAL_ICON, "Run in terminal (⇧⌘⏎)", (e) => {
+            iconButton(TERMINAL_ICON, tooltip("block.runInTerminal"), (e) => {
               e.preventDefault();
               runBlock(this.view, c.from, "terminal");
             }),
           );
         }
-        const copyBtn = iconButton(COPY_ICON, "Copy", (e) => {
+        const copyBtn = iconButton(COPY_ICON, tooltip("block.copy"), (e) => {
           e.preventDefault();
           const block = blockAt(this.view.state, c.from);
           if (!block) return;
@@ -514,7 +516,7 @@ const overlayPlugin = ViewPlugin.fromClass(
         const wrap = document.createElement("div");
         wrap.className = "ledge-close-wrap";
         wrap.dataset.close = c.id;
-        const copyBtn = iconButton(COPY_ICON, "Copy output", (e) => {
+        const copyBtn = iconButton(COPY_ICON, tooltip("block.copyOutput"), (e) => {
           e.preventDefault();
           const text = getInlineTerm(c.id)?.plainText();
           if (!text) return;
@@ -523,7 +525,7 @@ const overlayPlugin = ViewPlugin.fromClass(
         });
         wrap.appendChild(copyBtn);
         wrap.appendChild(
-          iconButton(CLOSE_ICON, "Dismiss", (e) => {
+          iconButton(CLOSE_ICON, tooltip("block.dismissOutput"), (e) => {
             e.preventDefault();
             // Dismissing a still-running block must not orphan its process: the
             // note's shell is shared, so a program left in the foreground would
@@ -658,11 +660,11 @@ export function ledgeBlocks(): Extension {
     overlayPlugin,
     keymap.of([
       {
-        key: "Mod-Enter",
+        key: keyOf("block.runInline")!,
         run: (view) => runBlock(view, view.state.selection.main.head, "inline"),
       },
       {
-        key: "Shift-Mod-Enter",
+        key: keyOf("block.runInTerminal")!,
         run: (view) => runBlock(view, view.state.selection.main.head, "terminal"),
       },
     ]),

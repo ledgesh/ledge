@@ -2,6 +2,11 @@ import { Fragment, useLayoutEffect, useRef, useState } from "react";
 import { Columns2, FilePlus, Plus, Rows2, SquareX, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useCmdHeld, useCtrlHeld } from "@/lib/useCmdHeld";
+import { ContextMenu } from "@/components/ContextMenu";
+import { ResizeHandle } from "@/components/ResizeHandle";
+import { useCommands } from "@/commands/CommandProvider";
+import { CommandMenuItem } from "@/commands/CommandMenuItem";
+import { tooltip } from "@/commands/format";
 import { useWorkspace } from "./store";
 import { attachEditor, detachEditor, focusEditor } from "./editorPool";
 import { leafIds, type LeafNode, type PaneNode, type SplitNode, type TabState } from "./tree";
@@ -24,27 +29,6 @@ function SplitView({ node }: { node: SplitNode }) {
   const ref = useRef<HTMLDivElement>(null);
   const isRow = node.dir === "row";
 
-  const onDividerDown = (e: React.PointerEvent) => {
-    e.preventDefault();
-    const container = ref.current;
-    if (!container) return;
-    const rect = container.getBoundingClientRect();
-    const move = (ev: PointerEvent) => {
-      const frac = isRow ? (ev.clientX - rect.left) / rect.width : (ev.clientY - rect.top) / rect.height;
-      dispatch({ type: "setRatio", splitId: node.id, ratio: frac });
-    };
-    const up = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
-    document.body.style.cursor = isRow ? "col-resize" : "row-resize";
-    document.body.style.userSelect = "none";
-  };
-
   return (
     <div ref={ref} className={cn("flex h-full w-full min-h-0 min-w-0", isRow ? "flex-row" : "flex-col")}>
       <div
@@ -53,12 +37,11 @@ function SplitView({ node }: { node: SplitNode }) {
       >
         <PaneTree node={node.children[0]} />
       </div>
-      <div
-        onPointerDown={onDividerDown}
-        className={cn(
-          "shrink-0 bg-border transition-colors hover:bg-primary/40",
-          isRow ? "w-[5px] cursor-col-resize" : "h-[5px] cursor-row-resize",
-        )}
+      <ResizeHandle
+        axis={isRow ? "x" : "y"}
+        containerRef={ref}
+        onResizeFraction={(frac) => dispatch({ type: "setRatio", splitId: node.id, ratio: frac })}
+        title="Drag to resize split"
       />
       <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
         <PaneTree node={node.children[1]} />
@@ -91,6 +74,7 @@ function LeafView({ leaf }: { leaf: LeafNode }) {
 // editor here. An empty pane shows a placeholder instead.
 function PaneBody({ leaf, focused }: { leaf: LeafNode; focused: boolean }) {
   const { dispatch } = useWorkspace();
+  const { exec } = useCommands();
   const hostRef = useRef<HTMLDivElement>(null);
   const active = leaf.tabs.find((t) => t.id === leaf.activeTabId) ?? null;
   const docId = active?.docId ?? null;
@@ -118,8 +102,16 @@ function PaneBody({ leaf, focused }: { leaf: LeafNode; focused: boolean }) {
   }, [docId]);
 
   // Put the caret in this editor when its pane gains focus or its tab changes.
+  //
+  // Unless a list row is driving: opening a note from the sidebar changes this
+  // pane's active tab, and yanking focus into the editor would take it right
+  // back off the row the user is working — which is what the row verbs act on
+  // (docs/interactions.md §1 R5). Clicking a note shows it; clicking the
+  // editor is what says you want to type in it.
   useLayoutEffect(() => {
-    if (focused && docId) focusEditor(docId);
+    if (!focused || !docId) return;
+    if (document.activeElement?.closest("[data-list-row]")) return;
+    focusEditor(docId);
   }, [focused, docId]);
 
   if (!active) {
@@ -128,7 +120,8 @@ function PaneBody({ leaf, focused }: { leaf: LeafNode; focused: boolean }) {
         <span className="text-sm">No open notes</span>
         <button
           className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs hover:bg-accent"
-          onClick={() => dispatch({ type: "newTab", paneId: leaf.id })}
+          title={tooltip("note.new")}
+          onClick={() => exec("note.new", { kind: "pane", paneId: leaf.id })}
         >
           <FilePlus className="size-3.5" /> New Note
         </button>
@@ -142,6 +135,7 @@ function PaneBody({ leaf, focused }: { leaf: LeafNode; focused: boolean }) {
 
 function TabBar({ leaf, focused }: { leaf: LeafNode; focused: boolean }) {
   const { dispatch, selected } = useWorkspace();
+  const { exec } = useCommands();
   // Tab quick-jump is Ctrl+number, but cmux shows the badge on either modifier.
   // Ctrl+number targets the FOCUSED pane, so only its tab bar gets badges (with
   // multiple tab groups, badging the others would be misleading).
@@ -150,6 +144,8 @@ function TabBar({ leaf, focused }: { leaf: LeafNode; focused: boolean }) {
   const badges = focused && (cmdHeld || ctrlHeld);
   const canClosePane = leafIds(selected.root).length > 1;
   const stripRef = useRef<HTMLDivElement>(null);
+  // The right-click menu: which tab, and where to anchor it. Null when closed.
+  const [menu, setMenu] = useState<{ tabId: string; x: number; y: number } | null>(null);
   // Where an in-flight drop would land, as an index into the current tab list.
   // Null when no tab is hovering this bar.
   const [dropIndex, setDropIndex] = useState<number | null>(null);
@@ -209,40 +205,71 @@ function TabBar({ leaf, focused }: { leaf: LeafNode; focused: boolean }) {
         {leaf.tabs.map((tab, i) => (
           <Fragment key={tab.id}>
             {dropIndex === i && <DropMarker />}
-            <TabItem leaf={leaf} tab={tab} paneFocused={focused} hint={badges && i < 9 ? i + 1 : null} />
+            <TabItem
+              leaf={leaf}
+              tab={tab}
+              paneFocused={focused}
+              hint={badges && i < 9 ? i + 1 : null}
+              onContextMenu={(x, y) => setMenu({ tabId: tab.id, x, y })}
+            />
           </Fragment>
         ))}
         {dropIndex === leaf.tabs.length && <DropMarker />}
         <button
           className="flex w-7 shrink-0 items-center justify-center text-muted-foreground hover:text-foreground"
-          title="New tab (⌘T)"
-          onClick={() => dispatch({ type: "newTab", paneId: leaf.id })}
+          title={tooltip("note.new")}
+          onClick={() => exec("note.new", { kind: "pane", paneId: leaf.id })}
         >
           <Plus className="size-3.5" />
         </button>
       </div>
       <div className="flex shrink-0 items-center gap-0.5 border-l px-1">
         <PaneAction
-          title="Split right (⌘D)"
-          onClick={() => dispatch({ type: "splitPane", dir: "row", paneId: leaf.id })}
+          title={tooltip("pane.splitRight")}
+          onClick={() => exec("pane.splitRight", { kind: "pane", paneId: leaf.id })}
         >
           <Columns2 className="size-3.5" />
         </PaneAction>
         <PaneAction
-          title="Split down (⇧⌘D)"
-          onClick={() => dispatch({ type: "splitPane", dir: "col", paneId: leaf.id })}
+          title={tooltip("pane.splitDown")}
+          onClick={() => exec("pane.splitDown", { kind: "pane", paneId: leaf.id })}
         >
           <Rows2 className="size-3.5" />
         </PaneAction>
         {canClosePane && (
           <PaneAction
-            title="Close pane (⇧⌘W)"
-            onClick={() => dispatch({ type: "closePane", paneId: leaf.id })}
+            title={tooltip("pane.close")}
+            onClick={() => exec("pane.close", { kind: "pane", paneId: leaf.id })}
           >
             <SquareX className="size-3.5" />
           </PaneAction>
         )}
       </div>
+
+      {menu && (
+        <ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)}>
+          <CommandMenuItem
+            id="tab.close"
+            target={{ kind: "tab", paneId: leaf.id, tabId: menu.tabId }}
+            onClose={() => setMenu(null)}
+          />
+          <CommandMenuItem
+            id="tab.closeOthers"
+            target={{ kind: "tab", paneId: leaf.id, tabId: menu.tabId }}
+            onClose={() => setMenu(null)}
+          />
+          <CommandMenuItem
+            id="pane.splitRight"
+            target={{ kind: "pane", paneId: leaf.id }}
+            onClose={() => setMenu(null)}
+          />
+          <CommandMenuItem
+            id="pane.splitDown"
+            target={{ kind: "pane", paneId: leaf.id }}
+            onClose={() => setMenu(null)}
+          />
+        </ContextMenu>
+      )}
     </div>
   );
 }
@@ -277,13 +304,16 @@ function TabItem({
   tab,
   paneFocused,
   hint,
+  onContextMenu,
 }: {
   leaf: LeafNode;
   tab: TabState;
   paneFocused: boolean;
   hint: number | null;
+  onContextMenu: (x: number, y: number) => void;
 }) {
   const { dispatch } = useWorkspace();
+  const { exec } = useCommands();
   const active = leaf.activeTabId === tab.id;
   const [dragged, setDragged] = useState(false);
   return (
@@ -298,6 +328,10 @@ function TabItem({
         dragged && "opacity-40",
       )}
       onClick={() => dispatch({ type: "selectTab", paneId: leaf.id, tabId: tab.id })}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        onContextMenu(e.clientX, e.clientY);
+      }}
       onDragStart={(e) => {
         dragging = { fromPaneId: leaf.id, tabId: tab.id };
         // Firefox refuses to start a drag unless some data is set.
@@ -313,10 +347,10 @@ function TabItem({
       <span className="truncate">{tab.title}</span>
       <button
         className="flex size-4 shrink-0 items-center justify-center rounded opacity-0 hover:bg-accent group-hover:opacity-100"
-        title="Close tab (⌘W)"
+        title={tooltip("tab.close")}
         onClick={(e) => {
           e.stopPropagation();
-          dispatch({ type: "closeTab", paneId: leaf.id, tabId: tab.id });
+          exec("tab.close", { kind: "tab", paneId: leaf.id, tabId: tab.id });
         }}
       >
         <X className="size-3" />

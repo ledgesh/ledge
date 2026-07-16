@@ -16,7 +16,13 @@
 // Renaming needs none of this: a note's filename follows its H1 now, and that
 // happens inside the save controller's own flush loop, which is already
 // serialised against writes (see syncTitle in notes/store.ts).
-import { deleteNote as trashFile, emptyTrash, listTrash, restoreNote as untrashFile } from "./channel";
+import {
+  deleteNote as trashFile,
+  deleteTrashed as unlinkTrashed,
+  emptyTrash,
+  listTrash,
+  restoreNote as untrashFile,
+} from "./channel";
 import { forgetDoc, freezeDoc, retargetDoc } from "./store";
 import type { Action } from "@/workspace/store";
 
@@ -75,6 +81,26 @@ export async function restoreNote(
     dispatch({ type: "noteRestored", note });
   } catch (err) {
     console.error("[notes] restore failed", err);
+    return err instanceof Error ? err.message : String(err);
+  }
+  void refreshTrash(dispatch);
+  return null;
+}
+
+// Unlink one trashed note. The caller confirms first; by the time this runs,
+// the note really is going.
+//
+// No freeze dance, for the same reason restore needs none: a trashed note has
+// no tabs and no save controller entry, so nothing in the app is holding it.
+export async function deleteTrashedNote(
+  path: string,
+  dispatch: (action: Action) => void,
+): Promise<string | null> {
+  try {
+    await unlinkTrashed(path);
+  } catch (err) {
+    console.error("[notes] permanent delete failed", err);
+    void refreshTrash(dispatch); // it may have gone before it threw
     return err instanceof Error ? err.message : String(err);
   }
   void refreshTrash(dispatch);

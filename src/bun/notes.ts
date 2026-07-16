@@ -317,9 +317,26 @@ export async function restoreNote(path: string): Promise<NoteMeta> {
   return metaAt(target);
 }
 
-// Unlink every trashed note, for real and for good. The one genuinely
-// destructive call in this file, which is why the UI puts a confirmation in
-// front of it and nothing else.
+// Unlink one trashed note, for real and for good. assertTrashed is the whole
+// safety story: it is the difference between deleting a note the user pointed
+// at in the Trash section and deleting an arbitrary file the view named.
+//
+// Returns false if it was already gone, which is the outcome the caller wanted
+// anyway — a note that is not there is not an error.
+export async function deleteTrashed(path: string): Promise<boolean> {
+  assertTrashed(path);
+  try {
+    await unlink(path);
+    return true;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw err;
+  }
+}
+
+// Unlink every trashed note, for real and for good. This and deleteTrashed are
+// the genuinely destructive calls in this file, which is why the UI puts a
+// confirmation in front of both and nothing else.
 export async function emptyTrash(): Promise<number> {
   return removeAll(await trashFiles());
 }

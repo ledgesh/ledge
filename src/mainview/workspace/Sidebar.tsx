@@ -1,11 +1,17 @@
-import { useCallback, useRef, useState, type ComponentType } from "react";
-import { Boxes, Folder, Inbox, Layers, Pencil, Plus, Terminal, Trash2, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type ComponentType } from "react";
+import { Boxes, Folder, Inbox, Layers, Plus, Terminal, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useCmdHeld } from "@/lib/useCmdHeld";
+import { useListNav } from "@/lib/useListNav";
 import { ResizeHandle } from "@/components/ResizeHandle";
-import { ContextMenu, MenuItem } from "@/components/ContextMenu";
+import { ContextMenu } from "@/components/ContextMenu";
 import { RenameField } from "@/components/RenameField";
 import { NoteBrowser } from "@/notes/NoteBrowser";
+import { useCommands } from "@/commands/CommandProvider";
+import { CommandMenuItem } from "@/commands/CommandMenuItem";
+import { configureUi } from "@/commands/glue";
+import { tooltip } from "@/commands/format";
+import { targetAttrs } from "@/commands/target";
 import { useWorkspace } from "./store";
 import { countTabs, leafIds, type Workspace } from "./tree";
 
@@ -58,13 +64,21 @@ let draggingWs: string | null = null;
 
 function WorkspaceStrip() {
   const { state, dispatch } = useWorkspace();
+  const { exec } = useCommands();
   const cmdHeld = useCmdHeld();
   const [renamingId, setRenamingId] = useState<string | null>(null);
   // The right-click menu: which workspace, and where to anchor it. Null when closed.
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
+
+  // The strip owns the inline-rename state, so it registers the hook the
+  // workspace.rename command (menu item, palette entry) reaches it through.
+  useEffect(() => {
+    configureUi({ beginRenameWorkspace: setRenamingId });
+  }, []);
   // Where an in-flight drop would land, as an index into the workspace list.
   const [dropIndex, setDropIndex] = useState<number | null>(null);
-  const listRef = useRef<HTMLDivElement>(null);
+  const nav = useListNav();
+  const listRef = nav.containerProps.ref;
 
   // The slot the cursor is over: the count of rows whose vertical midpoint sits
   // above it (0..workspaces.length). Measured off the live DOM so it tracks the
@@ -109,7 +123,7 @@ function WorkspaceStrip() {
         Workspaces
       </div>
       <div
-        ref={listRef}
+        {...nav.containerProps}
         className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-2"
         onDragOver={onDragOver}
         onDrop={onDrop}
@@ -124,11 +138,12 @@ function WorkspaceStrip() {
               renaming={renamingId === ws.id}
               canClose={state.workspaces.length > 1}
               hint={cmdHeld && i < 9 ? i + 1 : null}
-              onSelect={() => dispatch({ type: "selectWorkspace", id: ws.id })}
+              rowProps={nav.rowProps(ws.id, i)}
+              onSelect={() => exec("workspace.open", { kind: "workspace", id: ws.id })}
               onBeginRename={() => setRenamingId(ws.id)}
               onEndRename={() => setRenamingId(null)}
               onRename={(name) => dispatch({ type: "renameWorkspace", id: ws.id, name })}
-              onClose={() => dispatch({ type: "closeWorkspace", id: ws.id })}
+              onClose={() => exec("workspace.close", { kind: "workspace", id: ws.id })}
               onDragStart={() => (draggingWs = ws.id)}
               onDragEnd={() => {
                 draggingWs = null;
@@ -145,32 +160,24 @@ function WorkspaceStrip() {
       </div>
       <button
         className="flex items-center gap-2 border-t px-3.5 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
-        onClick={() => dispatch({ type: "newWorkspace" })}
+        title={tooltip("workspace.new")}
+        onClick={() => exec("workspace.new")}
       >
         <Plus className="size-4" /> New Workspace
       </button>
 
       {menu && (
         <ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)}>
-          <MenuItem
-            onSelect={() => {
-              setRenamingId(menu.id);
-              setMenu(null);
-            }}
-          >
-            <Pencil className="size-3.5" /> Rename
-          </MenuItem>
-          {state.workspaces.length > 1 && (
-            <MenuItem
-              destructive
-              onSelect={() => {
-                dispatch({ type: "closeWorkspace", id: menu.id });
-                setMenu(null);
-              }}
-            >
-              <Trash2 className="size-3.5" /> Close workspace
-            </MenuItem>
-          )}
+          <CommandMenuItem
+            id="workspace.rename"
+            target={{ kind: "workspace", id: menu.id }}
+            onClose={() => setMenu(null)}
+          />
+          <CommandMenuItem
+            id="workspace.close"
+            target={{ kind: "workspace", id: menu.id }}
+            onClose={() => setMenu(null)}
+          />
         </ContextMenu>
       )}
     </>
@@ -188,6 +195,7 @@ function WorkspaceRow({
   renaming,
   canClose,
   hint,
+  rowProps,
   onSelect,
   onBeginRename,
   onEndRename,
@@ -202,6 +210,7 @@ function WorkspaceRow({
   renaming: boolean;
   canClose: boolean;
   hint: number | null;
+  rowProps: ReturnType<ReturnType<typeof useListNav>["rowProps"]>;
   onSelect: () => void;
   onBeginRename: () => void;
   onEndRename: () => void;
@@ -219,10 +228,12 @@ function WorkspaceRow({
   return (
     <div
       data-ws
+      {...rowProps}
+      {...targetAttrs({ kind: "workspace", id: ws.id })}
       // Don't arm the drag while renaming, or the pointer can't reach the input.
       draggable={!renaming}
       className={cn(
-        "group relative flex cursor-default items-center gap-2 rounded-md px-2 py-1.5",
+        "group relative flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 outline-none focus-visible:ring-1 focus-visible:ring-ring",
         selected ? "bg-accent" : "hover:bg-accent/50",
       )}
       onClick={onSelect}
@@ -251,7 +262,7 @@ function WorkspaceRow({
       {canClose && (
         <button
           className="flex size-5 shrink-0 items-center justify-center rounded opacity-0 hover:bg-background group-hover:opacity-100"
-          title="Close workspace"
+          title={tooltip("workspace.close")}
           onClick={(e) => {
             e.stopPropagation();
             onClose();

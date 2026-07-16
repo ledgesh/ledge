@@ -13,6 +13,7 @@ import { MarkerParser, markerCommand } from "./markers";
 import {
   createNote,
   deleteNote,
+  deleteTrashed,
   emptyTrash,
   listNotes,
   listTrash,
@@ -173,6 +174,7 @@ const rpc = BrowserView.defineRPC<LedgeRPC>({
       noteDelete: async ({ path }) => ({ trashed: await deleteNote(path) }),
       trashList: async () => ({ items: await listTrash() }),
       trashRestore: async ({ path }) => ({ note: await restoreNote(path) }),
+      trashDelete: async ({ path }) => ({ removed: await deleteTrashed(path) }),
       trashEmpty: async () => ({ removed: await emptyTrash() }),
 
       runBlock: async ({ sessionId, id, code }) => {

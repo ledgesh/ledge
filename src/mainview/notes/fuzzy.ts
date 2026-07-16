@@ -64,16 +64,22 @@ export function fuzzyScore(query: string, text: string): number | null {
   return top === NONE ? null : top;
 }
 
-// Notes matching `query`, best first. An empty query keeps every note and sorts
-// by title, which is what the palette shows the moment it opens.
-export function filterNotes(query: string, notes: NoteMeta[]): NoteMeta[] {
-  const scored: Array<{ note: NoteMeta; score: number }> = [];
-  for (const note of notes) {
-    const score = fuzzyScore(query.trim(), note.title);
-    if (score !== null) scored.push({ note, score });
+// Anything matching `query`, best first, labelled by `key`. An empty query
+// keeps every item and sorts by label. Ties break on the label so the order is
+// stable and never depends on the order the items happened to arrive in.
+export function fuzzyFilter<T>(query: string, items: readonly T[], key: (item: T) => string): T[] {
+  const q = query.trim();
+  const scored: Array<{ item: T; score: number; label: string }> = [];
+  for (const item of items) {
+    const label = key(item);
+    const score = fuzzyScore(q, label);
+    if (score !== null) scored.push({ item, score, label });
   }
-  // Ties break on title so the order is stable and never depends on the order
-  // the notes happened to arrive in.
-  scored.sort((a, b) => b.score - a.score || a.note.title.localeCompare(b.note.title));
-  return scored.map((s) => s.note);
+  scored.sort((a, b) => b.score - a.score || a.label.localeCompare(b.label));
+  return scored.map((s) => s.item);
+}
+
+// Notes matching `query`, best first — the quick-open palette's filter.
+export function filterNotes(query: string, notes: NoteMeta[]): NoteMeta[] {
+  return fuzzyFilter(query, notes, (n) => n.title);
 }

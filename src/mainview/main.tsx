@@ -79,6 +79,7 @@ configureNotes({
   remove: (path) => electrobun.rpc!.request.noteDelete({ path }).then((r) => r.trashed),
   trash: () => electrobun.rpc!.request.trashList({}).then((r) => r.items),
   restore: (path) => electrobun.rpc!.request.trashRestore({ path }).then((r) => r.note),
+  removeTrashed: (path) => electrobun.rpc!.request.trashDelete({ path }).then((r) => r.removed),
   empty: () => electrobun.rpc!.request.trashEmpty({}).then((r) => r.removed),
 });
 
@@ -107,3 +108,4 @@ async function boot(): Promise<void> {
 }
 
 void boot();
+
