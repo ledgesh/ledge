@@ -11,6 +11,7 @@ import {
 } from "@codemirror/view";
 import { toNative, type RunDestination } from "./bridge";
 import { parseAnsi } from "./ansi";
+import { copyText } from "../lib/clipboard";
 
 // One inline run of a code block. Output accumulates as bytes arrive from native.
 export interface RunInfo {
@@ -224,10 +225,10 @@ class OutputWidget extends WidgetType {
       dur.textContent = formatDuration(this.run.durationMs);
       header.appendChild(dur);
     }
-    // Reserve room on the right so the overlaid dismiss button never sits on top
-    // of the duration text.
+    // Reserve room on the right so the overlaid copy + dismiss buttons never sit
+    // on top of the duration text.
     const gap = document.createElement("span");
-    gap.style.width = "22px";
+    gap.style.width = "48px";
     header.appendChild(gap);
     panel.appendChild(header);
 
@@ -248,8 +249,13 @@ class OutputWidget extends WidgetType {
     panel.appendChild(pre);
     return panel;
   }
+  // Let the browser own events inside the panel. CodeMirror would otherwise treat
+  // a mousedown here as a click into the document and collapse the selection, so
+  // returning true is what makes the output body drag-selectable (and Cmd+C then
+  // copies the native selection). The panel is contenteditable=false, so nothing
+  // in it needs CodeMirror's handling.
   ignoreEvent() {
-    return false;
+    return true;
   }
 }
 
@@ -273,35 +279,12 @@ function iconButton(markup: string, title: string, onDown: (e: MouseEvent) => vo
   return b;
 }
 
-// navigator.clipboard needs a secure context, which the views:// scheme is not,
-// so it is undefined (or rejects) here. Fall back to the temporary-textarea +
-// execCommand path, which works in this WebView without a secure context.
-function copyText(text: string): void {
-  const clip = navigator.clipboard;
-  if (clip && typeof clip.writeText === "function") {
-    clip.writeText(text).catch(() => execCopy(text));
-  } else {
-    execCopy(text);
-  }
-}
-
-function execCopy(text: string): void {
-  const ta = document.createElement("textarea");
-  ta.value = text;
-  ta.style.position = "fixed";
-  ta.style.top = "0";
-  ta.style.left = "0";
-  ta.style.opacity = "0";
-  ta.style.pointerEvents = "none";
-  document.body.appendChild(ta);
-  ta.focus();
-  ta.select();
-  try {
-    document.execCommand("copy");
-  } catch {
-    // Nothing more we can do; leave the clipboard untouched.
-  }
-  ta.remove();
+// Output text with ANSI escapes removed, for copying to the clipboard (the panel
+// renders colour, but the clipboard should get plain text).
+function plainOutput(text: string): string {
+  return parseAnsi(text)
+    .map((c) => c.text)
+    .join("");
 }
 
 // Swap the copy glyph for a checkmark for a beat, as click feedback.
@@ -356,6 +339,7 @@ const overlayPlugin = ViewPlugin.fromClass(
     hovered: number | null = null;
     onMove: (e: MouseEvent) => void;
     onScroll: () => void;
+    onKeyDown: (e: KeyboardEvent) => void;
 
     constructor(readonly view: EditorView) {
       this.layer = document.createElement("div");
@@ -370,9 +354,35 @@ const overlayPlugin = ViewPlugin.fromClass(
 
       this.onMove = (e) => this.updateHover(e.clientX, e.clientY);
       this.onScroll = () => this.schedule();
+      // Cmd+C over a selection inside an output panel: the panel is a
+      // contenteditable=false widget and the WebView's native copy does not put
+      // its text on the clipboard, so copy the selection explicitly through the
+      // native clipboard. Capture phase, so it runs before CodeMirror's own key
+      // handling. Scoped to this editor's panels, so with pooled editors only the
+      // one holding the selection acts.
+      this.onKeyDown = (e) => this.handleCopyKey(e);
+      document.addEventListener("keydown", this.onKeyDown, true);
       view.scrollDOM.addEventListener("mousemove", this.onMove);
       view.scrollDOM.addEventListener("scroll", this.onScroll, { passive: true });
       this.schedule();
+    }
+
+    handleCopyKey(e: KeyboardEvent) {
+      if (!(e.metaKey && !e.ctrlKey && !e.altKey && (e.key === "c" || e.key === "C"))) return;
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
+      const anchor = sel.anchorNode;
+      const el = anchor && (anchor.nodeType === 1 ? (anchor as Element) : anchor.parentElement);
+      const body = el?.closest?.(".ledge-output-body");
+      if (!body || !this.view.dom.contains(body)) return;
+      const text = sel.toString();
+      if (!text) return;
+      // Consume the event: preventDefault stops the native (beeping) copy, and
+      // stopping propagation keeps the editor's Mod-c keymap from also running and
+      // overwriting the clipboard with the (unrelated) document selection.
+      e.preventDefault();
+      e.stopPropagation();
+      copyText(text);
     }
 
     update(u: ViewUpdate) {
@@ -526,11 +536,19 @@ const overlayPlugin = ViewPlugin.fromClass(
         this.layer.appendChild(group);
       }
       for (const c of m.closes) {
-        // Mirror the control group's structure exactly: an absolutely-positioned
-        // wrapper holding a statically-positioned button.
+        // An absolutely-positioned wrapper holding the output panel's controls:
+        // copy (the current output, ANSI stripped) and dismiss.
         const wrap = document.createElement("div");
         wrap.className = "ledge-close-wrap";
         wrap.dataset.close = c.id;
+        const copyBtn = iconButton(COPY_ICON, "Copy output", (e) => {
+          e.preventDefault();
+          const run = this.view.state.field(runsField).find((r) => r.id === c.id);
+          if (!run) return;
+          copyText(plainOutput(run.text));
+          flashCopied(copyBtn);
+        });
+        wrap.appendChild(copyBtn);
         wrap.appendChild(
           iconButton(CLOSE_ICON, "Dismiss", (e) => {
             e.preventDefault();
@@ -547,6 +565,7 @@ const overlayPlugin = ViewPlugin.fromClass(
     }
 
     destroy() {
+      document.removeEventListener("keydown", this.onKeyDown, true);
       this.view.scrollDOM.removeEventListener("mousemove", this.onMove);
       this.view.scrollDOM.removeEventListener("scroll", this.onScroll);
       this.layer.remove();

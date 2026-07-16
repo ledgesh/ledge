@@ -4,6 +4,7 @@ import Electrobun, { Electroview } from "electrobun/view";
 import type { LedgeRPC } from "../shared/rpc-schema";
 import { configureBridge, dispatchRunEvent } from "./editor/bridge";
 import { configureTerminal, dispatchTerminalOutput } from "./terminal/channel";
+import { configureClipboard } from "./lib/clipboard";
 import "./index.css";
 import App from "./App";
 
@@ -39,6 +40,13 @@ configureTerminal({
   detach: () => {
     void electrobun.rpc!.request.terminalDetach({});
   },
+});
+
+configureClipboard({
+  write: (text) => {
+    void electrobun.rpc!.request.clipboardWrite({ text });
+  },
+  read: () => electrobun.rpc!.request.clipboardRead({}).then((r) => r.text),
 });
 
 createRoot(document.getElementById("root")!).render(

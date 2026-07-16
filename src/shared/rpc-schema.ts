@@ -23,6 +23,13 @@ export type LedgeRPC = {
       // off while the drawer is closed. Scrollback keeps accumulating either way.
       terminalAttach: { params: {}; response: { dataB64: string } };
       terminalDetach: { params: {}; response: { ok: boolean } };
+      // System clipboard, routed through the Bun process (pbcopy/pbpaste). The
+      // webview runs under the views:// scheme, which is not a secure context, so
+      // navigator.clipboard is unavailable and execCommand / native Cmd+V paste
+      // are unreliable without a native Edit menu. Going through Bun sidesteps all
+      // of that and behaves like a normal terminal's copy/paste.
+      clipboardWrite: { params: { text: string }; response: { ok: boolean } };
+      clipboardRead: { params: {}; response: { text: string } };
     };
     messages: {};
   };

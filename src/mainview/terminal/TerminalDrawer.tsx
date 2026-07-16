@@ -10,6 +10,7 @@ import {
   terminalAttach,
   terminalDetach,
 } from "./channel";
+import { copyText, readClipboard } from "../lib/clipboard";
 
 function xtermTheme(dark: boolean) {
   return dark
@@ -42,6 +43,37 @@ export function TerminalDrawer({ onReady }: { onReady?: () => void }) {
 
     // Keystrokes / pasted text -> Bun.
     const dataSub = term.onData((data) => sendTerminalText(data));
+
+    // Clipboard, matching a normal terminal. xterm draws its own selection (not a
+    // DOM selection the browser can copy) and the native paste event does not fire
+    // reliably in this WebView, so Cmd+C and Cmd+V are handled explicitly and go
+    // through the Bun process (pbcopy/pbpaste). Ctrl+C is left untouched so it
+    // still sends SIGINT; Cmd+A selects the whole buffer.
+    term.attachCustomKeyEventHandler((e) => {
+      if (e.type !== "keydown") return true;
+      const cmd = e.metaKey && !e.ctrlKey && !e.altKey;
+      // preventDefault on the keys we handle: otherwise the unhandled Cmd-key
+      // reaches AppKit's key-equivalent path, which rings the system alert (the
+      // "blip") even though the copy/paste itself succeeded.
+      if (cmd && (e.key === "c" || e.key === "C") && term.hasSelection()) {
+        e.preventDefault();
+        copyText(term.getSelection());
+        return false;
+      }
+      if (cmd && (e.key === "v" || e.key === "V")) {
+        e.preventDefault();
+        void readClipboard().then((text) => {
+          if (text) term.paste(text);
+        });
+        return false;
+      }
+      if (cmd && (e.key === "a" || e.key === "A")) {
+        e.preventDefault();
+        term.selectAll();
+        return false;
+      }
+      return true;
+    });
 
     // Live output is buffered until the scrollback snapshot has been written, so
     // the replayed history and any output that lands mid-attach stay in order.

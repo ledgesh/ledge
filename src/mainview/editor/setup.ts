@@ -7,6 +7,7 @@ import { syntaxHighlighting, HighlightStyle } from "@codemirror/language";
 import { tags } from "@lezer/highlight";
 import { toNative } from "./bridge";
 import { ledgeBlocks } from "./blocks";
+import { copyText, readClipboard } from "../lib/clipboard";
 
 // Ledge shows raw Markdown and styles it, rather than hiding the syntax the way
 // a live-preview editor does: the text you edit is the text on disk, which
@@ -79,6 +80,50 @@ const appKeymap = Prec.highest(
   ]),
 );
 
+// Clipboard, routed through the native bridge (pbcopy/pbpaste). CodeMirror's
+// built-in copy/cut/paste rely on the browser's clipboard events, which do not
+// work in this non-secure views:// WebView, so we handle the shortcuts ourselves.
+// Each command returns true so CodeMirror consumes the key event: that both
+// blocks the broken native path and stops the unhandled Cmd-key from reaching
+// AppKit, which would otherwise ring the system alert. High precedence so these
+// win over the default copy/cut/paste bindings.
+function selectedText(view: EditorView): string {
+  return view.state.selection.ranges.map((r) => view.state.sliceDoc(r.from, r.to)).join("\n");
+}
+
+const clipboardKeymap = Prec.highest(
+  keymap.of([
+    {
+      key: "Mod-c",
+      run: (view) => {
+        const text = selectedText(view);
+        if (text) copyText(text);
+        return true;
+      },
+    },
+    {
+      key: "Mod-x",
+      run: (view) => {
+        const text = selectedText(view);
+        if (text) {
+          copyText(text);
+          view.dispatch(view.state.replaceSelection(""));
+        }
+        return true;
+      },
+    },
+    {
+      key: "Mod-v",
+      run: (view) => {
+        void readClipboard().then((text) => {
+          if (text) view.dispatch(view.state.replaceSelection(text));
+        });
+        return true;
+      },
+    },
+  ]),
+);
+
 const theme = EditorView.theme({
   "&": {
     height: "100%",
@@ -116,6 +161,7 @@ export function createEditor(parent: HTMLElement, doc: string): EditorView {
         drawSelection(),
         lineNumbers(),
         appKeymap,
+        clipboardKeymap,
         ledgeBlocks(),
         keymap.of([...defaultKeymap, ...historyKeymap]),
         markdown({ base: markdownLanguage, codeLanguages: languages }),

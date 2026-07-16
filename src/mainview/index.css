@@ -181,6 +181,8 @@ body {
 }
 .ledge-close-wrap {
   position: absolute;
+  display: inline-flex;
+  gap: 1px;
 }
 .ledge-close-wrap .ledge-btn {
   pointer-events: auto;
@@ -278,4 +280,10 @@ body {
   white-space: pre-wrap;
   word-break: break-word;
   cursor: text;
+  /* The panel is a contenteditable=false widget inside the editor's
+     contenteditable surface; without an explicit user-select the browser will
+     not let you drag-select the output. With it (and OutputWidget.ignoreEvent
+     returning true) the text selects natively and Cmd+C copies it. */
+  user-select: text;
+  -webkit-user-select: text;
 }

@@ -110,6 +110,30 @@ const rpc = BrowserView.defineRPC<LedgeRPC>({
         attached = false;
         return { ok: true };
       },
+      // System clipboard via macOS pbcopy/pbpaste. The webview cannot reach the
+      // clipboard itself (non-secure views:// context), so the terminal and the
+      // inline output panel proxy copy/paste through here.
+      clipboardWrite: async ({ text }) => {
+        try {
+          const p = Bun.spawn(["pbcopy"], { stdin: "pipe" });
+          p.stdin.write(text);
+          await p.stdin.end();
+          await p.exited;
+        } catch {
+          // No pbcopy (non-macOS or PATH issue); drop silently.
+        }
+        return { ok: true };
+      },
+      clipboardRead: async () => {
+        try {
+          const p = Bun.spawn(["pbpaste"], { stdout: "pipe" });
+          const text = await new Response(p.stdout).text();
+          await p.exited;
+          return { text };
+        } catch {
+          return { text: "" };
+        }
+      },
     },
     messages: {},
   },
