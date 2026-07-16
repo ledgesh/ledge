@@ -10,5 +10,9 @@ build/
 # Logs
 *.log
 
+# Playwright artifacts (e2e failure traces and reports)
+test-results/
+playwright-report/
+
 # Internal working notes
 PLAN.md

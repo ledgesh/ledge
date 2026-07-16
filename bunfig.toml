@@ -1,0 +1,10 @@
+[test]
+# bun test owns src/; e2e/*.spec.ts belongs to the Playwright runner
+# (`bun run test:e2e`), and bun test would otherwise pick it up by its .spec
+# suffix and choke on the @playwright/test import.
+root = "src"
+# Point the note store at a scratch root before ANY test file loads (see
+# src/test-preload.ts). Test files share one module registry, so this cannot
+# be done inside a test file: whichever file imported bun/notes.ts first would
+# have already frozen NOTES_ROOT — possibly at the real ~/.ledge.
+preload = ["./src/test-preload.ts"]

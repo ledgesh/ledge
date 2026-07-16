@@ -1,8 +1,10 @@
 # Ledge testing standards
 
 How correctness is checked, and at which layer. The one-line version: **pure
-logic gets unit tests, wiring gets the type system, and behavior gets verified
-in the real WKWebView** — each layer covering what the one below cannot.
+logic gets unit tests, the note store gets real-filesystem tests, wiring gets
+the type system, UI behavior gets headless WebKit (the harness), and the
+native shell gets the live probe** — each layer covering what the one below
+cannot.
 
 ## 1. Runner and layout
 
@@ -34,9 +36,16 @@ A wrapper that grows logic is the signal to move that logic down into the
 core. What the wrappers and components add up to is covered by layer 4, not
 by simulating a browser badly.
 
-Filesystem code follows the same shape: `bun/notes.test.ts` tests the pure
-helpers (`uniqueName`, `isInside`) and the guards (a `rejects` assertion
-needs no filesystem) without ever touching disk.
+Filesystem code gets both halves: `bun/notes.test.ts` tests the pure helpers
+(`uniqueName`, `isInside`) and the guards (a `rejects` assertion needs no
+filesystem) without touching disk, and `bun/notes.fs.test.ts` exercises the
+rename choreography and the unlink paths against real files. The whole
+`bun test` run is pointed at a per-run temp dir by `src/test-preload.ts`
+(wired in `bunfig.toml`) — a *preload*, deliberately: `NOTES_ROOT` is frozen
+at import time and test files share one module registry, so an env var set
+inside a test file can be too late, and too late here means a test wiping the
+real `~/.ledge`. The fs test file re-checks the root is under the tmpdir and
+refuses to run otherwise.
 
 ## 3. Invariant tests
 
@@ -69,13 +78,48 @@ The seams built for testability (architecture.md §5) are where tests inject:
   creators, not by hand-assembling `AppState` literals that rot as the shape
   grows.
 
-## 5. Verifying in the real app
+## 5. The harness: UI behavior in headless WebKit
 
-Unit tests cannot see focus, WebKit quirks, or the Bun⇄view wiring — the
-click-focus bug lived entirely in the gap between green tests and the real
-webview. Nontrivial UI behavior therefore gets verified live before it is
-called done. The recipe (the WKWebView console is not forwarded, so results
-come out through the clipboard):
+Unit tests cannot see focus or WebKit quirks — the click-focus bug lived
+entirely in the gap between green unit tests and the real webview. That gap
+belongs to the **harness**: the real app booted in Playwright's headless
+WebKit (`bun run test:e2e`), which is the same engine lineage as the shipping
+WKWebView, so its focus/tabindex behavior is representative in a way no
+simulated DOM is.
+
+The trick is that no fake browser *or* fake app is involved — only a fake
+Bun. `src/mainview/harness.tsx` boots the entire view exactly as `main.tsx`
+does, but binds the `configureX` seams (architecture.md §5) to an in-memory
+store instead of the live RPC. Everything above the seams — the command
+registry, dispatch, focus, lists, dialogs, CodeMirror — runs for real. Vite
+serves `harness.html` in dev only; the production build's input is
+`index.html`, so none of it ships.
+
+Rules:
+
+- Specs (`e2e/*.spec.ts`) assert on what a user can observe — roles, visible
+  text, `document.activeElement` — never on internals reached through
+  `window`. (`window.__harness` exists for the few things with no visible
+  surface, like the clipboard.)
+- WebKit only, deliberately. A Chromium pass would green-light what the
+  shipping engine then does differently.
+- The fake store mirrors `bun/notes.ts` semantics (naming-by-heading,
+  enumeration on collision, move-don't-unlink). If a spec needs behavior the
+  fake lacks, extend the fake to match the real store — never the reverse.
+- No PTYs in the harness: run/terminal behavior belongs to the live probe.
+- Every interaction rule that can be a spec should be one, same as §3: R5
+  (click focuses the row, opening must not steal focus), §4 (irreversible
+  confirms focus Cancel), the bare-key domain guard, all live in
+  `e2e/list-verbs.spec.ts` as executable statements of the spec.
+
+## 6. Verifying in the real app
+
+What the harness still cannot see: the real RPC transport, the AppKit
+key-equivalent path (the ⌘-beep class of bug), the native clipboard, and
+Electrobun's shell. Changes touching those get verified live in the actual
+app — a smoke pass, now that the harness carries the behavioral load. The
+recipe (the WKWebView console is not forwarded, so results come out through
+the clipboard):
 
 1. **Scratch root, always.** Launch with `LEDGE_NOTES_ROOT=<scratch dir>` and
    seed it with throwaway notes. A probe must never run against the real
@@ -97,7 +141,7 @@ is an alertdialog, not a dialog); and edit `main.tsx` with proper edit tools,
 not ad-hoc string splicing — a text-index splice once matched `boot()`'s
 `catch` instead of the intended one and duplicated the file.
 
-## 6. The green bar
+## 7. The green bar
 
 Before any work is called done, all of:
 
@@ -105,7 +149,8 @@ Before any work is called done, all of:
 bunx tsc --noEmit    # no errors under src/
 bunx vite build      # the view still builds
 bun test             # everything passes; no skipped tests left behind
+bun run test:e2e     # when the change touches UI behavior
 ```
 
-plus §5 when the change has user-visible behavior. Report results as they
+plus §6 when the change touches the native seams. Report results as they
 are: a red test is a finding, not an obstacle to phrase around.

@@ -68,8 +68,9 @@ Bun therefore validates everything and derives anything derivable:
   `.md` files directly in `.trash`. Empty Trash removes exactly what the list
   showed, and nothing it did not.
 - **`LEDGE_NOTES_ROOT`** overrides the root (`~/.ledge`) for tests and
-  throwaway runs. Nothing in the app sets it; anything that exercises the real
-  app against real files must set it (see `docs/testing.md` §5).
+  throwaway runs. Nothing in the app sets it; every `bun test` run gets a
+  scratch one via preload, and anything that exercises the real app against
+  real files must set it (see `docs/testing.md` §§2, 6).
 
 ## 4. Identity keys: path vs docId
 
@@ -152,6 +153,11 @@ xterm, Tailwind + the shadcn utilities, lucide icons, Electrobun — are the
 approved set. A new dependency needs a reason the existing set genuinely
 cannot cover, stated in the PR/commit that adds it; "it has a nicer API" is
 not one. (This was a deliberate choice, not an accident of history.)
+
+Dev-only tooling gets the same test but a lower bar, since it never ships:
+`@playwright/test` is in because nothing in the existing set can execute a
+real DOM (`docs/testing.md` §5) — the canonical example of a reason that
+clears it.
 
 Bun-side: prefer `bun:ffi` and POSIX over native modules — node-pty is out for
 exactly this reason; the PTY is posix_spawn + poll.

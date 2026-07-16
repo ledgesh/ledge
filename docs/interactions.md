@@ -201,6 +201,11 @@ rather than adding their own capture-phase listeners.
   other key, row verbs included, falls through to the window dispatcher. Lists
   do not run commands — they publish which row is focused (as data attributes,
   read back by `commands/target.ts`) and let the one dispatcher decide.
+- One exception to "unmatched keys fall through untouched": a bare ⌫ in the
+  list domain is always consumed, even when its verb is refused (⌫ on the
+  last workspace). Some WebKit builds treat an unhandled Backspace outside a
+  text field as history-back, and a focused row must never navigate the app
+  away (caught by `e2e/workspace-rows.spec.ts`).
 
 ## 8. Discoverability
 

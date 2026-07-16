@@ -71,16 +71,25 @@ export function CommandProvider({ children }: { children: ReactNode }) {
       // The focused row, if any: a bare `d` carries no target of its own, so
       // the row it landed on is the target (commands/target.ts).
       const target = targetFromElement(e.target);
+      const domain = domainOf(e.target);
       const hit = resolveChord(commands, eventToChord(e), {
-        domain: domainOf(e.target),
+        domain,
         modalOpen: modalOpen(),
         targetKind: target?.kind,
       });
-      if (!hit) return;
       const c: CommandCtx = { ...ctxRef.current, target };
       // A disabled command lets the key fall through untouched (matching the
-      // old behavior of e.g. ⌘7 with six workspaces: nothing, no beep-guard).
-      if (hit.when && !hit.when(c)) return;
+      // old behavior of e.g. ⌘7 with six workspaces: nothing, no beep-guard) —
+      // except a bare ⌫ on a focused row, which must die here either way:
+      // some WebKit builds treat an unhandled Backspace outside a text field
+      // as history-back, so a refused verb (⌫ on the last workspace) has to
+      // be a no-op, not a navigation. A text field inside a row is safe: its
+      // focus puts the domain at "page", not "list" (domainOf above).
+      if (!hit || (hit.when && !hit.when(c))) {
+        const bare = !e.metaKey && !e.ctrlKey && !e.altKey;
+        if (domain === "list" && bare && e.key === "Backspace") e.preventDefault();
+        return;
+      }
       e.preventDefault();
       hit.run(c);
     };
