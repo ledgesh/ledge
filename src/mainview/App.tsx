@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { TerminalSquare, X } from "lucide-react";
+import { PanelLeft, TerminalSquare, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ResizeHandle } from "@/components/ResizeHandle";
 import { TerminalDrawer } from "@/terminal/TerminalDrawer";
 import { configureBridge } from "@/editor/bridge";
 import { sendTerminalText, closeSession, onTerminalExit } from "@/terminal/channel";
@@ -18,9 +19,30 @@ export default function App() {
   );
 }
 
+// Sidebar width bounds (px); the terminal's max is measured against the live
+// content height so the editor can't be squeezed away.
+const SIDEBAR_MIN = 180;
+const SIDEBAR_MAX = 460;
+const TERM_MIN = 140;
+const EDITOR_MIN = 160; // space the editor row keeps when the terminal grows
+
 function Shell() {
   const { state, dispatch, selected } = useWorkspace();
   const [termOpen, setTermOpen] = useState(false);
+  const [termHeight, setTermHeight] = useState(280);
+  const [sidebarWidth, setSidebarWidth] = useState(224);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  // The vertical stack (below the header) that holds the editor row and the
+  // terminal drawer; its height bounds how tall the terminal can grow.
+  const stackRef = useRef<HTMLDivElement>(null);
+
+  const resizeSidebar = useCallback((w: number) => {
+    setSidebarWidth(Math.max(SIDEBAR_MIN, Math.min(w, SIDEBAR_MAX)));
+  }, []);
+  const resizeTerm = useCallback((h: number) => {
+    const avail = stackRef.current?.clientHeight ?? window.innerHeight;
+    setTermHeight(Math.max(TERM_MIN, Math.min(h, avail - EDITOR_MIN)));
+  }, []);
   // The note whose terminal the drawer shows: the focused pane's active tab. Its
   // docId is the sessionId for that note's per-note terminal shell.
   const activeDocId = focusedDocId(selected);
@@ -117,6 +139,15 @@ function Shell() {
   return (
     <div className="flex h-screen flex-col bg-background text-foreground">
       <header className="flex h-11 shrink-0 items-center gap-2 border-b px-3">
+        <Button
+          variant={sidebarOpen ? "secondary" : "ghost"}
+          size="icon"
+          className="size-7"
+          onClick={() => setSidebarOpen((o) => !o)}
+          title={sidebarOpen ? "Hide workspaces" : "Show workspaces"}
+        >
+          <PanelLeft className="size-4" />
+        </Button>
         <span className="h-2 w-2 rounded-full bg-primary" />
         <span className="text-sm font-semibold">Ledge</span>
         <div className="flex-1" />
@@ -131,16 +162,37 @@ function Shell() {
         </Button>
       </header>
 
-      <div className="flex min-h-0 flex-1 flex-col">
+      <div ref={stackRef} className="flex min-h-0 flex-1 flex-col">
         <div className="flex min-h-0 flex-1">
-          <Sidebar />
+          {sidebarOpen && (
+            <>
+              <div style={{ width: sidebarWidth }} className="min-w-0 shrink-0">
+                <Sidebar />
+              </div>
+              <ResizeHandle
+                axis="x"
+                current={sidebarWidth}
+                onResize={resizeSidebar}
+                title="Drag to resize workspaces"
+              />
+            </>
+          )}
           <main className="min-h-0 min-w-0 flex-1">
             <WorkspaceView />
           </main>
         </div>
 
         {termOpen && (
-          <section className="flex h-[280px] shrink-0 flex-col border-t bg-background">
+          <ResizeHandle
+            axis="y"
+            invert
+            current={termHeight}
+            onResize={resizeTerm}
+            title="Drag to resize terminal"
+          />
+        )}
+        {termOpen && (
+          <section style={{ height: termHeight }} className="flex shrink-0 flex-col bg-background">
             <div className="flex h-7 shrink-0 items-center gap-2 border-b px-2">
               <TerminalSquare className="size-3.5 text-muted-foreground" />
               <span className="text-[11px] font-medium text-muted-foreground">Terminal</span>

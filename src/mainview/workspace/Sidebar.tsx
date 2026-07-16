@@ -67,7 +67,7 @@ export function Sidebar() {
   };
 
   return (
-    <aside className="flex w-56 shrink-0 flex-col border-r bg-muted/20">
+    <aside className="flex h-full w-full min-w-0 flex-col bg-muted/20">
       <div className="px-3 pb-1 pt-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
         Workspaces
       </div>
