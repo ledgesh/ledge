@@ -453,7 +453,10 @@ const overlayPlugin = ViewPlugin.fromClass(
           from,
           lang,
           top: c.top - base.top + 1,
-          right: 12,
+          // The panel's right border sits ~12px in from the editor edge (the
+          // .cm-content padding), so add a bit more to inset the buttons inside
+          // the card instead of flush against its edge.
+          right: 22,
           caret: head >= from && head <= to,
         });
       });
@@ -579,8 +582,25 @@ const overlayPlugin = ViewPlugin.fromClass(
 
 // --- Decorations -----------------------------------------------------------
 
+// A rounded panel behind each fenced code block, so code stands out from prose.
+// Every line of the block gets a background (via a line decoration); the opening
+// and closing fence lines additionally round the top/bottom corners. Emitted
+// first, in document order, so the combined set stays sorted by position.
+function fencePanelDecorations(state: EditorView["state"], out: Range<Decoration>[]): void {
+  eachBlock(state, (from, to) => {
+    const first = state.doc.lineAt(from).number;
+    const last = state.doc.lineAt(Math.min(to, state.doc.length)).number;
+    for (let n = first; n <= last; n += 1) {
+      const cls =
+        "ledge-code" + (n === first ? " ledge-code-top" : "") + (n === last ? " ledge-code-bottom" : "");
+      out.push(Decoration.line({ class: cls }).range(state.doc.line(n).from));
+    }
+  });
+}
+
 function buildDecorations(state: EditorView["state"]): DecorationSet {
   const ranges: Range<Decoration>[] = [];
+  fencePanelDecorations(state, ranges);
   for (const run of state.field(runsField)) {
     const anchor = Math.min(run.pos, state.doc.length);
     const line = state.doc.lineAt(anchor);

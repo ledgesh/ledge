@@ -72,6 +72,9 @@
   --ed-muted: rgba(60, 60, 67, 0.55);
   --panel-bg: rgba(0, 0, 0, 0.03);
   --panel-border: rgba(0, 0, 0, 0.12);
+  /* Fenced code-block panel: stronger than --panel-bg so blocks read as cards. */
+  --code-panel-bg: rgba(0, 0, 0, 0.045);
+  --code-panel-border: rgba(0, 0, 0, 0.1);
   --btn-hover: rgba(0, 0, 0, 0.08);
   --ok: #34c759;
   --err: #ff3b30;
@@ -103,6 +106,8 @@
     --ed-muted: rgba(235, 235, 245, 0.55);
     --panel-bg: rgba(255, 255, 255, 0.04);
     --panel-border: rgba(255, 255, 255, 0.14);
+    --code-panel-bg: rgba(255, 255, 255, 0.06);
+    --code-panel-border: rgba(255, 255, 255, 0.1);
     --btn-hover: rgba(255, 255, 255, 0.12);
     --ok: #30d158;
     --err: #ff453a;
@@ -149,6 +154,33 @@ body {
 }
 .cm-scroller {
   overflow: auto;
+}
+
+/* --- Fenced code-block panel ------------------------------------------------
+   Line decorations (built in editor/blocks.ts) wrap every line of a fenced code
+   block in a rounded, bordered card so code stands out from surrounding prose.
+   The background spans the content box (inset by `.cm-content` padding), the
+   fence lines round the top/bottom corners, and horizontal padding insets the
+   code from the card edge. Vertical space is padding (not margin) so CodeMirror
+   measures it and the gutter line numbers stay aligned. */
+.cm-line.ledge-code {
+  background: var(--code-panel-bg);
+  border-left: 1px solid var(--code-panel-border);
+  border-right: 1px solid var(--code-panel-border);
+  padding-left: 12px;
+  padding-right: 12px;
+}
+.cm-line.ledge-code-top {
+  border-top: 1px solid var(--code-panel-border);
+  border-top-left-radius: 8px;
+  border-top-right-radius: 8px;
+  padding-top: 8px;
+}
+.cm-line.ledge-code-bottom {
+  border-bottom: 1px solid var(--code-panel-border);
+  border-bottom-left-radius: 8px;
+  border-bottom-right-radius: 8px;
+  padding-bottom: 8px;
 }
 
 /* --- Block chrome overlay ---------------------------------------------------
