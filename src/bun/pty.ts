@@ -20,6 +20,7 @@ const libc = dlopen("libSystem.B.dylib", {
   write: { args: ["i32", "ptr", "u64"], returns: "i64" },
   poll: { args: ["ptr", "u64", "i32"], returns: "i32" },
   killpg: { args: ["i32", "i32"], returns: "i32" },
+  tcgetpgrp: { args: ["i32"], returns: "i32" },
   posix_spawn_file_actions_init: { args: ["ptr"], returns: "i32" },
   posix_spawn_file_actions_addopen: { args: ["ptr", "i32", "ptr", "i32", "u32"], returns: "i32" },
   posix_spawn_file_actions_adddup2: { args: ["ptr", "i32", "i32"], returns: "i32" },
@@ -57,6 +58,69 @@ int ledge_set_winsize(int fd, unsigned short cols, unsigned short rows) {
 }
 `;
 
+// Spawning the shell so that Ctrl-C works.
+//
+// A tty only turns ^C into SIGINT for its foreground process group, and it only
+// has one if some process has claimed it as its CONTROLLING terminal. On macOS
+// that claim is an explicit ioctl(TIOCSCTTY) - the "first tty a session leader
+// opens becomes its ctty" rule is System V/Linux, not BSD - and posix_spawn has no
+// file action for an ioctl. So POSIX_SPAWN_SETSID gave us a session leader with no
+// controlling terminal: `stty` reported isig on, and ^C still did nothing, because
+// the line discipline had nobody to signal.
+//
+// login_tty() is exactly that missing step (setsid + TIOCSCTTY + dup onto 0/1/2),
+// but it has to run in the child, between fork and exec. Hence this trampoline.
+// The header's warning about fork() under Bun holds for forking into JS; here the
+// child touches nothing but syscalls before execve replaces the image, which is
+// the same contract posix_spawn keeps inside libc.
+const SPAWN_C = `#include <util.h>
+#include <unistd.h>
+int ledge_spawn_tty(int slave_fd, int master_fd, const char *cwd,
+                    const char *path, char *const argv[], char *const envp[]) {
+  pid_t pid = fork();
+  if (pid != 0) return (int)pid;
+  close(master_fd);
+  if (login_tty(slave_fd) < 0) _exit(126);
+  if (cwd && cwd[0] && chdir(cwd) != 0) _exit(125);
+  execve(path, argv, envp);
+  _exit(127);
+  return 0;
+}
+`;
+
+type SpawnFn = (
+  slaveFD: number,
+  masterFD: number,
+  cwd: ReturnType<typeof ptr>,
+  path: ReturnType<typeof ptr>,
+  argv: ReturnType<typeof ptr>,
+  envp: ReturnType<typeof ptr>,
+) => number;
+
+// Same lazy-compile-and-cache deal as the resize trampoline. null means we fall
+// back to posix_spawn below: the shell still runs, but with no controlling
+// terminal, so ^C is inert. Losing Ctrl-C beats losing the terminal entirely.
+let spawnTty: SpawnFn | null | undefined;
+function spawnFn(): SpawnFn | null {
+  if (spawnTty !== undefined) return spawnTty;
+  try {
+    const src = join(tmpdir(), "ledge-spawntty.c");
+    writeFileSync(src, SPAWN_C);
+    const { symbols } = cc({
+      source: src,
+      symbols: {
+        ledge_spawn_tty: { args: ["int", "int", "ptr", "ptr", "ptr", "ptr"], returns: "int" },
+      },
+    });
+    spawnTty = (slaveFD, masterFD, cwd, path, argv, envp) =>
+      symbols.ledge_spawn_tty(slaveFD, masterFD, cwd, path, argv, envp) as number;
+  } catch (err) {
+    console.warn("[pty] login_tty spawn unavailable, Ctrl-C will not work:", (err as Error).message);
+    spawnTty = null;
+  }
+  return spawnTty;
+}
+
 // Compiled lazily and cached: null means the trampoline could not be built (very
 // old Bun, no TinyCC), in which case resize is a silent no-op.
 let setWinsize: ((fd: number, cols: number, rows: number) => number) | null | undefined;
@@ -75,6 +139,14 @@ function winsizeFn(): ((fd: number, cols: number, rows: number) => number) | nul
     setWinsize = null;
   }
   return setWinsize;
+}
+
+// pollfd { int fd; short events; short revents; } -> 8 bytes
+function pollBufFor(fd: number): Uint8Array {
+  const pollfd = new ArrayBuffer(8);
+  new Int32Array(pollfd, 0, 1)[0] = fd;
+  new Int16Array(pollfd, 4, 1)[0] = POLLIN;
+  return new Uint8Array(pollfd);
 }
 
 export interface PtyOptions {
@@ -126,9 +198,34 @@ export class PtyProcess {
     if (!namePtr) throw new Error("ttyname failed");
     const slavePath = new CString(namePtr).toString();
 
-    // The child opens the slave itself as fd 0 (dup'd to 1/2). Combined with
-    // SETSID below, the first tty a session leader opens becomes its controlling
-    // terminal, which is what turns on job control and makes Ctrl-C work.
+    const argv = cArr([opts.executable, ...opts.args]);
+    const envp = cArr(Object.entries(opts.env).map(([k, v]) => `${k}=${v}`));
+
+    const spawn = spawnFn();
+    if (spawn) {
+      const pid = spawn(
+        slaveFD,
+        masterFD,
+        ptr(cstr(opts.cwd ?? "")),
+        ptr(cstr(opts.executable)),
+        ptr(argv),
+        ptr(envp),
+      );
+      if (pid < 0) {
+        s.close(masterFD);
+        s.close(slaveFD);
+        throw new Error("fork failed");
+      }
+      s.close(slaveFD); // the parent has no use for the slave
+      this.pid = pid;
+      this.masterFD = masterFD;
+      this.pollBuf = pollBufFor(masterFD);
+      this.readBufPtr = ptr(this.readBuf);
+      return;
+    }
+
+    // Fallback: no controlling terminal, so no job control and no Ctrl-C. See
+    // spawnFn above for why this is the lesser evil rather than the design.
     const actions = new BigUint64Array(1);
     s.posix_spawn_file_actions_init(ptr(actions));
     s.posix_spawn_file_actions_addopen(ptr(actions), 0, ptr(cstr(slavePath)), O_RDWR, 0);
@@ -143,9 +240,6 @@ export class PtyProcess {
     const attrs = new BigUint64Array(1);
     s.posix_spawnattr_init(ptr(attrs));
     s.posix_spawnattr_setflags(ptr(attrs), POSIX_SPAWN_SETSID);
-
-    const argv = cArr([opts.executable, ...opts.args]);
-    const envp = cArr(Object.entries(opts.env).map(([k, v]) => `${k}=${v}`));
 
     const pidBuf = new Int32Array(1);
     const rc = s.posix_spawn(
@@ -165,12 +259,7 @@ export class PtyProcess {
 
     this.pid = pidBuf[0];
     this.masterFD = masterFD;
-
-    // pollfd { int fd; short events; short revents; } -> 8 bytes
-    const pollfd = new ArrayBuffer(8);
-    new Int32Array(pollfd, 0, 1)[0] = masterFD;
-    new Int16Array(pollfd, 4, 1)[0] = POLLIN;
-    this.pollBuf = new Uint8Array(pollfd);
+    this.pollBuf = pollBufFor(masterFD);
     this.readBufPtr = ptr(this.readBuf);
   }
 
@@ -220,17 +309,41 @@ export class PtyProcess {
     winsizeFn()?.(this.masterFD, cols, rows);
   }
 
+  /**
+   * The tty's foreground process group: the one a typed ^C would signal, or -1 if
+   * the tty has none.
+   *
+   * This is NOT the shell's own group. A controlling terminal turns zsh's job
+   * control on, and job control means every foreground job is put in a group of its
+   * own; signalling the shell's group would reach the shell (which ignores SIGINT)
+   * and miss the job entirely.
+   */
+  private fgPgrp(): number {
+    if (this.closed) return -1;
+    const pg = s.tcgetpgrp(this.masterFD);
+    return pg > 0 ? pg : -1;
+  }
+
+  /** SIGINT whatever is running in the foreground, as ^C would. */
   interrupt(): void {
-    s.killpg(this.pid, SIGINT);
+    const fg = this.fgPgrp();
+    s.killpg(fg > 0 ? fg : this.pid, SIGINT);
   }
 
   terminate(): void {
-    if (!this.closed) s.killpg(this.pid, SIGTERM);
+    if (this.closed) return;
+    const fg = this.fgPgrp();
+    if (fg > 0 && fg !== this.pid) s.killpg(fg, SIGTERM);
+    s.killpg(this.pid, SIGTERM);
   }
 
   close(): void {
     if (this.closed) return;
+    // Read the foreground group before anything dies: killing the shell first would
+    // leave us asking a tty whose owner is already gone.
+    const fg = this.fgPgrp();
     this.closed = true;
+    if (fg > 0 && fg !== this.pid) s.killpg(fg, SIGKILL);
     s.killpg(this.pid, SIGKILL);
     s.close(this.masterFD);
   }

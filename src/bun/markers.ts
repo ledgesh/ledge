@@ -16,12 +16,38 @@ export type MarkerEvent =
   | { type: "output"; blockId: string; data: Uint8Array }
   | { type: "ended"; blockId: string; exitCode: number };
 
-/** Build the line submitted to the shell for one block. */
-export function markerCommand(runner: string, nonce: string, blockId: string): string {
-  const tag = `ledge=${nonce}:${blockId}`;
+/**
+ * Install the end-marker hook. Sent once, when a note's inline shell is spawned,
+ * before any block runs.
+ *
+ * The end marker cannot be the next command on the block's line. Ctrl-C aborts the
+ * whole line, so the printf reporting the exit code never runs and the block reads
+ * as still Running forever - which is precisely what you get for interrupting it.
+ * zsh's `always` block does not survive the interrupt either.
+ *
+ * precmd runs before every prompt, and the shell prints a prompt however the line
+ * ended: finished, failed, or interrupted. So the end marker is reported from
+ * there, with $? carrying the real status (130 for a SIGINT).
+ *
+ * `local rc=$?` must be the first thing in the function or the status is lost.
+ * `__ledge_id` is cleared after reporting, so the hook stays silent for prompts
+ * that follow anything other than a block.
+ */
+export function markerInit(nonce: string): string {
   return (
-    `printf '\\033]133;C;${tag}\\a'; ${runner}; __ledge_rc=$?; ` +
-    `printf '\\033]133;D;%d;${tag}\\a' "$__ledge_rc"\n`
+    `__ledge_precmd() { local rc=$?; [[ -n "$__ledge_id" ]] || return; ` +
+    `printf '\\033]133;D;%d;ledge=${nonce}:%s\\a' "$rc" "$__ledge_id"; __ledge_id= }; ` +
+    `precmd_functions+=(__ledge_precmd)\n`
+  );
+}
+
+/**
+ * Build the line submitted to the shell for one block: name the block, mark its
+ * start, run it. The end marker comes from the precmd hook above.
+ */
+export function markerCommand(runner: string, nonce: string, blockId: string): string {
+  return (
+    `__ledge_id=${blockId}; printf '\\033]133;C;ledge=${nonce}:${blockId}\\a'; ${runner}\n`
   );
 }
 
@@ -33,6 +59,15 @@ type Parsed =
 export class MarkerParser {
   private buffer: Uint8Array = new Uint8Array(0);
   private openBlock: string | null = null;
+
+  /**
+   * The block whose start marker we have seen but whose end marker we have not, if
+   * any. Only the shell can normally close a block; this is for when the shell is
+   * gone and someone else has to say so.
+   */
+  get openBlockId(): string | null {
+    return this.openBlock;
+  }
 
   constructor(private readonly nonce: string) {}
 

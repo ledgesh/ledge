@@ -702,8 +702,12 @@ export function handleRunEvent(view: EditorView, id: string, kind: string, paylo
       break;
     }
     case "finished": {
-      const code = typeof payload === "number" ? payload : (payload as { exitCode?: number })?.exitCode ?? 0;
-      view.dispatch({ effects: setRunState.of({ id, state: code === 0 ? "done" : "error", exitCode: code }) });
+      // null means the shell died with the block still open: no status to show, so
+      // the panel says "Session ended" rather than inventing an exit code.
+      const code = typeof payload === "number" ? payload : null;
+      view.dispatch({
+        effects: setRunState.of({ id, state: code === 0 ? "done" : "error", exitCode: code }),
+      });
       // Push the final state to the terminal header and shrink it to the used rows.
       const run = view.state.field(runsField).find((r) => r.id === id);
       const it = getInlineTerm(id);

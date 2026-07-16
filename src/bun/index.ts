@@ -9,7 +9,7 @@
 // into another. Both talk to the view over typed RPC.
 import { BrowserView, BrowserWindow, Updater } from "electrobun/bun";
 import { PtyProcess } from "./pty";
-import { MarkerParser, markerCommand } from "./markers";
+import { MarkerParser, markerCommand, markerInit } from "./markers";
 import {
   createNote,
   deleteNote,
@@ -68,6 +68,9 @@ function inlineFor(sessionId: string): Inline {
   let it = inlines.get(sessionId);
   if (!it) {
     it = { shell: spawnShell(), parser: new MarkerParser(NONCE) };
+    // Install the end-marker hook before any block can run. Its own echo lands
+    // outside every C..D pair, so the parser drops it and no block ever sees it.
+    it.shell.write(markerInit(NONCE));
     inlines.set(sessionId, it);
   }
   return it;
@@ -210,17 +213,18 @@ const rpc = BrowserView.defineRPC<LedgeRPC>({
         return { accepted: true };
       },
       cancelRun: ({ sessionId }) => {
-        // SIGINT the note's inline shell's process group, interrupting whatever
-        // block is running in the foreground. killpg rather than writing a 0x03
-        // byte: the tty only turns Ctrl-C into a signal in canonical mode, so a
-        // program that put the terminal in raw mode (a REPL, vim, claude) would
-        // just read the byte as input and keep running. .get, not inlineFor, so a
-        // note with no shell never spawns one just to be cancelled.
+        // SIGINT whatever the note's inline shell is running, from outside the tty.
+        // A signal rather than a 0x03 byte: 0x03 only becomes SIGINT if the tty is
+        // in canonical mode, so a program that put it in raw mode (a REPL, vim,
+        // claude) would just read the byte as input and keep going. This path is
+        // used to force-cancel exactly those. .get, not inlineFor, so a note with no
+        // shell never spawns one just to be cancelled.
         //
-        // The foreground job shares the shell's process group here (job control is
-        // off on this pty), so killpg reaches it; interactive zsh ignores SIGINT,
-        // so the shell survives with its cwd/env intact for the note's next block.
-        // The wrapped `source` then returns and the run ends on its D marker.
+        // The signal goes to the tty's foreground process group, which the shell's
+        // job control gives the running job (see PtyProcess.interrupt). zsh is not
+        // in that group and ignores SIGINT anyway, so the shell survives with its
+        // cwd/env intact for the note's next block, and the run ends on the D marker
+        // its precmd hook prints when the prompt comes back.
         inlines.get(sessionId)?.shell.interrupt();
         return { ok: true };
       },
@@ -324,6 +328,11 @@ setInterval(() => {
     // A block that quit the shell (e.g. `exit`) leaves it dead; drop it so the
     // note's next run spawns a fresh one.
     if (it.shell.exited) {
+      // The shell died mid-block, so there was no prompt, no precmd, and no end
+      // marker. Close the block out by hand: nobody else can now, and a panel left
+      // on "Running" would keep the note's run button disabled for good.
+      const open = it.parser.openBlockId;
+      if (open) rpc.send.runEvent({ id: open, kind: "ended", exitCode: null });
       it.shell.close();
       inlines.delete(sessionId);
     }

@@ -1,11 +1,12 @@
 import { test, expect, describe } from "bun:test";
-import { MarkerParser } from "./markers";
+import { MarkerParser, markerCommand, markerInit } from "./markers";
 
 const NONCE = "testnonce";
 const enc = new TextEncoder();
 const dec = new TextDecoder();
 
-// Raw OSC 133 markers as the shell would emit them (see markerCommand).
+// Raw OSC 133 markers as the shell would emit them: C from the block's own line,
+// D from the precmd hook (see markerCommand / markerInit).
 const begin = (id: string, nonce = NONCE) => enc.encode(`\x1b]133;C;ledge=${nonce}:${id}\x07`);
 const end = (id: string, code = 0, nonce = NONCE) => enc.encode(`\x1b]133;D;${code};ledge=${nonce}:${id}\x07`);
 const bytes = (s: string) => enc.encode(s);
@@ -29,6 +30,40 @@ function outputText(events: ReturnType<MarkerParser["feed"]>): string {
     .map((e) => dec.decode((e as { data: Uint8Array }).data))
     .join("");
 }
+
+describe("markerCommand / markerInit", () => {
+  test("the block's line does not carry the end marker", () => {
+    const cmd = markerCommand("source /tmp/b.sh", NONCE, "web-1");
+    // The whole point: an interrupt aborts this line, so anything on it that was
+    // meant to report the exit code would never run. Only the start marker lives
+    // here; the end comes from the prompt hook.
+    expect(cmd).toContain("133;C;");
+    expect(cmd).not.toContain("133;D;");
+  });
+
+  test("the block's line names the block for the hook to report", () => {
+    expect(markerCommand("source /tmp/b.sh", NONCE, "web-7")).toContain("__ledge_id=web-7");
+  });
+
+  test("the hook reports the end, tagged and with the real status", () => {
+    const init = markerInit(NONCE);
+    expect(init).toContain("precmd_functions+=(__ledge_precmd)");
+    expect(init).toContain("133;D;");
+    expect(init).toContain(`ledge=${NONCE}`);
+    // $? has to be captured before anything else in the function can clobber it.
+    expect(init).toMatch(/__ledge_precmd\(\) \{ local rc=\$\?;/);
+  });
+
+  test("the hook stays quiet when no block is running", () => {
+    // Prompts happen for reasons other than blocks; without this guard every one
+    // of them would emit an end marker for whatever ran last.
+    expect(markerInit(NONCE)).toContain('[[ -n "$__ledge_id" ]] || return');
+  });
+
+  test("a block's id is cleared once reported, so it is reported once", () => {
+    expect(markerInit(NONCE)).toContain("__ledge_id= }");
+  });
+});
 
 describe("MarkerParser", () => {
   test("slices a full begin/output/end stream", () => {
@@ -115,5 +150,16 @@ describe("MarkerParser", () => {
     const ids = events.map((e) => e.blockId);
     expect(ids).toEqual(["a", "a", "a", "b", "b", "b"]);
     expect(events[5]).toMatchObject({ type: "ended", blockId: "b", exitCode: 1 });
+  });
+
+  test("openBlockId names the block still waiting on its end marker", () => {
+    // How the Bun side closes out a block whose shell died before the prompt (and
+    // therefore the hook) could report it.
+    const p = new MarkerParser(NONCE);
+    expect(p.openBlockId).toBe(null);
+    p.feed(join(begin("a"), bytes("working")));
+    expect(p.openBlockId).toBe("a");
+    p.feed(end("a", 0));
+    expect(p.openBlockId).toBe(null);
   });
 });

@@ -355,7 +355,12 @@ export function releaseInlineTerm(id: string): void {
 
 function statusText(run: RunInfo): string {
   if (run.state === "running") return "Running";
-  if (run.state === "error") return run.exitCode != null ? `Exited ${run.exitCode}` : "Session ended";
+  if (run.state === "error") {
+    // 128 + SIGINT: the shell's way of saying the block was Ctrl-C'd. Worth naming,
+    // because it is the one non-zero status the user asked for on purpose.
+    if (run.exitCode === 130) return "Interrupted";
+    return run.exitCode != null ? `Exited ${run.exitCode}` : "Session ended";
+  }
   return "Done";
 }
 

@@ -7,7 +7,11 @@ export type RunEvent =
   | { id: string; kind: "began" }
   // Output bytes, base64-encoded because RPC payloads are JSON.
   | { id: string; kind: "output"; dataB64: string }
-  | { id: string; kind: "ended"; exitCode: number };
+  // `exitCode: null` means the shell died with the block still running (the block
+  // ran `exit`, or the shell was killed): there is no status to report, only the
+  // fact that it is over. Without this the panel would sit on "Running" forever,
+  // and with it the note's run button, which is disabled while a block runs.
+  | { id: string; kind: "ended"; exitCode: number | null };
 
 /**
  * One note on disk. `path` is the note's identity; `title` is what to call it on
