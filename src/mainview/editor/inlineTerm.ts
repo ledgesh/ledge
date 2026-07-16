@@ -14,6 +14,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import type { RunInfo } from "./blocks";
 import { copyText, readClipboard } from "../lib/clipboard";
+import { settings } from "../lib/settings";
 
 // The tallest an inline run gets. 24 rows (~the classic terminal height) keeps the
 // panel about as tall as the old <pre> cap; past that the run scrolls.
@@ -100,7 +101,7 @@ export class InlineTerm {
     this.media = window.matchMedia("(prefers-color-scheme: dark)");
     this.term = new Terminal({
       fontFamily: FONT,
-      fontSize: 12,
+      fontSize: settings().terminal.fontSize,
       // Start at one row and grow with the output. xterm's default is 24, and
       // liveRows() never shrinks a running grid, so the starting size is the
       // smallest the panel can ever be.

@@ -12,6 +12,7 @@ import { findReplace } from "./find";
 import { fromDisk, sessionIdFacet } from "./session";
 import { noteChanged, saveNow } from "../notes/store";
 import { copyText, readClipboard } from "../lib/clipboard";
+import { settings } from "../lib/settings";
 import { keyOf } from "../commands/keys";
 
 // Ledge shows raw Markdown and styles it, rather than hiding the syntax the way
@@ -137,11 +138,13 @@ const clipboardKeymap = Prec.highest(
 );
 
 const theme = EditorView.theme({
+  // The base font size is a setting, applied per editor in createEditor below
+  // rather than here: this theme is module-level and would freeze the value
+  // before boot configures the snapshot.
   "&": {
     height: "100%",
     backgroundColor: "transparent",
     color: "var(--fg)",
-    fontSize: "14px",
   },
   ".cm-content": {
     fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
@@ -270,6 +273,7 @@ export function createEditor(parent: HTMLElement, doc: string, sessionId: string
         markdown({ base: markdownLanguage, codeLanguages: languages }),
         syntaxHighlighting(highlight),
         theme,
+        EditorView.theme({ "&": { fontSize: `${settings().editor.fontSize}px` } }),
         reporting,
       ],
     }),

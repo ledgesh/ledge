@@ -34,10 +34,14 @@ but because it is the end where a bug becomes an arbitrary argument: a stale
 path in a closure, a confused target, an injected string in a note's heading.
 Bun therefore validates everything and derives anything derivable:
 
-- **Every path arriving over RPC is checked before use.** `assertInRoot`
-  (backed by `isInside`) gates the notes root; `assertTrashed` — strictly
-  tighter: a `.md` file *directly inside* `.trash` — gates the two calls that
-  can unlink. `"../../.ssh/id_rsa"` must throw, and there is a test saying so.
+- **Every path arriving over RPC is checked before use.** `assertNote`
+  (inside the root *and* a `.md` file) gates every view-supplied note path;
+  `assertTrashed` — strictly tighter: a `.md` file *directly inside* `.trash` —
+  gates the two calls that can unlink. `"../../.ssh/id_rsa"` must throw, and
+  there is a test saying so. The `.md` requirement is load-bearing, not
+  tidiness: `settings.json` lives in the root and names the shell executable
+  (§6), so a `noteWrite` that accepted any in-root path would turn a notes
+  write into command execution at the next launch.
 - **The view never names a file.** It sends a note's *text*; Bun slugs the
   heading itself (`slugOf` emits only `[a-z0-9-]`), so filenames are safe by
   construction and there is no name parameter to validate or smuggle through.
@@ -119,7 +123,42 @@ Five instances exist and new needs should look like them: `configureBridge`
 `main.tsx` and the owning components do all the wiring; that is what keeps
 `notes/store.ts` and `commands/registry.ts` testable without a webview.
 
-## 6. Adding an RPC method
+## 6. Settings
+
+User preferences live in one JSON file, `settings.json`, in the notes root.
+`shared/settings.ts` owns the shape, the defaults, and the validator;
+`bun/settings.ts` owns the file. Bun reads it once at launch, applies its own
+half (the shell every PTY spawns, the trash TTL), and hands the view a
+validated snapshot over `settingsGet`; view consumers (editor and terminal
+font sizes, the runnable-fence set) read that snapshot at construction time
+through `lib/settings.ts`.
+
+- **What earns a setting.** The same shape of bar as the dependency policy
+  (§8): every setting is a behavioral fork the app tests and maintains
+  forever, so one exists only where the hardcoded default demonstrably fails
+  someone — not because a value *could* vary. The full current set: shell
+  path/args, editor and terminal font size, trash TTL, runnable fence
+  languages. Additions should be argued in those terms.
+- **Settings are not session state.** `settings.json` is *human-edited
+  preference*; which workspaces exist, their names, the pane layout are
+  *machine-written state* with different failure modes (a corrupt state file
+  must self-heal; a corrupt settings file must be left for its author). When
+  session persistence lands it gets its own file. Never mix the two.
+- **The file is the UI.** There is no settings panel; ⌘, (`settings.open`)
+  asks Bun to open the file in the OS editor. First launch seeds it with
+  every default spelled out, so the file documents its own knobs.
+- **Validation degrades per field, and never rewrites.** A bad value costs
+  that field (warned, defaulted — `parseSettings`); unparseable JSON costs the
+  whole file for the run but the bytes on disk are untouched: it is the
+  user's file, possibly mid-edit, and "fixing" it would destroy their work.
+- **Restart-applies, deliberately.** Both sides read once at launch; there is
+  no `settingsChanged` message and no live reload. Live-applying would mean
+  every consumer becomes reactive (rebuild CM themes, re-font live xterms,
+  respawn or leave stale shells) — a standing tax on every future setting,
+  paid to save one relaunch. Revisit only if editing settings becomes a
+  frequent act, which for this set it is not.
+
+## 7. Adding an RPC method
 
 The recipe, in order, using `trashDelete` as the worked example:
 
@@ -142,7 +181,7 @@ The recipe, in order, using `trashDelete` as the worked example:
 The compiler walks you through 3–7 once 1 and 4 are written; that is the
 point of the typed schema.
 
-## 7. Dependency policy
+## 8. Dependency policy
 
 **Hand-rolled over imported, for UI primitives.** ContextMenu, ConfirmDialog,
 QuickOpen/palette, RenameField, ResizeHandle, useListNav are ours; they total
@@ -162,7 +201,7 @@ clears it.
 Bun-side: prefer `bun:ffi` and POSIX over native modules — node-pty is out for
 exactly this reason; the PTY is posix_spawn + poll.
 
-## 8. Comments
+## 9. Comments
 
 Comments in this repo state *why* — the constraint, the rejected alternative,
 the failure the code prevents — not what the next line does. A comment that

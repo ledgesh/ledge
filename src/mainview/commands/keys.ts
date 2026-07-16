@@ -52,10 +52,13 @@ export const COMMANDS = {
   "workspace.icon": { title: "Change Icon…", listKeys: ["i"] },
   "workspace.close": { title: "Close Workspace", listKeys: ["Backspace"] },
 
-  // Chrome.
+  // Chrome. ⌘, is the macOS settings convention; it opens settings.json in
+  // the OS editor (there is no settings panel — the file is the UI, and edits
+  // apply at the next launch; docs/architecture.md "Settings").
   "sidebar.toggle": { title: "Toggle Sidebar", keys: ["Alt-Mod-b"] },
   "terminal.toggle": { title: "Toggle Terminal", keys: ["Ctrl-`"] },
   "terminal.close": { title: "Close Terminal" },
+  "settings.open": { title: "Settings…", keys: ["Mod-,"] },
 
   // Notes. note.delete is the row form (context menu, and `d`/⌫ on a focused
   // row); note.deleteCurrent is the ⌘⌫ / palette form acting on the focused

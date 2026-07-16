@@ -17,6 +17,8 @@ import { configureBridge } from "./editor/bridge";
 import { configureTerminal } from "./terminal/channel";
 import { configureNotes } from "./notes/channel";
 import { configureClipboard } from "./lib/clipboard";
+import { configureSettings } from "./lib/settings";
+import { DEFAULT_SETTINGS } from "../shared/settings";
 import { initialState } from "./workspace/store";
 import "./index.css";
 import App from "./App";
@@ -163,12 +165,25 @@ configureClipboard({
   read: async () => clip,
 });
 
+// A non-default editor font size, so a spec can tell "the setting reached the
+// editor" apart from "the old hardcoded 14px is still there". openFile is
+// recorded, not performed: launching an OS editor is a native seam.
+let settingsOpens = 0;
+configureSettings(
+  { ...DEFAULT_SETTINGS, editor: { fontSize: 18 } },
+  {
+    openFile: () => {
+      settingsOpens += 1;
+    },
+  },
+);
+
 declare global {
   interface Window {
-    __harness: { clipboard: () => string; store: FakeStore };
+    __harness: { clipboard: () => string; settingsOpens: () => number; store: FakeStore };
   }
 }
-window.__harness = { clipboard: () => clip, store };
+window.__harness = { clipboard: () => clip, settingsOpens: () => settingsOpens, store };
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

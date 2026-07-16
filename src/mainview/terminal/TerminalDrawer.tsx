@@ -11,6 +11,7 @@ import {
   terminalDetach,
 } from "./channel";
 import { copyText, readClipboard } from "../lib/clipboard";
+import { settings } from "../lib/settings";
 import { eventToChord, matchesKey } from "../commands/keymap";
 import { keyOf } from "../commands/keys";
 
@@ -50,7 +51,7 @@ export function TerminalDrawer({
     const media = window.matchMedia("(prefers-color-scheme: dark)");
     const term = new Terminal({
       fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-      fontSize: 12,
+      fontSize: settings().terminal.fontSize,
       cursorBlink: true,
       theme: xtermTheme(media.matches),
       allowProposedApi: true,

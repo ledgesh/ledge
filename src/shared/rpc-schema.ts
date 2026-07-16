@@ -2,6 +2,8 @@
 // This replaces the hand-rolled window.webkit.messageHandlers bridge from the
 // Swift build: the webview requests a block run, Bun streams run events back.
 
+import type { Settings } from "./settings";
+
 /** A streamed update about one running block, pushed Bun -> webview. */
 export type RunEvent =
   | { id: string; kind: "began" }
@@ -127,6 +129,14 @@ export type LedgeRPC = {
       // of that and behaves like a normal terminal's copy/paste.
       clipboardWrite: { params: { text: string }; response: { ok: boolean } };
       clipboardRead: { params: {}; response: { text: string } };
+      // The validated settings snapshot (shared/settings.ts), fetched once at
+      // boot. Bun owns the file, the parsing, and the fallbacks; the view only
+      // ever sees a complete, valid Settings. Applies at launch — there is no
+      // settingsChanged message, deliberately (architecture.md, "Settings").
+      settingsGet: { params: {}; response: { settings: Settings } };
+      // Open settings.json in the OS default editor (the ⌘, command). The view
+      // cannot name the file — Bun knows where it lives.
+      settingsOpen: { params: {}; response: { ok: boolean } };
     };
     messages: {};
   };

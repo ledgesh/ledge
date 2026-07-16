@@ -8,9 +8,10 @@ typed RPC in `src/shared/rpc-schema.ts`.
 
 - **[docs/architecture.md](docs/architecture.md)** — process/trust boundaries,
   filesystem invariants (rename-not-unlink, path guards), state ownership
-  (store vs `useState` vs `configureX` hooks), the recipe for adding an RPC
-  method, dependency policy. Read before adding modules, RPC methods, state,
-  or dependencies.
+  (store vs `useState` vs `configureX` hooks), settings policy (what earns a
+  knob in settings.json), the recipe for adding an RPC method, dependency
+  policy. Read before adding modules, RPC methods, state, settings, or
+  dependencies.
 - **[docs/interactions.md](docs/interactions.md)** — every user-facing action
   is a command in `src/mainview/commands/`; hotkey allocation, row verbs,
   destructive-action policy, Escape layering, tooltips. Read before adding

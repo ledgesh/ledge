@@ -6,6 +6,8 @@ import { configureBridge, dispatchRunEvent, setTerminalBusy } from "./editor/bri
 import { bytesToB64, configureTerminal, dispatchTerminalOutput, dispatchTerminalExit } from "./terminal/channel";
 import { configureNotes } from "./notes/channel";
 import { configureClipboard } from "./lib/clipboard";
+import { configureSettings } from "./lib/settings";
+import { DEFAULT_SETTINGS, type Settings } from "../shared/settings";
 import { initialState } from "./workspace/store";
 import "./index.css";
 import App from "./App";
@@ -91,16 +93,25 @@ configureNotes({
 async function boot(): Promise<void> {
   let notes: NoteMeta[] = [];
   let trash: TrashMeta[] = [];
+  let settings: Settings = DEFAULT_SETTINGS;
   try {
     // One round trip each, in parallel: the trash count is part of the first
-    // paint (it is a sidebar section), so fetching it after mount would flash.
-    [notes, trash] = await Promise.all([
+    // paint (it is a sidebar section), so fetching it after mount would flash;
+    // settings must beat the first render because editors and terminals read
+    // them at creation and never again (lib/settings.ts).
+    [notes, trash, settings] = await Promise.all([
       electrobun.rpc!.request.noteList({}).then((r) => r.notes),
       electrobun.rpc!.request.trashList({}).then((r) => r.items),
+      electrobun.rpc!.request.settingsGet({}).then((r) => r.settings),
     ]);
   } catch (err) {
     console.error("[notes] could not list the notes folder", err);
   }
+  configureSettings(settings, {
+    openFile: () => {
+      void electrobun.rpc!.request.settingsOpen({});
+    },
+  });
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
       <App initial={initialState(notes, trash)} />

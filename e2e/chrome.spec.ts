@@ -50,6 +50,22 @@ test("Empty Trash confirms, focused on Cancel, and empties on confirm", async ({
   await expect(page.getByRole("button", { name: /^Trash/ })).toHaveCount(0);
 });
 
+test("the settings snapshot reaches its consumers: the seeded editor font size applies", async ({ page }) => {
+  // The harness seeds editor.fontSize 18 (the default is 14), so 18px here
+  // proves the boot → configureSettings → createEditor chain, not a hardcode.
+  await noteRow(page, "Alpha").click();
+  const size = await page
+    .locator(".cm-editor")
+    .first()
+    .evaluate((el) => getComputedStyle(el).fontSize);
+  expect(size).toBe("18px");
+});
+
+test("⌘, asks Bun to open the settings file", async ({ page }) => {
+  await page.keyboard.press("Meta+,");
+  expect(await page.evaluate(() => window.__harness.settingsOpens())).toBe(1);
+});
+
 test("an open context menu suppresses the dispatcher; Escape closes only the menu", async ({ page }) => {
   await noteRow(page, "Beta").click({ button: "right" });
   const menu = page.getByRole("menu");

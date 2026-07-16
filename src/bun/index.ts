@@ -24,7 +24,13 @@ import {
   retitleNote,
   writeNote,
 } from "./notes";
+import { loadSettings, openSettingsFile } from "./settings";
 import type { LedgeRPC } from "../shared/rpc-schema";
+
+// Read once, applied for the life of the process: the shell below, the trash
+// TTL at the bottom, and the view's snapshot via settingsGet. Edits to
+// settings.json take effect at the next launch (architecture.md, "Settings").
+const settings = await loadSettings();
 
 // In the dev channel, prefer a running Vite dev server (bun run dev:hmr) so the
 // React view hot-reloads; otherwise load the built view copied into the bundle.
@@ -52,7 +58,12 @@ const toB64 = (bytes: Uint8Array) => Buffer.from(bytes).toString("base64");
 const fromB64 = (b64: string) => new Uint8Array(Buffer.from(b64, "base64"));
 
 function spawnShell(): PtyProcess {
-  return new PtyProcess({ executable: "/bin/zsh", args: ["-i"], env: shellEnv, cwd: process.env["HOME"] });
+  return new PtyProcess({
+    executable: settings.shell.path,
+    args: settings.shell.args,
+    env: shellEnv,
+    cwd: process.env["HOME"],
+  });
 }
 
 // --- per-note inline-run shells --------------------------------------------
@@ -301,6 +312,11 @@ const rpc = BrowserView.defineRPC<LedgeRPC>({
           return { text: "" };
         }
       },
+      settingsGet: () => ({ settings }),
+      settingsOpen: async () => {
+        await openSettingsFile();
+        return { ok: true };
+      },
     },
     messages: {},
   },
@@ -381,8 +397,8 @@ setInterval(() => {
 // it is housekeeping, and the window should not wait on a folder scan to open.
 // Doing it here rather than on a timer means a trashed note never disappears
 // out from under a Trash section the user is looking at.
-void purgeTrash()
-  .then((n) => n > 0 && console.log(`[notes] purged ${n} trashed note(s) past the 30-day limit`))
+void purgeTrash(settings.trash.ttlDays * 24 * 60 * 60 * 1000)
+  .then((n) => n > 0 && console.log(`[notes] purged ${n} trashed note(s) past the ${settings.trash.ttlDays}-day limit`))
   .catch((err) => console.error("[notes] trash purge failed", err));
 
 const mainWindow = new BrowserWindow({

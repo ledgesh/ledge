@@ -111,6 +111,7 @@ CodeMirror and never at the window level.
 | Command Palette…      | ⇧⌘P                       | also: type `>` as the first character in ⌘P |
 | Toggle Terminal       | ⌃`                        | from terminal focus it closes the drawer |
 | Toggle Sidebar        | ⌥⌘B                       | |
+| Settings…             | ⌘,                        | opens settings.json in the OS editor (architecture.md §6: the file is the UI) |
 | Delete Note           | ⌘⌫                        | page focus only; in the editor CodeMirror's delete-to-line-start wins |
 | Save                  | ⌘S                        | notes autosave; this skips the debounce |
 | Find / Replace        | ⌘F / ⌥⌘F (fallback ⇧⌘F)   | editor only; ⌥⌘F may be swallowed by cmux |

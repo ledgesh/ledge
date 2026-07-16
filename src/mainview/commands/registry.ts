@@ -24,6 +24,7 @@ import {
   Rows2,
   Save,
   Search,
+  Settings as SettingsIcon,
   Shapes,
   SquareX,
   TerminalSquare,
@@ -209,6 +210,12 @@ export function buildCommands(deps: RegistryDeps): Command[] {
       icon: X,
       palette: false, // Toggle Terminal covers it
       run: (ctx) => ctx.ui.closeTerminal?.(),
+    }),
+    // Opens settings.json in the OS editor — the file is the settings UI
+    // (docs/architecture.md "Settings"); changes apply at the next launch.
+    cmd("settings.open", {
+      icon: SettingsIcon,
+      run: () => deps.openSettings(),
     }),
 
     // --- notes ---------------------------------------------------------------

@@ -66,6 +66,16 @@ describe("createNote / writeNote / readNote", () => {
   test("writing outside the root is refused", async () => {
     await expect(writeNote(join(NOTES_ROOT, "..", "escape.md"), "x")).rejects.toThrow(/outside the notes root/);
   });
+
+  test("non-.md paths in the root are refused: settings.json is not a note", async () => {
+    // The escalation this blocks: settings.json names the shell executable, so
+    // a noteWrite that reached it would be command execution at next launch.
+    const path = join(NOTES_ROOT, "settings.json");
+    await expect(writeNote(path, '{"shell":{"path":"/tmp/evil"}}')).rejects.toThrow(/not a note path/);
+    await expect(readNote(path)).rejects.toThrow(/not a note path/);
+    await expect(retitleNote(path, "# X\n")).rejects.toThrow(/not a note path/);
+    await expect(deleteNote(path)).rejects.toThrow(/not a note path/);
+  });
 });
 
 describe("listNotes", () => {

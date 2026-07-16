@@ -21,6 +21,7 @@ import {
 import { sessionIdFacet } from "./session";
 import { acquireInlineTerm, getInlineTerm, releaseInlineTerm } from "./inlineTerm";
 import { copyText } from "../lib/clipboard";
+import { settings } from "../lib/settings";
 import { keyOf, type CommandId } from "../commands/keys";
 import { tooltip } from "../commands/format";
 
@@ -736,9 +737,13 @@ export function failAllRuns(view: EditorView): void {
 
 // --- Helpers ---------------------------------------------------------------
 
-const RUNNABLE = new Set(["sh", "bash", "zsh", "shell", "console", "python", "python3", "py", "ruby", "rb", "node", "js", "javascript"]);
+// Which fence languages get a Run button is a setting (blocks.runnable). Built
+// on first use, then cached: this runs in the decoration pass on every edit,
+// and the snapshot never changes after boot (settings apply at launch).
+let runnable: Set<string> | null = null;
 function isRunnable(lang: string | null): boolean {
-  return lang != null && RUNNABLE.has(lang.toLowerCase());
+  runnable ??= new Set(settings().blocks.runnable);
+  return lang != null && runnable.has(lang.toLowerCase());
 }
 
 function bytesFromBase64(b64: string): Uint8Array {

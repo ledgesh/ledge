@@ -10,6 +10,7 @@ function stubDeps(calls: string[] = []): RegistryDeps {
   const record = (name: string) => (arg: string) => calls.push(`${name}:${arg}`);
   return {
     copyText: record("copyText"),
+    openSettings: () => calls.push("openSettings"),
     editor: {
       find: record("find"),
       replace: record("replace"),
@@ -162,6 +163,13 @@ describe("registry", () => {
     find(cmds, "editor.find").run(makeCtx(state));
     find(cmds, "block.runInline").run(makeCtx(state));
     expect(calls).toEqual([`find:${docId}`, `runInline:${docId}`]);
+  });
+
+  test("run: settings.open routes to the openSettings edge", () => {
+    const calls: string[] = [];
+    const cmds = buildCommands(stubDeps(calls));
+    find(cmds, "settings.open").run(makeCtx(initialState([])));
+    expect(calls).toEqual(["openSettings"]);
   });
 
   test("run: note.copyPath copies the targeted row's path", () => {

@@ -112,6 +112,18 @@ function assertInRoot(path: string): string {
   return path;
 }
 
+// A note path from the view must be a .md file inside the root. The extension
+// check is load-bearing, not tidiness: settings.json lives in the root too and
+// names the shell executable, so a noteWrite that accepted any in-root path
+// would let a compromised view turn a notes write into command execution at
+// the next launch. Every function taking a view-supplied note path uses this;
+// in-root-only (assertInRoot) is reserved for paths this module built itself.
+function assertNote(path: string): string {
+  assertInRoot(path);
+  if (!/\.md$/i.test(path)) throw new Error(`not a note path: ${path}`);
+  return path;
+}
+
 export async function ensureRoot(): Promise<void> {
   await mkdir(NOTES_ROOT, { recursive: true });
 }
@@ -136,7 +148,7 @@ export async function listNotes(): Promise<NoteMeta[]> {
 
 // Read a note, or null if it is gone (deleted behind our back, say).
 export async function readNote(path: string): Promise<string | null> {
-  assertInRoot(path);
+  assertNote(path);
   try {
     return await readFile(path, "utf8");
   } catch {
@@ -150,7 +162,7 @@ export async function readNote(path: string): Promise<string | null> {
 // The temp name is dotted so a concurrent listNotes never shows it.
 let tmpCounter = 0;
 export async function writeNote(path: string, text: string): Promise<void> {
-  assertInRoot(path);
+  assertNote(path);
   const dir = dirname(path);
   await mkdir(dir, { recursive: true });
   tmpCounter += 1;
@@ -198,7 +210,7 @@ export async function createNote(text: string): Promise<NoteMeta> {
 // shell all survive, which is the whole reason path and docId are separate keys.
 // This is what makes naming-by-heading safe despite PLAN D15's warning.
 export async function retitleNote(path: string, text: string): Promise<NoteMeta> {
-  assertInRoot(path);
+  assertNote(path);
   const dir = dirname(path);
   const current = basename(path);
 
@@ -231,7 +243,7 @@ export async function retitleNote(path: string, text: string): Promise<NoteMeta>
 // Returns where the note landed, so the caller can offer to undo it, or null if
 // there was nothing to delete.
 export async function deleteNote(path: string): Promise<string | null> {
-  assertInRoot(path);
+  assertNote(path);
   if (isInside(TRASH_DIR, path)) return null; // already trashed
   await mkdir(TRASH_DIR, { recursive: true });
   const taken = new Set(await readdir(TRASH_DIR));

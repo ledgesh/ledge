@@ -56,6 +56,8 @@ export interface CommandCtx {
 // stays free of editor/RPC imports (and its tests can stub them).
 export interface RegistryDeps {
   copyText(text: string): void;
+  // Open settings.json in the OS editor (an RPC edge, like copyText).
+  openSettings(): void;
   editor: {
     find(docId: string): void;
     replace(docId: string): void;

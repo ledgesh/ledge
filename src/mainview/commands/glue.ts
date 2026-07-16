@@ -12,6 +12,7 @@ import { openReplace } from "@/editor/find";
 import { runBlock } from "@/editor/blocks";
 import { saveNow } from "@/notes/store";
 import { copyText } from "@/lib/clipboard";
+import { openSettingsFile } from "@/lib/settings";
 import type { RegistryDeps, UiHooks } from "./types";
 
 export const uiHooks: Partial<UiHooks> = {};
@@ -32,6 +33,7 @@ function withView(docId: string, fn: (view: NonNullable<ReturnType<typeof getEdi
 
 export const registryDeps: RegistryDeps = {
   copyText,
+  openSettings: openSettingsFile,
   editor: {
     find: (docId) => withView(docId, (view) => openSearchPanel(view)),
     replace: (docId) => withView(docId, (view) => openReplace(view)),
