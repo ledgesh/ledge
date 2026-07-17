@@ -12,6 +12,7 @@ import {
   Columns2,
   Command as CommandIcon,
   Copy,
+  ExternalLink,
   FilePlus,
   FileText,
   KeyRound,
@@ -28,6 +29,7 @@ import {
   Search,
   Settings as SettingsIcon,
   Shapes,
+  SquareCheck,
   SquareX,
   TerminalSquare,
   Trash2,
@@ -329,6 +331,15 @@ export function buildCommands(deps: RegistryDeps): Command[] {
       "block.runInTerminal",
       editorCommand(deps, TerminalSquare, (ed, docId) => ed.runInTerminal(docId)),
     ),
+    // Follows the link under the caret; ⌘-click on the link is the
+    // accelerator (editor/livePreview.ts). A caret not on a link makes this a
+    // no-op rather than hiding the entry — `when` cannot see the caret
+    // cheaply, and find/save keep the same always-visible contract.
+    cmd("link.open", editorCommand(deps, ExternalLink, (ed, docId) => ed.openLink(docId))),
+    // Toggles the checkbox on the caret's line; clicking the rendered box is
+    // the accelerator. Same always-visible, no-op-off-target contract as
+    // link.open above.
+    cmd("task.toggle", editorCommand(deps, SquareCheck, (ed, docId) => ed.toggleTask(docId))),
   ];
 
   // Indexed quick-jumps, one command per slot so the dispatcher and the

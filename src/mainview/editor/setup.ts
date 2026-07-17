@@ -8,6 +8,9 @@ import { tags } from "@lezer/highlight";
 import { toNative } from "./bridge";
 import { ledgeBlocks } from "./blocks";
 import { ledgeFrontmatter } from "./frontmatter";
+import { livePreview } from "./livePreview";
+import { tableRendering } from "./tables";
+import { quoteExit } from "./quotes";
 import { wrapping } from "./wrap";
 import { findReplace } from "./find";
 import { fromDisk, sessionIdFacet } from "./session";
@@ -16,13 +19,17 @@ import { copyText, readClipboard } from "../lib/clipboard";
 import { settings } from "../lib/settings";
 import { keyOf } from "../commands/keys";
 
-// Ledge shows raw Markdown and styles it, rather than hiding the syntax the way
-// a live-preview editor does: the text you edit is the text on disk, which
-// matters when a note's code blocks have to be exact. So the markers stay
-// visible and go dim (tags.processingInstruction covers #, **, >, -, `, and the
-// ``` fence marks); the content they mark gets the weight. Ported from the Swift
-// build's MarkdownTheme. Colors come from CSS vars so the editor tracks the OS
-// appearance without a second theme.
+// Ledge styles raw Markdown, and — since livePreview() landed — conceals the
+// markers where the caret is not (editor/livePreview.ts; editor.livePreview
+// in settings is the way back to fully-raw). The invariant that survives both
+// modes: the text you edit is the text on disk. Concealment is view-time
+// decoration only, and code block CONTENT is never touched — a note's code
+// has to be exact, so only the fence marks conceal. This HighlightStyle is
+// therefore still the whole story for anything revealed or never concealed:
+// markers go dim (tags.processingInstruction covers #, **, >, -, `, and the
+// ``` fence marks); the content they mark gets the weight. Ported from the
+// Swift build's MarkdownTheme. Colors come from CSS vars so the editor tracks
+// the OS appearance without a second theme.
 const highlight = HighlightStyle.define([
   { tag: tags.heading1, fontSize: "1.5em", fontWeight: "700" },
   { tag: tags.heading2, fontSize: "1.3em", fontWeight: "700" },
@@ -33,6 +40,9 @@ const highlight = HighlightStyle.define([
   { tag: tags.heading, fontWeight: "700" }, // Setext and any unlevelled heading.
   { tag: tags.strong, fontWeight: "700" },
   { tag: tags.emphasis, fontStyle: "italic" },
+  // Load-bearing under live preview: with the ~~ marks concealed, the strike
+  // itself is the only thing left saying the text is struck.
+  { tag: tags.strikethrough, textDecoration: "line-through" },
   { tag: tags.link, color: "var(--link)" },
   { tag: tags.url, color: "var(--ed-muted)" },
   { tag: tags.quote, color: "var(--ed-muted)", fontStyle: "italic" },
@@ -271,6 +281,17 @@ export function createEditor(parent: HTMLElement, doc: string, sessionId: string
         clipboardKeymap,
         ledgeBlocks(),
         ledgeFrontmatter(),
+        // The settings knob is the escape hatch back to fully-raw markdown
+        // (see the Settings comment in shared/settings.ts). Read at creation
+        // like fontSize below: settings apply at launch, never live.
+        // tableRendering is livePreview's block-level half (editor/tables.ts)
+        // — separate module because block widgets need a StateField, same
+        // knob because it is the same feature.
+        settings().editor.livePreview ? [livePreview(), tableRendering()] : [],
+        // Before markdown(): both bind Enter at Prec.high, and this one must
+        // see an empty quote line first (editor/quotes.ts). Not gated by
+        // livePreview — it is editing behavior, not rendering.
+        quoteExit(),
         keymap.of([...defaultKeymap, ...historyKeymap]),
         markdown({ base: markdownLanguage, codeLanguages: languages }),
         syntaxHighlighting(highlight),

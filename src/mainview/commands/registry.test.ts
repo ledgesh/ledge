@@ -21,6 +21,8 @@ function stubDeps(calls: string[] = [], noteHead: string | null = null): Registr
       save: record("save"),
       runInline: record("runInline"),
       runInTerminal: record("runInTerminal"),
+      openLink: record("openLink"),
+      toggleTask: record("toggleTask"),
     },
   };
 }

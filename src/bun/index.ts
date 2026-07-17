@@ -28,6 +28,7 @@ import {
 } from "./notes";
 import { runnerFor } from "./runner";
 import { loadSettings, openSettingsFile } from "./settings";
+import { openableUrl } from "../shared/links";
 import { resolveSpawn, type SpawnDeps } from "./spawnParams";
 import { readFileSync, statSync } from "node:fs";
 import type { LedgeRPC } from "../shared/rpc-schema";
@@ -389,6 +390,22 @@ const rpc = BrowserView.defineRPC<LedgeRPC>({
       settingsGet: () => ({ settings }),
       settingsOpen: async () => {
         await openSettingsFile();
+        return { ok: true };
+      },
+      // openableUrl is the guard here, not a convenience: `open` treats a
+      // non-URL argument as a file path (and launches .app bundles), so only
+      // the allowlisted schemes may pass. Re-checked on this side because the
+      // view's check is styling and this one is the boundary — the same move
+      // as assertProfileName above (architecture.md §2).
+      linkOpen: async ({ url }) => {
+        const target = openableUrl(url);
+        if (!target) return { ok: false };
+        try {
+          Bun.spawn(["open", target]);
+        } catch (err) {
+          console.warn("[links] could not open", target, err);
+          return { ok: false };
+        }
         return { ok: true };
       },
     },

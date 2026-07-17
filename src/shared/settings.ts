@@ -11,7 +11,13 @@ export interface Settings {
   // The login shell every PTY runs (per-note inline-run shells and terminal
   // drawers alike). Applied Bun-side at spawn.
   shell: { path: string; args: string[] };
-  editor: { fontSize: number };
+  // `livePreview` conceals markdown syntax where the caret is not
+  // (editor/livePreview.ts). The knob earns its place as the escape hatch,
+  // not a preference: the raw view is the app's original deliberate stance,
+  // and precise syntax editing (or any concealment bug) demonstrably needs a
+  // way back to text-on-screen-is-text-on-disk. Code block CONTENT is never
+  // concealed either way — only the fence marks are.
+  editor: { fontSize: number; livePreview: boolean };
   terminal: { fontSize: number };
   // How long a deleted note stays recoverable before the launch-time purge
   // evicts it (bun/notes.ts purgeTrash).
@@ -34,7 +40,7 @@ export interface Settings {
 
 export const DEFAULT_SETTINGS: Settings = Object.freeze({
   shell: { path: "/bin/zsh", args: ["-i"] },
-  editor: { fontSize: 14 },
+  editor: { fontSize: 14, livePreview: true },
   terminal: { fontSize: 12 },
   trash: { ttlDays: 30 },
   blocks: {
@@ -87,7 +93,10 @@ export function parseSettings(raw: unknown): { settings: Settings; problems: str
       },
       // Font sizes are bounded to what a human could plausibly want: outside
       // 6–72 is far more likely a typo (or a lost decimal point) than intent.
-      editor: { fontSize: num(editor, "fontSize", "editor.fontSize", d.editor.fontSize, 6, 72, problems) },
+      editor: {
+        fontSize: num(editor, "fontSize", "editor.fontSize", d.editor.fontSize, 6, 72, problems),
+        livePreview: bool(editor, "livePreview", "editor.livePreview", d.editor.livePreview, problems),
+      },
       terminal: { fontSize: num(terminal, "fontSize", "terminal.fontSize", d.terminal.fontSize, 6, 72, problems) },
       trash: { ttlDays: num(trash, "ttlDays", "trash.ttlDays", d.trash.ttlDays, 1, 36500, problems) },
       blocks: {
@@ -167,6 +176,20 @@ function stringMap(
     else problems.push(`"${label}.${k}" must be a non-empty string`);
   }
   return out;
+}
+
+function bool(
+  o: Record<string, unknown>,
+  key: string,
+  label: string,
+  fallback: boolean,
+  problems: string[],
+): boolean {
+  const v = o[key];
+  if (v === undefined) return fallback;
+  if (typeof v === "boolean") return v;
+  problems.push(`"${label}" must be true or false`);
+  return fallback;
 }
 
 function num(

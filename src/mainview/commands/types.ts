@@ -76,6 +76,12 @@ export interface RegistryDeps {
     save(docId: string): void;
     runInline(docId: string): void;
     runInTerminal(docId: string): void;
+    // Follow the link under the caret (livePreview.ts); no-op when the caret
+    // is not on one.
+    openLink(docId: string): void;
+    // Toggle the task checkbox on the caret's line (livePreview.ts); no-op
+    // when the line has none.
+    toggleTask(docId: string): void;
   };
 }
 

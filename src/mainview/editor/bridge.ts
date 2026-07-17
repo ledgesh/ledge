@@ -35,6 +35,10 @@ interface BridgeHandlers {
   // the ⌘-clicked frontmatter profile name asks for the same dialog the
   // "Edit Note Profile…" command opens.
   openProfileEditor: (name: string) => void;
+  // Open a URL in the OS default handler (browser, mail). main.tsx wires it
+  // to the linkOpen RPC; Bun re-validates the scheme (shared/links.ts) before
+  // anything reaches `open`.
+  openLink: (url: string) => void;
 }
 const handlers: Partial<BridgeHandlers> = {};
 
@@ -64,6 +68,12 @@ export function inputInline(sessionId: string, id: string, data: string): void {
 // Open the profile editor on `name` (editor/frontmatter.ts's ⌘-click).
 export function editProfile(name: string): void {
   handlers.openProfileEditor?.(name);
+}
+
+// Open `url` outside the app (editor/livePreview.ts's ⌘-click and the "Open
+// Link" command).
+export function openExternal(url: string): void {
+  handlers.openLink?.(url);
 }
 
 // Web -> Bun. Note edits do not come through here: persistence is a direct

@@ -120,6 +120,8 @@ CodeMirror and never at the window level.
 | Find Next / Previous  | ⌘G / ⇧⌘G (also F3 / ⇧F3)  | editor only |
 | Run Block Inline      | ⌘↩                        | cursor inside a runnable block |
 | Run Block in Terminal | ⇧⌘↩                       | |
+| Open Link             | — (palette; click the rendered link as accelerator) | follows the link under the caret (editor/livePreview.ts). A RENDERED link (syntax concealed, including inside a rendered table and bare URLs the caret is outside) opens on plain click — while concealed it is a widget, not editable text, same reasoning as the checkbox. A REVEALED link is raw text being edited: plain click is a caret move, ⌘-click opens (same grammar as the profile name above; the underline goes solid while ⌘ is held). Mouse-editing a rendered link: click adjacent text or arrow in, which reveals it. Schemes are allowlisted (shared/links.ts) and re-checked Bun-side |
+| Toggle Checkbox       | — (palette; click the rendered box as accelerator) | toggles the `[ ]`/`[x]` on the caret's line (editor/livePreview.ts). The box is a widget, not editable text, so a plain click may act — the caret-move grammar protects text, and the box is not text |
 | Rename Workspace…     | `r` (also menu / palette / double-click) | |
 | Change Icon…          | `i` (also menu / palette) | opens the icon grid on the workspace's row |
 | Close Workspace       | `⌫` (also menu / hover ✕) | |

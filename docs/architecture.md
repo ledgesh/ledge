@@ -152,12 +152,15 @@ through `lib/settings.ts`.
   (§8): every setting is a behavioral fork the app tests and maintains
   forever, so one exists only where the hardcoded default demonstrably fails
   someone — not because a value *could* vary. The full current set: shell
-  path/args, editor and terminal font size, trash TTL, runnable fence
-  languages, and the fence-language → interpreter map (`blocks.interpreters`,
-  applied Bun-side by `bun/runner.ts`; it exists because "which python" has no
-  universal answer — the default resolves via the login shell's PATH, and a
-  venv or pinned toolchain demonstrably needs to override that). Additions
-  should be argued in those terms.
+  path/args, editor and terminal font size, the live-preview toggle
+  (`editor.livePreview`: it exists as the escape hatch, not a preference —
+  raw markdown is the app's original deliberate stance, and precise syntax
+  editing demonstrably needs a way back to text-on-screen-is-text-on-disk),
+  trash TTL, runnable fence languages, and the fence-language → interpreter
+  map (`blocks.interpreters`, applied Bun-side by `bun/runner.ts`; it exists
+  because "which python" has no universal answer — the default resolves via
+  the login shell's PATH, and a venv or pinned toolchain demonstrably needs
+  to override that). Additions should be argued in those terms.
 - **Settings are not session state.** `settings.json` is *human-edited
   preference*; which workspaces exist, their names, the pane layout are
   *machine-written state* with different failure modes (a corrupt state file

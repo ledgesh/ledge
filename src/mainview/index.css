@@ -140,6 +140,42 @@ body {
   height: 100%;
 }
 
+/* --- Tab strip ----------------------------------------------------------------
+   The tab bar's scrolling region (workspace/PaneTree.tsx). Tabs overflowing the
+   pane scroll horizontally, but never show a scrollbar: a bar would eat the
+   tabs' height. In its place, a fade mask on whichever edge is clipping tabs
+   (the -clip-* classes, driven from scroll state via tabStrip.ts) says "more
+   this way"; the wheel and the active tab auto-scrolling into view do the
+   moving. */
+.ledge-tabstrip {
+  scrollbar-width: none;
+  --tabclip-l: 0px;
+  --tabclip-r: 0px;
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent,
+    black var(--tabclip-l),
+    black calc(100% - var(--tabclip-r)),
+    transparent
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent,
+    black var(--tabclip-l),
+    black calc(100% - var(--tabclip-r)),
+    transparent
+  );
+}
+.ledge-tabstrip::-webkit-scrollbar {
+  display: none;
+}
+.ledge-tabstrip-clip-l {
+  --tabclip-l: 20px;
+}
+.ledge-tabstrip-clip-r {
+  --tabclip-r: 20px;
+}
+
 /* --- CodeMirror surface ----------------------------------------------------- */
 /* The pooled editor host (created in editorPool.ts and re-parented between panes)
    must fill its pane so `.cm-editor { height: 100% }` has a definite parent.
@@ -207,6 +243,109 @@ body {
 .ledge-ctl-group.ledge-fm-chip .ledge-btn svg {
   width: 11px;
   height: 11px;
+}
+
+/* --- Live preview (editor/livePreview.ts) ------------------------------------
+   Markdown links with their syntax concealed: link color plus a dotted
+   underline, the hand cursor over RENDERED links via the hotspot layer
+   below (in-editor `cursor` being unreliable in the WKWebView), and the
+   underline goes solid while ⌘ is held (the metaHeld plugin) — for a
+   REVEALED link that's the "a click right now FOLLOWS instead of placing
+   the caret" signal, same affordance stack as the frontmatter profile
+   name above. */
+.ledge-mdlink,
+.ledge-mdlink span {
+  color: var(--link);
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+.ledge-meta .ledge-mdlink,
+.ledge-meta .ledge-mdlink span {
+  text-decoration-style: solid;
+}
+/* A link that will OPEN on plain click (rendered — livePreview.ts liveLink)
+   asks for the hand. The in-editor rule helps engines that honour it, but
+   the WKWebView does not do so reliably inside the editing context, so the
+   cursor that actually ships comes from the hotspot layer below. */
+.ledge-mdlink-live,
+.ledge-mdlink-live span {
+  cursor: pointer;
+}
+/* The WKWebView-proof hand: a body-parented layer pinned over the editor
+   (same trick as .ledge-overlay — elements outside the editing context
+   honour `cursor`), holding one invisible click-through-proof div per
+   rendered link / checkbox. Below the block controls (z 100), which must
+   stay clickable above everything. */
+.ledge-linklayer {
+  position: fixed;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 90;
+}
+.ledge-linklayer .ledge-hotspot {
+  position: absolute;
+  pointer-events: auto;
+  cursor: pointer;
+}
+/* The language label left visible when a fence's ``` marks conceal: restyled
+   as the block's small caption rather than a stray word. */
+.ledge-fence-lang,
+.ledge-fence-lang span {
+  font-size: 0.8em;
+  opacity: 0.75;
+}
+/* A task's [ ]/[x] marker, rendered as a real checkbox while concealed
+   (livePreview.ts TaskWidget). Sized to the text it sits in; accent follows
+   the link color so checked boxes read as "the app did this". Explicit
+   pointer, like .ledge-mdlink-live — the box acts on plain click. */
+.ledge-task {
+  width: 0.95em;
+  height: 0.95em;
+  margin: 0 0.1em;
+  vertical-align: -0.1em;
+  accent-color: var(--link);
+  cursor: pointer;
+}
+/* A checked task's label: done, quiet. */
+.ledge-task-done,
+.ledge-task-done span {
+  color: var(--ed-muted);
+  text-decoration: line-through;
+}
+/* A `---` thematic break while concealed (livePreview.ts RuleWidget): the
+   line it means, not the dashes it is. */
+.ledge-hrule {
+  display: inline-block;
+  width: 100%;
+  vertical-align: middle;
+  border-top: 1px solid var(--panel-border);
+}
+/* A pipe table while the caret is outside it (editor/tables.ts). Cells carry
+   their own alignment inline; links inside reuse .ledge-mdlink. */
+.ledge-mdtable {
+  border-collapse: collapse;
+  margin: 2px 0;
+  cursor: default;
+}
+.ledge-mdtable th,
+.ledge-mdtable td {
+  border: 1px solid var(--panel-border);
+  padding: 3px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+.ledge-mdtable th {
+  background: var(--panel-bg);
+  font-weight: 600;
+}
+.ledge-mdtable-code {
+  background: var(--code-panel-bg);
+  border-radius: 3px;
+  padding: 0 3px;
+}
+/* Links inside a rendered cell open on plain click, so: the hand. */
+.ledge-mdtable [data-url] {
+  cursor: pointer;
 }
 
 /* --- Fenced code-block panel ------------------------------------------------

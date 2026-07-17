@@ -10,6 +10,7 @@ import { openSearchPanel } from "@codemirror/search";
 import { focusEditor, getEditorView } from "@/workspace/editorPool";
 import { openReplace } from "@/editor/find";
 import { runBlock } from "@/editor/blocks";
+import { openLinkAtCursor, toggleTaskAt } from "@/editor/livePreview";
 import { saveNow } from "@/notes/store";
 import { copyText } from "@/lib/clipboard";
 import { openSettingsFile } from "@/lib/settings";
@@ -54,5 +55,8 @@ export const registryDeps: RegistryDeps = {
       withView(docId, (view) => runBlock(view, view.state.selection.main.head, "inline")),
     runInTerminal: (docId) =>
       withView(docId, (view) => runBlock(view, view.state.selection.main.head, "terminal")),
+    openLink: (docId) => withView(docId, (view) => openLinkAtCursor(view)),
+    toggleTask: (docId) =>
+      withView(docId, (view) => toggleTaskAt(view, view.state.selection.main.head)),
   },
 };

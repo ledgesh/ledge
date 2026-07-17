@@ -184,6 +184,14 @@ export type LedgeRPC = {
       // Open settings.json in the OS default editor (the ⌘, command). The view
       // cannot name the file — Bun knows where it lives.
       settingsOpen: { params: {}; response: { ok: boolean } };
+      // Open a note link in the OS default handler (browser, mail client).
+      // Sent by the editor's ⌘-click and the "Open Link" command. The URL is
+      // re-validated Bun-side against the same scheme allowlist the view used
+      // (shared/links.ts) — the view's check is styling, this one is the
+      // guard: `open` treats a non-URL argument as a file path and launches
+      // .app bundles, so an unvalidated string here would be command
+      // execution (architecture.md §2). ok:false means refused or unopenable.
+      linkOpen: { params: { url: string }; response: { ok: boolean } };
     };
     messages: {};
   };

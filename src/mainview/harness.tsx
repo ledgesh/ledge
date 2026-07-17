@@ -144,11 +144,17 @@ configureNotes({
 
 // No PTYs here: runs and the terminal are inert. A spec that needs run
 // behavior has outgrown the harness and belongs to the live probe.
+// Link opens are recorded, not performed, like settings opens below:
+// launching a browser is a native seam.
+const linkOpens: string[] = [];
 configureBridge({
   runInline: () => {},
   cancelRun: () => {},
   resizeInline: () => {},
   inputInline: () => {},
+  openLink: (url) => {
+    linkOpens.push(url);
+  },
 });
 configureTerminal({
   sendInput: () => {},
@@ -175,7 +181,7 @@ configureClipboard({
 let settingsOpens = 0;
 const profiles = new Map<string, string>();
 configureSettings(
-  { ...DEFAULT_SETTINGS, editor: { fontSize: 18 } },
+  { ...DEFAULT_SETTINGS, editor: { ...DEFAULT_SETTINGS.editor, fontSize: 18 } },
   {
     openFile: () => {
       settingsOpens += 1;
@@ -198,10 +204,20 @@ configureSettings(
 
 declare global {
   interface Window {
-    __harness: { clipboard: () => string; settingsOpens: () => number; store: FakeStore };
+    __harness: {
+      clipboard: () => string;
+      settingsOpens: () => number;
+      linkOpens: () => string[];
+      store: FakeStore;
+    };
   }
 }
-window.__harness = { clipboard: () => clip, settingsOpens: () => settingsOpens, store };
+window.__harness = {
+  clipboard: () => clip,
+  settingsOpens: () => settingsOpens,
+  linkOpens: () => [...linkOpens],
+  store,
+};
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

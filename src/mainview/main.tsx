@@ -42,6 +42,9 @@ configureBridge({
   inputInline: (sessionId, id, data) => {
     void electrobun.rpc!.request.inlineInput({ sessionId, id, dataB64: bytesToB64(new TextEncoder().encode(data)) });
   },
+  openLink: (url) => {
+    void electrobun.rpc!.request.linkOpen({ url });
+  },
 });
 
 configureTerminal({

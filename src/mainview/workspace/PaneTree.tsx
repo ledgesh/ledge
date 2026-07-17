@@ -10,6 +10,7 @@ import { tooltip } from "@/commands/format";
 import { useWorkspace } from "./store";
 import { attachEditor, detachEditor, focusEditor } from "./editorPool";
 import { leafIds, type LeafNode, type PaneNode, type SplitNode, type TabState } from "./tree";
+import { clippedEdges, wheelTravel } from "./tabStrip";
 
 // The tab being dragged, shared across every tab bar so a drop can name its
 // source pane. Kept outside React state because it only ever needs to be read
@@ -149,6 +150,30 @@ function TabBar({ leaf, focused }: { leaf: LeafNode; focused: boolean }) {
   // Where an in-flight drop would land, as an index into the current tab list.
   // Null when no tab is hovering this bar.
   const [dropIndex, setDropIndex] = useState<number | null>(null);
+  // Which edges of the strip are clipping tabs. The strip's scrollbar is
+  // hidden (index.css .ledge-tabstrip), so the fade masks these drive are the
+  // only sign that more tabs sit off an edge.
+  const [clipped, setClipped] = useState({ left: false, right: false });
+
+  const syncClipped = () => {
+    const strip = stripRef.current;
+    if (!strip) return;
+    const next = clippedEdges(strip.scrollLeft, strip.clientWidth, strip.scrollWidth);
+    setClipped((prev) => (prev.left === next.left && prev.right === next.right ? prev : next));
+  };
+
+  // Re-measure when the tab list changes and whenever the strip is resized —
+  // the strip resizes with its pane, so one observer covers split drags and
+  // window resizes both. Scrolling is handled by onScroll on the strip.
+  useLayoutEffect(() => {
+    syncClipped();
+    const strip = stripRef.current;
+    if (!strip) return;
+    const observer = new ResizeObserver(syncClipped);
+    observer.observe(strip);
+    return () => observer.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leaf.tabs]);
 
   // The slot the cursor is over: the count of tabs whose horizontal midpoint sits
   // left of it (0..tabs.length). Measured off the live DOM so it tracks the real
@@ -197,7 +222,16 @@ function TabBar({ leaf, focused }: { leaf: LeafNode; focused: boolean }) {
     <div className="flex h-8 shrink-0 items-stretch border-b bg-muted/30">
       <div
         ref={stripRef}
-        className="flex min-w-0 flex-1 items-stretch overflow-x-auto"
+        className={cn(
+          "ledge-tabstrip flex min-w-0 flex-1 items-stretch overflow-x-auto",
+          clipped.left && "ledge-tabstrip-clip-l",
+          clipped.right && "ledge-tabstrip-clip-r",
+        )}
+        onScroll={syncClipped}
+        onWheel={(e) => {
+          const travel = wheelTravel(e.deltaX, e.deltaY);
+          if (travel) stripRef.current?.scrollBy({ left: travel });
+        }}
         onDragOver={onDragOver}
         onDrop={onDrop}
         onDragLeave={onDragLeave}
@@ -316,8 +350,17 @@ function TabItem({
   const { exec } = useCommands();
   const active = leaf.activeTabId === tab.id;
   const [dragged, setDragged] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  // Keep the active tab on screen. With the strip's scrollbar hidden, a ⌃Tab
+  // or ⌃N jump to a clipped tab would otherwise switch to something invisible.
+  useLayoutEffect(() => {
+    if (active) ref.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [active]);
+
   return (
     <div
+      ref={ref}
       data-tab
       draggable
       className={cn(

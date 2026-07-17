@@ -101,6 +101,14 @@ export const COMMANDS = {
   "editor.findPrev": { title: "Find Previous", keys: ["Mod-Shift-g", "Shift-F3"] },
   "block.runInline": { title: "Run Block Inline", keys: ["Mod-Enter"] },
   "block.runInTerminal": { title: "Run Block in Terminal", keys: ["Mod-Shift-Enter"] },
+  // Palette-only: ⌘-click on the link itself is the accelerator
+  // (editor/livePreview.ts), same grammar as the frontmatter profile name.
+  // No chord: not frequent enough to spend one, and ⌘K is reserved below.
+  "link.open": { title: "Open Link" },
+  // Palette-only: clicking the rendered checkbox is the accelerator
+  // (editor/livePreview.ts TaskWidget); this is the keyboard path for a
+  // caret already on the task's line.
+  "task.toggle": { title: "Toggle Checkbox" },
 
   // Per-block hover buttons (editor/blocks.ts). Not palette commands — they
   // act on the hovered block — but their tooltips derive from here like every

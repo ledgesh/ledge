@@ -11,7 +11,7 @@ describe("parseSettings", () => {
   test("a full valid file round-trips (interpreters merge over the defaults)", () => {
     const input = {
       shell: { path: "/opt/homebrew/bin/fish", args: ["-l"] },
-      editor: { fontSize: 16 },
+      editor: { fontSize: 16, livePreview: false },
       terminal: { fontSize: 13 },
       trash: { ttlDays: 7 },
       blocks: { runnable: ["sh", "python"], interpreters: { python: "/venv/bin/python" } },
@@ -51,6 +51,13 @@ describe("parseSettings", () => {
       expect(settings.editor.fontSize).toBe(DEFAULT_SETTINGS.editor.fontSize);
       expect(problems).toHaveLength(1);
     }
+  });
+
+  test("livePreview takes only booleans — a truthy string is a typo", () => {
+    expect(parseSettings({ editor: { livePreview: false } }).settings.editor.livePreview).toBe(false);
+    const { settings, problems } = parseSettings({ editor: { livePreview: "yes" } });
+    expect(settings.editor.livePreview).toBe(DEFAULT_SETTINGS.editor.livePreview);
+    expect(problems).toEqual(['"editor.livePreview" must be true or false']);
   });
 
   test("an empty shell path falls back rather than spawning nothing", () => {

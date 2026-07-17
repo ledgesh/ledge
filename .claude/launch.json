@@ -6,6 +6,12 @@
       "runtimeExecutable": "bun",
       "runtimeArgs": ["run", "hmr"],
       "port": 5173
+    },
+    {
+      "name": "ledge-harness-2",
+      "runtimeExecutable": "bunx",
+      "runtimeArgs": ["vite", "--port", "5273"],
+      "port": 5273
     }
   ]
 }
