@@ -26,6 +26,7 @@ import {
   retitleNote,
   writeNote,
 } from "./notes";
+import { readLayout, writeLayout } from "./layout";
 import { pasteImageAsset, readAsset } from "./assets";
 import { runnerFor } from "./runner";
 import { loadSettings, openSettingsFile } from "./settings";
@@ -394,6 +395,10 @@ const rpc = BrowserView.defineRPC<LedgeRPC>({
       assetRead: async ({ src }) => ({ image: await readAsset(src) }),
       assetPaste: async () => ({ src: await pasteImageAsset() }),
       settingsGet: () => ({ settings }),
+      // Session layout: raw bytes both ways; the view owns the shape and the
+      // self-healing, Bun owns the file and the atomicity (bun/layout.ts).
+      layoutGet: async () => ({ text: await readLayout() }),
+      layoutSave: async ({ text }) => ({ ok: await writeLayout(text) }),
       settingsOpen: async () => {
         await openSettingsFile();
         return { ok: true };

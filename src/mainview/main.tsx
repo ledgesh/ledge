@@ -9,7 +9,7 @@ import { configureClipboard } from "./lib/clipboard";
 import { configureAssets } from "./lib/assets";
 import { configureSettings } from "./lib/settings";
 import { DEFAULT_SETTINGS, type Settings } from "../shared/settings";
-import { initialState } from "./workspace/store";
+import { configureLayout, restoredState } from "./workspace/persist";
 import "./index.css";
 import App from "./App";
 
@@ -103,27 +103,38 @@ configureNotes({
   },
 });
 
-// Read the notes folder before the first render, so the app opens straight into
-// the note you last edited instead of flashing an empty tab and swapping it out.
-// A failure here (Bun unreachable) must not leave a blank window: fall through to
-// the no-notes state, which is a fresh unsaved note.
+// Read the notes folder and the saved layout before the first render, so the
+// app opens straight into last session's workspaces and tabs instead of
+// flashing an empty tab and swapping it out. A failure here (Bun unreachable)
+// must not leave a blank window: fall through to the no-notes state, which is
+// a fresh unsaved note.
 async function boot(): Promise<void> {
   let notes: NoteMeta[] = [];
   let trash: TrashMeta[] = [];
   let settings: Settings = DEFAULT_SETTINGS;
+  let layout: string | null = null;
   try {
     // One round trip each, in parallel: the trash count is part of the first
     // paint (it is a sidebar section), so fetching it after mount would flash;
     // settings must beat the first render because editors and terminals read
-    // them at creation and never again (lib/settings.ts).
-    [notes, trash, settings] = await Promise.all([
+    // them at creation and never again (lib/settings.ts); the layout must beat
+    // it because it IS the first render's shape.
+    [notes, trash, settings, layout] = await Promise.all([
       electrobun.rpc!.request.noteList({}).then((r) => r.notes),
       electrobun.rpc!.request.trashList({}).then((r) => r.items),
       electrobun.rpc!.request.settingsGet({}).then((r) => r.settings),
+      electrobun.rpc!.request.layoutGet({}).then((r) => r.text),
     ]);
   } catch (err) {
     console.error("[notes] could not list the notes folder", err);
   }
+  // The save half of session persistence; the restore half is restoredState
+  // below, which prunes anything the noteList no longer vouches for.
+  configureLayout({
+    save: (text) => {
+      void electrobun.rpc!.request.layoutSave({ text });
+    },
+  });
   configureSettings(settings, {
     openFile: () => {
       void electrobun.rpc!.request.settingsOpen({});
@@ -135,7 +146,7 @@ async function boot(): Promise<void> {
   });
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
-      <App initial={initialState(notes, trash)} />
+      <App initial={restoredState(layout, notes, trash)} />
     </StrictMode>,
   );
 }

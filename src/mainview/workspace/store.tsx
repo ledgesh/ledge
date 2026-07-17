@@ -46,11 +46,15 @@ function makeWorkspace(name: string, tab: TabState): Workspace {
   return { id: uid("ws"), name, symbol: DEFAULT_ICON, root: leaf, focusedPaneId: leaf.id };
 }
 
-// The launch state, built from the notes already on disk (newest first, as
-// listNotes returns them). The pane layout is not persisted yet, so a launch
-// opens exactly one note: the one you edited last, or the demo note when the
-// notes folder is empty. That demo note is unsaved like any other new note, so a
-// first launch you do not type in still leaves the folder empty.
+// The fresh-start launch state, built from the notes already on disk (newest
+// first, as listNotes returns them): one workspace, one note — the one you
+// edited last, or the demo note when the notes folder is empty. That demo note
+// is unsaved like any other new note, so a first launch you do not type in
+// still leaves the folder empty.
+//
+// This is the FALLBACK, not the normal boot: a saved session restores through
+// workspace/persist.ts, and this state is what a first launch (or a corrupt
+// .layout.json) gets instead.
 //
 // Exported for unit tests (store.test.ts); the app goes through WorkspaceProvider.
 export function initialState(notes: NoteMeta[] = [], trash: TrashMeta[] = []): AppState {

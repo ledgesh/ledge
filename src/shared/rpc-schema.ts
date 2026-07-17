@@ -200,6 +200,19 @@ export type LedgeRPC = {
       // Bun reads the pasteboard (osascript; pbpaste is text-only) and names
       // the file itself via uniqueName — the view never names a file.
       assetPaste: { params: {}; response: { src: string | null } };
+      // The persisted session layout (.layout.json in the notes root): which
+      // workspaces exist, their pane trees, and which notes are open where.
+      // Machine-written state, not settings (architecture.md §6): Bun owns the
+      // file's bytes and atomicity, the VIEW owns the shape — it serializes on
+      // layout changes and parses/self-heals at boot (workspace/persist.ts), so
+      // the payload rides as raw text. null when no layout has ever been saved.
+      layoutGet: { params: {}; response: { text: string | null } };
+      // Persist the serialized layout. Bun writes it to the fixed dotted file —
+      // the view names nothing — atomically like a note save, and refuses text
+      // that is not JSON: the file lives in the notes root, and a write this
+      // free must not become arbitrary byte storage there. Sent debounced on
+      // every layout change and flushed on blur/pagehide, like note autosave.
+      layoutSave: { params: { text: string }; response: { ok: boolean } };
       // Open a note link in the OS default handler (browser, mail client).
       // Sent by the editor's ⌘-click and the "Open Link" command. The URL is
       // re-validated Bun-side against the same scheme allowlist the view used

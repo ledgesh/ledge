@@ -20,7 +20,7 @@ import { configureClipboard } from "./lib/clipboard";
 import { configureAssets } from "./lib/assets";
 import { configureSettings } from "./lib/settings";
 import { DEFAULT_SETTINGS } from "../shared/settings";
-import { initialState } from "./workspace/store";
+import { configureLayout, restoredState } from "./workspace/persist";
 import "./index.css";
 import App from "./App";
 
@@ -167,6 +167,17 @@ configureTerminal({
   restartSession: () => {},
 });
 
+// In-memory layout file, like the clipboard below: saves are recorded, and a
+// spec can read the latest serialization back via window.__harness. The boot
+// below passes null (a harness run always starts from the seeded notes), so
+// restore behavior itself is covered by persist.test.ts, not specs.
+let layoutText: string | null = null;
+configureLayout({
+  save: (text) => {
+    layoutText = text;
+  },
+});
+
 // In-memory clipboard, readable by specs via window.__harness.
 let clip = "";
 configureClipboard({
@@ -229,6 +240,7 @@ declare global {
       clipboard: () => string;
       settingsOpens: () => number;
       linkOpens: () => string[];
+      layout: () => string | null;
       store: FakeStore;
     };
   }
@@ -237,11 +249,12 @@ window.__harness = {
   clipboard: () => clip,
   settingsOpens: () => settingsOpens,
   linkOpens: () => [...linkOpens],
+  layout: () => layoutText,
   store,
 };
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <App initial={initialState(store.list(), store.listTrash())} />
+    <App initial={restoredState(null, store.list(), store.listTrash())} />
   </StrictMode>,
 );

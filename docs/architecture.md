@@ -176,8 +176,17 @@ through `lib/settings.ts`.
 - **Settings are not session state.** `settings.json` is *human-edited
   preference*; which workspaces exist, their names, the pane layout are
   *machine-written state* with different failure modes (a corrupt state file
-  must self-heal; a corrupt settings file must be left for its author). When
-  session persistence lands it gets its own file. Never mix the two.
+  must self-heal; a corrupt settings file must be left for its author). Session
+  state lives in its own file, `.layout.json` in the notes root — dotted, so
+  `listNotes` never shows it. Bun owns its bytes and atomicity (`bun/layout.ts`:
+  temp-plus-rename like a note save, and a JSON-parse gate so the view cannot
+  use the fixed-name write as arbitrary byte storage in the synced folder); the
+  **view** owns its shape (`workspace/persist.ts`: serialize debounced on every
+  layout change, restore at boot). Self-healing is the view's restore path:
+  every malformed or stale piece — a pruned note, a corrupt workspace, an
+  unparseable file — costs exactly itself, degrading down to a fresh
+  `initialState`, and restored tabs only ever open paths the boot `noteList`
+  also returned (paths stay opaque handles, §2). Never mix the two files.
 - **The file is the UI.** There is no settings panel; ⌘, (`settings.open`)
   asks Bun to open the file in the OS editor. First launch seeds it with
   every default spelled out, so the file documents its own knobs.

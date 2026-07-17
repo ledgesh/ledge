@@ -11,6 +11,7 @@ import { flushAll } from "@/notes/store";
 import { listNotes } from "@/notes/channel";
 import { refreshTrash } from "@/notes/actions";
 import { allDocIds, useWorkspace, WorkspaceProvider, type AppState } from "@/workspace/store";
+import { flushLayout, scheduleLayoutSave } from "@/workspace/persist";
 import { focusedDocId } from "@/workspace/tree";
 import { releaseEditor } from "@/workspace/editorPool";
 import { CommandProvider, useCommands } from "@/commands/CommandProvider";
@@ -136,14 +137,28 @@ function Shell() {
     prevDocs.current = live;
   }, [state]);
 
+  // Session persistence: every change to the workspace/pane/tab arrangement
+  // (or which workspace is selected) schedules a debounced layout save. Keyed
+  // on those two fields rather than the whole state, so a notes-folder refresh
+  // does not rewrite a layout that did not change.
+  useEffect(() => {
+    scheduleLayoutSave(state);
+  }, [state.workspaces, state.selectedId]);
+
   // Notes autosave on a short debounce, so the only real exposure is quitting (or
   // crashing) inside that window. Flushing when the window loses focus and on
   // pagehide narrows it to the case where you edit and quit in the same instant.
+  // The layout save above debounces the same way, so it flushes on the same
+  // events for the same reason.
   //
   // Re-reading the folder on the way back in is the mirror image: there is no file
   // watcher yet, so this is what notices a note you created or deleted in the
   // terminal while Ledge was in the background.
   useEffect(() => {
+    const flush = () => {
+      flushAll();
+      flushLayout();
+    };
     const refresh = () => {
       void listNotes()
         .then((notes) => dispatch({ type: "notesLoaded", notes }))
@@ -152,12 +167,12 @@ function Shell() {
       // note deleted (or restored) from a shell should not leave a stale count.
       void refreshTrash(dispatch);
     };
-    window.addEventListener("blur", flushAll);
-    window.addEventListener("pagehide", flushAll);
+    window.addEventListener("blur", flush);
+    window.addEventListener("pagehide", flush);
     window.addEventListener("focus", refresh);
     return () => {
-      window.removeEventListener("blur", flushAll);
-      window.removeEventListener("pagehide", flushAll);
+      window.removeEventListener("blur", flush);
+      window.removeEventListener("pagehide", flush);
       window.removeEventListener("focus", refresh);
     };
   }, [dispatch]);
