@@ -46,6 +46,9 @@ export interface UiHooks {
   // profile files; macOS binds no app to ".env", so there is no OS-editor
   // path to reach them by).
   openProfileEditor(name: string): void;
+  // Show an error under the note list (the browser's error strip): where a
+  // failed workspace create/attach reports, same surface as a failed delete.
+  showError(message: string): void;
 }
 
 export interface CommandCtx {
@@ -62,6 +65,13 @@ export interface RegistryDeps {
   copyText(text: string): void;
   // Open settings.json in the OS editor (an RPC edge, like copyText).
   openSettings(): void;
+  // Workspace lifecycle (workspace/actions.ts): each needs a Bun round trip
+  // (create a folder / open the native picker / detach the registry entry),
+  // so the reducer cannot do it alone. Each resolves to an error message to
+  // surface, or null.
+  createWorkspace(state: AppState, dispatch: (a: Action) => void): Promise<string | null>;
+  attachWorkspace(dispatch: (a: Action) => void): Promise<string | null>;
+  closeWorkspace(id: string, state: AppState, dispatch: (a: Action) => void): void;
   // Kill a note's shells so the next run respawns them with its current
   // frontmatter params.
   restartSession(docId: string): void;

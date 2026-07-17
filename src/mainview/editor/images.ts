@@ -14,7 +14,8 @@
 //
 // Two source kinds render: http(s) URLs load straight into the <img> (the
 // webview may fetch the web; it may not touch the filesystem), and note-
-// relative paths (`assets/x.png`) are fetched from Bun as base64 over
+// relative paths (`.ledge-assets/x.png`, or any image in the workspace
+// folder) are fetched from Bun as base64 over
 // assetRead (lib/assets.ts) — Bun re-validates the reference; the check here
 // is styling, Bun's is the guard, same split as links.ts. Anything else
 // (file:, absolute paths, traversals, non-image extensions) does not render.
@@ -32,7 +33,10 @@ import {
 import { Decoration, type DecorationSet, EditorView, WidgetType } from "@codemirror/view";
 import type { DocSlice, Span } from "./livePreview";
 import { frontmatterRange } from "./frontmatter";
+import { sessionIdFacet } from "./session";
 import { assetDataUrl } from "../lib/assets";
+import { folderOf } from "../notes/store";
+import { ASSETS_DIRNAME } from "../../shared/rpc-schema";
 
 /** A renderable image source. `remote` goes straight into the <img> src;
  * `asset` is a note-relative reference resolved through Bun (lib/assets.ts). */
@@ -61,7 +65,11 @@ export function imageSrcOf(raw: string): ImageSrc | null {
   if (m) return /^https?$/i.test(m[1]!) ? { kind: "remote", url: text } : null;
   if (/^www\./i.test(text)) return { kind: "remote", url: `https://${text}` };
   if (text.startsWith("/") || text.includes("\\")) return null;
-  if (text.split("/").some((part) => part.startsWith("."))) return null;
+  // The app's own assets dir is the one accepted dot-entry, and only as the
+  // first segment — the same exception assetPathOf carves out Bun-side, from
+  // the same shared constant. Deeper dots (temp files, .ledge-trash) stay out.
+  const parts = text.split("/");
+  if (parts.slice(parts[0] === ASSETS_DIRNAME ? 1 : 0).some((part) => part.startsWith("."))) return null;
   if (!IMAGE_EXT.test(text)) return null;
   return { kind: "asset", path: text };
 }
@@ -171,10 +179,18 @@ class ImageWidget extends WidgetType {
     if (m.src.kind === "remote") {
       img.src = m.src.url;
     } else {
-      void assetDataUrl(m.src.path).then((url) => {
-        if (url) img.src = url;
-        else broken();
-      });
+      // The reference resolves against this note's own workspace folder; no
+      // folder (an editor outside the pool, e.g. a test) renders as broken,
+      // the same degradation as an unconfigured asset channel.
+      const folder = folderOf(view.state.facet(sessionIdFacet));
+      if (!folder) {
+        broken();
+      } else {
+        void assetDataUrl(folder, m.src.path).then((url) => {
+          if (url) img.src = url;
+          else broken();
+        });
+      }
     }
 
     // A click is a caret move to the image's markdown, which reveals it right

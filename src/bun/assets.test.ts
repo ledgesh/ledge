@@ -1,28 +1,37 @@
 // The asset guard and the save/read choreography. assetPathOf is the whole
 // safety story for assetRead — the one RPC that takes a view-supplied
 // relative path — so its refusals get named tests the way assertTrashed's do
-// (docs/testing.md §3). The filesystem half runs against the scratch root the
-// preload set (see notes.fs.test.ts for why the guard re-checks it).
+// (docs/testing.md §3). Since the per-workspace split the reference resolves
+// against a caller-named root, so "which root" is part of the guard too.
+// The filesystem half runs against the scratch app home the preload set
+// (see notes.fs.test.ts for why the guard re-checks it).
 import { beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
-import { NOTES_ROOT } from "./notes";
+import { APP_HOME, createManaged, loadWorkspaces } from "./workspaces";
 import {
-  ASSETS_DIR,
+  assetsDirOf,
   assetPathOf,
   imageMimeOf,
   readAsset,
   savePastedImage,
 } from "./assets";
 
-if (!resolve(NOTES_ROOT).startsWith(resolve(tmpdir()) + sep)) {
-  throw new Error(`refusing to run filesystem tests against ${NOTES_ROOT} — is the preload configured?`);
+if (!resolve(APP_HOME).startsWith(resolve(tmpdir()) + sep)) {
+  throw new Error(`refusing to run filesystem tests against ${APP_HOME} — is the preload configured?`);
 }
 
+let ROOT = "";
+let ASSETS = "";
+
 beforeEach(async () => {
-  await rm(NOTES_ROOT, { recursive: true, force: true });
-  await mkdir(ASSETS_DIR, { recursive: true });
+  await rm(APP_HOME, { recursive: true, force: true });
+  await mkdir(APP_HOME, { recursive: true });
+  await loadWorkspaces();
+  ROOT = await createManaged("Notes");
+  ASSETS = assetsDirOf(ROOT);
+  await mkdir(ASSETS, { recursive: true });
 });
 
 // Not a real image; readAsset serves bytes by extension, which is the point —
@@ -30,37 +39,49 @@ beforeEach(async () => {
 const BYTES = new Uint8Array([1, 2, 3, 4]);
 
 describe("assetPathOf", () => {
-  test("a note-relative image path resolves inside the root", () => {
-    expect(assetPathOf("assets/x.png")).toBe(join(resolve(NOTES_ROOT), "assets", "x.png"));
+  test("a note-relative image path resolves inside its workspace root", () => {
+    expect(assetPathOf(ROOT, ".ledge-assets/x.png")).toBe(join(ROOT, ".ledge-assets", "x.png"));
   });
 
-  test("an image sitting outside assets/ but inside the root is allowed", () => {
+  test("an image sitting outside .ledge-assets/ but inside the root is allowed", () => {
     // Hand-managed images are the user's business; the root is the boundary.
-    expect(assetPathOf("pics/x.jpeg")).toBe(join(resolve(NOTES_ROOT), "pics", "x.jpeg"));
+    // An attached project's own visible assets/ folder is just such a folder.
+    expect(assetPathOf(ROOT, "pics/x.jpeg")).toBe(join(ROOT, "pics", "x.jpeg"));
+    expect(assetPathOf(ROOT, "assets/x.png")).toBe(join(ROOT, "assets", "x.png"));
+  });
+
+  test("an unregistered root is refused before the reference is even looked at", () => {
+    expect(() => assetPathOf(APP_HOME, ".ledge-assets/x.png")).toThrow(/not a registered workspace root/);
+    expect(() => assetPathOf(join(ROOT, "sub"), ".ledge-assets/x.png")).toThrow(/not a registered workspace root/);
   });
 
   test("a traversal out of the root is rejected", () => {
-    expect(() => assetPathOf("../outside.png")).toThrow();
-    expect(() => assetPathOf("assets/../../outside.png")).toThrow();
+    expect(() => assetPathOf(ROOT, "../outside.png")).toThrow();
+    expect(() => assetPathOf(ROOT, ".ledge-assets/../../outside.png")).toThrow();
   });
 
   test("an absolute path is rejected", () => {
-    expect(() => assetPathOf("/etc/passwd.png")).toThrow();
+    expect(() => assetPathOf(ROOT, "/etc/passwd.png")).toThrow();
   });
 
   test("a dot-entry anywhere in the path is rejected — invisible stays unservable", () => {
-    expect(() => assetPathOf(".trash/x.png")).toThrow();
-    expect(() => assetPathOf("assets/.hidden.png")).toThrow();
+    expect(() => assetPathOf(ROOT, ".ledge-trash/x.png")).toThrow();
+    expect(() => assetPathOf(ROOT, ".git/logo.png")).toThrow();
+    // The app's own assets dir is the ONE exception, and only as the first
+    // segment: in-flight .asset.tmp files (and anything else dotted) inside
+    // it stay unservable, and it earns no pass deeper in the path.
+    expect(() => assetPathOf(ROOT, ".ledge-assets/.hidden.png")).toThrow();
+    expect(() => assetPathOf(ROOT, "sub/.ledge-assets/x.png")).toThrow();
   });
 
-  test("a non-image extension is rejected — this call must not read notes or settings", () => {
-    expect(() => assetPathOf("settings.json")).toThrow();
-    expect(() => assetPathOf("note.md")).toThrow();
-    expect(() => assetPathOf("assets/archive.zip")).toThrow();
+  test("a non-image extension is rejected — this call must not read notes or config", () => {
+    expect(() => assetPathOf(ROOT, "config.json")).toThrow();
+    expect(() => assetPathOf(ROOT, "note.md")).toThrow();
+    expect(() => assetPathOf(ROOT, ".ledge-assets/archive.zip")).toThrow();
   });
 
   test("backslashes are rejected rather than interpreted", () => {
-    expect(() => assetPathOf("assets\\x.png")).toThrow();
+    expect(() => assetPathOf(ROOT, "assets\\x.png")).toThrow();
   });
 });
 
@@ -75,41 +96,52 @@ describe("imageMimeOf", () => {
 
 describe("readAsset", () => {
   test("serves the bytes and mime of an existing asset", async () => {
-    await writeFile(join(ASSETS_DIR, "x.png"), BYTES);
-    const got = await readAsset("assets/x.png");
+    await writeFile(join(ASSETS, "x.png"), BYTES);
+    const got = await readAsset(ROOT, ".ledge-assets/x.png");
     expect(got).not.toBeNull();
     expect(got!.mime).toBe("image/png");
     expect(new Uint8Array(Buffer.from(got!.dataB64, "base64"))).toEqual(BYTES);
   });
 
+  test("the same reference in another workspace is that workspace's file, not this one's", async () => {
+    // The whole reason assetRead carries a root: `.ledge-assets/x.png` is meaningful
+    // only relative to the note that references it.
+    const other = await createManaged("Other");
+    await mkdir(assetsDirOf(other), { recursive: true });
+    await writeFile(join(ASSETS, "x.png"), BYTES);
+    await writeFile(join(assetsDirOf(other), "x.png"), new Uint8Array([9, 9]));
+    const got = await readAsset(other, ".ledge-assets/x.png");
+    expect(new Uint8Array(Buffer.from(got!.dataB64, "base64"))).toEqual(new Uint8Array([9, 9]));
+  });
+
   test("a missing file is null, not an error — the widget shows a placeholder", async () => {
-    expect(await readAsset("assets/gone.png")).toBeNull();
+    expect(await readAsset(ROOT, ".ledge-assets/gone.png")).toBeNull();
   });
 
   test("a guarded path still throws — missing and forbidden are different answers", async () => {
-    await expect(readAsset("../outside.png")).rejects.toThrow();
+    await expect(readAsset(ROOT, "../outside.png")).rejects.toThrow();
   });
 });
 
 describe("savePastedImage", () => {
-  test("writes under assets/ and returns the markdown-relative reference", async () => {
-    const src = await savePastedImage(BYTES);
-    expect(src).toMatch(/^assets\/pasted-\d{4}-\d{2}-\d{2}\.png$/);
-    const got = await readAsset(src);
+  test("writes under the root's .ledge-assets/ and returns the markdown-relative reference", async () => {
+    const src = await savePastedImage(ROOT, BYTES);
+    expect(src).toMatch(/^\.ledge-assets\/pasted-\d{4}-\d{2}-\d{2}\.png$/);
+    const got = await readAsset(ROOT, src);
     expect(new Uint8Array(Buffer.from(got!.dataB64, "base64"))).toEqual(BYTES);
   });
 
   test("a second paste the same day enumerates instead of clobbering", async () => {
-    const a = await savePastedImage(BYTES);
-    const b = await savePastedImage(new Uint8Array([9, 9]));
+    const a = await savePastedImage(ROOT, BYTES);
+    const b = await savePastedImage(ROOT, new Uint8Array([9, 9]));
     expect(b).not.toBe(a);
-    const got = await readAsset(a);
+    const got = await readAsset(ROOT, a);
     expect(new Uint8Array(Buffer.from(got!.dataB64, "base64"))).toEqual(BYTES);
   });
 
   test("leaves no temp droppings behind", async () => {
-    await savePastedImage(BYTES);
-    const names = await readdir(ASSETS_DIR);
+    await savePastedImage(ROOT, BYTES);
+    const names = await readdir(ASSETS);
     expect(names.filter((n) => n.startsWith("."))).toEqual([]);
   });
 });

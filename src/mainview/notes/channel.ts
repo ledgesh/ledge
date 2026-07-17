@@ -7,17 +7,19 @@ import type { NoteParams } from "../../shared/frontmatter";
 import type { SearchHit } from "../../shared/search";
 
 interface NoteHandlers {
-  list: () => Promise<NoteMeta[]>;
+  // Scoped calls carry the workspace folder (an opaque root handle from Bun);
+  // per-note calls carry just the path — its folder is derivable Bun-side.
+  list: (folder: string) => Promise<NoteMeta[]>;
   read: (path: string) => Promise<string | null>;
-  search: (query: string) => Promise<SearchHit[]>;
+  search: (folder: string, query: string) => Promise<SearchHit[]>;
   write: (path: string, text: string) => Promise<void>;
-  create: (text: string) => Promise<NoteMeta>;
+  create: (folder: string, text: string) => Promise<NoteMeta>;
   retitle: (path: string, text: string) => Promise<NoteMeta>;
   remove: (path: string) => Promise<string | null>;
-  trash: () => Promise<TrashMeta[]>;
+  trash: (folder: string) => Promise<TrashMeta[]>;
   restore: (path: string) => Promise<NoteMeta>;
   removeTrashed: (path: string) => Promise<boolean>;
-  empty: () => Promise<number>;
+  empty: (folder: string) => Promise<number>;
   // Fire-and-forget, not a Promise: the store sends params on the save path
   // and nothing there can act on an acknowledgement.
   configureSession: (sessionId: string, params: NoteParams) => void;
@@ -34,27 +36,27 @@ function bridge(): NoteHandlers {
   return handlers;
 }
 
-export function listNotes(): Promise<NoteMeta[]> {
-  return bridge().list();
+export function listNotes(folder: string): Promise<NoteMeta[]> {
+  return bridge().list(folder);
 }
 
 export function readNote(path: string): Promise<string | null> {
   return bridge().read(path);
 }
 
-// Full-text hits for `query`, newest note first (shared/search.ts owns the
-// grammar and the caps). Bun does the scanning — the view never holds the
-// corpus, only the result list.
-export function searchNotes(query: string): Promise<SearchHit[]> {
-  return bridge().search(query);
+// Full-text hits for `query` within one workspace's notes, newest note first
+// (shared/search.ts owns the grammar and the caps). Bun does the scanning —
+// the view never holds the corpus, only the result list.
+export function searchNotes(folder: string, query: string): Promise<SearchHit[]> {
+  return bridge().search(folder, query);
 }
 
 export function writeNote(path: string, text: string): Promise<void> {
   return bridge().write(path, text);
 }
 
-export function createNote(text: string): Promise<NoteMeta> {
-  return bridge().create(text);
+export function createNote(folder: string, text: string): Promise<NoteMeta> {
+  return bridge().create(folder, text);
 }
 
 // Ask Bun to move a note's file to match its heading. Takes the note's text, not
@@ -69,8 +71,8 @@ export function deleteNote(path: string): Promise<string | null> {
   return bridge().remove(path);
 }
 
-export function listTrash(): Promise<TrashMeta[]> {
-  return bridge().trash();
+export function listTrash(folder: string): Promise<TrashMeta[]> {
+  return bridge().trash(folder);
 }
 
 // Takes a path Bun handed out via listTrash, and Bun re-checks that it really is
@@ -86,8 +88,8 @@ export function deleteTrashed(path: string): Promise<boolean> {
   return bridge().removeTrashed(path);
 }
 
-export function emptyTrash(): Promise<number> {
-  return bridge().empty();
+export function emptyTrash(folder: string): Promise<number> {
+  return bridge().empty(folder);
 }
 
 // Hand Bun a note's spawn params (parsed from its frontmatter), keyed by the

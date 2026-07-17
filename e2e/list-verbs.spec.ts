@@ -73,7 +73,7 @@ test.describe("note rows", () => {
   test("`c` copies the focused row's path", async ({ page }) => {
     await noteRow(page, "Gamma").click();
     await page.keyboard.press("c");
-    expect(await page.evaluate(() => window.__harness.clipboard())).toBe("/harness/notes/gamma.md");
+    expect(await page.evaluate(() => window.__harness.clipboard())).toBe("/harness/scratch/gamma.md");
   });
 });
 

@@ -15,6 +15,7 @@ import { saveNow } from "@/notes/store";
 import { copyText } from "@/lib/clipboard";
 import { openSettingsFile } from "@/lib/settings";
 import { restartSession } from "@/terminal/channel";
+import { attachWorkspace, closeWorkspace, createWorkspace } from "@/workspace/actions";
 import type { RegistryDeps, UiHooks } from "./types";
 
 // Enough of a note to parse its frontmatter — mirrors HEAD_BYTES in
@@ -41,6 +42,9 @@ function withView(docId: string, fn: (view: NonNullable<ReturnType<typeof getEdi
 export const registryDeps: RegistryDeps = {
   copyText,
   openSettings: openSettingsFile,
+  createWorkspace,
+  attachWorkspace,
+  closeWorkspace,
   restartSession,
   noteHead: (docId) => {
     const view = getEditorView(docId);

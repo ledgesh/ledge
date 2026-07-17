@@ -1,22 +1,36 @@
 import { test, expect, describe } from "bun:test";
-import { reducer, initialState, allDocIds, openNotePaths, type AppState, type Action } from "./store";
+import { reducer, initialState, allDocIds, notesOf, openNotePaths, trashOf, type AppState, type Action } from "./store";
 import { firstLeaf, leafIds, findLeaf, countTabs, focusedTab, type SplitNode } from "./tree";
 import { DEFAULT_ICON } from "./icons";
 import type { NoteMeta, TrashMeta } from "../../shared/rpc-schema";
 
+// The folder every fresh test state's first workspace owns. Notes are local
+// to a workspace folder now, so states are seeded per folder.
+const FOLDER = "/ws/notes";
+
+// An addWorkspace with a distinct folder per index: two adds with the SAME
+// folder would select the existing workspace instead of appending (the
+// one-workspace-per-folder rule, tested below).
+const addWs = (n: number): Action => ({
+  type: "addWorkspace",
+  name: `Workspace ${n}`,
+  folder: `/ws/extra-${n}`,
+});
+
 // Apply a sequence of actions from a fresh state.
 function run(...actions: Action[]): AppState {
-  return actions.reduce(reducer, initialState());
+  return actions.reduce(reducer, initialState(FOLDER));
 }
 
 const selected = (s: AppState) => s.workspaces.find((w) => w.id === s.selectedId)!;
 
 describe("initialState", () => {
-  test("one workspace, selected, with a single seeded tab", () => {
-    const s = initialState();
+  test("one workspace on the given folder, selected, with a single seeded tab", () => {
+    const s = initialState(FOLDER);
     expect(s.workspaces).toHaveLength(1);
     expect(s.selectedId).toBe(s.workspaces[0].id);
     const ws = selected(s);
+    expect(ws.folder).toBe(FOLDER);
     expect(leafIds(ws.root)).toHaveLength(1);
     expect(countTabs(ws.root)).toBe(1);
     expect(ws.focusedPaneId).toBe(firstLeaf(ws.root).id);
@@ -55,7 +69,7 @@ describe("tabs", () => {
   });
 
   test("closing the only tab empties the pane (activeTabId becomes empty)", () => {
-    const s0 = initialState();
+    const s0 = initialState(FOLDER);
     const leaf = firstLeaf(selected(s0).root);
     const s = reducer(s0, { type: "closeTab", paneId: leaf.id, tabId: leaf.activeTabId });
     const after = firstLeaf(selected(s).root);
@@ -125,7 +139,7 @@ describe("splits", () => {
   });
 
   test("closePane is a no-op when only one pane remains", () => {
-    const s0 = initialState();
+    const s0 = initialState(FOLDER);
     const s = reducer(s0, { type: "closePane" });
     expect(selected(s).root).toBe(selected(s0).root);
   });
@@ -142,51 +156,77 @@ describe("splits", () => {
 
 describe("focus", () => {
   test("focusPane ignores an unknown pane id", () => {
-    const s0 = initialState();
+    const s0 = initialState(FOLDER);
     const s = reducer(s0, { type: "focusPane", paneId: "ghost" });
     expect(selected(s).focusedPaneId).toBe(selected(s0).focusedPaneId);
   });
 });
 
 describe("workspaces", () => {
-  test("newWorkspace appends and selects it", () => {
-    const s = run({ type: "newWorkspace" });
+  test("addWorkspace appends over its folder and selects it", () => {
+    const s = run(addWs(2));
     expect(s.workspaces).toHaveLength(2);
     expect(s.selectedId).toBe(s.workspaces[1].id);
+    expect(s.workspaces[1].folder).toBe("/ws/extra-2");
+    // The new folder's lists exist, empty, so selectors and counts are total.
+    expect(notesOf(s, "/ws/extra-2")).toEqual([]);
+    expect(trashOf(s, "/ws/extra-2")).toEqual([]);
   });
 
-  test("closeWorkspace removes it and reselects a survivor", () => {
-    const s1 = run({ type: "newWorkspace" });
+  test("addWorkspace on a folder that already has a workspace selects it instead", () => {
+    // One workspace per folder: attaching an already-attached folder must not
+    // grow a twin (two views of one folder would be two lists disagreeing).
+    const s1 = run(addWs(2));
+    const s2 = reducer(s1, { type: "selectWorkspace", id: s1.workspaces[0].id });
+    const s3 = reducer(s2, { type: "addWorkspace", name: "Twin", folder: "/ws/extra-2" });
+    expect(s3.workspaces).toHaveLength(2);
+    expect(s3.selectedId).toBe(s1.workspaces[1].id);
+  });
+
+  test("closeWorkspace removes it, reselects a survivor, and drops its folder's lists", () => {
+    const s1 = run(addWs(2));
     const newId = s1.selectedId;
     const s2 = reducer(s1, { type: "closeWorkspace", id: newId });
     expect(s2.workspaces).toHaveLength(1);
     expect(s2.workspaces.some((w) => w.id === newId)).toBe(false);
     expect(s2.selectedId).toBe(s2.workspaces[0].id);
+    // The folder's lists went with it (nothing else reads them; the files on
+    // disk are untouched — only the view forgets).
+    expect(s2.notes["/ws/extra-2"]).toBeUndefined();
+    expect(s2.trash["/ws/extra-2"]).toBeUndefined();
   });
 
   test("closeWorkspace refuses to remove the last workspace", () => {
-    const s0 = initialState();
+    const s0 = initialState(FOLDER);
     const s = reducer(s0, { type: "closeWorkspace", id: s0.selectedId });
     expect(s.workspaces).toHaveLength(1);
     expect(s).toBe(s0);
   });
 
   test("renameWorkspace trims, and ignores an all-whitespace name", () => {
-    const s0 = initialState();
+    const s0 = initialState(FOLDER);
     const id = s0.selectedId;
     expect(selected(reducer(s0, { type: "renameWorkspace", id, name: "  Notes  " })).name).toBe("Notes");
     expect(selected(reducer(s0, { type: "renameWorkspace", id, name: "   " })).name).toBe(selected(s0).name);
   });
 
+  test("renaming a workspace does not touch its folder", () => {
+    // Display-only by design: the folder was slugged once at creation, and a
+    // rename must not invalidate every path handle under it.
+    const s0 = initialState(FOLDER);
+    const s = reducer(s0, { type: "renameWorkspace", id: s0.selectedId, name: "Brand New Name" });
+    expect(selected(s).folder).toBe(FOLDER);
+  });
+
   test("every workspace starts on the default icon, whatever its position", () => {
     // Icons used to be handed out by index, which made the strip look like the
     // app knew something about a workspace when it only knew its birth order.
-    const s = run({ type: "newWorkspace" }, { type: "newWorkspace" });
+    const s = run(addWs(2), addWs(3));
     expect(s.workspaces.map((w) => w.symbol)).toEqual([DEFAULT_ICON, DEFAULT_ICON, DEFAULT_ICON]);
   });
 
   test("setWorkspaceIcon changes one workspace's icon", () => {
-    const s0 = run({ type: "newWorkspace" });
+    const s0 = run(addWs(2));
     const s = reducer(s0, { type: "setWorkspaceIcon", id: s0.workspaces[0].id, symbol: "rocket" });
     expect(s.workspaces.map((w) => w.symbol)).toEqual(["rocket", DEFAULT_ICON]);
   });
@@ -194,19 +234,19 @@ describe("workspaces", () => {
   test("setWorkspaceIcon ignores a key the catalog doesn't have", () => {
     // iconFor would render the default for it, so storing it would pretend the
     // choice took.
-    const s0 = initialState();
+    const s0 = initialState(FOLDER);
     expect(reducer(s0, { type: "setWorkspaceIcon", id: s0.selectedId, symbol: "aardvark" })).toBe(s0);
   });
 
   test("setWorkspaceIcon ignores an unknown workspace", () => {
-    const s0 = initialState();
+    const s0 = initialState(FOLDER);
     expect(selected(reducer(s0, { type: "setWorkspaceIcon", id: "ghost", symbol: "rocket" })).symbol).toBe(
       DEFAULT_ICON,
     );
   });
 
   test("selectWorkspace ignores an unknown id", () => {
-    const s0 = initialState();
+    const s0 = initialState(FOLDER);
     expect(reducer(s0, { type: "selectWorkspace", id: "ghost" })).toBe(s0);
   });
 });
@@ -214,7 +254,7 @@ describe("workspaces", () => {
 describe("moveWorkspace", () => {
   // Build a state with three workspaces; ids [0,1,2].
   function three(): AppState {
-    return run({ type: "newWorkspace" }, { type: "newWorkspace" });
+    return run(addWs(2), addWs(3));
   }
 
   test("reorders a workspace to a later slot (index counts the pre-removal list)", () => {
@@ -247,28 +287,28 @@ describe("moveWorkspace", () => {
 });
 
 describe("notes", () => {
-  const note = (title: string): NoteMeta => ({ path: `/notes/${title}.md`, title, mtimeMs: 1 });
+  const note = (title: string): NoteMeta => ({ path: `${FOLDER}/${title}.md`, title, mtimeMs: 1 });
 
   // A state seeded from two notes on disk: `a` is the newest, so boot opens it.
   const withNotes = (...actions: Action[]): AppState =>
-    actions.reduce(reducer, initialState([note("a"), note("b")]));
+    actions.reduce(reducer, initialState(FOLDER, [note("a"), note("b")]));
 
   test("boot opens the most recently modified note", () => {
-    const s = initialState([note("a"), note("b")]);
-    expect(focusedTab(selected(s))!.path).toBe("/notes/a.md");
+    const s = initialState(FOLDER, [note("a"), note("b")]);
+    expect(focusedTab(selected(s))!.path).toBe(`${FOLDER}/a.md`);
     expect(focusedTab(selected(s))!.title).toBe("a");
   });
 
   test("boot with no notes on disk opens an unsaved demo note", () => {
-    const s = initialState([]);
+    const s = initialState(FOLDER, []);
     expect(focusedTab(selected(s))!.path).toBeNull();
-    expect(s.notes).toEqual([]);
+    expect(notesOf(s, FOLDER)).toEqual([]);
   });
 
   test("openNote on a closed note opens it in the focused pane", () => {
     const s = withNotes({ type: "openNote", note: note("b") });
     expect(countTabs(selected(s).root)).toBe(2);
-    expect(focusedTab(selected(s))!.path).toBe("/notes/b.md");
+    expect(focusedTab(selected(s))!.path).toBe(`${FOLDER}/b.md`);
   });
 
   test("openNote on an already-open note focuses that tab, never opening it twice", () => {
@@ -281,7 +321,7 @@ describe("notes", () => {
     // Switch away to a, then ask for b again.
     const leaf = firstLeaf(selected(s).root);
     s = reducer(s, { type: "selectTab", paneId: leaf.id, tabId: leaf.tabs[0].id });
-    expect(focusedTab(selected(s))!.path).toBe("/notes/a.md");
+    expect(focusedTab(selected(s))!.path).toBe(`${FOLDER}/a.md`);
 
     s = reducer(s, { type: "openNote", note: note("b") });
     expect(countTabs(selected(s).root)).toBe(before); // no new tab
@@ -291,51 +331,54 @@ describe("notes", () => {
   test("openNote finds the note in another workspace and selects it", () => {
     let s = withNotes({ type: "openNote", note: note("b") });
     const home = s.selectedId;
-    s = reducer(s, { type: "newWorkspace" });
+    s = reducer(s, addWs(2));
     expect(s.selectedId).not.toBe(home);
 
     s = reducer(s, { type: "openNote", note: note("b") });
     expect(s.selectedId).toBe(home); // jumped back to where b lives
-    expect(focusedTab(selected(s))!.path).toBe("/notes/b.md");
+    expect(focusedTab(selected(s))!.path).toBe(`${FOLDER}/b.md`);
     // ...and did not open a second copy in the new workspace.
     expect(allDocIds(s).length).toBe(3); // a, b, and the new workspace's seeded tab
   });
 
-  test("noteCreated binds the file to its tab and lists it", () => {
+  test("noteCreated binds the file to its tab and lists it in its folder", () => {
     const s = withNotes();
     const docId = focusedTab(selected(s))!.docId;
     const created = note("fresh");
-    const next = reducer(s, { type: "noteCreated", docId, note: created });
+    const next = reducer(s, { type: "noteCreated", docId, folder: FOLDER, note: created });
 
     expect(focusedTab(selected(next))!.path).toBe(created.path);
     expect(focusedTab(selected(next))!.title).toBe("fresh");
-    expect(next.notes[0]).toEqual(created); // newest first
+    expect(notesOf(next, FOLDER)[0]).toEqual(created); // newest first
   });
 
   test("noteCreated for a note already listed does not duplicate it", () => {
     const s = withNotes();
     const docId = focusedTab(selected(s))!.docId;
-    const next = reducer(s, { type: "noteCreated", docId, note: note("a") });
-    expect(next.notes.filter((n) => n.path === "/notes/a.md")).toHaveLength(1);
+    const next = reducer(s, { type: "noteCreated", docId, folder: FOLDER, note: note("a") });
+    expect(notesOf(next, FOLDER).filter((n) => n.path === `${FOLDER}/a.md`)).toHaveLength(1);
   });
 
-  test("notesLoaded replaces the list without touching the tabs", () => {
-    const s = withNotes();
-    const next = reducer(s, { type: "notesLoaded", notes: [note("c")] });
-    expect(next.notes.map((n) => n.title)).toEqual(["c"]);
+  test("notesLoaded replaces one folder's list without touching the tabs or other folders", () => {
+    const s = reducer(withNotes(), addWs(2));
+    const next = reducer(s, { type: "notesLoaded", folder: "/ws/extra-2", notes: [
+      { path: "/ws/extra-2/c.md", title: "c", mtimeMs: 1 },
+    ] });
+    expect(notesOf(next, "/ws/extra-2").map((n) => n.title)).toEqual(["c"]);
+    expect(notesOf(next, FOLDER).map((n) => n.title)).toEqual(["a", "b"]); // untouched
     expect(next.workspaces).toBe(s.workspaces);
   });
 
   test("openNotePaths reports every open note, ignoring unsaved tabs", () => {
     // newTab adds an unsaved (pathless) tab, which must not appear.
     const s = withNotes({ type: "openNote", note: note("b") }, { type: "newTab" });
-    expect(openNotePaths(s)).toEqual(new Set(["/notes/a.md", "/notes/b.md"]));
+    expect(openNotePaths(s)).toEqual(new Set([`${FOLDER}/a.md`, `${FOLDER}/b.md`]));
   });
 });
 
 describe("allDocIds", () => {
   test("collects every tab's docId across all workspaces", () => {
-    const s = run({ type: "newTab" }, { type: "newWorkspace" });
+    const s = run({ type: "newTab" }, addWs(2));
     const ids = allDocIds(s);
     expect(new Set(ids).size).toBe(ids.length); // unique
     // Two tabs in the first workspace + one seeded tab in the new one.
@@ -344,19 +387,19 @@ describe("allDocIds", () => {
 });
 
 describe("rename and delete", () => {
-  const note = (title: string): NoteMeta => ({ path: `/notes/${title}.md`, title, mtimeMs: 1 });
+  const note = (title: string): NoteMeta => ({ path: `${FOLDER}/${title}.md`, title, mtimeMs: 1 });
   const withNotes = (...actions: Action[]): AppState =>
-    actions.reduce(reducer, initialState([note("a"), note("b")]));
-  const renamed: NoteMeta = { path: "/notes/renamed.md", title: "renamed", mtimeMs: 2 };
+    actions.reduce(reducer, initialState(FOLDER, [note("a"), note("b")]));
+  const renamed: NoteMeta = { path: `${FOLDER}/renamed.md`, title: "renamed", mtimeMs: 2 };
 
   test("a rename moves the tab's path and title but keeps its session", () => {
     const before = withNotes();
     const docId = focusedTab(selected(before))!.docId;
 
-    const s = reducer(before, { type: "noteRenamed", path: "/notes/a.md", note: renamed });
+    const s = reducer(before, { type: "noteRenamed", path: `${FOLDER}/a.md`, note: renamed });
     const tab = focusedTab(selected(s))!;
 
-    expect(tab.path).toBe("/notes/renamed.md");
+    expect(tab.path).toBe(`${FOLDER}/renamed.md`);
     expect(tab.title).toBe("renamed");
     // The point of the whole path/docId split: the editor and the note's shells
     // are keyed by docId, so renaming the file must not disturb them.
@@ -365,27 +408,27 @@ describe("rename and delete", () => {
   });
 
   test("a rename updates the note in the browser's list, in place", () => {
-    const s = withNotes({ type: "noteRenamed", path: "/notes/a.md", note: renamed });
-    expect(s.notes.map((n) => n.title).sort()).toEqual(["b", "renamed"]);
+    const s = withNotes({ type: "noteRenamed", path: `${FOLDER}/a.md`, note: renamed });
+    expect(notesOf(s, FOLDER).map((n) => n.title).sort()).toEqual(["b", "renamed"]);
   });
 
   test("renaming a note that is not open touches only the list", () => {
     const before = withNotes();
     const s = reducer(before, {
       type: "noteRenamed",
-      path: "/notes/b.md",
-      note: { path: "/notes/c.md", title: "c", mtimeMs: 2 },
+      path: `${FOLDER}/b.md`,
+      note: { path: `${FOLDER}/c.md`, title: "c", mtimeMs: 2 },
     });
-    expect(s.notes.map((n) => n.title).sort()).toEqual(["a", "c"]);
+    expect(notesOf(s, FOLDER).map((n) => n.title).sort()).toEqual(["a", "c"]);
     expect(s.workspaces).toEqual(before.workspaces); // no tab was on b
   });
 
   test("a rename reaches the note wherever its tab was dragged to", () => {
     // The note opens in workspace 1; a second workspace is added and selected, so
-    // the tab holding /notes/a.md is no longer in the selected workspace.
-    const s = withNotes({ type: "newWorkspace" }, {
+    // the tab holding a.md is no longer in the selected workspace.
+    const s = withNotes(addWs(2), {
       type: "noteRenamed",
-      path: "/notes/a.md",
+      path: `${FOLDER}/a.md`,
       note: renamed,
     });
     const home = s.workspaces[0];
@@ -396,9 +439,9 @@ describe("rename and delete", () => {
     const before = withNotes();
     const docId = focusedTab(selected(before))!.docId;
 
-    const s = reducer(before, { type: "noteDeleted", path: "/notes/a.md" });
+    const s = reducer(before, { type: "noteDeleted", path: `${FOLDER}/a.md` });
 
-    expect(s.notes.map((n) => n.title)).toEqual(["b"]);
+    expect(notesOf(s, FOLDER).map((n) => n.title)).toEqual(["b"]);
     expect(countTabs(selected(s).root)).toBe(0);
     // The docId leaving the live set is what makes App tear the editor down and
     // close the note's shells; nothing else does it.
@@ -409,24 +452,24 @@ describe("rename and delete", () => {
     const before = withNotes({ type: "openNote", note: note("b") });
     expect(countTabs(selected(before).root)).toBe(2);
 
-    const s = reducer(before, { type: "noteDeleted", path: "/notes/a.md" });
+    const s = reducer(before, { type: "noteDeleted", path: `${FOLDER}/a.md` });
     const ws = selected(s);
     expect(countTabs(ws.root)).toBe(1);
-    expect(focusedTab(ws)!.path).toBe("/notes/b.md");
-    expect(openNotePaths(s)).toEqual(new Set(["/notes/b.md"]));
+    expect(focusedTab(ws)!.path).toBe(`${FOLDER}/b.md`);
+    expect(openNotePaths(s)).toEqual(new Set([`${FOLDER}/b.md`]));
   });
 
   test("deleting the active tab falls to a neighbour, as closing it would", () => {
     // b opens second and is active; deleting it should leave a active, not empty.
     const before = withNotes({ type: "openNote", note: note("b") });
-    const s = reducer(before, { type: "noteDeleted", path: "/notes/b.md" });
-    expect(focusedTab(selected(s))!.path).toBe("/notes/a.md");
+    const s = reducer(before, { type: "noteDeleted", path: `${FOLDER}/b.md` });
+    expect(focusedTab(selected(s))!.path).toBe(`${FOLDER}/a.md`);
   });
 
   test("deleting a note that is not open only touches the list", () => {
     const before = withNotes();
-    const s = reducer(before, { type: "noteDeleted", path: "/notes/b.md" });
-    expect(s.notes.map((n) => n.title)).toEqual(["a"]);
+    const s = reducer(before, { type: "noteDeleted", path: `${FOLDER}/b.md` });
+    expect(notesOf(s, FOLDER).map((n) => n.title)).toEqual(["a"]);
     expect(s.workspaces).toEqual(before.workspaces);
   });
 
@@ -434,8 +477,8 @@ describe("rename and delete", () => {
     // A new note has no path yet, so no note operation can match it.
     const before = withNotes({ type: "newTab" });
     const s = reducer(
-      reducer(before, { type: "noteRenamed", path: "/notes/a.md", note: renamed }),
-      { type: "noteDeleted", path: "/notes/renamed.md" },
+      reducer(before, { type: "noteRenamed", path: `${FOLDER}/a.md`, note: renamed }),
+      { type: "noteDeleted", path: `${FOLDER}/renamed.md` },
     );
     const tab = focusedTab(selected(s))!;
     expect(tab.path).toBeNull();
@@ -444,9 +487,9 @@ describe("rename and delete", () => {
 });
 
 describe("labels", () => {
-  const note = (title: string): NoteMeta => ({ path: `/notes/${title}.md`, title, mtimeMs: 1 });
+  const note = (title: string): NoteMeta => ({ path: `${FOLDER}/${title}.md`, title, mtimeMs: 1 });
   const withNotes = (...actions: Action[]): AppState =>
-    actions.reduce(reducer, initialState([note("a"), note("b")]));
+    actions.reduce(reducer, initialState(FOLDER, [note("a"), note("b")]));
 
   test("a heading edit relabels the tab", () => {
     const before = withNotes();
@@ -463,8 +506,8 @@ describe("labels", () => {
     const docId = focusedTab(selected(before))!.docId;
 
     const s = reducer(before, { type: "noteTitled", docId, label: "Shipping Notes" });
-    expect(s.notes.find((n) => n.path === "/notes/a.md")!.title).toBe("Shipping Notes");
-    expect(s.notes.find((n) => n.path === "/notes/b.md")!.title).toBe("b"); // untouched
+    expect(notesOf(s, FOLDER).find((n) => n.path === `${FOLDER}/a.md`)!.title).toBe("Shipping Notes");
+    expect(notesOf(s, FOLDER).find((n) => n.path === `${FOLDER}/b.md`)!.title).toBe("b"); // untouched
   });
 
   test("relabelling an unsaved note touches no browser row", () => {
@@ -494,7 +537,7 @@ describe("labels", () => {
     const before = withNotes();
     const docId = focusedTab(selected(before))!.docId;
     const s = reducer(
-      reducer(before, { type: "newWorkspace" }),
+      reducer(before, addWs(2)),
       { type: "noteTitled", docId, label: "Shipping Notes" },
     );
     expect(focusedTab(s.workspaces[0])!.title).toBe("Shipping Notes");
@@ -502,51 +545,55 @@ describe("labels", () => {
 });
 
 describe("trash", () => {
-  const note = (title: string, mtimeMs = 1): NoteMeta => ({ path: `/notes/${title}.md`, title, mtimeMs });
+  const note = (title: string, mtimeMs = 1): NoteMeta => ({ path: `${FOLDER}/${title}.md`, title, mtimeMs });
   const trashed = (title: string, deletedAt: number): TrashMeta => ({
-    path: `/notes/.trash/${title}.md`,
+    path: `${FOLDER}/.ledge-trash/${title}.md`,
     title,
     deletedAt,
   });
 
-  test("initialState carries an empty trash", () => {
-    expect(initialState().trash).toEqual([]);
-    expect(initialState([note("a")], [trashed("b", 5)]).trash).toHaveLength(1);
+  test("initialState carries an empty trash for its folder", () => {
+    expect(trashOf(initialState(FOLDER), FOLDER)).toEqual([]);
+    expect(trashOf(initialState(FOLDER, [note("a")], [trashed("b", 5)]), FOLDER)).toHaveLength(1);
   });
 
-  test("trashLoaded replaces the list", () => {
-    const s = reducer(initialState([], [trashed("old", 1)]), {
+  test("trashLoaded replaces one folder's list and no other's", () => {
+    const s0 = reducer(initialState(FOLDER, [], [trashed("old", 1)]), addWs(2));
+    const s = reducer(s0, {
       type: "trashLoaded",
-      items: [trashed("new", 2)],
+      folder: "/ws/extra-2",
+      items: [{ path: "/ws/extra-2/.ledge-trash/new.md", title: "new", deletedAt: 2 }],
     });
-    expect(s.trash.map((t) => t.title)).toEqual(["new"]);
+    expect(trashOf(s, "/ws/extra-2").map((t) => t.title)).toEqual(["new"]);
+    expect(trashOf(s, FOLDER).map((t) => t.title)).toEqual(["old"]); // untouched
   });
 
-  test("noteRestored puts the note back in the browser", () => {
-    const s = reducer(initialState([note("a")]), { type: "noteRestored", note: note("b") });
-    expect(s.notes.map((n) => n.title).sort()).toEqual(["a", "b"]);
+  test("noteRestored puts the note back in its folder's browser", () => {
+    const s = reducer(initialState(FOLDER, [note("a")]), { type: "noteRestored", folder: FOLDER, note: note("b") });
+    expect(notesOf(s, FOLDER).map((n) => n.title).sort()).toEqual(["a", "b"]);
   });
 
   test("a restored note lands in mtime order, not at the front", () => {
     // It keeps its real last-edited time (the trash records the deletion in
     // ctime and leaves mtime alone), so an old note restored today is still old.
-    const s = reducer(initialState([note("recent", 100), note("older", 10)]), {
+    const s = reducer(initialState(FOLDER, [note("recent", 100), note("older", 10)]), {
       type: "noteRestored",
+      folder: FOLDER,
       note: note("ancient", 1),
     });
-    expect(s.notes.map((n) => n.title)).toEqual(["recent", "older", "ancient"]);
+    expect(notesOf(s, FOLDER).map((n) => n.title)).toEqual(["recent", "older", "ancient"]);
   });
 
   test("restoring a note that is somehow already listed changes nothing", () => {
-    const before = initialState([note("a")]);
-    expect(reducer(before, { type: "noteRestored", note: note("a") })).toBe(before);
+    const before = initialState(FOLDER, [note("a")]);
+    expect(reducer(before, { type: "noteRestored", folder: FOLDER, note: note("a") })).toBe(before);
   });
 
   test("noteRestored does not reopen the note's tab", () => {
     // Restore puts a file back; it does not decide you want to look at it.
-    const before = initialState();
-    const s = reducer(before, { type: "noteRestored", note: note("a") });
+    const before = initialState(FOLDER);
+    const s = reducer(before, { type: "noteRestored", folder: FOLDER, note: note("a") });
     expect(countTabs(selected(s).root)).toBe(countTabs(selected(before).root));
-    expect(openNotePaths(s).has("/notes/a.md")).toBe(false);
+    expect(openNotePaths(s).has(`${FOLDER}/a.md`)).toBe(false);
   });
 });

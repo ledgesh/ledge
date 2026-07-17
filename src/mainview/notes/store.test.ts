@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { configureNotes, type NoteMeta } from "./channel";
+import { recordWorkspaceKinds, resetWorkspaceKinds } from "../workspace/channel";
 import { slugOf } from "../../shared/slug";
 import type { NoteParams } from "../../shared/frontmatter";
 import {
@@ -19,15 +20,23 @@ import {
 // A stand-in for the Bun note store. Writes are recorded; each call's promise can
 // be held open (`gate`) so the tests can drive what happens *during* a save, which
 // is where the interesting races live.
+// Every doc in these tests lives in one workspace folder; bind() below bakes
+// it in so the cases read as before the per-workspace split.
+const FOLDER = "/notes";
+const bind = (docId: string, path: string | null, handlers: DocHandlers) =>
+  bindDoc(docId, path, FOLDER, handlers);
+
 function fakeBridge() {
   const writes: Array<{ path: string; text: string }> = [];
   const creates: string[] = [];
+  const createFolders: string[] = [];
   const retitles: Array<{ path: string; text: string }> = [];
   const configures: Array<{ sessionId: string; params: NoteParams }> = [];
   let created = 0;
   const state = {
     writes,
     creates,
+    createFolders,
     retitles,
     configures,
     failNextRetitle: false,
@@ -59,8 +68,9 @@ function fakeBridge() {
       }
       writes.push({ path, text });
     },
-    create: async (text): Promise<NoteMeta> => {
+    create: async (folder, text): Promise<NoteMeta> => {
       if (state.gate) await state.gate.promise;
+      createFolders.push(folder);
       creates.push(text);
       created += 1;
       // The real createNote names from the H1 too; keep the enumerated shape so
@@ -103,6 +113,7 @@ const pastDebounce = () => new Promise((r) => setTimeout(r, 600));
 
 afterEach(() => {
   resetDocs();
+  resetWorkspaceKinds();
 });
 
 describe("binding", () => {
@@ -116,7 +127,7 @@ describe("binding", () => {
 
   test("a bound but untouched note writes nothing: opening a tab creates no file", async () => {
     const fs = fakeBridge();
-    bindDoc("doc-1", null, noop());
+    bind("doc-1", null, noop());
     await saveNow("doc-1");
     expect(fs.creates).toEqual([]);
     expect(fs.writes).toEqual([]);
@@ -124,14 +135,14 @@ describe("binding", () => {
 
   test("re-binding an open note keeps its allocated path", async () => {
     const fs = fakeBridge();
-    bindDoc("doc-1", null, noop());
+    bind("doc-1", null, noop());
     noteChanged("doc-1", "one");
     await saveNow("doc-1");
 
     // A tab re-attach (pane switch) rebinds with the path the TAB knows, which is
     // still null if the reducer has not caught up. The store must not forget the
     // file it just allocated and create a second one.
-    bindDoc("doc-1", null, noop());
+    bind("doc-1", null, noop());
     noteChanged("doc-1", "two");
     await saveNow("doc-1");
 
@@ -144,7 +155,7 @@ describe("first save allocates a file", () => {
   test("a pathless note is created once, then written to its new path", async () => {
     const fs = fakeBridge();
     const seen: NoteMeta[] = [];
-    bindDoc("doc-1", null, { ...noop(), onFile: (note) => seen.push(note) });
+    bind("doc-1", null, { ...noop(), onFile: (note) => seen.push(note) });
 
     noteChanged("doc-1", "first");
     await saveNow("doc-1");
@@ -158,19 +169,29 @@ describe("first save allocates a file", () => {
 
   test("a note that already has a file never creates one", async () => {
     const fs = fakeBridge();
-    bindDoc("doc-1", "/notes/existing.md", noop());
+    bind("doc-1", "/notes/existing.md", noop());
     noteChanged("doc-1", "edited");
     await saveNow("doc-1");
 
     expect(fs.creates).toEqual([]);
     expect(fs.writes).toEqual([{ path: "/notes/existing.md", text: "edited" }]);
   });
+
+  test("the file is created in the folder the doc was bound with — the tab's workspace", async () => {
+    // The folder captured at bindDoc is what keeps a first save landing in the
+    // note's own workspace, wherever the selection is by the time it fires.
+    const fs = fakeBridge();
+    bindDoc("doc-1", null, "/elsewhere", noop());
+    noteChanged("doc-1", "first");
+    await saveNow("doc-1");
+    expect(fs.createFolders).toEqual(["/elsewhere"]);
+  });
 });
 
 describe("in-flight edits", () => {
   test("edits during a save are coalesced into one follow-up write of the latest text", async () => {
     const fs = fakeBridge();
-    bindDoc("doc-1", "/notes/a.md", noop());
+    bind("doc-1", "/notes/a.md", noop());
     const release = fs.hold();
 
     noteChanged("doc-1", "v1");
@@ -193,7 +214,7 @@ describe("in-flight edits", () => {
 
   test("a second save during an in-flight create does not allocate a second file", async () => {
     const fs = fakeBridge();
-    bindDoc("doc-1", null, noop());
+    bind("doc-1", null, noop());
     const release = fs.hold();
 
     noteChanged("doc-1", "first");
@@ -215,7 +236,7 @@ describe("in-flight edits", () => {
 describe("autosave debounce", () => {
   test("a burst of keystrokes writes once, with the final text", async () => {
     const fs = fakeBridge();
-    bindDoc("doc-1", "/notes/a.md", noop());
+    bind("doc-1", "/notes/a.md", noop());
     noteChanged("doc-1", "h");
     noteChanged("doc-1", "he");
     noteChanged("doc-1", "hel");
@@ -228,8 +249,8 @@ describe("autosave debounce", () => {
 
   test("flushAll saves every dirty note now", async () => {
     const fs = fakeBridge();
-    bindDoc("doc-1", "/notes/a.md", noop());
-    bindDoc("doc-2", "/notes/b.md", noop());
+    bind("doc-1", "/notes/a.md", noop());
+    bind("doc-2", "/notes/b.md", noop());
     noteChanged("doc-1", "a-text");
     noteChanged("doc-2", "b-text");
 
@@ -244,7 +265,7 @@ describe("autosave debounce", () => {
 describe("releaseDoc", () => {
   test("a pending edit still reaches disk when the tab closes", async () => {
     const fs = fakeBridge();
-    bindDoc("doc-1", "/notes/a.md", noop());
+    bind("doc-1", "/notes/a.md", noop());
     noteChanged("doc-1", "unsaved");
 
     releaseDoc("doc-1"); // tab closed inside the debounce window
@@ -255,7 +276,7 @@ describe("releaseDoc", () => {
 
   test("a closed note is deregistered: later changes are ignored", async () => {
     const fs = fakeBridge();
-    bindDoc("doc-1", "/notes/a.md", noop());
+    bind("doc-1", "/notes/a.md", noop());
     releaseDoc("doc-1");
     await tick();
 
@@ -268,7 +289,7 @@ describe("releaseDoc", () => {
 describe("failure", () => {
   test("a failed write leaves the note dirty: the edit is retried, not dropped", async () => {
     const fs = fakeBridge();
-    bindDoc("doc-1", "/notes/a.md", noop());
+    bind("doc-1", "/notes/a.md", noop());
 
     fs.failNextWrite = true;
     noteChanged("doc-1", "v1");
@@ -282,7 +303,7 @@ describe("failure", () => {
 
   test("an edit arriving after a failed write supersedes the text that failed", async () => {
     const fs = fakeBridge();
-    bindDoc("doc-1", "/notes/a.md", noop());
+    bind("doc-1", "/notes/a.md", noop());
 
     fs.failNextWrite = true;
     noteChanged("doc-1", "v1");
@@ -301,7 +322,7 @@ describe("failure", () => {
 describe("moving and losing a note's file", () => {
   test("a frozen note keeps collecting edits but writes none of them", async () => {
     const fs = fakeBridge();
-    bindDoc("doc-1", "/notes/a.md", noop());
+    bind("doc-1", "/notes/a.md", noop());
 
     freezeDoc("doc-1");
     noteChanged("doc-1", "typed mid-rename");
@@ -311,7 +332,7 @@ describe("moving and losing a note's file", () => {
 
   test("retargeting writes what piled up while frozen, to the NEW path", async () => {
     const fs = fakeBridge();
-    bindDoc("doc-1", "/notes/a.md", noop());
+    bind("doc-1", "/notes/a.md", noop());
 
     freezeDoc("doc-1");
     noteChanged("doc-1", "typed mid-rename");
@@ -324,7 +345,7 @@ describe("moving and losing a note's file", () => {
 
   test("a clean note that is renamed writes nothing at all", async () => {
     const fs = fakeBridge();
-    bindDoc("doc-1", "/notes/a.md", noop());
+    bind("doc-1", "/notes/a.md", noop());
 
     freezeDoc("doc-1");
     retargetDoc("doc-1", "/notes/b.md");
@@ -334,7 +355,7 @@ describe("moving and losing a note's file", () => {
 
   test("saves after a rename go to the new path", async () => {
     const fs = fakeBridge();
-    bindDoc("doc-1", "/notes/a.md", noop());
+    bind("doc-1", "/notes/a.md", noop());
     freezeDoc("doc-1");
     retargetDoc("doc-1", "/notes/b.md");
 
@@ -345,7 +366,7 @@ describe("moving and losing a note's file", () => {
 
   test("a refused rename leaves the note saving to the path it still has", async () => {
     const fs = fakeBridge();
-    bindDoc("doc-1", "/notes/a.md", noop());
+    bind("doc-1", "/notes/a.md", noop());
 
     // What actions.ts does when Bun rejects the name: retarget at the old path.
     freezeDoc("doc-1");
@@ -358,7 +379,7 @@ describe("moving and losing a note's file", () => {
 
   test("a forgotten note drops its pending edit: a deleted note must not come back", async () => {
     const fs = fakeBridge();
-    bindDoc("doc-1", "/notes/a.md", noop());
+    bind("doc-1", "/notes/a.md", noop());
 
     noteChanged("doc-1", "unsaved words");
     forgetDoc("doc-1");
@@ -374,7 +395,7 @@ describe("moving and losing a note's file", () => {
 
   test("forgetting stops a flush that is already running from starting another lap", async () => {
     const fs = fakeBridge();
-    bindDoc("doc-1", "/notes/a.md", noop());
+    bind("doc-1", "/notes/a.md", noop());
 
     const release = fs.hold();
     noteChanged("doc-1", "v1");
@@ -406,7 +427,7 @@ describe("naming by heading", () => {
 
   test("editing the body of a titled note never moves its file", async () => {
     const fs = fakeBridge();
-    bindDoc("doc-1", "/notes/shipping-notes.md", noop());
+    bind("doc-1", "/notes/shipping-notes.md", noop());
     seedSlug("doc-1", titled("Shipping Notes"));
 
     noteChanged("doc-1", titled("Shipping Notes", "more words"));
@@ -421,7 +442,7 @@ describe("naming by heading", () => {
   // from under the user the first time they touch it.
   test("a note whose filename disagrees with its heading is left where it is", async () => {
     const fs = fakeBridge();
-    bindDoc("doc-1", "/notes/untitled-2.md", noop());
+    bind("doc-1", "/notes/untitled-2.md", noop());
     seedSlug("doc-1", titled("test-123"));
 
     noteChanged("doc-1", titled("test-123", "editing away"));
@@ -433,7 +454,7 @@ describe("naming by heading", () => {
   test("editing the heading moves the file and tells the tab where it went", async () => {
     const fs = fakeBridge();
     const moves: Array<{ path: string; prev: string | null }> = [];
-    bindDoc("doc-1", "/notes/shipping-notes.md", {
+    bind("doc-1", "/notes/shipping-notes.md", {
       ...noop(),
       onFile: (note, prev) => moves.push({ path: note.path, prev }),
     });
@@ -448,7 +469,7 @@ describe("naming by heading", () => {
 
   test("later saves go to the new path", async () => {
     const fs = fakeBridge();
-    bindDoc("doc-1", "/notes/shipping-notes.md", noop());
+    bind("doc-1", "/notes/shipping-notes.md", noop());
     seedSlug("doc-1", titled("Shipping Notes"));
 
     noteChanged("doc-1", titled("Shipping Plans"));
@@ -461,7 +482,7 @@ describe("naming by heading", () => {
 
   test("a heading edit that does not change the slug moves nothing", async () => {
     const fs = fakeBridge();
-    bindDoc("doc-1", "/notes/shipping-notes.md", noop());
+    bind("doc-1", "/notes/shipping-notes.md", noop());
     seedSlug("doc-1", titled("Shipping Notes"));
 
     // Punctuation and case wash out of the slug, so there is no rename to do.
@@ -473,7 +494,7 @@ describe("naming by heading", () => {
 
   test("removing the heading keeps the name the note already has", async () => {
     const fs = fakeBridge();
-    bindDoc("doc-1", "/notes/shipping-notes.md", noop());
+    bind("doc-1", "/notes/shipping-notes.md", noop());
     seedSlug("doc-1", titled("Shipping Notes"));
 
     // Renaming this back to untitled.md would be a nasty surprise, and would
@@ -487,7 +508,7 @@ describe("naming by heading", () => {
 
   test("giving an untitled note a heading names it", async () => {
     const fs = fakeBridge();
-    bindDoc("doc-1", "/notes/untitled.md", noop());
+    bind("doc-1", "/notes/untitled.md", noop());
     seedSlug("doc-1", "no heading yet\n");
 
     noteChanged("doc-1", titled("Shipping Notes"));
@@ -500,7 +521,7 @@ describe("naming by heading", () => {
     // createNote already names from the H1, so the create IS the naming: a retitle
     // on top of it would be a pointless second trip to the disk.
     const fs = fakeBridge();
-    bindDoc("doc-1", null, noop());
+    bind("doc-1", null, noop());
 
     noteChanged("doc-1", titled("Shipping Notes"));
     await saveNow("doc-1");
@@ -513,7 +534,7 @@ describe("naming by heading", () => {
     // A note whose load never landed (deleted behind our back). First sight of its
     // text must not be read as "the heading just changed".
     const fs = fakeBridge();
-    bindDoc("doc-1", "/notes/whatever.md", noop());
+    bind("doc-1", "/notes/whatever.md", noop());
 
     noteChanged("doc-1", titled("Shipping Notes"));
     await saveNow("doc-1");
@@ -527,7 +548,7 @@ describe("naming by heading", () => {
 
   test("a refused rename is retried, not silently forgotten", async () => {
     const fs = fakeBridge();
-    bindDoc("doc-1", "/notes/shipping-notes.md", noop());
+    bind("doc-1", "/notes/shipping-notes.md", noop());
     seedSlug("doc-1", titled("Shipping Notes"));
 
     fs.failNextRetitle = true;
@@ -543,7 +564,7 @@ describe("naming by heading", () => {
 
   test("seeding an already-seeded note does not overwrite what it knows", async () => {
     const fs = fakeBridge();
-    bindDoc("doc-1", "/notes/shipping-notes.md", noop());
+    bind("doc-1", "/notes/shipping-notes.md", noop());
     seedSlug("doc-1", titled("Shipping Notes"));
     seedSlug("doc-1", titled("Something Else")); // a second load; must not stick
 
@@ -566,7 +587,7 @@ describe("labelling", () => {
   test("editing the heading relabels the note", async () => {
     const { labels, handlers } = labelsOf();
     fakeBridge();
-    bindDoc("doc-1", "/notes/shipping-notes.md", handlers);
+    bind("doc-1", "/notes/shipping-notes.md", handlers);
     seedSlug("doc-1", titled("Shipping Notes"));
 
     noteChanged("doc-1", titled("Shipping Plans"));
@@ -578,7 +599,7 @@ describe("labelling", () => {
   test("a heading edit that renames nothing still relabels", async () => {
     const fs = fakeBridge();
     const { labels, handlers } = labelsOf();
-    bindDoc("doc-1", "/notes/shipping-notes.md", handlers);
+    bind("doc-1", "/notes/shipping-notes.md", handlers);
     seedSlug("doc-1", titled("Shipping Notes"));
 
     // Same slug ("shipping-notes"), so no file moves...
@@ -592,7 +613,7 @@ describe("labelling", () => {
   test("editing the body never relabels", async () => {
     const { labels, handlers } = labelsOf();
     fakeBridge();
-    bindDoc("doc-1", "/notes/shipping-notes.md", handlers);
+    bind("doc-1", "/notes/shipping-notes.md", handlers);
     seedSlug("doc-1", titled("Shipping Notes"));
 
     noteChanged("doc-1", titled("Shipping Notes", "more words"));
@@ -603,7 +624,7 @@ describe("labelling", () => {
   test("deleting the heading falls the label back to the filename", async () => {
     const { labels, handlers } = labelsOf();
     fakeBridge();
-    bindDoc("doc-1", "/notes/shipping-notes.md", handlers);
+    bind("doc-1", "/notes/shipping-notes.md", handlers);
     seedSlug("doc-1", titled("Shipping Notes"));
 
     noteChanged("doc-1", "just prose now\n");
@@ -615,7 +636,7 @@ describe("labelling", () => {
   test("a new note with no heading is labelled by the file it just got", async () => {
     const { labels, handlers } = labelsOf();
     fakeBridge();
-    bindDoc("doc-1", null, handlers);
+    bind("doc-1", null, handlers);
     seedSlug("doc-1", titled("Scratch"));
 
     // The save creates the file before the label is computed, so by then the note
@@ -629,7 +650,7 @@ describe("labelling", () => {
   test("a note loaded from disk is not relabelled just for being opened", async () => {
     const { labels, handlers } = labelsOf();
     fakeBridge();
-    bindDoc("doc-1", "/notes/shipping-notes.md", handlers);
+    bind("doc-1", "/notes/shipping-notes.md", handlers);
     seedSlug("doc-1", titled("Shipping Notes"));
 
     noteChanged("doc-1", titled("Shipping Notes", "typing"));
@@ -641,13 +662,14 @@ describe("labelling", () => {
 // Spawn params (frontmatter) reaching Bun: sent when a note's saved text lands
 // (seedSlug) and when an edit changes what the frontmatter parses to — and at
 // no other time, because nearly every note has no frontmatter and must cost
-// nothing on this path.
+// nothing on this path. (The one addition: a workspace carrying a default cwd
+// sends once at bindDoc — the block after this one.)
 describe("params syncing", () => {
   const withFm = (inner: string, body = "# Note\n\nbody\n") => `---\n${inner}---\n${body}`;
 
   test("a loaded note's frontmatter reaches Bun before any edit", async () => {
     const fs = fakeBridge();
-    bindDoc("doc-1", "/notes/api-tests.md", noop());
+    bind("doc-1", "/notes/api-tests.md", noop());
     seedSlug("doc-1", withFm("cwd: /tmp/proj\nprofile: petstore\n"));
 
     expect(fs.configures).toHaveLength(1);
@@ -658,7 +680,7 @@ describe("params syncing", () => {
 
   test("a note with no frontmatter sends nothing, on load or on save", async () => {
     const fs = fakeBridge();
-    bindDoc("doc-1", "/notes/plain.md", noop());
+    bind("doc-1", "/notes/plain.md", noop());
     seedSlug("doc-1", "# Plain\n\nbody\n");
 
     noteChanged("doc-1", "# Plain\n\nmore body\n");
@@ -668,7 +690,7 @@ describe("params syncing", () => {
 
   test("a body edit does not re-send unchanged params", async () => {
     const fs = fakeBridge();
-    bindDoc("doc-1", "/notes/api-tests.md", noop());
+    bind("doc-1", "/notes/api-tests.md", noop());
     seedSlug("doc-1", withFm("cwd: /tmp/proj\n"));
 
     noteChanged("doc-1", withFm("cwd: /tmp/proj\n", "# Note\n\nedited body\n"));
@@ -678,7 +700,7 @@ describe("params syncing", () => {
 
   test("editing the frontmatter sends the new params on save", async () => {
     const fs = fakeBridge();
-    bindDoc("doc-1", "/notes/api-tests.md", noop());
+    bind("doc-1", "/notes/api-tests.md", noop());
     seedSlug("doc-1", withFm("cwd: /tmp/old\n"));
 
     noteChanged("doc-1", withFm("cwd: /tmp/new\nenv:\n  A: 1\n"));
@@ -690,7 +712,7 @@ describe("params syncing", () => {
 
   test("typing frontmatter into a new note sends params with its first save", async () => {
     const fs = fakeBridge();
-    bindDoc("doc-1", null, noop());
+    bind("doc-1", null, noop());
 
     noteChanged("doc-1", withFm("profile: petstore\n"));
     await saveNow("doc-1");
@@ -700,7 +722,7 @@ describe("params syncing", () => {
 
   test("deleting the frontmatter sends empty params: back to the defaults", async () => {
     const fs = fakeBridge();
-    bindDoc("doc-1", "/notes/api-tests.md", noop());
+    bind("doc-1", "/notes/api-tests.md", noop());
     seedSlug("doc-1", withFm("cwd: /tmp/proj\n"));
 
     noteChanged("doc-1", "# Note\n\nbody\n");
@@ -712,11 +734,75 @@ describe("params syncing", () => {
   test("a comment-only frontmatter change re-sends nothing", async () => {
     // Comparison is on the PARSED params: annotating the block is not a change.
     const fs = fakeBridge();
-    bindDoc("doc-1", "/notes/api-tests.md", noop());
+    bind("doc-1", "/notes/api-tests.md", noop());
     seedSlug("doc-1", withFm("cwd: /tmp/proj\n"));
 
     noteChanged("doc-1", withFm("# the dev checkout\ncwd: /tmp/proj\n"));
     await saveNow("doc-1");
     expect(fs.configures).toHaveLength(1);
+  });
+});
+
+// The per-workspace default cwd: a note with no `cwd:` of its own inherits
+// its EXTERNAL workspace's folder (workspace/channel.ts workspaceDefaultCwd),
+// merged into every params send. Managed workspaces have no default, which is
+// what keeps the frontmatterless-note-sends-nothing economy above intact.
+describe("workspace default cwd", () => {
+  const withFm = (inner: string, body = "# Note\n\nbody\n") => `---\n${inner}---\n${body}`;
+  const external = () => recordWorkspaceKinds([{ root: FOLDER, kind: "external", available: true }]);
+
+  test("binding a note in an external workspace configures its folder as cwd at once", () => {
+    const fs = fakeBridge();
+    external();
+    // No seedSlug, no edit: a fresh tab's first act may be a Run click, and
+    // the shell it spawns must already be anchored to the workspace.
+    bind("doc-1", null, noop());
+    expect(fs.configures).toHaveLength(1);
+    expect(fs.configures[0]).toEqual({
+      sessionId: "doc-1",
+      params: { cwd: FOLDER, profile: null, envFile: null, env: {} },
+    });
+  });
+
+  test("a managed workspace keeps the old economy: nothing sent, ever", async () => {
+    const fs = fakeBridge();
+    recordWorkspaceKinds([{ root: FOLDER, kind: "managed", available: true }]);
+    bind("doc-1", "/notes/plain.md", noop());
+    seedSlug("doc-1", "# Plain\n\nbody\n");
+    noteChanged("doc-1", "# Plain\n\nmore\n");
+    await saveNow("doc-1");
+    expect(fs.configures).toEqual([]);
+  });
+
+  test("the note's own frontmatter cwd beats the workspace default", () => {
+    const fs = fakeBridge();
+    external();
+    bind("doc-1", "/notes/api-tests.md", noop());
+    seedSlug("doc-1", withFm("cwd: /tmp/proj\n"));
+    expect(fs.configures).toHaveLength(2); // bind (folder), then the seed
+    expect(fs.configures[1].params.cwd).toBe("/tmp/proj");
+  });
+
+  test("deleting the frontmatter cwd falls back to the workspace folder, not $HOME", async () => {
+    const fs = fakeBridge();
+    external();
+    bind("doc-1", "/notes/api-tests.md", noop());
+    seedSlug("doc-1", withFm("cwd: /tmp/proj\n"));
+    noteChanged("doc-1", "# Note\n\nbody\n");
+    await saveNow("doc-1");
+    expect(fs.configures).toHaveLength(3);
+    expect(fs.configures[2].params.cwd).toBe(FOLDER);
+  });
+
+  test("a plain note's load and edits re-send nothing past the bind", async () => {
+    // The merged params are what lastParamsKey tracks, so the folder default
+    // does not turn every body edit into a configure.
+    const fs = fakeBridge();
+    external();
+    bind("doc-1", "/notes/plain.md", noop());
+    seedSlug("doc-1", "# Plain\n\nbody\n");
+    noteChanged("doc-1", "# Plain\n\nmore\n");
+    await saveNow("doc-1");
+    expect(fs.configures).toHaveLength(1); // the bind's, nothing since
   });
 });

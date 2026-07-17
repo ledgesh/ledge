@@ -1,6 +1,7 @@
-// The note list: every .md in ~/.ledge, sitting under the workspace strip in the
-// sidebar. Notes are global to the notes root, so this list is the same whichever
-// workspace is selected; what changes per workspace is which of them are open.
+// The note list: every .md in the SELECTED WORKSPACE'S folder, sitting under
+// the workspace strip in the sidebar. Notes are local to their workspace, so
+// switching workspaces swaps this whole list (and the Trash section below it)
+// for the new folder's.
 //
 // There is no rename here on purpose: a note's filename follows its first-line H1
 // (notes/store.ts), so you rename a note by retitling it in the editor, and this
@@ -22,7 +23,7 @@ import { CommandMenuItem } from "@/commands/CommandMenuItem";
 import { configureUi } from "@/commands/glue";
 import { tooltip } from "@/commands/format";
 import { targetAttrs } from "@/commands/target";
-import { docIdsForPath, openNotePaths, useWorkspace } from "@/workspace/store";
+import { docIdsForPath, notesOf, openNotePaths, trashOf, useWorkspace } from "@/workspace/store";
 import { focusedTab } from "@/workspace/tree";
 import { agoLabel } from "./ago";
 import { deleteNote, deleteTrashedNote, emptyTrashNow, restoreNote } from "./actions";
@@ -46,12 +47,14 @@ export function NoteBrowser() {
   const [undo, setUndo] = useState<{ trashed: string; title: string } | null>(null);
   const nav = useListNav();
 
-  // Sorted by title, NOT by the mtime order the store holds them in: an autosave
-  // rewrites mtime on every keystroke burst, so an mtime-sorted list would shuffle
-  // itself under the pointer while you type.
+  // The selected workspace's notes only. Sorted by title, NOT by the mtime
+  // order the store holds them in: an autosave rewrites mtime on every
+  // keystroke burst, so an mtime-sorted list would shuffle itself under the
+  // pointer while you type.
+  const folderNotes = notesOf(state, selected.folder);
   const notes = useMemo(
-    () => [...state.notes].sort((a, b) => a.title.localeCompare(b.title)),
-    [state.notes],
+    () => [...folderNotes].sort((a, b) => a.title.localeCompare(b.title)),
+    [folderNotes],
   );
   const open = useMemo(() => openNotePaths(state), [state]);
   const current = focusedTab(selected)?.path ?? null;
@@ -65,7 +68,7 @@ export function NoteBrowser() {
 
   const trash = (note: NoteMeta) => {
     setError(null);
-    void deleteNote(note.path, docIdsForPath(state, note.path), dispatch).then((res) => {
+    void deleteNote(note.path, selected.folder, docIdsForPath(state, note.path), dispatch).then((res) => {
       setError(res.error);
       // No trashed path means the file was already gone, so there is nothing to
       // offer back and an Undo button would be a lie.
@@ -76,7 +79,7 @@ export function NoteBrowser() {
   const restore = (path: string) => {
     setError(null);
     setUndo(null);
-    void restoreNote(path, dispatch).then(setError);
+    void restoreNote(path, selected.folder, dispatch).then(setError);
   };
 
   // The browser owns the Undo strip, so it registers the hooks the delete and
@@ -89,6 +92,10 @@ export function NoteBrowser() {
     configureUi({
       deleteNoteWithUndo: (note) => hooks.current.trash(note),
       restoreTrashed: (path) => hooks.current.restore(path),
+      // The browser's error strip doubles as the workspace commands' error
+      // surface (a refused attach, a failed create): same sidebar, same shape
+      // of failure report.
+      showError: (message) => setError(message),
     });
   }, []);
 
@@ -104,7 +111,7 @@ export function NoteBrowser() {
       <div {...nav.containerProps} className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-2">
         {notes.length === 0 ? (
           <p className="px-2 py-1.5 text-[11px] leading-snug text-muted-foreground">
-            No notes yet. A new note is saved to ~/.ledge as soon as you type in it.
+            No notes yet. A new note is saved to this workspace's folder as soon as you type in it.
           </p>
         ) : (
           notes.map((note, i) => (
@@ -191,7 +198,7 @@ function TrashSection({
   onRestore: (path: string) => void;
   onError: (err: string | null) => void;
 }) {
-  const { state, dispatch } = useWorkspace();
+  const { state, dispatch, selected } = useWorkspace();
   const [open, setOpen] = useState(false);
   const [confirming, setConfirming] = useState(false);
   // The trashed note queued for permanent deletion, awaiting confirmation.
@@ -202,7 +209,8 @@ function TrashSection({
   const [now, setNow] = useState(() => Date.now());
   const nav = useListNav();
 
-  const items = state.trash;
+  // The selected workspace's trash: each folder keeps its own.
+  const items = trashOf(state, selected.folder);
 
   // The section owns both confirmations, so the trash.empty and trash.delete
   // commands open them here rather than deleting directly: the confirm IS the
@@ -225,13 +233,13 @@ function TrashSection({
   const empty = () => {
     setConfirming(false);
     onError(null);
-    void emptyTrashNow(dispatch).then(onError);
+    void emptyTrashNow(selected.folder, dispatch).then(onError);
   };
 
   const deleteForever = (path: string) => {
     setDeleting(null);
     onError(null);
-    void deleteTrashedNote(path, dispatch).then(onError);
+    void deleteTrashedNote(path, selected.folder, dispatch).then(onError);
   };
 
   return (
@@ -240,7 +248,7 @@ function TrashSection({
         <button
           className="flex min-w-0 flex-1 items-center gap-1 text-left"
           onClick={() => setOpen((o) => !o)}
-          title="Deleted notes, kept in ~/.ledge/.trash"
+          title="Deleted notes, kept in this workspace folder's .ledge-trash"
         >
           <ChevronRight
             className={cn("size-3 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")}

@@ -15,7 +15,7 @@ describe("targetAttrs / targetFromDataset", () => {
   test("round-trips every target kind", () => {
     const cases = [
       { kind: "note", path: "/n/a.md" },
-      { kind: "trash", path: "/n/.trash/a.md" },
+      { kind: "trash", path: "/n/.ledge-trash/a.md" },
       { kind: "workspace", id: "ws1" },
       { kind: "tab", paneId: "p1", tabId: "t1" },
       { kind: "pane", paneId: "p1" },

@@ -108,7 +108,8 @@ CodeMirror and never at the window level.
 | Split Right           | ⌘D                        | |
 | Split Down            | ⇧⌘D                       | |
 | Close Pane            | ⇧⌘W                       | |
-| New Workspace         | ⇧⌘N                       | |
+| New Workspace         | ⇧⌘N                       | creates a managed folder under ~/.ledge (Bun slugs the name) |
+| Attach Folder as Workspace… | — (palette, + menu) | native folder picker (Bun-side; the view never names a path); the chosen directory's .md files become the workspace's notes. Picking an already-attached folder switches to it. Also in the New Workspace split button's dropdown (the strip's + row) |
 | Switch to Workspace N | ⌘1…9                      | badge shows while ⌘ held |
 | Go to Note…           | ⌘P                        | |
 | Command Palette…      | ⇧⌘P                       | also: type `>` as the first character in ⌘P |
@@ -128,7 +129,7 @@ CodeMirror and never at the window level.
 | Toggle Checkbox       | — (palette; click the rendered box as accelerator) | toggles the `[ ]`/`[x]` on the caret's line (editor/livePreview.ts). The box is a widget, not editable text, so a plain click may act — the caret-move grammar protects text, and the box is not text |
 | Rename Workspace…     | `r` (also menu / palette / double-click) | |
 | Change Icon…          | `i` (also menu / palette) | opens the icon grid on the workspace's row |
-| Close Workspace       | `⌫` (also menu / hover ✕) | |
+| Close Workspace       | `⌫` (also menu / hover ✕) | detaches the folder from the registry; every note stays on disk, re-attachable |
 | Copy Path             | `c` (also note context menu) | |
 | Empty Trash…          | — (button / palette, confirmed) | |
 
@@ -144,8 +145,9 @@ Row verbs, by row kind. Each fires only while a row of that kind has focus
 ## 4. Destructive actions
 
 - **Reversible destruction → no confirmation, provide undo.** Deleting a note
-  moves it to `~/.ledge/.trash` and shows the Undo strip; a prompt in front of
-  an undoable action teaches people to click through prompts.
+  moves it to its workspace folder's `.ledge-trash` and shows the Undo strip; a
+  prompt in front of an undoable action teaches people to click through
+  prompts.
 - **Irreversible destruction → modal confirmation, focus on Cancel.** Two such
   actions exist, both in the Trash section: **Empty Trash** and **Delete
   Permanently** (one row). The confirmation *is* the command's behavior — the
@@ -153,10 +155,13 @@ Row verbs, by row kind. Each fires only while a row of that kind has focus
   menu item, and the button cannot diverge into an unconfirmed path. Anything
   that unlinks a file, rather than moving it aside, joins this list.
 - **Arrangement loss (close tab / pane / workspace, restart a note's shells)
-  → neither.** No data is destroyed; notes stay on disk. Restart Note Shell
-  sits here deliberately: closing a tab already kills the same shells
-  unconfirmed, and a confirm on the command whose whole point is "apply my
-  frontmatter now" would be friction teaching click-through.
+  → neither.** No data is destroyed; notes stay on disk. Closing a workspace
+  detaches its folder from the registry but unlinks nothing — the folder is
+  re-attachable with everything in it, which is what keeps it in this class
+  rather than the confirmed one. Restart Note Shell sits here deliberately:
+  closing a tab already kills the same shells unconfirmed, and a confirm on
+  the command whose whole point is "apply my frontmatter now" would be
+  friction teaching click-through.
 - Destructive menu items are styled destructive and never sit directly
   adjacent to their non-destructive sibling without a separator or ordering
   gap.

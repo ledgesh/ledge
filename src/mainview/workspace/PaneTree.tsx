@@ -74,23 +74,27 @@ function LeafView({ leaf }: { leaf: LeafNode }) {
 // editor is parented; switching tabs re-parents a different (already-alive)
 // editor here. An empty pane shows a placeholder instead.
 function PaneBody({ leaf, focused }: { leaf: LeafNode; focused: boolean }) {
-  const { dispatch } = useWorkspace();
+  const { dispatch, selected } = useWorkspace();
   const { exec } = useCommands();
   const hostRef = useRef<HTMLDivElement>(null);
   const active = leaf.tabs.find((t) => t.id === leaf.activeTabId) ?? null;
   const docId = active?.docId ?? null;
+  // PaneTree only ever renders the selected workspace, so the selected
+  // workspace's folder IS this tab's folder — and it never changes for a
+  // given docId (tabs stay in their workspace).
+  const folder = selected.folder;
 
   useLayoutEffect(() => {
     const container = hostRef.current;
     if (!container || !active) return;
-    attachEditor(container, active, {
+    attachEditor(container, active, folder, {
       // The note's file appeared (first save) or moved to follow its H1. Both reach
       // the tab the same way; only which action carries it differs, since a create
       // is identified by the docId that owns it and a move by the path it left.
       onFile: (note, prevPath) =>
         dispatch(
           prevPath === null
-            ? { type: "noteCreated", docId: active.docId, note }
+            ? { type: "noteCreated", docId: active.docId, folder, note }
             : { type: "noteRenamed", path: prevPath, note },
         ),
       // The heading changed. Not the same event as the file moving: a heading can

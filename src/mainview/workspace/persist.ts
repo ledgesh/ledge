@@ -1,5 +1,5 @@
 // Session persistence: the workspace/pane/tab arrangement, serialized to the
-// dotted .layout.json Bun keeps in the notes root and rebuilt at boot. The
+// dotted .layout.json Bun keeps in the app home and rebuilt at boot. The
 // file is machine-written state (architecture.md §6), so this module is where
 // its one hard requirement lives: a corrupt or stale file must self-heal —
 // anything that does not parse or no longer exists costs exactly itself, and
@@ -30,11 +30,14 @@ import {
 import { DEFAULT_ICON, isIconKey } from "./icons";
 import type { AppState } from "./store";
 import { initialState } from "./store";
-import type { NoteMeta, TrashMeta } from "../../shared/rpc-schema";
+import type { NoteMeta, TrashMeta, WorkspaceRootInfo } from "../../shared/rpc-schema";
 
-// The persisted shape, version 1. Tabs are note paths — opaque handles the
-// view was handed by Bun (architecture.md §2); restore only ever opens paths
-// the boot noteList also returned, so a hand-edited file cannot smuggle one in.
+// The persisted shape, version 2 (v1 predates per-workspace folders; there is
+// no migration — the product is unreleased — so v1 text restores as null and
+// boots fresh). Each workspace carries its notes `folder` (the opaque root
+// handle from Bun) and tabs as note paths; restore only ever opens paths that
+// folder's boot noteList also returned, so a hand-edited file cannot smuggle
+// in another root's file — the tab∈folder invariant is enforced here.
 interface PersistedLeaf {
   kind: "leaf";
   tabs: string[];
@@ -51,13 +54,22 @@ type PersistedNode = PersistedLeaf | PersistedSplit;
 interface PersistedWorkspace {
   name: string;
   symbol: string;
+  folder: string;
   root: PersistedNode;
 }
 interface PersistedLayout {
-  version: 1;
+  version: 2;
   selectedIndex: number;
   workspaces: PersistedWorkspace[];
 }
+
+// Workspaces whose folder is registered but not on disk this session (an
+// unmounted volume). They are dropped from the live AppState — there is
+// nothing to show — but carried VERBATIM through every save, so one unmounted
+// volume costs the session, not the saved layout: remount and relaunch, and
+// the workspace is back as it was. Reset on every restore; appended by
+// serializeLayout below.
+let dormant: PersistedWorkspace[] = [];
 
 // Same bounds the reducer clamps live drags to (store.tsx clampRatio).
 function clampRatio(r: number): number {
@@ -100,16 +112,22 @@ function persistNode(node: PaneNode, focusedPaneId: string): PersistedNode {
 // Exported for unit tests; the app reaches it through scheduleLayoutSave.
 export function serializeLayout(state: AppState): string {
   const layout: PersistedLayout = {
-    version: 1,
+    version: 2,
     selectedIndex: Math.max(
       0,
       state.workspaces.findIndex((w) => w.id === state.selectedId),
     ),
-    workspaces: state.workspaces.map((ws) => ({
-      name: ws.name,
-      symbol: ws.symbol,
-      root: persistNode(ws.root, ws.focusedPaneId),
-    })),
+    workspaces: [
+      ...state.workspaces.map((ws) => ({
+        name: ws.name,
+        symbol: ws.symbol,
+        folder: ws.folder,
+        root: persistNode(ws.root, ws.focusedPaneId),
+      })),
+      // The unmounted-volume workspaces ride along untouched, after the live
+      // ones so selectedIndex stays an index into what the user can see.
+      ...dormant,
+    ],
   };
   return JSON.stringify(layout);
 }
@@ -122,9 +140,11 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 
 // Rebuild one node, degrading per branch: a malformed half of a split costs
 // that half (the sibling takes its place), a whole malformed subtree costs the
-// workspace. `opened` spans every workspace: a note open twice would be two
-// docIds racing autosaves over one file — the invariant openNote enforces live,
-// enforced here against a file that could have been duplicated by hand.
+// workspace. `byPath` holds only THIS workspace's folder's notes, which is
+// what pins every restored tab inside its own folder. `opened` spans every
+// workspace: a note open twice would be two docIds racing autosaves over one
+// file — the invariant openNote enforces live, enforced here against a file
+// that could have been duplicated by hand.
 function restoreNode(
   raw: unknown,
   byPath: Map<string, NoteMeta>,
@@ -149,9 +169,10 @@ function restoreNode(
 
   if (raw.kind !== "leaf" || !Array.isArray(raw.tabs)) return null;
 
-  // Survivors: paths that are strings, still exist on disk (per the boot
-  // noteList — the only authority on paths), and are not already open in a
-  // pane restored before this one. origIndex keys the active-tab fixup below.
+  // Survivors: paths that are strings, still exist in this workspace's folder
+  // (per its boot noteList — the only authority on paths), and are not already
+  // open in a pane restored before this one. origIndex keys the active-tab
+  // fixup below.
   const survivors: Array<{ meta: NoteMeta; origIndex: number }> = [];
   raw.tabs.forEach((p, origIndex) => {
     if (typeof p !== "string" || opened.has(p)) return;
@@ -184,6 +205,7 @@ function restoreNode(
 
 function restoreWorkspace(
   raw: unknown,
+  folder: string,
   byPath: Map<string, NoteMeta>,
   opened: Set<string>,
   n: number,
@@ -194,20 +216,37 @@ function restoreWorkspace(
   if (!root) return null;
   const name = typeof raw.name === "string" && raw.name.trim() ? raw.name.trim() : `Workspace ${n}`;
   const symbol = typeof raw.symbol === "string" && isIconKey(raw.symbol) ? raw.symbol : DEFAULT_ICON;
-  return { id: uid("ws"), name, symbol, root, focusedPaneId: focus.paneId ?? firstLeaf(root).id };
+  return { id: uid("ws"), name, symbol, folder, root, focusedPaneId: focus.paneId ?? firstLeaf(root).id };
+}
+
+// Keep a raw persisted workspace verbatim for re-serialization (the dormant
+// path). Only the fields the shape owns are copied — anything else a
+// hand-editor added dies here, the same cleanup a live round trip would do.
+function keepDormant(raw: Record<string, unknown>, folder: string): void {
+  dormant.push({
+    name: typeof raw.name === "string" ? raw.name : "",
+    symbol: typeof raw.symbol === "string" ? (raw.symbol as string) : DEFAULT_ICON,
+    folder,
+    root: raw.root as PersistedNode,
+  });
 }
 
 // Rebuild the boot AppState from the saved layout text, or null when there is
 // nothing restorable — no file yet, unparseable JSON, an unknown version, or
-// no workspace surviving validation. The caller falls back to initialState;
-// this function never throws, because the file it reads is machine-written and
-// "refuse to boot" is not an acceptable failure mode for it.
+// no workspace surviving validation. Degradation per workspace: a folder no
+// longer registered costs its workspace; a folder registered but unavailable
+// (unmounted volume) is retained dormant — excluded from the state, carried
+// through saves. The caller falls back to initialState; this function never
+// throws, because the file it reads is machine-written and "refuse to boot"
+// is not an acceptable failure mode for it.
 // Exported for unit tests; the app goes through restoredState below.
 export function restoreLayout(
   text: string | null,
-  notes: NoteMeta[],
-  trash: TrashMeta[],
+  roots: WorkspaceRootInfo[],
+  notesByFolder: Record<string, NoteMeta[]>,
+  trashByFolder: Record<string, TrashMeta[]>,
 ): AppState | null {
+  dormant = [];
   if (text === null) return null;
   let json: unknown;
   try {
@@ -215,27 +254,63 @@ export function restoreLayout(
   } catch {
     return null;
   }
-  if (!isRecord(json) || json.version !== 1 || !Array.isArray(json.workspaces)) return null;
+  if (!isRecord(json) || json.version !== 2 || !Array.isArray(json.workspaces)) return null;
 
-  const byPath = new Map(notes.map((m) => [m.path, m]));
+  const rootInfo = new Map(roots.map((r) => [r.root, r]));
+  const byPathByFolder = new Map<string, Map<string, NoteMeta>>();
+  for (const [folder, notes] of Object.entries(notesByFolder)) {
+    byPathByFolder.set(folder, new Map(notes.map((m) => [m.path, m])));
+  }
+
   const opened = new Set<string>();
   const workspaces: Workspace[] = [];
   for (const raw of json.workspaces) {
-    const ws = restoreWorkspace(raw, byPath, opened, workspaces.length + 1);
+    if (!isRecord(raw) || typeof raw.folder !== "string") continue;
+    const info = rootInfo.get(raw.folder);
+    if (!info) continue; // unregistered folder: the workspace is gone
+    if (!info.available) {
+      keepDormant(raw, raw.folder); // unmounted volume: hold, don't prune
+      continue;
+    }
+    const ws = restoreWorkspace(
+      raw,
+      raw.folder,
+      byPathByFolder.get(raw.folder) ?? new Map(),
+      opened,
+      workspaces.length + 1,
+    );
     if (ws) workspaces.push(ws);
   }
   if (workspaces.length === 0) return null;
 
   const rawSelected = typeof json.selectedIndex === "number" ? json.selectedIndex : 0;
   const selected = workspaces[Math.max(0, Math.min(Math.floor(rawSelected), workspaces.length - 1))];
+  const notes: Record<string, NoteMeta[]> = {};
+  const trash: Record<string, TrashMeta[]> = {};
+  for (const ws of workspaces) {
+    notes[ws.folder] = notesByFolder[ws.folder] ?? [];
+    trash[ws.folder] = trashByFolder[ws.folder] ?? [];
+  }
   return { workspaces, selectedId: selected.id, notes, trash };
 }
 
-// The boot state: the saved session if it restores, else a fresh start. This
-// is main.tsx's (and the harness's) one entry point, so the fallback rule
-// lives here rather than at every boot site.
-export function restoredState(text: string | null, notes: NoteMeta[], trash: TrashMeta[]): AppState {
-  return restoreLayout(text, notes, trash) ?? initialState(notes, trash);
+// The boot state: the saved session if it restores, else a fresh start on the
+// first available workspace folder. This is main.tsx's (and the harness's) one
+// entry point, so the fallback rule lives here rather than at every boot site.
+// No available folder at all (Bun unreachable, or a registry healed to empty
+// before ensureDefault could run) falls to a folder-less state that renders
+// but cannot save — the same degradation the old boot had with no note list.
+export function restoredState(
+  text: string | null,
+  roots: WorkspaceRootInfo[],
+  notesByFolder: Record<string, NoteMeta[]>,
+  trashByFolder: Record<string, TrashMeta[]>,
+): AppState {
+  const restored = restoreLayout(text, roots, notesByFolder, trashByFolder);
+  if (restored) return restored;
+  const first = roots.find((r) => r.available);
+  const folder = first?.root ?? "";
+  return initialState(folder, notesByFolder[folder] ?? [], trashByFolder[folder] ?? []);
 }
 
 // --- the save side ----------------------------------------------------------

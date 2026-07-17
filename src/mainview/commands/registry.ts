@@ -15,6 +15,7 @@ import {
   ExternalLink,
   FilePlus,
   FileText,
+  FolderOpen,
   KeyRound,
   Layers,
   PanelLeft,
@@ -37,6 +38,7 @@ import {
   X,
 } from "lucide-react";
 import { findLeaf, focusedDocId, focusedTab, leafIds } from "@/workspace/tree";
+import { notesOf, trashOf } from "@/workspace/store";
 import { parseFrontmatter } from "../../shared/frontmatter";
 import { keysOf, listKeysOf, tabSelectKey, titleOf, workspaceSelectKey, type CommandId } from "./keys";
 import { chipOf } from "./format";
@@ -69,7 +71,9 @@ function targetNote(ctx: CommandCtx) {
   if (t && t.kind !== "note") return null;
   const path = t?.kind === "note" ? t.path : focusedTab(ctx.selected)?.path;
   if (!path) return null;
-  return ctx.state.notes.find((n) => n.path === path) ?? null;
+  // The selected workspace's list: rows and tabs both belong to it, so this is
+  // where any live note target must be.
+  return notesOf(ctx.state, ctx.selected.folder).find((n) => n.path === path) ?? null;
 }
 
 // The trashed note a trash-row command acts on. Trash rows always carry a
@@ -77,7 +81,7 @@ function targetNote(ctx: CommandCtx) {
 function targetTrashed(ctx: CommandCtx) {
   const t = ctx.target;
   if (t?.kind !== "trash") return null;
-  return ctx.state.trash.find((i) => i.path === t.path) ?? null;
+  return trashOf(ctx.state, ctx.selected.folder).find((i) => i.path === t.path) ?? null;
 }
 
 // The workspace a workspace-scoped command acts on: an explicit row/menu
@@ -171,7 +175,24 @@ export function buildCommands(deps: RegistryDeps): Command[] {
     // --- workspaces ----------------------------------------------------------
     cmd("workspace.new", {
       icon: Plus,
-      run: (ctx) => ctx.dispatch({ type: "newWorkspace" }),
+      // Async behind a void (deleteNoteWithUndo's pattern): Bun creates the
+      // folder, then the reducer adds the workspace over it.
+      run: (ctx) => {
+        void deps.createWorkspace(ctx.state, ctx.dispatch).then((err) => {
+          if (err) ctx.ui.showError?.(err);
+        });
+      },
+    }),
+    // Register an existing directory as a workspace, via the NATIVE folder
+    // picker (the view never names a path). Palette-only: not frequent enough
+    // to spend a chord on.
+    cmd("workspace.attach", {
+      icon: FolderOpen,
+      run: (ctx) => {
+        void deps.attachWorkspace(ctx.dispatch).then((err) => {
+          if (err) ctx.ui.showError?.(err);
+        });
+      },
     }),
     // Enter on a focused workspace row. Not in the palette: the generated
     // "Switch to Workspace: …" entries are the palette's form of this.
@@ -200,7 +221,10 @@ export function buildCommands(deps: RegistryDeps): Command[] {
       targetKind: "workspace",
       destructive: true,
       when: (ctx) => ctx.state.workspaces.length > 1,
-      run: (ctx) => ctx.dispatch({ type: "closeWorkspace", id: targetWorkspaceId(ctx) }),
+      // Closes the view AND detaches the folder from the registry — but never
+      // touches the files: the folder stays on disk, re-attachable with
+      // everything in it (hence still no confirmation; interactions.md §4).
+      run: (ctx) => deps.closeWorkspace(targetWorkspaceId(ctx), ctx.state, ctx.dispatch),
     }),
 
     // --- chrome --------------------------------------------------------------
@@ -323,7 +347,7 @@ export function buildCommands(deps: RegistryDeps): Command[] {
     cmd("trash.empty", {
       icon: Trash2,
       destructive: true,
-      when: (ctx) => ctx.state.trash.length > 0,
+      when: (ctx) => trashOf(ctx.state, ctx.selected.folder).length > 0,
       run: (ctx) => ctx.ui.confirmEmptyTrash?.(),
     }),
 

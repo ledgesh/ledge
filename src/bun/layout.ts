@@ -1,14 +1,16 @@
-// The Bun end of session persistence: .layout.json in the notes root, holding
+// The Bun end of session persistence: .layout.json in the app home, holding
 // which workspaces exist, their pane trees, and which notes are open where.
-// This is machine-written state, not settings (architecture.md §6): the VIEW
-// owns the shape and self-heals a corrupt file by discarding it at parse time
+// One global file even in the per-workspace world — the workspace LIST itself
+// is what it records, so it cannot live inside any one workspace. This is
+// machine-written state, not settings (architecture.md §6): the VIEW owns the
+// shape and self-heals a corrupt file by discarding it at parse time
 // (workspace/persist.ts), so this module deals only in bytes — read them back,
-// write them atomically. Dotted, so listNotes never shows it.
+// write them atomically. Dotted and in the app home, so no listing shows it.
 import { basename, join } from "node:path";
 import { readFile, rename, unlink, writeFile } from "node:fs/promises";
-import { ensureRoot, NOTES_ROOT } from "./notes";
+import { APP_HOME, ensureAppHome } from "./workspaces";
 
-export const LAYOUT_PATH = join(NOTES_ROOT, ".layout.json");
+export const LAYOUT_PATH = join(APP_HOME, ".layout.json");
 
 // The saved layout's raw text, or null when none has ever been saved (first
 // launch) or it cannot be read — both mean the same thing to the caller: boot
@@ -35,9 +37,9 @@ export async function writeLayout(text: string): Promise<boolean> {
     console.warn(`[layout] refusing to save non-JSON layout (${err})`);
     return false;
   }
-  await ensureRoot();
+  await ensureAppHome();
   tmpCounter += 1;
-  const tmp = join(NOTES_ROOT, `.${basename(LAYOUT_PATH)}.tmp-${process.pid}-${tmpCounter}`);
+  const tmp = join(APP_HOME, `.${basename(LAYOUT_PATH)}.tmp-${process.pid}-${tmpCounter}`);
   try {
     await writeFile(tmp, text, "utf8");
     await rename(tmp, LAYOUT_PATH);

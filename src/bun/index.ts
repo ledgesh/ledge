@@ -8,7 +8,8 @@
 // slice block output per block via OSC 133 markers; the terminal-drawer shell is
 // raw, driving xterm.js. Keeping them per note means a `cd` in one note never
 // leaks into another. All of them talk to the view over typed RPC.
-import { BrowserView, BrowserWindow, Updater } from "electrobun/bun";
+import { BrowserView, BrowserWindow, Updater, Utils } from "electrobun/bun";
+import { homedir } from "node:os";
 import { PtyProcess } from "./pty";
 import { InlinePool, type InlineEvent } from "./inlinePool";
 import { readProfile, writeProfile } from "./profiles";
@@ -19,7 +20,6 @@ import {
   emptyTrash,
   listNotes,
   listTrash,
-  NOTES_ROOT,
   purgeTrash,
   readNote,
   restoreNote,
@@ -27,6 +27,17 @@ import {
   searchNotes,
   writeNote,
 } from "./notes";
+import {
+  APP_HOME,
+  attachExternal,
+  availableRoots,
+  createManaged,
+  detachRoot,
+  ensureDefault,
+  kindOf,
+  listWorkspaceRoots,
+  loadWorkspaces,
+} from "./workspaces";
 import { readLayout, writeLayout } from "./layout";
 import { pasteImageAsset, readAsset } from "./assets";
 import { runnerFor } from "./runner";
@@ -41,6 +52,12 @@ import type { NoteParams } from "../shared/frontmatter";
 // TTL at the bottom, and the view's snapshot via settingsGet. Edits to
 // settings.json take effect at the next launch (architecture.md, "Settings").
 const settings = await loadSettings();
+
+// The workspace registry, loaded before any RPC can be served: every note
+// path guard consults it, and the default guarantees the view always boots
+// with at least one folder to put a note in.
+await loadWorkspaces();
+await ensureDefault();
 
 // In the dev channel, prefer a running Vite dev server (bun run dev:hmr) so the
 // React view hot-reloads; otherwise load the built view copied into the bundle.
@@ -229,23 +246,47 @@ const rpc = BrowserView.defineRPC<LedgeRPC>({
   maxRequestTime: 10_000,
   handlers: {
     requests: {
+      // --- workspaces ------------------------------------------------------
+      // The registry lives Bun-side (workspaces.ts): the view only ever passes
+      // back roots it was handed, and the one way an arbitrary folder gets in
+      // is the native dialog below — never a view-supplied path.
+      workspaceList: () => ({ workspaces: listWorkspaceRoots() }),
+      workspaceCreate: async ({ name }) => ({ root: await createManaged(name) }),
+      workspaceAttach: async () => {
+        // openFileDialog splits its FFI result on "," — a path containing a
+        // comma comes back shredded, so re-join and stat-validate; a comma
+        // path that still does not stat is refused, never guessed at.
+        const picked = (await Utils.openFileDialog({
+          startingFolder: homedir(),
+          canChooseFiles: false,
+          canChooseDirectory: true,
+          allowsMultipleSelection: false,
+        })).join(",");
+        if (!picked) return { root: null, kind: null, error: null }; // cancelled
+        const res = await attachExternal(picked);
+        if ("error" in res) return { root: null, kind: null, error: res.error };
+        return { root: res.root, kind: kindOf(res.root), error: null };
+      },
+      workspaceDetach: async ({ root }) => ({ ok: await detachRoot(root) }),
+
       // --- note store ------------------------------------------------------
-      // Every path these take is checked against the notes root inside notes.ts,
-      // so a compromised or buggy view cannot read or write outside ~/.ledge.
-      noteList: async () => ({ notes: await listNotes() }),
+      // Every path these take is checked against the registered workspace
+      // roots inside notes.ts, so a compromised or buggy view cannot read or
+      // write outside the folders the user chose.
+      noteList: async ({ root }) => ({ notes: await listNotes(root) }),
       noteRead: async ({ path }) => ({ text: await readNote(path) }),
       noteWrite: async ({ path, text }) => {
         await writeNote(path, text);
         return { ok: true };
       },
-      noteCreate: async ({ text }) => ({ note: await createNote(text) }),
+      noteCreate: async ({ root, text }) => ({ note: await createNote(root, text) }),
       noteRetitle: async ({ path, text }) => ({ note: await retitleNote(path, text) }),
       noteDelete: async ({ path }) => ({ trashed: await deleteNote(path) }),
-      noteSearch: async ({ query }) => ({ hits: await searchNotes(query) }),
-      trashList: async () => ({ items: await listTrash() }),
+      noteSearch: async ({ root, query }) => ({ hits: await searchNotes(root, query) }),
+      trashList: async ({ root }) => ({ items: await listTrash(root) }),
       trashRestore: async ({ path }) => ({ note: await restoreNote(path) }),
       trashDelete: async ({ path }) => ({ removed: await deleteTrashed(path) }),
-      trashEmpty: async () => ({ removed: await emptyTrash() }),
+      trashEmpty: async ({ root }) => ({ removed: await emptyTrash(root) }),
 
       runBlock: async ({ sessionId, id, code, language }) => {
         // The block body goes to a file, rather than being inlined into the
@@ -391,11 +432,12 @@ const rpc = BrowserView.defineRPC<LedgeRPC>({
           return { text: "" };
         }
       },
-      // Both guarded inside bun/assets.ts: assetRead's src passes assertions
-      // (in-root, image extension, no dot-entries) before it is read, and
-      // assetPaste names the file itself — the view supplies nothing.
-      assetRead: async ({ src }) => ({ image: await readAsset(src) }),
-      assetPaste: async () => ({ src: await pasteImageAsset() }),
+      // Both guarded inside bun/assets.ts: the root must be registered, the
+      // src passes assertions (in-root, image extension, no dot-entries)
+      // before it is read, and assetPaste names the file itself — the view
+      // supplies nothing but handles it was given.
+      assetRead: async ({ root, src }) => ({ image: await readAsset(root, src) }),
+      assetPaste: async ({ root }) => ({ src: await pasteImageAsset(root) }),
       settingsGet: () => ({ settings }),
       // Session layout: raw bytes both ways; the view owns the shape and the
       // self-healing, Bun owns the file and the atomicity (bun/layout.ts).
@@ -487,12 +529,17 @@ setInterval(() => {
   }
 }, 8);
 
-// Age old deletions out of the trash, once per launch. Deliberately not awaited:
-// it is housekeeping, and the window should not wait on a folder scan to open.
-// Doing it here rather than on a timer means a trashed note never disappears
-// out from under a Trash section the user is looking at.
-void purgeTrash(settings.trash.ttlDays * 24 * 60 * 60 * 1000)
-  .then((n) => n > 0 && console.log(`[notes] purged ${n} trashed note(s) past the ${settings.trash.ttlDays}-day limit`))
+// Age old deletions out of every available workspace's trash, once per launch.
+// Deliberately not awaited: it is housekeeping, and the window should not wait
+// on folder scans to open. Doing it here rather than on a timer means a
+// trashed note never disappears out from under a Trash section the user is
+// looking at. Unavailable roots are skipped, not failed: an unmounted volume's
+// trash just keeps its notes until it is back.
+void Promise.all(availableRoots().map((root) => purgeTrash(root, settings.trash.ttlDays * 24 * 60 * 60 * 1000)))
+  .then((ns) => {
+    const n = ns.reduce((a, b) => a + b, 0);
+    if (n > 0) console.log(`[notes] purged ${n} trashed note(s) past the ${settings.trash.ttlDays}-day limit`);
+  })
   .catch((err) => console.error("[notes] trash purge failed", err));
 
 const mainWindow = new BrowserWindow({
@@ -507,6 +554,6 @@ process.on("exit", () => {
   for (const t of terms.values()) t.term.close();
 });
 
-console.log("[bun] Ledge started (per-note shells, spawned on first use); notes root:", NOTES_ROOT);
+console.log("[bun] Ledge started (per-note shells, spawned on first use); app home:", APP_HOME);
 void mainWindow;
 

@@ -227,6 +227,7 @@ describe("focusedDocId", () => {
     id: "ws",
     name: "W",
     symbol: "inbox",
+    folder: "/ws/notes",
     root,
     focusedPaneId,
   });

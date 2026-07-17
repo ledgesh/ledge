@@ -1,14 +1,16 @@
-// The Bun end of settings: settings.json lives in the notes root, next to the
-// notes it configures, and this module is the only thing that reads or writes
-// it. Read once at launch (index.ts); changes apply at the next launch, never
-// live — restart-applies is the policy (docs/architecture.md, "Settings"), not
-// a limitation to fix.
+// The Bun end of settings: settings.json lives in the app home (~/.ledge),
+// beside the workspace registry and the managed workspace folders, and this
+// module is the only thing that reads or writes it. Settings stay GLOBAL in
+// the per-workspace world: shell path, font sizes, and interpreters are facts
+// about the person, not the folder. Read once at launch (index.ts); changes
+// apply at the next launch, never live — restart-applies is the policy
+// (docs/architecture.md, "Settings"), not a limitation to fix.
 import { join } from "node:path";
 import { readFile, writeFile } from "node:fs/promises";
 import { DEFAULT_SETTINGS, parseSettings, type Settings } from "../shared/settings";
-import { ensureRoot, NOTES_ROOT } from "./notes";
+import { APP_HOME, ensureAppHome } from "./workspaces";
 
-export const SETTINGS_PATH = join(NOTES_ROOT, "settings.json");
+export const SETTINGS_PATH = join(APP_HOME, "settings.json");
 
 // Read and validate settings.json. Three shapes of trouble, three answers:
 // no file → write the defaults out in full (the file is the settings UI, so it
@@ -41,7 +43,7 @@ export async function loadSettings(): Promise<Settings> {
 // not read would be data loss — if it exists, whatever the reason we couldn't
 // read it, leave it be.
 async function seedDefaultFile(): Promise<void> {
-  await ensureRoot();
+  await ensureAppHome();
   await writeFile(SETTINGS_PATH, JSON.stringify(DEFAULT_SETTINGS, null, 2) + "\n", {
     encoding: "utf8",
     flag: "wx",

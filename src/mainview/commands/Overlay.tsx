@@ -3,7 +3,9 @@
 // ⌘P opens in notes mode (fuzzy-open a note by title, the old QuickOpen);
 // ⇧⌘P opens in commands mode (every palette-visible command with its key
 // chip); ⌥⌘P opens in search mode (full-text over note bodies, via the
-// noteSearch RPC). Typing ">" as the first character of notes mode switches to
+// noteSearch RPC). Notes and search are scoped to the SELECTED WORKSPACE —
+// notes are local to their workspace, and these are that stance's two other
+// surfaces (the browser is the first). Typing ">" as the first character of
 // commands — the VS Code convention — and "#" switches to search; Backspace
 // over the sigil switches back. Only the first typed character triggers a
 // switch, so a note whose title contains either character stays findable, and
@@ -11,7 +13,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Command as CommandIcon, FileText, TextSearch } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useWorkspace } from "@/workspace/store";
+import { notesOf, useWorkspace } from "@/workspace/store";
 import { filterNotes, fuzzyFilter } from "@/notes/fuzzy";
 import { searchNotes, type SearchHit } from "@/notes/channel";
 import { requestReveal } from "@/workspace/editorPool";
@@ -26,7 +28,7 @@ export type OverlayMode = "notes" | "commands" | "search";
 const SEARCH_DEBOUNCE_MS = 80;
 
 export function Overlay({ initialMode, onClose }: { initialMode: OverlayMode; onClose: () => void }) {
-  const { state, dispatch } = useWorkspace();
+  const { state, dispatch, selected } = useWorkspace();
   const { exec, commands, ctx } = useCommands();
   const [query, setQuery] = useState("");
   const [index, setIndex] = useState(0);
@@ -42,9 +44,10 @@ export function Overlay({ initialMode, onClose }: { initialMode: OverlayMode; on
   // Strip the mode-switch sigil before filtering; a direct chord open has none.
   const q = sigil ? query.slice(1) : query;
 
+  const folderNotes = notesOf(state, selected.folder);
   const notes = useMemo(
-    () => (mode === "notes" ? filterNotes(q, state.notes) : []),
-    [mode, q, state.notes],
+    () => (mode === "notes" ? filterNotes(q, folderNotes) : []),
+    [mode, q, folderNotes],
   );
 
   // Search mode asks Bun, debounced, and guards against answers landing out of
@@ -57,7 +60,7 @@ export function Overlay({ initialMode, onClose }: { initialMode: OverlayMode; on
     }
     let stale = false;
     const timer = setTimeout(() => {
-      searchNotes(q).then(
+      searchNotes(selected.folder, q).then(
         (h) => {
           if (!stale) setHits(h);
         },
@@ -70,7 +73,7 @@ export function Overlay({ initialMode, onClose }: { initialMode: OverlayMode; on
       stale = true;
       clearTimeout(timer);
     };
-  }, [isSearch, q]);
+  }, [isSearch, q, selected.folder]);
   const items = useMemo<PaletteItem[]>(() => {
     if (!isCommands) return [];
     const visible = paletteItems(commands, ctx());
@@ -183,7 +186,7 @@ export function Overlay({ initialMode, onClose }: { initialMode: OverlayMode; on
                   ? q.trim() === ""
                     ? "Type to search every note's text"
                     : "No matches"
-                  : state.notes.length === 0
+                  : folderNotes.length === 0
                     ? "No notes yet"
                     : "No notes match"}
             </p>

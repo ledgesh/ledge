@@ -8,8 +8,7 @@ import { sendTerminalPaste, closeSession, onTerminalExit } from "@/terminal/chan
 import { Sidebar } from "@/workspace/Sidebar";
 import { WorkspaceView } from "@/workspace/WorkspaceView";
 import { flushAll } from "@/notes/store";
-import { listNotes } from "@/notes/channel";
-import { refreshTrash } from "@/notes/actions";
+import { refreshFolder } from "@/workspace/actions";
 import { allDocIds, useWorkspace, WorkspaceProvider, type AppState } from "@/workspace/store";
 import { flushLayout, scheduleLayoutSave } from "@/workspace/persist";
 import { focusedDocId } from "@/workspace/tree";
@@ -151,21 +150,24 @@ function Shell() {
   // The layout save above debounces the same way, so it flushes on the same
   // events for the same reason.
   //
-  // Re-reading the folder on the way back in is the mirror image: there is no file
-  // watcher yet, so this is what notices a note you created or deleted in the
-  // terminal while Ledge was in the background.
+  // Re-reading the folders on the way back in is the mirror image: there is no
+  // file watcher yet, so this is what notices a note you created or deleted in
+  // the terminal while Ledge was in the background. EVERY workspace's folder,
+  // not just the selected one — switching workspaces does not leave the window,
+  // so a selected-only refresh would show weeks-stale lists after a switch. One
+  // folder failing (its volume unmounted mid-session) costs that folder's
+  // refresh and nothing else (refreshFolder catches per call). The trash rides
+  // the same trip: it is a folder like any other, and a note deleted (or
+  // restored) from a shell should not leave a stale count.
+  const folders = state.workspaces.map((w) => w.folder);
+  const foldersKey = folders.join("\n");
   useEffect(() => {
     const flush = () => {
       flushAll();
       flushLayout();
     };
     const refresh = () => {
-      void listNotes()
-        .then((notes) => dispatch({ type: "notesLoaded", notes }))
-        .catch((err) => console.error("[notes] refresh failed", err));
-      // The trash is read on the same trip: it is a folder like any other, and a
-      // note deleted (or restored) from a shell should not leave a stale count.
-      void refreshTrash(dispatch);
+      for (const folder of folders) void refreshFolder(folder, dispatch);
     };
     window.addEventListener("blur", flush);
     window.addEventListener("pagehide", flush);
@@ -175,7 +177,10 @@ function Shell() {
       window.removeEventListener("pagehide", flush);
       window.removeEventListener("focus", refresh);
     };
-  }, [dispatch]);
+    // Keyed on the folder LIST (joined), not the array identity: workspaces
+    // re-render often, their folder set changes rarely.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dispatch, foldersKey]);
 
   // Suppress the WebView's native context menu app-wide. In this dev WKWebView it
   // carries only debug items (Reload, Inspect Element), unwanted in a notes app.

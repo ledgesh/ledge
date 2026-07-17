@@ -73,12 +73,12 @@ test("⌘V with an image (and no text) on the pasteboard embeds it, rendered at 
   // The caret parks below the inserted line, so the paste shows the IMAGE
   // immediately — no raw markdown to arrow away from.
   await expect(page.locator(".ledge-mdimage img")).toBeVisible();
-  await expect(page.locator(".cm-content")).not.toContainText("assets/pasted-1.png");
+  await expect(page.locator(".cm-content")).not.toContainText(".ledge-assets/pasted-1.png");
 
   // The document really carries the reference: stepping the caret back onto
   // the line reveals it.
   await page.keyboard.press("ArrowLeft");
-  await expect(page.locator(".cm-content")).toContainText("![](assets/pasted-1.png)");
+  await expect(page.locator(".cm-content")).toContainText("![](.ledge-assets/pasted-1.png)");
 });
 
 test("⌘V with text on the pasteboard still pastes the text", async ({ page }) => {

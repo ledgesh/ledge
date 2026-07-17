@@ -53,6 +53,11 @@ export const COMMANDS = {
   // only on a focused workspace row, which is why `r` can also mean Restore on
   // a trashed note without colliding.
   "workspace.new": { title: "New Workspace", keys: ["Mod-Shift-n"] },
+  // No chord (not frequent enough to spend one): lives in the palette and in
+  // the + button's dropdown (Sidebar.tsx). Opens the native folder picker;
+  // the chosen directory becomes a workspace whose notes live where they
+  // already are.
+  "workspace.attach": { title: "Attach Folder as Workspace…" },
   "workspace.open": { title: "Switch to Workspace", listKeys: ["Enter"] },
   "workspace.rename": { title: "Rename Workspace…", listKeys: ["r"] },
   "workspace.icon": { title: "Change Icon…", listKeys: ["i"] },

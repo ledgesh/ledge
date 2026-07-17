@@ -28,9 +28,21 @@ export interface NoteMeta {
 }
 
 /**
- * One deleted note, sitting in ~/.ledge/.trash. `path` is where it is now, which
- * is the handle restore and undo are given. `deletedAt` is when it was trashed
- * (see listTrash in bun/notes.ts for where that number comes from).
+ * The directory pasted images land in, under each workspace root. Part of the
+ * cross-boundary contract, not just a Bun detail: assetPaste returns
+ * references shaped `${ASSETS_DIRNAME}/x.png` into note text, and the view's
+ * image classifier (editor/images.ts imageSrcOf) must accept exactly this one
+ * dot-entry — two literals here would drift. App-prefixed and dotted like the
+ * trash, so Ledge's writes never mingle with an attached project's own
+ * `assets/` folder.
+ */
+export const ASSETS_DIRNAME = ".ledge-assets";
+
+/**
+ * One deleted note, sitting in its workspace root's .ledge-trash. `path` is where it
+ * is now, which is the handle restore and undo are given. `deletedAt` is when
+ * it was trashed (see listTrash in bun/notes.ts for where that number comes
+ * from).
  */
 export interface TrashMeta {
   path: string;
@@ -38,23 +50,64 @@ export interface TrashMeta {
   deletedAt: number;
 }
 
+/**
+ * One registered workspace root (bun/workspaces.ts). `root` is the folder's
+ * absolute path — the opaque handle the view passes back on every scoped call.
+ * `kind` says who created it: "managed" folders live directly in ~/.ledge and
+ * Bun may recreate them; "external" folders were picked by the user in the
+ * native dialog and Bun never mkdirs them. `available: false` means the folder
+ * is registered but missing on disk right now (an unmounted volume): the view
+ * keeps its saved layout dormant rather than pruning it.
+ */
+export interface WorkspaceRootInfo {
+  root: string;
+  kind: "managed" | "external";
+  available: boolean;
+}
+
 export type LedgeRPC = {
   bun: {
     requests: {
+      // The workspace-roots registry (workspaces.ts). Fetched once at boot,
+      // before the per-root note lists: the roots are the opaque handles every
+      // scoped call below carries. Unavailable roots are reported, not hidden,
+      // so the view can keep their saved layout dormant instead of pruning it.
+      workspaceList: { params: {}; response: { workspaces: WorkspaceRootInfo[] } };
+      // Create a managed workspace folder from a display name. Bun slugs the
+      // name into a folder itself (the view never names a path — the same
+      // trust move as noteCreate) and registers it. Sent by "New Workspace".
+      workspaceCreate: { params: { name: string }; response: { root: string } };
+      // Open the NATIVE folder picker and register the chosen directory as a
+      // workspace root. The path never rides the RPC: the dialog runs Bun-side,
+      // which is what keeps arbitrary external roots compatible with the trust
+      // boundary. root null + error null means the user cancelled; an error
+      // string means the choice was refused (not a directory, nested with
+      // another root). Picking an already-registered folder returns it, and
+      // the view focuses the existing workspace instead of adding a twin.
+      workspaceAttach: { params: {}; response: { root: string | null; kind: "managed" | "external" | null; error: string | null } };
+      // Remove a root from the registry. NEVER deletes files: the folder and
+      // every note in it stay on disk, re-attachable later. Sent when a
+      // workspace is closed (unless it is the last one, which the view refuses).
+      workspaceDetach: { params: { root: string }; response: { ok: boolean } };
       // The note store (notes.ts). Bun owns every path: the view holds paths only
       // as opaque handles it got from here, and Bun rejects any that fall outside
-      // the notes root. Notes are plain .md files; `path` identifies the file,
-      // while `sessionId` (the docId) identifies the live editor and its shells.
-      noteList: { params: {}; response: { notes: NoteMeta[] } };
+      // the REGISTERED WORKSPACE ROOTS (workspaces.ts): scoped calls name their
+      // root explicitly (checked for exact registry membership), per-note calls
+      // send just the path (its root is derived — a path determines its root).
+      // Notes are plain .md files; `path` identifies the file, while `sessionId`
+      // (the docId) identifies the live editor and its shells.
+      noteList: { params: { root: string }; response: { notes: NoteMeta[] } };
       // null when the note is gone (deleted behind the app's back).
       noteRead: { params: { path: string }; response: { text: string | null } };
       // Atomic overwrite (temp file plus rename), so a crash mid-save can never
       // truncate a note. Sent on a debounce as you type and on Cmd+S.
       noteWrite: { params: { path: string; text: string }; response: { ok: boolean } };
-      // Allocate a file for a note that has none and write its first content,
-      // returning the note the view then saves to (and titles its tab from). Sent
-      // on a note's first edit, so a tab opened and never typed in creates nothing.
-      noteCreate: { params: { text: string }; response: { note: NoteMeta } };
+      // Allocate a file in the given workspace root for a note that has none
+      // and write its first content, returning the note the view then saves to
+      // (and titles its tab from). Sent on a note's first edit, so a tab opened
+      // and never typed in creates nothing. The root is the tab's workspace at
+      // the moment of creation (tabs never move across workspaces).
+      noteCreate: { params: { root: string; text: string }; response: { note: NoteMeta } };
       // Move a note's file to match its first-line H1, returning where it now
       // lives (possibly unmoved). The view sends the note's TEXT, not a name: Bun
       // slugs the heading itself, so the name is safe by construction and there is
@@ -62,37 +115,40 @@ export type LedgeRPC = {
       // actually changes, never on an ordinary edit. The docId is untouched, so
       // the note's editor and shell live through it.
       noteRetitle: { params: { path: string; text: string }; response: { note: NoteMeta } };
-      // Delete a note by moving it to ~/.ledge/.trash. Not an unlink: a misclick
-      // should cost a trip to the Trash section, not the note. It is an
-      // app-private folder, not the system trash (see TRASH_DIR in notes.ts).
-      // Responds with where the note landed, which is the handle Undo restores
-      // from, or null if there was nothing there to delete.
+      // Delete a note by moving it into ITS OWN root's .ledge-trash. Not an unlink: a
+      // misclick should cost a trip to the Trash section, not the note. It is an
+      // app-private folder, not the system trash (see trashDirOf in notes.ts),
+      // and per root so the move never crosses a filesystem. Responds with where
+      // the note landed, which is the handle Undo restores from, or null if
+      // there was nothing there to delete.
       noteDelete: { params: { path: string }; response: { trashed: string | null } };
-      // Full-text search over note bodies: the query as one case-insensitive
-      // substring (shared/search.ts owns the grammar and the caps). Sent,
-      // debounced, as the search overlay's query changes. Bun owns the scan
-      // because the files are its to read — shipping every body across the RPC
-      // to search view-side would scale the payload with the notes folder
-      // instead of the result list. Hits arrive newest note first, each
-      // carrying the note plus the matched line, so the view can list, open,
-      // and reveal without a second request.
-      noteSearch: { params: { query: string }; response: { hits: SearchHit[] } };
-      // The deleted notes still recoverable, newest first. Read at boot and at
-      // every folder refresh, alongside noteList: the count is on screen whether
-      // or not the section is expanded, so the trash cannot quietly fill up.
-      trashList: { params: {}; response: { items: TrashMeta[] } };
-      // Move a trashed note back to the notes root, returning where it landed
-      // (its old name may be taken by now). Backs both Undo and the Restore
-      // button, which are the same operation: Undo is just the shortcut to the
-      // one that stays available in the Trash section.
+      // Full-text search over ONE workspace's note bodies: the query as one
+      // case-insensitive substring (shared/search.ts owns the grammar and the
+      // caps). Sent, debounced, as the search overlay's query changes, scoped
+      // to the selected workspace like the browser and quick-open. Bun owns
+      // the scan because the files are its to read — shipping every body
+      // across the RPC to search view-side would scale the payload with the
+      // notes folder instead of the result list. Hits arrive newest note
+      // first, each carrying the note plus the matched line, so the view can
+      // list, open, and reveal without a second request.
+      noteSearch: { params: { root: string; query: string }; response: { hits: SearchHit[] } };
+      // One workspace's deleted notes still recoverable, newest first. Read at
+      // boot and at every folder refresh, alongside noteList: the count is on
+      // screen whether or not the section is expanded, so the trash cannot
+      // quietly fill up.
+      trashList: { params: { root: string }; response: { items: TrashMeta[] } };
+      // Move a trashed note back to the root it was deleted from, returning
+      // where it landed (its old name may be taken by now). Backs both Undo and
+      // the Restore button, which are the same operation: Undo is just the
+      // shortcut to the one that stays available in the Trash section.
       trashRestore: { params: { path: string }; response: { note: NoteMeta } };
       // Unlink ONE trashed note, for good. Like trashEmpty this destroys a note
       // outright, so the view confirms first; unlike it, the note named is the
       // only one that can go. Responds false if it was already gone.
       trashDelete: { params: { path: string }; response: { removed: boolean } };
-      // Unlink every trashed note. Destroys notes outright, hence the
-      // confirmation in front of it.
-      trashEmpty: { params: {}; response: { removed: number } };
+      // Unlink every trashed note in one workspace. Destroys notes outright,
+      // hence the confirmation in front of it.
+      trashEmpty: { params: { root: string }; response: { removed: number } };
       // Shells are per note: `sessionId` is the tab's stable docId. The Bun side
       // lazily spawns that note's persistent inline-run shell on first runBlock and
       // closes it on closeSession, so a `cd` in one note never leaks into another.
@@ -194,34 +250,38 @@ export type LedgeRPC = {
       // Open settings.json in the OS default editor (the ⌘, command). The view
       // cannot name the file — Bun knows where it lives.
       settingsOpen: { params: {}; response: { ok: boolean } };
-      // Read one local image referenced by a note (`![](assets/x.png)`) for the
+      // Read one local image referenced by a note (`![](.ledge-assets/x.png)`) for the
       // editor's rendered preview. The webview cannot touch the filesystem, so
       // the bytes ride the RPC base64-encoded. `src` is the markdown-relative
-      // reference exactly as the note carries it; Bun resolves it against the
-      // notes root and guards it hard (bun/assets.ts assertAssetPath: inside
-      // the root, an image-extension allowlist, no dot-entries) — the view is
-      // the least-trusted end, and without the extension check this call would
-      // read settings.json or any note. null when the file is missing.
-      assetRead: { params: { src: string }; response: { image: { dataB64: string; mime: string } | null } };
-      // Save the pasteboard's image (if any) into <root>/assets as a PNG and
-      // return the markdown-relative reference to embed (`assets/pasted-….png`),
-      // or null when the pasteboard holds no image. Sent by the editor's ⌘V
-      // when the pasteboard has no text. The image bytes never cross the RPC:
-      // Bun reads the pasteboard (osascript; pbpaste is text-only) and names
-      // the file itself via uniqueName — the view never names a file.
-      assetPaste: { params: {}; response: { src: string | null } };
-      // The persisted session layout (.layout.json in the notes root): which
-      // workspaces exist, their pane trees, and which notes are open where.
-      // Machine-written state, not settings (architecture.md §6): Bun owns the
-      // file's bytes and atomicity, the VIEW owns the shape — it serializes on
-      // layout changes and parses/self-heals at boot (workspace/persist.ts), so
-      // the payload rides as raw text. null when no layout has ever been saved.
+      // reference exactly as the note carries it; `root` is the workspace the
+      // referencing note lives in — the reference is only meaningful relative
+      // to its own folder. Bun guards both hard (bun/assets.ts assetPathOf: a
+      // registered root, inside it, an image-extension allowlist, no
+      // dot-entries) — the view is the least-trusted end, and without the
+      // extension check this call would read any note. null when missing.
+      assetRead: { params: { root: string; src: string }; response: { image: { dataB64: string; mime: string } | null } };
+      // Save the pasteboard's image (if any) into the workspace root's .ledge-assets/
+      // as a PNG and return the markdown-relative reference to embed
+      // (`.ledge-assets/pasted-….png`), or null when the pasteboard holds no image.
+      // Sent by the editor's ⌘V when the pasteboard has no text; `root` is the
+      // pasting note's workspace. The image bytes never cross the RPC: Bun
+      // reads the pasteboard (osascript; pbpaste is text-only) and names the
+      // file itself via uniqueName — the view never names a file.
+      assetPaste: { params: { root: string }; response: { src: string | null } };
+      // The persisted session layout (.layout.json in the app home): which
+      // workspaces exist, which folder each owns, their pane trees, and which
+      // notes are open where. One global file — the workspace list itself is
+      // what it records. Machine-written state, not settings (architecture.md
+      // §6): Bun owns the file's bytes and atomicity, the VIEW owns the shape —
+      // it serializes on layout changes and parses/self-heals at boot
+      // (workspace/persist.ts), so the payload rides as raw text. null when no
+      // layout has ever been saved.
       layoutGet: { params: {}; response: { text: string | null } };
       // Persist the serialized layout. Bun writes it to the fixed dotted file —
       // the view names nothing — atomically like a note save, and refuses text
-      // that is not JSON: the file lives in the notes root, and a write this
-      // free must not become arbitrary byte storage there. Sent debounced on
-      // every layout change and flushed on blur/pagehide, like note autosave.
+      // that is not JSON: a write this free must not become arbitrary byte
+      // storage in the app home. Sent debounced on every layout change and
+      // flushed on blur/pagehide, like note autosave.
       layoutSave: { params: { text: string }; response: { ok: boolean } };
       // Open a note link in the OS default handler (browser, mail client).
       // Sent by the editor's ⌘-click and the "Open Link" command. The URL is

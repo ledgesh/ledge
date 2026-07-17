@@ -6,6 +6,7 @@
 // through to Bun. A note with no path yet gets one allocated on that first write,
 // which is what makes "a tab you never type in leaves no file" true.
 import { configureSession, createNote, retitleNote, writeNote, type NoteMeta } from "./channel";
+import { workspaceDefaultCwd } from "../workspace/channel";
 import { headingOf, labelOf, slugOf } from "../../shared/slug";
 import { parseFrontmatter } from "../../shared/frontmatter";
 
@@ -15,6 +16,12 @@ const SAVE_DELAY_MS = 500;
 
 interface Entry {
   docId: string;
+  // The workspace folder this note belongs to, captured when its tab opened.
+  // Stable for the docId's whole life: tabs never move across workspaces
+  // (moveTab is scoped to the selected one), so the folder a tab was born in
+  // is the folder its first save creates into. Also what the asset calls
+  // resolve `.ledge-assets/x.png` against (folderOf below).
+  folder: string;
   // null until this note's first save allocates a file.
   path: string | null;
   // The newest unsaved text, or null when the note is clean. Only ever the whole
@@ -41,10 +48,13 @@ interface Entry {
   // changes more often: "Shipping Notes" -> "shipping notes!" is a new label but
   // the same slug, so the tab must relabel while the file stays put.
   lastHeading: string | null;
-  // The spawn params (frontmatter) Bun last got for this note, as a JSON key.
-  // Seeded to "no params" rather than to "unknown" so the frontmatterless
-  // note — nearly every note — never sends a configure at all: Bun's defaults
-  // and empty params are the same thing.
+  // The spawn params (frontmatter merged with the workspace default cwd) Bun
+  // last got for this note, as a JSON key. Seeded to "no params" rather than
+  // to "unknown" so a frontmatterless note in a defaultless (managed)
+  // workspace — nearly every note — never sends a configure at all: for it,
+  // Bun's defaults and empty params are the same thing. A note whose
+  // workspace DOES carry a default cwd merges to something non-empty and so
+  // sends its first configure at bindDoc.
   lastParamsKey: string;
   handlers: DocHandlers;
 }
@@ -70,8 +80,15 @@ const EMPTY_PARAMS_KEY = JSON.stringify(parseFrontmatter("").params);
 // text, so touching a comment (or reflowing whitespace) in the frontmatter
 // re-sends nothing. Bun applies params at shell spawn, so an extra send is
 // harmless but a missed one is a shell born with stale cwd/env.
+//
+// A note that names no `cwd:` of its own inherits its workspace's default
+// (workspaceDefaultCwd: the folder itself for an external workspace, null for
+// a managed one) — merged here, at the one point params leave the view, so
+// every consumer Bun-side (persistent, overflow, and drawer shells) gets the
+// same answer without knowing workspaces exist.
 function syncParams(e: Entry, text: string): void {
   const { params } = parseFrontmatter(text);
+  if (params.cwd === null) params.cwd = workspaceDefaultCwd(e.folder);
   const key = JSON.stringify(params);
   if (key === e.lastParamsKey) return;
   e.lastParamsKey = key;
@@ -83,18 +100,20 @@ function syncParams(e: Entry, text: string): void {
   }
 }
 
-// Register an open note. `path` is null for a new note that has no file yet;
+// Register an open note. `folder` is the tab's workspace folder (where a first
+// save creates the file); `path` is null for a new note that has no file yet;
 // `onFile` fires whenever one is allocated or moves, so the tab can bind to it
 // and show its filename. Re-binding an already-open note only refreshes that
 // callback: its dirty state, its allocated path, and its seeded slug must survive.
-export function bindDoc(docId: string, path: string | null, handlers: DocHandlers): void {
+export function bindDoc(docId: string, path: string | null, folder: string, handlers: DocHandlers): void {
   const existing = docs.get(docId);
   if (existing) {
     existing.handlers = handlers;
     return;
   }
-  docs.set(docId, {
+  const entry: Entry = {
     docId,
+    folder,
     path,
     pending: null,
     timer: null,
@@ -105,7 +124,14 @@ export function bindDoc(docId: string, path: string | null, handlers: DocHandler
     lastHeading: null,
     lastParamsKey: EMPTY_PARAMS_KEY,
     handlers,
-  });
+  };
+  docs.set(docId, entry);
+  // The workspace default cwd must reach Bun even for a note that is never
+  // edited or even loaded (a fresh tab whose first act is a Run click), so
+  // send the empty text's params now. In a defaultless workspace this merges
+  // to exactly EMPTY_PARAMS_KEY and sends nothing — the pre-workspace
+  // behavior. seedSlug re-syncs with the real text once a load lands.
+  syncParams(entry, "");
 }
 
 // The docId currently bound to a note's file, or null when no open tab holds
@@ -116,6 +142,14 @@ export function bindDoc(docId: string, path: string | null, handlers: DocHandler
 export function docIdAt(path: string): string | null {
   for (const e of docs.values()) if (e.path === path) return e.docId;
   return null;
+}
+
+// The workspace folder an open note belongs to, or null for a docId the store
+// has never seen (an editor built outside the pool, e.g. a test). The asset
+// call sites (editor ⌘V paste, image widgets) use this to scope `.ledge-assets/…`
+// references to the note's own workspace.
+export function folderOf(docId: string): string | null {
+  return docs.get(docId)?.folder ?? null;
 }
 
 // Record the heading a note already has on disk, without renaming anything. Called
@@ -167,8 +201,9 @@ async function flush(e: Entry): Promise<void> {
         } else {
           // createNote names the file from this same text's H1, so a note titled
           // before its first save is born correctly named rather than created as
-          // untitled.md and renamed a beat later.
-          const note = await createNote(text);
+          // untitled.md and renamed a beat later. It lands in the tab's own
+          // workspace folder, captured at bindDoc.
+          const note = await createNote(e.folder, text);
           e.path = note.path;
           e.handlers.onFile(note, null);
         }

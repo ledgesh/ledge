@@ -138,12 +138,14 @@ async function loadNote(docId: string, path: string): Promise<void> {
 }
 
 // Get (creating on first use) the pooled editor for a tab's note. The returned
-// host is a detached <div> until attachEditor parents it into a pane.
-function acquire(tab: TabState, handlers: DocHandlers): { entry: Entry; created: boolean } {
+// host is a detached <div> until attachEditor parents it into a pane. `folder`
+// is the tab's workspace folder, recorded so a first save creates the file
+// there and asset references resolve against it (notes/store.ts).
+function acquire(tab: TabState, folder: string, handlers: DocHandlers): { entry: Entry; created: boolean } {
   const { docId } = tab;
   // Rebind on every acquire: the entry may predate this callback's closure, and
   // an already-open note keeps whatever dirty state, path, and seeded slug it has.
-  bindDoc(docId, tab.path, handlers);
+  bindDoc(docId, tab.path, folder, handlers);
   const existing = pool.get(docId);
   if (existing) return { entry: existing, created: false };
 
@@ -166,8 +168,13 @@ function acquire(tab: TabState, handlers: DocHandlers): { entry: Entry; created:
 // live EditorView so the caller can focus it. `handlers` carries the two ways a
 // note's name can move: its file appearing or being renamed to follow its H1
 // (onFile), and its on-screen label changing (onTitle).
-export function attachEditor(container: HTMLElement, tab: TabState, handlers: DocHandlers): EditorView {
-  const { entry, created } = acquire(tab, handlers);
+export function attachEditor(
+  container: HTMLElement,
+  tab: TabState,
+  folder: string,
+  handlers: DocHandlers,
+): EditorView {
+  const { entry, created } = acquire(tab, folder, handlers);
   if (entry.host.parentElement !== container) container.appendChild(entry.host);
   entry.view.requestMeasure();
   pingOverlay(entry.view);

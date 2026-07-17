@@ -34,20 +34,37 @@ but because it is the end where a bug becomes an arbitrary argument: a stale
 path in a closure, a confused target, an injected string in a note's heading.
 Bun therefore validates everything and derives anything derivable:
 
-- **Every path arriving over RPC is checked before use.** `assertNote`
-  (inside the root *and* a `.md` file) gates every view-supplied note path;
-  `assertTrashed` — strictly tighter: a `.md` file *directly inside* `.trash` —
-  gates the two calls that can unlink. `"../../.ssh/id_rsa"` must throw, and
-  there is a test saying so. The `.md` requirement is load-bearing, not
-  tidiness: `settings.json` lives in the root and names the shell executable
-  (§6), so a `noteWrite` that accepted any in-root path would turn a notes
-  write into command execution at the next launch.
+- **The workspace registry is a trust artifact.** Notes live in REGISTERED
+  WORKSPACE ROOTS (`bun/workspaces.ts`), and every path guard validates
+  against that set — so what may join it is itself part of the boundary. A
+  root gets in exactly three ways: Bun's own first-launch default, a managed
+  folder whose name Bun slugged from a display name (`workspaceCreate` — the
+  view names no path, the same move as `noteCreate`), or a directory the user
+  picked in the NATIVE folder dialog (`workspaceAttach`, which takes no
+  arguments: the path comes from the OS dialog Bun-side, never from the
+  view). The registry file `.workspaces.json` is machine-written AND
+  Bun-shaped; the view cannot read or write its bytes. No root may equal or
+  contain another (rootContaining must have a unique answer), or reach the
+  app home itself.
+- **Every path arriving over RPC is checked before use.** Scoped calls
+  (`noteList`, `noteCreate`, `noteSearch`, `trashList`, `trashEmpty`, the
+  asset pair) carry a root checked for exact registry membership
+  (`assertRegisteredRoot`). Per-note calls send only the path: `assertNote`
+  (inside a registered root *and* a `.md` file) gates every view-supplied
+  note path; `assertTrashed` — strictly tighter: a `.md` file *directly
+  inside its root's* `.ledge-trash` — gates the two calls that can unlink.
+  `"../../.ssh/id_rsa"` must throw, and there is a test saying so. The `.md`
+  requirement is load-bearing, not tidiness: an in-root write of any other
+  file would be arbitrary-file storage in a folder the user syncs.
 - **The view never names a file.** It sends a note's *text*; Bun slugs the
   heading itself (`slugOf` emits only `[a-z0-9-]`), so filenames are safe by
   construction and there is no name parameter to validate or smuggle through.
-- **Paths are opaque handles.** The view holds only paths it was handed by Bun
-  (`noteList`, `noteCreate`, `noteDelete`'s trashed location) and passes them
-  back unmodified. View code that constructs or edits a path is a bug.
+  Workspace folder names get the same treatment (`createManaged` slugs the
+  display name; renaming a workspace is display-only and touches no folder).
+- **Paths are opaque handles.** The view holds only paths and roots it was
+  handed by Bun (`workspaceList`, `noteList`, `noteCreate`, `noteDelete`'s
+  trashed location) and passes them back unmodified. View code that
+  constructs or edits a path is a bug.
 - **Spawn params are the one deliberate exception** to "the view never names
   anything": `sessionConfigure` carries a cwd, env vars, and file references
   the view parsed out of a note's frontmatter (`shared/frontmatter.ts`). This
@@ -65,42 +82,78 @@ Bun therefore validates everything and derives anything derivable:
 
 - **`rename(2)` is the primitive; `unlink` is the exception.** Saves are a
   temp-file-plus-rename (atomic within a filesystem: a crash mid-save leaves
-  the old note or the new one, never half). Delete is a rename into `.trash`.
-  Retitle is a rename. Restore is a rename. Exactly three code paths unlink a
-  *note* — `deleteTrashed`, `emptyTrash`, `purgeTrash` — all in `bun/notes.ts`, all
-  gated by `assertTrashed`, and the first two sit behind a confirmation
-  (interactions.md §4). **Anything new that unlinks a file joins all three
-  lists: the guard, the confirm, and this sentence.** (The one other `unlink`
-  in the repo is `writeNote` discarding its own temp file after a failed
-  save — a dotted file it created moments earlier that no listing ever shows.)
+  the old note or the new one, never half). Delete is a rename into the
+  note's OWN root's `.ledge-trash` — per workspace root, not one shared bin,
+  so the move never crosses a filesystem (no EXDEV on an external volume)
+  and a restore lands back in the workspace it left. Retitle is a rename. Restore
+  is a rename. Detaching a workspace touches no file at all: the registry
+  line goes, the folder stays, re-attachable. Exactly three code paths
+  unlink a *note* — `deleteTrashed`, `emptyTrash`, `purgeTrash` — all in
+  `bun/notes.ts`, all gated by `assertTrashed`, and the first two sit behind
+  a confirmation (interactions.md §4). **Anything new that unlinks a file
+  joins all three lists: the guard, the confirm, and this sentence.** (The
+  one other `unlink` in the repo is `writeNote` discarding its own temp file
+  after a failed save — a dotted file it created moments earlier that no
+  listing ever shows.)
+- **Bun never mkdirs an external root.** A managed folder (a direct child of
+  the app home) is Bun's to recreate; an external root that is missing is
+  what an unmounted volume looks like, and mkdir-ing it would grow a shadow
+  directory on the boot disk that silently catches autosaves. Operations on
+  a missing external root refuse (`rootReady`), the edit stays pending in
+  the view's autosave retry, and the registry keeps the entry unavailable so
+  a remount heals at the next boot.
 - **Name allocation is where clobber-safety lives.** `rename(2)` overwrites
   silently, so no call site may pick its own destination name: `uniqueName`
   (case-insensitive, because APFS is) allocates against a `readdir` snapshot
   plus the `reserved` set, and the rename that follows is safe *because* the
   allocation already skipped every taken name. A rename whose target didn't
   come from `uniqueName` is a latent data-loss bug.
-- **Dot-entries are invisible and inviolate.** `listNotes` skips them (which
-  is what hides `.trash` and the temp files); trash operations touch only
-  `.md` files directly in `.trash`. Empty Trash removes exactly what the list
-  showed, and nothing it did not.
-- **Images are files under the root, and Bun's alone to touch** (`bun/assets.ts`).
-  Pasted images land in `<root>/assets/` — visible, not dotted, because the
-  notes root is the folder people sync and an image a note depends on should
-  not be hidden from its owner. Saves are the same temp-plus-rename as notes,
-  names come from `uniqueName` (same clobber-safety), and **nothing ever
-  unlinks an asset**: deleting a note orphans its images, deliberately —
-  cheaper than joining the unlink list above. The view reads them over
-  `assetRead`, whose guard (`assetPathOf`) is assertNote's move inverted:
-  in-root, an image-extension allowlist (without which the call would read
-  `settings.json` or any note), and no dot-entries. On paste the bytes never
-  cross the RPC — `assetPaste` reads the pasteboard Bun-side and returns only
-  the markdown-relative reference; the view never names the file.
-- **`LEDGE_NOTES_ROOT`** overrides the root (`~/.ledge`) for tests and
-  throwaway runs. Nothing in the app sets it; every `bun test` run gets a
-  scratch one via preload, and anything that exercises the real app against
-  real files must set it (see `docs/testing.md` §§2, 6). **`LEDGE_PROFILES_DIR`**
-  is the same override for the profiles dir (§6a), for the same reason: no
-  test or probe may read — or seed — the real one.
+- **Ledge's writes into a workspace folder are `.ledge-`prefixed dot-entries**
+  (`.ledge-trash`, `.ledge-assets`). A workspace can be someone's real
+  project folder, so the app's own entries must be unmistakably the app's:
+  pastes must not mingle into a project's existing `assets/`, and — because
+  APFS is case-insensitive by default — a plain `.trash` would collide with
+  macOS's own `~/.Trash` if anyone attached their home directory, putting
+  the system trash's `.md` files under Ledge's Empty Trash. The prefix is
+  the namespace.
+- **Dot-entries are invisible, and so is what `.ledgeignore` names.**
+  `listNotes` skips dot-entries (which is what hides `.ledge-trash` and the
+  temp files) and prunes the well-known vendor/build directory names plus
+  the root's own `.ledgeignore` patterns (`bun/ignore.ts` — a small
+  gitignore subset, defaults overridable with `!name`), so an attached
+  project folder contributes its notes, not every README under
+  node_modules. Search is built on the same walk, so listed and searchable
+  cannot disagree. Ignoring is visibility, not a guard: an ignored note
+  that is already open still saves — the path guards stay registry-based.
+  Trash operations touch only `.md` files directly in `.ledge-trash`; Empty
+  Trash removes exactly what the list showed, and nothing it did not.
+- **Images are files under their workspace root, and Bun's alone to touch**
+  (`bun/assets.ts`). Pasted images land in `<root>/.ledge-assets/` — per
+  root, so a note's `![](.ledge-assets/x.png)` resolves against its own
+  folder and an external workspace carries its images with it. Saves are
+  the same temp-plus-rename as notes, names come from `uniqueName` (same
+  clobber-safety), and **nothing ever unlinks an asset**: deleting a note
+  orphans its images, deliberately — cheaper than joining the unlink list
+  above. The view reads them over `assetRead` with the asking note's root,
+  whose guard (`assetPathOf`) is assertNote's move inverted: a registered
+  root, in-root, an image-extension allowlist (without which the call would
+  read any note), and no dot-entries except `.ledge-assets` itself as the
+  first segment (the shared `ASSETS_DIRNAME` constant — the view's
+  classifier carves the same exception, from the same constant). Any
+  non-dotted in-root image works too: an attached folder's own
+  `img/photo.png` renders as-is. On paste the bytes never cross the RPC —
+  `assetPaste` reads the pasteboard Bun-side and returns only the
+  markdown-relative reference; the view never names the file.
+- **`LEDGE_NOTES_ROOT`** overrides the APP HOME (`~/.ledge` — where
+  `settings.json`, `.layout.json`, `.workspaces.json`, and the managed
+  workspace folders live; `APP_HOME` in `bun/workspaces.ts`) for tests and
+  throwaway runs. The env name predates the per-workspace split and is kept:
+  every preload and probe already speaks it. Nothing in the app sets it;
+  every `bun test` run gets a scratch one via preload, and anything that
+  exercises the real app against real files must set it (see
+  `docs/testing.md` §§2, 6). **`LEDGE_PROFILES_DIR`** is the same override
+  for the profiles dir (§6a), for the same reason: no test or probe may
+  read — or seed — the real one.
 
 ## 4. Identity keys: path vs docId
 
@@ -152,13 +205,14 @@ Five instances exist and new needs should look like them: `configureBridge`
 
 ## 6. Settings
 
-User preferences live in one JSON file, `settings.json`, in the notes root.
-`shared/settings.ts` owns the shape, the defaults, and the validator;
-`bun/settings.ts` owns the file. Bun reads it once at launch, applies its own
-half (the shell every PTY spawns, the trash TTL), and hands the view a
-validated snapshot over `settingsGet`; view consumers (editor and terminal
-font sizes, the runnable-fence set) read that snapshot at construction time
-through `lib/settings.ts`.
+User preferences live in one JSON file, `settings.json`, in the app home —
+GLOBAL, not per workspace: shell path, font sizes, and interpreters are facts
+about the person, not the folder. `shared/settings.ts` owns the shape, the
+defaults, and the validator; `bun/settings.ts` owns the file. Bun reads it
+once at launch, applies its own half (the shell every PTY spawns, the trash
+TTL), and hands the view a validated snapshot over `settingsGet`; view
+consumers (editor and terminal font sizes, the runnable-fence set) read that
+snapshot at construction time through `lib/settings.ts`.
 
 - **What earns a setting.** The same shape of bar as the dependency policy
   (§8): every setting is a behavioral fork the app tests and maintains
@@ -173,20 +227,27 @@ through `lib/settings.ts`.
   because "which python" has no universal answer — the default resolves via
   the login shell's PATH, and a venv or pinned toolchain demonstrably needs
   to override that). Additions should be argued in those terms.
-- **Settings are not session state.** `settings.json` is *human-edited
-  preference*; which workspaces exist, their names, the pane layout are
-  *machine-written state* with different failure modes (a corrupt state file
-  must self-heal; a corrupt settings file must be left for its author). Session
-  state lives in its own file, `.layout.json` in the notes root — dotted, so
-  `listNotes` never shows it. Bun owns its bytes and atomicity (`bun/layout.ts`:
-  temp-plus-rename like a note save, and a JSON-parse gate so the view cannot
-  use the fixed-name write as arbitrary byte storage in the synced folder); the
-  **view** owns its shape (`workspace/persist.ts`: serialize debounced on every
-  layout change, restore at boot). Self-healing is the view's restore path:
-  every malformed or stale piece — a pruned note, a corrupt workspace, an
-  unparseable file — costs exactly itself, degrading down to a fresh
-  `initialState`, and restored tabs only ever open paths the boot `noteList`
-  also returned (paths stay opaque handles, §2). Never mix the two files.
+- **Settings are not session state, and neither is the registry.** Three
+  files in the app home, three ownership shapes. `settings.json` is
+  *human-edited preference*. `.layout.json` — which workspaces exist, their
+  names and icons, which folder each owns, the pane trees — is
+  *machine-written state* whose bytes Bun owns (`bun/layout.ts`:
+  temp-plus-rename like a note save, and a JSON-parse gate so the view
+  cannot use the fixed-name write as arbitrary byte storage) but whose
+  SHAPE the **view** owns (`workspace/persist.ts`: serialize debounced on
+  every layout change, restore at boot). `.workspaces.json` — the set of
+  registered roots — is machine-written AND Bun-shaped, because it is a
+  trust artifact (§2): the view never sees its bytes at all. Failure modes
+  differ accordingly: a corrupt settings file is left for its author; a
+  corrupt layout costs itself, degrading per piece down to a fresh
+  `initialState`; a corrupt registry is renamed aside (bytes kept for
+  forensics) and rebuilt from `ensureDefault`. The view's restore path
+  self-heals per workspace: an unregistered folder costs its workspace, an
+  UNAVAILABLE one (unmounted volume) is held dormant — dropped from the
+  session, carried verbatim through saves — and restored tabs only ever
+  open paths their own folder's boot `noteList` returned (paths stay opaque
+  handles, §2; a tab can never cross into another workspace's folder).
+  Never mix the files.
 - **The file is the UI.** There is no settings panel; ⌘, (`settings.open`)
   asks Bun to open the file in the OS editor. First launch seeds it with
   every default spelled out, so the file documents its own knobs.
@@ -231,6 +292,18 @@ alike, which is what keeps all three telling one story about the note.
   anywhere, same cwd, same env. A knob belongs in frontmatter only when the
   right value genuinely varies per note (cwd, env); a knob that varies per
   person stays in settings. Neither is session state (§6 still applies).
+- **An external workspace anchors the default cwd.** A note that names no
+  `cwd:` of its own spawns shells in its workspace's folder when that
+  workspace is an attached external directory — attaching a project folder
+  is mostly *about* its shells starting in the project. Managed
+  `~/.ledge/<slug>/` workspaces have no default (a shell born inside a
+  hidden dotfolder helps nobody): their notes keep `$HOME`, exactly as
+  before workspaces had folders. The merge is view-side and implicit — no
+  per-workspace knob, no persistence: `notes/store.ts` (`syncParams`) fills
+  the empty cwd from `workspace/channel.ts`'s kind map, which records each
+  root's kind as its handle enters the view. Bun neither knows nor cares:
+  `resolveCwd` validates whatever arrives, so an unmounted external folder
+  degrades to `$HOME` with a warning like any stale frontmatter cwd.
 - **Profiles are the secrets story.** `profile: name` resolves to
   `~/.config/ledge/profiles/<name>.env` — one small file per project scope,
   never one global pile. The note carries only the *name*; the values are

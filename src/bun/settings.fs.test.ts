@@ -1,22 +1,22 @@
 // loadSettings against a real filesystem: the first-launch seed, the
 // merge-with-defaults on a partial file, and — most important — the promise
-// that a broken file is never rewritten. Root and guard match
-// notes.fs.test.ts (scratch root via src/test-preload.ts; see bunfig.toml).
+// that a broken file is never rewritten. Home and guard match
+// notes.fs.test.ts (scratch app home via src/test-preload.ts; see bunfig.toml).
 import { beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve, sep } from "node:path";
 import { DEFAULT_SETTINGS } from "../shared/settings";
-import { NOTES_ROOT } from "./notes";
+import { APP_HOME } from "./workspaces";
 import { loadSettings, SETTINGS_PATH } from "./settings";
 
-if (!resolve(NOTES_ROOT).startsWith(resolve(tmpdir()) + sep)) {
-  throw new Error(`refusing to run filesystem tests against ${NOTES_ROOT} — is the preload configured?`);
+if (!resolve(APP_HOME).startsWith(resolve(tmpdir()) + sep)) {
+  throw new Error(`refusing to run filesystem tests against ${APP_HOME} — is the preload configured?`);
 }
 
 beforeEach(async () => {
-  await rm(NOTES_ROOT, { recursive: true, force: true });
-  await mkdir(NOTES_ROOT, { recursive: true });
+  await rm(APP_HOME, { recursive: true, force: true });
+  await mkdir(APP_HOME, { recursive: true });
 });
 
 describe("loadSettings", () => {

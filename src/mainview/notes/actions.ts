@@ -10,7 +10,7 @@
 // So saving is suspended first, synchronously, before anything awaits:
 //
 //   freeze  -> the note stops writing, but keeps collecting edits
-//   disk    -> Bun moves the file to ~/.ledge/.trash
+//   disk    -> Bun moves the file into its workspace folder's .ledge-trash
 //   settle  -> forget the note entirely, or unfreeze it if the delete failed
 //
 // Renaming needs none of this: a note's filename follows its H1 now, and that
@@ -26,12 +26,12 @@ import {
 import { forgetDoc, freezeDoc, retargetDoc } from "./store";
 import type { Action } from "@/workspace/store";
 
-// Re-read the trash. Every mutation below ends with one rather than patching the
-// list in place: Bun owns the folder, the list is small, and a count that drifts
-// from the folder is worse than a round-trip.
-export function refreshTrash(dispatch: (action: Action) => void): Promise<void> {
-  return listTrash()
-    .then((items) => dispatch({ type: "trashLoaded", items }))
+// Re-read one workspace folder's trash. Every mutation below ends with one
+// rather than patching the list in place: Bun owns the folder, the list is
+// small, and a count that drifts from the folder is worse than a round-trip.
+export function refreshTrash(folder: string, dispatch: (action: Action) => void): Promise<void> {
+  return listTrash(folder)
+    .then((items) => dispatch({ type: "trashLoaded", folder, items }))
     .catch((err) => console.error("[notes] could not read the trash", err));
 }
 
@@ -44,6 +44,7 @@ export interface DeleteResult {
 
 export async function deleteNote(
   path: string,
+  folder: string,
   docIds: string[],
   dispatch: (action: Action) => void,
 ): Promise<DeleteResult> {
@@ -61,7 +62,7 @@ export async function deleteNote(
   // teardown (releaseDoc) to write, so closing the tabs cannot resurrect the note.
   for (const id of docIds) forgetDoc(id);
   dispatch({ type: "noteDeleted", path });
-  void refreshTrash(dispatch);
+  void refreshTrash(folder, dispatch);
   return { trashed, error: null };
 }
 
@@ -74,16 +75,17 @@ export async function deleteNote(
 // it is a file being moved while nothing in the app is holding it.
 export async function restoreNote(
   path: string,
+  folder: string,
   dispatch: (action: Action) => void,
 ): Promise<string | null> {
   try {
     const note = await untrashFile(path);
-    dispatch({ type: "noteRestored", note });
+    dispatch({ type: "noteRestored", folder, note });
   } catch (err) {
     console.error("[notes] restore failed", err);
     return err instanceof Error ? err.message : String(err);
   }
-  void refreshTrash(dispatch);
+  void refreshTrash(folder, dispatch);
   return null;
 }
 
@@ -94,29 +96,33 @@ export async function restoreNote(
 // no tabs and no save controller entry, so nothing in the app is holding it.
 export async function deleteTrashedNote(
   path: string,
+  folder: string,
   dispatch: (action: Action) => void,
 ): Promise<string | null> {
   try {
     await unlinkTrashed(path);
   } catch (err) {
     console.error("[notes] permanent delete failed", err);
-    void refreshTrash(dispatch); // it may have gone before it threw
+    void refreshTrash(folder, dispatch); // it may have gone before it threw
     return err instanceof Error ? err.message : String(err);
   }
-  void refreshTrash(dispatch);
+  void refreshTrash(folder, dispatch);
   return null;
 }
 
-// Unlink every trashed note. The caller confirms first; by the time this runs,
-// the notes really are going.
-export async function emptyTrashNow(dispatch: (action: Action) => void): Promise<string | null> {
+// Unlink every trashed note in one workspace's trash. The caller confirms
+// first; by the time this runs, the notes really are going.
+export async function emptyTrashNow(
+  folder: string,
+  dispatch: (action: Action) => void,
+): Promise<string | null> {
   try {
-    await emptyTrash();
+    await emptyTrash(folder);
   } catch (err) {
     console.error("[notes] empty trash failed", err);
-    void refreshTrash(dispatch); // some may have gone before it threw
+    void refreshTrash(folder, dispatch); // some may have gone before it threw
     return err instanceof Error ? err.message : String(err);
   }
-  dispatch({ type: "trashLoaded", items: [] });
+  dispatch({ type: "trashLoaded", folder, items: [] });
   return null;
 }

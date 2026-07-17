@@ -59,7 +59,7 @@ new rules should imitate:
 - row verbs live in `listKeys`, never `keys` (`keys.test.ts`);
 - the held-modifier badges show the same keys `keys.ts` binds;
 - note verbs refuse a trash target and vice versa;
-- `deleteTrashed` rejects anything not a `.md` directly inside `.trash`.
+- `deleteTrashed` rejects anything not a `.md` directly inside `.ledge-trash`.
 
 These are the cheapest guardrails the repo has: they turn "someone will
 forget" into "the suite goes red."

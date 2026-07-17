@@ -15,7 +15,7 @@ import { quoteExit } from "./quotes";
 import { wrapping } from "./wrap";
 import { findReplace } from "./find";
 import { fromDisk, sessionIdFacet } from "./session";
-import { noteChanged, saveNow } from "../notes/store";
+import { folderOf, noteChanged, saveNow } from "../notes/store";
 import { copyText, readClipboard } from "../lib/clipboard";
 import { pasteImageAsset } from "../lib/assets";
 import { settings } from "../lib/settings";
@@ -144,7 +144,7 @@ const clipboardKeymap = Prec.highest(
         // Text first, image as the fallback: a pasteboard carrying text is a
         // text paste (unchanged behavior), and a pasteboard with an image but
         // no text — a screenshot, a copied picture — embeds the image: Bun
-        // saves it under assets/ and hands back the reference to insert. The
+        // saves it under .ledge-assets/ and hands back the reference to insert. The
         // insert parks the caret on the line below the markdown, so the image
         // renders the moment it lands (editor/images.ts).
         void readClipboard().then(async (text) => {
@@ -152,7 +152,12 @@ const clipboardKeymap = Prec.highest(
             view.dispatch(view.state.replaceSelection(text));
             return;
           }
-          const src = await pasteImageAsset();
+          // The pasted image belongs to this note's workspace: its reference
+          // will resolve against that folder. No folder (an editor outside
+          // the pool, e.g. a test) means nowhere to save — skip.
+          const folder = folderOf(view.state.facet(sessionIdFacet));
+          if (!folder) return;
+          const src = await pasteImageAsset(folder);
           if (!src) return;
           const sel = view.state.selection.main;
           const { insert, cursor } = imagePasteInsert(view.state.doc, sel, src);

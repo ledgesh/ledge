@@ -13,6 +13,15 @@ function stubDeps(calls: string[] = [], noteHead: string | null = null): Registr
   return {
     copyText: record("copyText"),
     openSettings: () => calls.push("openSettings"),
+    createWorkspace: async () => {
+      calls.push("createWorkspace");
+      return null;
+    },
+    attachWorkspace: async () => {
+      calls.push("attachWorkspace");
+      return null;
+    },
+    closeWorkspace: (id) => calls.push(`closeWorkspace:${id}`),
     restartSession: record("restartSession"),
     noteHead: () => noteHead,
     editor: {
@@ -39,6 +48,11 @@ function makeCtx(state: AppState, dispatched: Action[] = []): CommandCtx {
 function apply(state: AppState, ...actions: Action[]): AppState {
   return actions.reduce(reducer, state);
 }
+
+// Notes are per workspace folder now; every test state's first workspace sits
+// on FOLDER, and a second workspace (where needed) on its own folder.
+const FOLDER = "/ws/notes";
+const secondWs: Action = { type: "addWorkspace", name: "Workspace 2", folder: "/ws/two" };
 
 const note = (path: string, title: string) => ({ path, title, mtimeMs: 0 });
 
@@ -92,21 +106,21 @@ describe("registry", () => {
   });
 
   test("enablement: workspace.close needs a second workspace", () => {
-    const one = initialState([]);
+    const one = initialState(FOLDER, []);
     expect(find(commands, "workspace.close").when!(makeCtx(one))).toBe(false);
-    const two = apply(one, { type: "newWorkspace" });
+    const two = apply(one, secondWs);
     expect(find(commands, "workspace.close").when!(makeCtx(two))).toBe(true);
   });
 
   test("enablement: pane.close needs a second pane", () => {
-    const one = initialState([]);
+    const one = initialState(FOLDER, []);
     expect(find(commands, "pane.close").when!(makeCtx(one))).toBe(false);
     const split = apply(one, { type: "splitPane", dir: "row" });
     expect(find(commands, "pane.close").when!(makeCtx(split))).toBe(true);
   });
 
   test("enablement: tab cycling and indexed jumps track the focused pane's tabs", () => {
-    const one = initialState([]);
+    const one = initialState(FOLDER, []);
     expect(find(commands, "tab.next").when!(makeCtx(one))).toBe(false);
     expect(find(commands, "tab.select.2").when!(makeCtx(one))).toBe(false);
     const two = apply(one, { type: "newTab" });
@@ -117,21 +131,21 @@ describe("registry", () => {
 
   test("enablement: note.deleteCurrent needs a saved focused note", () => {
     // The initial demo tab has no file on disk: nothing to delete.
-    const scratch = initialState([]);
+    const scratch = initialState(FOLDER, []);
     expect(find(commands, "note.deleteCurrent").when!(makeCtx(scratch))).toBe(false);
     const n = note("/tmp/a.md", "A");
-    const withNote = apply(initialState([n]), { type: "openNote", note: n });
+    const withNote = apply(initialState(FOLDER, [n]), { type: "openNote", note: n });
     expect(find(commands, "note.deleteCurrent").when!(makeCtx(withNote))).toBe(true);
   });
 
   test("enablement: trash.empty follows the trash count", () => {
-    expect(find(commands, "trash.empty").when!(makeCtx(initialState([])))).toBe(false);
-    const trashed = initialState([], [{ path: "/t/a.md", title: "A", deletedAt: 0 }]);
+    expect(find(commands, "trash.empty").when!(makeCtx(initialState(FOLDER, [])))).toBe(false);
+    const trashed = initialState(FOLDER, [], [{ path: "/t/a.md", title: "A", deletedAt: 0 }]);
     expect(find(commands, "trash.empty").when!(makeCtx(trashed))).toBe(true);
   });
 
   test("run: tab.close closes the focused pane's active tab", () => {
-    const state = apply(initialState([]), { type: "newTab" });
+    const state = apply(initialState(FOLDER, []), { type: "newTab" });
     const dispatched: Action[] = [];
     const ctx = makeCtx(state, dispatched);
     find(commands, "tab.close").run(ctx);
@@ -140,7 +154,7 @@ describe("registry", () => {
   });
 
   test("run: tab.close honors an explicit tab target", () => {
-    const state = apply(initialState([]), { type: "newTab" });
+    const state = apply(initialState(FOLDER, []), { type: "newTab" });
     const leaf = state.workspaces[0]!.root;
     if (leaf.kind !== "leaf") throw new Error("expected leaf");
     const dispatched: Action[] = [];
@@ -150,7 +164,7 @@ describe("registry", () => {
   });
 
   test("run: tab.next wraps around", () => {
-    const state = apply(initialState([]), { type: "newTab" }); // 2 tabs, second active
+    const state = apply(initialState(FOLDER, []), { type: "newTab" }); // 2 tabs, second active
     const dispatched: Action[] = [];
     find(commands, "tab.next").run(makeCtx(state, dispatched));
     const leaf = state.workspaces[0]!.root;
@@ -162,7 +176,7 @@ describe("registry", () => {
   test("run: editor commands route through deps with the focused docId", () => {
     const calls: string[] = [];
     const cmds = buildCommands(stubDeps(calls));
-    const state = initialState([]);
+    const state = initialState(FOLDER, []);
     const leaf = state.workspaces[0]!.root;
     if (leaf.kind !== "leaf") throw new Error("expected leaf");
     const docId = leaf.tabs[0]!.docId;
@@ -174,18 +188,31 @@ describe("registry", () => {
   test("run: settings.open routes to the openSettings edge", () => {
     const calls: string[] = [];
     const cmds = buildCommands(stubDeps(calls));
-    find(cmds, "settings.open").run(makeCtx(initialState([])));
+    find(cmds, "settings.open").run(makeCtx(initialState(FOLDER, [])));
     expect(calls).toEqual(["openSettings"]);
   });
 
   test("run: session.restart routes the focused docId to the restart edge", () => {
     const calls: string[] = [];
     const cmds = buildCommands(stubDeps(calls));
-    const state = initialState([]);
+    const state = initialState(FOLDER, []);
     const leaf = state.workspaces[0]!.root;
     if (leaf.kind !== "leaf") throw new Error("expected leaf");
     find(cmds, "session.restart").run(makeCtx(state));
     expect(calls).toEqual([`restartSession:${leaf.tabs[0]!.docId}`]);
+  });
+
+  test("run: workspace commands route through the action deps, not the reducer", () => {
+    // Creating and attaching need a Bun round trip (folder, native dialog);
+    // closing must detach the folder after the reducer closes the view. All
+    // three go through deps so the registry stays pure.
+    const calls: string[] = [];
+    const cmds = buildCommands(stubDeps(calls));
+    const state = apply(initialState(FOLDER, []), secondWs);
+    find(cmds, "workspace.new").run(makeCtx(state));
+    find(cmds, "workspace.attach").run(makeCtx(state));
+    find(cmds, "workspace.close").run(makeCtx(state));
+    expect(calls).toEqual(["createWorkspace", "attachWorkspace", `closeWorkspace:${state.selectedId}`]);
   });
 
   test("profile.open follows the current note's frontmatter, and only that", () => {
@@ -195,7 +222,7 @@ describe("registry", () => {
     // what the frontmatter already says.
     const opened: string[] = [];
     const withProfile = buildCommands(stubDeps([], "---\nprofile: petstore\n---\n# T\n"));
-    const ctx = { ...makeCtx(initialState([])), ui: { openProfileEditor: (n: string) => opened.push(n) } };
+    const ctx = { ...makeCtx(initialState(FOLDER, [])), ui: { openProfileEditor: (n: string) => opened.push(n) } };
     expect(find(withProfile, "profile.open").when!(ctx)).toBe(true);
     find(withProfile, "profile.open").run(ctx);
     expect(opened).toEqual(["petstore"]);
@@ -210,7 +237,7 @@ describe("registry", () => {
   test("run: note.copyPath copies the targeted row's path", () => {
     const calls: string[] = [];
     const cmds = buildCommands(stubDeps(calls));
-    const ctx = { ...makeCtx(initialState([])), target: { kind: "note", path: "/n/a.md" } as const };
+    const ctx = { ...makeCtx(initialState(FOLDER, [])), target: { kind: "note", path: "/n/a.md" } as const };
     find(cmds, "note.copyPath").run(ctx);
     expect(calls).toEqual(["copyText:/n/a.md"]);
   });
@@ -221,7 +248,7 @@ describe("registry", () => {
     // data-loss bug, not a UX one.
     const a = note("/n/a.md", "A");
     const b = note("/n/b.md", "B");
-    const state = apply(initialState([a, b]), { type: "openNote", note: a });
+    const state = apply(initialState(FOLDER, [a, b]), { type: "openNote", note: a });
     const deleted: string[] = [];
     const ctx: CommandCtx = {
       ...makeCtx(state),
@@ -237,7 +264,7 @@ describe("registry", () => {
     const n = note("/n/a.md", "A");
     const dispatched: Action[] = [];
     const ctx: CommandCtx = {
-      ...makeCtx(initialState([n]), dispatched),
+      ...makeCtx(initialState(FOLDER, [n]), dispatched),
       target: { kind: "note", path: n.path },
     };
     find(commands, "note.open").run(ctx);
@@ -249,7 +276,7 @@ describe("registry", () => {
     const restored: string[] = [];
     const confirmed: string[] = [];
     const ctx: CommandCtx = {
-      ...makeCtx(initialState([], [item])),
+      ...makeCtx(initialState(FOLDER, [], [item])),
       ui: {
         restoreTrashed: (p) => restored.push(p),
         confirmDeleteTrashed: (i) => confirmed.push(i.path),
@@ -266,7 +293,7 @@ describe("registry", () => {
   test("note verbs refuse a trash target", () => {
     // Both kinds carry a path; only the kind keeps Delete off a trashed note.
     const ctx: CommandCtx = {
-      ...makeCtx(initialState([], [{ path: "/t/a.md", title: "A", deletedAt: 0 }])),
+      ...makeCtx(initialState(FOLDER, [], [{ path: "/t/a.md", title: "A", deletedAt: 0 }])),
       target: { kind: "trash", path: "/t/a.md" },
     };
     expect(find(commands, "note.delete").when!(ctx)).toBe(false);
@@ -299,7 +326,7 @@ describe("registry", () => {
   });
 
   test("dynamic titles: workspace.select names the workspace", () => {
-    const state = initialState([]);
+    const state = initialState(FOLDER, []);
     const title = find(commands, "workspace.select.1").title;
     expect(typeof title).toBe("function");
     expect((title as (c: CommandCtx) => string)(makeCtx(state))).toBe(
@@ -308,7 +335,7 @@ describe("registry", () => {
   });
 
   test("palette: hides when-false and palette:false, resolves titles and chips", () => {
-    const state = initialState([]);
+    const state = initialState(FOLDER, []);
     const items = paletteItems(commands, makeCtx(state));
     const ids = items.map((i) => i.id);
     expect(ids).toContain("note.new");

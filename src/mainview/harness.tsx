@@ -11,12 +11,13 @@
 // is index.html, so none of this ships.
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import type { NoteMeta, TrashMeta } from "../shared/rpc-schema";
-import { headingOf, labelOf, slugOf } from "../shared/slug";
+import type { NoteMeta, TrashMeta, WorkspaceRootInfo } from "../shared/rpc-schema";
+import { headingOf, labelOf, slugify, slugOf } from "../shared/slug";
 import { collectHits, type SearchHit } from "../shared/search";
 import { configureBridge } from "./editor/bridge";
 import { configureTerminal } from "./terminal/channel";
 import { configureNotes } from "./notes/channel";
+import { configureWorkspaces, recordWorkspaceKinds } from "./workspace/channel";
 import { configureClipboard } from "./lib/clipboard";
 import { configureAssets } from "./lib/assets";
 import { configureSettings } from "./lib/settings";
@@ -25,21 +26,79 @@ import { configureLayout, restoredState } from "./workspace/persist";
 import "./index.css";
 import App from "./App";
 
-// Paths are opaque handles the view passes back unmodified (architecture.md
-// §2), so fake ones only need to be distinct and stable.
-const ROOT = "/harness/notes";
+// Paths and roots are opaque handles the view passes back unmodified
+// (architecture.md §2), so fake ones only need to be distinct and stable.
+// SCRATCH is the attached-at-boot workspace folder; EXTERNAL starts seeded
+// but UNATTACHED — the fake workspaceAttach returns it, which is what makes
+// the whole attach flow spec-able without the native dialog.
+const SCRATCH = "/harness/scratch";
+const EXTERNAL = "/harness/external";
 
-// bun/notes.ts, condensed to a Map: same naming-by-heading, same enumeration
-// on collision, same move-don't-unlink trash. Behavior the specs assert on
-// (which name a restore lands on, say) mirrors the real store; consult it
-// before changing anything here.
+interface RootData {
+  notes: Map<string, { text: string; mtimeMs: number }>;
+  trash: Map<string, { text: string; deletedAt: number }>;
+}
+
+// bun/notes.ts + bun/workspaces.ts, condensed to Maps: same naming-by-heading,
+// same enumeration on collision, same move-don't-unlink trash, same
+// detach-keeps-the-folder registry. Behavior the specs assert on (which name
+// a restore lands on, that a detached folder's notes survive) mirrors the
+// real store; consult it before changing anything here.
 class FakeStore {
-  notes = new Map<string, { text: string; mtimeMs: number }>();
-  trash = new Map<string, { text: string; deletedAt: number }>();
+  // Every folder that EXISTS (data survives detach); `attached` is the
+  // registry — the subset the app may see.
+  roots = new Map<string, RootData>();
+  attached: string[] = [];
   private clock = 1_700_000_000_000;
 
   private tick(): number {
     return (this.clock += 60_000);
+  }
+
+  ensureRoot(root: string): RootData {
+    let data = this.roots.get(root);
+    if (!data) {
+      data = { notes: new Map(), trash: new Map() };
+      this.roots.set(root, data);
+    }
+    return data;
+  }
+
+  attach(root: string): void {
+    this.ensureRoot(root);
+    if (!this.attached.includes(root)) this.attached.push(root);
+  }
+
+  detach(root: string): boolean {
+    const i = this.attached.indexOf(root);
+    if (i < 0) return false;
+    this.attached.splice(i, 1);
+    return true; // the data stays: detach never deletes
+  }
+
+  workspaceList(): WorkspaceRootInfo[] {
+    return this.attached.map((root) => ({
+      root,
+      kind: root.startsWith("/harness/") && !root.includes("external") ? "managed" : "external",
+      available: true,
+    }));
+  }
+
+  createManaged(name: string): string {
+    const base = slugify(name) ?? "workspace";
+    let root = `/harness/${base}`;
+    for (let n = 2; this.roots.has(root); n += 1) root = `/harness/${base}-${n}`;
+    this.attach(root);
+    return root;
+  }
+
+  // The folder a path belongs to. Every path the view sends came from here,
+  // so an unknown one is a spec bug worth throwing on.
+  private rootOf(path: string): { root: string; data: RootData } {
+    for (const [root, data] of this.roots) {
+      if (path.startsWith(`${root}/`)) return { root, data };
+    }
+    throw new Error(`harness: path outside every root: ${path}`);
   }
 
   private allocate(text: string, taken: Iterable<string>): string {
@@ -50,105 +109,136 @@ class FakeStore {
     return name;
   }
 
-  seed(text: string): void {
-    const path = `${ROOT}/${this.allocate(text, this.notes.keys())}`;
-    this.notes.set(path, { text, mtimeMs: this.tick() });
+  seed(root: string, text: string): void {
+    const data = this.ensureRoot(root);
+    const path = `${root}/${this.allocate(text, data.notes.keys())}`;
+    data.notes.set(path, { text, mtimeMs: this.tick() });
   }
 
-  seedTrash(text: string): void {
-    const path = `${ROOT}/.trash/${this.allocate(text, this.trash.keys())}`;
-    this.trash.set(path, { text, deletedAt: this.tick() });
+  seedTrash(root: string, text: string): void {
+    const data = this.ensureRoot(root);
+    const path = `${root}/.ledge-trash/${this.allocate(text, data.trash.keys())}`;
+    data.trash.set(path, { text, deletedAt: this.tick() });
   }
 
-  private meta(path: string): NoteMeta {
-    const n = this.notes.get(path)!;
+  private meta(data: RootData, path: string): NoteMeta {
+    const n = data.notes.get(path)!;
     return { path, title: labelOf(headingOf(n.text), path), mtimeMs: n.mtimeMs };
   }
 
-  list(): NoteMeta[] {
-    return [...this.notes.keys()].map((p) => this.meta(p)).sort((a, b) => b.mtimeMs - a.mtimeMs);
+  list(root: string): NoteMeta[] {
+    const data = this.ensureRoot(root);
+    return [...data.notes.keys()].map((p) => this.meta(data, p)).sort((a, b) => b.mtimeMs - a.mtimeMs);
   }
 
-  listTrash(): TrashMeta[] {
-    return [...this.trash.entries()]
+  listTrash(root: string): TrashMeta[] {
+    return [...this.ensureRoot(root).trash.entries()]
       .map(([path, t]) => ({ path, title: labelOf(headingOf(t.text), path), deletedAt: t.deletedAt }))
       .sort((a, b) => b.deletedAt - a.deletedAt);
   }
 
-  create(text: string): NoteMeta {
-    const path = `${ROOT}/${this.allocate(text, this.notes.keys())}`;
-    this.notes.set(path, { text, mtimeMs: this.tick() });
-    return this.meta(path);
+  readNote(path: string): string | null {
+    return this.rootOf(path).data.notes.get(path)?.text ?? null;
+  }
+
+  create(root: string, text: string): NoteMeta {
+    const data = this.ensureRoot(root);
+    const path = `${root}/${this.allocate(text, data.notes.keys())}`;
+    data.notes.set(path, { text, mtimeMs: this.tick() });
+    return this.meta(data, path);
   }
 
   write(path: string, text: string): void {
-    this.notes.set(path, { text, mtimeMs: this.tick() });
+    this.rootOf(path).data.notes.set(path, { text, mtimeMs: this.tick() });
   }
 
   retitle(path: string, text: string): NoteMeta {
-    const current = this.notes.get(path)!;
-    const others = [...this.notes.keys()].filter((p) => p !== path);
-    const target = `${ROOT}/${this.allocate(text, others)}`;
-    this.notes.delete(path);
-    this.notes.set(target, current);
-    return this.meta(target);
+    const { root, data } = this.rootOf(path);
+    const current = data.notes.get(path)!;
+    const others = [...data.notes.keys()].filter((p) => p !== path);
+    const target = `${root}/${this.allocate(text, others)}`;
+    data.notes.delete(path);
+    data.notes.set(target, current);
+    return this.meta(data, target);
   }
 
   remove(path: string): string | null {
-    const n = this.notes.get(path);
+    const { root, data } = this.rootOf(path);
+    const n = data.notes.get(path);
     if (!n) return null;
-    this.notes.delete(path);
-    const dest = `${ROOT}/.trash/${this.allocate(n.text, this.trash.keys())}`;
-    this.trash.set(dest, { text: n.text, deletedAt: this.tick() });
+    data.notes.delete(path);
+    // Into the note's OWN root's trash, like the real deleteNote.
+    const dest = `${root}/.ledge-trash/${this.allocate(n.text, data.trash.keys())}`;
+    data.trash.set(dest, { text: n.text, deletedAt: this.tick() });
     return dest;
   }
 
   restore(path: string): NoteMeta {
-    const t = this.trash.get(path)!;
-    this.trash.delete(path);
-    const dest = `${ROOT}/${this.allocate(t.text, this.notes.keys())}`;
-    this.notes.set(dest, { text: t.text, mtimeMs: this.tick() });
-    return this.meta(dest);
+    const { root, data } = this.rootOf(path);
+    const t = data.trash.get(path)!;
+    data.trash.delete(path);
+    const dest = `${root}/${this.allocate(t.text, data.notes.keys())}`;
+    data.notes.set(dest, { text: t.text, mtimeMs: this.tick() });
+    return this.meta(data, dest);
   }
 
   removeTrashed(path: string): boolean {
-    return this.trash.delete(path);
+    return this.rootOf(path).data.trash.delete(path);
   }
 
   // The real searchNotes is listNotes + the shared matcher; the fake composes
-  // the same two pieces, so the semantics cannot drift.
-  search(query: string): Promise<SearchHit[]> {
-    return collectHits(query, this.list(), (p) => this.notes.get(p)?.text ?? null);
+  // the same two pieces (scoped to one root), so the semantics cannot drift.
+  search(root: string, query: string): Promise<SearchHit[]> {
+    return collectHits(query, this.list(root), (p) => this.readNote(p));
   }
 
-  empty(): number {
-    const n = this.trash.size;
-    this.trash.clear();
+  empty(root: string): number {
+    const data = this.ensureRoot(root);
+    const n = data.trash.size;
+    data.trash.clear();
     return n;
   }
 }
 
 const store = new FakeStore();
-store.seed("# Alpha\n\nalpha body\n");
-store.seed("# Beta\n\nbeta body\n");
-store.seed("# Gamma\n\ngamma body\n");
-store.seedTrash("# Older\n\nonce deleted\n");
+store.attach(SCRATCH);
+store.seed(SCRATCH, "# Alpha\n\nalpha body\n");
+store.seed(SCRATCH, "# Beta\n\nbeta body\n");
+store.seed(SCRATCH, "# Gamma\n\ngamma body\n");
+store.seedTrash(SCRATCH, "# Older\n\nonce deleted\n");
+// Unattached, waiting for the fake workspaceAttach below.
+store.seed(EXTERNAL, "# Delta\n\ndelta body, external needle\n");
+store.seed(EXTERNAL, "# Epsilon\n\nepsilon body\n");
 
 configureNotes({
-  list: async () => store.list(),
-  read: async (path) => store.notes.get(path)?.text ?? null,
-  search: (query) => store.search(query),
+  list: async (folder) => store.list(folder),
+  read: async (path) => store.readNote(path),
+  search: (folder, query) => store.search(folder, query),
   write: async (path, text) => store.write(path, text),
-  create: async (text) => store.create(text),
+  create: async (folder, text) => store.create(folder, text),
   retitle: async (path, text) => store.retitle(path, text),
   remove: async (path) => store.remove(path),
-  trash: async () => store.listTrash(),
+  trash: async (folder) => store.listTrash(folder),
   restore: async (path) => store.restore(path),
   removeTrashed: async (path) => store.removeTrashed(path),
-  empty: async () => store.empty(),
+  empty: async (folder) => store.empty(folder),
   // No shells here (see configureBridge below), so params have nothing to
   // configure; the send is simply absorbed.
   configureSession: () => {},
+});
+
+// The registry fake: attach always offers EXTERNAL — the folder the "native
+// dialog" picks — so the attach flow (and close → re-attach, proving nothing
+// was deleted) runs in specs without any dialog. create mirrors
+// createManaged's slug-and-enumerate.
+configureWorkspaces({
+  list: async () => store.workspaceList(),
+  create: async (name) => store.createManaged(name),
+  attach: async () => {
+    store.attach(EXTERNAL);
+    return { root: EXTERNAL, kind: "external", error: null };
+  },
+  detach: async (root) => store.detach(root),
 });
 
 // No PTYs here: runs and the terminal are inert. A spec that needs run
@@ -197,20 +287,22 @@ configureClipboard({
 
 // In-memory image assets, mirroring bun/assets.ts semantics: read serves a
 // seeded map (missing → null, the broken placeholder), pasteImage allocates a
-// fresh name and returns the markdown reference like the real assetPaste. The
-// seeded file is a real 1×1 PNG so the rendered <img> actually loads.
+// fresh name and returns the markdown reference like the real assetPaste.
+// Keyed folder\0src like lib/assets' cache, so the per-workspace scoping is
+// real: the seeded image belongs to SCRATCH and is a real 1×1 PNG so the
+// rendered <img> actually loads.
 const PIXEL_B64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
 const assets = new Map<string, { dataB64: string; mime: string }>([
-  ["assets/dot.png", { dataB64: PIXEL_B64, mime: "image/png" }],
+  [`${SCRATCH}\0assets/dot.png`, { dataB64: PIXEL_B64, mime: "image/png" }],
 ]);
 let pasteCount = 0;
 configureAssets({
-  read: async (src) => assets.get(src) ?? null,
-  pasteImage: async () => {
+  read: async (folder, src) => assets.get(`${folder}\0${src}`) ?? null,
+  pasteImage: async (folder) => {
     pasteCount += 1;
-    const src = `assets/pasted-${pasteCount}.png`;
-    assets.set(src, { dataB64: PIXEL_B64, mime: "image/png" });
+    const src = `.ledge-assets/pasted-${pasteCount}.png`;
+    assets.set(`${folder}\0${src}`, { dataB64: PIXEL_B64, mime: "image/png" });
     return src;
   },
 });
@@ -261,8 +353,20 @@ window.__harness = {
   store,
 };
 
+// Same boot shape as main.tsx: the registry first, then per-folder lists.
+// null layout: a harness run always starts from the seeded notes; restore
+// behavior itself is covered by persist.test.ts, not specs.
+const bootRoots = store.workspaceList();
+recordWorkspaceKinds(bootRoots);
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <App initial={restoredState(null, store.list(), store.listTrash())} />
+    <App
+      initial={restoredState(
+        null,
+        bootRoots,
+        Object.fromEntries(bootRoots.map((r) => [r.root, store.list(r.root)])),
+        Object.fromEntries(bootRoots.map((r) => [r.root, store.listTrash(r.root)])),
+      )}
+    />
   </StrictMode>,
 );

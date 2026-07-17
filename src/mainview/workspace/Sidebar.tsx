@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Plus, X } from "lucide-react";
+import { ChevronDown, Plus, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useCmdHeld } from "@/lib/useCmdHeld";
 import { useListNav } from "@/lib/useListNav";
@@ -65,6 +65,8 @@ function WorkspaceStrip() {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   // The right-click menu: which workspace, and where to anchor it. Null when closed.
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
+  // The + button's dropdown (New Workspace / Attach Folder…). Null when closed.
+  const [addMenu, setAddMenu] = useState<{ x: number; y: number } | null>(null);
   // The workspace whose icon is being picked, and the row the popover hangs off.
   const [pickingId, setPickingId] = useState<string | null>(null);
   const [pickAnchor, setPickAnchor] = useState<HTMLElement | null>(null);
@@ -174,13 +176,42 @@ function WorkspaceStrip() {
         ))}
         {dropIndex === state.workspaces.length && <DropMarker />}
       </div>
-      <button
-        className="flex items-center gap-2 border-t px-3.5 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
-        title={tooltip("workspace.new")}
-        onClick={() => exec("workspace.new")}
-      >
-        <Plus className="size-4" /> New Workspace
-      </button>
+      {/* A split button: the wide half is New Workspace itself, the chevron
+          opens the menu of both ways to add one — the discoverable surface for
+          Attach Folder, which has no chord and would otherwise live only in
+          the palette. The chevron runs no command (it opens a menu), so its
+          hand-written title is allowed (interactions.md §5). */}
+      <div className="flex border-t">
+        <button
+          className="flex flex-1 items-center gap-2 px-3.5 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+          title={tooltip("workspace.new")}
+          onClick={() => exec("workspace.new")}
+        >
+          <Plus className="size-4" /> New Workspace
+        </button>
+        <button
+          aria-label="Add workspace options"
+          title="Add workspace options"
+          className="flex items-center border-l px-2.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+          onClick={(e) => {
+            const r = e.currentTarget.getBoundingClientRect();
+            setAddMenu({ x: Math.max(8, r.right - 200), y: r.bottom + 2 });
+          }}
+        >
+          <ChevronDown className="size-3.5" />
+        </button>
+      </div>
+
+      {addMenu && (
+        <ContextMenu x={addMenu.x} y={addMenu.y} onClose={() => setAddMenu(null)}>
+          <CommandMenuItem id="workspace.new" onClose={() => setAddMenu(null)} />
+          <CommandMenuItem
+            id="workspace.attach"
+            hint="Your folder's .md files become the workspace's notes"
+            onClose={() => setAddMenu(null)}
+          />
+        </ContextMenu>
+      )}
 
       {menu && (
         <ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)}>

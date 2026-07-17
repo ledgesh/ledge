@@ -44,6 +44,12 @@ export interface Workspace {
   id: string;
   name: string;
   symbol: string; // lucide icon key (see Sidebar.tsx)
+  // The workspace's notes folder on disk: an opaque root handle from Bun
+  // (workspace/channel.ts), never a path the view built. Named `folder`
+  // because `root` here is the PANE tree's root. Every tab's note lives under
+  // its own workspace's folder (persist.ts enforces it on restore), and the
+  // browser/quick-open/search are scoped to the selected workspace's.
+  folder: string;
   root: PaneNode;
   focusedPaneId: string;
 }

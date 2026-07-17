@@ -29,46 +29,66 @@ import type { NoteMeta, TrashMeta } from "../../shared/rpc-schema";
 export interface AppState {
   workspaces: Workspace[];
   selectedId: string;
-  // Every note in ~/.ledge, as the note browser and quick-open palette see it.
-  // Held in listNotes order (most recently modified first) because that is what
-  // picks the note to open at boot; the browser sorts a copy by title for
-  // display, since re-sorting by mtime would make rows jump around as you type.
-  notes: NoteMeta[];
-  // The deleted notes still sitting in ~/.ledge/.trash, newest deletion first.
-  // Held here rather than fetched by the Trash section when it opens, so the
-  // count shows on the collapsed header: a trash you have to open to discover
-  // is the one we already had, and it filled up silently.
-  trash: TrashMeta[];
+  // Every known note, PER WORKSPACE FOLDER, as the note browser and quick-open
+  // palette see them (both scoped to the selected workspace). Each list is
+  // held in listNotes order (most recently modified first) because that is
+  // what picks the note to open at boot; the browser sorts a copy by title for
+  // display, since re-sorting by mtime would make rows jump around as you
+  // type. Keyed by folder rather than workspace id because it is a fact about
+  // the folder on disk, and the folder is the stable key persistence speaks.
+  notes: Record<string, NoteMeta[]>;
+  // Each workspace folder's deleted notes still sitting in its .ledge-trash, newest
+  // deletion first. Held here rather than fetched by the Trash section when it
+  // opens, so the count shows on the collapsed header: a trash you have to
+  // open to discover is the one we already had, and it filled up silently.
+  trash: Record<string, TrashMeta[]>;
 }
 
-function makeWorkspace(name: string, tab: TabState): Workspace {
+// Total selectors: an unknown folder is an empty list, never undefined, so
+// components and command `when`s stay branch-free.
+export function notesOf(state: AppState, folder: string): NoteMeta[] {
+  return state.notes[folder] ?? [];
+}
+export function trashOf(state: AppState, folder: string): TrashMeta[] {
+  return state.trash[folder] ?? [];
+}
+
+function makeWorkspace(name: string, folder: string, tab: TabState): Workspace {
   const leaf = makeLeaf(tab);
-  return { id: uid("ws"), name, symbol: DEFAULT_ICON, root: leaf, focusedPaneId: leaf.id };
+  return { id: uid("ws"), name, symbol: DEFAULT_ICON, folder, root: leaf, focusedPaneId: leaf.id };
 }
 
-// The fresh-start launch state, built from the notes already on disk (newest
-// first, as listNotes returns them): one workspace, one note — the one you
-// edited last, or the demo note when the notes folder is empty. That demo note
-// is unsaved like any other new note, so a first launch you do not type in
-// still leaves the folder empty.
+// The fresh-start launch state, built from one workspace folder and the notes
+// already in it (newest first, as listNotes returns them): one workspace, one
+// note — the one you edited last, or the demo note when the folder is empty.
+// That demo note is unsaved like any other new note, so a first launch you do
+// not type in still leaves the folder empty.
 //
 // This is the FALLBACK, not the normal boot: a saved session restores through
 // workspace/persist.ts, and this state is what a first launch (or a corrupt
 // .layout.json) gets instead.
 //
 // Exported for unit tests (store.test.ts); the app goes through WorkspaceProvider.
-export function initialState(notes: NoteMeta[] = [], trash: TrashMeta[] = []): AppState {
+export function initialState(folder: string, notes: NoteMeta[] = [], trash: TrashMeta[] = []): AppState {
   const newest = notes[0];
   const tab = newest ? makeNoteTab(newest.path, newest.title) : makeTab("demo", "Welcome");
-  const first = makeWorkspace("Scratch", tab);
-  return { workspaces: [first], selectedId: first.id, notes, trash };
+  const first = makeWorkspace("Scratch", folder, tab);
+  return {
+    workspaces: [first],
+    selectedId: first.id,
+    notes: { [folder]: notes },
+    trash: { [folder]: trash },
+  };
 }
 
 // --- actions ---------------------------------------------------------------
 
 export type Action =
   | { type: "selectWorkspace"; id: string }
-  | { type: "newWorkspace" }
+  // A workspace whose folder Bun just created or attached (workspace/actions.ts
+  // did the round trip; the reducer stays pure). If some workspace already owns
+  // the folder, it is selected instead of duplicated — one workspace per folder.
+  | { type: "addWorkspace"; name: string; folder: string }
   | { type: "closeWorkspace"; id: string }
   | { type: "renameWorkspace"; id: string; name: string }
   | { type: "setWorkspaceIcon"; id: string; symbol: string }
@@ -81,26 +101,29 @@ export type Action =
   | { type: "splitPane"; dir: SplitDir; paneId?: string }
   | { type: "closePane"; paneId?: string }
   | { type: "setRatio"; splitId: string; ratio: number }
-  // A note's first save allocated it a file. Fired from notes/store.ts, so the
-  // tab picks up its path and shows the filename it was saved under.
-  | { type: "noteCreated"; docId: string; note: NoteMeta }
+  // A note's first save allocated it a file in `folder` (the tab's workspace).
+  // Fired from notes/store.ts via PaneTree, so the tab picks up its path and
+  // shows the filename it was saved under.
+  | { type: "noteCreated"; docId: string; folder: string; note: NoteMeta }
   // Open a note from the browser or the palette, or focus its tab if it is
   // already open somewhere.
   | { type: "openNote"; note: NoteMeta }
-  // The notes folder was re-read (at window focus). Replaces the known list.
-  | { type: "notesLoaded"; notes: NoteMeta[] }
+  // One workspace folder was re-read (at window focus). Replaces that folder's
+  // known list and no other's.
+  | { type: "notesLoaded"; folder: string; notes: NoteMeta[] }
   // A note's file moved. `path` is where it was; `note` is where it is now. Fired
   // from notes/actions.ts once Bun has done the rename, never before: the tab must
   // not show a name the file does not have.
   | { type: "noteRenamed"; path: string; note: NoteMeta }
   // A note's file is gone (trashed). Closes its tabs wherever they are.
   | { type: "noteDeleted"; path: string }
-  // The trash was re-read (at boot and at every folder refresh).
-  | { type: "trashLoaded"; items: TrashMeta[] }
-  // A trashed note came back, via Undo or the Restore button. `note` is where it
-  // landed, which need not be where it was deleted from: its old name may have
-  // been taken since. Its tabs are NOT reopened; it simply rejoins the browser.
-  | { type: "noteRestored"; note: NoteMeta }
+  // One workspace folder's trash was re-read (at boot and at every refresh).
+  | { type: "trashLoaded"; folder: string; items: TrashMeta[] }
+  // A trashed note came back to its folder, via Undo or the Restore button.
+  // `note` is where it landed, which need not be the name it was deleted
+  // under: its old name may have been taken since. Its tabs are NOT reopened;
+  // it simply rejoins the browser.
+  | { type: "noteRestored"; folder: string; note: NoteMeta }
   // What a note is called on screen changed: its H1 was edited (or removed, and
   // the label fell back to the filename). Separate from noteRenamed because a
   // heading can change without the slug changing, and then no file moves at all.
@@ -115,6 +138,30 @@ function withSelected(state: AppState, fn: (ws: Workspace) => Workspace): AppSta
   };
 }
 
+// Rewrite every folder's note list via `fn`, preserving identity when nothing
+// changed. Paths are globally unique (each lives under exactly one folder), so
+// per-path updates need no folder key from the caller — the scan is over a
+// handful of small lists.
+function mapNoteLists(
+  lists: Record<string, NoteMeta[]>,
+  fn: (n: NoteMeta) => NoteMeta | null,
+): Record<string, NoteMeta[]> {
+  let touched = false;
+  const out: Record<string, NoteMeta[]> = {};
+  for (const [folder, notes] of Object.entries(lists)) {
+    let changed = false;
+    const next: NoteMeta[] = [];
+    for (const n of notes) {
+      const m = fn(n);
+      if (m !== n) changed = true;
+      if (m !== null) next.push(m);
+    }
+    out[folder] = changed ? next : notes;
+    if (changed) touched = true;
+  }
+  return touched ? out : lists;
+}
+
 // Exported for unit tests (store.test.ts).
 export function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
@@ -123,22 +170,41 @@ export function reducer(state: AppState, action: Action): AppState {
         ? { ...state, selectedId: action.id }
         : state;
 
-    case "newWorkspace": {
-      const n = state.workspaces.length + 1;
-      const ws = makeWorkspace(`Workspace ${n}`, makeTab("scratch"));
-      return { ...state, workspaces: [...state.workspaces, ws], selectedId: ws.id };
+    case "addWorkspace": {
+      // One workspace per folder: re-adding (attaching a folder that is
+      // already a workspace) selects the existing one, openNote's move.
+      const existing = state.workspaces.find((w) => w.folder === action.folder);
+      if (existing) return { ...state, selectedId: existing.id };
+      const ws = makeWorkspace(action.name, action.folder, makeTab("scratch"));
+      return {
+        ...state,
+        workspaces: [...state.workspaces, ws],
+        selectedId: ws.id,
+        // Seed the folder's lists if boot did not already know it (a freshly
+        // created folder is empty; an attached one is loaded right after by
+        // workspace/actions.ts).
+        notes: state.notes[action.folder] ? state.notes : { ...state.notes, [action.folder]: [] },
+        trash: state.trash[action.folder] ? state.trash : { ...state.trash, [action.folder]: [] },
+      };
     }
 
     case "closeWorkspace": {
       if (state.workspaces.length <= 1) return state;
       const idx = state.workspaces.findIndex((w) => w.id === action.id);
       if (idx < 0) return state;
+      const closing = state.workspaces[idx];
       const workspaces = state.workspaces.filter((w) => w.id !== action.id);
       const selectedId =
         state.selectedId === action.id
           ? workspaces[Math.min(idx, workspaces.length - 1)].id
           : state.selectedId;
-      return { ...state, workspaces, selectedId };
+      // Drop the folder's lists with it (one workspace per folder, so nothing
+      // else reads them). The files stay on disk; only the view forgets.
+      const notes = { ...state.notes };
+      const trash = { ...state.trash };
+      delete notes[closing.folder];
+      delete trash[closing.folder];
+      return { ...state, workspaces, selectedId, notes, trash };
     }
 
     case "renameWorkspace": {
@@ -267,15 +333,16 @@ export function reducer(state: AppState, action: Action): AppState {
         touched = true;
         return { ...ws, root };
       });
-      // The new file belongs in the browser immediately, not at the next refresh.
-      // Newest first, matching listNotes order.
-      const known = state.notes.some((n) => n.path === action.note.path);
-      const notes = known ? state.notes : [action.note, ...state.notes];
+      // The new file belongs in its folder's browser immediately, not at the
+      // next refresh. Newest first, matching listNotes order.
+      const list = state.notes[action.folder] ?? [];
+      const known = list.some((n) => n.path === action.note.path);
+      const notes = known ? state.notes : { ...state.notes, [action.folder]: [action.note, ...list] };
       return touched || !known ? { ...state, workspaces, notes } : state;
     }
 
     case "notesLoaded":
-      return { ...state, notes: action.notes };
+      return { ...state, notes: { ...state.notes, [action.folder]: action.notes } };
 
     case "noteRenamed": {
       // The docId is untouched, so the editor, its undo history, and the note's
@@ -287,7 +354,9 @@ export function reducer(state: AppState, action: Action): AppState {
         );
         return root === ws.root ? ws : { ...ws, root };
       });
-      const notes = state.notes.map((n) => (n.path === action.path ? action.note : n));
+      // A rename never crosses folders, so the row updates in place wherever
+      // its path is found (paths are globally unique).
+      const notes = mapNoteLists(state.notes, (n) => (n.path === action.path ? action.note : n));
       return { ...state, workspaces, notes };
     }
 
@@ -306,7 +375,7 @@ export function reducer(state: AppState, action: Action): AppState {
       });
       const notes = path === null
         ? state.notes
-        : state.notes.map((n) => (n.path === path ? { ...n, title: action.label } : n));
+        : mapNoteLists(state.notes, (n) => (n.path === path ? { ...n, title: action.label } : n));
       return { ...state, workspaces, notes };
     }
 
@@ -318,19 +387,23 @@ export function reducer(state: AppState, action: Action): AppState {
       // Closing the tabs is what drops their docIds out of the live set, which is
       // what App's reconciliation effect turns into an editor teardown and a
       // closeSession for the note's shells.
-      return { ...state, workspaces, notes: state.notes.filter((n) => n.path !== action.path) };
+      return { ...state, workspaces, notes: mapNoteLists(state.notes, (n) => (n.path === action.path ? null : n)) };
     }
 
     case "trashLoaded":
-      return { ...state, trash: action.items };
+      return { ...state, trash: { ...state.trash, [action.folder]: action.items } };
 
     case "noteRestored": {
-      if (state.notes.some((n) => n.path === action.note.path)) return state;
+      const list = state.notes[action.folder] ?? [];
+      if (list.some((n) => n.path === action.note.path)) return state;
       // Re-sorted rather than pushed to the front: a restored note keeps its real
       // last-edited time (the trash records the deletion in ctime and leaves mtime
-      // alone), so it belongs wherever that puts it. This list is held in listNotes
+      // alone), so it belongs wherever that puts it. The list is held in listNotes
       // order, and a refresh would put it there anyway.
-      const notes = [...state.notes, action.note].sort((a, b) => b.mtimeMs - a.mtimeMs);
+      const notes = {
+        ...state.notes,
+        [action.folder]: [...list, action.note].sort((a, b) => b.mtimeMs - a.mtimeMs),
+      };
       return { ...state, notes };
     }
 

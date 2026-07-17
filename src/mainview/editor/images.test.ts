@@ -47,11 +47,14 @@ describe("imageSrcOf", () => {
   });
 
   test("a note-relative image path is an asset", () => {
-    expect(imageSrcOf("assets/pasted-2026-07-17.png")).toEqual({
+    // The app's own dir (what assetPaste returns) — the one accepted dot-entry —
+    // and any plain relative path, e.g. an attached folder's own images.
+    expect(imageSrcOf(".ledge-assets/pasted-2026-07-17.png")).toEqual({
       kind: "asset",
-      path: "assets/pasted-2026-07-17.png",
+      path: ".ledge-assets/pasted-2026-07-17.png",
     });
     expect(imageSrcOf("assets/photo.JPG")).toEqual({ kind: "asset", path: "assets/photo.JPG" });
+    expect(imageSrcOf("img/shot.png")).toEqual({ kind: "asset", path: "img/shot.png" });
   });
 
   test("non-http schemes are refused — file: is the one that matters", () => {
@@ -63,7 +66,10 @@ describe("imageSrcOf", () => {
     expect(imageSrcOf("/etc/passwd.png")).toBeNull();
     expect(imageSrcOf("../outside.png")).toBeNull();
     expect(imageSrcOf("assets/../../x.png")).toBeNull();
-    expect(imageSrcOf(".trash/x.png")).toBeNull();
+    expect(imageSrcOf(".ledge-trash/x.png")).toBeNull();
+    // The assets-dir exception is first-segment only, matching assetPathOf.
+    expect(imageSrcOf(".ledge-assets/.hidden.png")).toBeNull();
+    expect(imageSrcOf("sub/.ledge-assets/x.png")).toBeNull();
   });
 
   test("a relative path without an image extension is not attempted", () => {
@@ -89,9 +95,9 @@ describe("imageModels", () => {
   });
 
   test("an empty alt models as empty — the pasted-image form", () => {
-    const [m] = models("![](assets/pasted-2026-07-17.png)\n");
+    const [m] = models("![](.ledge-assets/pasted-2026-07-17.png)\n");
     expect(m!.alt).toBe("");
-    expect(m!.src).toEqual({ kind: "asset", path: "assets/pasted-2026-07-17.png" });
+    expect(m!.src).toEqual({ kind: "asset", path: ".ledge-assets/pasted-2026-07-17.png" });
   });
 
   test("surrounding whitespace still counts as alone", () => {
@@ -123,7 +129,7 @@ describe("imageModels", () => {
 });
 
 describe("imagePasteInsert", () => {
-  const at = (text: string, pos: number, src = "assets/p.png") =>
+  const at = (text: string, pos: number, src = ".ledge-assets/p.png") =>
     imagePasteInsert(doc(text), { from: pos, to: pos }, src);
 
   // The trailing newline and the caret-after-it are the rule everywhere: the
@@ -132,27 +138,27 @@ describe("imagePasteInsert", () => {
 
   test("on a blank line: bare markdown plus the trailing break, caret below", () => {
     const { insert, cursor } = at("abc\n\n", 4);
-    expect(insert).toBe("![](assets/p.png)\n");
+    expect(insert).toBe("![](.ledge-assets/p.png)\n");
     expect(cursor).toBe(insert.length);
   });
 
   test("mid-line it breaks onto its own line on both sides", () => {
     const text = "hello world\n";
     const { insert, cursor } = at(text, 5);
-    expect(insert).toBe("\n![](assets/p.png)\n");
+    expect(insert).toBe("\n![](.ledge-assets/p.png)\n");
     expect(cursor).toBe(insert.length);
   });
 
   test("at the end of a nonempty line a leading break is added too", () => {
     const { insert, cursor } = at("hello\n", 5);
-    expect(insert).toBe("\n![](assets/p.png)\n");
+    expect(insert).toBe("\n![](.ledge-assets/p.png)\n");
     expect(cursor).toBe(insert.length);
   });
 
   test("replacing a selection keeps the line rule against what survives", () => {
     // "world" is selected; "hello " remains before it on the line.
     const text = "hello world\n";
-    const { insert } = imagePasteInsert(doc(text), { from: 6, to: 11 }, "assets/p.png");
-    expect(insert).toBe("\n![](assets/p.png)\n");
+    const { insert } = imagePasteInsert(doc(text), { from: 6, to: 11 }, ".ledge-assets/p.png");
+    expect(insert).toBe("\n![](.ledge-assets/p.png)\n");
   });
 });
