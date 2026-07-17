@@ -50,6 +50,7 @@ function fakeBridge() {
   configureNotes({
     list: async () => [],
     read: async () => null,
+    search: async () => [],
     write: async (path, text) => {
       if (state.gate) await state.gate.promise;
       if (state.failNextWrite) {

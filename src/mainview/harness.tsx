@@ -13,6 +13,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import type { NoteMeta, TrashMeta } from "../shared/rpc-schema";
 import { headingOf, labelOf, slugOf } from "../shared/slug";
+import { collectHits, type SearchHit } from "../shared/search";
 import { configureBridge } from "./editor/bridge";
 import { configureTerminal } from "./terminal/channel";
 import { configureNotes } from "./notes/channel";
@@ -114,6 +115,12 @@ class FakeStore {
     return this.trash.delete(path);
   }
 
+  // The real searchNotes is listNotes + the shared matcher; the fake composes
+  // the same two pieces, so the semantics cannot drift.
+  search(query: string): Promise<SearchHit[]> {
+    return collectHits(query, this.list(), (p) => this.notes.get(p)?.text ?? null);
+  }
+
   empty(): number {
     const n = this.trash.size;
     this.trash.clear();
@@ -130,6 +137,7 @@ store.seedTrash("# Older\n\nonce deleted\n");
 configureNotes({
   list: async () => store.list(),
   read: async (path) => store.notes.get(path)?.text ?? null,
+  search: (query) => store.search(query),
   write: async (path, text) => store.write(path, text),
   create: async (text) => store.create(text),
   retitle: async (path, text) => store.retitle(path, text),

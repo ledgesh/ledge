@@ -25,6 +25,7 @@ import {
   readNote,
   restoreNote,
   retitleNote,
+  searchNotes,
   writeNote,
 } from "./notes";
 
@@ -93,6 +94,43 @@ describe("listNotes", () => {
     await writeFile(join(TRASH_DIR, "deleted.md"), "# Deleted\n");
     await writeFile(join(NOTES_ROOT, ".stray.md"), "# Stray\n");
     expect((await listNotes()).map((n) => n.title)).toEqual(["Visible"]);
+  });
+});
+
+describe("searchNotes", () => {
+  test("finds a match in any note's body and says where it sits", async () => {
+    await createNote("# Recipes\n\nbring the stock to a boil\n");
+    await createNote("# Plans\n\nnothing to see\n");
+    const hits = await searchNotes("STOCK");
+    expect(hits).toEqual([
+      {
+        path: join(NOTES_ROOT, "recipes.md"),
+        title: "Recipes",
+        mtimeMs: expect.any(Number),
+        line: 3,
+        snippet: "bring the stock to a boil",
+        col: "bring the ".length,
+      },
+    ]);
+  });
+
+  test("hits arrive newest note first, the order listNotes shows", async () => {
+    const old = await createNote("# Old\n\nshared term\n");
+    await createNote("# New\n\nshared term\n");
+    await utimes(old.path, new Date(0), new Date(0));
+    expect((await searchNotes("shared term")).map((h) => h.title)).toEqual(["New", "Old"]);
+  });
+
+  test("what is invisible to listNotes is invisible to search: trash and dot-entries", async () => {
+    await deleteNote((await createNote("# Deleted\n\nsecret needle\n")).path);
+    await writeFile(join(NOTES_ROOT, ".stray.md"), "secret needle\n");
+    expect(await searchNotes("secret needle")).toEqual([]);
+  });
+
+  test("an empty query matches nothing, not every line of every note", async () => {
+    await createNote("# Something\n\nbody\n");
+    expect(await searchNotes("")).toEqual([]);
+    expect(await searchNotes("   ")).toEqual([]);
   });
 });
 

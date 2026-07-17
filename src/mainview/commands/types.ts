@@ -28,7 +28,7 @@ export interface UiHooks {
   toggleTerminal(): void;
   closeTerminal(): void;
   toggleSidebar(): void;
-  openOverlay(mode: "notes" | "commands"): void;
+  openOverlay(mode: "notes" | "commands" | "search"): void;
   beginRenameWorkspace(id: string): void;
   // Open the icon picker on a workspace, anchored to its row in the strip.
   pickWorkspaceIcon(id: string): void;

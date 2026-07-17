@@ -8,13 +8,14 @@
 // host into the newly-visible pane; it never destroys the view. A view is torn
 // down only when its tab is closed (releaseEditor).
 import { Transaction } from "@codemirror/state";
-import type { EditorView } from "@codemirror/view";
+import { EditorView } from "@codemirror/view";
 import { createEditor } from "../editor/setup";
 import { handleRunEvent, pingOverlay } from "../editor/blocks";
 import { onRunEvent } from "../editor/bridge";
 import { fromDisk } from "../editor/session";
 import { readNote } from "../notes/channel";
-import { bindDoc, releaseDoc, seedSlug, type DocHandlers } from "../notes/store";
+import { bindDoc, docIdAt, releaseDoc, seedSlug, type DocHandlers } from "../notes/store";
+import { revealSelection } from "./reveal";
 import type { RunEvent } from "../../shared/rpc-schema";
 import type { TabState } from "./tree";
 
@@ -66,6 +67,50 @@ interface Entry {
 
 const pool = new Map<string, Entry>();
 
+// --- search reveals ---------------------------------------------------------
+//
+// "Open this note AND show me the matched line" from the search overlay.
+// Keyed by path, not docId: the hit's path is the only handle the overlay
+// holds — the docId does not exist until the tab opens. One-shot: a request is
+// consumed by the first editor that can honor it, so a stale one can never
+// yank the selection around on some later tab switch.
+const pendingReveals = new Map<string, { line: number; query: string }>();
+
+export function requestReveal(path: string, line: number, query: string): void {
+  // A note already open with its text on screen gets the reveal immediately:
+  // its tab may already be the active one, in which case no attach — the
+  // other consumer below — will ever revisit it. A detached (background-tab)
+  // editor waits for its attach instead: CodeMirror measures scroll targets
+  // against live geometry, which a detached host does not have.
+  const docId = docIdAt(path);
+  const entry = docId ? pool.get(docId) : undefined;
+  if (entry && entry.host.isConnected) {
+    applyReveal(entry.view, { line, query });
+    return;
+  }
+  pendingReveals.set(path, { line, query });
+}
+
+function takeReveal(path: string, view: EditorView): void {
+  const req = pendingReveals.get(path);
+  if (!req) return;
+  pendingReveals.delete(path);
+  applyReveal(view, req);
+}
+
+function applyReveal(view: EditorView, req: { line: number; query: string }): void {
+  const sel = revealSelection(view.state.doc, req.line, req.query);
+  view.dispatch({
+    selection: { anchor: sel.anchor, head: sel.head },
+    effects: EditorView.scrollIntoView(sel.anchor, { y: "center" }),
+  });
+  // A reveal is "take me there": the caret belongs on the match. Focus is also
+  // what makes the selection visible — and when the hit's note was already the
+  // active tab, nothing else (PaneTree's focus effect keys on the docId, which
+  // did not change) would put it in the editor.
+  view.focus();
+}
+
 // Pour a note's saved text into its (empty, freshly-created) editor. The read is
 // async, so the editor exists first and the content arrives a beat later; the
 // alternative, holding the pane blank until the file lands, would make every tab
@@ -88,17 +133,19 @@ async function loadNote(docId: string, path: string): Promise<void> {
     changes: { from: 0, to: entry.view.state.doc.length, insert: text },
     annotations: [fromDisk.of(true), Transaction.addToHistory.of(false)],
   });
+  // Only now is there text for a search reveal to land on.
+  takeReveal(path, entry.view);
 }
 
 // Get (creating on first use) the pooled editor for a tab's note. The returned
 // host is a detached <div> until attachEditor parents it into a pane.
-function acquire(tab: TabState, handlers: DocHandlers): Entry {
+function acquire(tab: TabState, handlers: DocHandlers): { entry: Entry; created: boolean } {
   const { docId } = tab;
   // Rebind on every acquire: the entry may predate this callback's closure, and
   // an already-open note keeps whatever dirty state, path, and seeded slug it has.
   bindDoc(docId, tab.path, handlers);
   const existing = pool.get(docId);
-  if (existing) return existing;
+  if (existing) return { entry: existing, created: false };
 
   const host = document.createElement("div");
   host.className = "ledge-editor-host";
@@ -112,7 +159,7 @@ function acquire(tab: TabState, handlers: DocHandlers): Entry {
   const entry: Entry = { host, view, offRun, ro };
   pool.set(docId, entry);
   if (tab.path) void loadNote(docId, tab.path);
-  return entry;
+  return { entry, created: true };
 }
 
 // Parent the editor's host into `container` and re-pin its overlay. Returns the
@@ -120,10 +167,14 @@ function acquire(tab: TabState, handlers: DocHandlers): Entry {
 // note's name can move: its file appearing or being renamed to follow its H1
 // (onFile), and its on-screen label changing (onTitle).
 export function attachEditor(container: HTMLElement, tab: TabState, handlers: DocHandlers): EditorView {
-  const entry = acquire(tab, handlers);
+  const { entry, created } = acquire(tab, handlers);
   if (entry.host.parentElement !== container) container.appendChild(entry.host);
   entry.view.requestMeasure();
   pingOverlay(entry.view);
+  // A reveal aimed at a background tab lands on its attach. Only a pre-existing
+  // editor: a freshly created one is still empty (its text arrives async in
+  // loadNote, which consumes the request once there are lines to reveal).
+  if (!created && tab.path) takeReveal(tab.path, entry.view);
   return entry.view;
 }
 

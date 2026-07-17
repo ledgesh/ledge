@@ -14,6 +14,7 @@ import { mkdir, readdir, readFile, rename, stat, unlink, writeFile } from "node:
 import type { Stats } from "node:fs";
 import type { NoteMeta, TrashMeta } from "../shared/rpc-schema";
 import { headingOf, labelOf, slugOf, titleOf } from "../shared/slug";
+import { collectHits, type SearchHit } from "../shared/search";
 
 // Overridable so a test (or a throwaway run) can point the store at a scratch
 // folder instead of the real notes. Nothing in the app sets it.
@@ -144,6 +145,18 @@ export async function listNotes(): Promise<NoteMeta[]> {
   };
   await walk(NOTES_ROOT);
   return out.sort((a, b) => b.mtimeMs - a.mtimeMs);
+}
+
+// Full-text search over every note's body (shared/search.ts owns the matching
+// grammar and the caps). Built on listNotes rather than its own walk, so what
+// is searchable and what is listed can never disagree — dot-entries and the
+// trash stay invisible here because they are invisible there. Reading bodies
+// whole is deliberate: the label path's HEAD_BYTES economy is about not
+// reading blobs to *name* a note, and searching inside them is exactly the
+// job that has to. readNote's null (a note deleted mid-scan) costs that note
+// and nothing else.
+export async function searchNotes(query: string): Promise<SearchHit[]> {
+  return collectHits(query, await listNotes(), (path) => readNote(path));
 }
 
 // Read a note, or null if it is gone (deleted behind our back, say).

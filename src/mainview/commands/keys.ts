@@ -28,6 +28,12 @@ export const COMMANDS = {
   "note.new": { title: "New Note", keys: ["Mod-n", "Mod-t"] },
   "palette.notes": { title: "Go to Note…", keys: ["Mod-p"] },
   "palette.commands": { title: "Command Palette…", keys: ["Mod-Shift-p"] },
+  // Full-text search across note bodies, in the same overlay (typing "#" first
+  // in ⌘P is the sigil route, like ">" for commands). ⌥⌘P as the ⌥-variant of
+  // quick-open: the shift-scope rule would want ⇧⌘F (find, but across notes),
+  // but ⇧⌘F is the editor's working replace fallback under cmux (see
+  // editor.replace below) and search must stay reachable from editor focus.
+  "palette.search": { title: "Search Notes…", keys: ["Alt-Mod-p"] },
 
   // Tabs. ⌘W closes the focused pane's active tab; ⇧⌘W is the pane (the
   // "bigger scope" shift rule).

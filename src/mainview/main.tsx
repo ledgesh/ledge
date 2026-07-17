@@ -88,6 +88,7 @@ configureAssets({
 configureNotes({
   list: () => electrobun.rpc!.request.noteList({}).then((r) => r.notes),
   read: (path) => electrobun.rpc!.request.noteRead({ path }).then((r) => r.text),
+  search: (query) => electrobun.rpc!.request.noteSearch({ query }).then((r) => r.hits),
   write: async (path, text) => {
     await electrobun.rpc!.request.noteWrite({ path, text });
   },

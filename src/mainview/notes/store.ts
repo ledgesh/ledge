@@ -108,6 +108,16 @@ export function bindDoc(docId: string, path: string | null, handlers: DocHandler
   });
 }
 
+// The docId currently bound to a note's file, or null when no open tab holds
+// it. Path → docId is one-to-one in practice (openNote focuses an existing tab
+// rather than opening a second on the same path), so the first match is the
+// match. Used by the editor pool to land a search reveal on an already-open
+// note, whose editor no attach will revisit.
+export function docIdAt(path: string): string | null {
+  for (const e of docs.values()) if (e.path === path) return e.docId;
+  return null;
+}
+
 // Record the heading a note already has on disk, without renaming anything. Called
 // as a note's saved text lands in its editor (editorPool.loadNote).
 //

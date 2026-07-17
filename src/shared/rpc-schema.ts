@@ -4,6 +4,7 @@
 
 import type { Settings } from "./settings";
 import type { NoteParams } from "./frontmatter";
+import type { SearchHit } from "./search";
 
 /** A streamed update about one running block, pushed Bun -> webview. */
 export type RunEvent =
@@ -67,6 +68,15 @@ export type LedgeRPC = {
       // Responds with where the note landed, which is the handle Undo restores
       // from, or null if there was nothing there to delete.
       noteDelete: { params: { path: string }; response: { trashed: string | null } };
+      // Full-text search over note bodies: the query as one case-insensitive
+      // substring (shared/search.ts owns the grammar and the caps). Sent,
+      // debounced, as the search overlay's query changes. Bun owns the scan
+      // because the files are its to read — shipping every body across the RPC
+      // to search view-side would scale the payload with the notes folder
+      // instead of the result list. Hits arrive newest note first, each
+      // carrying the note plus the matched line, so the view can list, open,
+      // and reveal without a second request.
+      noteSearch: { params: { query: string }; response: { hits: SearchHit[] } };
       // The deleted notes still recoverable, newest first. Read at boot and at
       // every folder refresh, alongside noteList: the count is on screen whether
       // or not the section is expanded, so the trash cannot quietly fill up.

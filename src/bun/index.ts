@@ -24,6 +24,7 @@ import {
   readNote,
   restoreNote,
   retitleNote,
+  searchNotes,
   writeNote,
 } from "./notes";
 import { readLayout, writeLayout } from "./layout";
@@ -240,6 +241,7 @@ const rpc = BrowserView.defineRPC<LedgeRPC>({
       noteCreate: async ({ text }) => ({ note: await createNote(text) }),
       noteRetitle: async ({ path, text }) => ({ note: await retitleNote(path, text) }),
       noteDelete: async ({ path }) => ({ trashed: await deleteNote(path) }),
+      noteSearch: async ({ query }) => ({ hits: await searchNotes(query) }),
       trashList: async () => ({ items: await listTrash() }),
       trashRestore: async ({ path }) => ({ note: await restoreNote(path) }),
       trashDelete: async ({ path }) => ({ removed: await deleteTrashed(path) }),

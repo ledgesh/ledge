@@ -1,21 +1,29 @@
-// The unified quick-open overlay: one component, two modes.
+// The unified quick-open overlay: one component, three modes.
 //
-// ⌘P opens in notes mode (fuzzy-open a note, the old QuickOpen); ⇧⌘P opens in
-// commands mode (every palette-visible command with its key chip). Typing ">"
-// as the first character of notes mode switches to commands — the VS Code
-// convention — and Backspace over it switches back. Only the first typed
-// character triggers the switch, so a note whose title contains ">" stays
-// findable, and ⇧⌘P is always a direct route to commands.
+// ⌘P opens in notes mode (fuzzy-open a note by title, the old QuickOpen);
+// ⇧⌘P opens in commands mode (every palette-visible command with its key
+// chip); ⌥⌘P opens in search mode (full-text over note bodies, via the
+// noteSearch RPC). Typing ">" as the first character of notes mode switches to
+// commands — the VS Code convention — and "#" switches to search; Backspace
+// over the sigil switches back. Only the first typed character triggers a
+// switch, so a note whose title contains either character stays findable, and
+// the direct chords always land in their mode.
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Command as CommandIcon, FileText } from "lucide-react";
+import { Command as CommandIcon, FileText, TextSearch } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useWorkspace } from "@/workspace/store";
 import { filterNotes, fuzzyFilter } from "@/notes/fuzzy";
+import { searchNotes, type SearchHit } from "@/notes/channel";
+import { requestReveal } from "@/workspace/editorPool";
 import { pushLayer } from "./layers";
 import { useCommands } from "./CommandProvider";
 import { paletteItems, type PaletteItem } from "./registry";
 
-export type OverlayMode = "notes" | "commands";
+export type OverlayMode = "notes" | "commands" | "search";
+
+// How long a keystroke burst can run before the RPC fires. Short enough that
+// results feel live, long enough that "shipping" is one scan, not eight.
+const SEARCH_DEBOUNCE_MS = 80;
 
 export function Overlay({ initialMode, onClose }: { initialMode: OverlayMode; onClose: () => void }) {
   const { state, dispatch } = useWorkspace();
@@ -25,14 +33,44 @@ export function Overlay({ initialMode, onClose }: { initialMode: OverlayMode; on
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
-  const isCommands = initialMode === "commands" || query.startsWith(">");
-  // Strip the mode-switch ">" before filtering; a direct ⇧⌘P open has none.
-  const q = isCommands && initialMode === "notes" ? query.slice(1) : query;
+  // The sigils only fire as the first character of notes mode; the direct
+  // chords are unconditional.
+  const sigil = initialMode === "notes" ? (query.startsWith(">") ? "commands" : query.startsWith("#") ? "search" : null) : null;
+  const mode: OverlayMode = sigil ?? initialMode;
+  const isCommands = mode === "commands";
+  const isSearch = mode === "search";
+  // Strip the mode-switch sigil before filtering; a direct chord open has none.
+  const q = sigil ? query.slice(1) : query;
 
   const notes = useMemo(
-    () => (isCommands ? [] : filterNotes(q, state.notes)),
-    [isCommands, q, state.notes],
+    () => (mode === "notes" ? filterNotes(q, state.notes) : []),
+    [mode, q, state.notes],
   );
+
+  // Search mode asks Bun, debounced, and guards against answers landing out of
+  // order: only the reply to the query still on screen may set the list.
+  const [hits, setHits] = useState<SearchHit[]>([]);
+  useEffect(() => {
+    if (!isSearch || q.trim() === "") {
+      setHits([]);
+      return;
+    }
+    let stale = false;
+    const timer = setTimeout(() => {
+      searchNotes(q).then(
+        (h) => {
+          if (!stale) setHits(h);
+        },
+        () => {
+          if (!stale) setHits([]);
+        },
+      );
+    }, SEARCH_DEBOUNCE_MS);
+    return () => {
+      stale = true;
+      clearTimeout(timer);
+    };
+  }, [isSearch, q]);
   const items = useMemo<PaletteItem[]>(() => {
     if (!isCommands) return [];
     const visible = paletteItems(commands, ctx());
@@ -44,7 +82,7 @@ export function Overlay({ initialMode, onClose }: { initialMode: OverlayMode; on
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isCommands, q, commands, state]);
 
-  const count = isCommands ? items.length : notes.length;
+  const count = isCommands ? items.length : isSearch ? hits.length : notes.length;
   // A stale index from a longer result set would point past the end.
   const active = Math.min(index, Math.max(count - 1, 0));
 
@@ -71,6 +109,14 @@ export function Overlay({ initialMode, onClose }: { initialMode: OverlayMode; on
       // the overlay's focus out of the way before they act.
       onClose();
       exec(item.id);
+    } else if (isSearch) {
+      const hit = hits[i];
+      if (!hit) return;
+      // The reveal is registered before the open: openNote's render is what
+      // attaches (or creates) the editor the reveal lands in.
+      requestReveal(hit.path, hit.line, q);
+      dispatch({ type: "openNote", note: { path: hit.path, title: hit.title, mtimeMs: hit.mtimeMs } });
+      onClose();
     } else {
       const note = notes[i];
       if (!note) return;
@@ -106,7 +152,13 @@ export function Overlay({ initialMode, onClose }: { initialMode: OverlayMode; on
         <input
           ref={inputRef}
           value={query}
-          placeholder={isCommands ? "Run a command" : "Search notes  (> for commands)"}
+          placeholder={
+            isCommands
+              ? "Run a command"
+              : isSearch
+                ? "Search inside notes"
+                : "Search notes  (> commands · # in text)"
+          }
           spellCheck={false}
           // WKWebView applies autocorrect/autocapitalize to a bare <input> and
           // mangles what you type ("sh" becomes "Sh"). `autocorrect` is WebKit-only
@@ -127,9 +179,13 @@ export function Overlay({ initialMode, onClose }: { initialMode: OverlayMode; on
             <p className="px-2.5 py-3 text-center text-[11px] text-muted-foreground">
               {isCommands
                 ? "No matching commands"
-                : state.notes.length === 0
-                  ? "No notes yet"
-                  : "No notes match"}
+                : isSearch
+                  ? q.trim() === ""
+                    ? "Type to search every note's text"
+                    : "No matches"
+                  : state.notes.length === 0
+                    ? "No notes yet"
+                    : "No notes match"}
             </p>
           ) : isCommands ? (
             items.map((item, i) => {
@@ -161,6 +217,36 @@ export function Overlay({ initialMode, onClose }: { initialMode: OverlayMode; on
                       {item.chip}
                     </span>
                   )}
+                </div>
+              );
+            })
+          ) : isSearch ? (
+            hits.map((hit, i) => {
+              // The snippet with its match set off: col/length index the query
+              // inside it (shared/search.ts windows long lines around it).
+              const len = q.trim().length;
+              return (
+                <div
+                  key={`${hit.path}:${hit.line}`}
+                  data-active={i === active ? "" : undefined}
+                  className={cn(
+                    "flex cursor-default items-center gap-2 rounded px-2.5 py-1.5",
+                    i === active && "bg-accent",
+                  )}
+                  onMouseMove={() => setIndex(i)}
+                  onClick={() => open(i)}
+                >
+                  <TextSearch className="size-3.5 shrink-0 text-muted-foreground" />
+                  <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
+                    {hit.snippet.slice(0, hit.col)}
+                    <span className="rounded-[2px] bg-primary/15 font-medium text-foreground">
+                      {hit.snippet.slice(hit.col, hit.col + len)}
+                    </span>
+                    {hit.snippet.slice(hit.col + len)}
+                  </span>
+                  <span className="max-w-[35%] shrink-0 truncate text-[11px] text-muted-foreground">
+                    {hit.title}
+                  </span>
                 </div>
               );
             })

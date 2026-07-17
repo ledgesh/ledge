@@ -32,6 +32,7 @@ import {
   SquareCheck,
   SquareX,
   TerminalSquare,
+  TextSearch,
   Trash2,
   X,
 } from "lucide-react";
@@ -104,6 +105,10 @@ export function buildCommands(deps: RegistryDeps): Command[] {
       icon: CommandIcon,
       palette: false, // opening the palette from the palette is a no-op
       run: (ctx) => ctx.ui.openOverlay?.("commands"),
+    }),
+    cmd("palette.search", {
+      icon: TextSearch,
+      run: (ctx) => ctx.ui.openOverlay?.("search"),
     }),
 
     // --- tabs ----------------------------------------------------------------

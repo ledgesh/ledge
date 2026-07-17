@@ -4,10 +4,12 @@
 // (notes/store.ts) is testable without an RPC or a webview.
 import type { NoteMeta, TrashMeta } from "../../shared/rpc-schema";
 import type { NoteParams } from "../../shared/frontmatter";
+import type { SearchHit } from "../../shared/search";
 
 interface NoteHandlers {
   list: () => Promise<NoteMeta[]>;
   read: (path: string) => Promise<string | null>;
+  search: (query: string) => Promise<SearchHit[]>;
   write: (path: string, text: string) => Promise<void>;
   create: (text: string) => Promise<NoteMeta>;
   retitle: (path: string, text: string) => Promise<NoteMeta>;
@@ -38,6 +40,13 @@ export function listNotes(): Promise<NoteMeta[]> {
 
 export function readNote(path: string): Promise<string | null> {
   return bridge().read(path);
+}
+
+// Full-text hits for `query`, newest note first (shared/search.ts owns the
+// grammar and the caps). Bun does the scanning — the view never holds the
+// corpus, only the result list.
+export function searchNotes(query: string): Promise<SearchHit[]> {
+  return bridge().search(query);
 }
 
 export function writeNote(path: string, text: string): Promise<void> {
@@ -89,4 +98,4 @@ export function configureSession(sessionId: string, params: NoteParams): void {
   bridge().configureSession(sessionId, params);
 }
 
-export type { NoteMeta, TrashMeta };
+export type { NoteMeta, TrashMeta, SearchHit };

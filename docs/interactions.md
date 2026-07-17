@@ -72,7 +72,10 @@ Rules:
   ⌘W tab → ⇧⌘W pane · ⌘D split right → ⇧⌘D split down · ⌘N note → ⇧⌘N
   workspace · ⌘P notes → ⇧⌘P commands · ⌘↩ inline run → ⇧⌘↩ terminal run ·
   ⌘G next → ⇧⌘G previous.
-- **⌥ (Alt)** — secondary/rare variants: ⌥⌘F replace, ⌥⌘B sidebar.
+- **⌥ (Alt)** — secondary/rare variants: ⌥⌘F replace, ⌥⌘B sidebar, ⌥⌘P
+  full-text search (the ⌥-variant of ⌘P quick-open; the shift-scope rule would
+  want ⇧⌘F — find, but across notes — but ⇧⌘F is the editor's working replace
+  fallback under cmux, and search must stay reachable from editor focus).
 - **Bare keys** — the verbs of a focused list row, and *only* those. They live
   in `listKeys`, never `keys`, and the resolver consults them solely in the
   `list` focus domain: anywhere else an unmodified key is typing, and the one
@@ -109,6 +112,7 @@ CodeMirror and never at the window level.
 | Switch to Workspace N | ⌘1…9                      | badge shows while ⌘ held |
 | Go to Note…           | ⌘P                        | |
 | Command Palette…      | ⇧⌘P                       | also: type `>` as the first character in ⌘P |
+| Search Notes…         | ⌥⌘P                       | full-text over note bodies (one case-insensitive substring — shared/search.ts owns the grammar); also: type `#` as the first character in ⌘P. Enter opens the note with the matched line revealed and selected |
 | Toggle Terminal       | ⌃`                        | from terminal focus it closes the drawer |
 | Toggle Sidebar        | ⌥⌘B                       | |
 | Settings…             | ⌘,                        | opens settings.json in the OS editor (architecture.md §6: the file is the UI) |
