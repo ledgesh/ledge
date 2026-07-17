@@ -42,6 +42,43 @@ describe("headingOf", () => {
   });
 });
 
+describe("headingOf and frontmatter", () => {
+  test("the title is the first line after the block", () => {
+    expect(headingOf("---\ncwd: /x\n---\n# Shipping Notes\nbody")).toBe("Shipping Notes");
+  });
+
+  test("the conventional blank line under the fence does not cost the title", () => {
+    // Every frontmatter-bearing tool trains this habit; strict-first-line here
+    // would rename the note to untitled for leaving one blank line.
+    expect(headingOf("---\ncwd: /x\n---\n\n# Shipping Notes\nbody")).toBe("Shipping Notes");
+    expect(headingOf("---\ncwd: /x\n---\n\n\n# Spaced Out\n")).toBe("Spaced Out");
+  });
+
+  test("a bare note keeps the strict first-line rule", () => {
+    // Without a fence, the blank first line still means "opens with something
+    // other than a heading" — frontmatter loosens nothing for plain notes.
+    expect(headingOf("\n# After a blank line")).toBeNull();
+  });
+
+  test("prose after the block still is not a heading", () => {
+    expect(headingOf("---\ncwd: /x\n---\nprose\n# Later")).toBeNull();
+  });
+
+  test("a note that is only frontmatter has no heading", () => {
+    expect(headingOf("---\ncwd: /x\n---\n")).toBeNull();
+    expect(headingOf("---\ncwd: /x\n---")).toBeNull();
+  });
+
+  test("an unterminated opener is content, so its --- first line is no heading", () => {
+    expect(headingOf("---\n# Not A Title Behind A Thematic Break\n")).toBeNull();
+  });
+
+  test("slugOf composes: a frontmatter note is named by its real heading", () => {
+    expect(slugOf("---\nprofile: petstore\n---\n# API Smoke Tests\n")).toBe("api-smoke-tests");
+    expect(slugOf("---\nprofile: petstore\n---\nno heading\n")).toBeNull();
+  });
+});
+
 describe("slugify", () => {
   test("lowercases and hyphenates", () => {
     expect(slugify("Shipping Notes")).toBe("shipping-notes");

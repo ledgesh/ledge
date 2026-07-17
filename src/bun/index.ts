@@ -10,7 +10,8 @@
 // leaks into another. All of them talk to the view over typed RPC.
 import { BrowserView, BrowserWindow, Updater } from "electrobun/bun";
 import { PtyProcess } from "./pty";
-import { InlinePool } from "./inlinePool";
+import { InlinePool, type InlineEvent } from "./inlinePool";
+import { readProfile, writeProfile } from "./profiles";
 import {
   createNote,
   deleteNote,
@@ -27,7 +28,10 @@ import {
 } from "./notes";
 import { runnerFor } from "./runner";
 import { loadSettings, openSettingsFile } from "./settings";
+import { resolveSpawn, type SpawnDeps } from "./spawnParams";
+import { readFileSync, statSync } from "node:fs";
 import type { LedgeRPC } from "../shared/rpc-schema";
+import type { NoteParams } from "../shared/frontmatter";
 
 // Read once, applied for the life of the process: the shell below, the trash
 // TTL at the bottom, and the view's snapshot via settingsGet. Edits to
@@ -56,15 +60,49 @@ const NONCE = Math.random().toString(36).slice(2) + Date.now().toString(36);
 
 const shellEnv = { ...process.env, TERM: "xterm-256color" } as Record<string, string>;
 
+// Per-session spawn parameters, as the view parsed them from each note's
+// frontmatter (sessionConfigure). Read at shell SPAWN, never applied to a
+// running shell: a shell keeps the cwd/env it was born with, and an edited
+// frontmatter takes effect on the session's next shell (restart-applies —
+// same policy as settings, and the rpc-schema comment is the contract).
+// Cleared with the session in closeSession: the params describe a live tab,
+// not a note file, so they share its lifetime exactly.
+const sessionParams = new Map<string, NoteParams>();
+
+// The real filesystem behind resolveSpawn (its tests inject a fake one).
+const spawnDeps: SpawnDeps = {
+  readFile: (path) => {
+    try {
+      return readFileSync(path, "utf8");
+    } catch {
+      return null;
+    }
+  },
+  isDir: (path) => {
+    try {
+      return statSync(path).isDirectory();
+    } catch {
+      return false;
+    }
+  },
+  warn: (msg) => console.warn("[session]", msg),
+};
+
 const toB64 = (bytes: Uint8Array) => Buffer.from(bytes).toString("base64");
 const fromB64 = (b64: string) => new Uint8Array(Buffer.from(b64, "base64"));
 
-function spawnShell(): PtyProcess {
+// Every shell a session gets — persistent inline, overflow, terminal drawer —
+// spawns through here, so all of them read the note's params the same way.
+// The lookup happens AT spawn: an overflow shell spawned after a frontmatter
+// edit gets the new params while the persistent shell keeps its old ones,
+// which is just the restart-applies contract seen from another angle.
+function spawnShell(sessionId: string): PtyProcess {
+  const { cwd, env } = resolveSpawn(sessionParams.get(sessionId), shellEnv, spawnDeps);
   return new PtyProcess({
     executable: settings.shell.path,
     args: settings.shell.args,
-    env: shellEnv,
-    cwd: process.env["HOME"],
+    env,
+    cwd,
   });
 }
 
@@ -130,7 +168,7 @@ function termFor(sessionId: string): Term {
   let t = terms.get(sessionId);
   if (!t) {
     t = {
-      term: spawnShell(),
+      term: spawnShell(sessionId),
       attached: false,
       chunks: [],
       len: 0,
@@ -180,6 +218,7 @@ function closeSession(sessionId: string): void {
   inlinePool.closeSession(sessionId);
   terms.get(sessionId)?.term.close();
   terms.delete(sessionId);
+  sessionParams.delete(sessionId);
 }
 
 const rpc = BrowserView.defineRPC<LedgeRPC>({
@@ -293,6 +332,36 @@ const rpc = BrowserView.defineRPC<LedgeRPC>({
         closeSession(sessionId);
         return { ok: true };
       },
+      sessionConfigure: ({ sessionId, params }) => {
+        // Stored, not applied: spawnShell reads this when the session's next
+        // shell starts. Values go nowhere but that spawn (see rpc-schema).
+        sessionParams.set(sessionId, params);
+        return { ok: true };
+      },
+      sessionRestart: ({ sessionId }) => {
+        // The restart-applies escape hatch (see rpc-schema): kill the shells,
+        // keep the params, and lazy respawn does the rest. The pool closes out
+        // open runs through the same event path the drain loop uses.
+        inlinePool.restartSession(sessionId, sendRunEvent);
+        const t = terms.get(sessionId);
+        if (t) {
+          // Mirror the shell-exited teardown below: the drawer closes, and a
+          // busy flag the view still holds is cleared — a dead shell runs
+          // nothing.
+          if (t.attached) rpc.send.terminalExit({ sessionId });
+          if (t.sentBusy) rpc.send.terminalBusy({ sessionId, busy: false });
+          t.term.close();
+          terms.delete(sessionId);
+        }
+        return { ok: true };
+      },
+      // Both assert the profile name inside — anything that is not a plain
+      // name throws before it can become a path (architecture.md §2).
+      profileRead: async ({ name }) => ({ text: await readProfile(name) }),
+      profileWrite: async ({ name, text }) => {
+        await writeProfile(name, text);
+        return { ok: true };
+      },
       // System clipboard via macOS pbcopy/pbpaste. The webview cannot reach the
       // clipboard itself (non-secure views:// context), so the terminal and the
       // inline output panel proxy copy/paste through here.
@@ -333,16 +402,21 @@ const rpc = BrowserView.defineRPC<LedgeRPC>({
 // no per-note bookkeeping here); terminal shells stream raw to whichever drawer
 // is attached to that note. Inline lifecycle — overflow teardown on a run's end,
 // closing out the run of a shell that died mid-block — lives in the pool.
+// One pool event -> one runEvent message. Shared by the drain loop and
+// sessionRestart, which closes out open runs through the same path so the
+// view cannot tell a restart-killed run from a shell that died on its own.
+function sendRunEvent(ev: InlineEvent): void {
+  if (ev.type === "began") {
+    rpc.send.runEvent({ id: ev.blockId, kind: "began" });
+  } else if (ev.type === "output") {
+    rpc.send.runEvent({ id: ev.blockId, kind: "output", dataB64: toB64(ev.data) });
+  } else {
+    rpc.send.runEvent({ id: ev.blockId, kind: "ended", exitCode: ev.exitCode });
+  }
+}
+
 setInterval(() => {
-  inlinePool.drain((ev) => {
-    if (ev.type === "began") {
-      rpc.send.runEvent({ id: ev.blockId, kind: "began" });
-    } else if (ev.type === "output") {
-      rpc.send.runEvent({ id: ev.blockId, kind: "output", dataB64: toB64(ev.data) });
-    } else {
-      rpc.send.runEvent({ id: ev.blockId, kind: "ended", exitCode: ev.exitCode });
-    }
-  });
+  inlinePool.drain(sendRunEvent);
 
   for (const [sessionId, t] of terms) {
     const termData = t.term.drain();

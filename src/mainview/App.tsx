@@ -14,6 +14,7 @@ import { allDocIds, useWorkspace, WorkspaceProvider, type AppState } from "@/wor
 import { focusedDocId } from "@/workspace/tree";
 import { releaseEditor } from "@/workspace/editorPool";
 import { CommandProvider, useCommands } from "@/commands/CommandProvider";
+import { ProfileEditor } from "@/components/ProfileEditor";
 import { configureUi } from "@/commands/glue";
 import { tooltip } from "@/commands/format";
 import { Overlay, type OverlayMode } from "@/commands/Overlay";
@@ -45,6 +46,9 @@ function Shell() {
   const [sidebarWidth, setSidebarWidth] = useState(224);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [overlay, setOverlay] = useState<OverlayMode | null>(null);
+  // The profile the editor dialog is open on, or null. Shell owns it like the
+  // rest of the chrome: the command reaches it through the ui hook below.
+  const [profileEditing, setProfileEditing] = useState<string | null>(null);
   // The vertical stack (below the header) that holds the editor row and the
   // terminal drawer; its height bounds how tall the terminal can grow.
   const stackRef = useRef<HTMLDivElement>(null);
@@ -90,12 +94,16 @@ function Shell() {
       closeTerminal: () => setTermOpen(false),
       toggleSidebar: () => setSidebarOpen((o) => !o),
       openOverlay: setOverlay,
+      openProfileEditor: setProfileEditing,
     });
   }, []);
   useEffect(() => {
     configureBridge({
       toggleTerminal: () => exec("terminal.toggle"),
       runInTerminal,
+      // The ⌘-clicked frontmatter profile name lands on the same dialog as
+      // the "Edit Note Profile…" command.
+      openProfileEditor: setProfileEditing,
     });
   }, [exec, runInTerminal]);
 
@@ -260,6 +268,9 @@ function Shell() {
       </div>
 
       {overlay && <Overlay initialMode={overlay} onClose={() => setOverlay(null)} />}
+      {profileEditing && (
+        <ProfileEditor name={profileEditing} onClose={() => setProfileEditing(null)} />
+      )}
     </div>
   );
 }

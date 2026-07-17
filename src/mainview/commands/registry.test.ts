@@ -5,12 +5,16 @@ import { parseKey, resolveChord, DEFAULT_DOMAINS, type FocusDomain } from "./key
 import type { Command, CommandCtx, RegistryDeps } from "./types";
 
 // Stub deps: the registry never touches the editor stack or the clipboard in
-// tests; we only record that the right edge was invoked.
-function stubDeps(calls: string[] = []): RegistryDeps {
+// tests; we only record that the right edge was invoked. `noteHead` is what a
+// focused note's editor would hold — settable so the frontmatter-driven
+// commands (profile.open) can be steered per test.
+function stubDeps(calls: string[] = [], noteHead: string | null = null): RegistryDeps {
   const record = (name: string) => (arg: string) => calls.push(`${name}:${arg}`);
   return {
     copyText: record("copyText"),
     openSettings: () => calls.push("openSettings"),
+    restartSession: record("restartSession"),
+    noteHead: () => noteHead,
     editor: {
       find: record("find"),
       replace: record("replace"),
@@ -170,6 +174,35 @@ describe("registry", () => {
     const cmds = buildCommands(stubDeps(calls));
     find(cmds, "settings.open").run(makeCtx(initialState([])));
     expect(calls).toEqual(["openSettings"]);
+  });
+
+  test("run: session.restart routes the focused docId to the restart edge", () => {
+    const calls: string[] = [];
+    const cmds = buildCommands(stubDeps(calls));
+    const state = initialState([]);
+    const leaf = state.workspaces[0]!.root;
+    if (leaf.kind !== "leaf") throw new Error("expected leaf");
+    find(cmds, "session.restart").run(makeCtx(state));
+    expect(calls).toEqual([`restartSession:${leaf.tabs[0]!.docId}`]);
+  });
+
+  test("profile.open follows the current note's frontmatter, and only that", () => {
+    // The command is the editing arm of `profile: name`: with a profile named
+    // it opens the editor dialog on exactly that one, and with none it is
+    // hidden — prompting for a name here would invent a second way to say
+    // what the frontmatter already says.
+    const opened: string[] = [];
+    const withProfile = buildCommands(stubDeps([], "---\nprofile: petstore\n---\n# T\n"));
+    const ctx = { ...makeCtx(initialState([])), ui: { openProfileEditor: (n: string) => opened.push(n) } };
+    expect(find(withProfile, "profile.open").when!(ctx)).toBe(true);
+    find(withProfile, "profile.open").run(ctx);
+    expect(opened).toEqual(["petstore"]);
+
+    const withoutProfile = buildCommands(stubDeps([], "# Plain note\n"));
+    expect(find(withoutProfile, "profile.open").when!(ctx)).toBe(false);
+
+    const noEditor = buildCommands(stubDeps([], null));
+    expect(find(noEditor, "profile.open").when!(ctx)).toBe(false);
   });
 
   test("run: note.copyPath copies the targeted row's path", () => {

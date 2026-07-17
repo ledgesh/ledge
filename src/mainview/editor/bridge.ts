@@ -31,6 +31,10 @@ interface BridgeHandlers {
   cancelRun: (sessionId: string, id: string) => void;
   resizeInline: (sessionId: string, id: string, cols: number, rows: number) => void;
   inputInline: (sessionId: string, id: string, data: string) => void;
+  // Open the profile editor dialog (App owns it). The editor calls this when
+  // the ⌘-clicked frontmatter profile name asks for the same dialog the
+  // "Edit Note Profile…" command opens.
+  openProfileEditor: (name: string) => void;
 }
 const handlers: Partial<BridgeHandlers> = {};
 
@@ -55,6 +59,11 @@ export function resizeInline(sessionId: string, id: string, cols: number, rows: 
 // that run. Called by the inline terminal's onData while the block is running.
 export function inputInline(sessionId: string, id: string, data: string): void {
   handlers.inputInline?.(sessionId, id, data);
+}
+
+// Open the profile editor on `name` (editor/frontmatter.ts's ⌘-click).
+export function editProfile(name: string): void {
+  handlers.openProfileEditor?.(name);
 }
 
 // Web -> Bun. Note edits do not come through here: persistence is a direct

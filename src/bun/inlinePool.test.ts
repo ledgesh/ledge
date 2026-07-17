@@ -53,6 +53,63 @@ function makePool() {
   return { pool, shells, drained };
 }
 
+describe("restartSession", () => {
+  test("kills the shells and the next run gets a fresh one", () => {
+    const { pool, shells, drained } = makePool();
+    pool.run("note", "a", "source /tmp/a.sh");
+    shells[0].emit(began("a") + ended("a"));
+    drained();
+
+    pool.restartSession("note", () => {});
+    expect(shells[0].closed).toBe(true);
+
+    pool.run("note", "b", "source /tmp/b.sh");
+    expect(shells.length).toBe(2);
+    // A fresh shell, fully re-primed: the marker hook lives in the dead zsh.
+    expect(shells[1].written.startsWith(markerInit(NONCE))).toBe(true);
+  });
+
+  test("open runs are closed out through emit, overflow included", () => {
+    // The tab is still open and watching (unlike closeSession): a run left
+    // un-ended would sit on "Running" with a dead run button forever.
+    const { pool, shells, drained } = makePool();
+    pool.run("note", "a", "source /tmp/a.sh");
+    shells[0].emit(began("a"));
+    drained();
+    pool.run("note", "b", "source /tmp/b.sh"); // overflow: a still running
+
+    const events: InlineEvent[] = [];
+    pool.restartSession("note", (ev) => events.push(ev));
+    expect(events).toEqual([
+      { type: "ended", blockId: "a", exitCode: null },
+      { type: "ended", blockId: "b", exitCode: null },
+    ]);
+    expect(shells.every((s) => s.closed)).toBe(true);
+  });
+
+  test("an idle session restarts silently; an unknown one is a no-op", () => {
+    const { pool, shells, drained } = makePool();
+    pool.run("note", "a", "source /tmp/a.sh");
+    shells[0].emit(began("a") + ended("a"));
+    drained();
+
+    const events: InlineEvent[] = [];
+    pool.restartSession("note", (ev) => events.push(ev));
+    pool.restartSession("never-seen", (ev) => events.push(ev));
+    expect(events).toEqual([]);
+  });
+
+  test("a resize stashed for a not-yet-started run dies with the restart", () => {
+    // The pre-run resize was measured against panels of the session being torn
+    // down; applying it to a post-restart shell would be a stale grid.
+    const { pool, shells } = makePool();
+    pool.resize("note", "x", 33, 7);
+    pool.restartSession("note", () => {});
+    pool.run("note", "x", "source /tmp/x.sh");
+    expect(shells[0].resizes).toEqual([]);
+  });
+});
+
 describe("shell selection", () => {
   test("the first run goes to the note's persistent shell, primed with the marker hook", () => {
     const { pool, shells } = makePool();
@@ -60,6 +117,19 @@ describe("shell selection", () => {
     expect(shells.length).toBe(1);
     expect(shells[0].written.startsWith(markerInit(NONCE))).toBe(true);
     expect(shells[0].written).toContain("source /tmp/a.sh");
+  });
+
+  test("every spawn is told which session it is for, overflow included", () => {
+    // The spawn uses it to give the shell that note's params (frontmatter cwd/
+    // env); an overflow shell for the same note must be born with the same ones.
+    const spawnedFor: string[] = [];
+    const pool = new InlinePool((sessionId) => {
+      spawnedFor.push(sessionId);
+      return new FakeShell();
+    }, NONCE);
+    pool.run("note-1", "a", "source /tmp/a.sh");
+    pool.run("note-1", "b", "source /tmp/b.sh"); // overflow: a is still running
+    expect(spawnedFor).toEqual(["note-1", "note-1"]);
   });
 
   test("a second run while the first is still going gets an overflow shell of its own", () => {

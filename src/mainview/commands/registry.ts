@@ -14,11 +14,13 @@ import {
   Copy,
   FilePlus,
   FileText,
+  KeyRound,
   Layers,
   PanelLeft,
   Pencil,
   Play,
   Plus,
+  RefreshCw,
   Replace,
   RotateCcw,
   Rows2,
@@ -32,6 +34,7 @@ import {
   X,
 } from "lucide-react";
 import { findLeaf, focusedDocId, focusedTab, leafIds } from "@/workspace/tree";
+import { parseFrontmatter } from "../../shared/frontmatter";
 import { keysOf, listKeysOf, tabSelectKey, titleOf, workspaceSelectKey, type CommandId } from "./keys";
 import { chipOf } from "./format";
 import type { Command, CommandCtx, RegistryDeps } from "./types";
@@ -218,6 +221,30 @@ export function buildCommands(deps: RegistryDeps): Command[] {
       run: () => deps.openSettings(),
     }),
 
+    // --- per-note params (frontmatter) ----------------------------------------
+    // Kill the current note's shells; the next run/attach respawns them with
+    // the note's current frontmatter params — the restart-applies escape hatch.
+    cmd("session.restart", {
+      icon: RefreshCw,
+      when: (ctx) => focusedDocId(ctx.selected) !== null,
+      run: (ctx) => {
+        const docId = focusedDocId(ctx.selected);
+        if (docId) deps.restartSession(docId);
+      },
+    }),
+    // Edit the profile the current note's frontmatter names, in the in-app
+    // dialog (components/ProfileEditor.tsx). Hidden when it names none: with
+    // no name there is nothing to edit, and prompting for one here would
+    // invent a second way to say what the frontmatter already says.
+    cmd("profile.open", {
+      icon: KeyRound,
+      when: (ctx) => currentProfile(ctx, deps) !== null,
+      run: (ctx) => {
+        const name = currentProfile(ctx, deps);
+        if (name) ctx.ui.openProfileEditor?.(name);
+      },
+    }),
+
     // --- notes ---------------------------------------------------------------
     cmd("note.open", {
       icon: FileText,
@@ -334,6 +361,16 @@ export function buildCommands(deps: RegistryDeps): Command[] {
   }
 
   return list;
+}
+
+// The profile the current note's frontmatter names, or null (no focused note,
+// no editor for it yet, or no profile line). Parsed from the doc's head on
+// demand: `when` runs per menu/palette render and must stay cheap.
+function currentProfile(ctx: CommandCtx, deps: RegistryDeps): string | null {
+  const docId = focusedDocId(ctx.selected);
+  if (!docId) return null;
+  const head = deps.noteHead(docId);
+  return head === null ? null : parseFrontmatter(head).params.profile;
 }
 
 function paneTarget(ctx: CommandCtx): string | undefined {

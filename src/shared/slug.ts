@@ -20,11 +20,24 @@ const MAX_SLUG = 60;
 // the store. Only the on-screen label is capped; the note's text is untouched.
 const MAX_LABEL = 120;
 
+import { frontmatterEnd } from "./frontmatter";
+
 // The note's title: the content of a first-line H1, or null if the note does not
 // open with one. Strictly the first line, and strictly one "#": a note that opens
 // with prose, a list, or an "##" subheading has no title to take a name from.
+//
+// A frontmatter block does not count as the note opening with something else:
+// the title is the first line AFTER it, else every note carrying params would
+// slug to "untitled". Blank lines are skipped there — and only there. Leaving
+// one under the closing fence is convention in every frontmatter-bearing tool,
+// and honoring the strict-first-line rule against it would tax exactly the
+// habit users arrive with; a bare note keeps the strict rule because there the
+// blank line is the whole signal that the note starts with something else.
 export function headingOf(text: string): string | null {
-  const firstLine = text.slice(0, text.indexOf("\n") === -1 ? undefined : text.indexOf("\n"));
+  const start = frontmatterEnd(text);
+  const body = start === 0 ? text : text.slice(start).replace(/^(?:[ \t]*\r?\n)+/, "");
+  const nl = body.indexOf("\n");
+  const firstLine = nl === -1 ? body : body.slice(0, nl);
   // CommonMark wants whitespace after the #, so "#hashtag" is not a heading.
   const m = /^#[ \t]+(.*\S)/.exec(firstLine);
   return m ? m[1]!.trim() : null;

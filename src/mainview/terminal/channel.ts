@@ -25,6 +25,7 @@ let sendResizeFn: ((sessionId: string, cols: number, rows: number) => void) | nu
 let attachFn: ((sessionId: string) => Promise<{ dataB64: string }>) | null = null;
 let detachFn: ((sessionId: string) => void) | null = null;
 let closeSessionFn: ((sessionId: string) => void) | null = null;
+let restartSessionFn: ((sessionId: string) => void) | null = null;
 
 // Wired by main.tsx once the Electroview RPC exists.
 export function configureTerminal(fns: {
@@ -34,6 +35,7 @@ export function configureTerminal(fns: {
   attach: (sessionId: string) => Promise<{ dataB64: string }>;
   detach: (sessionId: string) => void;
   closeSession: (sessionId: string) => void;
+  restartSession: (sessionId: string) => void;
 }): void {
   sendInputFn = fns.sendInput;
   sendPasteFn = fns.sendPaste;
@@ -41,6 +43,7 @@ export function configureTerminal(fns: {
   attachFn = fns.attach;
   detachFn = fns.detach;
   closeSessionFn = fns.closeSession;
+  restartSessionFn = fns.restartSession;
 }
 
 // Enable live streaming for a note and return its scrollback bytes to replay.
@@ -81,6 +84,15 @@ export function sendTerminalResize(sessionId: string, cols: number, rows: number
 /** Tear down both of a note's shells (its tab closed). */
 export function closeSession(sessionId: string): void {
   closeSessionFn?.(sessionId);
+}
+
+/**
+ * Kill both of a note's shells but keep the tab (and the session's params):
+ * the next run or attach spawns fresh shells with the note's current
+ * frontmatter params. The "Restart Note Shell" command.
+ */
+export function restartSession(sessionId: string): void {
+  restartSessionFn?.(sessionId);
 }
 
 // Bun -> webview raw pty output, tagged with the note it came from. The mounted

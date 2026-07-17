@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { configureNotes, type NoteMeta } from "./channel";
 import { slugOf } from "../../shared/slug";
+import type { NoteParams } from "../../shared/frontmatter";
 import {
   bindDoc,
   flushAll,
@@ -22,11 +23,13 @@ function fakeBridge() {
   const writes: Array<{ path: string; text: string }> = [];
   const creates: string[] = [];
   const retitles: Array<{ path: string; text: string }> = [];
+  const configures: Array<{ sessionId: string; params: NoteParams }> = [];
   let created = 0;
   const state = {
     writes,
     creates,
     retitles,
+    configures,
     failNextRetitle: false,
     // When set, every write parks on this promise until it is resolved.
     gate: null as { promise: Promise<void>; open: () => void } | null,
@@ -82,6 +85,9 @@ function fakeBridge() {
     restore: async (path: string) => ({ path, title: "", mtimeMs: 0 }),
     removeTrashed: async () => true,
     empty: async () => 0,
+    configureSession: (sessionId, params) => {
+      configures.push({ sessionId, params });
+    },
   });
 
   return state;
@@ -628,5 +634,88 @@ describe("labelling", () => {
     noteChanged("doc-1", titled("Shipping Notes", "typing"));
     await saveNow("doc-1");
     expect(labels).toEqual([]);
+  });
+});
+
+// Spawn params (frontmatter) reaching Bun: sent when a note's saved text lands
+// (seedSlug) and when an edit changes what the frontmatter parses to — and at
+// no other time, because nearly every note has no frontmatter and must cost
+// nothing on this path.
+describe("params syncing", () => {
+  const withFm = (inner: string, body = "# Note\n\nbody\n") => `---\n${inner}---\n${body}`;
+
+  test("a loaded note's frontmatter reaches Bun before any edit", async () => {
+    const fs = fakeBridge();
+    bindDoc("doc-1", "/notes/api-tests.md", noop());
+    seedSlug("doc-1", withFm("cwd: /tmp/proj\nprofile: petstore\n"));
+
+    expect(fs.configures).toHaveLength(1);
+    expect(fs.configures[0].sessionId).toBe("doc-1");
+    expect(fs.configures[0].params.cwd).toBe("/tmp/proj");
+    expect(fs.configures[0].params.profile).toBe("petstore");
+  });
+
+  test("a note with no frontmatter sends nothing, on load or on save", async () => {
+    const fs = fakeBridge();
+    bindDoc("doc-1", "/notes/plain.md", noop());
+    seedSlug("doc-1", "# Plain\n\nbody\n");
+
+    noteChanged("doc-1", "# Plain\n\nmore body\n");
+    await saveNow("doc-1");
+    expect(fs.configures).toEqual([]);
+  });
+
+  test("a body edit does not re-send unchanged params", async () => {
+    const fs = fakeBridge();
+    bindDoc("doc-1", "/notes/api-tests.md", noop());
+    seedSlug("doc-1", withFm("cwd: /tmp/proj\n"));
+
+    noteChanged("doc-1", withFm("cwd: /tmp/proj\n", "# Note\n\nedited body\n"));
+    await saveNow("doc-1");
+    expect(fs.configures).toHaveLength(1); // the seed, nothing since
+  });
+
+  test("editing the frontmatter sends the new params on save", async () => {
+    const fs = fakeBridge();
+    bindDoc("doc-1", "/notes/api-tests.md", noop());
+    seedSlug("doc-1", withFm("cwd: /tmp/old\n"));
+
+    noteChanged("doc-1", withFm("cwd: /tmp/new\nenv:\n  A: 1\n"));
+    await saveNow("doc-1");
+    expect(fs.configures).toHaveLength(2);
+    expect(fs.configures[1].params.cwd).toBe("/tmp/new");
+    expect(fs.configures[1].params.env).toEqual({ A: "1" });
+  });
+
+  test("typing frontmatter into a new note sends params with its first save", async () => {
+    const fs = fakeBridge();
+    bindDoc("doc-1", null, noop());
+
+    noteChanged("doc-1", withFm("profile: petstore\n"));
+    await saveNow("doc-1");
+    expect(fs.configures).toHaveLength(1);
+    expect(fs.configures[0].params.profile).toBe("petstore");
+  });
+
+  test("deleting the frontmatter sends empty params: back to the defaults", async () => {
+    const fs = fakeBridge();
+    bindDoc("doc-1", "/notes/api-tests.md", noop());
+    seedSlug("doc-1", withFm("cwd: /tmp/proj\n"));
+
+    noteChanged("doc-1", "# Note\n\nbody\n");
+    await saveNow("doc-1");
+    expect(fs.configures).toHaveLength(2);
+    expect(fs.configures[1].params).toEqual({ cwd: null, profile: null, envFile: null, env: {} });
+  });
+
+  test("a comment-only frontmatter change re-sends nothing", async () => {
+    // Comparison is on the PARSED params: annotating the block is not a change.
+    const fs = fakeBridge();
+    bindDoc("doc-1", "/notes/api-tests.md", noop());
+    seedSlug("doc-1", withFm("cwd: /tmp/proj\n"));
+
+    noteChanged("doc-1", withFm("# the dev checkout\ncwd: /tmp/proj\n"));
+    await saveNow("doc-1");
+    expect(fs.configures).toHaveLength(1);
   });
 });

@@ -11,3 +11,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 process.env["LEDGE_NOTES_ROOT"] = mkdtempSync(join(tmpdir(), "ledge-test-"));
+// Same deal for the profiles dir (bun/spawnParams.ts): no test may read — or
+// seed — the real ~/.config/ledge/profiles.
+process.env["LEDGE_PROFILES_DIR"] = mkdtempSync(join(tmpdir(), "ledge-test-profiles-"));

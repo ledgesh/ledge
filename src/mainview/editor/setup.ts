@@ -7,6 +7,7 @@ import { syntaxHighlighting, HighlightStyle } from "@codemirror/language";
 import { tags } from "@lezer/highlight";
 import { toNative } from "./bridge";
 import { ledgeBlocks } from "./blocks";
+import { ledgeFrontmatter } from "./frontmatter";
 import { wrapping } from "./wrap";
 import { findReplace } from "./find";
 import { fromDisk, sessionIdFacet } from "./session";
@@ -269,6 +270,7 @@ export function createEditor(parent: HTMLElement, doc: string, sessionId: string
         appKeymap,
         clipboardKeymap,
         ledgeBlocks(),
+        ledgeFrontmatter(),
         keymap.of([...defaultKeymap, ...historyKeymap]),
         markdown({ base: markdownLanguage, codeLanguages: languages }),
         syntaxHighlighting(highlight),

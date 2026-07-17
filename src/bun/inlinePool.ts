@@ -65,8 +65,12 @@ export class InlinePool {
   // Applied (and dropped) when the run picks its shell.
   private readonly pendingResize = new Map<string, { sessionId: string; cols: number; rows: number }>();
 
+  // `spawn` takes the session id so the shell can be born with that note's
+  // params (cwd/env from its frontmatter): the pool decides WHEN a shell
+  // spawns, but whose note it belongs to is information only the caller's
+  // spawn can act on.
   constructor(
-    private readonly spawn: () => InlineShellIO,
+    private readonly spawn: (sessionId: string) => InlineShellIO,
     private readonly nonce: string,
   ) {}
 
@@ -77,10 +81,10 @@ export class InlinePool {
       session = { primary: null, overflow: new Map() };
       this.sessions.set(sessionId, session);
     }
-    if (!session.primary) session.primary = this.newSlot();
+    if (!session.primary) session.primary = this.newSlot(sessionId);
     let slot = session.primary;
     if (slot.activeRun !== null) {
-      slot = this.newSlot();
+      slot = this.newSlot(sessionId);
       session.overflow.set(id, slot);
     }
     slot.activeRun = id;
@@ -138,6 +142,28 @@ export class InlinePool {
     }
   }
 
+  /**
+   * Kill all of a note's inline shells so its next run spawns fresh ones (with
+   * the note's current params). Unlike closeSession the tab is still open and
+   * watching: every open run must be closed out through `emit`, or its panel
+   * sits on "Running" and its run button stays dead — the same debt the drain
+   * loop pays when a shell dies on its own.
+   */
+  restartSession(sessionId: string, emit: (ev: InlineEvent) => void): void {
+    const session = this.sessions.get(sessionId);
+    if (session) {
+      for (const slot of this.slots(session)) {
+        const open = slot.parser.openBlockId ?? slot.activeRun;
+        if (open) emit({ type: "ended", blockId: open, exitCode: null });
+        slot.shell.close();
+      }
+      this.sessions.delete(sessionId);
+    }
+    for (const [id, p] of this.pendingResize) {
+      if (p.sessionId === sessionId) this.pendingResize.delete(id);
+    }
+  }
+
   /** Tear down all of a note's inline shells; its tab closed. */
   closeSession(sessionId: string): void {
     const session = this.sessions.get(sessionId);
@@ -159,8 +185,8 @@ export class InlinePool {
     this.pendingResize.clear();
   }
 
-  private newSlot(): Slot {
-    const shell = this.spawn();
+  private newSlot(sessionId: string): Slot {
+    const shell = this.spawn(sessionId);
     // Install the end-marker hook before any block can run. Its own echo lands
     // outside every C..D pair, so the parser drops it and no block ever sees it.
     shell.write(markerInit(this.nonce));

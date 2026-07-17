@@ -61,6 +61,9 @@ configureTerminal({
   closeSession: (sessionId) => {
     void electrobun.rpc!.request.closeSession({ sessionId });
   },
+  restartSession: (sessionId) => {
+    void electrobun.rpc!.request.sessionRestart({ sessionId });
+  },
 });
 
 configureClipboard({
@@ -84,6 +87,9 @@ configureNotes({
   restore: (path) => electrobun.rpc!.request.trashRestore({ path }).then((r) => r.note),
   removeTrashed: (path) => electrobun.rpc!.request.trashDelete({ path }).then((r) => r.removed),
   empty: () => electrobun.rpc!.request.trashEmpty({}).then((r) => r.removed),
+  configureSession: (sessionId, params) => {
+    void electrobun.rpc!.request.sessionConfigure({ sessionId, params });
+  },
 });
 
 // Read the notes folder before the first render, so the app opens straight into
@@ -110,6 +116,10 @@ async function boot(): Promise<void> {
   configureSettings(settings, {
     openFile: () => {
       void electrobun.rpc!.request.settingsOpen({});
+    },
+    readProfile: (name) => electrobun.rpc!.request.profileRead({ name }).then((r) => r.text),
+    writeProfile: async (name, text) => {
+      await electrobun.rpc!.request.profileWrite({ name, text });
     },
   });
   createRoot(document.getElementById("root")!).render(

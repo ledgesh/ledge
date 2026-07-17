@@ -3,6 +3,7 @@
 // once it exists. Keeping the shim separate means the persistence logic
 // (notes/store.ts) is testable without an RPC or a webview.
 import type { NoteMeta, TrashMeta } from "../../shared/rpc-schema";
+import type { NoteParams } from "../../shared/frontmatter";
 
 interface NoteHandlers {
   list: () => Promise<NoteMeta[]>;
@@ -15,6 +16,9 @@ interface NoteHandlers {
   restore: (path: string) => Promise<NoteMeta>;
   removeTrashed: (path: string) => Promise<boolean>;
   empty: () => Promise<number>;
+  // Fire-and-forget, not a Promise: the store sends params on the save path
+  // and nothing there can act on an acknowledgement.
+  configureSession: (sessionId: string, params: NoteParams) => void;
 }
 
 let handlers: NoteHandlers | null = null;
@@ -75,6 +79,14 @@ export function deleteTrashed(path: string): Promise<boolean> {
 
 export function emptyTrash(): Promise<number> {
   return bridge().empty();
+}
+
+// Hand Bun a note's spawn params (parsed from its frontmatter), keyed by the
+// tab's docId — the same key its shells live under. It rides the note-store
+// channel rather than the terminal one because the sender is notes/store.ts:
+// the save path is the one place that sees every text change.
+export function configureSession(sessionId: string, params: NoteParams): void {
+  bridge().configureSession(sessionId, params);
 }
 
 export type { NoteMeta, TrashMeta };

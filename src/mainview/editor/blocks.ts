@@ -12,12 +12,14 @@ import {
 import {
   toNative,
   cancelRun,
+  editProfile,
   isTerminalBusy,
   onTerminalBusyChange,
   resizeInline,
   inputInline,
   type RunDestination,
 } from "./bridge";
+import { frontmatterRange, profileChipAnchor } from "./frontmatter";
 import { sessionIdFacet } from "./session";
 import { acquireInlineTerm, getInlineTerm, releaseInlineTerm } from "./inlineTerm";
 import { copyText } from "../lib/clipboard";
@@ -282,6 +284,7 @@ const PLAY_ICON = svg('<path d="M5 3.4 12.5 8 5 12.6 Z" fill="currentColor" stro
 const TERMINAL_ICON = svg('<rect x="1.5" y="2.5" width="13" height="11" rx="2"/><path d="M4.5 6.3l2 1.7-2 1.7"/><path d="M8.5 10h3"/>');
 const COPY_ICON = svg('<rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 5.5V4A1.5 1.5 0 0 0 9 2.5H4A1.5 1.5 0 0 0 2.5 4v5A1.5 1.5 0 0 0 4 10.5h1.5"/>');
 const CHECK_ICON = svg('<path d="M3.5 8.4l3 3 6-6.8"/>');
+const KEY_ICON = svg('<circle cx="5" cy="11" r="2.7"/><path d="M7 9l6.5-6.5"/><path d="M10.5 5.5l2.2 2.2"/>');
 const CLOSE_ICON = svg('<path d="M4 4l8 8M12 4l-8 8"/>');
 
 // Why a run button is off. Worth spelling out on the button itself: "nothing
@@ -353,10 +356,25 @@ interface CloseSpec {
   top: number;
   right: number;
 }
+// The frontmatter profile's edit button, anchored just past the value's last
+// glyph. It lives in this layer, not in the text, for the same reason every
+// other button does: out here it gets a real pointer cursor and an obvious
+// click target, which the in-text ⌘-click (editor/frontmatter.ts) — kept as
+// the accelerator — cannot offer while WebKit pins the I-beam.
+interface ProfileSpec {
+  name: string;
+  top: number;
+  left: number;
+  caret: boolean;
+}
+// The compact chip's rendered height (button 16 + padding 2 + border 2), used
+// to center it on the profile line. Must match .ledge-fm-chip in index.css.
+const FM_CHIP_H = 20;
 interface Measured {
   rect: { top: number; left: number; width: number; height: number };
   controls: ControlSpec[];
   closes: CloseSpec[];
+  profile: ProfileSpec | null;
   sig: string;
 }
 
@@ -364,7 +382,9 @@ const overlayPlugin = ViewPlugin.fromClass(
   class {
     layer: HTMLDivElement;
     sig = "";
-    hovered: number | null = null;
+    // The hovered block's key: a code block's `from` as a string, or "fm" for
+    // the frontmatter block.
+    hovered: string | null = null;
     onMove: (e: MouseEvent) => void;
     onScroll: () => void;
     onKeyDown: (e: KeyboardEvent) => void;
@@ -442,15 +462,24 @@ const overlayPlugin = ViewPlugin.fromClass(
 
     // Reveal a block's controls while the pointer is over that block. The pointer
     // may be over the floating controls themselves; `posAtCoords` still resolves
-    // to the block line underneath, so the group stays lit.
+    // to the block line underneath, so the group stays lit. The frontmatter
+    // block participates under the key "fm": its edit button reveals on hover
+    // anywhere in the block, same grammar as code blocks.
     updateHover(x: number, y: number) {
       const pos = this.view.posAtCoords({ x, y });
-      const b = pos != null ? blockAt(this.view.state, pos) : null;
-      const from = b ? b.from : null;
-      if (from === this.hovered) return;
-      this.hovered = from;
+      let key: string | null = null;
+      if (pos != null) {
+        const b = blockAt(this.view.state, pos);
+        if (b) key = String(b.from);
+        else {
+          const fm = frontmatterRange(this.view.state);
+          if (fm && pos >= fm.from && pos <= fm.to) key = "fm";
+        }
+      }
+      if (key === this.hovered) return;
+      this.hovered = key;
       for (const g of Array.from(this.layer.querySelectorAll<HTMLElement>(".ledge-ctl-group"))) {
-        g.classList.toggle("hover", from != null && g.dataset.block === String(from));
+        g.classList.toggle("hover", key != null && g.dataset.block === key);
       }
     }
 
@@ -461,7 +490,13 @@ const overlayPlugin = ViewPlugin.fromClass(
       // floating buttons stranded on screen, so collapse the overlay entirely
       // until its host is re-parented into a visible pane.
       if (!view.dom.isConnected) {
-        return { rect: { top: 0, left: 0, width: 0, height: 0 }, controls: [], closes: [], sig: "detached" };
+        return {
+          rect: { top: 0, left: 0, width: 0, height: 0 },
+          controls: [],
+          closes: [],
+          profile: null,
+          sig: "detached",
+        };
       }
       // The layer is a fixed box pinned over the editor's rect, so measure every
       // button against the editor's viewport rect and position it relative to that.
@@ -524,10 +559,38 @@ const overlayPlugin = ViewPlugin.fromClass(
         });
       }
 
+      // The frontmatter profile's edit button (see ProfileSpec). Same
+      // reveal grammar as block controls: visible while the pointer or the
+      // caret is in the block. Centered on the line's glyph box — the compact
+      // chip sits beside one small text line, not in a card's padded corner.
+      let profile: ProfileSpec | null = null;
+      const anchor = profileChipAnchor(view.state);
+      if (anchor) {
+        let pc: { top: number; bottom: number; right: number } | null = null;
+        try {
+          pc = view.coordsAtPos(anchor.pos);
+        } catch {
+          pc = null; // scrolled out of the rendered viewport
+        }
+        if (pc) {
+          const fm = frontmatterRange(view.state);
+          profile = {
+            name: anchor.name,
+            top: (pc.top + pc.bottom) / 2 - base.top - FM_CHIP_H / 2,
+            left: pc.right - base.left + 6,
+            caret: !!fm && head >= fm.from && head <= fm.to,
+          };
+        }
+      }
+
       const sig =
-        controls.map((c) => `${c.from}:${c.lang}`).join("|") + "#" + closes.map((c) => c.id).join("|");
+        controls.map((c) => `${c.from}:${c.lang}`).join("|") +
+        "#" +
+        closes.map((c) => c.id).join("|") +
+        "#fm:" +
+        (profile?.name ?? "");
       const rect = { top: base.top, left: base.left, width: base.width, height: base.height };
-      return { rect, controls, closes, sig };
+      return { rect, controls, closes, profile, sig };
     }
 
     write(m: Measured) {
@@ -558,6 +621,14 @@ const overlayPlugin = ViewPlugin.fromClass(
         if (!el) continue;
         el.style.top = `${c.top}px`;
         el.style.right = `${c.right}px`;
+      }
+      if (m.profile) {
+        const el = this.layer.querySelector<HTMLElement>(`.ledge-ctl-group[data-block="fm"]`);
+        if (el) {
+          el.style.top = `${m.profile.top}px`;
+          el.style.left = `${m.profile.left}px`;
+          el.classList.toggle("caret", m.profile.caret);
+        }
       }
     }
 
@@ -616,6 +687,19 @@ const overlayPlugin = ViewPlugin.fromClass(
             const run = this.view.state.field(runsField).find((r) => r.id === c.id);
             if (run?.state === "running") cancelRun(this.view.state.facet(sessionIdFacet), c.id);
             this.view.dispatch({ effects: removeRun.of(c.id) });
+          }),
+        );
+        this.layer.appendChild(wrap);
+      }
+      if (m.profile) {
+        const name = m.profile.name;
+        const wrap = document.createElement("div");
+        wrap.className = "ledge-ctl-group ledge-fm-chip";
+        wrap.dataset.block = "fm";
+        wrap.appendChild(
+          iconButton(KEY_ICON, tooltip("profile.open"), (e) => {
+            e.preventDefault();
+            editProfile(name);
           }),
         );
         this.layer.appendChild(wrap);

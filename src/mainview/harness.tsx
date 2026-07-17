@@ -137,6 +137,9 @@ configureNotes({
   restore: async (path) => store.restore(path),
   removeTrashed: async (path) => store.removeTrashed(path),
   empty: async () => store.empty(),
+  // No shells here (see configureBridge below), so params have nothing to
+  // configure; the send is simply absorbed.
+  configureSession: () => {},
 });
 
 // No PTYs here: runs and the terminal are inert. A spec that needs run
@@ -154,6 +157,7 @@ configureTerminal({
   attach: async () => ({ dataB64: "" }),
   detach: () => {},
   closeSession: () => {},
+  restartSession: () => {},
 });
 
 // In-memory clipboard, readable by specs via window.__harness.
@@ -169,11 +173,25 @@ configureClipboard({
 // editor" apart from "the old hardcoded 14px is still there". openFile is
 // recorded, not performed: launching an OS editor is a native seam.
 let settingsOpens = 0;
+const profiles = new Map<string, string>();
 configureSettings(
   { ...DEFAULT_SETTINGS, editor: { fontSize: 18 } },
   {
     openFile: () => {
       settingsOpens += 1;
+    },
+    // An in-memory profile store, seeded on first read like the real one, so
+    // specs can drive the profile editor dialog end to end.
+    readProfile: async (name) => {
+      let text = profiles.get(name);
+      if (text === undefined) {
+        text = `# Ledge profile "${name}"\n`;
+        profiles.set(name, text);
+      }
+      return text;
+    },
+    writeProfile: async (name, text) => {
+      profiles.set(name, text);
     },
   },
 );

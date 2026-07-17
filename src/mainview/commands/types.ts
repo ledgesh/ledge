@@ -42,6 +42,10 @@ export interface UiHooks {
   // Open the confirmation for unlinking ONE trashed note. Irreversible, so it
   // is a confirm rather than an undo (docs/interactions.md §4).
   confirmDeleteTrashed(item: TrashMeta): void;
+  // Open the profile editor dialog on one named profile (the in-app UI for
+  // profile files; macOS binds no app to ".env", so there is no OS-editor
+  // path to reach them by).
+  openProfileEditor(name: string): void;
 }
 
 export interface CommandCtx {
@@ -58,6 +62,14 @@ export interface RegistryDeps {
   copyText(text: string): void;
   // Open settings.json in the OS editor (an RPC edge, like copyText).
   openSettings(): void;
+  // Kill a note's shells so the next run respawns them with its current
+  // frontmatter params.
+  restartSession(docId: string): void;
+  // The head of a note's live document — enough of it to parse frontmatter —
+  // or null when no editor holds that doc. A head, not the whole text: `when`
+  // runs on every menu/palette render, and a note carrying a pasted blob
+  // should not be serialized just to ask whether it names a profile.
+  noteHead(docId: string): string | null;
   editor: {
     find(docId: string): void;
     replace(docId: string): void;

@@ -123,7 +123,8 @@ the clipboard):
 
 1. **Scratch root, always.** Launch with `LEDGE_NOTES_ROOT=<scratch dir>` and
    seed it with throwaway notes. A probe must never run against the real
-   `~/.ledge`.
+   `~/.ledge`. Anything touching profiles sets `LEDGE_PROFILES_DIR` the same
+   way — a probe must never read or seed `~/.config/ledge/profiles` either.
 2. **Temp probe in `main.tsx`**: a self-contained block that waits for boot,
    drives the app with synthetic events, and reports via the `clipboardWrite`
    RPC as one `PROBE: key=value ...` line behind a unique sentinel.

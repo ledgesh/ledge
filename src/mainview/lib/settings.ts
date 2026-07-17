@@ -9,6 +9,11 @@ import { DEFAULT_SETTINGS, type Settings } from "../../shared/settings";
 interface SettingsHandlers {
   // Open settings.json in the OS editor (Bun knows where it lives).
   openFile: () => void;
+  // The profile editor's load/save. Profiles do not go through the OS editor
+  // like settings.json — macOS binds no app to ".env" — so Ledge's own dialog
+  // is the UI and these are its two edges. Bun validates the name.
+  readProfile: (name: string) => Promise<string>;
+  writeProfile: (name: string, text: string) => Promise<void>;
 }
 
 // Defaults until configured: a boot that failed to reach Bun still renders,
@@ -28,4 +33,14 @@ export function settings(): Settings {
 export function openSettingsFile(): void {
   if (!handlers) throw new Error("settings bridge not configured");
   handlers.openFile();
+}
+
+export function readProfile(name: string): Promise<string> {
+  if (!handlers) throw new Error("settings bridge not configured");
+  return handlers.readProfile(name);
+}
+
+export function writeProfile(name: string, text: string): Promise<void> {
+  if (!handlers) throw new Error("settings bridge not configured");
+  return handlers.writeProfile(name, text);
 }

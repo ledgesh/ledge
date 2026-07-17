@@ -112,6 +112,8 @@ CodeMirror and never at the window level.
 | Toggle Terminal       | ⌃`                        | from terminal focus it closes the drawer |
 | Toggle Sidebar        | ⌥⌘B                       | |
 | Settings…             | ⌘,                        | opens settings.json in the OS editor (architecture.md §6: the file is the UI) |
+| Restart Note Shell    | — (palette)               | kills the current note's shells; its frontmatter params apply at respawn (architecture.md §6a) |
+| Edit Note Profile…    | — (palette; edit button on the block, hover/caret-revealed like block controls; ⌘-click the name as accelerator) | opens the profile the note's frontmatter names in Ledge's key/value dialog (macOS binds no app to .env), created seeded if new; hidden when it names none. The button is primary — it lives in the overlay layer where the pointer cursor works; ⌘-click (not click: a plain click is a caret move on editable text) goes solid-underline while ⌘ is held |
 | Delete Note           | ⌘⌫                        | page focus only; in the editor CodeMirror's delete-to-line-start wins |
 | Save                  | ⌘S                        | notes autosave; this skips the debounce |
 | Find / Replace        | ⌘F / ⌥⌘F (fallback ⇧⌘F)   | editor only; ⌥⌘F may be swallowed by cmux |
@@ -144,8 +146,11 @@ Row verbs, by row kind. Each fires only while a row of that kind has focus
   command opens the dialog rather than deleting, so the row verb (`d`), the
   menu item, and the button cannot diverge into an unconfirmed path. Anything
   that unlinks a file, rather than moving it aside, joins this list.
-- **Arrangement loss (close tab / pane / workspace) → neither.** No data is
-  destroyed; notes stay on disk.
+- **Arrangement loss (close tab / pane / workspace, restart a note's shells)
+  → neither.** No data is destroyed; notes stay on disk. Restart Note Shell
+  sits here deliberately: closing a tab already kills the same shells
+  unconfirmed, and a confirm on the command whose whole point is "apply my
+  frontmatter now" would be friction teaching click-through.
 - Destructive menu items are styled destructive and never sit directly
   adjacent to their non-destructive sibling without a separator or ordering
   gap.
@@ -169,7 +174,7 @@ topmost layer only:
 
 1. Context menu, and the popovers that behave like one (the workspace icon
    picker: anchored, dismissed by a pick or a press outside)
-2. Confirm dialog
+2. Dialogs: confirm, and the profile editor
 3. Palette / quick-open overlay
 4. Editor find panel (CodeMirror-internal, editor focus only)
 5. Terminal drawer (terminal focus only — documented tradeoff: full-screen

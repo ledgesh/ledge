@@ -3,6 +3,7 @@
 // Swift build: the webview requests a block run, Bun streams run events back.
 
 import type { Settings } from "./settings";
+import type { NoteParams } from "./frontmatter";
 
 /** A streamed update about one running block, pushed Bun -> webview. */
 export type RunEvent =
@@ -138,6 +139,36 @@ export type LedgeRPC = {
       // Tear down both of a note's shells; sent when its tab (or pane, or
       // workspace) closes and its docId drops out of the live set.
       closeSession: { params: { sessionId: string }; response: { ok: boolean } };
+      // The note's spawn parameters, as the view parsed them from its
+      // frontmatter (shared/frontmatter.ts). Sent when a note's saved text
+      // first lands in its editor and again whenever an edit changes what the
+      // frontmatter parses to; Bun keeps the latest per session and applies it
+      // when that session's shells SPAWN — an already-running shell keeps the
+      // params it was born with (restart-applies, like settings). These values
+      // are deliberately not opaque handles (architecture.md §2): they flow
+      // only into the user's own shell's spawn, which grants the view nothing
+      // that runBlock — arbitrary code in that same shell — does not already.
+      sessionConfigure: { params: { sessionId: string; params: NoteParams }; response: { ok: boolean } };
+      // Kill all of a note's shells so the next run / terminal attach spawns
+      // fresh ones — the escape hatch for restart-applies params: edit the
+      // frontmatter, restart, and the new cwd/env are live. Unlike
+      // closeSession the tab stays open, so Bun closes out every open run
+      // (runEvent ended) and tells an attached drawer the shell is gone
+      // (terminalExit); the session's params survive — applying them is the
+      // point. Sent by the "Restart Note Shell" command.
+      sessionRestart: { params: { sessionId: string }; response: { ok: boolean } };
+      // Read one profile's env file, creating it (seeded, 0600) first if it
+      // does not exist. Unlike settings.json, profiles do NOT open in the OS
+      // editor — macOS binds no application to ".env" (LSApplicationNotFound),
+      // so `open` dead-ends — Ledge's own profile editor is the UI, and this
+      // pair is its load/save. `name` is re-validated Bun-side
+      // (assertProfileName) before it becomes a filename in both calls: the
+      // view is the least-trusted end. Fired by the "Edit Note Profile"
+      // command with the profile the note's frontmatter names.
+      profileRead: { params: { name: string }; response: { text: string } };
+      // Write the profile's full new text (the editor serializes; comments
+      // survive — shared/dotenv.ts). Atomic like a note save, kept 0600.
+      profileWrite: { params: { name: string; text: string }; response: { ok: boolean } };
       // System clipboard, routed through the Bun process (pbcopy/pbpaste). The
       // webview runs under the views:// scheme, which is not a secure context, so
       // navigator.clipboard is unavailable and execCommand / native Cmd+V paste

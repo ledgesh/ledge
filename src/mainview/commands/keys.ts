@@ -60,6 +60,17 @@ export const COMMANDS = {
   "terminal.close": { title: "Close Terminal" },
   "settings.open": { title: "Settings…", keys: ["Mod-,"] },
 
+  // Per-note params (frontmatter). Both palette/menu-only: neither is frequent
+  // enough to spend a chord on. Restart is the escape hatch for restart-applies
+  // params — kill the note's shells, keep its params, respawn lazily; no
+  // confirm, because closing a tab already tears shells down unconfirmed and
+  // this is the same class of loss (interactions.md §4, arrangement loss).
+  // Edit Note Profile opens the CURRENT note's profile in Ledge's own editor
+  // dialog — not the OS editor like settings.json, because macOS binds no
+  // application to ".env" and `open` dead-ends (components/ProfileEditor.tsx).
+  "session.restart": { title: "Restart Note Shell" },
+  "profile.open": { title: "Edit Note Profile…" },
+
   // Notes. note.delete is the row form (context menu, and `d`/⌫ on a focused
   // row); note.deleteCurrent is the ⌘⌫ / palette form acting on the focused
   // note. Both land in the trash with Undo (docs/interactions.md §4). ⌘⌫ fires

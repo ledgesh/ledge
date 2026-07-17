@@ -156,6 +156,59 @@ body {
   overflow: auto;
 }
 
+/* --- Frontmatter block --------------------------------------------------------
+   Line decorations (editor/frontmatter.ts) render a note's params block dimmed
+   and at one size: it is machinery, not prose. The `span` reset is what keeps
+   markdown's own styling out of it — the parser reads `# comment` lines as
+   headings and would render the quiet block as the loudest thing on screen.
+   Color only; the caret, selection, and edit behavior are untouched. */
+.cm-line.ledge-fm,
+.cm-line.ledge-fm span {
+  color: var(--ed-muted);
+  font-size: 1em;
+  font-weight: 400;
+  font-style: normal;
+}
+.cm-line.ledge-fm {
+  font-size: 0.85em;
+}
+.cm-line.ledge-fm-fence {
+  opacity: 0.55;
+}
+/* The ⌘-clickable profile name (editor/frontmatter.ts). Link-colored against
+   the muted block; the cursor stays an I-beam (WebKit forces it inside the
+   editing context), so the primary affordance is the hover-revealed edit
+   button in the overlay layer (blocks.ts), and this styling marks the
+   accelerator. */
+.cm-line.ledge-fm .ledge-fm-profile,
+.cm-line.ledge-fm .ledge-fm-profile span {
+  color: var(--link);
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+/* While ⌘ is held (the metaHeld plugin) the underline goes solid: the live
+   "a click now follows, not edits" signal the cursor cannot give. */
+.ledge-meta .cm-line.ledge-fm .ledge-fm-profile,
+.ledge-meta .cm-line.ledge-fm .ledge-fm-profile span {
+  text-decoration-style: solid;
+}
+/* Compact variant for the profile edit chip: block-control buttons are sized
+   for a code card's padded corner, and next to one small dimmed line they
+   dwarf it. Rendered height (16 + 2 + 2) = FM_CHIP_H in blocks.ts, which
+   centers the chip on the line — keep the two in sync. */
+.ledge-ctl-group.ledge-fm-chip {
+  padding: 1px;
+}
+.ledge-ctl-group.ledge-fm-chip .ledge-btn {
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+}
+.ledge-ctl-group.ledge-fm-chip .ledge-btn svg {
+  width: 11px;
+  height: 11px;
+}
+
 /* --- Fenced code-block panel ------------------------------------------------
    Line decorations (built in editor/blocks.ts) wrap every line of a fenced code
    block in a rounded, bordered card so code stands out from surrounding prose.

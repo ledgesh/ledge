@@ -13,7 +13,13 @@ import { runBlock } from "@/editor/blocks";
 import { saveNow } from "@/notes/store";
 import { copyText } from "@/lib/clipboard";
 import { openSettingsFile } from "@/lib/settings";
+import { restartSession } from "@/terminal/channel";
 import type { RegistryDeps, UiHooks } from "./types";
+
+// Enough of a note to parse its frontmatter — mirrors HEAD_BYTES in
+// bun/notes.ts, and the same accepted edge: a >4KB frontmatter block is
+// somebody's art project, not a params bug.
+const HEAD_BYTES = 4096;
 
 export const uiHooks: Partial<UiHooks> = {};
 
@@ -34,6 +40,12 @@ function withView(docId: string, fn: (view: NonNullable<ReturnType<typeof getEdi
 export const registryDeps: RegistryDeps = {
   copyText,
   openSettings: openSettingsFile,
+  restartSession,
+  noteHead: (docId) => {
+    const view = getEditorView(docId);
+    if (!view) return null;
+    return view.state.sliceDoc(0, Math.min(HEAD_BYTES, view.state.doc.length));
+  },
   editor: {
     find: (docId) => withView(docId, (view) => openSearchPanel(view)),
     replace: (docId) => withView(docId, (view) => openReplace(view)),

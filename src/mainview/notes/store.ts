@@ -5,8 +5,9 @@
 // its first save). Edits land in `pending` and a debounce writes the latest text
 // through to Bun. A note with no path yet gets one allocated on that first write,
 // which is what makes "a tab you never type in leaves no file" true.
-import { createNote, retitleNote, writeNote, type NoteMeta } from "./channel";
+import { configureSession, createNote, retitleNote, writeNote, type NoteMeta } from "./channel";
 import { headingOf, labelOf, slugOf } from "../../shared/slug";
+import { parseFrontmatter } from "../../shared/frontmatter";
 
 // Long enough that a burst of typing is one write, short enough that the window
 // where a crash loses work is small. Matches PLAN P1-4.
@@ -40,6 +41,11 @@ interface Entry {
   // changes more often: "Shipping Notes" -> "shipping notes!" is a new label but
   // the same slug, so the tab must relabel while the file stays put.
   lastHeading: string | null;
+  // The spawn params (frontmatter) Bun last got for this note, as a JSON key.
+  // Seeded to "no params" rather than to "unknown" so the frontmatterless
+  // note — nearly every note — never sends a configure at all: Bun's defaults
+  // and empty params are the same thing.
+  lastParamsKey: string;
   handlers: DocHandlers;
 }
 
@@ -54,6 +60,28 @@ export interface DocHandlers {
 }
 
 const docs = new Map<string, Entry>();
+
+// What "no frontmatter" serializes to, so entries can start there (see
+// Entry.lastParamsKey).
+const EMPTY_PARAMS_KEY = JSON.stringify(parseFrontmatter("").params);
+
+// Send the note's spawn params to Bun if its frontmatter now parses to
+// something different. Comparison is on the parsed params, not the block's
+// text, so touching a comment (or reflowing whitespace) in the frontmatter
+// re-sends nothing. Bun applies params at shell spawn, so an extra send is
+// harmless but a missed one is a shell born with stale cwd/env.
+function syncParams(e: Entry, text: string): void {
+  const { params } = parseFrontmatter(text);
+  const key = JSON.stringify(params);
+  if (key === e.lastParamsKey) return;
+  e.lastParamsKey = key;
+  try {
+    configureSession(e.docId, params);
+  } catch {
+    // No bridge (a store driven in unit tests). Params are advisory — they
+    // must never be what breaks seeding or saving.
+  }
+}
 
 // Register an open note. `path` is null for a new note that has no file yet;
 // `onFile` fires whenever one is allocated or moves, so the tab can bind to it
@@ -75,6 +103,7 @@ export function bindDoc(docId: string, path: string | null, handlers: DocHandler
     lastSlug: null,
     slugSeeded: false,
     lastHeading: null,
+    lastParamsKey: EMPTY_PARAMS_KEY,
     handlers,
   });
 }
@@ -92,6 +121,10 @@ export function seedSlug(docId: string, text: string): void {
   e.lastSlug = slugOf(text);
   e.lastHeading = headingOf(text);
   e.slugSeeded = true;
+  // Same moment, opposite direction: the slug is seeded so the file does NOT
+  // move, but params already on disk must reach Bun now — the note's first
+  // shell can spawn on a Run click long before any edit triggers a flush.
+  syncParams(e, text);
 }
 
 // The editor's document changed. Schedules a save; called on every keystroke, so
@@ -129,6 +162,9 @@ async function flush(e: Entry): Promise<void> {
           e.path = note.path;
           e.handlers.onFile(note, null);
         }
+        // Before syncTitle: a failed rename must not also cost Bun the params
+        // update (syncParams is already idempotent for the retry that follows).
+        syncParams(e, text);
         // Inside the flush loop on purpose: the inFlight guard already serialises
         // this note's disk work, so a rename can never overlap a write to the path
         // it is moving. Nothing else has to be locked or frozen.

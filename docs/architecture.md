@@ -48,6 +48,18 @@ Bun therefore validates everything and derives anything derivable:
 - **Paths are opaque handles.** The view holds only paths it was handed by Bun
   (`noteList`, `noteCreate`, `noteDelete`'s trashed location) and passes them
   back unmodified. View code that constructs or edits a path is a bug.
+- **Spawn params are the one deliberate exception** to "the view never names
+  anything": `sessionConfigure` carries a cwd, env vars, and file references
+  the view parsed out of a note's frontmatter (`shared/frontmatter.ts`). This
+  grants the view nothing new — `runBlock` already executes arbitrary code as
+  the user, and a shell's own `cd`/`export`/`source` can do everything these
+  params do — but the discipline that keeps it safe is narrow and must stay
+  so: the values flow **only** into the child shell's spawn
+  (`bun/spawnParams.ts`), Bun never reads, returns, or acts on them itself
+  (beyond the cwd `stat` and the env-file reads that feed the spawn), and the
+  one value that becomes a filename — the profile name — is re-validated
+  Bun-side with the same predicate the parser used (`isProfileName`), because
+  the parser's check is a typo message and only Bun's is a guard.
 
 ## 3. Filesystem invariants
 
@@ -74,7 +86,9 @@ Bun therefore validates everything and derives anything derivable:
 - **`LEDGE_NOTES_ROOT`** overrides the root (`~/.ledge`) for tests and
   throwaway runs. Nothing in the app sets it; every `bun test` run gets a
   scratch one via preload, and anything that exercises the real app against
-  real files must set it (see `docs/testing.md` §§2, 6).
+  real files must set it (see `docs/testing.md` §§2, 6). **`LEDGE_PROFILES_DIR`**
+  is the same override for the profiles dir (§6a), for the same reason: no
+  test or probe may read — or seed — the real one.
 
 ## 4. Identity keys: path vs docId
 
@@ -162,6 +176,68 @@ through `lib/settings.ts`.
   respawn or leave stale shells) — a standing tax on every future setting,
   paid to save one relaunch. Revisit only if editing settings becomes a
   frequent act, which for this set it is not.
+
+## 6a. Per-note params (frontmatter) & profiles
+
+A note may open with a YAML-subset frontmatter block naming the parameters
+its shells spawn with:
+
+```markdown
+---
+cwd: ~/Projects/ledge        # working dir; ~ expands, missing dir -> $HOME + warning
+env:                         # inline non-secret vars
+  NODE_ENV: development
+profile: petstore            # named secrets scope (see below)
+envFile: ./.env              # project-owned dotenv, resolved against cwd
+---
+```
+
+`shared/frontmatter.ts` owns the grammar (hand-rolled per §8; per-line
+degradation like `parseSettings`); `bun/spawnParams.ts` owns what the values
+mean at spawn. Precedence is `process.env` < `envFile` < `profile` < `env`,
+with `TERM` pinned back afterwards — xterm.js is the terminal whatever a note
+claims. The split of duties across the boundary: the **view** parses the
+block (it holds the text) and sends the params over `sessionConfigure`,
+keyed by docId; **Bun** stores them per session and reads them each time one
+of that session's shells spawns — persistent, overflow, and terminal drawer
+alike, which is what keeps all three telling one story about the note.
+
+- **Settings vs frontmatter.** `settings.json` is app-wide preference;
+  frontmatter is a per-note fact that travels with the note — open it
+  anywhere, same cwd, same env. A knob belongs in frontmatter only when the
+  right value genuinely varies per note (cwd, env); a knob that varies per
+  person stays in settings. Neither is session state (§6 still applies).
+- **Profiles are the secrets story.** `profile: name` resolves to
+  `~/.config/ledge/profiles/<name>.env` — one small file per project scope,
+  never one global pile. The note carries only the *name*; the values are
+  resolved Bun-side at spawn and never exist in the webview process (the
+  editor dialog below is the one deliberate exception, and it masks them).
+  The dir is deliberately **outside the notes root**: `~/.ledge` is the
+  folder people sync and back up, and layout, not crypto, is what keeps a
+  synced notes folder from carrying credentials. Files are created `0600`,
+  seeded self-documenting. The name is safe by construction (`isProfileName`:
+  no separators, no dots) — the same trust move as `slugOf`.
+- **Ledge's own dialog is the profile UI** ("Edit Note Profile…", the edit
+  button pinned after the profile name, or ⌘-click the name itself — all →
+  `components/ProfileEditor.tsx`, over the `profileRead`/`profileWrite`
+  RPCs). Profiles are the one config file that does NOT open in the OS
+  editor: macOS binds no application to `.env`, so the settings.json move
+  (`open` the file) dead-ends with LSApplicationNotFound. The file stays a
+  plain dotenv on disk — greppable, hand-editable — and dialog saves go
+  through `serializeDotenv` (`shared/dotenv.ts`), which preserves comments
+  and untouched lines byte-for-byte, so hand edits and dialog edits coexist
+  rather than compete. Values render masked by default: the dialog must not
+  become the place secrets end up on screen after all.
+- **Restart-applies, like settings.** Params are read at shell *spawn*; a
+  live shell keeps the cwd/env it was born with, and an edited frontmatter
+  takes effect on the session's next shell. The "Restart Note Shell" command
+  is the deliberate escape hatch: kill the note's shells, keep its params,
+  respawn lazily. (This is also why an overflow shell spawned after a
+  frontmatter edit can be newer than the persistent one — each shell reads
+  the params at its own birth.)
+- **Everything degrades, nothing throws.** A missing profile, a stale cwd, a
+  bad env name each cost themselves — warned in the Bun log, and the shell
+  still spawns. A dead Run button diagnoses nothing.
 
 ## 7. Adding an RPC method
 
