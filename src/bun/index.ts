@@ -40,13 +40,14 @@ import {
 } from "./workspaces";
 import { readLayout, writeLayout } from "./layout";
 import { pasteImageAsset, readAsset } from "./assets";
-import { runnerFor } from "./runner";
+import { interpretersFor, runnerFor } from "./runner";
 import { loadSettings, openSettingsFile } from "./settings";
 import { openableUrl } from "../shared/links";
 import { resolveSpawn, type SpawnDeps } from "./spawnParams";
+import { buildRemoteSpawn } from "./remoteSpawn";
 import { readFileSync, statSync } from "node:fs";
 import type { LedgeRPC } from "../shared/rpc-schema";
-import type { NoteParams } from "../shared/frontmatter";
+import { isHostName, LOCAL_HOST, type NoteParams } from "../shared/frontmatter";
 
 // Read once, applied for the life of the process: the shell below, the trash
 // TTL at the bottom, and the view's snapshot via settingsGet. Edits to
@@ -112,12 +113,47 @@ const spawnDeps: SpawnDeps = {
 const toB64 = (bytes: Uint8Array) => Buffer.from(bytes).toString("base64");
 const fromB64 = (b64: string) => new Uint8Array(Buffer.from(b64, "base64"));
 
+// The machine a spawn or run actually gets, from what the view asked for and
+// what the note's frontmatter DECLARED. The declared list is the allowlist
+// (architecture.md §2: the view is the least-trusted end, and the picker is
+// only its UI): an undeclared or malformed request falls back to the note's
+// own first host — never silently to some other machine — with a warning.
+// No request at all means the frontmatter decides: the single declared host,
+// or local for the note that declares none, so a note saying `host: prod`
+// targets prod through every path whether or not the view says so.
+function resolveHost(sessionId: string, requested: string | null | undefined): string {
+  const declared = sessionParams.get(sessionId)?.hosts ?? [];
+  const fallback = declared[0] ?? LOCAL_HOST;
+  if (requested == null) return fallback;
+  const allowed =
+    requested === LOCAL_HOST
+      ? declared.length === 0 || declared.includes(LOCAL_HOST)
+      : isHostName(requested) && declared.includes(requested);
+  if (!allowed) {
+    console.warn(`[session] host "${requested}" is not declared by this note; using "${fallback}"`);
+    return fallback;
+  }
+  return requested;
+}
+
 // Every shell a session gets — persistent inline, overflow, terminal drawer —
 // spawns through here, so all of them read the note's params the same way.
 // The lookup happens AT spawn: an overflow shell spawned after a frontmatter
 // edit gets the new params while the persistent shell keeps its old ones,
 // which is just the restart-applies contract seen from another angle.
-function spawnShell(sessionId: string): PtyProcess {
+//
+// `host` (already through resolveHost) forks the spawn, not the pty: a remote
+// shell is ssh as the pty's child (bun/remoteSpawn.ts), spawned with the BASE
+// env in $HOME — the note's cwd/env travel inside the ssh command to the
+// machine they are about, and the local resolution (profile files, cwd stat)
+// deliberately does not run.
+function spawnShell(sessionId: string, host: string, kind: "inline" | "terminal"): PtyProcess {
+  if (host !== LOCAL_HOST) {
+    const remote = buildRemoteSpawn(host, kind, sessionParams.get(sessionId), (msg) =>
+      console.warn("[session]", msg),
+    );
+    return new PtyProcess({ executable: remote.executable, args: remote.args, env: shellEnv, cwd: homedir() });
+  }
   const { cwd, env } = resolveSpawn(sessionParams.get(sessionId), shellEnv, spawnDeps);
   return new PtyProcess({
     executable: settings.shell.path,
@@ -132,7 +168,7 @@ function spawnShell(sessionId: string): PtyProcess {
 // sliced per block. The pool owns the whole policy — a persistent shell per note
 // (spawned on its first runBlock) so cwd/env carry across blocks, plus an
 // ephemeral overflow shell per additional concurrent run; see inlinePool.ts.
-const inlinePool = new InlinePool(spawnShell, NONCE);
+const inlinePool = new InlinePool((sessionId, host) => spawnShell(sessionId, host, "inline"), NONCE);
 
 // --- per-note terminal-drawer shells ---------------------------------------
 // A separate, plain interactive session per note with no marker protocol. Its raw
@@ -156,6 +192,11 @@ const BP_ENABLE = "\x1b[?2004h";
 const BP_DISABLE = "\x1b[?2004l";
 interface Term {
   term: PtyProcess;
+  // The machine this shell lives on (LOCAL_HOST or an ssh destination), fixed
+  // at spawn: pastes build their runner lines for it, and the drawer's badge
+  // shows it. Moving means a restart — same contract as every other spawn
+  // param.
+  host: string;
   attached: boolean;
   chunks: Uint8Array[];
   len: number;
@@ -185,11 +226,15 @@ const terms = new Map<string, Term>();
 // Names the temp files behind interpreted blocks pasted to the terminal
 // (inline runs use the view's block id instead; see runBlock).
 let nextTermRunId = 1;
-function termFor(sessionId: string): Term {
+// `requestedHost` matters only when this call is the one that spawns; a live
+// shell's host is fixed at its birth.
+function termFor(sessionId: string, requestedHost?: string | null): Term {
   let t = terms.get(sessionId);
   if (!t) {
+    const host = resolveHost(sessionId, requestedHost);
     t = {
-      term: spawnShell(sessionId),
+      term: spawnShell(sessionId, host, "terminal"),
+      host,
       attached: false,
       chunks: [],
       len: 0,
@@ -288,7 +333,7 @@ const rpc = BrowserView.defineRPC<LedgeRPC>({
       trashDelete: async ({ path }) => ({ removed: await deleteTrashed(path) }),
       trashEmpty: async ({ root }) => ({ removed: await emptyTrash(root) }),
 
-      runBlock: async ({ sessionId, id, code, language }) => {
+      runBlock: async ({ sessionId, id, code, language, host }) => {
         // The block body goes to a file, rather than being inlined into the
         // command line. That sidesteps quoting, heredocs, and line continuations.
         // What runs the file is the language's business (runner.ts): shell blocks
@@ -297,9 +342,22 @@ const rpc = BrowserView.defineRPC<LedgeRPC>({
         // overflow shell whose state dies with the run — inlinePool.ts), other
         // languages exec their interpreter on it. process.execPath is the app's
         // bundled bun, backing the "bun" interpreter for TypeScript.
-        const spec = runnerFor(id, language, code, settings.blocks.interpreters, process.execPath);
-        await Bun.write(spec.path, spec.contents);
-        inlinePool.run(sessionId, id, spec.command);
+        //
+        // A remote run writes no local file: the file belongs on the target
+        // machine, and the runner's command carries the body there in-band.
+        const target = resolveHost(sessionId, host);
+        // interpretersFor, not the bare map: the target machine may override
+        // per-language commands (blocks.hostInterpreters).
+        const spec = runnerFor(
+          id,
+          language,
+          code,
+          interpretersFor(target, settings.blocks),
+          process.execPath,
+          target !== LOCAL_HOST,
+        );
+        if (!spec.remote) await Bun.write(spec.path, spec.contents);
+        inlinePool.run(sessionId, id, spec.command, target);
         return { accepted: true };
       },
       cancelRun: ({ sessionId, id }) => {
@@ -335,17 +393,26 @@ const rpc = BrowserView.defineRPC<LedgeRPC>({
         termFor(sessionId).term.write(fromB64(dataB64));
         return { ok: true };
       },
-      terminalPaste: async ({ sessionId, text, language }) => {
-        const t = termFor(sessionId);
+      terminalPaste: async ({ sessionId, text, language, host }) => {
+        const t = termFor(sessionId, host);
         // A fenced block in an interpreted language cannot be pasted as-is —
         // zsh would run it as shell. Its runner line is pasted instead (same
         // runner as inline; the temp file is written here). Shell blocks keep
         // pasting their literal code: visible, editable, in shell history.
+        // Built for the host the drawer's shell is ON (not the request's):
+        // a remote drawer must never be pasted a local temp path.
         let paste = text;
         if (language != null) {
-          const spec = runnerFor(`term-${nextTermRunId++}`, language, text, settings.blocks.interpreters, process.execPath);
+          const spec = runnerFor(
+            `term-${nextTermRunId++}`,
+            language,
+            text,
+            interpretersFor(t.host, settings.blocks),
+            process.execPath,
+            t.host !== LOCAL_HOST,
+          );
           if (spec.kind === "interpreter") {
-            await Bun.write(spec.path, spec.contents);
+            if (!spec.remote) await Bun.write(spec.path, spec.contents);
             paste = spec.command;
           }
         }
@@ -364,15 +431,19 @@ const rpc = BrowserView.defineRPC<LedgeRPC>({
       // enabling live streaming: the snapshot is everything up to now, live is
       // everything after, with no gap or overlap. Lazily spawns the note's
       // terminal shell on first attach.
-      terminalAttach: ({ sessionId }) => {
-        const t = termFor(sessionId);
+      terminalAttach: ({ sessionId, host }) => {
+        const t = termFor(sessionId, host);
         t.attached = true;
-        return { dataB64: toB64(sbSnapshot(t)) };
+        return { dataB64: toB64(sbSnapshot(t)), host: t.host };
       },
       terminalDetach: ({ sessionId }) => {
         const t = terms.get(sessionId);
         if (t) t.attached = false;
         return { ok: true };
+      },
+      terminalStatus: ({ sessionId }) => {
+        const t = terms.get(sessionId);
+        return { live: !!t, host: t?.host ?? null };
       },
       closeSession: ({ sessionId }) => {
         closeSession(sessionId);

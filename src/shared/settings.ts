@@ -35,7 +35,23 @@ export interface Settings {
   // the bun runtime bundled with the app, so TypeScript runs without a bun on
   // PATH. User entries MERGE over these defaults (a venv python should not
   // cost you node), so to un-map a language remove it from `runnable` instead.
-  blocks: { runnable: string[]; interpreters: Record<string, string> };
+  //
+  // `hostInterpreters` overrides `interpreters` per target machine, for runs
+  // a note's `host:` frontmatter sends elsewhere: the base map runs verbatim
+  // on every machine, and "which python" can have a different answer on
+  // prod than here — the same fact that earned `interpreters` its existence,
+  // one axis up. Keys are host patterns matched against the run's ssh
+  // destination ("deploy@prod-01", or the reserved "local"); `*` matches any
+  // run of characters, so one entry covers a numbered fleet
+  // ("deploy@anypost-*"). Every matching section merges over the base in
+  // file order, later keys winning. Machine facts live HERE, not in
+  // frontmatter: the same host appears in many notes, and its toolchain
+  // layout is one fact about one machine, not a per-note choice.
+  blocks: {
+    runnable: string[];
+    interpreters: Record<string, string>;
+    hostInterpreters: Record<string, Record<string, string>>;
+  };
 }
 
 export const DEFAULT_SETTINGS: Settings = Object.freeze({
@@ -59,6 +75,7 @@ export const DEFAULT_SETTINGS: Settings = Object.freeze({
       ts: "bun", typescript: "bun",
       php: "php",
     },
+    hostInterpreters: {},
   },
 });
 
@@ -109,10 +126,31 @@ export function parseSettings(raw: unknown): { settings: Settings; problems: str
           ...d.blocks.interpreters,
           ...stringMap(blocks, "interpreters", "blocks.interpreters", problems),
         },
+        hostInterpreters: hostMaps(blocks, problems),
       },
     },
     problems,
   };
+}
+
+// blocks.hostInterpreters: an object of host pattern -> language map. Degrades
+// per host section (a section that is not an object costs that host alone) and
+// then per entry inside it, via the same stringMap every language map uses.
+// Host patterns are kept verbatim — case and "*"s are the matcher's business
+// (bun/runner.ts interpretersFor), and a pattern that matches nothing is not
+// an error, just a section that never applies.
+function hostMaps(blocks: Record<string, unknown>, problems: string[]): Record<string, Record<string, string>> {
+  const v = blocks["hostInterpreters"];
+  if (v === undefined) return {};
+  if (!isRecord(v)) {
+    problems.push(`"blocks.hostInterpreters" must be an object of host pattern -> language maps`);
+    return {};
+  }
+  const out: Record<string, Record<string, string>> = {};
+  for (const host of Object.keys(v)) {
+    out[host] = stringMap(v, host, `blocks.hostInterpreters.${host}`, problems);
+  }
+  return out;
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {

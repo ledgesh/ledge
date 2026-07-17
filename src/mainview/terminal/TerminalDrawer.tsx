@@ -29,14 +29,21 @@ function xtermTheme(dark: boolean) {
 // `onReady` fires once the terminal has mounted and subscribed to output, so a
 // queued "run in terminal" command can be flushed without racing the first output.
 // `onClose` hides the drawer (Escape); the shell keeps running for next open.
+// `spawnHost` is the machine picked for this open, consumed only if this
+// attach is what spawns the shell; `onHost` reports the host the shell is
+// actually on (from the attach response), which App shows as the badge.
 export function TerminalDrawer({
   sessionId,
+  spawnHost,
   onReady,
   onClose,
+  onHost,
 }: {
   sessionId: string;
+  spawnHost?: string | null;
   onReady?: () => void;
   onClose?: () => void;
+  onHost?: (host: string) => void;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   // Keep the latest onClose reachable from the key handler without re-running the
@@ -124,8 +131,9 @@ export function TerminalDrawer({
       else queue.push(bytes);
     });
 
-    void terminalAttach(sessionId).then((snapshot) => {
+    void terminalAttach(sessionId, spawnHost).then(({ snapshot, host }) => {
       if (disposed) return;
+      onHost?.(host);
       if (snapshot.length) term.write(snapshot);
       for (const q of queue) term.write(q);
       queue.length = 0;

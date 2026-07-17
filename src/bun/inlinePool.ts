@@ -16,9 +16,16 @@
 // shells alive as a pool — would make "which shell has my cd?" a matter of
 // scheduling luck; predictable beats warm here.
 //
+// Persistent shells are keyed per (note, host): a note that targets several
+// machines gets one persistent shell on each, so `cd` in a web1 block still
+// carries to the next web1 block while db2's shell keeps its own state. Runs
+// that land on a busy shell overflow exactly as before — an overflow shell is
+// spawned on the run's own host and dies with the run.
+//
 // This module holds the policy (which shell a run gets, what dies when) behind
 // an injected spawn function, so the whole lifecycle is unit-testable with a
 // fake shell; index.ts owns the real PtyProcess and the RPC.
+import { LOCAL_HOST } from "../shared/frontmatter";
 import { MarkerParser, markerCommand, markerInit } from "./markers";
 
 /** The slice of PtyProcess the pool drives (pty.ts satisfies it structurally). */
@@ -51,9 +58,10 @@ interface Slot {
 }
 
 interface Session {
-  // The note's persistent shell; null after it died (a block ran `exit`), and
-  // respawned by the next run.
-  primary: Slot | null;
+  // The note's persistent shells, one per host it has run on ("local" for the
+  // machine Ledge runs on). An entry disappears when its shell dies (a block
+  // ran `exit`) and is respawned by that host's next run.
+  primaries: Map<string, Slot>;
   // Overflow shells keyed by the run they were spawned for; they die with it.
   overflow: Map<string, Slot>;
 }
@@ -65,26 +73,29 @@ export class InlinePool {
   // Applied (and dropped) when the run picks its shell.
   private readonly pendingResize = new Map<string, { sessionId: string; cols: number; rows: number }>();
 
-  // `spawn` takes the session id so the shell can be born with that note's
-  // params (cwd/env from its frontmatter): the pool decides WHEN a shell
-  // spawns, but whose note it belongs to is information only the caller's
-  // spawn can act on.
+  // `spawn` takes the session id and host so the shell can be born with that
+  // note's params (cwd/env from its frontmatter) on the machine the run named:
+  // the pool decides WHEN a shell spawns, but whose note it belongs to and
+  // where it lives is information only the caller's spawn can act on.
   constructor(
-    private readonly spawn: (sessionId: string) => InlineShellIO,
+    private readonly spawn: (sessionId: string, host: string) => InlineShellIO,
     private readonly nonce: string,
   ) {}
 
-  /** Start `runner` for run `id`, on the note's shell or a fresh overflow one. */
-  run(sessionId: string, id: string, runner: string): void {
+  /** Start `runner` for run `id`, on the note's shell for `host` or a fresh overflow one. */
+  run(sessionId: string, id: string, runner: string, host: string = LOCAL_HOST): void {
     let session = this.sessions.get(sessionId);
     if (!session) {
-      session = { primary: null, overflow: new Map() };
+      session = { primaries: new Map(), overflow: new Map() };
       this.sessions.set(sessionId, session);
     }
-    if (!session.primary) session.primary = this.newSlot(sessionId);
-    let slot = session.primary;
+    let slot = session.primaries.get(host);
+    if (!slot) {
+      slot = this.newSlot(sessionId, host);
+      session.primaries.set(host, slot);
+    }
     if (slot.activeRun !== null) {
-      slot = this.newSlot(sessionId);
+      slot = this.newSlot(sessionId, host);
       session.overflow.set(id, slot);
     }
     slot.activeRun = id;
@@ -138,7 +149,7 @@ export class InlinePool {
           this.dropSlot(session, slot);
         }
       }
-      if (!session.primary && session.overflow.size === 0) this.sessions.delete(sessionId);
+      if (session.primaries.size === 0 && session.overflow.size === 0) this.sessions.delete(sessionId);
     }
   }
 
@@ -185,8 +196,8 @@ export class InlinePool {
     this.pendingResize.clear();
   }
 
-  private newSlot(sessionId: string): Slot {
-    const shell = this.spawn(sessionId);
+  private newSlot(sessionId: string, host: string): Slot {
+    const shell = this.spawn(sessionId, host);
     // Install the end-marker hook before any block can run. Its own echo lands
     // outside every C..D pair, so the parser drops it and no block ever sees it.
     shell.write(markerInit(this.nonce));
@@ -194,20 +205,20 @@ export class InlinePool {
   }
 
   private slots(session: Session): Slot[] {
-    return session.primary ? [session.primary, ...session.overflow.values()] : [...session.overflow.values()];
+    return [...session.primaries.values(), ...session.overflow.values()];
   }
 
   private slotFor(sessionId: string, id: string): Slot | undefined {
     const session = this.sessions.get(sessionId);
     if (!session) return undefined;
-    if (session.primary?.activeRun === id) return session.primary;
+    for (const slot of session.primaries.values()) if (slot.activeRun === id) return slot;
     return session.overflow.get(id);
   }
 
-  // A run reached its D marker: free its shell, or retire it. The persistent
-  // shell survives to carry cwd/env to the next block; an overflow shell has no
-  // next block — nothing can ever be routed to it again — so keeping it would
-  // only leak a zsh.
+  // A run reached its D marker: free its shell, or retire it. A persistent
+  // shell survives to carry cwd/env to its host's next block; an overflow
+  // shell has no next block — nothing can ever be routed to it again — so
+  // keeping it would only leak a shell (and, remotely, an ssh connection).
   private runEnded(session: Session, slot: Slot, id: string): void {
     if (slot.activeRun === id) slot.activeRun = null;
     if (session.overflow.get(id) === slot) {
@@ -218,9 +229,11 @@ export class InlinePool {
 
   private dropSlot(session: Session, slot: Slot): void {
     slot.shell.close();
-    if (session.primary === slot) {
-      session.primary = null;
-      return;
+    for (const [host, s] of session.primaries) {
+      if (s === slot) {
+        session.primaries.delete(host);
+        return;
+      }
     }
     for (const [id, s] of session.overflow) {
       if (s === slot) session.overflow.delete(id);

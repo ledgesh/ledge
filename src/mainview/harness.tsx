@@ -246,8 +246,13 @@ configureWorkspaces({
 // Link opens are recorded, not performed, like settings opens below:
 // launching a browser is a native seam.
 const linkOpens: string[] = [];
+// Runs are inert, but WHICH machine a run names is view-side policy (the
+// host picker's always-ask rule), so the target rides the record for specs.
+const inlineRuns: { sessionId: string; host: string | null }[] = [];
 configureBridge({
-  runInline: () => {},
+  runInline: (sessionId, _id, _code, _language, host) => {
+    inlineRuns.push({ sessionId, host });
+  },
   cancelRun: () => {},
   resizeInline: () => {},
   inputInline: () => {},
@@ -258,19 +263,20 @@ configureBridge({
 // The terminal stays inert (no PTY output), but WHICH note a paste or attach
 // addresses is view-side routing — the drawer must show the same note's shell
 // the block's run was sent to — so those sessionIds are recorded for specs.
-const termAttaches: string[] = [];
-const termPastes: { sessionId: string; text: string }[] = [];
+const termAttaches: { sessionId: string; host: string | null }[] = [];
+const termPastes: { sessionId: string; text: string; host: string | null }[] = [];
 configureTerminal({
   sendInput: () => {},
-  sendPaste: (sessionId, text) => {
-    termPastes.push({ sessionId, text });
+  sendPaste: (sessionId, text, _language, host) => {
+    termPastes.push({ sessionId, text, host: host ?? null });
   },
   sendResize: () => {},
-  attach: async (sessionId) => {
-    termAttaches.push(sessionId);
-    return { dataB64: "" };
+  attach: async (sessionId, host) => {
+    termAttaches.push({ sessionId, host: host ?? null });
+    return { dataB64: "", host: host ?? "local" };
   },
   detach: () => {},
+  status: async () => ({ live: false, host: null }),
   closeSession: () => {},
   restartSession: () => {},
 });
@@ -351,8 +357,9 @@ declare global {
       settingsOpens: () => number;
       linkOpens: () => string[];
       layout: () => string | null;
-      termAttaches: () => string[];
-      termPastes: () => { sessionId: string; text: string }[];
+      termAttaches: () => { sessionId: string; host: string | null }[];
+      termPastes: () => { sessionId: string; text: string; host: string | null }[];
+      inlineRuns: () => { sessionId: string; host: string | null }[];
       store: FakeStore;
     };
   }
@@ -362,8 +369,9 @@ window.__harness = {
   settingsOpens: () => settingsOpens,
   linkOpens: () => [...linkOpens],
   layout: () => layoutText,
-  termAttaches: () => [...termAttaches],
+  termAttaches: () => termAttaches.map((a) => ({ ...a })),
   termPastes: () => termPastes.map((p) => ({ ...p })),
+  inlineRuns: () => inlineRuns.map((r) => ({ ...r })),
   store,
 };
 

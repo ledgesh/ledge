@@ -522,6 +522,19 @@ body {
   color: var(--ed-muted);
   opacity: 0.7;
 }
+/* The run's target machine (inline output header). Bordered, not just text:
+   with prod and staging both on screen, the host must read as a badge at a
+   glance, not blend into the status line. */
+.ledge-host-chip {
+  font-size: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--ed-muted);
+  border: 1px solid color-mix(in srgb, var(--ed-muted) 40%, transparent);
+  border-radius: 4px;
+  padding: 0 5px;
+  line-height: 15px;
+  margin-left: 6px;
+}
 .ledge-output-body {
   margin: 0;
   padding: 8px;

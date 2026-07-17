@@ -226,7 +226,15 @@ snapshot at construction time through `lib/settings.ts`.
   map (`blocks.interpreters`, applied Bun-side by `bun/runner.ts`; it exists
   because "which python" has no universal answer — the default resolves via
   the login shell's PATH, and a venv or pinned toolchain demonstrably needs
-  to override that). Additions should be argued in those terms.
+  to override that), plus its per-machine refinement
+  (`blocks.hostInterpreters`: host-pattern → language map, merged over the
+  base for runs a note's `host:` sends elsewhere — the same "which python"
+  fact, which can have a different answer on prod than here. `*` globs cover
+  numbered fleets; matching sections merge in file order, later wins;
+  resolution is `interpretersFor` in `bun/runner.ts`. It lives in settings,
+  not frontmatter, because a machine's toolchain layout is one fact about
+  one machine, identical in every note that targets it). Additions should be
+  argued in those terms.
 - **Settings are not session state, and neither is the registry.** Three
   files in the app home, three ownership shapes. `settings.json` is
   *human-edited preference*. `.layout.json` — which workspaces exist, their
@@ -274,6 +282,7 @@ env:                         # inline non-secret vars
   NODE_ENV: development
 profile: petstore            # named secrets scope (see below)
 envFile: ./.env              # project-owned dotenv, resolved against cwd
+host: web1 deploy@prod       # machines blocks may run on (ssh destinations / "local")
 ---
 ```
 
@@ -325,13 +334,44 @@ alike, which is what keeps all three telling one story about the note.
   and untouched lines byte-for-byte, so hand edits and dialog edits coexist
   rather than compete. Values render masked by default: the dialog must not
   become the place secrets end up on screen after all.
+- **`host:` puts a note's shells on another machine — as ssh's client,
+  never its replacement.** The PTY stays local; a remote shell is
+  `ssh -t <host> '<cd/export preamble>; exec …'` as the pty's child
+  (`bun/remoteSpawn.ts`), so auth (agent, passphrase prompts, 2FA, host
+  keys) happens in the terminal exactly as it would anywhere, Ledge holds
+  no credentials, and connection reuse is the user's `~/.ssh/config`
+  (ControlMaster), not ours. The declared list is an **allowlist enforced
+  Bun-side** (`resolveHost` in `bun/index.ts`, re-applying the parser's
+  `isHostName` — the same two-ended move as profile names): a run may only
+  name a declared host, and with more than one declared the view interposes
+  the host picker on every run (interactions.md). What crosses the wire is
+  narrow by design: cwd (a `cd` in the preamble, `~` anchored to the
+  *remote* home) and inline `env` (documented non-secret). `profile` and
+  `envFile` are **local-only** and warn — a secret on a remote command line
+  would sit in that machine's process table. Inline runs exec `bash -l`
+  remotely (the marker hook installs under zsh or bash — `markerInit` is
+  written portable for exactly this — and bash is the one shell ~every
+  server has); block bodies reach the remote /tmp in-band, base64 through
+  the shell itself (`bun/runner.ts` remote mode), so no second connection
+  and no quoting surface. Interpreted fences resolve their interpreter from
+  the *remote* PATH — `bun` there means the remote's bun, and a machine
+  without one fails with its own "command not found" — with
+  `blocks.hostInterpreters` (§6) as the per-machine override when a host's
+  toolchain lives somewhere the base map does not name. Persistent inline
+  shells are per (note, host) (`bun/inlinePool.ts`), so `cd` still carries
+  across consecutive blocks aimed at the same machine. The terminal drawer
+  runs the user's own remote login shell; its host is fixed at spawn and
+  shown as a badge. Known limits, accepted: a non-POSIX remote *login*
+  shell (fish, csh) works only for notes with no cwd/env preamble, and
+  inline runs need bash on the remote.
 - **Restart-applies, like settings.** Params are read at shell *spawn*; a
   live shell keeps the cwd/env it was born with, and an edited frontmatter
   takes effect on the session's next shell. The "Restart Note Shell" command
   is the deliberate escape hatch: kill the note's shells, keep its params,
   respawn lazily. (This is also why an overflow shell spawned after a
   frontmatter edit can be newer than the persistent one — each shell reads
-  the params at its own birth.)
+  the params at its own birth.) For remote hosts this is also how a
+  drawer's shell moves machines: restart, reopen, pick again.
 - **Everything degrades, nothing throws.** A missing profile, a stale cwd, a
   bad env name each cost themselves — warned in the Bun log, and the shell
   still spawns. A dead Run button diagnoses nothing.

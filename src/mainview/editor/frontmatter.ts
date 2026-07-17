@@ -13,7 +13,7 @@
 // gets parsed, never one line more or less.
 import { StateField, type EditorState, type Extension, type Range } from "@codemirror/state";
 import { Decoration, type DecorationSet, EditorView, ViewPlugin } from "@codemirror/view";
-import { frontmatterEnd, isProfileName, unquote } from "../../shared/frontmatter";
+import { frontmatterEnd, isProfileName, parseFrontmatter, unquote } from "../../shared/frontmatter";
 import { editProfile } from "./bridge";
 
 // Enough of a note to find the block's end — the same cap as everywhere else
@@ -87,6 +87,17 @@ export function frontmatterRange(state: EditorState): { from: number; to: number
 export function profileChipAnchor(state: EditorState): { pos: number; name: string } | null {
   const p = effectiveProfileLine(state.sliceDoc(0, Math.min(HEAD_BYTES, state.doc.length)));
   return p ? { pos: state.doc.line(p.lineNumber).from + p.to, name: p.name } : null;
+}
+
+/**
+ * The hosts this note's `host:` line declares, from the LIVE document — the
+ * picker must reflect what is on screen, not the store's debounced last send.
+ * (Bun still validates the eventual choice against what it was last SENT,
+ * so a pick made inside the autosave window degrades to a warning, never to
+ * an undeclared machine.)
+ */
+export function declaredHosts(state: EditorState): string[] {
+  return parseFrontmatter(state.sliceDoc(0, Math.min(HEAD_BYTES, state.doc.length))).params.hosts;
 }
 
 const FENCE = Decoration.line({ class: "ledge-fm ledge-fm-fence" });

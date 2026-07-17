@@ -20,20 +20,22 @@ export function b64ToBytes(b64: string): Uint8Array {
 }
 
 let sendInputFn: ((sessionId: string, dataB64: string) => void) | null = null;
-let sendPasteFn: ((sessionId: string, text: string, language?: string | null) => void) | null = null;
+let sendPasteFn: ((sessionId: string, text: string, language?: string | null, host?: string | null) => void) | null = null;
 let sendResizeFn: ((sessionId: string, cols: number, rows: number) => void) | null = null;
-let attachFn: ((sessionId: string) => Promise<{ dataB64: string }>) | null = null;
+let attachFn: ((sessionId: string, host?: string | null) => Promise<{ dataB64: string; host: string }>) | null = null;
 let detachFn: ((sessionId: string) => void) | null = null;
+let statusFn: ((sessionId: string) => Promise<{ live: boolean; host: string | null }>) | null = null;
 let closeSessionFn: ((sessionId: string) => void) | null = null;
 let restartSessionFn: ((sessionId: string) => void) | null = null;
 
 // Wired by main.tsx once the Electroview RPC exists.
 export function configureTerminal(fns: {
   sendInput: (sessionId: string, dataB64: string) => void;
-  sendPaste: (sessionId: string, text: string, language?: string | null) => void;
+  sendPaste: (sessionId: string, text: string, language?: string | null, host?: string | null) => void;
   sendResize: (sessionId: string, cols: number, rows: number) => void;
-  attach: (sessionId: string) => Promise<{ dataB64: string }>;
+  attach: (sessionId: string, host?: string | null) => Promise<{ dataB64: string; host: string }>;
   detach: (sessionId: string) => void;
+  status: (sessionId: string) => Promise<{ live: boolean; host: string | null }>;
   closeSession: (sessionId: string) => void;
   restartSession: (sessionId: string) => void;
 }): void {
@@ -42,15 +44,34 @@ export function configureTerminal(fns: {
   sendResizeFn = fns.sendResize;
   attachFn = fns.attach;
   detachFn = fns.detach;
+  statusFn = fns.status;
   closeSessionFn = fns.closeSession;
   restartSessionFn = fns.restartSession;
 }
 
-// Enable live streaming for a note and return its scrollback bytes to replay.
-export async function terminalAttach(sessionId: string): Promise<Uint8Array> {
-  if (!attachFn) return new Uint8Array(0);
-  const { dataB64 } = await attachFn(sessionId);
-  return b64ToBytes(dataB64);
+/**
+ * Enable live streaming for a note and return its scrollback bytes to replay,
+ * plus the host the shell is on (what the drawer's badge shows). `host` is
+ * used only if this attach is the one that spawns the shell; a live shell's
+ * host is fixed at its birth (rpc-schema terminalAttach).
+ */
+export async function terminalAttach(
+  sessionId: string,
+  host?: string | null,
+): Promise<{ snapshot: Uint8Array; host: string }> {
+  if (!attachFn) return { snapshot: new Uint8Array(0), host: "local" };
+  const { dataB64, host: on } = await attachFn(sessionId, host);
+  return { snapshot: b64ToBytes(dataB64), host: on };
+}
+
+/**
+ * Whether the note's terminal shell is alive right now, and where. Asked
+ * before opening the drawer (or sending a block to it) on a multi-host note:
+ * only a spawn-to-be warrants the host picker.
+ */
+export async function terminalStatus(sessionId: string): Promise<{ live: boolean; host: string | null }> {
+  if (!statusFn) return { live: false, host: null };
+  return statusFn(sessionId);
 }
 
 export function terminalDetach(sessionId: string): void {
@@ -73,8 +94,8 @@ export function sendTerminalText(sessionId: string, text: string): void {
  * `language` (the block's fence word) makes Bun paste an interpreted block's
  * runner line instead of its raw code; omit it for literal pastes (Cmd+V).
  */
-export function sendTerminalPaste(sessionId: string, text: string, language?: string | null): void {
-  sendPasteFn?.(sessionId, text, language);
+export function sendTerminalPaste(sessionId: string, text: string, language?: string | null, host?: string | null): void {
+  sendPasteFn?.(sessionId, text, language, host);
 }
 
 export function sendTerminalResize(sessionId: string, cols: number, rows: number): void {

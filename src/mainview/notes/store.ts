@@ -8,7 +8,7 @@
 import { configureSession, createNote, retitleNote, writeNote, type NoteMeta } from "./channel";
 import { workspaceDefaultCwd } from "../workspace/channel";
 import { headingOf, labelOf, slugOf } from "../../shared/slug";
-import { parseFrontmatter } from "../../shared/frontmatter";
+import { parseFrontmatter, type NoteParams } from "../../shared/frontmatter";
 
 // Long enough that a burst of typing is one write, short enough that the window
 // where a crash loses work is small. Matches PLAN P1-4.
@@ -150,6 +150,16 @@ export function docIdAt(path: string): string | null {
 // references to the note's own workspace.
 export function folderOf(docId: string): string | null {
   return docs.get(docId)?.folder ?? null;
+}
+
+// The spawn params this note last SENT to Bun (lastParamsKey is their JSON —
+// parsed back rather than stored twice, so this can never disagree with what
+// Bun holds). App's terminal-drawer flow reads `hosts` from here: the drawer
+// belongs to the note as a whole, not to an editor view, and this is the one
+// view-side record of the note's params that exists outside the editor.
+export function paramsOf(docId: string): NoteParams | null {
+  const e = docs.get(docId);
+  return e ? (JSON.parse(e.lastParamsKey) as NoteParams) : null;
 }
 
 // Record the heading a note already has on disk, without renaming anything. Called

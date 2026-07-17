@@ -158,8 +158,13 @@ export type LedgeRPC = {
       // `language` is the fence's info string ("python", "node", ...): Bun picks
       // the runner from it — source into the shell, or exec an interpreter on the
       // temp file (bun/runner.ts). The view never decides how code runs.
+      // `host` is the machine the user picked for THIS run (the note's host
+      // picker), or absent to let the note's frontmatter decide (its single
+      // declared host, else local). Bun re-validates it against the note's
+      // declared list (resolveHost in bun/index.ts): the frontmatter is the
+      // allowlist, and the view's picker is only its UI.
       runBlock: {
-        params: { sessionId: string; id: string; code: string; language: string | null };
+        params: { sessionId: string; id: string; code: string; language: string | null; host?: string | null };
         response: { accepted: boolean };
       };
       // Interrupt one running block (SIGINT to its shell's foreground process
@@ -194,14 +199,29 @@ export type LedgeRPC = {
       // terminal: an interpreted language (see runBlock) pastes its runner line
       // (`python3 /tmp/...py`) instead of the raw code, which zsh could not run.
       // Shell blocks and the drawer's own Cmd+V (no language) paste text as-is.
-      terminalPaste: { params: { sessionId: string; text: string; language?: string | null }; response: { ok: boolean } };
+      // `host` matters only if this call is what spawns the shell (a paste
+      // into a note whose drawer was never opened); an already-live drawer
+      // shell keeps the host it was born on, and the runner line for an
+      // interpreted block is built for THAT host, so a remote drawer never
+      // gets a local temp path it cannot read.
+      terminalPaste: { params: { sessionId: string; text: string; language?: string | null; host?: string | null }; response: { ok: boolean } };
       terminalResize: { params: { sessionId: string; cols: number; rows: number }; response: { ok: boolean } };
       // Attach lazily spawns the note's terminal shell (if needed), returns the
       // scrollback so far (so a freshly opened drawer shows the existing prompt and
       // history) and turns on live streaming; detach turns it off while the drawer
       // is closed or shows another note. Scrollback keeps accumulating either way.
-      terminalAttach: { params: { sessionId: string }; response: { dataB64: string } };
+      // `host` is the machine picked for the spawn (ignored when the shell is
+      // already live — its host is fixed at birth, restart to move it); the
+      // response reports the host the shell is actually on, which is what the
+      // drawer's badge shows. Validated like runBlock's (resolveHost).
+      terminalAttach: { params: { sessionId: string; host?: string | null }; response: { dataB64: string; host: string } };
       terminalDetach: { params: { sessionId: string }; response: { ok: boolean } };
+      // Whether the note's terminal shell is currently alive, and where. The
+      // view asks before opening the drawer (or sending a block to it) on a
+      // multi-host note: a live shell means no host picker — the paste can
+      // only go where that shell already is — while a dead one means the
+      // spawn is about to happen and the user must choose first.
+      terminalStatus: { params: { sessionId: string }; response: { live: boolean; host: string | null } };
       // Tear down both of a note's shells; sent when its tab (or pane, or
       // workspace) closes and its docId drops out of the live set.
       closeSession: { params: { sessionId: string }; response: { ok: boolean } };

@@ -18,7 +18,7 @@
 // the block and never a crash. The note is hand-edited text; a typo has to
 // degrade as gently as one in settings.json does.
 
-/** Spawn parameters a note may declare. null / {} mean "not declared". */
+/** Spawn parameters a note may declare. null / {} / [] mean "not declared". */
 export interface NoteParams {
   // Working directory for the note's shells (inline-run, overflow, terminal).
   cwd: string | null;
@@ -29,7 +29,16 @@ export interface NoteParams {
   envFile: string | null;
   // Inline non-secret vars, merged over the spawn env.
   env: Record<string, string>;
+  // The machines this note's blocks may execute on: ssh destinations
+  // (`user@host`, an ssh-config alias), or the reserved word "local". Empty
+  // means undeclared — everything runs locally, as before the key existed.
+  // More than one entry means every run asks which member to target; the list
+  // is an allowlist, enforced Bun-side (bun/index.ts resolveHost).
+  hosts: string[];
 }
+
+/** The reserved `host:` member meaning "this machine, no ssh". */
+export const LOCAL_HOST = "local";
 
 export interface Frontmatter {
   params: NoteParams;
@@ -55,6 +64,18 @@ const FENCE = /^---\s*$/;
 // the SAME predicate, or a name could pass one and surprise the other.
 export function isProfileName(name: string): boolean {
   return /^[A-Za-z0-9_-]+$/.test(name);
+}
+
+// An ssh destination (`host`, `user@host`, an ssh-config alias) or "local".
+// The charset covers all of those; what it excludes is what matters: a leading
+// "-" would read as an ssh OPTION when the destination becomes argv (option
+// injection), and whitespace/quotes/commas never appear in a real destination
+// but would break the list syntax and the remote command line. Same
+// parser-checks/Bun-guards split as isProfileName: the view's check is the
+// typo message, Bun re-applies the SAME predicate where the value is used
+// (bun/index.ts resolveHost).
+export function isHostName(name: string): boolean {
+  return /^[A-Za-z0-9_.@:-]+$/.test(name) && !name.startsWith("-");
 }
 
 // Env var names as execve and every shell agree on them. Anything else (spaces,
@@ -91,7 +112,7 @@ export function frontmatterEnd(text: string): number {
 /** Parse a note's frontmatter into spawn params (see the header for grammar). */
 export function parseFrontmatter(text: string): Frontmatter {
   const end = frontmatterEnd(text);
-  const params: NoteParams = { cwd: null, profile: null, envFile: null, env: {} };
+  const params: NoteParams = { cwd: null, profile: null, envFile: null, env: {}, hosts: [] };
   const problems: string[] = [];
   if (end === 0) return { params, problems, end };
 
@@ -153,6 +174,23 @@ export function parseFrontmatter(text: string): Frontmatter {
         else if (!isProfileName(value)) problems.push(`"profile" must be letters, digits, "-" or "_": "${value}"`);
         else params.profile = value;
         break;
+      case "host": {
+        // One line, space- or comma-separated: `host: web1, deploy@prod`.
+        // Neither separator can appear in a real ssh destination, so a flat
+        // list needs no new grammar. Per-token degradation, env-style: a bad
+        // token costs itself, the machines beside it stay reachable.
+        if (!value) {
+          problems.push(`"host" must name at least one machine (or "local")`);
+          break;
+        }
+        params.hosts = []; // a repeated host: line replaces, like every other key
+        for (const token of value.split(/[,\s]+/)) {
+          if (!token) continue;
+          if (!isHostName(token)) problems.push(`"host" entry is not an ssh destination: "${token}"`);
+          else if (!params.hosts.includes(token)) params.hosts.push(token);
+        }
+        break;
+      }
       default:
         // Same reasoning as parseSettings: a misspelled key silently ignored
         // reads as "my frontmatter does nothing" — say so instead.

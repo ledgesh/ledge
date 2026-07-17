@@ -64,5 +64,17 @@ export function chipOf(keys?: readonly string[], listKeys?: readonly string[]): 
   return key ? formatKey(key) : null;
 }
 
+// Middle-ellipsis a label that will not fit, keeping BOTH ends: for values
+// like `ubuntu@anypost-app-prod-01` the distinguishing part is the tail, and
+// the CSS `truncate` end-ellipsis is exactly what eats it. The tail keeps one
+// more character than the head for the same reason. Callers pair this with a
+// `title` carrying the full value.
+export function middleEllipsis(label: string, max: number): string {
+  if (label.length <= max) return label;
+  const tail = Math.ceil((max - 1) / 2);
+  const head = max - 1 - tail;
+  return `${label.slice(0, head)}…${label.slice(label.length - tail)}`;
+}
+
 export type { CommandId };
 export { COMMANDS };

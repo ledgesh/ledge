@@ -57,11 +57,22 @@ describe("markerCommand / markerInit", () => {
   test("the hook stays quiet when no block is running", () => {
     // Prompts happen for reasons other than blocks; without this guard every one
     // of them would emit an end marker for whatever ran last.
-    expect(markerInit(NONCE)).toContain('[[ -n "$__ledge_id" ]] || return');
+    expect(markerInit(NONCE)).toContain('[ -n "$__ledge_id" ] || return');
   });
 
   test("a block's id is cleared once reported, so it is reported once", () => {
-    expect(markerInit(NONCE)).toContain("__ledge_id= }");
+    expect(markerInit(NONCE)).toContain("__ledge_id=; }");
+  });
+
+  test("the hook registers in zsh and bash alike", () => {
+    // Remote inline shells are bash (bun/remoteSpawn.ts); local ones zsh. The
+    // one init line must land the hook in whichever it hits, and its body must
+    // stay POSIX — a zsh-ism would error line-by-line in bash and never report
+    // an end marker, leaving every remote block Running forever.
+    const init = markerInit(NONCE);
+    expect(init).toContain("precmd_functions+=(__ledge_precmd)");
+    expect(init).toContain('PROMPT_COMMAND="__ledge_precmd${PROMPT_COMMAND:+;$PROMPT_COMMAND}"');
+    expect(init).not.toContain("[[");
   });
 });
 

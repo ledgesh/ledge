@@ -46,7 +46,7 @@ test("the terminal button in an unfocused pane focuses that pane and runs there"
     attaches: window.__harness.termAttaches(),
   }));
   expect(paste.text).toContain('echo "ready"');
-  expect(attaches[attaches.length - 1]).toBe(paste.sessionId);
+  expect(attaches[attaches.length - 1].sessionId).toBe(paste.sessionId);
 });
 
 test("the terminal button in the focused pane still routes to its own shell", async ({ page }) => {
@@ -61,5 +61,5 @@ test("the terminal button in the focused pane still routes to its own shell", as
     attaches: window.__harness.termAttaches(),
   }));
   expect(paste.text).toContain('echo "ready"');
-  expect(attaches[attaches.length - 1]).toBe(paste.sessionId);
+  expect(attaches[attaches.length - 1].sessionId).toBe(paste.sessionId);
 });

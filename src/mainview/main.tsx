@@ -32,8 +32,8 @@ const rpc = Electroview.defineRPC<LedgeRPC>({
 const electrobun = new Electrobun.Electroview({ rpc });
 
 configureBridge({
-  runInline: (sessionId, id, code, language) => {
-    void electrobun.rpc!.request.runBlock({ sessionId, id, code, language });
+  runInline: (sessionId, id, code, language, host) => {
+    void electrobun.rpc!.request.runBlock({ sessionId, id, code, language, host });
   },
   cancelRun: (sessionId, id) => {
     void electrobun.rpc!.request.cancelRun({ sessionId, id });
@@ -53,16 +53,17 @@ configureTerminal({
   sendInput: (sessionId, dataB64) => {
     void electrobun.rpc!.request.terminalInput({ sessionId, dataB64 });
   },
-  sendPaste: (sessionId, text, language) => {
-    void electrobun.rpc!.request.terminalPaste({ sessionId, text, language });
+  sendPaste: (sessionId, text, language, host) => {
+    void electrobun.rpc!.request.terminalPaste({ sessionId, text, language, host });
   },
   sendResize: (sessionId, cols, rows) => {
     void electrobun.rpc!.request.terminalResize({ sessionId, cols, rows });
   },
-  attach: (sessionId) => electrobun.rpc!.request.terminalAttach({ sessionId }),
+  attach: (sessionId, host) => electrobun.rpc!.request.terminalAttach({ sessionId, host }),
   detach: (sessionId) => {
     void electrobun.rpc!.request.terminalDetach({ sessionId });
   },
+  status: (sessionId) => electrobun.rpc!.request.terminalStatus({ sessionId }),
   closeSession: (sessionId) => {
     void electrobun.rpc!.request.closeSession({ sessionId });
   },

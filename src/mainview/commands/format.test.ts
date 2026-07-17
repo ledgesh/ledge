@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { chipOf, formatKey, keyChip, tooltip } from "./format";
+import { chipOf, formatKey, keyChip, middleEllipsis, tooltip } from "./format";
 
 describe("formatKey", () => {
   test("letters uppercase with macOS glyph order ⌃⌥⇧⌘", () => {
@@ -59,5 +59,28 @@ describe("chipOf", () => {
     expect(chipOf(["Mod-Backspace"], ["Backspace"])).toBe("⌘⌫");
     expect(chipOf(undefined, ["d", "Backspace"])).toBe("D");
     expect(chipOf([], [])).toBeNull();
+  });
+});
+
+describe("middleEllipsis", () => {
+  test("a fitting label passes through untouched", () => {
+    expect(middleEllipsis("web1", 30)).toBe("web1");
+    expect(middleEllipsis("123456", 6)).toBe("123456");
+  });
+
+  test("a long label keeps BOTH ends — the tail is what tells -01 from -02", () => {
+    const a = middleEllipsis("ubuntu@anypost-app-prod-01", 20);
+    const b = middleEllipsis("ubuntu@anypost-app-prod-02", 20);
+    expect(a).toHaveLength(20);
+    expect(a.startsWith("ubuntu@")).toBe(true);
+    expect(a.endsWith("-01")).toBe(true);
+    expect(b.endsWith("-02")).toBe(true);
+    expect(a).not.toBe(b);
+  });
+
+  test("the result never exceeds max", () => {
+    for (const max of [5, 8, 13, 20]) {
+      expect(middleEllipsis("a".repeat(50) + "-tail", max).length).toBeLessThanOrEqual(max);
+    }
   });
 });

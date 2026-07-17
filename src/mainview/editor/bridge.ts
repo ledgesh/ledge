@@ -9,6 +9,37 @@ import type { RunEvent } from "../../shared/rpc-schema";
 /** Where a block's output goes when it runs. */
 export type RunDestination = "inline" | "terminal";
 
+/** One request to choose a target machine, anchored near what asked for it. */
+export interface HostPickRequest {
+  hosts: string[];
+  // The session's last-picked host, preselected so a repeat run on the same
+  // machine is Enter; running on a DIFFERENT machine takes a deliberate move.
+  preferred: string | null;
+  anchor: { x: number; y: number };
+  onPick: (host: string) => void;
+}
+
+// The last host picked per session, view-side only and never persisted: it is
+// a convenience default for the picker, not state Bun acts on — every actual
+// run still names its host explicitly and is validated Bun-side.
+const lastHost = new Map<string, string>();
+
+export function lastHostFor(sessionId: string): string | null {
+  return lastHost.get(sessionId) ?? null;
+}
+
+/** Ask the user which declared host to target, remembering the answer. */
+export function requestHostPick(sessionId: string, req: Omit<HostPickRequest, "preferred">): void {
+  handlers.pickHost?.({
+    ...req,
+    preferred: lastHostFor(sessionId),
+    onPick: (host) => {
+      lastHost.set(sessionId, host);
+      req.onPick(host);
+    },
+  });
+}
+
 type NativeMessage =
   | { type: "toggleTerminal" }
   | {
@@ -19,15 +50,36 @@ type NativeMessage =
       code: string;
       language: string | null;
       destination: RunDestination;
+      // The machine picked for an inline run (the host picker, or the note's
+      // single declared host), null for local/undeclared. Bun re-validates it
+      // against the note's declared list either way.
+      host?: string | null;
+      // The note's declared host list, for the TERMINAL destination: the
+      // drawer's shell has one host for its whole life, so whether to ask is
+      // decided where the drawer lives (App), not per block here. `anchor` is
+      // where the asking block sits, so the picker App may open lands beside
+      // the click instead of across the window.
+      hosts?: string[];
+      anchor?: { x: number; y: number };
     };
 
 // Handlers are set from two places: main.tsx wires runInline (needs the RPC),
 // and App wires the terminal-drawer callbacks (need React state). configureBridge
 // merges, so either can set its own fields without clobbering the other.
 interface BridgeHandlers {
-  runInline: (sessionId: string, id: string, code: string, language: string | null) => void;
+  runInline: (sessionId: string, id: string, code: string, language: string | null, host: string | null) => void;
   toggleTerminal: () => void;
-  runInTerminal: (sessionId: string, code: string, language: string | null) => void;
+  runInTerminal: (
+    sessionId: string,
+    code: string,
+    language: string | null,
+    hosts: string[],
+    anchor?: { x: number; y: number },
+  ) => void;
+  // Open the anchored host-picker popover (App renders it): the note declares
+  // more than one host, so the user chooses before anything executes.
+  // `onPick` fires with the chosen host; dismissal fires nothing.
+  pickHost: (req: HostPickRequest) => void;
   cancelRun: (sessionId: string, id: string) => void;
   resizeInline: (sessionId: string, id: string, cols: number, rows: number) => void;
   inputInline: (sessionId: string, id: string, data: string) => void;
@@ -86,10 +138,10 @@ export function toNative(message: unknown): void {
   }
   if (m.type !== "run") return;
   if (m.destination === "terminal") {
-    handlers.runInTerminal?.(m.sessionId, m.code, m.language);
+    handlers.runInTerminal?.(m.sessionId, m.code, m.language, m.hosts ?? [], m.anchor);
     return;
   }
-  if (m.id) handlers.runInline?.(m.sessionId, m.id, m.code, m.language);
+  if (m.id) handlers.runInline?.(m.sessionId, m.id, m.code, m.language, m.host ?? null);
 }
 
 // Bun -> web run events. Every mounted editor registers a sink bound to its own

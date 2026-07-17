@@ -32,12 +32,22 @@ export type MarkerEvent =
  * `local rc=$?` must be the first thing in the function or the status is lost.
  * `__ledge_id` is cleared after reporting, so the hook stays silent for prompts
  * that follow anything other than a block.
+ *
+ * The line is written blind into whatever shell the pool spawned, and since
+ * remote hosts came along that is not always zsh: a remote inline shell is
+ * `bash -l` (bash is the one shell ~every server has; see bun/remoteSpawn.ts).
+ * So the function body is POSIX (`[ ]`, explicit `;` before `}`) and only the
+ * hook registration branches: zsh's precmd_functions, else bash's
+ * PROMPT_COMMAND (prepended — both run before every prompt). Anything else
+ * (fish, ash) never receives this line, because the pool only ever spawns
+ * zsh (local, settings.shell) or bash (remote).
  */
 export function markerInit(nonce: string): string {
   return (
-    `__ledge_precmd() { local rc=$?; [[ -n "$__ledge_id" ]] || return; ` +
-    `printf '\\033]133;D;%d;ledge=${nonce}:%s\\a' "$rc" "$__ledge_id"; __ledge_id= }; ` +
-    `precmd_functions+=(__ledge_precmd)\n`
+    `__ledge_precmd() { local rc=$?; [ -n "$__ledge_id" ] || return; ` +
+    `printf '\\033]133;D;%d;ledge=${nonce}:%s\\a' "$rc" "$__ledge_id"; __ledge_id=; }; ` +
+    `if [ -n "$ZSH_VERSION" ]; then precmd_functions+=(__ledge_precmd); ` +
+    `else PROMPT_COMMAND="__ledge_precmd\${PROMPT_COMMAND:+;\$PROMPT_COMMAND}"; fi\n`
   );
 }
 

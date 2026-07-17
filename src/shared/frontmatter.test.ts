@@ -48,20 +48,23 @@ describe("frontmatterEnd", () => {
 describe("parseFrontmatter", () => {
   test("a note with no frontmatter yields empty params and no problems", () => {
     const { params, problems, end } = parseFrontmatter("# Title\nbody");
-    expect(params).toEqual({ cwd: null, profile: null, envFile: null, env: {} });
+    expect(params).toEqual({ cwd: null, profile: null, envFile: null, env: {}, hosts: [] });
     expect(problems).toEqual([]);
     expect(end).toBe(0);
   });
 
-  test("all four keys parse together", () => {
+  test("all five keys parse together", () => {
     const { params, problems } = parseFrontmatter(
-      fm("cwd: ~/Projects/ledge\nprofile: petstore\nenvFile: ./.env\nenv:\n  NODE_ENV: development\n  PORT: 3000\n"),
+      fm(
+        "cwd: ~/Projects/ledge\nprofile: petstore\nenvFile: ./.env\nhost: web1 deploy@prod\nenv:\n  NODE_ENV: development\n  PORT: 3000\n",
+      ),
     );
     expect(params).toEqual({
       cwd: "~/Projects/ledge",
       profile: "petstore",
       envFile: "./.env",
       env: { NODE_ENV: "development", PORT: "3000" },
+      hosts: ["web1", "deploy@prod"],
     });
     expect(problems).toEqual([]);
   });
@@ -159,6 +162,43 @@ describe("parseFrontmatter", () => {
     expect(params.cwd).toBe("/second");
   });
 
+  test("host: parses a flat list, comma- or space-separated", () => {
+    expect(parseFrontmatter(fm("host: web1\n")).params.hosts).toEqual(["web1"]);
+    expect(parseFrontmatter(fm("host: web1 deploy@prod\n")).params.hosts).toEqual(["web1", "deploy@prod"]);
+    expect(parseFrontmatter(fm("host: web1, deploy@prod,db-2\n")).params.hosts).toEqual([
+      "web1",
+      "deploy@prod",
+      "db-2",
+    ]);
+  });
+
+  test("host: accepts the reserved word local alongside real machines", () => {
+    const { params, problems } = parseFrontmatter(fm("host: local staging\n"));
+    expect(params.hosts).toEqual(["local", "staging"]);
+    expect(problems).toEqual([]);
+  });
+
+  test("a host entry is an ssh destination by construction or refused", () => {
+    // The destination becomes ssh argv: a leading "-" would read as an option
+    // (option injection), and quotes/spaces would break the remote command.
+    for (const bad of ["-oProxyCommand=evil", "a;b", "h'x", "web$1"]) {
+      const { params, problems } = parseFrontmatter(fm(`host: ${bad}\n`));
+      expect(params.hosts).toEqual([]);
+      expect(problems.length).toBeGreaterThanOrEqual(1);
+    }
+  });
+
+  test("a bad host entry costs itself, not the machines beside it", () => {
+    const { params, problems } = parseFrontmatter(fm("host: web1 'bad' db-2\n"));
+    expect(params.hosts).toEqual(["web1", "db-2"]);
+    expect(problems.length).toBe(1);
+  });
+
+  test("host entries dedupe, and a repeated host: line replaces the list", () => {
+    expect(parseFrontmatter(fm("host: web1 web1\n")).params.hosts).toEqual(["web1"]);
+    expect(parseFrontmatter(fm("host: web1\nhost: db-2\n")).params.hosts).toEqual(["db-2"]);
+  });
+
   test("CRLF notes parse the same as LF ones", () => {
     const { params, problems } = parseFrontmatter("---\r\ncwd: /x\r\nenv:\r\n  A: 1\r\n---\r\n# T\r\n");
     expect(params.cwd).toBe("/x");
@@ -168,7 +208,7 @@ describe("parseFrontmatter", () => {
 
   test("an empty block is valid and empty", () => {
     const { params, problems, end } = parseFrontmatter("---\n---\n# Title\n");
-    expect(params).toEqual({ cwd: null, profile: null, envFile: null, env: {} });
+    expect(params).toEqual({ cwd: null, profile: null, envFile: null, env: {}, hosts: [] });
     expect(problems).toEqual([]);
     expect(end).toBeGreaterThan(0);
   });

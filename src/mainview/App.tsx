@@ -3,11 +3,13 @@ import { PanelLeft, TerminalSquare, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ResizeHandle } from "@/components/ResizeHandle";
 import { TerminalDrawer } from "@/terminal/TerminalDrawer";
-import { configureBridge } from "@/editor/bridge";
-import { sendTerminalPaste, closeSession, onTerminalExit } from "@/terminal/channel";
+import { configureBridge, requestHostPick, type HostPickRequest } from "@/editor/bridge";
+import { sendTerminalPaste, closeSession, onTerminalExit, terminalStatus } from "@/terminal/channel";
 import { Sidebar } from "@/workspace/Sidebar";
 import { WorkspaceView } from "@/workspace/WorkspaceView";
-import { flushAll } from "@/notes/store";
+import { HostPicker } from "@/components/HostPicker";
+import { LOCAL_HOST } from "../shared/frontmatter";
+import { flushAll, paramsOf } from "@/notes/store";
 import { refreshFolder } from "@/workspace/actions";
 import { allDocIds, useWorkspace, WorkspaceProvider, type AppState } from "@/workspace/store";
 import { flushLayout, scheduleLayoutSave } from "@/workspace/persist";
@@ -66,27 +68,63 @@ function Shell() {
   // A "run in terminal" fired while the drawer is closed (or for a note other than
   // the one shown) queues its command here and flushes once the terminal for that
   // note has mounted, so its output is not dropped.
-  const pending = useRef<{ sessionId: string; cmd: string; language: string | null } | null>(null);
+  const pending = useRef<{ sessionId: string; cmd: string; language: string | null; host: string | null } | null>(
+    null,
+  );
+  // The open host-picker request, if any (multi-host note about to run/spawn).
+  const [hostPick, setHostPick] = useState<HostPickRequest | null>(null);
+  // The machine the drawer's shell is on (attach response), for the badge.
+  const [termHost, setTermHost] = useState<string | null>(null);
+  // The host picked for the NEXT drawer spawn. A ref, not state: it is consumed
+  // by the mount that follows the very setTermOpen that reads it, and must
+  // never linger — the doc-change effect below clears it so a tab switch spawns
+  // on the new note's own frontmatter default, not a stale pick.
+  const spawnHost = useRef<string | null>(null);
+  useEffect(() => {
+    spawnHost.current = null;
+    setTermHost(null); // the badge describes one note's shell; never carry it across
+  }, [activeDocId]);
+  useEffect(() => {
+    if (!termOpen) setTermHost(null);
+  }, [termOpen]);
+
+  // The header Terminal button: the anchor for pickers with no better one
+  // (the ⌃` toggle, a run whose block position is unknown).
+  const termBtnRef = useRef<HTMLButtonElement>(null);
+  const headerPickAnchor = () => {
+    const r = termBtnRef.current?.getBoundingClientRect();
+    return r ? { x: r.right - 200, y: r.bottom + 6 } : { x: window.innerWidth - 240, y: 48 };
+  };
 
   const runInTerminal = useCallback(
-    (sessionId: string, code: string, language: string | null) => {
-      // Bun wraps this as a bracketed paste and gates it on the shell being ready,
-      // so it is safe to fire even the instant a lazily-spawned shell starts.
-      if (termOpen && sessionId === activeDocId) {
-        sendTerminalPaste(sessionId, code, language);
-        return;
-      }
-      // The block can live in an unfocused pane: its buttons are in the overlay
-      // layer parented to <body>, so clicking one never hits the pane's
-      // focus-on-mousedown handler. The drawer always shows the focused pane's
-      // note, so focus the note's pane first — otherwise the drawer opens on
-      // some other note and the paste runs in a shell nothing is showing.
-      if (sessionId !== activeDocId) {
-        const hit = findTabBy(selected.root, (t) => t.docId === sessionId);
-        if (hit) dispatch({ type: "selectTab", paneId: hit.paneId, tabId: hit.tabId });
-      }
-      pending.current = { sessionId, cmd: code, language };
-      setTermOpen(true);
+    (sessionId: string, code: string, language: string | null, hosts: string[], anchor?: { x: number; y: number }) => {
+      const proceed = (host: string | null) => {
+        // Bun wraps this as a bracketed paste and gates it on the shell being ready,
+        // so it is safe to fire even the instant a lazily-spawned shell starts.
+        if (termOpen && sessionId === activeDocId) {
+          sendTerminalPaste(sessionId, code, language, host);
+          return;
+        }
+        // The block can live in an unfocused pane: its buttons are in the overlay
+        // layer parented to <body>, so clicking one never hits the pane's
+        // focus-on-mousedown handler. The drawer always shows the focused pane's
+        // note, so focus the note's pane first — otherwise the drawer opens on
+        // some other note and the paste runs in a shell nothing is showing.
+        if (sessionId !== activeDocId) {
+          const hit = findTabBy(selected.root, (t) => t.docId === sessionId);
+          if (hit) dispatch({ type: "selectTab", paneId: hit.paneId, tabId: hit.tabId });
+        }
+        pending.current = { sessionId, cmd: code, language, host };
+        spawnHost.current = host;
+        setTermOpen(true);
+      };
+      // Only a spawn-to-be warrants the picker: a live drawer shell has one
+      // host for its whole life, and the paste can only go there (the badge
+      // says where that is). Restart Note Shell is the way to move it.
+      void terminalStatus(sessionId).then(({ live }) => {
+        if (live || hosts.length <= 1) proceed(hosts[0] ?? null);
+        else requestHostPick(sessionId, { hosts, anchor: anchor ?? headerPickAnchor(), onPick: proceed });
+      });
     },
     [termOpen, activeDocId, selected.root, dispatch],
   );
@@ -97,19 +135,60 @@ function Shell() {
   // button, the editor keymap, the window hotkey, and the palette all converge
   // on one implementation; main.tsx wires the RPC-backed inline-run handler
   // separately, and configureBridge merges.
+  // The toggle needs the CURRENT note and drawer state, but configureUi is
+  // registered once; refs carry the latest values into that stable closure.
+  const termOpenRef = useRef(termOpen);
+  termOpenRef.current = termOpen;
+  const activeDocRef = useRef(activeDocId);
+  activeDocRef.current = activeDocId;
+
   useEffect(() => {
     configureUi({
-      toggleTerminal: () => setTermOpen((o) => !o),
+      toggleTerminal: () => {
+        if (termOpenRef.current) {
+          setTermOpen(false);
+          return;
+        }
+        // Opening the drawer on a multi-host note whose shell is not alive is
+        // a spawn: the machine must be chosen before it happens. Single-host
+        // and local notes open silently, spawning on their frontmatter's own
+        // answer; a live shell reopens wherever it already is.
+        const sid = activeDocRef.current;
+        const hosts = sid ? (paramsOf(sid)?.hosts ?? []) : [];
+        if (!sid || hosts.length <= 1) {
+          spawnHost.current = hosts[0] ?? null;
+          setTermOpen(true);
+          return;
+        }
+        void terminalStatus(sid).then(({ live }) => {
+          if (live) {
+            setTermOpen(true);
+            return;
+          }
+          requestHostPick(sid, {
+            hosts,
+            anchor: headerPickAnchor(),
+            onPick: (host) => {
+              spawnHost.current = host;
+              setTermOpen(true);
+            },
+          });
+        });
+      },
       closeTerminal: () => setTermOpen(false),
       toggleSidebar: () => setSidebarOpen((o) => !o),
       openOverlay: setOverlay,
       openProfileEditor: setProfileEditing,
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => {
     configureBridge({
       toggleTerminal: () => exec("terminal.toggle"),
       runInTerminal,
+      // The host picker is Shell-rendered chrome like every dialog; the editor
+      // reaches it through the bridge (blocks.ts requestHostPick).
+      pickHost: setHostPick,
       // The ⌘-clicked frontmatter profile name lands on the same dialog as
       // the "Edit Note Profile…" command.
       openProfileEditor: setProfileEditing,
@@ -118,7 +197,7 @@ function Shell() {
 
   const onTerminalReady = useCallback(() => {
     if (pending.current) {
-      sendTerminalPaste(pending.current.sessionId, pending.current.cmd, pending.current.language);
+      sendTerminalPaste(pending.current.sessionId, pending.current.cmd, pending.current.language, pending.current.host);
       pending.current = null;
     }
   }, []);
@@ -221,6 +300,7 @@ function Shell() {
         <span className="text-sm font-semibold">Ledge</span>
         <div className="flex-1" />
         <Button
+          ref={termBtnRef}
           variant={termOpen ? "secondary" : "ghost"}
           size="sm"
           onClick={() => exec("terminal.toggle")}
@@ -265,6 +345,13 @@ function Shell() {
             <div className="flex h-7 shrink-0 items-center gap-2 border-b px-2">
               <TerminalSquare className="size-3.5 text-muted-foreground" />
               <span className="text-[11px] font-medium text-muted-foreground">Terminal</span>
+              {termHost && termHost !== LOCAL_HOST && (
+                // Loudly, always: with remote shells in play, which machine
+                // this prompt belongs to must never need remembering.
+                <span className="rounded border border-amber-500/50 px-1.5 font-mono text-[10px] leading-4 text-amber-600 dark:text-amber-400">
+                  {termHost}
+                </span>
+              )}
               <div className="flex-1" />
               <Button
                 variant="ghost"
@@ -283,8 +370,10 @@ function Shell() {
                 <TerminalDrawer
                   key={activeDocId}
                   sessionId={activeDocId}
+                  spawnHost={spawnHost.current}
                   onReady={onTerminalReady}
                   onClose={() => setTermOpen(false)}
+                  onHost={setTermHost}
                 />
               ) : (
                 <div className="flex h-full items-center justify-center text-[11px] text-muted-foreground">
@@ -300,6 +389,7 @@ function Shell() {
       {profileEditing && (
         <ProfileEditor name={profileEditing} onClose={() => setProfileEditing(null)} />
       )}
+      {hostPick && <HostPicker req={hostPick} onClose={() => setHostPick(null)} />}
     </div>
   );
 }

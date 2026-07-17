@@ -314,3 +314,89 @@ describe("run-addressed plumbing", () => {
     expect(shells[0].resizes).toEqual([[120, 1]]);
   });
 });
+
+describe("per-host persistent shells", () => {
+  // Like makePool, but the fake spawn records which host each shell was born
+  // for, which is the whole behavior under test here.
+  function makeHostPool() {
+    const shells: Array<FakeShell & { host?: string }> = [];
+    const pool = new InlinePool((_sessionId, host) => {
+      const s = new FakeShell() as FakeShell & { host?: string };
+      s.host = host;
+      shells.push(s);
+      return s;
+    }, NONCE);
+    const drained = (): InlineEvent[] => {
+      const events: InlineEvent[] = [];
+      pool.drain((ev) => events.push(ev));
+      return events;
+    };
+    return { pool, shells, drained };
+  }
+
+  test("a run with no host lands on the local shell, exactly as before hosts existed", () => {
+    const { pool, shells } = makeHostPool();
+    pool.run("note", "a", "source /tmp/a.sh");
+    expect(shells.map((s) => s.host)).toEqual(["local"]);
+  });
+
+  test("each host gets its own persistent shell, and each is reused per host", () => {
+    const { pool, shells, drained } = makeHostPool();
+    pool.run("note", "a", "cmd-a", "web1");
+    shells[0].emit(began("a") + ended("a"));
+    drained();
+    pool.run("note", "b", "cmd-b", "db2");
+    shells[1].emit(began("b") + ended("b"));
+    drained();
+    // Back to web1: its shell (with its cwd/env) is the one that runs it.
+    pool.run("note", "c", "cmd-c", "web1");
+    expect(shells.map((s) => s.host)).toEqual(["web1", "db2"]);
+    expect(shells[0].written).toContain("cmd-c");
+    expect(shells[1].written).not.toContain("cmd-c");
+  });
+
+  test("a run while its host's shell is busy overflows onto that same host", () => {
+    const { pool, shells, drained } = makeHostPool();
+    pool.run("note", "a", "cmd-a", "web1");
+    shells[0].emit(began("a"));
+    drained(); // a is mid-block on web1's persistent shell
+    pool.run("note", "b", "cmd-b", "web1");
+    expect(shells.length).toBe(2);
+    expect(shells[1].host).toBe("web1");
+    // ...and the overflow dies with its run, as ever.
+    shells[1].emit(began("b") + ended("b"));
+    drained();
+    expect(shells[1].closed).toBe(true);
+    expect(shells[0].closed).toBe(false);
+  });
+
+  test("one host's dead shell costs that host only; the other machines keep theirs", () => {
+    const { pool, shells, drained } = makeHostPool();
+    pool.run("note", "a", "cmd-a", "web1");
+    shells[0].emit(began("a") + ended("a"));
+    drained();
+    pool.run("note", "b", "cmd-b", "db2");
+    shells[1].emit(began("b") + ended("b"));
+    drained();
+    shells[0].exited = true; // web1's block ran `exit` (or ssh dropped)
+    drained();
+    pool.run("note", "c", "cmd-c", "web1");
+    pool.run("note", "d", "cmd-d", "db2");
+    // web1 respawned; db2 still on its original shell.
+    expect(shells.length).toBe(3);
+    expect(shells[2].host).toBe("web1");
+    expect(shells[1].written).toContain("cmd-d");
+  });
+
+  test("restartSession kills every host's shell", () => {
+    const { pool, shells, drained } = makeHostPool();
+    pool.run("note", "a", "cmd-a", "web1");
+    shells[0].emit(began("a") + ended("a"));
+    drained();
+    pool.run("note", "b", "cmd-b", "db2");
+    shells[1].emit(began("b") + ended("b"));
+    drained();
+    pool.restartSession("note", () => {});
+    expect(shells.every((s) => s.closed)).toBe(true);
+  });
+});

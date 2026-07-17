@@ -17,9 +17,11 @@ import {
   onTerminalBusyChange,
   resizeInline,
   inputInline,
+  requestHostPick,
   type RunDestination,
 } from "./bridge";
-import { frontmatterRange, profileChipAnchor } from "./frontmatter";
+import { declaredHosts, frontmatterRange, profileChipAnchor } from "./frontmatter";
+import { LOCAL_HOST } from "../../shared/frontmatter";
 import { sessionIdFacet } from "./session";
 import { acquireInlineTerm, getInlineTerm, releaseInlineTerm } from "./inlineTerm";
 import { copyText } from "../lib/clipboard";
@@ -33,6 +35,10 @@ export interface RunInfo {
   from: number; // block start (maps through edits), used to match on re-run
   pos: number; // anchor for the output panel (block end line), maps through edits
   lang: string | null;
+  // The machine this run targets (null = local/undeclared). Shown in the
+  // output panel's header: with multiple machines in play, output that does
+  // not say where it came from is a misread waiting to happen.
+  host: string | null;
   state: "running" | "done" | "error";
   exitCode: number | null;
   startedAt: number;
@@ -196,13 +202,63 @@ export function runBlock(view: EditorView, pos: number, destination: RunDestinat
 
   // This note's id, so the run reaches this note's own shell (see bridge.ts).
   const sessionId = view.state.facet(sessionIdFacet);
+  const hosts = declaredHosts(view.state);
 
   if (destination === "terminal") {
-    // Output goes to the drawer; no inline panel is created here.
-    toNative({ type: "run", sessionId, code: block.code, language: block.lang, destination: "terminal" });
+    // Output goes to the drawer; no inline panel is created here. The declared
+    // list rides along un-picked: the drawer is one shell with one host for
+    // its whole life, so whether a picker is even meaningful (only when this
+    // paste is what spawns the shell) is App's call, not per-block ours.
+    toNative({
+      type: "run",
+      sessionId,
+      code: block.code,
+      language: block.lang,
+      destination: "terminal",
+      hosts,
+      anchor: pickerAnchor(view, block.from),
+    });
     return true;
   }
 
+  // More than one declared host: nothing executes until the user names the
+  // machine — every run, deliberately (a prod/staging list must never run on
+  // a remembered default; the remembered pick is only the preselection).
+  if (hosts.length > 1) {
+    requestHostPick(sessionId, {
+      hosts,
+      anchor: pickerAnchor(view, block.from),
+      onPick: (host) => startInlineRun(view, sessionId, block, host),
+    });
+    return true;
+  }
+  startInlineRun(view, sessionId, block, hosts[0] ?? null);
+  return true;
+}
+
+// Where the host picker opens: at the block's control corner, which is where
+// the click that asked for it (or the block the caret is in) already is.
+function pickerAnchor(view: EditorView, from: number): { x: number; y: number } {
+  const base = view.dom.getBoundingClientRect();
+  let y = base.top + 40;
+  try {
+    const c = view.coordsAtPos(view.state.doc.lineAt(from).from);
+    if (c) y = c.bottom + 4;
+  } catch {
+    // block scrolled out of the rendered viewport; the fallback y is fine
+  }
+  return { x: base.right - 240, y };
+}
+
+function startInlineRun(
+  view: EditorView,
+  sessionId: string,
+  block: Block,
+  host: string | null,
+): boolean {
+  // Re-checked when the pick comes back asynchronously: the block's earlier
+  // run may have started (double ⌘↵) while the picker was open.
+  if (isBlockRunning(view.state, block.from, block.to)) return false;
   const id = nextId();
   view.dispatch({
     effects: addRun.of({
@@ -210,13 +266,14 @@ export function runBlock(view: EditorView, pos: number, destination: RunDestinat
       from: block.from,
       pos: view.state.doc.lineAt(block.to).to,
       lang: block.lang,
+      host,
       state: "running",
       exitCode: null,
       startedAt: Date.now(),
       durationMs: null,
     }),
   });
-  toNative({ type: "run", sessionId, id, code: block.code, language: block.lang, destination: "inline" });
+  toNative({ type: "run", sessionId, id, code: block.code, language: block.lang, destination: "inline", host });
   return true;
 }
 
@@ -296,10 +353,13 @@ const TERM_BUSY = "This note's terminal is busy";
 // Gray out a run button while its shell cannot take a block. The native `disabled`
 // does the work: it stops the mousedown, so the click cannot queue anything, and
 // there is no second code path to keep in step with the CSS.
-function setBusy(btn: HTMLButtonElement | null, busy: boolean, id: CommandId, why: string): void {
+// `hostHint` keeps the target machine visible where no picker will interrupt:
+// a single-host note runs on that host silently, so the tooltip is the one
+// place that says so before the click.
+function setBusy(btn: HTMLButtonElement | null, busy: boolean, id: CommandId, why: string, hostHint: string | null): void {
   if (!btn) return;
   btn.disabled = busy;
-  btn.title = busy ? why : tooltip(id);
+  btn.title = busy ? why : hostHint ? `${tooltip(id)} — ${hostHint}` : tooltip(id);
 }
 
 function iconButton(markup: string, title: string, onDown: (e: MouseEvent) => void): HTMLButtonElement {
@@ -375,6 +435,10 @@ interface Measured {
   controls: ControlSpec[];
   closes: CloseSpec[];
   profile: ProfileSpec | null;
+  // Tooltip suffix for the run buttons: where a click will execute ("on web1"
+  // for the single declared host) or that it will ask ("choose machine…").
+  // Note-level, not per block — the frontmatter is one declaration.
+  hostHint: string | null;
   sig: string;
 }
 
@@ -495,6 +559,7 @@ const overlayPlugin = ViewPlugin.fromClass(
           controls: [],
           closes: [],
           profile: null,
+          hostHint: null,
           sig: "detached",
         };
       }
@@ -583,6 +648,14 @@ const overlayPlugin = ViewPlugin.fromClass(
         }
       }
 
+      const hosts = declaredHosts(view.state);
+      const hostHint =
+        hosts.length > 1
+          ? "choose machine…"
+          : hosts.length === 1 && hosts[0] !== LOCAL_HOST
+            ? `on ${hosts[0]}`
+            : null;
+
       const sig =
         controls.map((c) => `${c.from}:${c.lang}`).join("|") +
         "#" +
@@ -590,7 +663,7 @@ const overlayPlugin = ViewPlugin.fromClass(
         "#fm:" +
         (profile?.name ?? "");
       const rect = { top: base.top, left: base.left, width: base.width, height: base.height };
-      return { rect, controls, closes, profile, sig };
+      return { rect, controls, closes, profile, hostHint, sig };
     }
 
     write(m: Measured) {
@@ -613,8 +686,8 @@ const overlayPlugin = ViewPlugin.fromClass(
         el.style.top = `${c.top}px`;
         el.style.right = `${c.right}px`;
         el.classList.toggle("caret", c.caret);
-        setBusy(el.querySelector('[data-act="run"]'), c.runBusy, "block.runInline", INLINE_BUSY);
-        setBusy(el.querySelector('[data-act="term"]'), c.termBusy, "block.runInTerminal", TERM_BUSY);
+        setBusy(el.querySelector('[data-act="run"]'), c.runBusy, "block.runInline", INLINE_BUSY, m.hostHint);
+        setBusy(el.querySelector('[data-act="term"]'), c.termBusy, "block.runInTerminal", TERM_BUSY, m.hostHint);
       }
       for (const c of m.closes) {
         const el = this.layer.querySelector<HTMLElement>(`.ledge-close-wrap[data-close="${c.id}"]`);

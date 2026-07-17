@@ -12,11 +12,15 @@ export function ContextMenu({
   x,
   y,
   onClose,
+  width = 200,
   children,
 }: {
   x: number;
   y: number;
   onClose: () => void;
+  // Wider for menus whose items are values rather than verbs (the host
+  // picker's ssh destinations); the default fits every command menu.
+  width?: number;
   children: ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -42,15 +46,14 @@ export function ContextMenu({
   }, [onClose]);
 
   // Keep the menu on-screen: flip above / nudge left when it would overflow.
-  const W = 200;
-  const left = Math.min(x, window.innerWidth - W - 8);
+  const left = Math.min(x, window.innerWidth - width - 8);
   const top = Math.min(y, window.innerHeight - 88);
 
   return (
     <div
       ref={ref}
       role="menu"
-      style={{ left, top, width: W }}
+      style={{ left, top, width }}
       className="fixed z-50 rounded-md border bg-card p-1 text-card-foreground shadow-md"
     >
       {children}

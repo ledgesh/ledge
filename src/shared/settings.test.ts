@@ -22,6 +22,7 @@ describe("parseSettings", () => {
       blocks: {
         runnable: ["sh", "python"],
         interpreters: { ...DEFAULT_SETTINGS.blocks.interpreters, python: "/venv/bin/python" },
+        hostInterpreters: {},
       },
     });
     expect(problems).toEqual([]);
@@ -105,6 +106,44 @@ describe("parseSettings", () => {
     const { settings, problems } = parseSettings({ blocks: { interpreters: ["python3"] } });
     expect(settings.blocks.interpreters).toEqual(DEFAULT_SETTINGS.blocks.interpreters);
     expect(problems).toEqual(['"blocks.interpreters" must be an object of language -> command strings']);
+  });
+
+  test("hostInterpreters parses host patterns verbatim, languages lowercased", () => {
+    const { settings, problems } = parseSettings({
+      blocks: { hostInterpreters: { "deploy@anypost-*": { Python: "/opt/py312/bin/python3" } } },
+    });
+    expect(settings.blocks.hostInterpreters).toEqual({
+      "deploy@anypost-*": { python: "/opt/py312/bin/python3" },
+    });
+    expect(problems).toEqual([]);
+  });
+
+  test("a bad hostInterpreters entry costs that language of that host alone", () => {
+    const { settings, problems } = parseSettings({
+      blocks: { hostInterpreters: { prod: { python: "", ts: "/opt/bun run" }, db: { python: "/opt/py" } } },
+    });
+    expect(settings.blocks.hostInterpreters["prod"]).toEqual({ ts: "/opt/bun run" });
+    expect(settings.blocks.hostInterpreters["db"]).toEqual({ python: "/opt/py" });
+    expect(problems).toEqual(['"blocks.hostInterpreters.prod.python" must be a non-empty string']);
+  });
+
+  test("a non-object host section costs that host alone; a non-object field costs the feature", () => {
+    const one = parseSettings({ blocks: { hostInterpreters: { prod: "python3", db: { rb: "/opt/ruby" } } } });
+    expect(one.settings.blocks.hostInterpreters["prod"]).toEqual({});
+    expect(one.settings.blocks.hostInterpreters["db"]).toEqual({ rb: "/opt/ruby" });
+    expect(one.problems.length).toBe(1);
+
+    const all = parseSettings({ blocks: { hostInterpreters: ["prod"] } });
+    expect(all.settings.blocks.hostInterpreters).toEqual({});
+    expect(all.problems).toEqual([
+      '"blocks.hostInterpreters" must be an object of host pattern -> language maps',
+    ]);
+  });
+
+  test("hostInterpreters defaults to empty and stays optional", () => {
+    const { settings, problems } = parseSettings({});
+    expect(settings.blocks.hostInterpreters).toEqual({});
+    expect(problems).toEqual([]);
   });
 
   test("a misspelled section is reported, not silently ignored", () => {

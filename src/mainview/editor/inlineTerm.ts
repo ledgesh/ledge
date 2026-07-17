@@ -54,6 +54,7 @@ export class InlineTerm {
   private readonly header: HTMLDivElement;
   private readonly dot: HTMLSpanElement;
   private readonly status: HTMLSpanElement;
+  private readonly hostChip: HTMLSpanElement;
   private readonly duration: HTMLSpanElement;
   private readonly term: Terminal;
   private readonly fit: FitAddon;
@@ -81,13 +82,18 @@ export class InlineTerm {
     this.dot = document.createElement("span");
     this.status = document.createElement("span");
     this.status.className = "ledge-status";
+    // Where this run executes, when that is not this machine: with several
+    // machines in play, output that does not say whose it is invites misreads.
+    this.hostChip = document.createElement("span");
+    this.hostChip.className = "ledge-host-chip";
+    this.hostChip.style.display = "none";
     const spacer = document.createElement("span");
     spacer.style.flex = "1";
     this.duration = document.createElement("span");
     this.duration.className = "ledge-duration";
     const gap = document.createElement("span");
     gap.style.width = "48px";
-    this.header.append(this.dot, this.status, spacer, this.duration, gap);
+    this.header.append(this.dot, this.status, this.hostChip, spacer, this.duration, gap);
     this.wrap.appendChild(this.header);
 
     this.body = document.createElement("div");
@@ -175,6 +181,10 @@ export class InlineTerm {
   setState(run: RunInfo): void {
     this.dot.className = `ledge-dot ledge-dot-${run.state}`;
     this.status.textContent = statusText(run);
+    // "local" is the reserved frontmatter word, not a place worth labeling.
+    const remote = run.host && run.host !== "local" ? run.host : null;
+    this.hostChip.textContent = remote ?? "";
+    this.hostChip.style.display = remote ? "" : "none";
     this.duration.textContent = run.durationMs != null ? formatDuration(run.durationMs) : "";
   }
 
