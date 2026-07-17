@@ -347,6 +347,25 @@ body {
 .ledge-mdtable [data-url] {
   cursor: pointer;
 }
+/* An image while the caret is off its line (editor/images.ts). Capped so one
+   screenshot cannot swallow the whole note; a click reveals the markdown, so
+   the cursor stays default like a table's. */
+.ledge-mdimage {
+  padding: 2px 0;
+  cursor: default;
+}
+.ledge-mdimage img {
+  display: block;
+  max-width: 100%;
+  max-height: 420px;
+  border-radius: 6px;
+}
+/* The file is gone (or the URL would not load): say so quietly, in place. */
+.ledge-mdimage-broken {
+  color: var(--ed-muted);
+  font-size: 0.85em;
+  font-style: italic;
+}
 
 /* --- Fenced code-block panel ------------------------------------------------
    Line decorations (built in editor/blocks.ts) wrap every line of a fenced code

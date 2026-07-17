@@ -10,12 +10,14 @@ import { ledgeBlocks } from "./blocks";
 import { ledgeFrontmatter } from "./frontmatter";
 import { livePreview } from "./livePreview";
 import { tableRendering } from "./tables";
+import { imagePasteInsert, imageRendering } from "./images";
 import { quoteExit } from "./quotes";
 import { wrapping } from "./wrap";
 import { findReplace } from "./find";
 import { fromDisk, sessionIdFacet } from "./session";
 import { noteChanged, saveNow } from "../notes/store";
 import { copyText, readClipboard } from "../lib/clipboard";
+import { pasteImageAsset } from "../lib/assets";
 import { settings } from "../lib/settings";
 import { keyOf } from "../commands/keys";
 
@@ -139,8 +141,26 @@ const clipboardKeymap = Prec.highest(
     {
       key: "Mod-v",
       run: (view) => {
-        void readClipboard().then((text) => {
-          if (text) view.dispatch(view.state.replaceSelection(text));
+        // Text first, image as the fallback: a pasteboard carrying text is a
+        // text paste (unchanged behavior), and a pasteboard with an image but
+        // no text — a screenshot, a copied picture — embeds the image: Bun
+        // saves it under assets/ and hands back the reference to insert. The
+        // insert parks the caret on the line below the markdown, so the image
+        // renders the moment it lands (editor/images.ts).
+        void readClipboard().then(async (text) => {
+          if (text) {
+            view.dispatch(view.state.replaceSelection(text));
+            return;
+          }
+          const src = await pasteImageAsset();
+          if (!src) return;
+          const sel = view.state.selection.main;
+          const { insert, cursor } = imagePasteInsert(view.state.doc, sel, src);
+          view.dispatch({
+            changes: { from: sel.from, to: sel.to, insert },
+            selection: { anchor: sel.from + cursor },
+            userEvent: "input.paste",
+          });
         });
         return true;
       },
@@ -284,10 +304,11 @@ export function createEditor(parent: HTMLElement, doc: string, sessionId: string
         // The settings knob is the escape hatch back to fully-raw markdown
         // (see the Settings comment in shared/settings.ts). Read at creation
         // like fontSize below: settings apply at launch, never live.
-        // tableRendering is livePreview's block-level half (editor/tables.ts)
-        // — separate module because block widgets need a StateField, same
-        // knob because it is the same feature.
-        settings().editor.livePreview ? [livePreview(), tableRendering()] : [],
+        // tableRendering and imageRendering are livePreview's block-level
+        // halves (editor/tables.ts, editor/images.ts) — separate modules
+        // because block widgets need a StateField, same knob because they are
+        // the same feature.
+        settings().editor.livePreview ? [livePreview(), tableRendering(), imageRendering()] : [],
         // Before markdown(): both bind Enter at Prec.high, and this one must
         // see an empty quote line first (editor/quotes.ts). Not gated by
         // livePreview — it is editing behavior, not rendering.

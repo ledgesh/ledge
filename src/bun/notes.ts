@@ -49,10 +49,10 @@ export const TRASH_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 // there, and a case-sensitive check would hand back a name whose rename silently
 // clobbers the other note. Being conservative on Linux (enumerating to foo-2.md
 // where foo.md would have been free) is the cheap side of that trade.
-export function uniqueName(base: string, taken: Set<string>): string {
+export function uniqueName(base: string, taken: Set<string>, ext = ".md"): string {
   const lower = new Set([...taken].map((t) => t.toLowerCase()));
-  let name = `${base}.md`;
-  for (let n = 2; lower.has(name.toLowerCase()); n += 1) name = `${base}-${n}.md`;
+  let name = `${base}${ext}`;
+  for (let n = 2; lower.has(name.toLowerCase()); n += 1) name = `${base}-${n}${ext}`;
   return name;
 }
 

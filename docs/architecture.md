@@ -83,6 +83,18 @@ Bun therefore validates everything and derives anything derivable:
   is what hides `.trash` and the temp files); trash operations touch only
   `.md` files directly in `.trash`. Empty Trash removes exactly what the list
   showed, and nothing it did not.
+- **Images are files under the root, and Bun's alone to touch** (`bun/assets.ts`).
+  Pasted images land in `<root>/assets/` — visible, not dotted, because the
+  notes root is the folder people sync and an image a note depends on should
+  not be hidden from its owner. Saves are the same temp-plus-rename as notes,
+  names come from `uniqueName` (same clobber-safety), and **nothing ever
+  unlinks an asset**: deleting a note orphans its images, deliberately —
+  cheaper than joining the unlink list above. The view reads them over
+  `assetRead`, whose guard (`assetPathOf`) is assertNote's move inverted:
+  in-root, an image-extension allowlist (without which the call would read
+  `settings.json` or any note), and no dot-entries. On paste the bytes never
+  cross the RPC — `assetPaste` reads the pasteboard Bun-side and returns only
+  the markdown-relative reference; the view never names the file.
 - **`LEDGE_NOTES_ROOT`** overrides the root (`~/.ledge`) for tests and
   throwaway runs. Nothing in the app sets it; every `bun test` run gets a
   scratch one via preload, and anything that exercises the real app against

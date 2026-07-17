@@ -17,6 +17,7 @@ import { configureBridge } from "./editor/bridge";
 import { configureTerminal } from "./terminal/channel";
 import { configureNotes } from "./notes/channel";
 import { configureClipboard } from "./lib/clipboard";
+import { configureAssets } from "./lib/assets";
 import { configureSettings } from "./lib/settings";
 import { DEFAULT_SETTINGS } from "../shared/settings";
 import { initialState } from "./workspace/store";
@@ -173,6 +174,26 @@ configureClipboard({
     clip = text;
   },
   read: async () => clip,
+});
+
+// In-memory image assets, mirroring bun/assets.ts semantics: read serves a
+// seeded map (missing → null, the broken placeholder), pasteImage allocates a
+// fresh name and returns the markdown reference like the real assetPaste. The
+// seeded file is a real 1×1 PNG so the rendered <img> actually loads.
+const PIXEL_B64 =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+const assets = new Map<string, { dataB64: string; mime: string }>([
+  ["assets/dot.png", { dataB64: PIXEL_B64, mime: "image/png" }],
+]);
+let pasteCount = 0;
+configureAssets({
+  read: async (src) => assets.get(src) ?? null,
+  pasteImage: async () => {
+    pasteCount += 1;
+    const src = `assets/pasted-${pasteCount}.png`;
+    assets.set(src, { dataB64: PIXEL_B64, mime: "image/png" });
+    return src;
+  },
 });
 
 // A non-default editor font size, so a spec can tell "the setting reached the

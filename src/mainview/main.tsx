@@ -6,6 +6,7 @@ import { configureBridge, dispatchRunEvent, setTerminalBusy } from "./editor/bri
 import { bytesToB64, configureTerminal, dispatchTerminalOutput, dispatchTerminalExit } from "./terminal/channel";
 import { configureNotes } from "./notes/channel";
 import { configureClipboard } from "./lib/clipboard";
+import { configureAssets } from "./lib/assets";
 import { configureSettings } from "./lib/settings";
 import { DEFAULT_SETTINGS, type Settings } from "../shared/settings";
 import { initialState } from "./workspace/store";
@@ -74,6 +75,13 @@ configureClipboard({
     void electrobun.rpc!.request.clipboardWrite({ text });
   },
   read: () => electrobun.rpc!.request.clipboardRead({}).then((r) => r.text),
+});
+
+// Note images: bytes for `![](assets/…)` references, and the pasteboard-image
+// half of ⌘V. Bun guards the reference and names the pasted file.
+configureAssets({
+  read: (src) => electrobun.rpc!.request.assetRead({ src }).then((r) => r.image),
+  pasteImage: () => electrobun.rpc!.request.assetPaste({}).then((r) => r.src),
 });
 
 // Bun owns the notes folder; the view only ever holds paths it got from here.

@@ -28,6 +28,13 @@ describe("uniqueName", () => {
   test("unrelated names never collide", () => {
     expect(uniqueName("untitled", new Set(["notes.md", "untitled-2.md"]))).toBe("untitled.md");
   });
+
+  test("another extension allocates the same way — image assets share the allocator", () => {
+    expect(uniqueName("pasted-2026-07-17", new Set(), ".png")).toBe("pasted-2026-07-17.png");
+    expect(uniqueName("pasted-2026-07-17", new Set(["Pasted-2026-07-17.PNG"]), ".png")).toBe(
+      "pasted-2026-07-17-2.png",
+    );
+  });
 });
 
 describe("isInside", () => {

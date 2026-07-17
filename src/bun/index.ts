@@ -26,6 +26,7 @@ import {
   retitleNote,
   writeNote,
 } from "./notes";
+import { pasteImageAsset, readAsset } from "./assets";
 import { runnerFor } from "./runner";
 import { loadSettings, openSettingsFile } from "./settings";
 import { openableUrl } from "../shared/links";
@@ -387,6 +388,11 @@ const rpc = BrowserView.defineRPC<LedgeRPC>({
           return { text: "" };
         }
       },
+      // Both guarded inside bun/assets.ts: assetRead's src passes assertions
+      // (in-root, image extension, no dot-entries) before it is read, and
+      // assetPaste names the file itself — the view supplies nothing.
+      assetRead: async ({ src }) => ({ image: await readAsset(src) }),
+      assetPaste: async () => ({ src: await pasteImageAsset() }),
       settingsGet: () => ({ settings }),
       settingsOpen: async () => {
         await openSettingsFile();

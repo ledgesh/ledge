@@ -12,8 +12,10 @@
 // (the text stays, styled as a link), code-fence ``` marks, the `- ` bullet
 // on task lines (the checkbox is the bullet), escape backslashes, backslash
 // hard breaks, decodable HTML entities (drawn as their character), and
-// `---` thematic breaks (drawn as a rule). Tables are the block-level half
-// of the same idea and live in tables.ts. What deliberately does not
+// `---` thematic breaks (drawn as a rule). Tables and images are the
+// block-level halves of the same idea and live in tables.ts / images.ts (an
+// image alone on its line draws as the image; inline in prose it stays the
+// concealed-link treatment below). What deliberately does not
 // conceal: fence CONTENT (byte-exact code is the app's promise; only the
 // fence marks go), the language label on the opening fence (restyled small,
 // kept as the block's caption), setext underlines and blockquote/list marks

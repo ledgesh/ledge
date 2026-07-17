@@ -184,6 +184,22 @@ export type LedgeRPC = {
       // Open settings.json in the OS default editor (the ⌘, command). The view
       // cannot name the file — Bun knows where it lives.
       settingsOpen: { params: {}; response: { ok: boolean } };
+      // Read one local image referenced by a note (`![](assets/x.png)`) for the
+      // editor's rendered preview. The webview cannot touch the filesystem, so
+      // the bytes ride the RPC base64-encoded. `src` is the markdown-relative
+      // reference exactly as the note carries it; Bun resolves it against the
+      // notes root and guards it hard (bun/assets.ts assertAssetPath: inside
+      // the root, an image-extension allowlist, no dot-entries) — the view is
+      // the least-trusted end, and without the extension check this call would
+      // read settings.json or any note. null when the file is missing.
+      assetRead: { params: { src: string }; response: { image: { dataB64: string; mime: string } | null } };
+      // Save the pasteboard's image (if any) into <root>/assets as a PNG and
+      // return the markdown-relative reference to embed (`assets/pasted-….png`),
+      // or null when the pasteboard holds no image. Sent by the editor's ⌘V
+      // when the pasteboard has no text. The image bytes never cross the RPC:
+      // Bun reads the pasteboard (osascript; pbpaste is text-only) and names
+      // the file itself via uniqueName — the view never names a file.
+      assetPaste: { params: {}; response: { src: string | null } };
       // Open a note link in the OS default handler (browser, mail client).
       // Sent by the editor's ⌘-click and the "Open Link" command. The URL is
       // re-validated Bun-side against the same scheme allowlist the view used
