@@ -255,11 +255,21 @@ configureBridge({
     linkOpens.push(url);
   },
 });
+// The terminal stays inert (no PTY output), but WHICH note a paste or attach
+// addresses is view-side routing — the drawer must show the same note's shell
+// the block's run was sent to — so those sessionIds are recorded for specs.
+const termAttaches: string[] = [];
+const termPastes: { sessionId: string; text: string }[] = [];
 configureTerminal({
   sendInput: () => {},
-  sendPaste: () => {},
+  sendPaste: (sessionId, text) => {
+    termPastes.push({ sessionId, text });
+  },
   sendResize: () => {},
-  attach: async () => ({ dataB64: "" }),
+  attach: async (sessionId) => {
+    termAttaches.push(sessionId);
+    return { dataB64: "" };
+  },
   detach: () => {},
   closeSession: () => {},
   restartSession: () => {},
@@ -341,6 +351,8 @@ declare global {
       settingsOpens: () => number;
       linkOpens: () => string[];
       layout: () => string | null;
+      termAttaches: () => string[];
+      termPastes: () => { sessionId: string; text: string }[];
       store: FakeStore;
     };
   }
@@ -350,6 +362,8 @@ window.__harness = {
   settingsOpens: () => settingsOpens,
   linkOpens: () => [...linkOpens],
   layout: () => layoutText,
+  termAttaches: () => [...termAttaches],
+  termPastes: () => termPastes.map((p) => ({ ...p })),
   store,
 };
 

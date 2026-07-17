@@ -11,7 +11,7 @@ import { flushAll } from "@/notes/store";
 import { refreshFolder } from "@/workspace/actions";
 import { allDocIds, useWorkspace, WorkspaceProvider, type AppState } from "@/workspace/store";
 import { flushLayout, scheduleLayoutSave } from "@/workspace/persist";
-import { focusedDocId } from "@/workspace/tree";
+import { findTabBy, focusedDocId } from "@/workspace/tree";
 import { releaseEditor } from "@/workspace/editorPool";
 import { CommandProvider, useCommands } from "@/commands/CommandProvider";
 import { ProfileEditor } from "@/components/ProfileEditor";
@@ -74,12 +74,21 @@ function Shell() {
       // so it is safe to fire even the instant a lazily-spawned shell starts.
       if (termOpen && sessionId === activeDocId) {
         sendTerminalPaste(sessionId, code, language);
-      } else {
-        pending.current = { sessionId, cmd: code, language };
-        setTermOpen(true);
+        return;
       }
+      // The block can live in an unfocused pane: its buttons are in the overlay
+      // layer parented to <body>, so clicking one never hits the pane's
+      // focus-on-mousedown handler. The drawer always shows the focused pane's
+      // note, so focus the note's pane first — otherwise the drawer opens on
+      // some other note and the paste runs in a shell nothing is showing.
+      if (sessionId !== activeDocId) {
+        const hit = findTabBy(selected.root, (t) => t.docId === sessionId);
+        if (hit) dispatch({ type: "selectTab", paneId: hit.paneId, tabId: hit.tabId });
+      }
+      pending.current = { sessionId, cmd: code, language };
+      setTermOpen(true);
     },
-    [termOpen, activeDocId],
+    [termOpen, activeDocId, selected.root, dispatch],
   );
 
   // Shell owns the chrome state (terminal drawer, sidebar, overlay), so it
