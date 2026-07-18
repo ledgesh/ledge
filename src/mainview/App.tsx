@@ -16,7 +16,8 @@ import { refreshFolder } from "@/workspace/actions";
 import { allDocIds, notesOf, useWorkspace, WorkspaceProvider, type AppState } from "@/workspace/store";
 import { flushLayout, scheduleLayoutSave } from "@/workspace/persist";
 import { findTabBy, focusedDocId } from "@/workspace/tree";
-import { allEditorViews, releaseEditor, requestHeadingReveal } from "@/workspace/editorPool";
+import { allEditorViews, releaseEditor, reloadOpenNotes, requestHeadingReveal } from "@/workspace/editorPool";
+import { onNotesChanged } from "@/notes/channel";
 import { CommandProvider, useCommands } from "@/commands/CommandProvider";
 import { ProfileEditor } from "@/components/ProfileEditor";
 import { configureUi } from "@/commands/glue";
@@ -289,14 +290,25 @@ function Shell() {
     };
     const refresh = () => {
       for (const folder of folders) void refreshFolder(folder, dispatch);
+      // Open, unedited notes follow their files too — an agent may have
+      // rewritten one while Ledge was in the background.
+      void reloadOpenNotes();
     };
     window.addEventListener("blur", flush);
     window.addEventListener("pagehide", flush);
     window.addEventListener("focus", refresh);
+    // The watcher's push (rpc notesChanged) is the same refresh, scoped to the
+    // one root that changed and arriving WITHOUT a focus change — the agent
+    // working in the note's own terminal drawer never blurs the window.
+    const offChanged = onNotesChanged((root) => {
+      if (folders.includes(root)) void refreshFolder(root, dispatch);
+      void reloadOpenNotes();
+    });
     return () => {
       window.removeEventListener("blur", flush);
       window.removeEventListener("pagehide", flush);
       window.removeEventListener("focus", refresh);
+      offChanged();
     };
     // Keyed on the folder LIST (joined), not the array identity: workspaces
     // re-render often, their folder set changes rarely.

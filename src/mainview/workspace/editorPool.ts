@@ -14,7 +14,15 @@ import { handleRunEvent, pingOverlay } from "../editor/blocks";
 import { onRunEvent } from "../editor/bridge";
 import { fromDisk } from "../editor/session";
 import { readNote } from "../notes/channel";
-import { bindDoc, docIdAt, releaseDoc, seedSlug, type DocHandlers } from "../notes/store";
+import {
+  bindDoc,
+  docIdAt,
+  releaseDoc,
+  reloadCandidates,
+  reseedDoc,
+  seedSlug,
+  type DocHandlers,
+} from "../notes/store";
 import { revealHeading, revealSelection } from "./reveal";
 import type { RunEvent } from "../../shared/rpc-schema";
 import type { TabState } from "./tree";
@@ -135,21 +143,53 @@ function applyReveal(view: EditorView, req: RevealRequest): void {
 // saving it straight back, and it stays out of the undo history so the first
 // Cmd+Z in a note cannot wipe it back to empty.
 async function loadNote(docId: string, path: string): Promise<void> {
-  const text = await readNote(path);
-  if (text === null) return; // note is gone; leave the editor empty rather than guess
+  const file = await readNote(path);
+  if (file === null) return; // note is gone; leave the editor empty rather than guess
   // Before the text reaches the editor, tell the save controller which heading this
   // note ALREADY has. Filenames follow the H1 from here on, and without this the
   // load itself would look like the heading appearing from nowhere and move the
   // file. A note only gets renamed by a heading you edit, never by one you open.
-  seedSlug(docId, text);
+  // The mtime rides along: it is the disk version every later save states as
+  // its expectation (the external-edit guard).
+  seedSlug(docId, file.text, file.mtimeMs);
   const entry = pool.get(docId);
   if (!entry) return; // the tab closed while the read was in flight
   entry.view.dispatch({
-    changes: { from: 0, to: entry.view.state.doc.length, insert: text },
+    changes: { from: 0, to: entry.view.state.doc.length, insert: file.text },
     annotations: [fromDisk.of(true), Transaction.addToHistory.of(false)],
   });
   // Only now is there text for a search reveal to land on.
   takeReveal(path, entry.view);
+}
+
+// Re-read every open, UNEDITED note and pour in any text that changed on disk
+// (an agent in the note's own terminal, git, a shell edit). Called on the
+// watcher's notesChanged push and on window focus (the belt). The decisions —
+// who is a candidate, whether the adoption still holds after the async read —
+// live in the store (reloadCandidates / reseedDoc); this wrapper only touches
+// CodeMirror. Same annotations as loadNote: a reload is not an edit (nothing
+// to save back) and not undoable (Cmd+Z must not resurrect text the file no
+// longer holds — the buffer was clean, so nothing of the user's is at stake).
+// A note whose file is GONE is left showing what it had: deleting is the
+// delete flow's job (and the note list refresh already dropped the row); a
+// next edit here recreates the file, which is the kinder failure.
+export async function reloadOpenNotes(): Promise<void> {
+  for (const cand of reloadCandidates()) {
+    const file = await readNote(cand.path);
+    if (file === null || file.mtimeMs === cand.mtimeMs) continue;
+    const entry = pool.get(cand.docId);
+    if (!entry) continue; // tab closed while the read was in flight
+    if (!reseedDoc(cand.docId, cand.path, file.text, file.mtimeMs)) continue; // dirtied meanwhile
+    const view = entry.view;
+    // Keep the caret somewhere sensible (clamped to the new length) — for a
+    // background reload the exact spot matters less than not scrolling to 0.
+    const head = Math.min(view.state.selection.main.head, file.text.length);
+    view.dispatch({
+      changes: { from: 0, to: view.state.doc.length, insert: file.text },
+      selection: { anchor: head },
+      annotations: [fromDisk.of(true), Transaction.addToHistory.of(false)],
+    });
+  }
 }
 
 // Get (creating on first use) the pooled editor for a tab's note. The returned

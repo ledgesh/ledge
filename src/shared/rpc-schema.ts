@@ -97,11 +97,27 @@ export type LedgeRPC = {
       // Notes are plain .md files; `path` identifies the file, while `sessionId`
       // (the docId) identifies the live editor and its shells.
       noteList: { params: { root: string }; response: { notes: NoteMeta[] } };
-      // null when the note is gone (deleted behind the app's back).
-      noteRead: { params: { path: string }; response: { text: string | null } };
+      // null when the note is gone (deleted behind the app's back). `mtimeMs`
+      // rides along because it is the note's disk VERSION: the view holds it
+      // per open note and hands it back on every noteWrite, which is how a
+      // save can tell "my own last state" from "someone else wrote here".
+      noteRead: { params: { path: string }; response: { note: { text: string; mtimeMs: number } | null } };
       // Atomic overwrite (temp file plus rename), so a crash mid-save can never
       // truncate a note. Sent on a debounce as you type and on Cmd+S.
-      noteWrite: { params: { path: string; text: string }; response: { ok: boolean } };
+      // `baseMtimeMs` is the disk version the view last saw (from noteRead,
+      // this call's own response, or NoteMeta); null means no expectation
+      // (a note edited before its first read landed) and writes blind, as
+      // every write did before the guard existed. On a mismatch with genuinely
+      // different bytes — an agent or terminal edit landing while the note was
+      // being edited here — the buffer still wins the live path (the user is
+      // the one typing), but the disk version is first moved into the root's
+      // .ledge-trash, never overwritten in place: `divergedTo` says where, and
+      // the Trash section is where the losing version stays recoverable.
+      // A mismatch whose bytes are identical just adopts the disk mtime.
+      noteWrite: {
+        params: { path: string; text: string; baseMtimeMs: number | null };
+        response: { mtimeMs: number; divergedTo: string | null };
+      };
       // Allocate a file in the given workspace root for a note that has none
       // and write its first content, returning the note the view then saves to
       // (and titles its tab from). Sent on a note's first edit, so a tab opened
@@ -332,6 +348,18 @@ export type LedgeRPC = {
       // side has already torn the shell down; the view closes the drawer if it is
       // showing that note. Reopening the drawer spawns a fresh shell.
       terminalExit: { sessionId: string };
+      // Something changed one workspace root's files behind the app's back — an
+      // agent in the terminal drawer, git, a shell mv/rm. Pushed by the per-root
+      // fs.watch (bun/watch.ts), debounced Bun-side, filtered to .md entries
+      // outside dot-directories. The view re-reads that folder's note and trash
+      // lists and reloads any open, UNEDITED note whose file moved on (an edited
+      // one is left alone; its next save's baseMtimeMs guard arbitrates).
+      // Ledge's own saves fire it too, deliberately unfiltered: the reload
+      // compares mtimes and no-ops, and suppressing them here would mean the
+      // watcher and the store had to agree on what "ours" means. The window's
+      // focus refresh stays as the belt for a watcher that misses (an unmounted
+      // volume's root is not watched until the next boot).
+      notesChanged: { root: string };
     };
   };
 };

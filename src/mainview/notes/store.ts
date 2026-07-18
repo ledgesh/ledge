@@ -36,6 +36,11 @@ interface Entry {
   // Edits keep accumulating in `pending`; they just do not reach disk until the
   // entry has been retargeted at the new path (see freezeDoc / retargetDoc).
   frozen: boolean;
+  // The disk version this note last read or wrote — writeNote's baseMtimeMs,
+  // which is what lets Bun catch an external edit under an autosave instead of
+  // silently flattening it. null until the first read or write lands: a note
+  // edited that early saves blind, exactly as every save did before the guard.
+  mtimeMs: number | null;
   // The slug this note's heading last asked for, and whether we have ever seen
   // this note's text at all. The pair is what keeps naming-by-heading from
   // touching a file until its heading actually changes: a note loaded from disk
@@ -119,6 +124,7 @@ export function bindDoc(docId: string, path: string | null, folder: string, hand
     timer: null,
     inFlight: false,
     frozen: false,
+    mtimeMs: null,
     lastSlug: null,
     slugSeeded: false,
     lastHeading: null,
@@ -169,12 +175,15 @@ export function paramsOf(docId: string): NoteParams | null {
 // already exist: without it, the first flush of any note would see its slug change
 // from "unknown" to whatever its H1 says and move a file the user never asked to
 // move. Seeding means the rule only ever applies to headings edited from here on.
-export function seedSlug(docId: string, text: string): void {
+export function seedSlug(docId: string, text: string, mtimeMs: number | null = null): void {
   const e = docs.get(docId);
   if (!e || e.slugSeeded) return;
   e.lastSlug = slugOf(text);
   e.lastHeading = headingOf(text);
   e.slugSeeded = true;
+  // The read that carried this text also carried the disk version; from here
+  // on every save states its expectation (see Entry.mtimeMs).
+  if (mtimeMs !== null) e.mtimeMs = mtimeMs;
   // Same moment, opposite direction: the slug is seeded so the file does NOT
   // move, but params already on disk must reach Bun now — the note's first
   // shell can spawn on a Run click long before any edit triggers a flush.
@@ -207,7 +216,15 @@ async function flush(e: Entry): Promise<void> {
       e.pending = null;
       try {
         if (e.path) {
-          await writeNote(e.path, text);
+          const res = await writeNote(e.path, text, e.mtimeMs);
+          e.mtimeMs = res.mtimeMs;
+          // The save displaced an external edit (an agent, git, vim) into the
+          // trash. The buffer won the live path — the user is the one typing —
+          // and the loser is recoverable in the Trash section, whose count the
+          // watcher's refresh updates. A log, not a dialog: nothing was lost.
+          if (res.divergedTo) {
+            console.warn("[notes] this note changed on disk mid-edit; that version is in the trash:", res.divergedTo);
+          }
         } else {
           // createNote names the file from this same text's H1, so a note titled
           // before its first save is born correctly named rather than created as
@@ -215,6 +232,7 @@ async function flush(e: Entry): Promise<void> {
           // workspace folder, captured at bindDoc.
           const note = await createNote(e.folder, text);
           e.path = note.path;
+          e.mtimeMs = note.mtimeMs;
           e.handlers.onFile(note, null);
         }
         // Before syncTitle: a failed rename must not also cost Bun the params
@@ -280,6 +298,9 @@ async function syncTitle(e: Entry, text: string): Promise<void> {
   // text goes back into `pending`) tries the rename again rather than deciding the
   // heading is already dealt with.
   e.lastSlug = slug;
+  // rename(2) preserves mtime, so this is normally a no-op — but the meta's
+  // stat is the truth, and adopting it keeps the guard aligned with the file.
+  e.mtimeMs = note.mtimeMs;
   if (note.path === prev) return; // already correctly named
   e.path = note.path;
   e.handlers.onFile(note, prev);
@@ -295,6 +316,65 @@ export async function saveNow(docId: string): Promise<void> {
     e.timer = null;
   }
   await flush(e);
+}
+
+// --- external reload ---------------------------------------------------------
+// The read direction of external-edit safety: an agent (or git, or vim) wrote
+// a note Ledge has open. A CLEAN buffer simply adopts the disk text — the
+// decision half lives here (which notes may reload, and what adopting means
+// for the tracking state), the DOM half (pouring text into CodeMirror) in
+// editorPool.reloadOpenNotes, per the pure-core/thin-wrapper split.
+// A DIRTY buffer is deliberately not a candidate: the user is mid-thought,
+// and their next save's baseMtimeMs guard arbitrates instead (the external
+// version lands in the trash, nothing is lost).
+
+export interface ReloadCandidate {
+  docId: string;
+  path: string;
+  // The disk version the buffer currently reflects; a differing stat means
+  // the file moved on and the buffer should follow.
+  mtimeMs: number | null;
+}
+
+// Every open note whose buffer could safely be replaced right now: it has a
+// file, its load has landed (slugSeeded — a reload racing the initial load
+// would double-pour), and nothing is pending, in flight, or frozen.
+export function reloadCandidates(): ReloadCandidate[] {
+  const out: ReloadCandidate[] = [];
+  for (const e of docs.values()) {
+    if (!e.path || !e.slugSeeded) continue;
+    if (e.pending !== null || e.timer !== null || e.inFlight || e.frozen) continue;
+    out.push({ docId: e.docId, path: e.path, mtimeMs: e.mtimeMs });
+  }
+  return out;
+}
+
+// Adopt an external edit's text as the note's new baseline, re-checking that
+// the entry is STILL clean and still aimed at `path` — the read was async, and
+// a keystroke (or a delete, or a retitle) may have landed since the candidate
+// list was drawn. False means "do not touch the editor"; the caller drops the
+// reload and the normal save path takes it from there.
+//
+// Adopting re-seeds the slug/heading tracking rather than diffing it: a
+// heading that CHANGED on disk must relabel the tab but must not rename the
+// file — the rename rule stays "a heading you edit here", and a disk-side
+// H1 edit is one you opened, not one you made (same stance as seedSlug).
+export function reseedDoc(docId: string, path: string, text: string, mtimeMs: number): boolean {
+  const e = docs.get(docId);
+  if (!e || e.path !== path) return false;
+  if (e.pending !== null || e.timer !== null || e.inFlight || e.frozen) return false;
+  e.mtimeMs = mtimeMs;
+  e.slugSeeded = true;
+  e.lastSlug = slugOf(text);
+  const heading = headingOf(text);
+  if (heading !== e.lastHeading) {
+    e.lastHeading = heading;
+    e.handlers.onTitle(labelOf(heading, e.path));
+  }
+  // The disk edit may have rewritten the frontmatter too; the note's next
+  // shell should spawn with what the file now says.
+  syncParams(e, text);
+  return true;
 }
 
 // Suspend saving for a note whose file is about to move. Without this, an edit

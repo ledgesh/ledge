@@ -108,7 +108,28 @@ Bun therefore validates everything and derives anything derivable:
   a missing external root refuse (`rootReady`), the edit stays pending in
   the view's autosave retry, and the registry keeps the entry unavailable so
   a remount heals at the next boot.
-- **Name allocation is where clobber-safety lives.** `rename(2)` overwrites
+- **A save never silently flattens an external edit.** The notes folder is
+  shared ground — agents in the note's own terminal drawer, git, anything
+  with a shell writes there — so `noteWrite` carries the disk version the
+  view last saw (`baseMtimeMs`; tracked per open note in `notes/store.ts`,
+  seeded by the read, advanced by every write). On a mismatch with genuinely
+  different bytes, the buffer still wins the live path — its author is the
+  one typing — but the disk version is first MOVED into the root's
+  `.ledge-trash` (through `deleteNote`, so it joins no unlink list), never
+  overwritten in place: a concurrent edit costs a trip to the Trash section,
+  not the edit. Identical bytes just adopt the disk mtime; a null base (a
+  note edited before its first read landed) writes blind, as every save did
+  before the guard. The read direction is symmetric: open notes with a CLEAN
+  buffer follow their file (`reloadCandidates`/`reseedDoc` in
+  `notes/store.ts` decide, `editorPool.reloadOpenNotes` pours; a reload
+  re-seeds the slug tracking, so a disk-side H1 edit relabels the tab but
+  renames nothing — the rename rule stays "a heading you edit here"), while
+  a DIRTY buffer is left alone for the write guard to arbitrate. Reloads are
+  driven by the per-root `fs.watch` (`bun/watch.ts` → the `notesChanged`
+  push, debounced, filtered to note-shaped entries outside dot-directories)
+  with the window-focus refresh as the belt; an unwatchable root (unmounted
+  volume) degrades to focus-refresh only, warned, like every other
+  unavailable-root path. `rename(2)` overwrites
   silently, so no call site may pick its own destination name: `uniqueName`
   (case-insensitive, because APFS is) allocates against a `readdir` snapshot
   plus the `reserved` set, and the rename that follows is safe *because* the

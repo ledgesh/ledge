@@ -156,34 +156,75 @@ export async function listNotes(root: string): Promise<NoteMeta[]> {
 // job that has to. readNote's null (a note deleted mid-scan) costs that note
 // and nothing else.
 export async function searchNotes(root: string, query: string): Promise<SearchHit[]> {
-  return collectHits(query, await listNotes(root), (path) => readNote(path));
+  return collectHits(query, await listNotes(root), async (path) => (await readNote(path))?.text ?? null);
 }
 
-// Read a note, or null if it is gone (deleted behind our back, say).
-export async function readNote(path: string): Promise<string | null> {
+// Read a note, or null if it is gone (deleted behind our back, say). The mtime
+// comes back too: it is the note's disk version, which the view echoes into
+// writeNote's baseMtimeMs so a save can tell its own last state from an
+// external edit. Stat BEFORE read, deliberately: if a write lands between the
+// two, the text is newer than the mtime we report, so the next comparison
+// still sees a difference and re-reads — stale-looking, never stale-passing.
+export async function readNote(path: string): Promise<{ text: string; mtimeMs: number } | null> {
   assertNote(path);
   try {
-    return await readFile(path, "utf8");
+    const mtimeMs = (await stat(path)).mtimeMs;
+    return { text: await readFile(path, "utf8"), mtimeMs };
   } catch {
     return null;
   }
+}
+
+// What a save reports back: the written file's new disk version, and — when
+// the guard below fired — where the overwritten external edit went.
+export interface WriteResult {
+  mtimeMs: number;
+  divergedTo: string | null;
 }
 
 // Atomic save: write a temp file in the SAME directory, then rename(2) over the
 // target. rename is atomic within a filesystem, so a crash (or a `kill -9`)
 // mid-save leaves either the old note or the new one, never a half-written file.
 // The temp name is dotted so a concurrent listNotes never shows it.
+//
+// `baseMtimeMs` is the caller's expectation: the disk version it last read or
+// wrote. When the file's actual mtime disagrees AND the bytes genuinely differ,
+// someone else — an agent in the note's own terminal, git, vim — wrote here
+// since. The buffer still wins the live path (its author is the one typing),
+// but the external version is first MOVED into the root's trash via deleteNote,
+// never destroyed: the same rename-not-unlink stance as every delete, so a
+// concurrent edit costs a trip to the Trash section, not the edit. Identical
+// bytes just adopt the disk mtime — no write, no trash noise. null means no
+// expectation (a note edited before its first read landed) and writes blind.
+//
+// The returned mtime is the TEMP file's, statted before the rename (which
+// preserves it): stat-after-rename could catch a foreign write that landed in
+// between and report a version whose bytes we never saw. The stat-then-rename
+// window on the guard itself remains — closing it would need an exchange
+// primitive POSIX rename lacks — but the guard is aimed at the seconds-to-
+// minutes an agent edit sits unnoticed, not at microsecond interleavings.
 let tmpCounter = 0;
-export async function writeNote(path: string, text: string): Promise<void> {
+export async function writeNote(path: string, text: string, baseMtimeMs: number | null = null): Promise<WriteResult> {
   const root = assertNote(path);
   await rootReady(root);
   const dir = dirname(path);
   await mkdir(dir, { recursive: true });
+  let divergedTo: string | null = null;
+  if (baseMtimeMs !== null) {
+    const disk = await stat(path).catch(() => null); // gone is not a conflict: the write recreates it
+    if (disk && disk.mtimeMs !== baseMtimeMs) {
+      const current = await readFile(path, "utf8").catch(() => null);
+      if (current === text) return { mtimeMs: disk.mtimeMs, divergedTo: null };
+      if (current !== null) divergedTo = await deleteNote(path);
+    }
+  }
   tmpCounter += 1;
   const tmp = join(dir, `.${basename(path)}.tmp-${process.pid}-${tmpCounter}`);
   try {
     await writeFile(tmp, text, "utf8");
+    const mtimeMs = (await stat(tmp)).mtimeMs;
     await rename(tmp, path);
+    return { mtimeMs, divergedTo };
   } catch (err) {
     await unlink(tmp).catch(() => {});
     throw err;

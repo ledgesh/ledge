@@ -10,6 +10,8 @@ import {
   freezeDoc,
   noteChanged,
   releaseDoc,
+  reloadCandidates,
+  reseedDoc,
   resetDocs,
   retargetDoc,
   saveNow,
@@ -28,6 +30,8 @@ const bind = (docId: string, path: string | null, handlers: DocHandlers) =>
 
 function fakeBridge() {
   const writes: Array<{ path: string; text: string }> = [];
+  // The baseMtimeMs each write stated — the external-edit guard's expectation.
+  const writeBases: Array<number | null> = [];
   const creates: string[] = [];
   const createFolders: string[] = [];
   const retitles: Array<{ path: string; text: string }> = [];
@@ -35,6 +39,7 @@ function fakeBridge() {
   let created = 0;
   const state = {
     writes,
+    writeBases,
     creates,
     createFolders,
     retitles,
@@ -60,13 +65,16 @@ function fakeBridge() {
     list: async () => [],
     read: async () => null,
     search: async () => [],
-    write: async (path, text) => {
+    write: async (path, text, baseMtimeMs) => {
       if (state.gate) await state.gate.promise;
       if (state.failNextWrite) {
         state.failNextWrite = false;
         throw new Error("disk on fire");
       }
       writes.push({ path, text });
+      writeBases.push(baseMtimeMs);
+      // Successive writes get successive versions, like a real disk.
+      return { mtimeMs: 1000 + writes.length, divergedTo: null };
     },
     create: async (folder, text): Promise<NoteMeta> => {
       if (state.gate) await state.gate.promise;
@@ -804,5 +812,112 @@ describe("workspace default cwd", () => {
     noteChanged("doc-1", "# Plain\n\nmore\n");
     await saveNow("doc-1");
     expect(fs.configures).toHaveLength(1); // the bind's, nothing since
+  });
+});
+
+describe("external-edit safety: the save's expectation", () => {
+  test("a loaded note's first save states the disk version its load carried", async () => {
+    const fs = fakeBridge();
+    bind("doc-1", "/notes/a.md", noop());
+    seedSlug("doc-1", "# A\n\nbody\n", 777);
+    noteChanged("doc-1", "# A\n\nedited\n");
+    await saveNow("doc-1");
+    expect(fs.writeBases).toEqual([777]);
+  });
+
+  test("each save's expectation is the previous save's reported version", async () => {
+    const fs = fakeBridge();
+    bind("doc-1", "/notes/a.md", noop());
+    seedSlug("doc-1", "# A\n\nbody\n", 777);
+    noteChanged("doc-1", "# A\n\none\n");
+    await saveNow("doc-1");
+    noteChanged("doc-1", "# A\n\ntwo\n");
+    await saveNow("doc-1");
+    expect(fs.writeBases).toEqual([777, 1001]); // the stub reported 1001 for the first write
+  });
+
+  test("a note created here states the create's version on its next save", async () => {
+    const fs = fakeBridge();
+    bind("doc-1", null, noop());
+    noteChanged("doc-1", "# New\n");
+    await saveNow("doc-1"); // allocates untitled-1.md, mtimeMs 1
+    noteChanged("doc-1", "# New\n\nmore\n");
+    await saveNow("doc-1");
+    expect(fs.writeBases).toEqual([1]);
+  });
+
+  test("a note edited before its load landed saves blind — null expectation, the pre-guard behavior", async () => {
+    const fs = fakeBridge();
+    bind("doc-1", "/notes/a.md", noop());
+    noteChanged("doc-1", "# A\n\ntyped before the read came back\n");
+    await saveNow("doc-1");
+    expect(fs.writeBases).toEqual([null]);
+  });
+});
+
+describe("external-edit safety: reload", () => {
+  test("only a clean, loaded note with a file is a reload candidate", () => {
+    fakeBridge();
+    bind("clean", "/notes/clean.md", noop());
+    seedSlug("clean", "# Clean\n", 10);
+    bind("dirty", "/notes/dirty.md", noop());
+    seedSlug("dirty", "# Dirty\n", 20);
+    noteChanged("dirty", "# Dirty\n\nmid-thought\n");
+    bind("fileless", null, noop());
+    bind("frozen", "/notes/frozen.md", noop());
+    seedSlug("frozen", "# Frozen\n", 30);
+    freezeDoc("frozen");
+    bind("unloaded", "/notes/unloaded.md", noop()); // its read never landed: no seed
+    expect(reloadCandidates()).toEqual([{ docId: "clean", path: "/notes/clean.md", mtimeMs: 10 }]);
+  });
+
+  test("adopting a disk edit relabels the tab and renames nothing — a disk H1 is a heading you opened, not one you edited", async () => {
+    const fs = fakeBridge();
+    const titles: string[] = [];
+    bind("doc-1", "/notes/old-title.md", { onFile: () => {}, onTitle: (t) => titles.push(t) });
+    seedSlug("doc-1", "# Old Title\n\nbody\n", 10);
+    expect(reseedDoc("doc-1", "/notes/old-title.md", "# Agent Title\n\nrewritten\n", 20)).toBe(true);
+    expect(titles).toEqual(["Agent Title"]);
+    // A body edit after the adoption: the save's expectation is the adopted
+    // version, and the unchanged (new) heading moves no file.
+    noteChanged("doc-1", "# Agent Title\n\nrewritten, plus me\n");
+    await saveNow("doc-1");
+    expect(fs.retitles).toEqual([]);
+    expect(fs.writeBases).toEqual([20]);
+  });
+
+  test("a heading the user edits AFTER an adoption still renames — the rename rule survives the reload", async () => {
+    const fs = fakeBridge();
+    bind("doc-1", "/notes/old-title.md", noop());
+    seedSlug("doc-1", "# Old Title\n", 10);
+    reseedDoc("doc-1", "/notes/old-title.md", "# Agent Title\n", 20);
+    noteChanged("doc-1", "# My Title\n");
+    await saveNow("doc-1");
+    expect(fs.retitles).toHaveLength(1);
+  });
+
+  test("an entry that went dirty between the candidate list and the read is refused", () => {
+    fakeBridge();
+    const titles: string[] = [];
+    bind("doc-1", "/notes/a.md", { onFile: () => {}, onTitle: (t) => titles.push(t) });
+    seedSlug("doc-1", "# A\n", 10);
+    noteChanged("doc-1", "# A\n\na keystroke landed\n");
+    expect(reseedDoc("doc-1", "/notes/a.md", "# Agent\n", 20)).toBe(false);
+    expect(titles).toEqual([]); // refused means untouched: no relabel, no adoption
+  });
+
+  test("an entry retargeted at another path since the candidate list is refused", () => {
+    fakeBridge();
+    bind("doc-1", "/notes/a.md", noop());
+    seedSlug("doc-1", "# A\n", 10);
+    expect(reseedDoc("doc-1", "/notes/elsewhere.md", "# B\n", 20)).toBe(false);
+  });
+
+  test("adopting a disk edit re-sends the frontmatter it carries", () => {
+    const fs = fakeBridge();
+    bind("doc-1", "/notes/a.md", noop());
+    seedSlug("doc-1", "# A\n", 10);
+    reseedDoc("doc-1", "/notes/a.md", "---\ncwd: /tmp/agent-proj\n---\n# A\n", 20);
+    expect(fs.configures.at(-1)?.params.cwd).toBe("/tmp/agent-proj");
   });
 });

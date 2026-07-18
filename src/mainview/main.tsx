@@ -4,7 +4,7 @@ import Electrobun, { Electroview } from "electrobun/view";
 import type { LedgeRPC, NoteMeta, TrashMeta, WorkspaceRootInfo } from "../shared/rpc-schema";
 import { configureBridge, dispatchRunEvent, setTerminalBusy } from "./editor/bridge";
 import { bytesToB64, configureTerminal, dispatchTerminalOutput, dispatchTerminalExit } from "./terminal/channel";
-import { configureNotes } from "./notes/channel";
+import { configureNotes, dispatchNotesChanged } from "./notes/channel";
 import { configureWorkspaces, recordWorkspaceKinds } from "./workspace/channel";
 import { configureClipboard } from "./lib/clipboard";
 import { configureAssets } from "./lib/assets";
@@ -25,6 +25,7 @@ const rpc = Electroview.defineRPC<LedgeRPC>({
       terminalOutput: ({ sessionId, dataB64 }) => dispatchTerminalOutput(sessionId, dataB64),
       terminalBusy: ({ sessionId, busy }) => setTerminalBusy(sessionId, busy),
       terminalExit: ({ sessionId }) => dispatchTerminalExit(sessionId),
+      notesChanged: ({ root }) => dispatchNotesChanged(root),
     },
   },
 });
@@ -98,11 +99,9 @@ configureWorkspaces({
 
 configureNotes({
   list: (folder) => electrobun.rpc!.request.noteList({ root: folder }).then((r) => r.notes),
-  read: (path) => electrobun.rpc!.request.noteRead({ path }).then((r) => r.text),
+  read: (path) => electrobun.rpc!.request.noteRead({ path }).then((r) => r.note),
   search: (folder, query) => electrobun.rpc!.request.noteSearch({ root: folder, query }).then((r) => r.hits),
-  write: async (path, text) => {
-    await electrobun.rpc!.request.noteWrite({ path, text });
-  },
+  write: (path, text, baseMtimeMs) => electrobun.rpc!.request.noteWrite({ path, text, baseMtimeMs }),
   create: (folder, text) => electrobun.rpc!.request.noteCreate({ root: folder, text }).then((r) => r.note),
   retitle: (path, text) => electrobun.rpc!.request.noteRetitle({ path, text }).then((r) => r.note),
   remove: (path) => electrobun.rpc!.request.noteDelete({ path }).then((r) => r.trashed),

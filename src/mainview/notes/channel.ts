@@ -6,13 +6,27 @@ import type { NoteMeta, TrashMeta } from "../../shared/rpc-schema";
 import type { NoteParams } from "../../shared/frontmatter";
 import type { SearchHit } from "../../shared/search";
 
+// What a read hands back: the note's text plus its disk version, which the
+// store echoes into the next write's baseMtimeMs (external-edit guard).
+export interface NoteFile {
+  text: string;
+  mtimeMs: number;
+}
+
+// What a guarded write reports: the new disk version, and where an external
+// edit went (the root's trash) when the save displaced one — null normally.
+export interface WriteResult {
+  mtimeMs: number;
+  divergedTo: string | null;
+}
+
 interface NoteHandlers {
   // Scoped calls carry the workspace folder (an opaque root handle from Bun);
   // per-note calls carry just the path — its folder is derivable Bun-side.
   list: (folder: string) => Promise<NoteMeta[]>;
-  read: (path: string) => Promise<string | null>;
+  read: (path: string) => Promise<NoteFile | null>;
   search: (folder: string, query: string) => Promise<SearchHit[]>;
-  write: (path: string, text: string) => Promise<void>;
+  write: (path: string, text: string, baseMtimeMs: number | null) => Promise<WriteResult>;
   create: (folder: string, text: string) => Promise<NoteMeta>;
   retitle: (path: string, text: string) => Promise<NoteMeta>;
   remove: (path: string) => Promise<string | null>;
@@ -40,7 +54,7 @@ export function listNotes(folder: string): Promise<NoteMeta[]> {
   return bridge().list(folder);
 }
 
-export function readNote(path: string): Promise<string | null> {
+export function readNote(path: string): Promise<NoteFile | null> {
   return bridge().read(path);
 }
 
@@ -51,8 +65,11 @@ export function searchNotes(folder: string, query: string): Promise<SearchHit[]>
   return bridge().search(folder, query);
 }
 
-export function writeNote(path: string, text: string): Promise<void> {
-  return bridge().write(path, text);
+// `baseMtimeMs` is the disk version this note last read or wrote (null before
+// the first read lands): Bun refuses to silently overwrite a file that moved
+// past it — see noteWrite in the rpc schema for the arbitration.
+export function writeNote(path: string, text: string, baseMtimeMs: number | null): Promise<WriteResult> {
+  return bridge().write(path, text, baseMtimeMs);
 }
 
 export function createNote(folder: string, text: string): Promise<NoteMeta> {
@@ -98,6 +115,25 @@ export function emptyTrash(folder: string): Promise<number> {
 // the save path is the one place that sees every text change.
 export function configureSession(sessionId: string, params: NoteParams): void {
   bridge().configureSession(sessionId, params);
+}
+
+// --- external changes --------------------------------------------------------
+// Bun's watcher push (`notesChanged` in the rpc schema): one workspace root's
+// files moved behind the app's back. main.tsx feeds the message in; App
+// subscribes and answers with a folder refresh plus a reload of clean open
+// buffers. A subscriber set rather than a Handlers field: this is a push the
+// view REACTS to, not a capability it calls, and it can arrive before (or
+// without) configureNotes in tests.
+
+const changeSubs = new Set<(root: string) => void>();
+
+export function onNotesChanged(fn: (root: string) => void): () => void {
+  changeSubs.add(fn);
+  return () => changeSubs.delete(fn);
+}
+
+export function dispatchNotesChanged(root: string): void {
+  for (const fn of changeSubs) fn(root);
 }
 
 export type { NoteMeta, TrashMeta, SearchHit };

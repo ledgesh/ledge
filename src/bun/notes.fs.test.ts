@@ -36,6 +36,12 @@ if (!resolve(APP_HOME).startsWith(resolve(tmpdir()) + sep)) {
 let ROOT = ""; // the default workspace root every test gets
 let TRASH = ""; // its trash
 
+// readNote returns {text, mtimeMs}; most assertions here only care about the
+// bytes. null stays null so the gone-note cases read the same.
+async function textAt(path: string): Promise<string | null> {
+  return (await readNote(path))?.text ?? null;
+}
+
 // A second root, for the cross-workspace cases. Managed for convenience; the
 // guards make no managed/external distinction beyond mkdir self-healing.
 async function secondRoot(): Promise<string> {
@@ -55,7 +61,7 @@ describe("createNote / writeNote / readNote", () => {
     const note = await createNote(ROOT, "# Shipping Notes\n\nhello");
     expect(note.path).toBe(join(ROOT, "shipping-notes.md"));
     expect(note.title).toBe("Shipping Notes");
-    expect(await readNote(note.path)).toBe("# Shipping Notes\n\nhello");
+    expect(await textAt(note.path)).toBe("# Shipping Notes\n\nhello");
   });
 
   test("a second note with the same heading enumerates instead of clobbering", async () => {
@@ -63,7 +69,7 @@ describe("createNote / writeNote / readNote", () => {
     const b = await createNote(ROOT, "# Plan\n\ntwo");
     expect(a.path).not.toBe(b.path);
     expect(b.path).toBe(join(ROOT, "plan-2.md"));
-    expect(await readNote(a.path)).toBe("# Plan\n\none");
+    expect(await textAt(a.path)).toBe("# Plan\n\none");
   });
 
   test("the same heading in two workspaces is two plain names — reservations are per folder", async () => {
@@ -125,6 +131,65 @@ describe("createNote / writeNote / readNote", () => {
     await expect(writeNote(note.path, "# edited\n")).rejects.toThrow(/not on disk/);
     await expect(createNote(dir, "# Another\n")).rejects.toThrow(/not on disk/);
     expect(await stat(dir).catch(() => null)).toBeNull(); // nothing recreated it
+  });
+});
+
+describe("writeNote's external-edit guard", () => {
+  // An "agent edit": bytes replaced behind the app's back, with an mtime the
+  // caller has never seen. utimes pins it, because two writes can land inside
+  // one mtime granule and would make the test flaky about what it proves.
+  async function externalEdit(path: string, text: string, at = 12_345_000): Promise<void> {
+    await writeFile(path, text, "utf8");
+    await utimes(path, new Date(at), new Date(at));
+  }
+
+  test("a save whose base matches the disk overwrites quietly and reports the new version", async () => {
+    const note = await createNote(ROOT, "# Plain\n");
+    const first = await writeNote(note.path, "# Plain\n\none", null);
+    const second = await writeNote(note.path, "# Plain\n\ntwo", first.mtimeMs);
+    expect(first.divergedTo).toBeNull();
+    expect(second.divergedTo).toBeNull();
+    expect(await textAt(note.path)).toBe("# Plain\n\ntwo");
+    expect(second.mtimeMs).toBe((await stat(note.path)).mtimeMs); // the reported version IS the file's
+  });
+
+  test("an external edit under a dirty buffer is moved to the trash, and the save wins the live path", async () => {
+    const note = await createNote(ROOT, "# Contested\n");
+    const mine = await writeNote(note.path, "# Contested\n\nmine", null);
+    await externalEdit(note.path, "# Contested\n\nan agent wrote this");
+    const res = await writeNote(note.path, "# Contested\n\nmine, newer", mine.mtimeMs);
+    expect(res.divergedTo).toBe(join(TRASH, "contested.md"));
+    expect(await textAt(note.path)).toBe("# Contested\n\nmine, newer");
+    expect(await textAt(res.divergedTo!)).toBe("# Contested\n\nan agent wrote this"); // preserved, not destroyed
+    expect((await listTrash(ROOT)).map((t) => t.path)).toEqual([res.divergedTo!]);
+  });
+
+  test("an external edit with identical bytes adopts the disk version — no write, no trash noise", async () => {
+    const note = await createNote(ROOT, "# Same\n");
+    const mine = await writeNote(note.path, "# Same\n\nbody", null);
+    await externalEdit(note.path, "# Same\n\nbody"); // the agent wrote exactly this text
+    const res = await writeNote(note.path, "# Same\n\nbody", mine.mtimeMs);
+    expect(res.mtimeMs).toBe(12_345_000);
+    expect(res.divergedTo).toBeNull();
+    expect(await listTrash(ROOT)).toEqual([]);
+  });
+
+  test("a null base writes blind: no expectation, no divergence — the pre-guard behavior", async () => {
+    const note = await createNote(ROOT, "# Blind\n");
+    await externalEdit(note.path, "# Blind\n\ntheirs");
+    const res = await writeNote(note.path, "# Blind\n\nmine", null);
+    expect(res.divergedTo).toBeNull();
+    expect(await textAt(note.path)).toBe("# Blind\n\nmine");
+    expect(await listTrash(ROOT)).toEqual([]);
+  });
+
+  test("a file deleted behind the app's back is not a conflict: the save recreates it", async () => {
+    const note = await createNote(ROOT, "# Gone\n");
+    const mine = await writeNote(note.path, "# Gone\n\nbody", null);
+    await rm(note.path);
+    const res = await writeNote(note.path, "# Gone\n\nbody, edited", mine.mtimeMs);
+    expect(res.divergedTo).toBeNull();
+    expect(await textAt(note.path)).toBe("# Gone\n\nbody, edited");
   });
 });
 
@@ -235,7 +300,7 @@ describe("retitleNote", () => {
     const note = await createNote(ROOT, "# Draft\n");
     const moved = await retitleNote(note.path, "# Final\n");
     expect(moved.path).toBe(join(ROOT, "final.md"));
-    expect(await readNote(moved.path)).toBe("# Draft\n"); // retitle moves, it does not save
+    expect(await textAt(moved.path)).toBe("# Draft\n"); // retitle moves, it does not save
     expect(await readdir(ROOT)).toEqual(["final.md"]);
   });
 
@@ -251,7 +316,7 @@ describe("retitleNote", () => {
     const note = await createNote(ROOT, "# Source\n\nmine");
     const moved = await retitleNote(note.path, "# Target\n\nmine");
     expect(moved.path).toBe(join(ROOT, "target-2.md"));
-    expect(await readNote(other.path)).toBe("# Target\n\ntheirs");
+    expect(await textAt(other.path)).toBe("# Target\n\ntheirs");
   });
 
   test("a name taken in ANOTHER workspace is no obstacle: enumeration is per folder", async () => {
@@ -270,7 +335,7 @@ describe("trash round-trip", () => {
     expect(trashed).toBe(join(TRASH, "doomed.md"));
     expect(await listNotes(ROOT)).toEqual([]);
     expect((await listTrash(ROOT)).map((t) => t.path)).toEqual([trashed]);
-    expect(await readNote(trashed)).toBe("# Doomed\n\nbody"); // bytes intact, only moved
+    expect(await textAt(trashed)).toBe("# Doomed\n\nbody"); // bytes intact, only moved
   });
 
   test("each workspace's trash is its own: a delete here never shows up there", async () => {
@@ -293,8 +358,8 @@ describe("trash round-trip", () => {
     await createNote(ROOT, "# Twice\n\nusurper"); // takes twice.md while the original sits in the trash
     const restored = await restoreNote(trashed!);
     expect(restored.path).toBe(join(ROOT, "twice-2.md"));
-    expect(await readNote(restored.path)).toBe("# Twice\n\noriginal");
-    expect(await readNote(join(ROOT, "twice.md"))).toBe("# Twice\n\nusurper");
+    expect(await textAt(restored.path)).toBe("# Twice\n\noriginal");
+    expect(await textAt(join(ROOT, "twice.md"))).toBe("# Twice\n\nusurper");
   });
 });
 

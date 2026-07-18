@@ -141,6 +141,19 @@ class FakeStore {
     return this.rootOf(path).data.notes.get(path)?.text ?? null;
   }
 
+  // The read the channel handler serves: text plus disk version, like the real
+  // readNote — the store echoes the mtime into write's baseMtimeMs.
+  readFile(path: string): { text: string; mtimeMs: number } | null {
+    const n = this.rootOf(path).data.notes.get(path);
+    return n ? { text: n.text, mtimeMs: n.mtimeMs } : null;
+  }
+
+  // Test seam (window.__harness): an "agent" rewriting a note behind the app's
+  // back — a fresh mtime, exactly what an external temp+rename write looks like.
+  writeExternal(path: string, text: string): void {
+    this.rootOf(path).data.notes.set(path, { text, mtimeMs: this.tick() });
+  }
+
   create(root: string, text: string): NoteMeta {
     const data = this.ensureRoot(root);
     const path = `${root}/${this.allocate(text, data.notes.keys())}`;
@@ -148,8 +161,23 @@ class FakeStore {
     return this.meta(data, path);
   }
 
-  write(path: string, text: string): void {
-    this.rootOf(path).data.notes.set(path, { text, mtimeMs: this.tick() });
+  // Mirrors the real writeNote's guard (bun/notes.ts): a mismatched base with
+  // genuinely different bytes moves the disk version into the trash and the
+  // incoming text wins the live path; identical bytes just adopt the disk
+  // mtime. The fake must carry the semantics or the harness specs would
+  // green-light a view that never handles divergence.
+  write(path: string, text: string, baseMtimeMs: number | null): { mtimeMs: number; divergedTo: string | null } {
+    const { root, data } = this.rootOf(path);
+    const cur = data.notes.get(path);
+    let divergedTo: string | null = null;
+    if (cur && baseMtimeMs !== null && cur.mtimeMs !== baseMtimeMs) {
+      if (cur.text === text) return { mtimeMs: cur.mtimeMs, divergedTo: null };
+      divergedTo = `${root}/.ledge-trash/${this.allocate(cur.text, data.trash.keys())}`;
+      data.trash.set(divergedTo, { text: cur.text, deletedAt: this.tick() });
+    }
+    const mtimeMs = this.tick();
+    data.notes.set(path, { text, mtimeMs });
+    return { mtimeMs, divergedTo };
   }
 
   retitle(path: string, text: string): NoteMeta {
@@ -212,9 +240,9 @@ store.seed(EXTERNAL, "# Epsilon\n\nepsilon body\n");
 
 configureNotes({
   list: async (folder) => store.list(folder),
-  read: async (path) => store.readNote(path),
+  read: async (path) => store.readFile(path),
   search: (folder, query) => store.search(folder, query),
-  write: async (path, text) => store.write(path, text),
+  write: async (path, text, baseMtimeMs) => store.write(path, text, baseMtimeMs),
   create: async (folder, text) => store.create(folder, text),
   retitle: async (path, text) => store.retitle(path, text),
   remove: async (path) => store.remove(path),

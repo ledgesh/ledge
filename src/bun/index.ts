@@ -39,6 +39,7 @@ import {
   loadWorkspaces,
 } from "./workspaces";
 import { readLayout, writeLayout } from "./layout";
+import { syncWatchers } from "./watch";
 import { pasteImageAsset, readAsset } from "./assets";
 import { interpretersFor, runnerFor } from "./runner";
 import { loadSettings, openSettingsFile } from "./settings";
@@ -296,7 +297,11 @@ const rpc = BrowserView.defineRPC<LedgeRPC>({
       // back roots it was handed, and the one way an arbitrary folder gets in
       // is the native dialog below — never a view-supplied path.
       workspaceList: () => ({ workspaces: listWorkspaceRoots() }),
-      workspaceCreate: async ({ name }) => ({ root: await createManaged(name) }),
+      workspaceCreate: async ({ name }) => {
+        const root = await createManaged(name);
+        refreshWatchers();
+        return { root };
+      },
       workspaceAttach: async () => {
         // openFileDialog splits its FFI result on "," — a path containing a
         // comma comes back shredded, so re-join and stat-validate; a comma
@@ -310,19 +315,28 @@ const rpc = BrowserView.defineRPC<LedgeRPC>({
         if (!picked) return { root: null, kind: null, error: null }; // cancelled
         const res = await attachExternal(picked);
         if ("error" in res) return { root: null, kind: null, error: res.error };
+        refreshWatchers();
         return { root: res.root, kind: kindOf(res.root), error: null };
       },
-      workspaceDetach: async ({ root }) => ({ ok: await detachRoot(root) }),
+      workspaceDetach: async ({ root }) => {
+        const ok = await detachRoot(root);
+        refreshWatchers();
+        return { ok };
+      },
 
       // --- note store ------------------------------------------------------
       // Every path these take is checked against the registered workspace
       // roots inside notes.ts, so a compromised or buggy view cannot read or
       // write outside the folders the user chose.
       noteList: async ({ root }) => ({ notes: await listNotes(root) }),
-      noteRead: async ({ path }) => ({ text: await readNote(path) }),
-      noteWrite: async ({ path, text }) => {
-        await writeNote(path, text);
-        return { ok: true };
+      noteRead: async ({ path }) => ({ note: await readNote(path) }),
+      // The guard and the divergence-to-trash live in writeNote (notes.ts);
+      // this only reports. divergedTo non-null is worth a log line Bun-side
+      // too: the view's console is invisible in the shipped app.
+      noteWrite: async ({ path, text, baseMtimeMs }) => {
+        const res = await writeNote(path, text, baseMtimeMs);
+        if (res.divergedTo) console.warn("[notes] external edit preserved in trash:", res.divergedTo, "(save to", path, "won)");
+        return res;
       },
       noteCreate: async ({ root, text }) => ({ note: await createNote(root, text) }),
       noteRetitle: async ({ path, text }) => ({ note: await retitleNote(path, text) }),
@@ -538,6 +552,17 @@ const rpc = BrowserView.defineRPC<LedgeRPC>({
     messages: {},
   },
 });
+
+// Watch every available root for changes made behind the app's back (agents in
+// the drawer, git, plain shell edits) and push notesChanged so the view can
+// re-read lists and reload clean open buffers. Trails the registry: the
+// workspace handlers above re-sync on every attach/create/detach, and an
+// unavailable root simply is not watched until a sync finds it back
+// (bun/watch.ts owns the skip-and-warn).
+function refreshWatchers(): void {
+  syncWatchers(availableRoots(), (root) => rpc.send.notesChanged({ root }));
+}
+refreshWatchers();
 
 // Drain every live shell on a short interval. (poll()-gated reads never block;
 // see pty.ts.) Inline shells are sliced into per-block events (block ids are
