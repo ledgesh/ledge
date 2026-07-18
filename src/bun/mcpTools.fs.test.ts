@@ -349,6 +349,95 @@ describe("append_note", () => {
   });
 });
 
+// The revision tool: exact-match replacement, no fuzz. The decisions worth
+// pinning are the refusals (they teach the agent to self-correct: exactness,
+// ambiguity counts, replace_all as the escape), the literal-replacement
+// hazard ($-patterns), and that an edit reaching the H1 retitles the result.
+describe("edit_note", () => {
+  const HAD = Object.hasOwn(process.env, "LEDGE_NOTE");
+  const OLD = process.env["LEDGE_NOTE"];
+  afterEach(() => {
+    if (HAD) process.env["LEDGE_NOTE"] = OLD;
+    else delete process.env["LEDGE_NOTE"];
+  });
+
+  test("replaces one exact match, whitespace included", async () => {
+    const n = await createNote(ROOT, "# Plan\n\n- [ ] ship it\n\ndone soon\n");
+    const out = await call("edit_note", { title: "Plan", old_text: "- [ ] ship it", new_text: "- [x] ship it" });
+    expect(out.path).toBe(n.path);
+    expect(out.title).toBe("Plan");
+    expect(out.replacements).toBeUndefined();
+    expect(out.divergedTo).toBeUndefined();
+    expect((await readNote(n.path))?.text).toBe("# Plan\n\n- [x] ship it\n\ndone soon\n");
+  });
+
+  test("no title or path edits the current note ($LEDGE_NOTE)", async () => {
+    const n = await createNote(ROOT, "# Current\n\nteh typo\n");
+    process.env["LEDGE_NOTE"] = n.path;
+    await call("edit_note", { old_text: "teh", new_text: "the" });
+    expect((await readNote(n.path))?.text).toBe("# Current\n\nthe typo\n");
+  });
+
+  test("a non-match is an error that says matching is exact", async () => {
+    await createNote(ROOT, "# Plan\n\nreal text\n");
+    expect(call("edit_note", { title: "Plan", old_text: "Real Text", new_text: "x" })).rejects.toThrow(
+      "the match is exact",
+    );
+  });
+
+  test("an ambiguous match is an error that counts the occurrences", async () => {
+    await createNote(ROOT, "# Plan\n\nfoo\nfoo\nfoo\n");
+    expect(call("edit_note", { title: "Plan", old_text: "foo", new_text: "bar" })).rejects.toThrow(
+      'appears 3 times in "Plan"',
+    );
+  });
+
+  test("replace_all changes every occurrence and reports the count", async () => {
+    const n = await createNote(ROOT, "# Plan\n\nfoo and foo, then foo\n");
+    const out = await call("edit_note", { title: "Plan", old_text: "foo", new_text: "bar", replace_all: true });
+    expect(out.replacements).toBe(3);
+    expect((await readNote(n.path))?.text).toBe("# Plan\n\nbar and bar, then bar\n");
+  });
+
+  test("an empty new_text deletes the match", async () => {
+    const n = await createNote(ROOT, "# Plan\n\nkeep DELETEME this\n");
+    await call("edit_note", { title: "Plan", old_text: "DELETEME ", new_text: "" });
+    expect((await readNote(n.path))?.text).toBe("# Plan\n\nkeep this\n");
+  });
+
+  test("the replacement is literal — $-patterns do not expand", async () => {
+    // String.replaceAll would turn $& into the match; split/join must not.
+    const n = await createNote(ROOT, "# Costs\n\nprice: cheap\n");
+    await call("edit_note", { title: "Costs", old_text: "cheap", new_text: "$& or $100" });
+    expect((await readNote(n.path))?.text).toBe("# Costs\n\nprice: $& or $100\n");
+  });
+
+  test("editing the H1 retitles the note in the result; the file stays put", async () => {
+    const n = await createNote(ROOT, "# Draft\n\nbody\n");
+    const out = await call("edit_note", { title: "Draft", old_text: "# Draft", new_text: "# Final" });
+    expect(out.path).toBe(n.path);
+    expect(out.title).toBe("Final");
+    expect((await call("read_note", { title: "Final" })).path).toBe(n.path);
+  });
+
+  test("an edit that eats the trailing newline gets it restored", async () => {
+    const n = await createNote(ROOT, "# Log\n\nlast line\n");
+    await call("edit_note", { title: "Log", old_text: "last line\n", new_text: "new last" });
+    expect((await readNote(n.path))?.text).toBe("# Log\n\nnew last\n");
+  });
+
+  test("empty old_text, identical texts, and unknown notes are refused", async () => {
+    await createNote(ROOT, "# Plan\n\nbody\n");
+    expect(call("edit_note", { title: "Plan", old_text: "", new_text: "x" })).rejects.toThrow("give old_text");
+    expect(call("edit_note", { title: "Plan", old_text: "body", new_text: "body" })).rejects.toThrow(
+      "nothing would change",
+    );
+    expect(call("edit_note", { title: "No Such Note", old_text: "a", new_text: "b" })).rejects.toThrow(
+      "no note titled",
+    );
+  });
+});
+
 describe("search_notes", () => {
   test("finds lines across workspaces, tagged with theirs", async () => {
     await createNote(ROOT, "# One\nthe walrus sleeps");

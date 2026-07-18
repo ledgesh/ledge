@@ -4,10 +4,10 @@
 // exactly as they gate the webview — and a write arrives with the store's
 // invariants intact: create_note names files by H1 slug through uniqueName
 // (an agent cannot choose a filename, let alone clobber one), append_note
-// saves through writeNote's baseMtimeMs guard (a concurrent edit is moved to
-// the trash, never destroyed), and the running app sees either as an ordinary
-// external edit through its watcher — the same survivability story the
-// agent's own shell already had.
+// and edit_note save through writeNote's baseMtimeMs guard (a concurrent
+// edit is moved to the trash, never destroyed), and the running app sees any
+// of them as an ordinary external edit through its watcher — the same
+// survivability story the agent's own shell already had.
 //
 // Notes are addressed by TITLE first — the same rename-proof choice wikilinks
 // made (shared/wikilinks.ts): filenames follow the H1, so a path an agent
@@ -342,6 +342,66 @@ export const ledgeTools: McpTool[] = [
       // by writeNote's guard, never silently lost under the append.
       const res = await writeNote(n.path, joined, n.mtimeMs);
       const out: Record<string, unknown> = { path: n.path, title: n.title, workspace: n.workspace, modified: iso(res.mtimeMs) };
+      if (res.divergedTo !== null) out["divergedTo"] = res.divergedTo;
+      return out;
+    },
+  },
+  {
+    name: "edit_note",
+    description:
+      "Revise a note by exact text replacement. `old_text` must match the note's current text exactly — whitespace and newlines included, as read_note returns it — and exactly once; include enough surrounding context to pin the spot, or set `replace_all` to change every occurrence. An empty `new_text` deletes the match. This tool changes what is already there; to add new content, prefer append_note (it places additions correctly). Unlike append_note it can touch the H1, which retitles the note — address it by the new title afterwards. Address the note by title (preferred) or path; with neither, edits the current note — the one whose terminal this session was launched from. If someone else saved the note mid-edit, their version is preserved in the workspace's trash and `divergedTo` names where.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        old_text: { type: "string", description: "The exact text to replace, verbatim from the note." },
+        new_text: { type: "string", description: "The replacement. Empty deletes the matched text." },
+        replace_all: {
+          type: "boolean",
+          description: "Replace every occurrence instead of requiring exactly one match.",
+        },
+        ...TITLE_OR_PATH_PROPS,
+      },
+      required: ["old_text", "new_text"],
+      additionalProperties: false,
+    },
+    handler: async (args) => {
+      const oldText = args["old_text"];
+      const newText = args["new_text"];
+      if (typeof oldText !== "string" || oldText === "") {
+        throw new Error("give old_text — the exact text to replace (to add new content, use append_note or create_note)");
+      }
+      if (typeof newText !== "string") throw new Error("give new_text — the replacement (empty deletes the match)");
+      if (oldText === newText) throw new Error("old_text and new_text are identical — nothing would change");
+      await loadWorkspaces();
+      const n = await locate(args);
+      // split/join, not replaceAll: a `$&` in the replacement must stay
+      // literal text, and the split counts the matches in the same pass.
+      const parts = n.text.split(oldText);
+      const count = parts.length - 1;
+      if (count === 0) {
+        throw new Error(
+          `old_text not found in "${n.title}" — the match is exact, whitespace and newlines included; read_note shows the current text`,
+        );
+      }
+      if (count > 1 && args["replace_all"] !== true) {
+        throw new Error(
+          `old_text appears ${count} times in "${n.title}" — include more surrounding context to make it unique, or set replace_all to change every occurrence`,
+        );
+      }
+      let edited = parts.join(newText);
+      // Notes end in a newline; only an edit that ate the note's last one
+      // (old_text reaching EOF, replacement without it) trips this.
+      if (!edited.endsWith("\n")) edited += "\n";
+      const res = await writeNote(n.path, edited, n.mtimeMs);
+      const out: Record<string, unknown> = {
+        path: n.path,
+        // Recomputed from the edited text, the way locate() computed it: the
+        // edit may have rewritten the H1, and the old title would misaddress.
+        title: labelOf(headingOf(edited), n.path),
+        workspace: n.workspace,
+        modified: iso(res.mtimeMs),
+      };
+      if (count > 1) out["replacements"] = count;
       if (res.divergedTo !== null) out["divergedTo"] = res.divergedTo;
       return out;
     },

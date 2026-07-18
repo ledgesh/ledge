@@ -39,17 +39,19 @@ workspace attached mid-session is visible to agents without a restart. Its
 protocol is a hand-rolled JSON-RPC subset (`initialize`/`tools/*`, one
 message per line; §8's stance — the SDK earns its place if resources or
 prompts ever join), its stdout belongs to that protocol (logs go to stderr),
-and its tool set grew in deliberate tiers: reads first, then two writes
+and its tool set grew in deliberate tiers: reads first, then additive writes
 (`create_note`, `append_note` — end of note, or targeted at a heading's
 section via the same fence-aware ATX grammar the `[[note#heading]]` reveal
 uses, `shared/wikilinks.ts`; either way a trailing run of ` ```prompt `
 blocks stays last — those are the note's controls, and appends land above
-them) once the read tier proved out — both through
+them), then revision (`edit_note` — exact-match text replacement, unique
+occurrence required unless `replace_all`; the one write that can touch the
+H1 and so retitle a note) — all through
 the store, so an agent's write gets H1-slug naming via `uniqueName` (agents
 never choose filenames) and rides `writeNote`'s `baseMtimeMs` divergence
 guard, and the running app perceives it as an ordinary external edit through
-its watcher (the external-edit safety work is what made this tier acceptable
-at all). Title-addressed reads reuse
+its watcher (the external-edit safety work is what made these tiers
+acceptable at all). Title-addressed reads reuse
 `shared/wikilinks.ts` — the same resolution the editor uses, hoisted to
 shared/ for exactly this second consumer. Called with no target at all,
 `read_note`/`backlinks` fall back to `$LEDGE_NOTE` — the note whose terminal
