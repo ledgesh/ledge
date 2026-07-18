@@ -5,10 +5,19 @@
 // tags: line's tokens style like the profile name. Real WebKit because the
 // pill styling, the hotspot click, and the popup are exactly what unit tests
 // cannot see (docs/testing.md §5).
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 const noteRow = (page: Page, title: string) =>
   page.locator('[data-target-kind="note"]', { hasText: title });
+
+// A visible completion popup is not yet an accepting one — the wikilinks
+// spec's guard, for the same two Enter-swallowing windows (the disabled
+// re-query state, and interactionDelay after opening). See wikilinks.spec.ts
+// for the full story.
+const completionAcceptReady = async (page: Page, popup: Locator) => {
+  await expect(popup).not.toHaveClass(/cm-tooltip-autocomplete-disabled/);
+  await page.waitForTimeout(100);
+};
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/harness.html");
@@ -61,6 +70,7 @@ test("# pops the tag picker with the workspace's tags; accepting completes", asy
   const popup = page.locator(".cm-tooltip-autocomplete");
   await expect(popup).toBeVisible();
   await expect(popup.locator("li", { hasText: "#ledge" })).toBeVisible();
+  await completionAcceptReady(page, popup);
   await page.keyboard.press("Enter");
   await expect(page.locator(".cm-line", { hasText: "about #ledge" })).toBeVisible();
 });

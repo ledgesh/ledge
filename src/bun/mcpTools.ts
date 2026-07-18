@@ -22,7 +22,10 @@ import { appendToNote, headingsOf, resolveWikiTitle } from "../shared/wikilinks"
 import { normalizeTag } from "../shared/tags";
 import type { McpTool } from "./mcp";
 import { backlinksTo, createNote, listNotes, notesTagged, readNote, searchNotes, tagsIn, writeNote } from "./notes";
-import { assertRegisteredRoot, availableRoots, listWorkspaceRoots, loadWorkspaces, rootContaining } from "./workspaces";
+import { assertRegisteredRoot, availableRoots, listWorkspaceRoots, loadWorkspaces, rootContaining, roots } from "./workspaces";
+import { createFromTemplate, openDaily, resolveConfiguredWorkspace } from "./daily";
+import { loadSettings } from "./settings";
+import type { Settings } from "../shared/settings";
 
 // Agents read timestamps, not epoch millis.
 function iso(mtimeMs: number): string {
@@ -149,6 +152,23 @@ function targetWorkspace(args: Record<string, unknown>): string {
   );
 }
 
+// Where today's note lives: an explicit ask wins, then the daily.workspace
+// setting, then the ordinary deixis chain. Only the daily tool consults the
+// setting — create_note keeps its existing chain untouched — and only here
+// does the no-workspace error learn to mention the knob that would pin it.
+function dailyWorkspace(args: Record<string, unknown>, settings: Settings): string {
+  const asked = args["workspace"];
+  if (typeof asked === "string" && asked !== "") return assertRegisteredRoot(asked);
+  const configured = resolveConfiguredWorkspace(settings.daily.workspace, roots());
+  if (configured !== null) return configured;
+  try {
+    return targetWorkspace(args);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`${msg} — or set daily.workspace in settings.json to pin where daily notes live`);
+  }
+}
+
 const TITLE_OR_PATH_PROPS = {
   title: {
     type: "string",
@@ -176,7 +196,7 @@ export const ledgeTools: McpTool[] = [
   {
     name: "list_notes",
     description:
-      "List notes — title, path, workspace, last modified — newest first, across every available workspace or scoped to one.",
+      "List notes — title, path, workspace, last modified — newest first, across every available workspace or scoped to one. A note whose frontmatter declares `template: true` (or `template: daily`) carries that value in its row: those are the user's note templates, the ones create_note's `template` argument is usually pointed at — and the `daily` one is what daily_note instantiates.",
     inputSchema: {
       type: "object",
       properties: { workspace: { type: "string", description: "A workspace root from list_workspaces." } },
@@ -185,7 +205,15 @@ export const ledgeTools: McpTool[] = [
     handler: async (args) => {
       await loadWorkspaces();
       const notes = await notesIn(args["workspace"]);
-      return notes.map((n) => ({ path: n.path, title: n.title, workspace: n.workspace, modified: iso(n.mtimeMs) }));
+      return notes.map((n) => ({
+        path: n.path,
+        title: n.title,
+        workspace: n.workspace,
+        modified: iso(n.mtimeMs),
+        // Present-only-when-marked, like the meta itself: most rows say
+        // nothing; the daily template's row says template: "daily".
+        ...(n.template ? { template: n.template } : {}),
+      }));
     },
   },
   {
@@ -327,25 +355,62 @@ export const ledgeTools: McpTool[] = [
   {
     name: "create_note",
     description:
-      "Create a new note. Start the text with an H1 (`# Title`) — the filename is derived from it, and the title is how every other tool (and the user's [[wikilinks]]) will address the note; without one it is created as untitled. Names never clobber: a duplicate title gets a numbered file. With no `workspace`, the note lands in the current session's workspace (Ledge sets LEDGE_WORKSPACE in every note's shells), or in the only workspace when just one exists.",
+      "Create a new note. Start the text with an H1 (`# Title`) — the filename is derived from it, and the title is how every other tool (and the user's [[wikilinks]]) will address the note; without one it is created as untitled. Names never clobber: a duplicate title gets a numbered file. Instead of `text`, give `template` (the title of an existing note) plus `title`: the template's text becomes the new note's body, with {{date}}, {{time}}, {{title}}, {{yesterday}}, and {{tomorrow}} substituted and its H1 replaced by `title`. With no `workspace`, the note lands in the current session's workspace (Ledge sets LEDGE_WORKSPACE in every note's shells), or in the only workspace when just one exists.",
     inputSchema: {
       type: "object",
       properties: {
-        text: { type: "string", description: "The note's full Markdown text, H1 first." },
+        text: { type: "string", description: "The note's full Markdown text, H1 first. Required unless `template` is given." },
+        template: {
+          type: "string",
+          description:
+            "The title of an existing note to instantiate as this note's body, instead of `text`. Any note works; the user's designated templates are the notes list_notes flags `template: true` (their frontmatter carries that marker, which instantiation strips from the new note).",
+        },
+        title: { type: "string", description: "The new note's title, when creating from `template`." },
         workspace: { type: "string", description: "A workspace root from list_workspaces." },
       },
-      required: ["text"],
       additionalProperties: false,
     },
     handler: async (args) => {
+      await loadWorkspaces();
+      const template = args["template"];
+      if (typeof template === "string" && template.trim() !== "") {
+        if (typeof args["text"] === "string" && args["text"].trim() !== "") {
+          throw new Error("give either `text` or `template`, not both — the template is the note's body");
+        }
+        const title = args["title"];
+        if (typeof title !== "string" || title.trim() === "") {
+          throw new Error("creating from a template needs a `title` for the new note");
+        }
+        const root = targetWorkspace(args);
+        const meta = await createFromTemplate(root, template.trim(), title.trim());
+        return { path: meta.path, title: meta.title, workspace: root, modified: iso(meta.mtimeMs) };
+      }
       const text = args["text"];
       if (typeof text !== "string" || text.trim() === "") {
         throw new Error("give the note's text (start it with `# Title` — the title is how the note will be addressed)");
       }
-      await loadWorkspaces();
       const root = targetWorkspace(args);
       const meta = await createNote(root, text);
       return { path: meta.path, title: meta.title, workspace: root, modified: iso(meta.mtimeMs) };
+    },
+  },
+  {
+    name: "daily_note",
+    description:
+      "Create or open today's daily note: one note per LOCAL calendar day, titled YYYY-MM-DD. Idempotent — if a note bearing today's date as its title exists in the target workspace it is returned (`created: false`), never duplicated. A missing one is created from the target workspace's own note whose frontmatter says `template: daily` when one exists ({{tokens}} substituted, like create_note's `template`; strictly per-workspace — another workspace's daily template is never borrowed), else as a bare dated note. The workspace: an explicit argument wins, then the `daily.workspace` setting, then the current session's workspace (LEDGE_WORKSPACE), then the only workspace when just one exists.",
+    inputSchema: {
+      type: "object",
+      properties: { workspace: { type: "string", description: "A workspace root from list_workspaces." } },
+      additionalProperties: false,
+    },
+    handler: async (args) => {
+      await loadWorkspaces();
+      // Per call, not at module load: matching loadWorkspaces' stance, so an
+      // edited knob reaches the next call without restarting the server.
+      const settings = await loadSettings();
+      const root = dailyWorkspace(args, settings);
+      const { meta, created } = await openDaily(root);
+      return { path: meta.path, title: meta.title, workspace: root, created, modified: iso(meta.mtimeMs) };
     },
   },
   {

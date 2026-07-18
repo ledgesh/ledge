@@ -80,7 +80,13 @@ Rules:
   ⌥⌘T slot was free), ⌥⌘P full-text search (the ⌥-variant of ⌘P quick-open;
   the shift-scope rule would want ⇧⌘F — find, but across notes — but ⇧⌘F is
   the editor's working replace fallback under cmux, and search must stay
-  reachable from editor focus).
+  reachable from editor focus), ⌥⌘N new note from template (the ⌥-variant
+  of ⌘N: the same act, parameterized by a template — a note whose
+  frontmatter declares `template: true`).
+- **⌘J** — Open Today's Daily Note. J is the journal key: of the ⌘ letters
+  still free (E J L O R U Y), it is the only mnemonic one, and ⌘O stays
+  held for a literal "Open…" someday. ⇧⌘J stays free for a future
+  bigger-scope variant.
 - **Bare keys** — the verbs of a focused list row, and *only* those. They live
   in `listKeys`, never `keys`, and the resolver consults them solely in the
   `list` focus domain: anywhere else an unmodified key is typing, and the one
@@ -110,6 +116,11 @@ CodeMirror and never at the window level.
 | Command               | Key                       | Notes |
 | --------------------- | ------------------------- | ----- |
 | New Note              | ⌘N (alias ⌘T)             | |
+| Open Today's Daily Note | ⌘J                      | create-or-open, idempotent: today's LOCAL YYYY-MM-DD note, resolved by title in the daily workspace (settings `daily.workspace`, else the selected one), created from that workspace's OWN note whose frontmatter says `template: daily` when one exists (`{{date}}`/`{{time}}`/`{{title}}`/`{{yesterday}}`/`{{tomorrow}}` substituted, prompt fences carried inert, marker stripped; several claimants resolve newest-first warned). Strictly per-workspace: another workspace's daily template is never borrowed — a daily note materializes unasked, so a template you cannot see from where you sit must not shape it; a workspace with no claimant gets the bare dated note. A corpus marker, not a setting — picked up live, no restart. Lands via the CLI-open path: workspace selected, tab focused |
+| New Note from Template… | ⌥⌘N                     | opens the command palette pre-filtered to one generated entry per template — every note whose frontmatter declares `template: true`, read LIVE from the note lists (the palette IS the picker — the workspace.select dynamic-entry move; the selected workspace's templates lead, other workspaces' entries name their home). The pick instantiates that exact note as an "Untitled" note in the selected workspace, marker stripped — typing the H1 is the rename. Always visible: with no template anywhere it pre-filters to New Template instead, so the empty state teaches the feature |
+| New Template          | — (palette)               | creates a pre-marked note ("Untitled Template" — the H1 is the rename UI) whose body IS the how-to (the `{{token}}` vocabulary written literally, the marker line, the carry rules) and opens it for editing — the empty state's exit, and the make-a-template verb thereafter. Named in the New Note / New Workspace grammar; "Starter Template" was rejected as a second concept beside "template" |
+| Edit Daily Template / New Daily Template | — (palette) | one verb, two faces (exactly one shows, so the title says what will happen): opens the `template: daily` note ⌘J instantiates, or — when its workspace has none — creates a pre-marked starter (H1 + a `[[{{yesterday}}]]` carry-over line; spare on purpose, every line lands in each day's note) and opens it. Both act in the workspace ⌘J acts in (`daily.workspace` as resolved at boot and mirrored view-side off `workspaceList`, else the selected one — the role is per-workspace, so pointing anywhere else would touch a template ⌘J ignores), riding the external-open path so a pinned daily workspace gets selected first. Palette-only: a once-in-a-while act earns no chord, and ⇧⌘J stays reserved |
+| Make This Note a Template / Remove Template Marker | — (palette) | adds/removes `template: true` in the current note's frontmatter, in its own editor (undoable; autosave + the watcher refresh carry it into the picker). Exactly one of the pair shows, per the note's live frontmatter — profile.open's move. Marked notes wear the LayoutTemplate glyph in the sidebar and the ⌘P rows — and the `template: daily` note wears ⌘J's own CalendarDays, so the icon column reads file = note, layout = template, calendar = what seeds each day (icons, not badges: same object, different kind; tabs stay plain — the marker line is on screen there). `ledge ls` appends `(template)` / `(daily template)`; `list_notes` carries the value |
 | Close Tab             | ⌘W                        | closes the focused pane's active tab |
 | Next / Previous Tab   | ⌃Tab / ⌃⇧Tab (alias ⇧⌘] / ⇧⌘[) | |
 | Go to Tab N           | ⌃1…9                      | focused pane; badge shows while ⌃ held |
@@ -120,7 +131,7 @@ CodeMirror and never at the window level.
 | Attach Folder as Workspace… | — (palette, + menu) | native folder picker (Bun-side; the view never names a path); the chosen directory's .md files become the workspace's notes. Picking an already-attached folder switches to it. Also in the New Workspace split button's dropdown (the strip's + row) |
 | Switch to Workspace N | ⌘1…9                      | badge shows while ⌘ held |
 | Go to Note…           | ⌘P                        | |
-| Command Palette…      | ⇧⌘P                       | also: type `>` as the first character in ⌘P |
+| Command Palette…      | ⇧⌘P                       | also: type `>` as the first character in ⌘P. A filtered query ranks by match quality with chorded commands one notch up (CHORD_BOOST, notes/fuzzy.ts): the §2 policy allocates chords to the frequent acts, so the chord doubles as the ranking signal — "daily" surfaces ⌘J's Open Today's Daily Note above the unchorded template verbs whose titles merely match earlier. The boost decides between comparable matches only; it never beats a tighter match ("edit daily" still leads with Edit Daily Template). An empty query keeps the registry's semantic order |
 | Search Notes…         | ⌥⌘P                       | full-text over note bodies (one case-insensitive substring — shared/search.ts owns the grammar); also: type `#` as the first character in ⌘P. Enter opens the note with the matched line revealed and selected. A `#`-leading query additionally surfaces the workspace's matching tags as rows ABOVE the text hits (a #tag is text too, so its occurrences still list below); Enter on a tag row lands in the Tags panel drilled into it |
 | Toggle Terminal       | ⌃`                        | from terminal focus it closes the drawer |
 | Toggle Sidebar        | ⌥⌘B                       | |
@@ -287,14 +298,24 @@ verb table (`src/bun/cli.ts`), governed here so it stays coherent with the
 app rather than growing its own dialect.
 
 - **Verbs are unix-shaped and few**: `ls`, `cat`, `search`, `tags`, `new`,
-  `append`, `workspaces`, `open`, `install`, `mcp`, `help`. A bare `ledge`
-  opens the app; a bare non-verb argument is a title to open
+  `today`, `append`, `workspaces`, `open`, `install`, `mcp`, `help`. A bare
+  `ledge` opens the app; a bare non-verb argument is a title to open
   (`ledge open <title>` is the spelled-out escape for a note titled like a
-  verb). New verbs argue for themselves the way new commands do (§1): every
-  verb is surface users must learn and help text must carry. `ledge tags`
-  prints the directory (`#tag  count` rows); `ledge tags <tag>` prints
-  occurrences grep-shaped like `search` (path:line: text, hitless = exit 1),
-  scoped by the same cwd chain.
+  verb — including one literally titled "today"). New verbs argue for
+  themselves the way new commands do (§1): every verb is surface users must
+  learn and help text must carry. `ledge tags` prints the directory
+  (`#tag  count` rows); `ledge tags <tag>` prints occurrences grep-shaped
+  like `search` (path:line: text, hitless = exit 1), scoped by the same cwd
+  chain. `ledge today` is ⌘J from the shell — the daily_note handler
+  create-or-opens today's note (the `daily.workspace` setting honored, cwd
+  deixis the fallback; the target workspace's own `template: daily` note
+  seeds it when one exists — never another workspace's), prints its path (`$EDITOR $(ledge today)` just works), and
+  lands the app on it via the open-request file.
+  `ledge new --template <note> <title...>` instantiates a template note as
+  the body (the create_note handler's template mode; piping a second body
+  alongside it is refused). The name may be ANY note's title — the
+  `template: true` frontmatter marker is discovery (it fills the app's ⌥⌘N
+  picker and flags rows in `ledge ls`/list_notes), not permission.
 - **Semantics come from the MCP tool handlers, never beside them.** A verb
   that reads or writes notes dispatches through `bun/mcpTools.ts`, so title
   resolution, workspace deixis, naming, and the divergence guard cannot

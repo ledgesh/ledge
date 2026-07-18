@@ -42,6 +42,18 @@ export interface NoteParams {
   // the shell cares. Inline #hashtags in the body are the other tag source;
   // shared/tags.ts tagRefsOf merges the two.
   tags: string[];
+  // Whether the note declares itself a template (`template: true`): the note
+  // appears in the "New Note from Template…" picker, and instantiating it
+  // strips this line (shared/template.ts) so instances are not templates too.
+  // The value `daily` claims a ROLE on top of that: this template is the one
+  // ⌘J / `ledge today` instantiates for each day's note (bun/daily.ts
+  // findDailyTemplate). In the corpus rather than in settings.json
+  // deliberately: which notes are templates — and which one is the daily —
+  // is a fact about the notes, and marking one is editing a note: no
+  // registry to keep in sync, no restart to apply it, nothing to go stale
+  // when the note retitles. Like tags, it never feeds a spawn; it lives here
+  // because the block has one parser.
+  template: boolean | "daily";
 }
 
 /** The reserved `host:` member meaning "this machine, no ssh". */
@@ -154,7 +166,7 @@ export function frontmatterEnd(text: string): number {
 /** Parse a note's frontmatter into spawn params (see the header for grammar). */
 export function parseFrontmatter(text: string): Frontmatter {
   const end = frontmatterEnd(text);
-  const params: NoteParams = { cwd: null, profile: null, envFile: null, env: {}, hosts: [], tags: [] };
+  const params: NoteParams = { cwd: null, profile: null, envFile: null, env: {}, hosts: [], tags: [], template: false };
   const problems: string[] = [];
   if (end === 0) return { params, problems, end };
 
@@ -249,6 +261,15 @@ export function parseFrontmatter(text: string): Frontmatter {
         }
         break;
       }
+      case "template":
+        // Exactly true, false, or daily: any other value is a typo, and
+        // defaulting a typo to "is a template" would surprise harder than
+        // the reverse.
+        if (value === "true") params.template = true;
+        else if (value === "false") params.template = false;
+        else if (value === "daily") params.template = "daily";
+        else problems.push(`"template" must be true, false, or daily: "${value}"`);
+        break;
       default:
         // Same reasoning as parseSettings: a misspelled key silently ignored
         // reads as "my frontmatter does nothing" — say so instead.

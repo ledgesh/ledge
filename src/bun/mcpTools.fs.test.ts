@@ -14,6 +14,8 @@ import { join, resolve, sep } from "node:path";
 import { APP_HOME, WORKSPACES_PATH, createManaged, loadWorkspaces } from "./workspaces";
 import { createNote, readNote } from "./notes";
 import { ledgeTools } from "./mcpTools";
+import { SETTINGS_PATH } from "./settings";
+import { isoDateOf } from "../shared/template";
 
 if (!resolve(APP_HOME).startsWith(resolve(tmpdir()) + sep)) {
   throw new Error(`refusing to run filesystem tests against ${APP_HOME} — is the preload configured?`);
@@ -81,6 +83,15 @@ describe("list_notes", () => {
 
   test("an unregistered workspace argument is refused", async () => {
     expect(call("list_notes", { workspace: "/etc" })).rejects.toThrow("not a registered workspace root");
+  });
+
+  test("a template: true note is flagged in its row; the rest carry no flag", async () => {
+    await createNote(ROOT, "---\ntemplate: true\n---\n# Meeting\n");
+    await createNote(ROOT, "# Plain\n");
+    const rows = await call("list_notes", { workspace: ROOT });
+    const byTitle = new Map(rows.map((n: { title: string }) => [n.title, n]));
+    expect((byTitle.get("Meeting") as { template?: boolean }).template).toBe(true);
+    expect("template" in (byTitle.get("Plain") as object)).toBe(false);
   });
 });
 
@@ -279,6 +290,76 @@ describe("create_note", () => {
       "not a registered workspace root",
     );
     expect(call("create_note", { workspace: ROOT, text: "  \n" })).rejects.toThrow("give the note's text");
+  });
+});
+
+describe("create_note from a template", () => {
+  test("instantiates the named note: tokens substituted, H1 forced, frontmatter carried", async () => {
+    await createNote(ROOT, "---\ntags: meeting\n---\n\n# Meeting\n\nOn {{date}}.\n");
+    const out = await call("create_note", { workspace: ROOT, template: "Meeting", title: "Standup" });
+    expect(out.path).toBe(join(ROOT, "standup.md"));
+    expect(out.title).toBe("Standup");
+    expect((await readNote(out.path))?.text).toBe(
+      `---\ntags: meeting\n---\n\n# Standup\n\nOn ${isoDateOf(new Date())}.\n`,
+    );
+  });
+
+  test("a template needs a title, and refuses a second body via text", async () => {
+    await createNote(ROOT, "# Meeting\n");
+    expect(call("create_note", { workspace: ROOT, template: "Meeting" })).rejects.toThrow(
+      "needs a `title`",
+    );
+    expect(
+      call("create_note", { workspace: ROOT, template: "Meeting", title: "T", text: "# T\n" }),
+    ).rejects.toThrow("not both");
+  });
+
+  test("a template that names no note throws rather than creating bare", async () => {
+    expect(call("create_note", { workspace: ROOT, template: "Ghost", title: "T" })).rejects.toThrow(
+      'no note titled "Ghost"',
+    );
+  });
+});
+
+describe("daily_note", () => {
+  const HAD = Object.hasOwn(process.env, "LEDGE_WORKSPACE");
+  const OLD = process.env["LEDGE_WORKSPACE"];
+  afterEach(() => {
+    if (HAD) process.env["LEDGE_WORKSPACE"] = OLD;
+    else delete process.env["LEDGE_WORKSPACE"];
+  });
+
+  test("creates today's note once, then returns it (the created flag says which)", async () => {
+    const title = isoDateOf(new Date());
+    const first = await call("daily_note", { workspace: ROOT });
+    expect(first.created).toBe(true);
+    expect(first.title).toBe(title);
+    expect(first.path).toBe(join(ROOT, `${title}.md`));
+    const second = await call("daily_note", { workspace: ROOT });
+    expect(second.created).toBe(false);
+    expect(second.path).toBe(first.path);
+    expect(await readNote(join(ROOT, `${title}-2.md`))).toBeNull();
+  });
+
+  test("the daily.workspace setting outranks the env; an explicit argument outranks both", async () => {
+    await writeFile(SETTINGS_PATH, JSON.stringify({ daily: { workspace: OTHER } }));
+    process.env["LEDGE_WORKSPACE"] = ROOT;
+    expect((await call("daily_note")).workspace).toBe(OTHER);
+    expect((await call("daily_note", { workspace: ROOT })).workspace).toBe(ROOT);
+  });
+
+  test("the note marked template: daily shapes the created note — no settings involved", async () => {
+    await createNote(ROOT, "---\ntemplate: daily\n---\n# Daily Template\n\nCarry over [[{{yesterday}}]].\n");
+    const out = await call("daily_note", { workspace: ROOT });
+    expect((await readNote(out.path))?.text).toContain("Carry over [[");
+    expect((await readNote(out.path))?.text).toContain(`# ${isoDateOf(new Date())}`);
+    // The role marker stayed with the template, not the day's note.
+    expect((await readNote(out.path))?.text).not.toContain("template:");
+  });
+
+  test("with several workspaces and no pin, the error teaches the knob", async () => {
+    delete process.env["LEDGE_WORKSPACE"];
+    expect(call("daily_note")).rejects.toThrow("daily.workspace");
   });
 });
 

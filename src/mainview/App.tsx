@@ -75,7 +75,18 @@ function Shell() {
     setTagShown(tag);
     setRightPanel("tags");
   }, []);
-  const [overlay, setOverlay] = useState<OverlayMode | null>(null);
+  // Mode plus the seed for its input (note.fromTemplate opens the palette
+  // pre-filtered; every other opener seeds ""). `seq` increments on every
+  // open and keys the <Overlay>, forcing a REMOUNT even when one is already
+  // up: the component reads initialQuery/initialMode into state at mount, so
+  // without the new key, a command run from inside the palette that re-opens
+  // it (note.fromTemplate, palette.notes) would leave the old input text on
+  // screen — an exec that visibly did nothing. The counter is a ref, NOT
+  // derived from the previous overlay state: the palette row's Enter closes
+  // (state → null) before the command re-opens, and a null-derived counter
+  // would land back on the same seq — same key, no remount, the very bug.
+  const overlaySeq = useRef(0);
+  const [overlay, setOverlay] = useState<{ mode: OverlayMode; query: string; seq: number } | null>(null);
   // The profile the editor dialog is open on, or null. Shell owns it like the
   // rest of the chrome: the command reaches it through the ui hook below.
   const [profileEditing, setProfileEditing] = useState<string | null>(null);
@@ -216,7 +227,10 @@ function Shell() {
       toggleOutline: () => setRightPanel((p) => (p === "outline" ? null : "outline")),
       toggleTags: () => setRightPanel((p) => (p === "tags" ? null : "tags")),
       showTag,
-      openOverlay: setOverlay,
+      openOverlay: (mode, initialQuery) => {
+        overlaySeq.current += 1;
+        setOverlay({ mode, query: initialQuery ?? "", seq: overlaySeq.current });
+      },
       openProfileEditor: setProfileEditing,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -570,7 +584,9 @@ function Shell() {
         )}
       </div>
 
-      {overlay && <Overlay initialMode={overlay} onClose={() => setOverlay(null)} />}
+      {overlay && (
+        <Overlay key={overlay.seq} initialMode={overlay.mode} initialQuery={overlay.query} onClose={() => setOverlay(null)} />
+      )}
       {profileEditing && (
         <ProfileEditor name={profileEditing} onClose={() => setProfileEditing(null)} />
       )}

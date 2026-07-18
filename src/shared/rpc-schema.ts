@@ -26,6 +26,16 @@ export interface NoteMeta {
   path: string;
   title: string;
   mtimeMs: number;
+  // Present when the note's frontmatter marks it a template
+  // (shared/frontmatter.ts): `true` for an ordinary one (it belongs in the
+  // "New Note from Template…" picker), `"daily"` for the one ⌘J
+  // instantiates each day — the role rides the marker's own value. On the
+  // meta rather than behind its own query because listNotes already reads
+  // each note's head for the title — the flag rides the same read, and the
+  // view's per-folder lists (with their existing watcher-driven refresh)
+  // become the live template registry for free. Optional so the many
+  // fixtures and metas that are not templates say nothing at all.
+  template?: true | "daily";
 }
 
 /** A CLI open request after Bun resolved and guarded it (bun/openRequest.ts):
@@ -111,7 +121,11 @@ export type LedgeRPC = {
       // before the per-root note lists: the roots are the opaque handles every
       // scoped call below carries. Unavailable roots are reported, not hidden,
       // so the view can keep their saved layout dormant instead of pruning it.
-      workspaceList: { params: {}; response: { workspaces: WorkspaceRootInfo[] } };
+      // `dailyRoot` rides along because it is derived from this same registry:
+      // the daily.workspace setting resolved to one of these roots (null when
+      // unset or stale) — where ⌘J will act, which the Edit Daily Template
+      // faces must point at. Boot-time like the setting itself (restart-applies).
+      workspaceList: { params: {}; response: { workspaces: WorkspaceRootInfo[]; dailyRoot: string | null } };
       // Create a managed workspace folder from a display name. Bun slugs the
       // name into a folder itself (the view never names a path — the same
       // trust move as noteCreate) and registers it. Sent by "New Workspace".
@@ -170,6 +184,28 @@ export type LedgeRPC = {
       // actually changes, never on an ordinary edit. The docId is untouched, so
       // the note's editor and shell live through it.
       noteRetitle: { params: { path: string; text: string }; response: { note: NoteMeta } };
+      // Create-or-open today's daily note (bun/daily.ts openDaily). Bun
+      // computes the LOCAL YYYY-MM-DD title, resolves it by title in the
+      // daily workspace — the daily.workspace setting when it names a
+      // registered root, else `root`, the view's selected workspace — and
+      // creates the note when missing, from the note marked
+      // `template: daily` when one exists (none degrades to a bare
+      // "# <date>"). The response is ExternalOpenInfo on purpose: the view
+      // feeds it to the same subscriber a CLI open rides
+      // (notes/channel.ts dispatchExternalOpen), so select-workspace-then-
+      // open has ONE definition. Sent by the ⌘J command.
+      dailyOpen: { params: { root: string }; response: { open: ExternalOpenInfo; created: boolean } };
+      // Instantiate a template note into a new note in `root`: marker strip,
+      // {{token}} substitution, H1 forcing (shared/template.ts), then the
+      // same store path as noteCreate, so H1-slug naming and uniqueName
+      // still hold and nothing can clobber. `templatePath` is a PATH, unlike
+      // the title-addressed MCP/CLI surfaces: the ⌥⌘N picker's rows come
+      // from the live note lists, so the view picked a concrete note —
+      // re-resolving its title here could land on a different note with the
+      // same name in another workspace. The path passes the same guards
+      // every view-sent path does (readNote's assertNote). `title` null
+      // means "Untitled": the H1 is the rename UI.
+      noteFromTemplate: { params: { root: string; templatePath: string; title: string | null }; response: { note: NoteMeta } };
       // Delete a note by moving it into ITS OWN root's .ledge-trash. Not an unlink: a
       // misclick should cost a trip to the Trash section, not the note. It is an
       // app-private folder, not the system trash (see trashDirOf in notes.ts),

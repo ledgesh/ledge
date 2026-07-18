@@ -20,7 +20,7 @@ export interface AttachResult {
 }
 
 interface WorkspaceHandlers {
-  list: () => Promise<WorkspaceRootInfo[]>;
+  list: () => Promise<{ workspaces: WorkspaceRootInfo[]; dailyRoot: string | null }>;
   create: (name: string) => Promise<string>;
   // Opens the NATIVE folder picker Bun-side; root null + error null = cancelled.
   attach: () => Promise<AttachResult>;
@@ -48,6 +48,22 @@ export function recordWorkspaceKinds(infos: WorkspaceRootInfo[]): void {
   for (const info of infos) kinds.set(info.root, info.kind);
 }
 
+// The daily.workspace setting resolved Bun-side to a registered root (null =
+// unset/stale), recorded off the same workspaceList response the kinds come
+// from. One consumer: the Edit/New Daily Template faces, which must point at
+// the workspace ⌘J will actually act in — Bun still re-resolves on every ⌘J,
+// so this mirror is display truth, never authority.
+let dailyRoot: string | null = null;
+
+/** The boot fetch's share, recordWorkspaceKinds's sibling. */
+export function recordDailyRoot(root: string | null): void {
+  dailyRoot = root;
+}
+
+export function dailyWorkspaceRoot(): string | null {
+  return dailyRoot;
+}
+
 /**
  * The default working directory for shells of notes in `folder`, or null for
  * "no opinion" ($HOME, Bun's own default). An EXTERNAL workspace anchors its
@@ -62,15 +78,17 @@ export function workspaceDefaultCwd(folder: string): string | null {
   return kinds.get(folder) === "external" ? folder : null;
 }
 
-// Test seam: forget every recorded kind.
+// Test seam: forget every recorded kind (and the daily root).
 export function resetWorkspaceKinds(): void {
   kinds.clear();
+  dailyRoot = null;
 }
 
 export function listWorkspaceRoots(): Promise<WorkspaceRootInfo[]> {
-  return bridge().list().then((infos) => {
-    recordWorkspaceKinds(infos);
-    return infos;
+  return bridge().list().then((r) => {
+    recordWorkspaceKinds(r.workspaces);
+    recordDailyRoot(r.dailyRoot);
+    return r.workspaces;
   });
 }
 

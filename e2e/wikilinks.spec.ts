@@ -4,10 +4,26 @@
 // and `[[title#heading]]` reveals the heading it names. Run in real WebKit
 // because completion popups, hotspots, and focus are exactly what unit tests
 // cannot see (docs/testing.md §5).
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 const noteRow = (page: Page, title: string) =>
   page.locator('[data-target-kind="note"]', { hasText: title });
+
+// A visible completion popup is not yet an accepting one. acceptCompletion
+// ignores Enter (falling through to insert-newline) in two windows: while a
+// keystroke's re-query is in flight — the popup renders its stale options
+// grayed, with the -disabled class — and for interactionDelay (75ms) after
+// opening, the guard against a popup swallowing a newline as it appears under
+// the user's fingers. No human outruns either window, but the driver does,
+// exactly when a loaded parallel run staggers keystrokes past the popup's
+// 100ms activation debounce. So before pressing Enter: wait out the disabled
+// state (observable), then one 100ms beat — the open timestamp is preserved
+// across re-queries, so it is at least as old as the visibility we observed,
+// and 100ms past that clears the 75ms delay deterministically.
+const completionAcceptReady = async (page: Page, popup: Locator) => {
+  await expect(popup).not.toHaveClass(/cm-tooltip-autocomplete-disabled/);
+  await page.waitForTimeout(100);
+};
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/harness.html");
@@ -35,6 +51,7 @@ test("[[ pops the note picker; accepting closes the brackets", async ({ page }) 
   // after ]] — still touching the link, so it shows raw.
   await page.keyboard.type("Al");
   await expect(popup.locator("li")).toHaveCount(1);
+  await completionAcceptReady(page, popup);
   await page.keyboard.press("Enter");
   await expect(page.locator(".cm-line").first()).toHaveText("see [[Alpha]]");
 

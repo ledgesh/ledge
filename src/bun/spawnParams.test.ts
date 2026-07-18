@@ -24,6 +24,7 @@ const params = (p: Partial<NoteParams>): NoteParams => ({
   env: {},
   hosts: [],
   tags: [],
+  template: false,
   ...p,
 });
 

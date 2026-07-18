@@ -17,6 +17,7 @@ import { mkdir, readdir, readFile, rename, stat, unlink, writeFile } from "node:
 import type { Stats } from "node:fs";
 import type { BacklinkHit, NoteMeta, TagHit, TrashMeta } from "../shared/rpc-schema";
 import { headingOf, labelOf, slugOf, titleOf } from "../shared/slug";
+import { parseFrontmatter } from "../shared/frontmatter";
 import { collectHits, type SearchHit } from "../shared/search";
 import { resolveWikiTitle, wikiRefsOf } from "../shared/wikilinks";
 import { normalizeTag, tagDirectoryOf, tagRefsOf, type TagInfo } from "../shared/tags";
@@ -69,25 +70,43 @@ function baseFor(text: string): string {
 // A note as the view sees it. `title` is the display label: the note's heading if
 // it has one, else its filename. The filename is a slug of that same heading, so
 // this is usually the pretty form of it ("Shipping Notes" for shipping-notes.md).
+// The template flag comes from the same text the title does: the head already in
+// hand is enough frontmatter to answer `template:`, so the picker's registry
+// costs no extra read. The marker's value rides along (`true`, or the `daily`
+// role); present-only-when-marked keeps every ordinary meta lean.
 async function metaFor(path: string, text: string): Promise<NoteMeta> {
-  return { path, title: labelOf(headingOf(text), path), mtimeMs: (await stat(path)).mtimeMs };
+  const t = parseFrontmatter(text).params.template;
+  return {
+    path,
+    title: labelOf(headingOf(text), path),
+    mtimeMs: (await stat(path)).mtimeMs,
+    ...(t ? { template: t } : {}),
+  };
 }
 
 // The same, for a note whose text we do not already have in hand: read just
-// enough of the file to label it.
+// enough of the file to label and flag it.
 async function metaAt(path: string): Promise<NoteMeta> {
-  return { path, title: labelOf(await headingAt(path), path), mtimeMs: (await stat(path)).mtimeMs };
+  const head = await headAt(path);
+  const t = head === null ? false : parseFrontmatter(head).params.template;
+  return {
+    path,
+    title: labelOf(head === null ? null : headingOf(head), path),
+    mtimeMs: (await stat(path)).mtimeMs,
+    ...(t ? { template: t } : {}),
+  };
 }
 
-// Enough of a note to read its first line. Notes are small, but a note carrying a
-// big pasted blob is not worth reading whole just to label it, and listNotes does
-// this once per note on every refresh.
+// Enough of a note to read its first line and its frontmatter block. Notes are
+// small, but a note carrying a big pasted blob is not worth reading whole just
+// to label it, and listNotes does this once per note on every refresh.
 const HEAD_BYTES = 4096;
-async function headingAt(path: string): Promise<string | null> {
+async function headAt(path: string): Promise<string | null> {
   try {
-    // A first line longer than this would be truncated here, but a heading that
-    // long is not a usable label (or filename: slugify caps at 60) anyway.
-    return headingOf(await Bun.file(path).slice(0, HEAD_BYTES).text());
+    // A first line (or frontmatter block) longer than this would be truncated
+    // here, but a heading that long is not a usable label (slugify caps at 60),
+    // and a >4KB block is somebody's art project (the glue.ts noteHead edge).
+    return await Bun.file(path).slice(0, HEAD_BYTES).text();
   } catch {
     return null; // unreadable: fall back to the filename
   }
@@ -451,7 +470,8 @@ export async function listTrash(root: string): Promise<TrashMeta[]> {
   const files = await trashFiles(assertRegisteredRoot(root));
   const out: TrashMeta[] = [];
   for (const { path, stat: s } of files) {
-    out.push({ path, title: labelOf(await headingAt(path), path), deletedAt: s.ctimeMs });
+    const head = await headAt(path);
+    out.push({ path, title: labelOf(head === null ? null : headingOf(head), path), deletedAt: s.ctimeMs });
   }
   return out.sort((a, b) => b.deletedAt - a.deletedAt);
 }

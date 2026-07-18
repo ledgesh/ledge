@@ -28,7 +28,7 @@ import { serve } from "./mcp";
 import { ledgeTools } from "./mcpTools";
 import { installShim, tildify } from "./cliShim";
 import { writeOpenRequest } from "./openRequest";
-import { loadWorkspaces, rootContaining, roots } from "./workspaces";
+import { loadWorkspaces, rootContaining, roots, workspaceMatches } from "./workspaces";
 
 export { tildify }; // display formatting; defined in cliShim.ts so the app's install handler shares it
 
@@ -45,6 +45,7 @@ export interface CliFlags {
   workspace?: string;
   heading?: string;
   message?: string;
+  template?: string;
   json: boolean;
   all: boolean;
   help: boolean;
@@ -62,12 +63,13 @@ export interface ParsedCli {
 export function parseCliArgs(argv: readonly string[]): ParsedCli | { error: string } {
   const flags: CliFlags = { json: false, all: false, help: false };
   const positionals: string[] = [];
-  const valued: Record<string, "workspace" | "heading" | "message"> = {
+  const valued: Record<string, "workspace" | "heading" | "message" | "template"> = {
     "--workspace": "workspace",
     "-w": "workspace",
     "--heading": "heading",
     "--message": "message",
     "-m": "message",
+    "--template": "template",
   };
   let literal = false;
   for (let i = 0; i < argv.length; i += 1) {
@@ -107,25 +109,32 @@ export function hitPath(p: string, cwd: string, home: string = homedir()): strin
 
 /** ls rows: title column padded, date, then the variable-width path last. */
 export function formatNoteList(
-  notes: ReadonlyArray<{ title: string; path: string; modified: string }>,
+  notes: ReadonlyArray<{ title: string; path: string; modified: string; template?: true | "daily" }>,
   home: string = homedir(),
 ): string[] {
-  const rows = notes.map((n) => ({ title: n.title, date: n.modified.slice(0, 10), path: tildify(n.path, home) }));
+  const rows = notes.map((n) => ({
+    title: n.title,
+    date: n.modified.slice(0, 10),
+    path: tildify(n.path, home),
+    // The `template:` frontmatter marker, surfaced where the notes are
+    // listed — the same discoverability move as the app's ⌥⌘N picker. A
+    // trailing tag, not a column: most rows have nothing to say.
+    tag: n.template === "daily" ? "  (daily template)" : n.template ? "  (template)" : "",
+  }));
   const width = rows.reduce((w, r) => Math.max(w, r.title.length), 0);
-  return rows.map((r) => `${r.title.padEnd(width)}  ${r.date}  ${r.path}`);
+  return rows.map((r) => `${r.title.padEnd(width)}  ${r.date}  ${r.path}${r.tag}`);
 }
 
 // What a --workspace argument may say: a root path (~ expands), or — for
 // `ledge -w notes` convenience — the folder name of exactly one registered
 // root. Names are shorthand, not identity: two roots sharing a basename make
 // the name ambiguous, and the error lists the paths that would disambiguate.
+// The match itself is workspaceMatches (shared with the daily.workspace
+// setting); only the refusals are the CLI's own.
 export function resolveWorkspaceArg(value: string, registered: readonly string[], home: string = homedir()): string {
-  const expanded = value === "~" ? home : value.startsWith("~/") ? join(home, value.slice(2)) : value;
-  const asPath = resolve(expanded);
-  if (registered.includes(asPath)) return asPath;
-  const byName = registered.filter((r) => basename(r) === value);
-  if (byName.length === 1) return byName[0]!;
-  if (byName.length > 1) throw new Error(`"${value}" names several workspaces — use a path: ${byName.join(", ")}`);
+  const matches = workspaceMatches(value, registered, home);
+  if (matches.length === 1) return matches[0]!;
+  if (matches.length > 1) throw new Error(`"${value}" names several workspaces — use a path: ${matches.join(", ")}`);
   if (registered.length === 0) throw new Error("no workspaces registered yet — open the app once first");
   throw new Error(`not a workspace: ${value} — known: ${registered.map((r) => tildify(r, home)).join(", ")}`);
 }
@@ -143,7 +152,10 @@ usage:
   ledge search <query...>      full-text search; prints path:line: match
   ledge tags [tag]             list tags (#name + note count), or the notes
                                bearing one; prints path:line: match
+  ledge today                  create-or-open today's daily note, in the app
   ledge new [title...]         create a note (body read from piped stdin)
+         --template <note>     instantiate that note's text as the body
+                               ({{date}}, {{time}}, {{yesterday}}, ... substituted)
   ledge append [title...]      append to a note; no title = the current note
          -m <text>             the text to append (or pipe it on stdin)
          --heading <h>         append at the end of that heading's section
@@ -203,7 +215,8 @@ function humanize(msg: string): string {
     .replace(/\blist_workspaces\b/g, "`ledge workspaces`")
     .replace(/\bread_note\b/g, "`ledge cat`")
     .replace(/\bcreate_note\b/g, "`ledge new`")
-    .replace(/\bappend_note\b/g, "`ledge append`");
+    .replace(/\bappend_note\b/g, "`ledge append`")
+    .replace(/\bdaily_note\b/g, "`ledge today`");
 }
 
 export async function runCli(argv: readonly string[], io: CliIo): Promise<number> {
@@ -336,6 +349,24 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
         case "new": {
           const title = positionals.join(" ");
           const body = (await io.stdin())?.replace(/\s+$/u, "") ?? "";
+          if (flags.template !== undefined) {
+            // The template IS the body; a piped one would be a second body
+            // with no principled merge order, so it is refused, not folded.
+            if (body !== "") {
+              io.err("ledge: --template is the note's body — don't pipe one too");
+              return 2;
+            }
+            if (title === "") {
+              io.err("ledge: new --template needs a title for the new note");
+              return 2;
+            }
+            const args: Record<string, unknown> = { template: flags.template, title };
+            if (scope !== null) args["workspace"] = scope;
+            const n = await tool("create_note", args);
+            if (flags.json) io.out(JSON.stringify(n, null, 2));
+            else io.out(n.path);
+            return 0;
+          }
           if (title === "" && body === "") {
             io.err("ledge: new needs a title, piped stdin, or both");
             return 2;
@@ -345,6 +376,16 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
           if (flags.json) io.out(JSON.stringify(n, null, 2));
           else io.out(n.path); // the path alone: `$EDITOR $(ledge new x)` should just work
           return 0;
+        }
+        case "today": {
+          // Create-or-open today's note, then land in the app on it — the
+          // whole point is one motion from anywhere. Path to stdout first
+          // (the `new` contract: scriptable), the open ride-along after.
+          const n = await tool("daily_note", scope !== null ? { workspace: scope } : {});
+          if (flags.json) io.out(JSON.stringify(n, null, 2));
+          else io.out(n.path);
+          await writeOpenRequest(n.path as string);
+          return openApp(io);
         }
         case "append": {
           const arg = positionals.join(" ");

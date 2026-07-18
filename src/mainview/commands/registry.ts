@@ -10,6 +10,7 @@ import {
   ArrowLeft,
   ArrowRight,
   Bold,
+  CalendarDays,
   Columns2,
   Command as CommandIcon,
   Copy,
@@ -21,6 +22,7 @@ import {
   Italic,
   KeyRound,
   Layers,
+  LayoutTemplate,
   Link,
   Link2,
   PanelLeft,
@@ -54,6 +56,106 @@ import type { Command, CommandCtx, RegistryDeps } from "./types";
 // behavior. Keeps the table and the registry from drifting apart.
 function cmd(id: CommandId, rest: Omit<Command, "id" | "title" | "keys" | "listKeys">): Command {
   return { id, title: titleOf(id), keys: keysOf(id), listKeys: listKeysOf(id), ...rest };
+}
+
+// The generated per-template entries' shared title prefix — and, verbatim,
+// the query note.fromTemplate seeds the palette with: the fuzzy filter then
+// shows exactly these entries (the ":" keeps the parent command's own
+// "…"-titled row from matching itself back into the list).
+const TEMPLATE_PREFIX = "New Note from Template: ";
+
+// Pre-registered entry slots for the picker (commands are data built once;
+// the workspace.select move, sized for a template collection rather than a
+// keyboard row). A choice past the last slot simply has no entry — at that
+// point the collection needs pruning more than the palette needs scrolling.
+const TEMPLATE_SLOTS = 24;
+
+// One picker row: what its entry says after the prefix, and the concrete note
+// it instantiates.
+interface TemplateChoice {
+  label: string;
+  path: string;
+}
+
+// The picker's rows, computed from LIVE state on every render/dispatch: every
+// note whose frontmatter declares `template: true` (NoteMeta.template — the
+// store's per-folder lists, refreshed by the watcher, are the registry; no
+// settings, no restart). The selected workspace's own templates lead,
+// unlabeled; other workspaces' follow in strip order, each naming its home,
+// so a title shared across workspaces stays two distinguishable rows.
+// Alphabetical within a workspace — mtime order would reshuffle the picker
+// every time a template is edited.
+function templateChoices(ctx: CommandCtx): TemplateChoice[] {
+  const out: TemplateChoice[] = [];
+  const ordered = [ctx.selected, ...ctx.state.workspaces.filter((w) => w.id !== ctx.selected.id)];
+  for (const ws of ordered) {
+    const marked = notesOf(ctx.state, ws.folder)
+      .filter((n) => n.template)
+      .sort((a, b) => a.title.localeCompare(b.title));
+    for (const n of marked) {
+      out.push({ label: ws.id === ctx.selected.id ? n.title : `${n.title} (${ws.name})`, path: n.path });
+    }
+  }
+  return out;
+}
+
+// What "New Template" creates: a note already carrying the marker, whose
+// body is the whole how-to — the {{token}} vocabulary is written out
+// LITERALLY here (createNote, not instantiateTemplate, writes it), so the
+// note teaches the syntax and, once instantiated, demonstrates it. Titled
+// with the app's placeholder word: the H1 is the rename UI.
+const STARTER_TEMPLATE = `---
+template: true
+---
+# Untitled Template
+
+This note is a template because its frontmatter says \`template: true\` —
+that line is the whole mechanism. Mark any note the same way (or run
+"Make This Note a Template" from the palette) and it appears under
+New Note from Template… (⌥⌘N) immediately.
+
+Creating a note from a template fills in these tokens:
+
+- {{date}} — today, as YYYY-MM-DD
+- {{time}} — the clock, as HH:MM
+- {{title}} — the new note's title
+- {{yesterday}} / {{tomorrow}} — adjacent days, handy in [[wikilinks]]
+
+Everything else copies as written: frontmatter (cwd, env, tags) carries into
+every instance, and a \`prompt\` fence arrives ready to run (⌘↩) — a
+template that runs is the point. The H1 above is replaced by each new note's
+own title, so leave it, or spell it \`# {{title}}\`; both work.
+
+A template may say \`template: daily\` instead of \`true\`: that one is what
+⌘J (and \`ledge today\`) instantiates as each day's note — per workspace,
+each names its own (or run "New Daily Template" from the palette). Now make
+this skeleton yours.
+`;
+
+// What "New Daily Template" creates: the daily role's starter, pre-marked so
+// nobody hand-writes the frontmatter. Deliberately spare where
+// STARTER_TEMPLATE is a cheatsheet: every line here lands verbatim in each
+// day's note, so the body must be worth waking up to, not documentation.
+// The H1 is replaced by the date at instantiation.
+const DAILY_STARTER = `---
+template: daily
+---
+# Daily Template
+
+Continued from [[{{yesterday}}]].
+`;
+
+// The workspace ⌘J acts in — daily.workspace as resolved at boot (a dep:
+// that mirror is a setting's, not view state), else the selected one — and
+// its current `template: daily` claimant. The role is per-workspace, so the
+// Edit/New verbs must point exactly where ⌘J will look; the note lists are
+// newest-first, so find() is the same newest-wins Bun applies when several
+// notes claim the role.
+function dailyTemplateTarget(ctx: CommandCtx, deps: RegistryDeps) {
+  const pinned = deps.dailyRoot();
+  const ws = ctx.state.workspaces.find((w) => w.folder === pinned) ?? ctx.selected;
+  const claimant = notesOf(ctx.state, ws.folder).find((n) => n.template === "daily") ?? null;
+  return { ws, claimant };
 }
 
 // The pane a pane-scoped command acts on: an explicit menu target, else the
@@ -106,6 +208,85 @@ export function buildCommands(deps: RegistryDeps): Command[] {
           type: "newTab",
           paneId: ctx.target?.kind === "pane" ? ctx.target.paneId : undefined,
         }),
+    }),
+    // Create-or-open today's YYYY-MM-DD note and land in it. The open rides
+    // the external-open subscriber (the CLI-open path), so glue's dep only
+    // resolves to an error to surface — or null, done.
+    cmd("daily.open", {
+      icon: CalendarDays,
+      run: (ctx) => {
+        void deps.openDailyNote(ctx.selected.folder).then((err) => {
+          if (err) ctx.ui.showError?.(err);
+        });
+      },
+    }),
+    // The palette IS the template picker: pre-filtered to the generated
+    // per-template entries below, rather than growing a dialog of its own.
+    // Always visible — with no template anywhere yet, it pre-filters to
+    // New Template instead, so the empty state is the tutorial rather than
+    // a missing menu item.
+    cmd("note.fromTemplate", {
+      icon: FilePlus,
+      run: (ctx) =>
+        ctx.ui.openOverlay?.(
+          "commands",
+          templateChoices(ctx).length > 0 ? TEMPLATE_PREFIX : titleOf("template.starter"),
+        ),
+    }),
+    // Creates the pre-marked cheatsheet note above and opens it for editing.
+    cmd("template.starter", {
+      icon: LayoutTemplate,
+      run: (ctx) => {
+        void deps.createNote(ctx.selected.folder, STARTER_TEMPLATE).then(
+          (note) => ctx.dispatch({ type: "openNote", note }),
+          (err) => ctx.ui.showError?.(err instanceof Error ? err.message : String(err)),
+        );
+      },
+    }),
+    // The marker's verbs on the current note, exactly one visible at a time
+    // (the `when`s read the live frontmatter, profile.open's move). The edit
+    // happens in the note's own editor — undoable, autosaved, and the saved
+    // file's watcher refresh is what updates the picker's rows.
+    cmd("note.templateOn", {
+      icon: LayoutTemplate,
+      when: (ctx) => currentTemplateFlag(ctx, deps) === false,
+      run: (ctx) => {
+        const docId = focusedDocId(ctx.selected);
+        if (docId) deps.editor.toggleTemplate(docId);
+      },
+    }),
+    cmd("note.templateOff", {
+      icon: LayoutTemplate,
+      // Truthy, not === true: a `template: daily` note is a template too,
+      // and this verb is how its marker (role included) comes off.
+      when: (ctx) => !!currentTemplateFlag(ctx, deps),
+      run: (ctx) => {
+        const docId = focusedDocId(ctx.selected);
+        if (docId) deps.editor.toggleTemplate(docId);
+      },
+    }),
+    // The daily role's verb, two faces so the title says what will happen
+    // (keys.ts). Opens ride openNoteIn — the external-open subscriber's
+    // select-then-open — because the daily workspace may not be the selected
+    // one, and the verb must land where ⌘J will look.
+    cmd("daily.templateEdit", {
+      icon: CalendarDays,
+      when: (ctx) => !!dailyTemplateTarget(ctx, deps).claimant,
+      run: (ctx) => {
+        const { ws, claimant } = dailyTemplateTarget(ctx, deps);
+        if (claimant) deps.openNoteIn(ws.folder, claimant);
+      },
+    }),
+    cmd("daily.templateNew", {
+      icon: CalendarDays,
+      when: (ctx) => !dailyTemplateTarget(ctx, deps).claimant,
+      run: (ctx) => {
+        const { ws } = dailyTemplateTarget(ctx, deps);
+        void deps.createNote(ws.folder, DAILY_STARTER).then(
+          (note) => deps.openNoteIn(ws.folder, note),
+          (err) => ctx.ui.showError?.(err instanceof Error ? err.message : String(err)),
+        );
+      },
     }),
     cmd("palette.notes", {
       icon: FileText,
@@ -490,6 +671,30 @@ export function buildCommands(deps: RegistryDeps): Command[] {
     cmd("format.link", editorCommand(deps, Link, (ed, docId) => ed.insertLink(docId))),
   ];
 
+  // One palette entry per marked note — the workspace.select move: the
+  // palette is the picker, so ⌥⌘N needs no dialog. The slots are fixed but
+  // the rows are not: title and `when` read templateChoices(ctx) live, so
+  // marking a note surfaces its entry on the next palette render, no restart
+  // and no rebuild. The created note opens as "Untitled" in the selected
+  // workspace (wherever the template itself lives), and typing its H1
+  // renames it.
+  for (let i = 0; i < TEMPLATE_SLOTS; i += 1) {
+    list.push({
+      id: `note.fromTemplate.${i}`,
+      title: (ctx) => `${TEMPLATE_PREFIX}${templateChoices(ctx)[i]?.label ?? i}`,
+      icon: FilePlus,
+      when: (ctx) => !!templateChoices(ctx)[i],
+      run: (ctx) => {
+        const choice = templateChoices(ctx)[i];
+        if (!choice) return;
+        void deps.newNoteFromTemplate(ctx.selected.folder, choice.path).then(
+          (note) => ctx.dispatch({ type: "openNote", note }),
+          (err) => ctx.ui.showError?.(err instanceof Error ? err.message : String(err)),
+        );
+      },
+    });
+  }
+
   // Indexed quick-jumps, one command per slot so the dispatcher and the
   // palette stay plain data. ⌘N switches workspace, ⌃N selects a tab in the
   // focused pane — exactly what the held-modifier badges advertise.
@@ -530,6 +735,16 @@ function currentProfile(ctx: CommandCtx, deps: RegistryDeps): string | null {
   if (!docId) return null;
   const head = deps.noteHead(docId);
   return head === null ? null : parseFrontmatter(head).params.profile;
+}
+
+// The current note's template marker (false, true, or the "daily" role) —
+// same head parse as currentProfile, null when there is no focused live doc
+// to ask (which hides BOTH marker verbs).
+function currentTemplateFlag(ctx: CommandCtx, deps: RegistryDeps): boolean | "daily" | null {
+  const docId = focusedDocId(ctx.selected);
+  if (!docId) return null;
+  const head = deps.noteHead(docId);
+  return head === null ? null : parseFrontmatter(head).params.template;
 }
 
 function paneTarget(ctx: CommandCtx): string | undefined {
@@ -574,6 +789,11 @@ export interface PaletteItem {
   id: string;
   title: string;
   chip: string | null;
+  // Whether the command holds a real chord (`keys`, not `listKeys` — a row
+  // verb's bare key is a convenience, not a frequency claim). The palette
+  // ranks chorded commands a notch higher on a filtered query (CHORD_BOOST):
+  // a chord marks the act reached for most, per the §2 allocation policy.
+  chorded: boolean;
   icon?: Command["icon"];
   destructive?: boolean;
 }
@@ -587,6 +807,7 @@ export function paletteItems(commands: readonly Command[], ctx: CommandCtx): Pal
       id: c.id,
       title: typeof c.title === "function" ? c.title(ctx) : c.title,
       chip: chipOf(c.keys, c.listKeys),
+      chorded: (c.keys?.length ?? 0) > 0,
       icon: c.icon,
       destructive: c.destructive,
     });

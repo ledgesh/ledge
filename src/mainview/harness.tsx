@@ -13,12 +13,14 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import type { BacklinkHit, NoteMeta, TagHit, TrashMeta, WorkspaceRootInfo } from "../shared/rpc-schema";
 import { headingOf, labelOf, slugify, slugOf } from "../shared/slug";
+import { parseFrontmatter } from "../shared/frontmatter";
+import { instantiateTemplate, isoDateOf } from "../shared/template";
 import { collectHits, type SearchHit } from "../shared/search";
 import { resolveWikiTitle, wikiRefsOf } from "../shared/wikilinks";
 import { normalizeTag, tagDirectoryOf, tagRefsOf, type TagInfo } from "../shared/tags";
 import { configureBridge } from "./editor/bridge";
 import { configureTerminal } from "./terminal/channel";
-import { configureNotes, dispatchExternalOpen, type ExternalOpenInfo } from "./notes/channel";
+import { configureNotes, dispatchExternalOpen, dispatchNotesChanged, type ExternalOpenInfo } from "./notes/channel";
 import { configureWorkspaces, recordWorkspaceKinds } from "./workspace/channel";
 import { configureClipboard } from "./lib/clipboard";
 import { configureCli } from "./lib/cli";
@@ -126,7 +128,16 @@ class FakeStore {
 
   private meta(data: RootData, path: string): NoteMeta {
     const n = data.notes.get(path)!;
-    return { path, title: labelOf(headingOf(n.text), path), mtimeMs: n.mtimeMs };
+    // The real metaFor's flag, from the same shared parser: `template:`
+    // frontmatter is what puts a note in the ⌥⌘N picker, and the `daily`
+    // role rides the value.
+    const t = parseFrontmatter(n.text).params.template;
+    return {
+      path,
+      title: labelOf(headingOf(n.text), path),
+      mtimeMs: n.mtimeMs,
+      ...(t ? { template: t } : {}),
+    };
   }
 
   list(root: string): NoteMeta[] {
@@ -273,6 +284,35 @@ class FakeStore {
     data.trash.clear();
     return n;
   }
+
+  // Mirrors bun/daily.ts createFromTemplatePath: the picker picked a concrete
+  // note, so the fake takes its path too; a vanished template throws.
+  // Instantiation is the SAME shared instantiateTemplate.
+  createFromTemplatePath(root: string, templatePath: string, title: string | null): NoteMeta {
+    const text = this.readNote(templatePath);
+    if (text === null) throw new Error(`the template note is gone (${templatePath}); pick again`);
+    return this.create(root, instantiateTemplate(text, title ?? "Untitled", new Date()));
+  }
+
+  // The real findDailyTemplate (bun/daily.ts): the note IN THIS ROOT marked
+  // `template: daily` — strictly per-workspace, no borrowing from other
+  // attached roots. The meta flag comes from the same shared parser, so
+  // which note the role means cannot drift between harness and store.
+  private findDailyTemplate(root: string): string | null {
+    const local = this.list(root).find((n) => n.template === "daily");
+    return local ? this.readNote(local.path) : null;
+  }
+
+  // Mirrors bun/daily.ts openDaily: local-date title, resolve-else-create,
+  // instantiating the `template: daily` note when one exists — no settings.
+  openDaily(root: string): { open: ExternalOpenInfo; created: boolean } {
+    const title = isoDateOf(new Date());
+    const existing = resolveWikiTitle(title, this.list(root));
+    if (existing) return { open: { ...existing, root }, created: false };
+    const tpl = this.findDailyTemplate(root);
+    const text = tpl !== null ? instantiateTemplate(tpl, title, new Date()) : `# ${title}\n`;
+    return { open: { ...this.create(root, text), root }, created: true };
+  }
 }
 
 const store = new FakeStore();
@@ -306,6 +346,8 @@ configureNotes({
   // Nothing pending at harness boot; specs drive the live-push path instead,
   // through window.__harness.externalOpen below.
   takeOpenRequest: async () => null,
+  openDaily: async (folder) => store.openDaily(folder),
+  createFromTemplate: async (folder, templatePath, title) => store.createFromTemplatePath(folder, templatePath, title),
 });
 
 // The registry fake: attach always offers EXTERNAL — the folder the "native
@@ -313,7 +355,7 @@ configureNotes({
 // was deleted) runs in specs without any dialog. create mirrors
 // createManaged's slug-and-enumerate.
 configureWorkspaces({
-  list: async () => store.workspaceList(),
+  list: async () => ({ workspaces: store.workspaceList(), dailyRoot: null }),
   create: async (name) => store.createManaged(name),
   attach: async () => {
     store.attach(EXTERNAL);
@@ -407,10 +449,17 @@ configureAssets({
 // A non-default editor font size, so a spec can tell "the setting reached the
 // editor" apart from "the old hardcoded 14px is still there". openFile is
 // recorded, not performed: launching an OS editor is a native seam.
+// No template configuration: templates are notes carrying `template: true`
+// frontmatter, seeded per spec (a boot-time seed would shift every
+// list-count assertion in the older specs).
+const HARNESS_SETTINGS = {
+  ...DEFAULT_SETTINGS,
+  editor: { ...DEFAULT_SETTINGS.editor, fontSize: 18 },
+};
 let settingsOpens = 0;
 const profiles = new Map<string, string>();
 configureSettings(
-  { ...DEFAULT_SETTINGS, editor: { ...DEFAULT_SETTINGS.editor, fontSize: 18 } },
+  HARNESS_SETTINGS,
   {
     openFile: () => {
       settingsOpens += 1;
@@ -450,6 +499,10 @@ declare global {
       // Simulate the CLI's openExternal push (a Bun-side watcher event has no
       // visible surface to drive it from).
       externalOpen: (open: ExternalOpenInfo) => void;
+      // Simulate the watcher's notesChanged push for one root: how a spec
+      // makes a store.seed visible to the app's lists — the same refresh a
+      // real external write triggers.
+      notesChanged: (root: string) => void;
       store: FakeStore;
     };
   }
@@ -463,6 +516,7 @@ window.__harness = {
   termPastes: () => termPastes.map((p) => ({ ...p })),
   inlineRuns: () => inlineRuns.map((r) => ({ ...r })),
   externalOpen: (open) => dispatchExternalOpen(open),
+  notesChanged: (root) => dispatchNotesChanged(root),
   store,
 };
 

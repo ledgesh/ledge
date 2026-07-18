@@ -54,7 +54,9 @@ export interface UiHooks {
   // tag click lands (a panel directory row, an overlay tag row, a rendered
   // #tag in the editor via the bridge).
   showTag(tag: string): void;
-  openOverlay(mode: "notes" | "commands" | "search"): void;
+  // `initialQuery` seeds the input (filter text only, never sigil-parsed):
+  // how note.fromTemplate lands in the palette pre-filtered to its entries.
+  openOverlay(mode: "notes" | "commands" | "search", initialQuery?: string): void;
   beginRenameWorkspace(id: string): void;
   // Open the icon picker on a workspace, anchored to its row in the strip.
   pickWorkspaceIcon(id: string): void;
@@ -119,6 +121,34 @@ export interface RegistryDeps {
   // for the same reason as revealBacklink: the view lookup lives in the
   // editor stack (editorPool), which the registry must not import.
   jumpToHeading(docId: string, line: number, text: string): void;
+  // Create-or-open today's daily note. `folder` is the selected workspace —
+  // the fallback when the daily.workspace setting pins none; Bun decides.
+  // The open itself rides the external-open subscriber (glue feeds Bun's
+  // answer to dispatchExternalOpen), so the command never dispatches an
+  // openNote of its own. Resolves to an error message to surface, or null —
+  // the createWorkspace contract.
+  openDailyNote(folder: string): Promise<string | null>;
+  // Instantiate a template note — `templatePath` is the picker row's concrete
+  // pick from the live note lists — into `folder`, titled "Untitled": the H1
+  // is the rename UI, so there is no title prompt. Resolves to the created
+  // note, for an ordinary openNote dispatch. (Which notes ARE templates is
+  // not a dep: the registry reads NoteMeta.template from ctx.state itself,
+  // which is what keeps the ⌥⌘N entries live without a rebuild.)
+  newNoteFromTemplate(folder: string, templatePath: string): Promise<NoteMeta>;
+  // Create a note from literal text in `folder` — the starter template's
+  // birth (registry.ts owns the text). The same channel createNote every
+  // first save uses, so naming and collision behavior cannot differ.
+  createNote(folder: string, text: string): Promise<NoteMeta>;
+  // The daily.workspace setting resolved to a registered root at boot (null =
+  // unset/stale), mirrored from Bun with the workspace registry. The Edit/New
+  // Daily Template faces read it so they act in the workspace ⌘J will act in,
+  // not merely the selected one. A dep, not ctx.state: it is boot-frozen
+  // like every setting, not live view state.
+  dailyRoot(): string | null;
+  // Open a note that may live outside the selected workspace, by its root and
+  // meta — glued to the external-open subscriber, whose select-then-open is
+  // the one definition of that move.
+  openNoteIn(root: string, note: NoteMeta): void;
   // The head of a note's live document — enough of it to parse frontmatter —
   // or null when no editor holds that doc. A head, not the whole text: `when`
   // runs on every menu/palette render, and a note carrying a pasted blob
@@ -142,6 +172,10 @@ export interface RegistryDeps {
     bold(docId: string): void;
     italic(docId: string): void;
     insertLink(docId: string): void;
+    // Add or remove the note's `template: true` frontmatter line in its LIVE
+    // editor (editor/templateFlag.ts): an ordinary undoable edit, so autosave
+    // and the watcher-driven list refresh carry the change everywhere else.
+    toggleTemplate(docId: string): void;
   };
 }
 

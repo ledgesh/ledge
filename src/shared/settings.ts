@@ -79,6 +79,24 @@ export interface Settings {
     interpreters: Record<string, string>;
     hostInterpreters: Record<string, Record<string, string>>;
   };
+  // Daily notes: one note per LOCAL calendar day, titled YYYY-MM-DD, reached
+  // by ⌘J / `ledge today` (create-or-open, idempotent). `workspace` pins
+  // where they live — a registered root's absolute path (~ expands) or its
+  // folder name. It earns its knob because the deixis default (the selected
+  // workspace in the app, cwd at the CLI) demonstrably scatters daily notes
+  // for anyone with more than one workspace, and "where is today's note?" is
+  // the feature's one promise — and it stays a knob because a workspace is
+  // not a note: there is no corpus object to carry the fact. Empty string
+  // means unset (deixis); a value naming no registered root degrades,
+  // reported, never an error. WHICH note seeds the day is NOT here: mark
+  // that note `template: daily` in its own frontmatter — the retired
+  // `template` field named a note by title, which went stale on rename.
+  daily: { workspace: string };
+  // There is deliberately no templates section: which notes are templates is
+  // corpus data, not configuration — a note declares itself with
+  // `template: true` frontmatter, and the ⌥⌘N picker reads the live note
+  // lists. A registry here would need hand-editing, restart to apply, and
+  // would go stale against renames; the marker needs none of that.
 }
 
 export const DEFAULT_SETTINGS: Settings = Object.freeze({
@@ -106,6 +124,7 @@ export const DEFAULT_SETTINGS: Settings = Object.freeze({
     },
     hostInterpreters: {},
   },
+  daily: { workspace: "" },
 });
 
 // Validate a parsed settings.json into a full Settings, field by field: a bad
@@ -120,9 +139,13 @@ export function parseSettings(raw: unknown): { settings: Settings; problems: str
   if (!isRecord(raw)) problems.push("settings.json is not a JSON object");
 
   // A misspelled section would otherwise be silently ignored, which reads as
-  // "my setting does nothing" — say so instead.
+  // "my setting does nothing" — say so instead. "templates" gets its own
+  // message: the section existed briefly (a list of template note titles) and
+  // a file still carrying it deserves the pointer, not a shrug.
   for (const key of Object.keys(root)) {
-    if (!(key in d)) problems.push(`unknown section "${key}"`);
+    if (key === "templates") {
+      problems.push(`"templates" is retired — mark a note with \`template: true\` frontmatter instead`);
+    } else if (!(key in d)) problems.push(`unknown section "${key}"`);
   }
 
   const shell = section(root, "shell", problems);
@@ -130,6 +153,12 @@ export function parseSettings(raw: unknown): { settings: Settings; problems: str
   const terminal = section(root, "terminal", problems);
   const trash = section(root, "trash", problems);
   const blocks = section(root, "blocks", problems);
+  const daily = section(root, "daily", problems);
+  // Like the retired "templates" section: the field existed briefly (a note
+  // title), and a file still carrying it deserves the pointer, not silence.
+  if ("template" in daily) {
+    problems.push(`"daily.template" is retired — mark the note itself with \`template: daily\` frontmatter instead`);
+  }
 
   return {
     settings: {
@@ -156,6 +185,9 @@ export function parseSettings(raw: unknown): { settings: Settings; problems: str
           ...stringMap(blocks, "interpreters", "blocks.interpreters", problems),
         },
         hostInterpreters: hostMaps(blocks, problems),
+      },
+      daily: {
+        workspace: optStr(daily, "workspace", "daily.workspace", problems),
       },
     },
     problems,
@@ -206,6 +238,22 @@ function str(
   if (typeof v === "string" && v.length > 0) return v;
   problems.push(`"${label}" must be a non-empty string`);
   return fallback;
+}
+
+// Like str, but "" is a meaning, not a typo: these fields spell "unset" as an
+// empty string so the seeded file can show the knob blank and stay valid JSON
+// without nulls.
+function optStr(
+  o: Record<string, unknown>,
+  key: string,
+  label: string,
+  problems: string[],
+): string {
+  const v = o[key];
+  if (v === undefined) return "";
+  if (typeof v === "string") return v;
+  problems.push(`"${label}" must be a string`);
+  return "";
 }
 
 function strings(

@@ -34,6 +34,7 @@ import {
 } from "./notes";
 import {
   APP_HOME,
+  assertRegisteredRoot,
   attachExternal,
   availableRoots,
   createManaged,
@@ -43,7 +44,9 @@ import {
   listWorkspaceRoots,
   loadWorkspaces,
   rootContaining,
+  roots,
 } from "./workspaces";
+import { createFromTemplatePath, openDaily, resolveConfiguredWorkspace } from "./daily";
 import { readLayout, writeLayout } from "./layout";
 import { installShim, tildify } from "./cliShim";
 import { OPEN_REQUEST_PATH, takeOpenRequest } from "./openRequest";
@@ -315,7 +318,10 @@ const rpc = BrowserView.defineRPC<LedgeRPC>({
       // The registry lives Bun-side (workspaces.ts): the view only ever passes
       // back roots it was handed, and the one way an arbitrary folder gets in
       // is the native dialog below — never a view-supplied path.
-      workspaceList: () => ({ workspaces: listWorkspaceRoots() }),
+      workspaceList: () => ({
+        workspaces: listWorkspaceRoots(),
+        dailyRoot: resolveConfiguredWorkspace(settings.daily.workspace, roots()),
+      }),
       workspaceCreate: async ({ name }) => {
         const root = await createManaged(name);
         refreshWatchers();
@@ -359,6 +365,19 @@ const rpc = BrowserView.defineRPC<LedgeRPC>({
       },
       noteCreate: async ({ root, text }) => ({ note: await createNote(root, text) }),
       noteRetitle: async ({ path, text }) => ({ note: await retitleNote(path, text) }),
+      // The daily.workspace setting outranks the view's selected workspace
+      // (that is the knob's whole job: pin where daily notes live); the
+      // selected one is the deixis fallback. The response is shaped as an
+      // external open so the view's one workspace-select-then-open path
+      // handles it (see the schema comment).
+      dailyOpen: async ({ root }) => {
+        const target = resolveConfiguredWorkspace(settings.daily.workspace, roots()) ?? assertRegisteredRoot(root);
+        const { meta, created } = await openDaily(target);
+        return { open: { ...meta, root: target }, created };
+      },
+      noteFromTemplate: async ({ root, templatePath, title }) => ({
+        note: await createFromTemplatePath(root, templatePath, title),
+      }),
       noteDelete: async ({ path }) => ({ trashed: await deleteNote(path) }),
       noteSearch: async ({ root, query }) => ({ hits: await searchNotes(root, query) }),
       // backlinksTo derives and guards the root itself (assertNote), the

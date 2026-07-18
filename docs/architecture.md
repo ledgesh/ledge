@@ -40,7 +40,15 @@ protocol is a hand-rolled JSON-RPC subset (`initialize`/`tools/*`, one
 message per line; §8's stance — the SDK earns its place if resources or
 prompts ever join), its stdout belongs to that protocol (logs go to stderr),
 and its tool set grew in deliberate tiers: reads first, then additive writes
-(`create_note`, `append_note` — end of note, or targeted at a heading's
+(`create_note` — plain text, or `template` + `title` to instantiate an
+existing note as the body (`shared/template.ts`: `{{date}}`-class
+substitution, H1 forcing, and the `template: true` marker stripped so
+instances are not templates; `bun/daily.ts` resolving the template by
+title — ANY note's title works, the marker being discovery for the pickers
+and `list_notes`' flag, not permission); `daily_note` — create-or-open
+today's LOCAL-date note, idempotent
+where `create_note` is never-clobber, which contract split is why it is its
+own tool; `append_note` — end of note, or targeted at a heading's
 section via the same fence-aware ATX grammar the `[[note#heading]]` reveal
 uses, `shared/wikilinks.ts`; either way a trailing run of ` ```prompt `
 blocks stays last — those are the note's controls, and appends land above
@@ -341,8 +349,24 @@ snapshot at construction time through `lib/settings.ts`.
   numbered fleets; matching sections merge in file order, later wins;
   resolution is `interpretersFor` in `bun/runner.ts`. It lives in settings,
   not frontmatter, because a machine's toolchain layout is one fact about
-  one machine, identical in every note that targets it). Additions should be
-  argued in those terms.
+  one machine, identical in every note that targets it), and the daily
+  workspace (`daily.workspace`: it exists because the deixis default —
+  selected workspace in the app, cwd at the CLI — demonstrably scatters
+  daily notes for anyone with more than one workspace, and "where is
+  today's note?" is the feature's one promise; it stays a KNOB because a
+  workspace is not a note — there is no corpus object to carry the fact. A
+  value naming no registered root degrades warned). Additions should be
+  argued in those terms. The boundary also runs the other way — corpus
+  data must not become a knob: WHICH notes are templates briefly lived
+  here as a title list (`templates.notes`), and WHICH note seeds the daily
+  as a title field (`daily.template`); both were retired for the
+  `template:` frontmatter marker (`true`, or `daily` for the ⌘J role),
+  because config naming notes by title needed hand-editing, applied at
+  relaunch, and went stale against the notes it described, while the
+  marker is edited where the note is, read live off the note lists
+  (`NoteMeta.template`), travels through renames, and is stripped at
+  instantiation. parseSettings still recognizes both retired spellings by
+  name and answers with the migration hint rather than "unknown section".
 - **Settings are not session state, and neither is the registry.** Three
   files in the app home, three ownership shapes. `settings.json` is
   *human-edited preference*. `.layout.json` — which workspaces exist, their
@@ -391,8 +415,14 @@ env:                         # inline non-secret vars
 profile: petstore            # named secrets scope (see below)
 envFile: ./.env              # project-owned dotenv, resolved against cwd
 host: web1 deploy@prod       # machines blocks may run on (ssh destinations / "local")
+template: true               # this note is a template: offered by ⌥⌘N, marker stripped at instantiation
+                             # (value `daily` additionally claims the ⌘J role for ITS OWN workspace: per-workspace, never borrowed across roots)
 ---
 ```
+
+(`tags:` also lives in the block — shared/tags.ts's other tag source — and,
+like `template:`, never feeds a spawn: both ride the one parser because the
+block has one grammar, not because the shell cares.)
 
 `shared/frontmatter.ts` owns the grammar (hand-rolled per §8; per-line
 degradation like `parseSettings`); `bun/spawnParams.ts` owns what the values

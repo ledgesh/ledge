@@ -18,10 +18,10 @@
 // fourth mode and no second sigil — the "#" the search sigil already spends
 // is the one tags are written with.
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Command as CommandIcon, FileText, Hash, TextSearch } from "lucide-react";
+import { CalendarDays, Command as CommandIcon, FileText, Hash, LayoutTemplate, TextSearch } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { notesOf, useWorkspace } from "@/workspace/store";
-import { filterNotes, fuzzyFilter } from "@/notes/fuzzy";
+import { CHORD_BOOST, filterNotes, fuzzyFilter } from "@/notes/fuzzy";
 import { listTags, searchNotes, type SearchHit } from "@/notes/channel";
 import { normalizeTag, type TagInfo } from "../../shared/tags";
 import { requestReveal } from "@/workspace/editorPool";
@@ -35,10 +35,21 @@ export type OverlayMode = "notes" | "commands" | "search";
 // results feel live, long enough that "shipping" is one scan, not eight.
 const SEARCH_DEBOUNCE_MS = 80;
 
-export function Overlay({ initialMode, onClose }: { initialMode: OverlayMode; onClose: () => void }) {
+export function Overlay({
+  initialMode,
+  // Seeds the input as plain filter text — the sigil branch below never sees
+  // it (sigils are a notes-mode, first-typed-character affair, and the one
+  // seeded open lands in commands mode). note.fromTemplate's pre-filter.
+  initialQuery = "",
+  onClose,
+}: {
+  initialMode: OverlayMode;
+  initialQuery?: string;
+  onClose: () => void;
+}) {
   const { state, dispatch, selected } = useWorkspace();
   const { exec, commands, ctx } = useCommands();
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(initialQuery);
   const [index, setIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -116,8 +127,11 @@ export function Overlay({ initialMode, onClose }: { initialMode: OverlayMode; on
     if (!isCommands) return [];
     const visible = paletteItems(commands, ctx());
     // An empty query shows the registry's own order (semantic grouping); a
-    // query re-ranks by match quality.
-    return q.trim() ? fuzzyFilter(q, visible, (i) => i.title) : visible;
+    // query re-ranks by match quality, chorded commands a notch up — the
+    // chord marks the frequent act (CHORD_BOOST's rationale in fuzzy.ts).
+    return q.trim()
+      ? fuzzyFilter(q, visible, (i) => i.title, (i) => (i.chorded ? CHORD_BOOST : 0))
+      : visible;
     // ctx() reads a ref; state/selected are the real inputs that change what
     // `when` and the dynamic titles produce.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -335,7 +349,17 @@ export function Overlay({ initialMode, onClose }: { initialMode: OverlayMode; on
                 onMouseMove={() => setIndex(i)}
                 onClick={() => open(i)}
               >
-                <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+                {/* The NoteBrowser row's icon rule: a template note wears
+                    LayoutTemplate, the daily-role note CalendarDays — the
+                    browser and the picker must agree on what kind of thing a
+                    note is. */}
+                {note.template === "daily" ? (
+                  <CalendarDays className="size-3.5 shrink-0 text-muted-foreground" />
+                ) : note.template ? (
+                  <LayoutTemplate className="size-3.5 shrink-0 text-muted-foreground" />
+                ) : (
+                  <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+                )}
                 <span className="truncate text-sm">{note.title}</span>
               </div>
             ))

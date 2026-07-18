@@ -12,7 +12,7 @@
 // `d` deletes, `r` restores. The rows publish their identity as data attributes
 // (commands/target.ts) and the window dispatcher reads it back, so a right-click
 // and a keystroke run the same command against the same note.
-import { ChevronRight, FileText, Plus, RotateCcw, Trash2 } from "lucide-react";
+import { CalendarDays, ChevronRight, FileText, LayoutTemplate, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { useListNav } from "@/lib/useListNav";
@@ -438,7 +438,17 @@ function NoteRow({
       }}
       title={note.path}
     >
-      <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+      {/* A template note (frontmatter template: true) swaps the glyph — the
+          same LayoutTemplate the template commands wear in the palette — and
+          the daily-role note (template: daily) wears ⌘J's own CalendarDays.
+          Icons, not badges: same object, different kind, zero row width. */}
+      {note.template === "daily" ? (
+        <CalendarDays className="size-3.5 shrink-0 text-muted-foreground" />
+      ) : note.template ? (
+        <LayoutTemplate className="size-3.5 shrink-0 text-muted-foreground" />
+      ) : (
+        <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+      )}
       <div className={cn("min-w-0 flex-1 truncate text-sm leading-tight", !open && "text-muted-foreground")}>
         {note.title}
       </div>

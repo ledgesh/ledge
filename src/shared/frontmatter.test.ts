@@ -48,15 +48,15 @@ describe("frontmatterEnd", () => {
 describe("parseFrontmatter", () => {
   test("a note with no frontmatter yields empty params and no problems", () => {
     const { params, problems, end } = parseFrontmatter("# Title\nbody");
-    expect(params).toEqual({ cwd: null, profile: null, envFile: null, env: {}, hosts: [], tags: [] });
+    expect(params).toEqual({ cwd: null, profile: null, envFile: null, env: {}, hosts: [], tags: [], template: false });
     expect(problems).toEqual([]);
     expect(end).toBe(0);
   });
 
-  test("all six keys parse together", () => {
+  test("all seven keys parse together", () => {
     const { params, problems } = parseFrontmatter(
       fm(
-        "cwd: ~/Projects/ledge\nprofile: petstore\nenvFile: ./.env\nhost: web1 deploy@prod\ntags: work, ledge\nenv:\n  NODE_ENV: development\n  PORT: 3000\n",
+        "cwd: ~/Projects/ledge\nprofile: petstore\nenvFile: ./.env\nhost: web1 deploy@prod\ntags: work, ledge\ntemplate: true\nenv:\n  NODE_ENV: development\n  PORT: 3000\n",
       ),
     );
     expect(params).toEqual({
@@ -66,7 +66,25 @@ describe("parseFrontmatter", () => {
       env: { NODE_ENV: "development", PORT: "3000" },
       hosts: ["web1", "deploy@prod"],
       tags: ["work", "ledge"],
+      template: true,
     });
+    expect(problems).toEqual([]);
+  });
+
+  test("template takes exactly true, false, or daily; anything else costs the line", () => {
+    expect(parseFrontmatter(fm("template: true\n")).params.template).toBe(true);
+    expect(parseFrontmatter(fm("template: false\n")).params.template).toBe(false);
+    // The `daily` value claims the role: this template seeds each day's note.
+    expect(parseFrontmatter(fm("template: daily\n")).params.template).toBe("daily");
+    const { params, problems } = parseFrontmatter(fm("template: yes\n"));
+    expect(params.template).toBe(false);
+    expect(problems).toEqual([`"template" must be true, false, or daily: "yes"`]);
+  });
+
+  test("an env var named template is an env var, not the marker", () => {
+    const { params, problems } = parseFrontmatter(fm("env:\n  template: jinja\n"));
+    expect(params.template).toBe(false);
+    expect(params.env["template"]).toBe("jinja");
     expect(problems).toEqual([]);
   });
 
@@ -259,7 +277,7 @@ describe("parseFrontmatter", () => {
 
   test("an empty block is valid and empty", () => {
     const { params, problems, end } = parseFrontmatter("---\n---\n# Title\n");
-    expect(params).toEqual({ cwd: null, profile: null, envFile: null, env: {}, hosts: [], tags: [] });
+    expect(params).toEqual({ cwd: null, profile: null, envFile: null, env: {}, hosts: [], tags: [], template: false });
     expect(problems).toEqual([]);
     expect(end).toBeGreaterThan(0);
   });

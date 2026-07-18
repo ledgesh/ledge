@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { NoteMeta } from "./channel";
-import { filterNotes, fuzzyScore } from "./fuzzy";
+import { CHORD_BOOST, filterNotes, fuzzyFilter, fuzzyScore } from "./fuzzy";
 
 const note = (title: string): NoteMeta => ({ path: `/notes/${title}.md`, title, mtimeMs: 0 });
 
@@ -74,5 +74,34 @@ describe("filterNotes", () => {
 
   test("whitespace around the query is ignored", () => {
     expect(filterNotes("  ship  ", [note("shipping")]).map((n) => n.title)).toEqual(["shipping"]);
+  });
+});
+
+describe("fuzzyFilter boost", () => {
+  const label = (s: string) => s;
+  const boostFor = (want: string) => (s: string) => (s === want ? CHORD_BOOST : 0);
+
+  test("outweighs where in the title the match sits — the palette's chorded-command case", () => {
+    // Same-quality "Daily" run in both; unboosted, the earlier match wins on
+    // the position penalty. The boost (⌘J's chord) must flip exactly this.
+    const items = ["Edit Daily Template", "Open Today's Daily Note"];
+    expect(fuzzyFilter("daily", items, label)[0]).toBe("Edit Daily Template");
+    expect(fuzzyFilter("daily", items, label, boostFor("Open Today's Daily Note"))[0]).toBe(
+      "Open Today's Daily Note",
+    );
+  });
+
+  test("cannot beat a genuinely tighter match", () => {
+    // "edit daily" matches Edit Daily Template as boundary runs and the other
+    // only scattered: a chord is a nudge between comparable matches, never an
+    // override of match quality.
+    const items = ["Edit Daily Template", "Open Today's Daily Note"];
+    expect(fuzzyFilter("edit daily", items, label, boostFor("Open Today's Daily Note"))[0]).toBe(
+      "Edit Daily Template",
+    );
+  });
+
+  test("never revives a non-match", () => {
+    expect(fuzzyFilter("zzz", ["Open Today's Daily Note"], label, () => 1000)).toEqual([]);
   });
 });

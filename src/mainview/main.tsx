@@ -5,7 +5,7 @@ import type { LedgeRPC, NoteMeta, TrashMeta, WorkspaceRootInfo } from "../shared
 import { configureBridge, dispatchRunEvent, setTerminalBusy } from "./editor/bridge";
 import { bytesToB64, configureTerminal, dispatchTerminalOutput, dispatchTerminalExit } from "./terminal/channel";
 import { configureNotes, dispatchExternalOpen, dispatchNotesChanged } from "./notes/channel";
-import { configureWorkspaces, recordWorkspaceKinds } from "./workspace/channel";
+import { configureWorkspaces, recordDailyRoot, recordWorkspaceKinds } from "./workspace/channel";
 import { configureClipboard } from "./lib/clipboard";
 import { configureCli } from "./lib/cli";
 import { configureAssets } from "./lib/assets";
@@ -93,7 +93,7 @@ configureAssets({
 // Bun owns the workspace folders; the view only ever holds roots and paths it
 // got from here.
 configureWorkspaces({
-  list: () => electrobun.rpc!.request.workspaceList({}).then((r) => r.workspaces),
+  list: () => electrobun.rpc!.request.workspaceList({}),
   create: (name) => electrobun.rpc!.request.workspaceCreate({ name }).then((r) => r.root),
   attach: () => electrobun.rpc!.request.workspaceAttach({}),
   detach: (root) => electrobun.rpc!.request.workspaceDetach({ root }).then((r) => r.ok),
@@ -115,6 +115,9 @@ configureNotes({
   removeTrashed: (path) => electrobun.rpc!.request.trashDelete({ path }).then((r) => r.removed),
   empty: (folder) => electrobun.rpc!.request.trashEmpty({ root: folder }).then((r) => r.removed),
   takeOpenRequest: () => electrobun.rpc!.request.openRequestTake({}).then((r) => r.open),
+  openDaily: (folder) => electrobun.rpc!.request.dailyOpen({ root: folder }),
+  createFromTemplate: (folder, templatePath, title) =>
+    electrobun.rpc!.request.noteFromTemplate({ root: folder, templatePath, title }).then((r) => r.note),
   configureSession: (sessionId, params, notePath) => {
     void electrobun.rpc!.request.sessionConfigure({ sessionId, params, notePath });
   },
@@ -142,10 +145,13 @@ async function boot(): Promise<void> {
     // render's shape. Eager per-folder fetch keeps that first paint complete;
     // fine at human workspace counts (revisit lazily if a huge external folder
     // ever makes boot crawl). A folder that fails to list costs itself only.
-    roots = await electrobun.rpc!.request.workspaceList({}).then((r) => r.workspaces);
-    // This fetch bypasses the channel wrapper, so record kinds explicitly:
-    // the per-workspace default cwd needs them (workspace/channel.ts).
+    const registry = await electrobun.rpc!.request.workspaceList({});
+    roots = registry.workspaces;
+    // This fetch bypasses the channel wrapper, so record explicitly: kinds
+    // for the per-workspace default cwd, the resolved daily root for the
+    // Edit Daily Template faces (workspace/channel.ts).
     recordWorkspaceKinds(roots);
+    recordDailyRoot(registry.dailyRoot);
     const available = roots.filter((w) => w.available).map((w) => w.root);
     [settings, layout] = await Promise.all([
       electrobun.rpc!.request.settingsGet({}).then((r) => r.settings),

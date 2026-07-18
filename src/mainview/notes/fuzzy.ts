@@ -64,16 +64,35 @@ export function fuzzyScore(query: string, text: string): number | null {
   return top === NONE ? null : top;
 }
 
+// The command palette's boost for chorded commands. A chord is the registry's
+// own frequency claim (docs/interactions.md §2: chords are EARNED by how often
+// an act is reached for), so between comparable matches the palette surfaces
+// the act the user most likely wants — "daily" puts ⌘J's Open Today's Daily
+// Note above the unchorded template verbs, whose match merely starts earlier
+// in the title. Sized between MAX_GAP_PENALTY (so it outweighs where in the
+// title the match happens to sit) and the ~25 a longer unbroken run scores
+// (so it can never beat a genuinely tighter match: "edit daily" still ranks
+// Edit Daily Template first).
+export const CHORD_BOOST = 12;
+
 // Anything matching `query`, best first, labelled by `key`. An empty query
 // keeps every item and sorts by label. Ties break on the label so the order is
 // stable and never depends on the order the items happened to arrive in.
-export function fuzzyFilter<T>(query: string, items: readonly T[], key: (item: T) => string): T[] {
+// `boost` adds a per-item constant AFTER match scoring — item importance, on
+// the same arbitrary scale (the palette passes CHORD_BOOST for chorded
+// commands); it never revives a non-match.
+export function fuzzyFilter<T>(
+  query: string,
+  items: readonly T[],
+  key: (item: T) => string,
+  boost?: (item: T) => number,
+): T[] {
   const q = query.trim();
   const scored: Array<{ item: T; score: number; label: string }> = [];
   for (const item of items) {
     const label = key(item);
     const score = fuzzyScore(q, label);
-    if (score !== null) scored.push({ item, score, label });
+    if (score !== null) scored.push({ item, score: score + (boost?.(item) ?? 0), label });
   }
   scored.sort((a, b) => b.score - a.score || a.label.localeCompare(b.label));
   return scored.map((s) => s.item);

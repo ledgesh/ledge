@@ -7,8 +7,13 @@ import type { Command, CommandCtx, RegistryDeps } from "./types";
 // Stub deps: the registry never touches the editor stack or the clipboard in
 // tests; we only record that the right edge was invoked. `noteHead` is what a
 // focused note's editor would hold — settable so the frontmatter-driven
-// commands (profile.open) can be steered per test.
-function stubDeps(calls: string[] = [], noteHead: string | null = null): RegistryDeps {
+// commands (profile.open) can be steered per test. `dailyRoot` is the
+// boot-resolved daily.workspace mirror the Edit/New Daily Template faces read.
+function stubDeps(
+  calls: string[] = [],
+  noteHead: string | null = null,
+  dailyRoot: string | null = null,
+): RegistryDeps {
   const record = (name: string) => (arg: string) => calls.push(`${name}:${arg}`);
   return {
     copyText: record("copyText"),
@@ -27,6 +32,20 @@ function stubDeps(calls: string[] = [], noteHead: string | null = null): Registr
     },
     closeWorkspace: (id) => calls.push(`closeWorkspace:${id}`),
     restartSession: record("restartSession"),
+    openDailyNote: async (folder) => {
+      calls.push(`openDailyNote:${folder}`);
+      return null;
+    },
+    newNoteFromTemplate: async (folder, templatePath) => {
+      calls.push(`newNoteFromTemplate:${folder}:${templatePath}`);
+      return { path: `${folder}/untitled.md`, title: "Untitled", mtimeMs: 0 };
+    },
+    createNote: async (folder, text) => {
+      calls.push(`createNote:${folder}:${text.split("\n", 4).join("|")}`);
+      return { path: `${folder}/untitled-template.md`, title: "Untitled Template", mtimeMs: 0 };
+    },
+    dailyRoot: () => dailyRoot,
+    openNoteIn: (root, note) => calls.push(`openNoteIn:${root}:${note.path}`),
     revealBacklink: (path, line, raw) => calls.push(`revealBacklink:${path}:${line}:${raw}`),
     jumpToHeading: (docId, line, text) => calls.push(`jumpToHeading:${docId}:${line}:${text}`),
     noteHead: () => noteHead,
@@ -41,6 +60,7 @@ function stubDeps(calls: string[] = [], noteHead: string | null = null): Registr
       bold: record("bold"),
       italic: record("italic"),
       insertLink: record("insertLink"),
+      toggleTemplate: record("toggleTemplate"),
     },
   };
 }
@@ -212,6 +232,150 @@ describe("registry", () => {
     await Bun.sleep(0); // the run fires and forgets; the surface lands a microtask later
     expect(calls).toEqual(["installCli"]);
     expect(notices).toEqual(["installed"]);
+  });
+
+  test("run: daily.open routes the selected folder to the daily edge", async () => {
+    const calls: string[] = [];
+    const cmds = buildCommands(stubDeps(calls));
+    find(cmds, "daily.open").run(makeCtx(initialState(FOLDER, [])));
+    await Bun.sleep(0);
+    expect(calls).toEqual([`openDailyNote:${FOLDER}`]);
+    // No openNote dispatch here: the open rides the external-open subscriber.
+  });
+
+  test("note.fromTemplate pre-filters to the entries — or to the starter when none exist", () => {
+    const marked = { ...note(`${FOLDER}/meeting.md`, "Meeting"), template: true as const };
+    const overlays: string[] = [];
+    const ui = { openOverlay: (mode: string, q?: string) => overlays.push(`${mode}:${q ?? ""}`) };
+    const parent = find(commands, "note.fromTemplate");
+    // Always visible: discoverability is the point of the empty state.
+    expect(parent.when).toBeUndefined();
+    parent.run({ ...makeCtx(initialState(FOLDER, [marked])), ui });
+    parent.run({ ...makeCtx(initialState(FOLDER, [note(`${FOLDER}/a.md`, "A")])), ui });
+    expect(overlays).toEqual([
+      "commands:New Note from Template: ",
+      "commands:New Template",
+    ]);
+  });
+
+  test("the template entries are LIVE state, not a boot snapshot", async () => {
+    // The same built commands see different rows as the note lists change —
+    // that is what makes "mark a note, use it" work without a relaunch.
+    const calls: string[] = [];
+    const cmds = buildCommands(stubDeps(calls));
+    const entry = find(cmds, "note.fromTemplate.0");
+    const none = makeCtx(initialState(FOLDER, [note(`${FOLDER}/plain.md`, "Plain")]));
+    expect(entry.when!(none)).toBe(false);
+
+    const marked = { ...note(`${FOLDER}/meeting.md`, "Meeting"), template: true as const };
+    const dispatched: Action[] = [];
+    const ctx = makeCtx(initialState(FOLDER, [marked]), dispatched);
+    expect(entry.when!(ctx)).toBe(true);
+    expect((entry.title as (c: CommandCtx) => string)(ctx)).toBe("New Note from Template: Meeting");
+    entry.run(ctx);
+    await Bun.sleep(0);
+    // The pick hands over the PATH — the concrete note, not a re-resolvable name.
+    expect(calls).toEqual([`newNoteFromTemplate:${FOLDER}:${marked.path}`]);
+    expect(dispatched).toEqual([
+      { type: "openNote", note: { path: `${FOLDER}/untitled.md`, title: "Untitled", mtimeMs: 0 } },
+    ]);
+  });
+
+  test("another workspace's template follows the selected one's, naming its home", () => {
+    const mine = { ...note(`${FOLDER}/zeta.md`, "Zeta"), template: true as const };
+    const theirs = { ...note("/ws/two/meeting.md", "Meeting"), template: true as const };
+    const state = apply(initialState(FOLDER, [mine]), secondWs, {
+      type: "notesLoaded",
+      folder: "/ws/two",
+      notes: [theirs],
+    });
+    // Selected is workspace 2 after addWorkspace; its own Meeting leads,
+    // the first workspace's Zeta trails with the workspace name attached.
+    const ctx = makeCtx(state);
+    const titleOfSlot = (i: number) =>
+      (find(commands, `note.fromTemplate.${i}`).title as (c: CommandCtx) => string)(ctx);
+    expect(titleOfSlot(0)).toBe("New Note from Template: Meeting");
+    expect(titleOfSlot(1)).toBe(`New Note from Template: Zeta (${state.workspaces[0]!.name})`);
+    expect(find(commands, "note.fromTemplate.2").when!(ctx)).toBe(false);
+  });
+
+  test("template.starter creates the marked cheatsheet and opens it", async () => {
+    const calls: string[] = [];
+    const cmds = buildCommands(stubDeps(calls));
+    const dispatched: Action[] = [];
+    find(cmds, "template.starter").run(makeCtx(initialState(FOLDER, []), dispatched));
+    await Bun.sleep(0);
+    // Born marked: the starter must appear in the picker it teaches about.
+    expect(calls).toEqual([`createNote:${FOLDER}:---|template: true|---|# Untitled Template`]);
+    expect(dispatched).toEqual([
+      { type: "openNote", note: { path: `${FOLDER}/untitled-template.md`, title: "Untitled Template", mtimeMs: 0 } },
+    ]);
+  });
+
+  test("the marker verbs follow the current note's frontmatter, one at a time", () => {
+    const state = initialState(FOLDER, []);
+    const docId = state.workspaces[0]!.root.kind === "leaf" ? state.workspaces[0]!.root.tabs[0]!.docId : "";
+    const calls: string[] = [];
+    const unmarked = buildCommands(stubDeps(calls, "# Plain note\n"));
+    const ctx = makeCtx(state);
+    expect(find(unmarked, "note.templateOn").when!(ctx)).toBe(true);
+    expect(find(unmarked, "note.templateOff").when!(ctx)).toBe(false);
+    find(unmarked, "note.templateOn").run(ctx);
+    expect(calls).toEqual([`toggleTemplate:${docId}`]);
+
+    const marked = buildCommands(stubDeps([], "---\ntemplate: true\n---\n# T\n"));
+    expect(find(marked, "note.templateOn").when!(ctx)).toBe(false);
+    expect(find(marked, "note.templateOff").when!(ctx)).toBe(true);
+
+    // No live editor for the doc: neither verb shows.
+    const noEditor = buildCommands(stubDeps([], null));
+    expect(find(noEditor, "note.templateOn").when!(ctx)).toBe(false);
+    expect(find(noEditor, "note.templateOff").when!(ctx)).toBe(false);
+  });
+
+  test("the daily-template verbs: one face at a time, acting in the selected workspace by default", async () => {
+    const calls: string[] = [];
+    const cmds = buildCommands(stubDeps(calls));
+    // No claimant anywhere: only New shows, and it creates the pre-marked
+    // starter in the selected workspace, opening it through the external-open
+    // edge (the daily workspace need not be the selected one in general).
+    const bare = makeCtx(initialState(FOLDER, [note(`${FOLDER}/plain.md`, "Plain")]));
+    expect(find(cmds, "daily.templateEdit").when!(bare)).toBe(false);
+    expect(find(cmds, "daily.templateNew").when!(bare)).toBe(true);
+    find(cmds, "daily.templateNew").run(bare);
+    await Bun.sleep(0);
+    expect(calls).toEqual([
+      `createNote:${FOLDER}:---|template: daily|---|# Daily Template`,
+      `openNoteIn:${FOLDER}:${FOLDER}/untitled-template.md`,
+    ]);
+
+    // A claimant flips the faces; a plain template: true note does not.
+    calls.length = 0;
+    const daily = { ...note(`${FOLDER}/daily.md`, "Daily Template"), template: "daily" as const };
+    const plain = { ...note(`${FOLDER}/meeting.md`, "Meeting"), template: true as const };
+    const claimed = makeCtx(initialState(FOLDER, [plain, daily]));
+    expect(find(cmds, "daily.templateEdit").when!(claimed)).toBe(true);
+    expect(find(cmds, "daily.templateNew").when!(claimed)).toBe(false);
+    find(cmds, "daily.templateEdit").run(claimed);
+    expect(calls).toEqual([`openNoteIn:${FOLDER}:${daily.path}`]);
+  });
+
+  test("the daily-template verbs follow a pinned daily.workspace, not the selection", () => {
+    // daily.workspace resolved to the FIRST workspace at boot; workspace 2 is
+    // selected. The verbs must look (and act) where ⌘J will: the pinned root.
+    const calls: string[] = [];
+    const pinned = buildCommands(stubDeps(calls, null, FOLDER));
+    const daily = { ...note(`${FOLDER}/daily.md`, "Daily Template"), template: "daily" as const };
+    const state = apply(initialState(FOLDER, [daily]), secondWs, {
+      type: "notesLoaded",
+      folder: "/ws/two",
+      notes: [{ ...note("/ws/two/theirs.md", "Theirs"), template: "daily" as const }],
+    });
+    const ctx = makeCtx(state); // selected is workspace 2 after addWorkspace
+    expect(ctx.selected.folder).toBe("/ws/two");
+    expect(find(pinned, "daily.templateEdit").when!(ctx)).toBe(true);
+    find(pinned, "daily.templateEdit").run(ctx);
+    expect(calls).toEqual([`openNoteIn:${FOLDER}:${daily.path}`]);
   });
 
   test("run: session.restart routes the focused docId to the restart edge", () => {

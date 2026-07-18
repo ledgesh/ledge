@@ -29,6 +29,12 @@ describe("parseCliArgs", () => {
 
   test("a valued flag with nothing after it is an error, not an undefined", () => {
     expect(parseCliArgs(["append", "-m"])).toEqual({ error: "-m needs a value" });
+    expect(parseCliArgs(["new", "--template"])).toEqual({ error: "--template needs a value" });
+  });
+
+  test("--template is a valued flag, title words stay positionals", () => {
+    const p = parseCliArgs(["new", "My", "Standup", "--template", "Meeting"]);
+    expect(p).toMatchObject({ verb: "new", positionals: ["My", "Standup"], flags: { template: "Meeting" } });
   });
 
   test("an unknown flag is an error, not a positional", () => {
@@ -77,6 +83,14 @@ describe("formatNoteList", () => {
       "A             2026-07-18  ~/w/a.md",
       "Longer Title  2026-07-17  ~/w/longer-title.md",
     ]);
+  });
+
+  test("a template row carries its tag after the path", () => {
+    const lines = formatNoteList(
+      [{ title: "Meeting", path: "/home/u/w/meeting.md", modified: "2026-07-18T09:00:00.000Z", template: true }],
+      "/home/u",
+    );
+    expect(lines).toEqual(["Meeting  2026-07-18  ~/w/meeting.md  (template)"]);
   });
 });
 

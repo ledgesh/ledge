@@ -46,6 +46,15 @@ interface NoteHandlers {
   // subscription is up — the pull exists because a push at boot could fire
   // before anyone listens.
   takeOpenRequest: () => Promise<ExternalOpenInfo | null>;
+  // Create-or-open today's daily note (rpc dailyOpen). `folder` is the
+  // selected workspace — the fallback when the daily.workspace setting does
+  // not pin one. The ExternalOpenInfo comes back for the caller to feed to
+  // dispatchExternalOpen: the CLI-open subscriber owns select-then-open.
+  openDaily: (folder: string) => Promise<{ open: ExternalOpenInfo; created: boolean }>;
+  // Instantiate a template note — a PATH from the live note lists, the
+  // picker's concrete pick — into a new note in `folder` (rpc
+  // noteFromTemplate). Title null creates it as "Untitled".
+  createFromTemplate: (folder: string, templatePath: string, title: string | null) => Promise<NoteMeta>;
 }
 
 let handlers: NoteHandlers | null = null;
@@ -186,6 +195,19 @@ export function dispatchExternalOpen(open: ExternalOpenInfo): void {
 
 export function takeOpenRequest(): Promise<ExternalOpenInfo | null> {
   return bridge().takeOpenRequest();
+}
+
+// Create-or-open today's daily note. The caller (commands/glue.ts) feeds the
+// returned open through dispatchExternalOpen so the CLI-open subscriber does
+// the select-workspace-then-open — one definition, not a parallel path.
+export function openDailyNote(folder: string): Promise<{ open: ExternalOpenInfo; created: boolean }> {
+  return bridge().openDaily(folder);
+}
+
+// A new note from a template note (addressed by its path — the ⌥⌘N picker
+// picked a concrete row), landing in `folder`.
+export function createNoteFromTemplate(folder: string, templatePath: string, title: string | null): Promise<NoteMeta> {
+  return bridge().createFromTemplate(folder, templatePath, title);
 }
 
 export type { BacklinkHit, ExternalOpenInfo, NoteMeta, TagHit, TrashMeta, SearchHit };

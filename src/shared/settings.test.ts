@@ -31,6 +31,7 @@ describe("parseSettings", () => {
         interpreters: { ...DEFAULT_SETTINGS.blocks.interpreters, python: "/venv/bin/python" },
         hostInterpreters: {},
       },
+      daily: { workspace: "" },
     });
     expect(problems).toEqual([]);
   });
@@ -171,5 +172,38 @@ describe("parseSettings", () => {
       expect(settings).toEqual(DEFAULT_SETTINGS);
       expect(problems).toEqual(["settings.json is not a JSON object"]);
     }
+  });
+
+  test("an absent daily section defaults silently (seed-frozen files)", () => {
+    // Every settings.json seeded before the section existed lacks it — that
+    // must read as "unset", not as a problem.
+    const { settings, problems } = parseSettings({});
+    expect(settings.daily).toEqual({ workspace: "" });
+    expect(problems).toEqual([]);
+  });
+
+  test("daily.workspace accepts strings, empty included; a non-string costs the field", () => {
+    const good = parseSettings({ daily: { workspace: "~/notes/journal" } });
+    expect(good.settings.daily).toEqual({ workspace: "~/notes/journal" });
+    expect(good.problems).toEqual([]);
+
+    const bad = parseSettings({ daily: { workspace: 3 } });
+    expect(bad.settings.daily.workspace).toBe("");
+    expect(bad.problems).toEqual(['"daily.workspace" must be a string']);
+  });
+
+  test("the retired daily.template field points at the template: daily marker", () => {
+    const { settings, problems } = parseSettings({ daily: { workspace: "", template: "Daily Template" } });
+    expect(settings.daily).toEqual({ workspace: "" });
+    expect(problems).toEqual([
+      '"daily.template" is retired — mark the note itself with `template: daily` frontmatter instead',
+    ]);
+  });
+
+  test("the retired templates section points at the frontmatter marker", () => {
+    // The section shipped briefly (a list of template note titles); a file
+    // still carrying it gets the migration hint, not a bare unknown-section.
+    const { problems } = parseSettings({ templates: { notes: ["Meeting"] } });
+    expect(problems).toEqual(['"templates" is retired — mark a note with `template: true` frontmatter instead']);
   });
 });

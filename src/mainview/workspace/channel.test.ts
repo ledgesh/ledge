@@ -6,7 +6,9 @@ import {
   attachWorkspaceFolder,
   configureWorkspaces,
   createWorkspaceFolder,
+  dailyWorkspaceRoot,
   listWorkspaceRoots,
+  recordDailyRoot,
   recordWorkspaceKinds,
   resetWorkspaceKinds,
   workspaceDefaultCwd,
@@ -22,10 +24,13 @@ const attachResult = (res: Partial<AttachResult>): AttachResult => ({
 
 function fakeBridge(attach: AttachResult = attachResult({})) {
   configureWorkspaces({
-    list: async () => [
-      { root: "/ws/managed", kind: "managed", available: true },
-      { root: "/ext/project", kind: "external", available: true },
-    ],
+    list: async () => ({
+      workspaces: [
+        { root: "/ws/managed", kind: "managed", available: true },
+        { root: "/ext/project", kind: "external", available: true },
+      ],
+      dailyRoot: "/ws/managed",
+    }),
     create: async () => "/ws/created",
     attach: async () => attach,
     detach: async () => true,
@@ -66,5 +71,21 @@ describe("workspaceDefaultCwd", () => {
   test("boot's direct fetch records through recordWorkspaceKinds", () => {
     recordWorkspaceKinds([{ root: "/ext/boot", kind: "external", available: true }]);
     expect(workspaceDefaultCwd("/ext/boot")).toBe("/ext/boot");
+  });
+});
+
+describe("dailyWorkspaceRoot", () => {
+  test("null until recorded; list() records what Bun resolved", async () => {
+    expect(dailyWorkspaceRoot()).toBeNull();
+    fakeBridge();
+    await listWorkspaceRoots();
+    expect(dailyWorkspaceRoot()).toBe("/ws/managed");
+  });
+
+  test("boot's direct fetch records through recordDailyRoot, null included", () => {
+    recordDailyRoot("/ws/managed");
+    expect(dailyWorkspaceRoot()).toBe("/ws/managed");
+    recordDailyRoot(null);
+    expect(dailyWorkspaceRoot()).toBeNull();
   });
 });

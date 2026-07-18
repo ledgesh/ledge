@@ -129,6 +129,60 @@ describe("new", () => {
     const r = await run(["new"], { cwd: ROOT });
     expect(r.code).toBe(2);
   });
+
+  test("--template instantiates a note by title, substituted and retitled", async () => {
+    await run(["new", "Meeting"], { cwd: ROOT, stdin: "Agenda for {{title}}.\n" });
+    const r = await run(["new", "Sprint", "Review", "--template", "Meeting"], { cwd: ROOT });
+    expect(r.code).toBe(0);
+    expect(r.out).toEqual([join(ROOT, "sprint-review.md")]);
+    expect((await readNote(r.out[0]!))?.text).toBe("# Sprint Review\n\nAgenda for Sprint Review.\n");
+  });
+
+  test("--template refuses a piped second body, and needs a title", async () => {
+    await run(["new", "Meeting"], { cwd: ROOT });
+    const piped = await run(["new", "T", "--template", "Meeting"], { cwd: ROOT, stdin: "body\n" });
+    expect(piped.code).toBe(2);
+    const untitled = await run(["new", "--template", "Meeting"], { cwd: ROOT });
+    expect(untitled.code).toBe(2);
+  });
+
+  test("--template naming no note fails with the humanized error", async () => {
+    const r = await run(["new", "T", "--template", "Ghost"], { cwd: ROOT });
+    expect(r.code).toBe(1);
+    expect(r.err.join("\n")).toContain('no note titled "Ghost"');
+  });
+});
+
+describe("today", () => {
+  test("creates today's note, prints its path, and opens the app on it", async () => {
+    const r = await run(["today"], { cwd: ROOT });
+    expect(r.code).toBe(0);
+    expect(r.out).toHaveLength(1);
+    expect(r.opens).toBe(1);
+    const req = await takeOpenRequest();
+    expect(req?.path).toBe(r.out[0]!);
+    const text = (await readNote(r.out[0]!))?.text ?? "";
+    expect(text).toMatch(/^# \d{4}-\d{2}-\d{2}\n$/);
+  });
+
+  test("a second run the same day resolves the same note", async () => {
+    const first = await run(["today"], { cwd: ROOT });
+    const second = await run(["today"], { cwd: ROOT });
+    expect(second.out).toEqual(first.out);
+  });
+
+  test("cwd deixis picks the workspace; -w overrides it", async () => {
+    const here = await run(["today"], { cwd: OTHER });
+    expect(here.out[0]!.startsWith(OTHER)).toBe(true);
+    const scoped = await run(["today", "-w", "notes"], { cwd: OTHER });
+    expect(scoped.out[0]!.startsWith(ROOT)).toBe(true);
+  });
+
+  test("outside every workspace with several registered, the error teaches the knob", async () => {
+    const r = await run(["today"]);
+    expect(r.code).toBe(1);
+    expect(r.err.join("\n")).toContain("daily.workspace");
+  });
 });
 
 describe("cat", () => {

@@ -26,6 +26,43 @@ export const COMMANDS = {
   // the action has always been "new tab", and the tab-bar + button still says
   // so, but the thing a tab holds is a note.
   "note.new": { title: "New Note", keys: ["Mod-n", "Mod-t"] },
+  // The daily note: create-or-open today's local YYYY-MM-DD note in the daily
+  // workspace (settings daily.workspace, else the selected one). J — the
+  // journal key: of the free ⌘ letters (E J L O R U Y), J is the only one
+  // with a mnemonic, and ⌘O stays held for a literal "Open…" someday. The ⇧
+  // slot (⇧⌘J) stays free for a future bigger-scope variant.
+  "daily.open": { title: "Open Today's Daily Note", keys: ["Mod-j"] },
+  // The ⌥-tier variant of ⌘N (§2: secondary form of the base key): a new
+  // note, but from a template — any note whose frontmatter declares
+  // `template: true`. Opens the command palette pre-filtered to the
+  // per-template entries — the palette is the picker, the workspace.select
+  // dynamic-entry move. Always visible: with no templates yet it lands on
+  // New Template instead, so the feature explains itself at the
+  // moment someone reaches for it.
+  "note.fromTemplate": { title: "New Note from Template…", keys: ["Alt-Mod-n"] },
+  // The empty state's exit, and the "new template" verb thereafter: creates a
+  // pre-marked note whose BODY is the cheatsheet ({{tokens}}, the marker, the
+  // carry rules), so the documentation is the thing itself. Named in the
+  // New Note / New Workspace grammar — "Starter Template" was rejected
+  // because it reads as a second concept beside "template". Palette-only —
+  // once-in-a-while acts earn no chord.
+  "template.starter": { title: "New Template" },
+  // The marker's two verbs, on the current note: exactly one shows at a time
+  // (the `when`s read the note's live frontmatter, profile.open's move), so
+  // the visible title always says what will happen. Palette-only, like the
+  // other frontmatter verbs.
+  "note.templateOn": { title: "Make This Note a Template" },
+  "note.templateOff": { title: "Remove Template Marker" },
+  // The daily role's verb, two faces of one act (exactly one visible, like
+  // the marker verbs): open the `template: daily` note ⌘J instantiates, or —
+  // when its workspace has none — create a pre-marked starter so nobody
+  // hand-writes the role. Both act in the workspace ⌘J acts in
+  // (daily.workspace resolved at boot, else the selected one — the role is
+  // per-workspace, so pointing anywhere else would edit a template ⌘J
+  // ignores). Palette-only: editing your daily template is a
+  // once-in-a-while act, and ⇧⌘J stays reserved for a bigger-scope ⌘J.
+  "daily.templateEdit": { title: "Edit Daily Template" },
+  "daily.templateNew": { title: "New Daily Template" },
   "palette.notes": { title: "Go to Note…", keys: ["Mod-p"] },
   "palette.commands": { title: "Command Palette…", keys: ["Mod-Shift-p"] },
   // Full-text search across note bodies, in the same overlay (typing "#" first

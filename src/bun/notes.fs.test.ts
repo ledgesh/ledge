@@ -225,6 +225,15 @@ describe("listNotes", () => {
     await expect(listNotes(APP_HOME)).rejects.toThrow(/not a registered workspace root/);
   });
 
+  test("a note declaring template: true is flagged; every other meta stays lean", async () => {
+    await createNote(ROOT, "---\ntemplate: true\n---\n# Meeting\n");
+    await createNote(ROOT, "# Plain\n");
+    const byTitle = new Map((await listNotes(ROOT)).map((n) => [n.title, n]));
+    expect(byTitle.get("Meeting")?.template).toBe(true);
+    // Absent, not false: the flag is present-only-when-true (rpc-schema).
+    expect("template" in byTitle.get("Plain")!).toBe(false);
+  });
+
   test("vendor dirs are pruned: an attached project's node_modules is not notes", async () => {
     await createNote(ROOT, "# Real\n");
     await mkdir(join(ROOT, "node_modules", "some-pkg"), { recursive: true });

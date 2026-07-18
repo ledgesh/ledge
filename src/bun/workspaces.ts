@@ -12,7 +12,7 @@
 // and where managed workspace folders are created. Notes never live directly
 // in APP_HOME anymore; they live in the registered roots.
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { mkdir, readdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { slugify } from "../shared/slug";
 import type { WorkspaceRootInfo } from "../shared/rpc-schema";
@@ -58,6 +58,26 @@ export function uniqueName(base: string, taken: Set<string>, ext = ".md"): strin
   let name = `${base}${ext}`;
   for (let n = 2; lower.has(name.toLowerCase()); n += 1) name = `${base}-${n}${ext}`;
   return name;
+}
+
+// The roots a loosely-spelled workspace could mean: a root path (~ expands),
+// or — as shorthand — the folder name of a registered root. Shared by the
+// CLI's --workspace argument (cli.ts resolveWorkspaceArg) and the
+// daily.workspace setting (daily.ts): what a name MEANS must have one
+// definition — a name that reaches workspace X at the shell cannot reach Y
+// from settings.json — while what a miss costs stays with each surface (the
+// CLI throws its own error texts, the setting degrades to deixis). Empty =
+// no match; two or more = an ambiguous basename, for the caller to refuse
+// or degrade as suits it.
+export function workspaceMatches(
+  value: string,
+  registered: readonly string[],
+  home: string = homedir(),
+): string[] {
+  const expanded = value === "~" ? home : value.startsWith("~/") ? join(home, value.slice(2)) : value;
+  const asPath = resolve(expanded);
+  if (registered.includes(asPath)) return [asPath];
+  return registered.filter((r) => basename(r) === value);
 }
 
 // --- the registry ------------------------------------------------------------
