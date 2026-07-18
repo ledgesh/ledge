@@ -23,6 +23,7 @@ import {
   seedSlug,
   type DocHandlers,
 } from "../notes/store";
+import { changedSpan } from "../lib/textDiff";
 import { revealHeading, revealSelection } from "./reveal";
 import type { RunEvent } from "../../shared/rpc-schema";
 import type { TabState } from "./tree";
@@ -181,12 +182,17 @@ export async function reloadOpenNotes(): Promise<void> {
     if (!entry) continue; // tab closed while the read was in flight
     if (!reseedDoc(cand.docId, cand.path, file.text, file.mtimeMs)) continue; // dirtied meanwhile
     const view = entry.view;
-    // Keep the caret somewhere sensible (clamped to the new length) — for a
-    // background reload the exact spot matters less than not scrolling to 0.
-    const head = Math.min(view.state.selection.main.head, file.text.length);
+    // Dispatch the SMALLEST span that changed, never a full-document replace:
+    // a full replace maps every anchored position to the document's edges —
+    // run-output panels (blocks.ts runsField) teleport below appended text,
+    // and the caret ends up clamped instead of mapped. With a minimal span,
+    // positions outside it (usually including the caret — the buffer was
+    // clean, the user was elsewhere) do not move at all; CodeMirror maps the
+    // selection through the change on its own.
+    const span = changedSpan(view.state.doc.toString(), file.text);
+    if (!span) continue; // same bytes, newer mtime: reseed above already recorded it
     view.dispatch({
-      changes: { from: 0, to: view.state.doc.length, insert: file.text },
-      selection: { anchor: head },
+      changes: span,
       annotations: [fromDisk.of(true), Transaction.addToHistory.of(false)],
     });
   }

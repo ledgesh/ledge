@@ -8,6 +8,13 @@ describe("parseSettings", () => {
     expect(problems).toEqual([]);
   });
 
+  test("prompt fences are runnable out of the box, feeding claude on stdin", () => {
+    // The trailing `<` is load-bearing (runner.test.ts explains); this pins
+    // the default so an edit there cannot silently unmap agent blocks.
+    expect(DEFAULT_SETTINGS.blocks.runnable).toContain("prompt");
+    expect(DEFAULT_SETTINGS.blocks.interpreters["prompt"]).toBe("LEDGE_PROMPT_BLOCK=1 claude --allowedTools mcp__ledge -p <");
+  });
+
   test("a full valid file round-trips (interpreters merge over the defaults)", () => {
     const input = {
       shell: { path: "/opt/homebrew/bin/fish", args: ["-l"] },

@@ -18,7 +18,7 @@ import { resolve } from "node:path";
 import type { NoteMeta } from "../shared/rpc-schema";
 import { MAX_HITS } from "../shared/search";
 import { headingOf, labelOf } from "../shared/slug";
-import { resolveWikiTitle, wikiRefsOf } from "../shared/wikilinks";
+import { appendToNote, headingsOf, resolveWikiTitle, wikiRefsOf } from "../shared/wikilinks";
 import type { McpTool } from "./mcp";
 import { createNote, listNotes, readNote, searchNotes, writeNote } from "./notes";
 import { assertRegisteredRoot, availableRoots, listWorkspaceRoots, loadWorkspaces, rootContaining } from "./workspaces";
@@ -301,11 +301,16 @@ export const ledgeTools: McpTool[] = [
   {
     name: "append_note",
     description:
-      "Append Markdown to an existing note, as a new block separated by one blank line. Address the note by title (preferred) or path; with neither, appends to the current note — the one whose terminal this session was launched from. The note's H1 (and so its title and filename) is untouched. If someone else saved the note mid-append, their version is preserved in the workspace's trash and `divergedTo` names where.",
+      "Append Markdown to an existing note, as a new block separated by one blank line. Address the note by title (preferred) or path; with neither, appends to the current note — the one whose terminal this session was launched from. Give `heading` to append at the END of that heading's section (before the next same-or-shallower heading) instead of the end of the note — prefer this when the note has a matching section, so additions land with their kin. Either way, a run of ```prompt blocks at the very end stays at the end: those are the note's controls, and the addition lands above them, with the rest of the content. The note's H1 (and so its title and filename) is untouched. If someone else saved the note mid-append, their version is preserved in the workspace's trash and `divergedTo` names where.",
     inputSchema: {
       type: "object",
       properties: {
         text: { type: "string", description: "The Markdown to append." },
+        heading: {
+          type: "string",
+          description:
+            "A heading in the note (case-insensitive, without the #s). The text is appended at the end of that heading's section.",
+        },
         ...TITLE_OR_PATH_PROPS,
       },
       required: ["text"],
@@ -316,13 +321,22 @@ export const ledgeTools: McpTool[] = [
       if (typeof text !== "string" || text.trim() === "") throw new Error("give the text to append");
       await loadWorkspaces();
       const n = await locate(args);
-      // Block semantics: exactly one blank line between old content and new,
-      // one trailing newline — however either side was terminated. Leading
+      // Block semantics live in appendToNote (shared/wikilinks.ts): one blank
+      // line each side, trailing ```prompt blocks stay at the end. Leading
       // blank lines in the addition would double the separator, so they go;
       // first-line indentation stays (it can be meaningful Markdown).
-      const base = n.text.replace(/\s+$/u, "");
       const addition = text.replace(/^(?:[ \t]*\n)+/u, "").replace(/\s+$/u, "");
-      const joined = (base === "" ? "" : base + "\n\n") + addition + "\n";
+      const heading =
+        typeof args["heading"] === "string" && args["heading"].trim() !== "" ? (args["heading"] as string) : null;
+      const joined = appendToNote(n.text, addition, heading);
+      if (joined === null) {
+        const have = headingsOf(n.text).map((h) => h.text);
+        throw new Error(
+          `no heading "${heading}" in "${n.title}" — ` +
+            (have.length ? `its headings are: ${have.join(", ")}` : "it has no headings") +
+            "; omit `heading` to append at the end",
+        );
+      }
       // baseMtimeMs is the version locate() just read: a foreign write landing
       // inside this handler's read-modify-write window is moved to the trash
       // by writeNote's guard, never silently lost under the append.

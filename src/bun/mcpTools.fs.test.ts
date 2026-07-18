@@ -313,6 +313,36 @@ describe("append_note", () => {
     expect((await readNote(n.path))?.text).toContain("# Not A New Title");
   });
 
+  test("a heading argument appends inside that section, not at the end", async () => {
+    // The splice itself is shared/wikilinks.test.ts's subject; what this pins
+    // is the tool wiring — heading + the env-default note compose, and the
+    // result still reports the note's identity.
+    const n = await createNote(ROOT, "# Jokes\n\n## Puns\n\nfirst\n\n## Long Ones\n\nsaga\n");
+    process.env["LEDGE_NOTE"] = n.path;
+    const out = await call("append_note", { heading: "puns", text: "second" });
+    expect(out.path).toBe(n.path);
+    expect((await readNote(n.path))?.text).toBe("# Jokes\n\n## Puns\n\nfirst\n\nsecond\n\n## Long Ones\n\nsaga\n");
+  });
+
+  test("a note ending with its own prompt block keeps the block last — the append lands above it", async () => {
+    // The "add another joke to this note" note: content, then the runnable
+    // ```prompt fence that produced this very call. Below the block would
+    // interleave results with the button (and each rerun would bury it).
+    const n = await createNote(ROOT, "# Jokes\n\n> joke one\n\n```prompt\nadd another joke\n```\n");
+    process.env["LEDGE_NOTE"] = n.path;
+    await call("append_note", { text: "> joke two" });
+    expect((await readNote(n.path))?.text).toBe(
+      "# Jokes\n\n> joke one\n\n> joke two\n\n```prompt\nadd another joke\n```\n",
+    );
+  });
+
+  test("a heading the note lacks is an error that lists what it has", async () => {
+    await createNote(ROOT, "# Recipes\n\n## Soups\n\n## Breads\n");
+    expect(call("append_note", { title: "Recipes", heading: "Desserts", text: "x" })).rejects.toThrow(
+      "its headings are: Recipes, Soups, Breads",
+    );
+  });
+
   test("empty additions and unknown targets are refused", async () => {
     expect(call("append_note", { title: "Anything", text: "  \n " })).rejects.toThrow("give the text to append");
     expect(call("append_note", { title: "No Such Note", text: "hi" })).rejects.toThrow('no note titled');

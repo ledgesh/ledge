@@ -66,6 +66,21 @@ describe("runnerFor", () => {
     expect(spec.command).toBe("lua /tmp/ledge-run-b9.lua");
   });
 
+  test("prompt fences feed the block body to the agent CLI on stdin, ledge tools pre-allowed", () => {
+    // The interpreter value ends with `<`: verbatim insertion makes it a
+    // redirect, because `claude -p /tmp/file` would read the PATH as the
+    // prompt. No shim script — the shell is the shim. The allow flag is
+    // load-bearing too: print mode cannot ask permission, so without it a
+    // write-intent block ends with "I wasn't allowed to write".
+    const spec = runnerFor("b11", "prompt", "Summarize this note as a haiku", INTERP, BUN);
+    expect(spec.kind).toBe("interpreter");
+    expect(spec.path).toBe("/tmp/ledge-run-b11.prompt");
+    expect(spec.contents).toBe("Summarize this note as a haiku");
+    // The env prefix marks the session one-shot; the MCP server's initialize
+    // instructions read it and tell the agent not to ask follow-ups.
+    expect(spec.command).toBe("LEDGE_PROMPT_BLOCK=1 claude --allowedTools mcp__ledge -p < /tmp/ledge-run-b11.prompt");
+  });
+
   test("a hostile fence word cannot shape the temp path", () => {
     const key = "../../x";
     const spec = runnerFor("b10", key, "1", { [key]: "cat" }, BUN);
@@ -110,6 +125,13 @@ describe("runnerFor (remote)", () => {
     const spec = runnerFor("r4", "ts", "1", INTERP, BUN, true);
     expect(spec.command).toContain("bun run /tmp/ledge-run-r4.ts");
     expect(spec.command).not.toContain(BUN);
+  });
+
+  test("a remote prompt block rides in-band, then feeds the remote claude on stdin", () => {
+    const spec = runnerFor("r7", "prompt", "Check disk usage and summarize", INTERP, BUN, true);
+    expect(spec.command).toBe(
+      `printf '%s' '${b64("Check disk usage and summarize")}' | base64 --decode > /tmp/ledge-run-r7.prompt && LEDGE_PROMPT_BLOCK=1 claude --allowedTools mcp__ledge -p < /tmp/ledge-run-r7.prompt`,
+    );
   });
 
   test("the php tag is supplied before encoding, so both machines run the same bytes", () => {

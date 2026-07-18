@@ -118,6 +118,56 @@ describe("resolveSpawn: env layers", () => {
   });
 });
 
+describe("resolveSpawn: host-terminal identity is scrubbed", () => {
+  test("the launching terminal's identity vars do not reach note shells", () => {
+    // The app inherited these from the terminal `bun run dev` ran in; inside
+    // a Ledge PTY every one of them is a false fact. CMUX_SURFACE_ID is the
+    // load-bearing example: cmux's `claude` PATH shim keys on it and injects
+    // session hooks that then fail in a session cmux never owned.
+    const { deps } = fakeFs();
+    const base = {
+      ...BASE,
+      CMUX_SURFACE_ID: "4BFF2BFA",
+      CMUX_SOCKET_PATH: "/tmp/cmux.sock",
+      GHOSTTY_BIN_DIR: "/Applications/cmux.app/Contents/MacOS",
+      TERM_PROGRAM: "WezTerm",
+      TERM_PROGRAM_VERSION: "1.0",
+      TMUX: "/tmp/tmux-501/default,123,0",
+    };
+    const r = resolveSpawn(undefined, base, deps, HOME, PROFILES);
+    for (const key of Object.keys(base)) {
+      if (key in BASE) continue;
+      expect(key in r.env).toBe(false);
+    }
+    // The legitimate base survives untouched — TERM included (it is Ledge's
+    // own, already pinned).
+    expect(r.env["TERM"]).toBe("xterm-256color");
+    expect(r.env["PATH"]).toBe("/usr/bin");
+  });
+
+  test("only the identity vars go: a prefix needs its underscore", () => {
+    const { deps } = fakeFs();
+    const r = resolveSpawn(undefined, { ...BASE, CMUXY: "mine", KITTYCAT: "also mine" }, deps, HOME, PROFILES);
+    expect(r.env["CMUXY"]).toBe("mine");
+    expect(r.env["KITTYCAT"]).toBe("also mine");
+  });
+
+  test("a note can opt one back in: the scrub is base-layer only", () => {
+    // Driving the outer cmux over its socket from a note shell is a
+    // legitimate want; frontmatter env applies after the scrub.
+    const { deps } = fakeFs();
+    const r = resolveSpawn(
+      params({ env: { CMUX_SOCKET_PATH: "/tmp/cmux.sock" } }),
+      { ...BASE, CMUX_SOCKET_PATH: "/inherited/cmux.sock", CMUX_SURFACE_ID: "X" },
+      deps,
+      HOME,
+      PROFILES,
+    );
+    expect(r.env["CMUX_SOCKET_PATH"]).toBe("/tmp/cmux.sock");
+    expect("CMUX_SURFACE_ID" in r.env).toBe(false);
+  });
+});
+
 describe("resolveSpawn degrades, never throws", () => {
   test("a missing profile warns and spawns without it", () => {
     const { deps, warns } = fakeFs();

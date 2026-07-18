@@ -23,7 +23,12 @@ export interface Settings {
   // evicts it (bun/notes.ts purgeTrash).
   trash: { ttlDays: number };
   // Code-fence languages that get a Run button (editor/blocks.ts). Matched
-  // case-insensitively against the fence's info string.
+  // case-insensitively against the fence's info string. A user's list
+  // REPLACES this one (that is how a language is un-mapped) — and since
+  // bun/settings.ts seeds settings.json with the defaults written out in
+  // full, an existing install's file has this list frozen at seed time:
+  // adding a language to the default below does NOT reach seeded files, so
+  // announce such additions (the user adds the word to their own list).
   //
   // `interpreters` maps a fence language to the command that runs its temp
   // file (bun/runner.ts). A language with no entry is sourced into the note's
@@ -35,6 +40,28 @@ export interface Settings {
   // the bun runtime bundled with the app, so TypeScript runs without a bun on
   // PATH. User entries MERGE over these defaults (a venv python should not
   // cost you node), so to un-map a language remove it from `runnable` instead.
+  //
+  // A ```prompt fence is an agent run: the default maps it to Claude Code's
+  // print mode, with a trailing `<` so the shell feeds the block body to the
+  // CLI on stdin — values are shell text, so redirection composes, and
+  // `claude -p /tmp/file` without it would read the PATH as the prompt.
+  // Because the block runs from the note's own shell, the agent inherits the
+  // note's cwd, env, and the $LEDGE_NOTE/$LEDGE_WORKSPACE facts, so a prompt
+  // block saying "this note" resolves through the Ledge MCP server exactly
+  // as it would in the terminal drawer. `--allowedTools mcp__ledge`
+  // pre-authorizes that server's tools, because print mode is
+  // non-interactive: there is no one to answer a permission prompt, so
+  // without it a write-intent block runs to completion and then reports it
+  // was not allowed to write. Granting exactly the Ledge tools is safe by
+  // the same argument as the server's own stance — they are guarded by the
+  // registry and path asserts, and touch nothing the block's shell could not
+  // already touch. Every OTHER permission still applies. The LEDGE_PROMPT_BLOCK=1
+  // prefix marks the session as a one-shot for the same reason: nobody can
+  // answer a follow-up question either, and without being told, the model
+  // ends its reply asking one (the MCP server's initialize instructions read
+  // the marker and say "act, don't ask" — bun/mcp.ts). Expect silence until
+  // the run finishes: print mode buffers its answer. Point the entry at
+  // another stdin-reading CLI to switch agents.
   //
   // `hostInterpreters` overrides `interpreters` per target machine, for runs
   // a note's `host:` frontmatter sends elsewhere: the base map runs verbatim
@@ -67,6 +94,7 @@ export const DEFAULT_SETTINGS: Settings = Object.freeze({
       "node", "js", "javascript",
       "ts", "typescript",
       "php",
+      "prompt",
     ],
     interpreters: {
       python: "python3", python3: "python3", py: "python3",
@@ -74,6 +102,7 @@ export const DEFAULT_SETTINGS: Settings = Object.freeze({
       node: "node", js: "node", javascript: "node",
       ts: "bun", typescript: "bun",
       php: "php",
+      prompt: "LEDGE_PROMPT_BLOCK=1 claude --allowedTools mcp__ledge -p <",
     },
     hostInterpreters: {},
   },

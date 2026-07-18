@@ -60,7 +60,10 @@ describe("lifecycle", () => {
 // hoping it discovers the no-argument fallback in a tool description.
 describe("instructions", () => {
   const SAVED = new Map<string, string | undefined>(
-    ["LEDGE_NOTE", "LEDGE_WORKSPACE"].map((k) => [k, Object.hasOwn(process.env, k) ? process.env[k] : undefined]),
+    ["LEDGE_NOTE", "LEDGE_WORKSPACE", "LEDGE_PROMPT_BLOCK"].map((k) => [
+      k,
+      Object.hasOwn(process.env, k) ? process.env[k] : undefined,
+    ]),
   );
   afterEach(() => {
     for (const [k, v] of SAVED) {
@@ -98,6 +101,23 @@ describe("instructions", () => {
     const text = await initInstructions();
     expect(text).not.toContain("this session was launched from");
     expect(text).toContain("named explicitly");
+  });
+
+  test("a prompt-block run is told it is one-shot: act, don't ask", async () => {
+    // Print mode has nobody on the other end; without this the model ends
+    // with "let me know if…" aimed at a closed pipe.
+    process.env["LEDGE_NOTE"] = "/ws/current.md";
+    process.env["LEDGE_PROMPT_BLOCK"] = "1";
+    const text = await initInstructions();
+    expect(text).toContain("ONE-SHOT");
+    expect(text).toContain("cannot reply");
+  });
+
+  test("interactive sessions get no one-shot warning", async () => {
+    process.env["LEDGE_NOTE"] = "/ws/current.md";
+    delete process.env["LEDGE_PROMPT_BLOCK"];
+    const text = await initInstructions();
+    expect(text).not.toContain("ONE-SHOT");
   });
 });
 

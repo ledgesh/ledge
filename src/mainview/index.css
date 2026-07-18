@@ -572,6 +572,28 @@ body {
 .ledge-term-body {
   padding: 6px 8px;
 }
+/* Before the first byte: name the silence instead of showing a bare header
+   over an empty body. Invisible for the first beat (the animation's delay),
+   so quick commands never flash it; then a slow breathe while the run stays
+   quiet. Removed by inlineTerm.ts on the first byte or at freeze. */
+.ledge-term-waiting {
+  padding: 2px 2px 4px;
+  font-size: 11px;
+  color: var(--ed-muted);
+  opacity: 0;
+  animation: ledge-waiting-breathe 2s ease-in-out 0.45s infinite;
+  user-select: none;
+  -webkit-user-select: none;
+}
+@keyframes ledge-waiting-breathe {
+  0%,
+  100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 0.9;
+  }
+}
 .ledge-term-host {
   width: 100%;
 }

@@ -40,7 +40,11 @@ protocol is a hand-rolled JSON-RPC subset (`initialize`/`tools/*`, one
 message per line; §8's stance — the SDK earns its place if resources or
 prompts ever join), its stdout belongs to that protocol (logs go to stderr),
 and its tool set grew in deliberate tiers: reads first, then two writes
-(`create_note`, `append_note`) once the read tier proved out — both through
+(`create_note`, `append_note` — end of note, or targeted at a heading's
+section via the same fence-aware ATX grammar the `[[note#heading]]` reveal
+uses, `shared/wikilinks.ts`; either way a trailing run of ` ```prompt `
+blocks stays last — those are the note's controls, and appends land above
+them) once the read tier proved out — both through
 the store, so an agent's write gets H1-slug naming via `uniqueName` (agents
 never choose filenames) and rides `writeNote`'s `baseMtimeMs` divergence
 guard, and the running app perceives it as an ordinary external edit through
@@ -57,7 +61,14 @@ resolves there first, before the global newest-first pass — the same scoping
 the current note's own wikilinks get. The server's initialize `instructions`
 state both facts outright (this note is X, this workspace is Y), because
 that context is what actually steers an agent; tool-description hints alone
-proved not to.
+proved not to. The last agent seam is in-note: a ` ```prompt ` fence is
+runnable by default (`blocks.runnable`), mapped in `blocks.interpreters` to
+`claude -p <` — the trailing redirect feeds the block body to the agent CLI
+on stdin from the note's own shell, so the run inherits the note's cwd, env,
+and the `$LEDGE_NOTE`/`$LEDGE_WORKSPACE` facts, and closes the loop: a note
+can hold a prompt that reads and writes notes. No new machinery earned its
+keep here — it is one default entry in an existing map (the settings comment
+documents the redirect trick and how to point it at another CLI).
 
 ## 2. The trust boundary
 
@@ -359,7 +370,13 @@ host: web1 deploy@prod       # machines blocks may run on (ssh destinations / "l
 degradation like `parseSettings`); `bun/spawnParams.ts` owns what the values
 mean at spawn. Precedence is `process.env` < `envFile` < `profile` < `env`,
 with `TERM` pinned back afterwards — xterm.js is the terminal whatever a note
-claims. The split of duties across the boundary: the **view** parses the
+claims. The base layer is first scrubbed of *host-terminal identity*
+(`CMUX_*`, `GHOSTTY_*`, `ITERM_*`, `TERM_PROGRAM`, `TMUX`, …): the app
+inherits those from whatever terminal launched it, and inside a Ledge PTY
+every one is a false fact — cmux's `claude` shim, for one, keys on
+`CMUX_SURFACE_ID` to inject session hooks that then fail in sessions cmux
+never owned. Scrubbed base-layer only, so a note that wants one back can set
+it in `env:`. The split of duties across the boundary: the **view** parses the
 block (it holds the text) and sends the params over `sessionConfigure`,
 keyed by docId; **Bun** stores them per session and reads them each time one
 of that session's shells spawns — persistent, overflow, and terminal drawer

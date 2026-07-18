@@ -1,11 +1,12 @@
 // Turns a session's NoteParams (frontmatter, via sessionConfigure) into the
 // cwd and env its shells actually spawn with.
 //
-// Resolution order is the precedence contract: process.env < envFile < profile
-// < inline env, with TERM pinned back to the base afterwards — a note that
-// exports TERM would not get a different terminal, it would get a broken one
-// (xterm.js is the terminal, whatever the note claims). cwd resolves first
-// because a relative envFile resolves against it.
+// Resolution order is the precedence contract: process.env (scrubbed of
+// host-terminal identity, below) < envFile < profile < inline env, with TERM
+// pinned back to the base afterwards — a note that exports TERM would not get
+// a different terminal, it would get a broken one (xterm.js is the terminal,
+// whatever the note claims). cwd resolves first because a relative envFile
+// resolves against it.
 //
 // Every failure degrades and warns, never throws: a missing profile or a
 // deleted cwd is a note problem, and the shell must still spawn — a dead Run
@@ -28,6 +29,26 @@ import { parseDotenv } from "../shared/dotenv";
 // app sets it.
 export const PROFILES_DIR =
   process.env["LEDGE_PROFILES_DIR"] ?? join(homedir(), ".config", "ledge", "profiles");
+
+// Env vars by which terminal apps announce "your shell runs inside me". Every
+// one of them is FALSE inside a Ledge PTY: the app inherited them from
+// whatever terminal launched it (`bun run dev` in a cmux pane, say), and
+// passing them through makes note shells masquerade as panes of that
+// terminal. Not cosmetic: cmux ships a `claude` PATH shim that sees
+// CMUX_SURFACE_ID and injects session-tracking hooks, which then fail ("Hook
+// cancelled") at the end of a session cmux never owned — every prompt block
+// ran with that error appended. Same stance as the TERM pin: xterm.js is the
+// terminal here, whatever the environment claims. Scrubbed from the BASE
+// layer only, so a note that genuinely wants one (driving the outer cmux over
+// its socket, say) can put it back through env:/profile.
+const HOST_TERMINAL_PREFIXES = ["CMUX_", "GHOSTTY_", "ITERM_", "WEZTERM_", "KITTY_", "ALACRITTY_"];
+const HOST_TERMINAL_VARS = new Set(["TERM_PROGRAM", "TERM_PROGRAM_VERSION", "TERM_SESSION_ID", "TMUX", "TMUX_PANE", "STY"]);
+
+function scrubHostTerminal(env: Record<string, string>): void {
+  for (const key of Object.keys(env)) {
+    if (HOST_TERMINAL_VARS.has(key) || HOST_TERMINAL_PREFIXES.some((p) => key.startsWith(p))) delete env[key];
+  }
+}
 
 export interface SpawnDeps {
   // null for unreadable/missing — the distinction does not matter here, both
@@ -57,6 +78,7 @@ export function resolveSpawn(
 ): ResolvedSpawn {
   const cwd = resolveCwd(params?.cwd ?? null, home, deps);
   const env = { ...baseEnv };
+  scrubHostTerminal(env);
 
   if (params?.envFile) {
     // Relative to the note's cwd, so `envFile: ./.env` composes with

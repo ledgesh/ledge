@@ -39,6 +39,32 @@ test("a disk-side H1 edit relabels the tab — and only relabels: no rename, no 
   await expect(page.locator(".cm-content")).toContainText("Alpha Prime");
 });
 
+test("an agent appending to a note that ends with a running block lands BELOW the output panel", async ({ page }) => {
+  // The tier-2/3 shape: a prompt block is the last thing in the note, its run
+  // appends to the note, and the appended text must not wedge itself between
+  // the fence and its output. Two things carry this: the reload dispatches a
+  // minimal span (an insertion at the end, not a full replace), and the run
+  // anchor maps with assoc -1 so an insertion exactly at it stays below.
+  const FENCED = "# Alpha\n\n```sh\necho hi\n```\n";
+  await agentWrites(page, ALPHA, FENCED);
+  await refresh(page);
+  await expect(page.locator(".cm-content")).toContainText("echo hi");
+  // Run it: the harness PTY is inert, so the run stays live with its panel
+  // mounted under the fence.
+  await page.locator('[data-act="run"]').dispatchEvent("mousedown", { button: 0 });
+  await expect(page.locator(".ledge-output")).toBeVisible();
+
+  await agentWrites(page, ALPHA, FENCED + "\n> a joke from the agent\n");
+  await refresh(page);
+  const appended = page.locator(".cm-line", { hasText: "a joke from the agent" });
+  await expect(appended).toBeVisible();
+  const [panel, text] = await Promise.all([
+    page.locator(".ledge-output").boundingBox(),
+    appended.boundingBox(),
+  ]);
+  expect(panel!.y).toBeLessThan(text!.y);
+});
+
 test("a dirty editor holds its ground; the displaced disk version lands in the trash, not oblivion", async ({ page }) => {
   await page.locator(".cm-content").click();
   await page.keyboard.press("End");

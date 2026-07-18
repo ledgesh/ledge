@@ -82,7 +82,11 @@ const runsField = StateField.define<RunInfo[]>({
       next = next.map((r) => ({
         ...r,
         from: tr.changes.mapPos(r.from, -1),
-        pos: tr.changes.mapPos(r.pos, 1),
+        // assoc -1, same as `from`: text inserted exactly at the anchor — an
+        // agent appending to a note that ENDS with this block puts it right
+        // here — must land BELOW the output panel, not push the panel down
+        // past itself. The panel hugs its fence; what arrives after follows.
+        pos: tr.changes.mapPos(r.pos, -1),
       }));
     }
     for (const e of tr.effects) {

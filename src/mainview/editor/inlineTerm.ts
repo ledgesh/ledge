@@ -50,6 +50,7 @@ export interface InlineTermOptions {
 export class InlineTerm {
   readonly wrap: HTMLDivElement;
   private readonly body: HTMLDivElement;
+  private readonly waiting: HTMLDivElement;
   private readonly host: HTMLDivElement;
   private readonly header: HTMLDivElement;
   private readonly dot: HTMLSpanElement;
@@ -98,6 +99,15 @@ export class InlineTerm {
 
     this.body = document.createElement("div");
     this.body.className = "ledge-term-body";
+    // Until the first byte arrives the panel is a header over nothing, which
+    // reads as a hang — and some runs are honestly silent for a long time
+    // (`claude -p` says nothing until it is done). Name the state instead.
+    // CSS keeps this invisible for the first beat, so quick commands never
+    // flash it; removed on the first byte (write) or at freeze.
+    this.waiting = document.createElement("div");
+    this.waiting.className = "ledge-term-waiting";
+    this.waiting.textContent = "running — no output yet";
+    this.body.appendChild(this.waiting);
     this.host = document.createElement("div");
     this.host.className = "ledge-term-host";
     this.host.style.display = "none"; // revealed on first output
@@ -192,6 +202,7 @@ export class InlineTerm {
     if (this.disposed) return;
     if (!this.shown) {
       this.shown = true;
+      this.waiting.remove();
       this.host.style.display = "block";
       this.refit();
       this.opts.onHeightChange?.();
@@ -222,6 +233,10 @@ export class InlineTerm {
   freeze(): void {
     if (this.disposed) return;
     this.live = false;
+    // A run that finished without a byte keeps its header ("Done") and drops
+    // the placeholder: "no output yet" would be a lie, and "no output" is
+    // what a collapsed body already says.
+    this.waiting.remove();
     // The full-screen program that claimed the grid has exited with the block, and
     // its screen went with it, so the pin has nothing left to protect. Cleared here
     // or freeze's shrink would be undone by the next re-fit.
