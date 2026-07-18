@@ -35,7 +35,7 @@ function fakeBridge() {
   const creates: string[] = [];
   const createFolders: string[] = [];
   const retitles: Array<{ path: string; text: string }> = [];
-  const configures: Array<{ sessionId: string; params: NoteParams }> = [];
+  const configures: Array<{ sessionId: string; params: NoteParams; notePath: string | null }> = [];
   let created = 0;
   const state = {
     writes,
@@ -104,8 +104,8 @@ function fakeBridge() {
     restore: async (path: string) => ({ path, title: "", mtimeMs: 0 }),
     removeTrashed: async () => true,
     empty: async () => 0,
-    configureSession: (sessionId, params) => {
-      configures.push({ sessionId, params });
+    configureSession: (sessionId, params, notePath) => {
+      configures.push({ sessionId, params, notePath });
     },
   });
 
@@ -680,20 +680,27 @@ describe("params syncing", () => {
     bind("doc-1", "/notes/api-tests.md", noop());
     seedSlug("doc-1", withFm("cwd: /tmp/proj\nprofile: petstore\n"));
 
-    expect(fs.configures).toHaveLength(1);
-    expect(fs.configures[0].sessionId).toBe("doc-1");
-    expect(fs.configures[0].params.cwd).toBe("/tmp/proj");
-    expect(fs.configures[0].params.profile).toBe("petstore");
+    // Two sends: the bind announces the note's location, the seed its params.
+    expect(fs.configures).toHaveLength(2);
+    expect(fs.configures[1].sessionId).toBe("doc-1");
+    expect(fs.configures[1].params.cwd).toBe("/tmp/proj");
+    expect(fs.configures[1].params.profile).toBe("petstore");
+    expect(fs.configures[1].notePath).toBe("/notes/api-tests.md");
   });
 
-  test("a note with no frontmatter sends nothing, on load or on save", async () => {
+  test("a note with no frontmatter announces its location once, then nothing", async () => {
+    // The pre-facts economy was "no frontmatter, no send"; the location fact
+    // deliberately amends it to one send per on-disk note — a shell must not
+    // be born ignorant of LEDGE_NOTE just because the note has no params.
     const fs = fakeBridge();
     bind("doc-1", "/notes/plain.md", noop());
     seedSlug("doc-1", "# Plain\n\nbody\n");
 
     noteChanged("doc-1", "# Plain\n\nmore body\n");
     await saveNow("doc-1");
-    expect(fs.configures).toEqual([]);
+    expect(fs.configures).toHaveLength(1);
+    expect(fs.configures[0].notePath).toBe("/notes/plain.md");
+    expect(fs.configures[0].params.env).toEqual({});
   });
 
   test("a body edit does not re-send unchanged params", async () => {
@@ -703,7 +710,7 @@ describe("params syncing", () => {
 
     noteChanged("doc-1", withFm("cwd: /tmp/proj\n", "# Note\n\nedited body\n"));
     await saveNow("doc-1");
-    expect(fs.configures).toHaveLength(1); // the seed, nothing since
+    expect(fs.configures).toHaveLength(2); // bind + seed, nothing since
   });
 
   test("editing the frontmatter sends the new params on save", async () => {
@@ -713,9 +720,9 @@ describe("params syncing", () => {
 
     noteChanged("doc-1", withFm("cwd: /tmp/new\nenv:\n  A: 1\n"));
     await saveNow("doc-1");
-    expect(fs.configures).toHaveLength(2);
-    expect(fs.configures[1].params.cwd).toBe("/tmp/new");
-    expect(fs.configures[1].params.env).toEqual({ A: "1" });
+    expect(fs.configures).toHaveLength(3);
+    expect(fs.configures[2].params.cwd).toBe("/tmp/new");
+    expect(fs.configures[2].params.env).toEqual({ A: "1" });
   });
 
   test("typing frontmatter into a new note sends params with its first save", async () => {
@@ -726,6 +733,25 @@ describe("params syncing", () => {
     await saveNow("doc-1");
     expect(fs.configures).toHaveLength(1);
     expect(fs.configures[0].params.profile).toBe("petstore");
+    // The first save allocated the file, and the fact rode the same send.
+    expect(fs.configures[0].notePath).toBe("/notes/untitled-1.md");
+  });
+
+  test("an unsaved note sends no location: LEDGE_NOTE must not name a file that is not there", () => {
+    const fs = fakeBridge();
+    bind("doc-1", null, noop());
+    expect(fs.configures).toEqual([]);
+  });
+
+  test("a rename re-sends the location fact: the next shell knows where the note IS", async () => {
+    const fs = fakeBridge();
+    bind("doc-1", "/notes/old-name.md", noop());
+    seedSlug("doc-1", "# Old Name\n\nbody\n");
+
+    noteChanged("doc-1", "# New Name\n\nbody\n");
+    await saveNow("doc-1");
+    const last = fs.configures[fs.configures.length - 1];
+    expect(last.notePath).toBe("/notes/new-name.md");
   });
 
   test("deleting the frontmatter sends empty params: back to the defaults", async () => {
@@ -735,8 +761,8 @@ describe("params syncing", () => {
 
     noteChanged("doc-1", "# Note\n\nbody\n");
     await saveNow("doc-1");
-    expect(fs.configures).toHaveLength(2);
-    expect(fs.configures[1].params).toEqual({ cwd: null, profile: null, envFile: null, env: {}, hosts: [] });
+    expect(fs.configures).toHaveLength(3);
+    expect(fs.configures[2].params).toEqual({ cwd: null, profile: null, envFile: null, env: {}, hosts: [] });
   });
 
   test("a comment-only frontmatter change re-sends nothing", async () => {
@@ -747,7 +773,7 @@ describe("params syncing", () => {
 
     noteChanged("doc-1", withFm("# the dev checkout\ncwd: /tmp/proj\n"));
     await saveNow("doc-1");
-    expect(fs.configures).toHaveLength(1);
+    expect(fs.configures).toHaveLength(2); // bind + seed
   });
 });
 
@@ -769,16 +795,16 @@ describe("workspace default cwd", () => {
     expect(fs.configures[0]).toEqual({
       sessionId: "doc-1",
       params: { cwd: FOLDER, profile: null, envFile: null, env: {}, hosts: [] },
+      notePath: null,
     });
   });
 
-  test("a managed workspace keeps the old economy: nothing sent, ever", async () => {
+  test("a managed workspace's pathless note keeps the old economy: nothing sent", () => {
+    // Only a PATHLESS note now: an on-disk note always announces its
+    // location once (see "announces its location once" above).
     const fs = fakeBridge();
     recordWorkspaceKinds([{ root: FOLDER, kind: "managed", available: true }]);
-    bind("doc-1", "/notes/plain.md", noop());
-    seedSlug("doc-1", "# Plain\n\nbody\n");
-    noteChanged("doc-1", "# Plain\n\nmore\n");
-    await saveNow("doc-1");
+    bind("doc-1", null, noop());
     expect(fs.configures).toEqual([]);
   });
 

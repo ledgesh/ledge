@@ -50,13 +50,37 @@ async function notesIn(workspace: unknown): Promise<Located[]> {
 }
 
 // The note a {title, path, workspace} triple names, with its text in hand.
-// Exactly one of title/path must be given; title resolves across every
-// workspace unless one is named, path just has to pass the guards.
+// Title resolves across every workspace unless one is named; path just has
+// to pass the guards. NO arguments at all falls back to $LEDGE_NOTE — the
+// deixis chain: Ledge stamps the variable into every note shell's spawn
+// (bun/index.ts sessionFacts), the agent CLI launched there inherits it, and
+// so does this server, spawned by the agent. "The note I am sitting in"
+// then needs no argument. The env names a path, so it can go stale if the
+// note renames itself after the shell spawned — the error says so, because
+// the fix (address it by title) is not guessable from "not found".
 async function locate(args: Record<string, unknown>): Promise<Located & { text: string }> {
-  const { title, path } = args;
-  if (typeof path === "string" && path !== "") {
+  const { title } = args;
+  let path = typeof args["path"] === "string" && args["path"] !== "" ? (args["path"] as string) : null;
+  let fromEnv = false;
+  if (path === null && !(typeof title === "string" && title.trim() !== "")) {
+    const env = process.env["LEDGE_NOTE"];
+    if (!env) {
+      throw new Error(
+        "give a title or a path — or call from a shell in a Ledge note's terminal, where LEDGE_NOTE names the current note and no argument is needed",
+      );
+    }
+    path = env;
+    fromEnv = true;
+  }
+  if (path !== null) {
     const file = await readNote(path); // throws for anything outside a registered root
-    if (file === null) throw new Error(`no note at ${path} — it may have been renamed; try its title, or list_notes`);
+    if (file === null) {
+      throw new Error(
+        fromEnv
+          ? `LEDGE_NOTE names ${path}, which is gone — the note was likely renamed after its terminal opened; address it by title (list_notes shows them)`
+          : `no note at ${path} — it may have been renamed; try its title, or list_notes`,
+      );
+    }
     const p = resolve(path);
     return {
       path: p,
@@ -92,6 +116,9 @@ const TITLE_OR_PATH_PROPS = {
   workspace: { type: "string", description: "Restrict title resolution to one workspace root." },
 } as const;
 
+const CURRENT_NOTE_HINT =
+  " With NO arguments, targets the current note — the one whose terminal this session was launched from (Ledge sets LEDGE_NOTE in every note's shells).";
+
 export const ledgeTools: McpTool[] = [
   {
     name: "list_workspaces",
@@ -121,7 +148,8 @@ export const ledgeTools: McpTool[] = [
   {
     name: "read_note",
     description:
-      "Read a note's full Markdown text. Address it by title (preferred — titles survive renames) or by a path from another tool's result.",
+      "Read a note's full Markdown text. Address it by title (preferred — titles survive renames) or by a path from another tool's result." +
+      CURRENT_NOTE_HINT,
     inputSchema: { type: "object", properties: TITLE_OR_PATH_PROPS, additionalProperties: false },
     handler: async (args) => {
       await loadWorkspaces();
@@ -173,7 +201,8 @@ export const ledgeTools: McpTool[] = [
   {
     name: "backlinks",
     description:
-      "Find the notes whose [[wikilinks]] point at a given note. The target may be named by title or path; links resolve within the target's own workspace, the same way the editor resolves them.",
+      "Find the notes whose [[wikilinks]] point at a given note. The target may be named by title or path; links resolve within the target's own workspace, the same way the editor resolves them." +
+      CURRENT_NOTE_HINT,
     inputSchema: { type: "object", properties: TITLE_OR_PATH_PROPS, additionalProperties: false },
     handler: async (args) => {
       await loadWorkspaces();

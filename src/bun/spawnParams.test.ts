@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { resolveSpawn, type SpawnDeps } from "./spawnParams";
+import { resolveSpawn, stampSessionFacts, type SpawnDeps } from "./spawnParams";
 import type { NoteParams } from "../shared/frontmatter";
 
 const HOME = "/home/u";
@@ -156,5 +156,32 @@ describe("resolveSpawn degrades, never throws", () => {
     const r = resolveSpawn(params({ profile: "p" }), BASE, deps, HOME, PROFILES);
     expect(r.env["GOOD"]).toBe("1");
     expect(warns.length).toBe(1);
+  });
+});
+
+describe("stampSessionFacts", () => {
+  const facts = { note: "/ws/plan.md", workspace: "/ws" };
+
+  test("stamps both variables when the session has a note file", () => {
+    const env: Record<string, string> = { PATH: "/usr/bin" };
+    stampSessionFacts(env, facts);
+    expect(env["LEDGE_NOTE"]).toBe("/ws/plan.md");
+    expect(env["LEDGE_WORKSPACE"]).toBe("/ws");
+  });
+
+  test("the names are Ledge's: a user layer that set them is overridden", () => {
+    // resolveSpawn merged frontmatter/profile/envFile first; the stamp runs
+    // after, so a note cannot claim to be a different note.
+    const env: Record<string, string> = { LEDGE_NOTE: "/etc/passwd", LEDGE_WORKSPACE: "/" };
+    stampSessionFacts(env, facts);
+    expect(env["LEDGE_NOTE"]).toBe("/ws/plan.md");
+    expect(env["LEDGE_WORKSPACE"]).toBe("/ws");
+  });
+
+  test("no facts scrubs the names — an unsaved note reads as no note, not as its frontmatter's claim", () => {
+    const env: Record<string, string> = { LEDGE_NOTE: "/etc/passwd", LEDGE_WORKSPACE: "/" };
+    stampSessionFacts(env, null);
+    expect("LEDGE_NOTE" in env).toBe(false);
+    expect("LEDGE_WORKSPACE" in env).toBe(false);
   });
 });

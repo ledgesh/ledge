@@ -2,7 +2,7 @@
 // reply, what gets an error, and how tool results and failures are framed.
 // The real tools run against a real filesystem in mcpTools.fs.test.ts; the
 // spawned-process seam (stdio framing end to end) is mcp.stdio.fs.test.ts.
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { createDispatcher, type McpTool } from "./mcp";
 
 const echo: McpTool = {
@@ -52,6 +52,37 @@ describe("lifecycle", () => {
 
   test("ping pongs", async () => {
     expect((await send(req(7, "ping")))?.["result"]).toEqual({});
+  });
+});
+
+// The initialize instructions are the deixis lever: launched from a note's
+// terminal, the server TELLS the agent which note "this note" is, instead of
+// hoping it discovers the no-argument fallback in a tool description.
+describe("instructions", () => {
+  const HAD = Object.hasOwn(process.env, "LEDGE_NOTE");
+  const OLD = process.env["LEDGE_NOTE"];
+  afterEach(() => {
+    if (HAD) process.env["LEDGE_NOTE"] = OLD;
+    else delete process.env["LEDGE_NOTE"];
+  });
+
+  async function initInstructions(): Promise<string> {
+    const res = await send(req(1, "initialize", { protocolVersion: "2025-06-18" }));
+    return (res?.["result"] as Record<string, unknown>)["instructions"] as string;
+  }
+
+  test("launched from a note's terminal, they name the note outright", async () => {
+    process.env["LEDGE_NOTE"] = "/ws/current.md";
+    const text = await initInstructions();
+    expect(text).toContain("/ws/current.md");
+    expect(text).toContain("NO arguments");
+  });
+
+  test("launched anywhere else, they say notes must be named", async () => {
+    delete process.env["LEDGE_NOTE"];
+    const text = await initInstructions();
+    expect(text).not.toContain("this session was launched from");
+    expect(text).toContain("named explicitly");
   });
 });
 

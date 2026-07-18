@@ -35,6 +35,27 @@ export interface McpTool {
 const PROTOCOL_VERSIONS = new Set(["2024-11-05", "2025-03-26", "2025-06-18"]);
 const LATEST_PROTOCOL = "2025-06-18";
 
+// What the client folds into the agent's context at connect time. This is
+// the deixis lever the per-tool descriptions cannot be: a tool description
+// is reference material the model may or may not consult, while initialize
+// instructions sit in its working context — and the server KNOWS at startup
+// whether it was spawned from inside a note's terminal ($LEDGE_NOTE,
+// architecture.md §2), so "this note" can be resolved by name up front
+// instead of hoping the model discovers the no-argument fallback.
+// Read at initialize, not module load: the env cannot change mid-process,
+// but tests exercise both shapes through one dispatcher.
+function instructions(): string {
+  const note = process.env["LEDGE_NOTE"];
+  const here = note
+    ? `This session was launched from inside the Ledge note at ${note}. When the user says "this note" or "the current note", they mean that one: call read_note with NO arguments to fetch it (backlinks with no arguments targets it too).`
+    : `When an agent runs inside a Ledge note's terminal, $LEDGE_NOTE names that note and read_note with no arguments reads it; this session was not launched from one, so notes must be named explicitly.`;
+  return (
+    "Ledge is the user's local Markdown notes app; these tools read their notes. " +
+    "Notes are addressed by TITLE (their H1, case-insensitive) — titles survive file renames, paths may not. " +
+    here
+  );
+}
+
 const PARSE_ERROR = -32700;
 const INVALID_REQUEST = -32600;
 const METHOD_NOT_FOUND = -32601;
@@ -89,6 +110,7 @@ export function createDispatcher(tools: readonly McpTool[]): (line: string) => P
           protocolVersion: typeof asked === "string" && PROTOCOL_VERSIONS.has(asked) ? asked : LATEST_PROTOCOL,
           capabilities: { tools: {} },
           serverInfo: { name: "ledge", version: "0.0.1" },
+          instructions: instructions(),
         });
       }
       case "ping":

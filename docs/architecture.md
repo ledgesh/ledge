@@ -43,7 +43,11 @@ and its tool set is deliberately READ-ONLY for now: write tools are a
 separate, later decision, sequenced behind the external-edit safety work that
 makes agent writes survivable at all. Title-addressed reads reuse
 `shared/wikilinks.ts` — the same resolution the editor uses, hoisted to
-shared/ for exactly this second consumer.
+shared/ for exactly this second consumer. Called with no target at all,
+`read_note`/`backlinks` fall back to `$LEDGE_NOTE` — the note whose terminal
+the agent was launched from, stamped into every note shell's spawn (§2) and
+inherited down the agent → server process chain — so "the note I am sitting
+in" needs no argument.
 
 ## 2. The trust boundary
 
@@ -101,6 +105,16 @@ Bun therefore validates everything and derives anything derivable:
   one value that becomes a filename — the profile name — is re-validated
   Bun-side with the same predicate the parser used (`isProfileName`), because
   the parser's check is a typo message and only Bun's is a guard.
+  `sessionConfigure` also carries one FACT beside the frontmatter params: the
+  note's own path (`notePath`), which Bun admits only after proving it is a
+  `.md` inside a registered root, then stamps into local spawns as
+  `LEDGE_NOTE`/`LEDGE_WORKSPACE` — *after* every user env layer, the TERM
+  move, so no frontmatter (or profile, or envFile) can forge where a shell
+  claims to live, and a session with no admitted fact gets the names scrubbed
+  rather than whatever a layer smuggled in. This is the deixis agents ride:
+  a CLI launched in a note's terminal inherits `LEDGE_NOTE`, and the MCP
+  server's `read_note`/`backlinks` default to it when called with no
+  arguments.
 
 ## 3. Filesystem invariants
 

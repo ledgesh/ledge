@@ -87,6 +87,33 @@ export function resolveSpawn(
   return { cwd, env };
 }
 
+/** Where a session's note lives, as validated facts: the note's own file and
+ * the workspace root containing it. Derived and checked Bun-side (index.ts,
+ * against the registry) — never taken from frontmatter. */
+export interface SessionFacts {
+  note: string;
+  workspace: string;
+}
+
+// Stamp the session's location into a spawn env as LEDGE_NOTE and
+// LEDGE_WORKSPACE — the deixis an agent in the note's shells needs to answer
+// "the note I am sitting in" (the MCP server's read_note defaults to
+// LEDGE_NOTE when called with no arguments).
+//
+// Applied AFTER every user layer, the same move as the TERM pin and for the
+// same reason: these names are Ledge's, never the note's. A frontmatter (or
+// profile, or envFile) that sets them is overridden when the facts exist and
+// scrubbed when they do not — an unsaved note must read as "no note file",
+// not as whatever its frontmatter claims.
+export function stampSessionFacts(env: Record<string, string>, facts: SessionFacts | null): void {
+  delete env["LEDGE_NOTE"];
+  delete env["LEDGE_WORKSPACE"];
+  if (facts) {
+    env["LEDGE_NOTE"] = facts.note;
+    env["LEDGE_WORKSPACE"] = facts.workspace;
+  }
+}
+
 function expandTilde(path: string, home: string): string {
   if (path === "~") return home;
   if (path.startsWith("~/")) return join(home, path.slice(2));

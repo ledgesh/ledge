@@ -10,6 +10,7 @@
 // leaks into another. All of them talk to the view over typed RPC.
 import { BrowserView, BrowserWindow, Updater, Utils } from "electrobun/bun";
 import { homedir } from "node:os";
+import { resolve } from "node:path";
 import { PtyProcess } from "./pty";
 import { InlinePool, type InlineEvent } from "./inlinePool";
 import { readProfile, writeProfile } from "./profiles";
@@ -37,6 +38,7 @@ import {
   kindOf,
   listWorkspaceRoots,
   loadWorkspaces,
+  rootContaining,
 } from "./workspaces";
 import { readLayout, writeLayout } from "./layout";
 import { syncWatchers } from "./watch";
@@ -44,7 +46,7 @@ import { pasteImageAsset, readAsset } from "./assets";
 import { interpretersFor, runnerFor } from "./runner";
 import { loadSettings, openSettingsFile } from "./settings";
 import { openableUrl } from "../shared/links";
-import { resolveSpawn, type SpawnDeps } from "./spawnParams";
+import { resolveSpawn, stampSessionFacts, type SessionFacts, type SpawnDeps } from "./spawnParams";
 import { buildRemoteSpawn } from "./remoteSpawn";
 import { readFileSync, statSync } from "node:fs";
 import type { LedgeRPC } from "../shared/rpc-schema";
@@ -91,6 +93,14 @@ const shellEnv = { ...process.env, TERM: "xterm-256color" } as Record<string, st
 // Cleared with the session in closeSession: the params describe a live tab,
 // not a note file, so they share its lifetime exactly.
 const sessionParams = new Map<string, NoteParams>();
+
+// The session's validated location facts (spawnParams.ts stampSessionFacts).
+// Kept beside sessionParams, not inside it: params are what the NOTE said,
+// this is what LEDGE knows — sessionConfigure's notePath is only admitted
+// here once it proves to be a real .md inside a registered root, the same
+// re-validation move as the profile name and for the same reason (the view's
+// path was honest when it sent it; this check is what makes it a fact).
+const sessionFacts = new Map<string, SessionFacts>();
 
 // The real filesystem behind resolveSpawn (its tests inject a fake one).
 const spawnDeps: SpawnDeps = {
@@ -156,6 +166,8 @@ function spawnShell(sessionId: string, host: string, kind: "inline" | "terminal"
     return new PtyProcess({ executable: remote.executable, args: remote.args, env: shellEnv, cwd: homedir() });
   }
   const { cwd, env } = resolveSpawn(sessionParams.get(sessionId), shellEnv, spawnDeps);
+  // Local spawns only: on a remote host the note's local path names nothing.
+  stampSessionFacts(env, sessionFacts.get(sessionId) ?? null);
   return new PtyProcess({
     executable: settings.shell.path,
     args: settings.shell.args,
@@ -286,6 +298,7 @@ function closeSession(sessionId: string): void {
   terms.get(sessionId)?.term.close();
   terms.delete(sessionId);
   sessionParams.delete(sessionId);
+  sessionFacts.delete(sessionId);
 }
 
 const rpc = BrowserView.defineRPC<LedgeRPC>({
@@ -463,10 +476,13 @@ const rpc = BrowserView.defineRPC<LedgeRPC>({
         closeSession(sessionId);
         return { ok: true };
       },
-      sessionConfigure: ({ sessionId, params }) => {
+      sessionConfigure: ({ sessionId, params, notePath }) => {
         // Stored, not applied: spawnShell reads this when the session's next
         // shell starts. Values go nowhere but that spawn (see rpc-schema).
         sessionParams.set(sessionId, params);
+        const root = notePath !== null && /\.md$/i.test(notePath) ? rootContaining(notePath) : null;
+        if (root) sessionFacts.set(sessionId, { note: resolve(notePath!), workspace: root });
+        else sessionFacts.delete(sessionId);
         return { ok: true };
       },
       sessionRestart: ({ sessionId }) => {

@@ -109,8 +109,8 @@ configureNotes({
   restore: (path) => electrobun.rpc!.request.trashRestore({ path }).then((r) => r.note),
   removeTrashed: (path) => electrobun.rpc!.request.trashDelete({ path }).then((r) => r.removed),
   empty: (folder) => electrobun.rpc!.request.trashEmpty({ root: folder }).then((r) => r.removed),
-  configureSession: (sessionId, params) => {
-    void electrobun.rpc!.request.sessionConfigure({ sessionId, params });
+  configureSession: (sessionId, params, notePath) => {
+    void electrobun.rpc!.request.sessionConfigure({ sessionId, params, notePath });
   },
 });
 

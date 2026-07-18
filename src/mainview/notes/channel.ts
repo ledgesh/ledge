@@ -36,7 +36,7 @@ interface NoteHandlers {
   empty: (folder: string) => Promise<number>;
   // Fire-and-forget, not a Promise: the store sends params on the save path
   // and nothing there can act on an acknowledgement.
-  configureSession: (sessionId: string, params: NoteParams) => void;
+  configureSession: (sessionId: string, params: NoteParams, notePath: string | null) => void;
 }
 
 let handlers: NoteHandlers | null = null;
@@ -113,8 +113,8 @@ export function emptyTrash(folder: string): Promise<number> {
 // tab's docId — the same key its shells live under. It rides the note-store
 // channel rather than the terminal one because the sender is notes/store.ts:
 // the save path is the one place that sees every text change.
-export function configureSession(sessionId: string, params: NoteParams): void {
-  bridge().configureSession(sessionId, params);
+export function configureSession(sessionId: string, params: NoteParams, notePath: string | null): void {
+  bridge().configureSession(sessionId, params, notePath);
 }
 
 // --- external changes --------------------------------------------------------

@@ -250,7 +250,15 @@ export type LedgeRPC = {
       // are deliberately not opaque handles (architecture.md §2): they flow
       // only into the user's own shell's spawn, which grants the view nothing
       // that runBlock — arbitrary code in that same shell — does not already.
-      sessionConfigure: { params: { sessionId: string; params: NoteParams }; response: { ok: boolean } };
+      // `notePath` rides alongside the frontmatter params but is a FACT, not a
+      // setting: the file this session's note lives at (null before its first
+      // save), re-sent when the file moves. Bun re-validates it against the
+      // registry and stamps it into local spawns as LEDGE_NOTE (plus the
+      // containing root as LEDGE_WORKSPACE), pinned after every user env
+      // layer — so an agent in the note's own shells can answer "the note I
+      // am sitting in" (the MCP server's read_note defaults to it), and no
+      // frontmatter can forge it.
+      sessionConfigure: { params: { sessionId: string; params: NoteParams; notePath: string | null }; response: { ok: boolean } };
       // Kill all of a note's shells so the next run / terminal attach spawns
       // fresh ones — the escape hatch for restart-applies params: edit the
       // frontmatter, restart, and the new cwd/env are live. Unlike

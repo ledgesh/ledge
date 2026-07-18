@@ -6,7 +6,7 @@
 //
 // Same scratch-home discipline as notes.fs.test.ts: the preload pointed
 // APP_HOME at a temp dir before anything imported, and the guard re-checks.
-import { beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
@@ -120,8 +120,52 @@ describe("read_note", () => {
     expect(call("read_note", { path: join(ROOT, "settings.json") })).rejects.toThrow("not a note path");
   });
 
-  test("neither title nor path is an error, not a guess", async () => {
-    expect(call("read_note", {})).rejects.toThrow("give either a title or a path");
+});
+
+// The no-argument default: "the note I am sitting in". Ledge stamps
+// LEDGE_NOTE into every note shell's spawn; the agent CLI inherits it and so
+// does this server, spawned by the agent. These tests drive the same fallback
+// through the server's own process env — saved and restored around each, so
+// the suite behaves the same however it was launched.
+describe("the current-note default (LEDGE_NOTE)", () => {
+  const HAD = Object.hasOwn(process.env, "LEDGE_NOTE");
+  const OLD = process.env["LEDGE_NOTE"];
+  afterEach(() => {
+    if (HAD) process.env["LEDGE_NOTE"] = OLD;
+    else delete process.env["LEDGE_NOTE"];
+  });
+
+  test("no arguments reads the note the terminal belongs to", async () => {
+    const n = await createNote(ROOT, "# Current\n\nright here");
+    process.env["LEDGE_NOTE"] = n.path;
+    const out = await call("read_note", {});
+    expect(out.path).toBe(n.path);
+    expect(out.text).toContain("right here");
+  });
+
+  test("backlinks with no arguments targets the current note too", async () => {
+    const n = await createNote(ROOT, "# Current\n");
+    await createNote(ROOT, "# Pointer\n[[Current]]");
+    process.env["LEDGE_NOTE"] = n.path;
+    const out = await call("backlinks", {});
+    expect(out.backlinks.map((b: { title: string }) => b.title)).toEqual(["Pointer"]);
+  });
+
+  test("explicit arguments beat the environment", async () => {
+    const cur = await createNote(ROOT, "# Current\n");
+    await createNote(ROOT, "# Other\nelsewhere");
+    process.env["LEDGE_NOTE"] = cur.path;
+    expect((await call("read_note", { title: "Other" })).text).toContain("elsewhere");
+  });
+
+  test("a stale LEDGE_NOTE (the note renamed itself) says to use the title", async () => {
+    process.env["LEDGE_NOTE"] = join(ROOT, "moved-on.md");
+    expect(call("read_note", {})).rejects.toThrow("address it by title");
+  });
+
+  test("outside any note terminal, no arguments is an error that says where the default comes from", async () => {
+    delete process.env["LEDGE_NOTE"];
+    expect(call("read_note", {})).rejects.toThrow("LEDGE_NOTE");
   });
 });
 

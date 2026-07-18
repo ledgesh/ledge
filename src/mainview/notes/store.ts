@@ -76,9 +76,10 @@ export interface DocHandlers {
 
 const docs = new Map<string, Entry>();
 
-// What "no frontmatter" serializes to, so entries can start there (see
-// Entry.lastParamsKey).
-const EMPTY_PARAMS_KEY = JSON.stringify(parseFrontmatter("").params);
+// What "nothing yet" serializes to, so entries can start there (see
+// Entry.lastParamsKey): no frontmatter, no file. A pathless bind in a
+// defaultless workspace lands exactly here and sends nothing.
+const EMPTY_PARAMS_KEY = JSON.stringify({ params: parseFrontmatter("").params, notePath: null });
 
 // Send the note's spawn params to Bun if its frontmatter now parses to
 // something different. Comparison is on the parsed params, not the block's
@@ -94,11 +95,17 @@ const EMPTY_PARAMS_KEY = JSON.stringify(parseFrontmatter("").params);
 function syncParams(e: Entry, text: string): void {
   const { params } = parseFrontmatter(text);
   if (params.cwd === null) params.cwd = workspaceDefaultCwd(e.folder);
-  const key = JSON.stringify(params);
+  // The note's path rides along as a FACT (rpc-schema: Bun stamps it into
+  // spawn env as LEDGE_NOTE after validating it). Folding it into the change
+  // key means a path change — first save, rename — re-sends on its own, so
+  // the fact tracks the file without any parallel bookkeeping. This does cost
+  // every on-disk note one send at bind (its location is never "empty"): an
+  // extra send is harmless, a missed one is a shell born not knowing its note.
+  const key = JSON.stringify({ params, notePath: e.path });
   if (key === e.lastParamsKey) return;
   e.lastParamsKey = key;
   try {
-    configureSession(e.docId, params);
+    configureSession(e.docId, params, e.path);
   } catch {
     // No bridge (a store driven in unit tests). Params are advisory — they
     // must never be what breaks seeding or saving.
@@ -132,11 +139,12 @@ export function bindDoc(docId: string, path: string | null, folder: string, hand
     handlers,
   };
   docs.set(docId, entry);
-  // The workspace default cwd must reach Bun even for a note that is never
-  // edited or even loaded (a fresh tab whose first act is a Run click), so
-  // send the empty text's params now. In a defaultless workspace this merges
-  // to exactly EMPTY_PARAMS_KEY and sends nothing — the pre-workspace
-  // behavior. seedSlug re-syncs with the real text once a load lands.
+  // The workspace default cwd — and, for a note that already has a file, its
+  // location fact — must reach Bun even for a note that is never edited or
+  // even loaded (a fresh tab whose first act is a Run click), so send the
+  // empty text's params now. A pathless bind in a defaultless workspace
+  // still merges to exactly EMPTY_PARAMS_KEY and sends nothing. seedSlug
+  // re-syncs with the real text once a load lands.
   syncParams(entry, "");
 }
 
@@ -165,7 +173,7 @@ export function folderOf(docId: string): string | null {
 // view-side record of the note's params that exists outside the editor.
 export function paramsOf(docId: string): NoteParams | null {
   const e = docs.get(docId);
-  return e ? (JSON.parse(e.lastParamsKey) as NoteParams) : null;
+  return e ? (JSON.parse(e.lastParamsKey) as { params: NoteParams }).params : null;
 }
 
 // Record the heading a note already has on disk, without renaming anything. Called
@@ -304,6 +312,11 @@ async function syncTitle(e: Entry, text: string): Promise<void> {
   if (note.path === prev) return; // already correctly named
   e.path = note.path;
   e.handlers.onFile(note, prev);
+  // The file moved, so the session's location fact must follow: the note's
+  // NEXT shell should be born knowing where the note is, not where it was.
+  // (A shell already running keeps its stale LEDGE_NOTE — restart-applies,
+  // like every spawn param; title addressing is the rename-proof spine.)
+  syncParams(e, text);
 }
 
 // Save now, skipping the debounce, and resolve once the note is on disk. Cmd+S
