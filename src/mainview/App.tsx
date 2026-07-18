@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { PanelLeft, PanelRight, TerminalSquare, X } from "lucide-react";
+import { Link2, PanelLeft, TableOfContents, TerminalSquare, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ResizeHandle } from "@/components/ResizeHandle";
 import { TerminalDrawer } from "@/terminal/TerminalDrawer";
@@ -7,6 +7,7 @@ import { configureBridge, requestHostPick, type HostPickRequest } from "@/editor
 import { sendTerminalPaste, closeSession, onTerminalExit, terminalStatus } from "@/terminal/channel";
 import { Sidebar } from "@/workspace/Sidebar";
 import { BacklinksPanel } from "@/workspace/BacklinksPanel";
+import { OutlinePanel } from "@/workspace/OutlinePanel";
 import { WorkspaceView } from "@/workspace/WorkspaceView";
 import { HostPicker } from "@/components/HostPicker";
 import { LOCAL_HOST } from "../shared/frontmatter";
@@ -51,10 +52,13 @@ function Shell() {
   const [termHeight, setTermHeight] = useState(280);
   const [sidebarWidth, setSidebarWidth] = useState(224);
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  // The right-hand Backlinks panel: closed by default (it earns its width per
-  // session), sized within the sidebar's own bounds — the two are mirrors.
-  const [backlinksOpen, setBacklinksOpen] = useState(false);
-  const [backlinksWidth, setBacklinksWidth] = useState(260);
+  // The right-hand panel: one slot, two faces (Backlinks, Outline) — the
+  // toggles are radio-with-off, opening one closes the other. Closed by
+  // default (it earns its width per session), sized within the sidebar's own
+  // bounds — the two sides are mirrors. The width is the SLOT's, shared by
+  // both faces, so swapping faces doesn't reflow the editor.
+  const [rightPanel, setRightPanel] = useState<"backlinks" | "outline" | null>(null);
+  const [rightWidth, setRightWidth] = useState(260);
   const [overlay, setOverlay] = useState<OverlayMode | null>(null);
   // The profile the editor dialog is open on, or null. Shell owns it like the
   // rest of the chrome: the command reaches it through the ui hook below.
@@ -66,8 +70,8 @@ function Shell() {
   const resizeSidebar = useCallback((w: number) => {
     setSidebarWidth(Math.max(SIDEBAR_MIN, Math.min(w, SIDEBAR_MAX)));
   }, []);
-  const resizeBacklinks = useCallback((w: number) => {
-    setBacklinksWidth(Math.max(SIDEBAR_MIN, Math.min(w, SIDEBAR_MAX)));
+  const resizeRight = useCallback((w: number) => {
+    setRightWidth(Math.max(SIDEBAR_MIN, Math.min(w, SIDEBAR_MAX)));
   }, []);
   const resizeTerm = useCallback((h: number) => {
     const avail = stackRef.current?.clientHeight ?? window.innerHeight;
@@ -192,7 +196,8 @@ function Shell() {
       },
       closeTerminal: () => setTermOpen(false),
       toggleSidebar: () => setSidebarOpen((o) => !o),
-      toggleBacklinks: () => setBacklinksOpen((o) => !o),
+      toggleBacklinks: () => setRightPanel((p) => (p === "backlinks" ? null : "backlinks")),
+      toggleOutline: () => setRightPanel((p) => (p === "outline" ? null : "outline")),
       openOverlay: setOverlay,
       openProfileEditor: setProfileEditing,
     });
@@ -382,27 +387,37 @@ function Shell() {
         >
           <PanelLeft className="size-4" />
         </Button>
-        <span className="h-2 w-2 rounded-full bg-primary" />
-        <span className="text-sm font-semibold">Ledge</span>
         <div className="flex-1" />
         <Button
           ref={termBtnRef}
           variant={termOpen ? "secondary" : "ghost"}
-          size="sm"
+          size="icon"
+          className="size-7"
           onClick={() => exec("terminal.toggle")}
           title={tooltip("terminal.toggle")}
         >
-          <TerminalSquare />
-          Terminal
+          <TerminalSquare className="size-4" />
         </Button>
         <Button
-          variant={backlinksOpen ? "secondary" : "ghost"}
+          variant={rightPanel === "outline" ? "secondary" : "ghost"}
+          size="icon"
+          className="size-7"
+          onClick={() => exec("outline.toggle")}
+          title={tooltip("outline.toggle")}
+        >
+          <TableOfContents className="size-4" />
+        </Button>
+        <Button
+          variant={rightPanel === "backlinks" ? "secondary" : "ghost"}
           size="icon"
           className="size-7"
           onClick={() => exec("backlinks.toggle")}
           title={tooltip("backlinks.toggle")}
         >
-          <PanelRight className="size-4" />
+          {/* The panel's own header icon (BacklinksPanel.tsx), not a generic
+              panel glyph: three faces on this side of the header need three
+              distinguishable icons. */}
+          <Link2 className="size-4" />
         </Button>
       </header>
 
@@ -424,19 +439,19 @@ function Shell() {
           <main className="min-h-0 min-w-0 flex-1">
             <WorkspaceView />
           </main>
-          {backlinksOpen && (
+          {rightPanel && (
             <>
               {/* The handle sits on the panel's far side (its left), so the
                   delta inverts — the terminal-drawer arrangement, rotated. */}
               <ResizeHandle
                 axis="x"
                 invert
-                current={backlinksWidth}
-                onResize={resizeBacklinks}
-                title="Drag to resize backlinks"
+                current={rightWidth}
+                onResize={resizeRight}
+                title={`Drag to resize ${rightPanel}`}
               />
-              <div style={{ width: backlinksWidth }} className="min-w-0 shrink-0">
-                <BacklinksPanel />
+              <div style={{ width: rightWidth }} className="min-w-0 shrink-0">
+                {rightPanel === "backlinks" ? <BacklinksPanel /> : <OutlinePanel />}
               </div>
             </>
           )}

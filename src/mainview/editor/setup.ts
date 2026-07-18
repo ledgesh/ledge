@@ -6,6 +6,7 @@ import { languages } from "@codemirror/language-data";
 import { syntaxHighlighting, HighlightStyle } from "@codemirror/language";
 import { tags } from "@lezer/highlight";
 import { toNative } from "./bridge";
+import { dispatchDocChanged } from "./docEvents";
 import { ledgeBlocks } from "./blocks";
 import { ledgeFrontmatter } from "./frontmatter";
 import { livePreview } from "./livePreview";
@@ -79,6 +80,10 @@ const highlight = HighlightStyle.define([
 // not itself an edit that saves it straight back.
 const reporting = EditorView.updateListener.of((update) => {
   if (!update.docChanged) return;
+  // Every doc change, INCLUDING fromDisk loads, broadcasts to derivers (the
+  // Outline panel): a note's text arriving at open is exactly when its
+  // headings appear. Only real edits fall through to noteChanged below.
+  dispatchDocChanged(update.state.facet(sessionIdFacet));
   if (update.transactions.some((t) => t.annotation(fromDisk))) return;
   noteChanged(update.state.facet(sessionIdFacet), update.state.doc.toString());
 });

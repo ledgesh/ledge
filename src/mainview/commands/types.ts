@@ -23,6 +23,12 @@ export type CommandTarget =
   // "note" because the verb is different: Enter opens the note AT ITS LINK,
   // not at wherever the editor last was.
   | { kind: "backlink"; path: string; line: number; raw: string }
+  // A row in the Outline panel: one heading of the ACTIVE tab's live doc.
+  // Keyed by docId, not path, because the outline follows the focused tab and
+  // an unsaved scratch note has headings before it has a file. `text` doubles
+  // as the reveal query: the jump re-finds it on the line, so a doc that
+  // shifted since the row rendered still lands on the heading.
+  | { kind: "heading"; docId: string; line: number; text: string }
   | { kind: "tab"; paneId: string; tabId: string }
   | { kind: "pane"; paneId: string };
 
@@ -35,6 +41,7 @@ export interface UiHooks {
   closeTerminal(): void;
   toggleSidebar(): void;
   toggleBacklinks(): void;
+  toggleOutline(): void;
   openOverlay(mode: "notes" | "commands" | "search"): void;
   beginRenameWorkspace(id: string): void;
   // Open the icon picker on a workspace, anchored to its row in the strip.
@@ -95,6 +102,11 @@ export interface RegistryDeps {
   // inline, because requestReveal lives in the editor stack and the registry
   // must stay importable by pure unit tests.
   revealBacklink(path: string, line: number, raw: string): void;
+  // Move the caret to an Outline row's heading in the note's own live editor.
+  // No open involved — the outline always describes the focused tab. A dep
+  // for the same reason as revealBacklink: the view lookup lives in the
+  // editor stack (editorPool), which the registry must not import.
+  jumpToHeading(docId: string, line: number, text: string): void;
   // The head of a note's live document — enough of it to parse frontmatter —
   // or null when no editor holds that doc. A head, not the whole text: `when`
   // runs on every menu/palette render, and a note carrying a pasted blob

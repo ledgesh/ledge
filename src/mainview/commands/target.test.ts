@@ -16,6 +16,8 @@ describe("targetAttrs / targetFromDataset", () => {
     const cases = [
       { kind: "note", path: "/n/a.md" },
       { kind: "trash", path: "/n/.ledge-trash/a.md" },
+      { kind: "backlink", path: "/n/a.md", line: 3, raw: "[[Alpha]]" },
+      { kind: "heading", docId: "doc1", line: 7, text: "Setup" },
       { kind: "workspace", id: "ws1" },
       { kind: "tab", paneId: "p1", tabId: "t1" },
       { kind: "pane", paneId: "p1" },
@@ -43,5 +45,9 @@ describe("targetAttrs / targetFromDataset", () => {
     expect(targetFromDataset({ targetKind: "nonsense" })).toBeUndefined();
     expect(targetFromDataset({ targetKind: "note" })).toBeUndefined(); // no path
     expect(targetFromDataset({ targetKind: "tab", targetPane: "p1" })).toBeUndefined(); // no tab
+    // A garbled line yields no target at all — never a jump to NaN.
+    expect(
+      targetFromDataset({ targetKind: "heading", targetId: "doc1", targetLine: "x" }),
+    ).toBeUndefined();
   });
 });

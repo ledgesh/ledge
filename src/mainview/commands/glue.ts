@@ -7,7 +7,9 @@
 // confirmation), and commands reach them through ctx.ui without the registry
 // importing any component.
 import { openSearchPanel } from "@codemirror/search";
+import { EditorView } from "@codemirror/view";
 import { focusEditor, getEditorView, requestReveal } from "@/workspace/editorPool";
+import { revealSelection } from "@/workspace/reveal";
 import { openReplace } from "@/editor/find";
 import { runBlock } from "@/editor/blocks";
 import { openLinkAtCursor, toggleTaskAt } from "@/editor/livePreview";
@@ -52,6 +54,20 @@ export const registryDeps: RegistryDeps = {
   // query, re-found on the line (workspace/reveal.ts) so a file that has
   // moved on still lands on the link.
   revealBacklink: (path, line, raw) => requestReveal(path, line, raw),
+  // Jump to an Outline row's heading in the note's own live editor. The
+  // heading text is the reveal query (revealSelection re-finds it on the
+  // line, so a doc that shifted still lands right); y "start" rather than the
+  // cross-note reveal's center, because a TOC jump means "show me this
+  // section" and the section is below the heading. withView focuses first —
+  // a jump is "take me there", like every reveal.
+  jumpToHeading: (docId, line, text) =>
+    withView(docId, (view) => {
+      const sel = revealSelection(view.state.doc, line, text);
+      view.dispatch({
+        selection: { anchor: sel.anchor, head: sel.head },
+        effects: EditorView.scrollIntoView(sel.anchor, { y: "start" }),
+      });
+    }),
   noteHead: (docId) => {
     const view = getEditorView(docId);
     if (!view) return null;

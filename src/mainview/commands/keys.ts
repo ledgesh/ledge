@@ -72,6 +72,11 @@ export const COMMANDS = {
   // give it: B is taken (and ⌘B/⌘L-adjacent chords are reserved for
   // formatting), so L — links — carries it.
   "backlinks.toggle": { title: "Toggle Backlinks", keys: ["Alt-Mod-l"] },
+  // The right panel's other face: the active note's headings, live. Same
+  // ⌥-tier as its sibling toggles; O for outline (⌘O itself stays free).
+  // The two right-panel toggles are radio-with-off — opening one closes the
+  // other, since they share the one slot.
+  "outline.toggle": { title: "Toggle Outline", keys: ["Alt-Mod-o"] },
   "terminal.toggle": { title: "Toggle Terminal", keys: ["Ctrl-`"] },
   "terminal.close": { title: "Close Terminal" },
   "settings.open": { title: "Settings…", keys: ["Mod-,"] },
@@ -101,6 +106,13 @@ export const COMMANDS = {
   // verb. Its own command (not note.open) because the target kind differs and
   // the behavior is open-at-a-place, not just open.
   "backlink.open": { title: "Open", listKeys: ["Enter"] },
+  // Outline-panel rows: Jump moves the caret to that heading in the note's
+  // OWN editor — no note open involved, the outline always describes the
+  // active tab. Copy Link puts the heading's wikilink on the clipboard
+  // ([[Title#Heading]]), ready to paste into another note; `c` is the same
+  // row verb note rows spend on Copy Path.
+  "outline.jump": { title: "Jump to Heading", listKeys: ["Enter"] },
+  "outline.copyLink": { title: "Copy Link", listKeys: ["c"] },
   "note.delete": { title: "Delete", listKeys: ["d", "Backspace"] },
   "note.deleteCurrent": { title: "Delete Note", keys: ["Mod-Backspace"] },
   "note.copyPath": { title: "Copy Path", listKeys: ["c"] },

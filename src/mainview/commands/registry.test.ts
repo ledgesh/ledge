@@ -28,6 +28,7 @@ function stubDeps(calls: string[] = [], noteHead: string | null = null): Registr
     closeWorkspace: (id) => calls.push(`closeWorkspace:${id}`),
     restartSession: record("restartSession"),
     revealBacklink: (path, line, raw) => calls.push(`revealBacklink:${path}:${line}:${raw}`),
+    jumpToHeading: (docId, line, text) => calls.push(`jumpToHeading:${docId}:${line}:${text}`),
     noteHead: () => noteHead,
     editor: {
       find: record("find"),
@@ -257,6 +258,37 @@ describe("registry", () => {
     const ctx = { ...makeCtx(initialState(FOLDER, [])), target: { kind: "note", path: "/n/a.md" } as const };
     find(cmds, "note.copyPath").run(ctx);
     expect(calls).toEqual(["copyText:/n/a.md"]);
+  });
+
+  test("run: outline.jump routes its row through the jumpToHeading dep", () => {
+    const calls: string[] = [];
+    const cmds = buildCommands(stubDeps(calls));
+    const ctx = {
+      ...makeCtx(initialState(FOLDER, [])),
+      target: { kind: "heading", docId: "doc1", line: 7, text: "Setup" } as const,
+    };
+    find(cmds, "outline.jump").run(ctx);
+    expect(calls).toEqual(["jumpToHeading:doc1:7:Setup"]);
+  });
+
+  test("run: outline.copyLink copies [[Title#Heading]] — plain [[Title]] for the H1 itself", () => {
+    // The focused tab is the initial demo tab, titled "Welcome"; a subheading
+    // gets the anchored form, the H1 (its text IS the title) gets the plain
+    // link — [[Welcome#Welcome]] would be a strange spelling of the note
+    // itself.
+    const calls: string[] = [];
+    const cmds = buildCommands(stubDeps(calls));
+    const ctx = makeCtx(initialState(FOLDER, []));
+    const title = ctx.selected.root.kind === "leaf" ? ctx.selected.root.tabs[0]!.title : "";
+    find(cmds, "outline.copyLink").run({
+      ...ctx,
+      target: { kind: "heading", docId: "doc1", line: 3, text: "Setup" } as const,
+    });
+    find(cmds, "outline.copyLink").run({
+      ...ctx,
+      target: { kind: "heading", docId: "doc1", line: 1, text: title } as const,
+    });
+    expect(calls).toEqual([`copyText:[[${title}#Setup]]`, `copyText:[[${title}]]`]);
   });
 
   test("run: row verbs act on their row, not on the current note", () => {

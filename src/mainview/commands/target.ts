@@ -37,6 +37,15 @@ export function targetAttrs(target: CommandTarget): Record<string, string> {
         "data-target-line": String(target.line),
         "data-target-raw": target.raw,
       };
+    case "heading":
+      // targetRaw carries the heading text — it plays the same role as a
+      // backlink's raw [[...]]: the query the jump re-finds on the line.
+      return {
+        "data-target-kind": "heading",
+        "data-target-id": target.docId,
+        "data-target-line": String(target.line),
+        "data-target-raw": target.text,
+      };
     case "workspace":
       return { "data-target-kind": "workspace", "data-target-id": target.id };
     case "tab":
@@ -65,6 +74,14 @@ export function targetFromDataset(d: TargetDataset): CommandTarget | undefined {
       const line = Number(d.targetLine);
       return d.targetPath && Number.isInteger(line) && line >= 1
         ? { kind: "backlink", path: d.targetPath, line, raw: d.targetRaw ?? "" }
+        : undefined;
+    }
+    case "heading": {
+      // Same rules as backlink: a garbled line yields no target; a missing
+      // text degrades to line start rather than dropping the jump.
+      const line = Number(d.targetLine);
+      return d.targetId && Number.isInteger(line) && line >= 1
+        ? { kind: "heading", docId: d.targetId, line, text: d.targetRaw ?? "" }
         : undefined;
     }
     case "workspace":

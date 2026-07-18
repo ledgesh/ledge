@@ -18,8 +18,8 @@ import {
   FolderOpen,
   KeyRound,
   Layers,
+  Link2,
   PanelLeft,
-  PanelRight,
   Pencil,
   Play,
   Plus,
@@ -33,6 +33,7 @@ import {
   Shapes,
   SquareCheck,
   SquareX,
+  TableOfContents,
   TerminalSquare,
   TextSearch,
   Trash2,
@@ -234,8 +235,14 @@ export function buildCommands(deps: RegistryDeps): Command[] {
       run: (ctx) => ctx.ui.toggleSidebar?.(),
     }),
     cmd("backlinks.toggle", {
-      icon: PanelRight,
+      // Link2, not a panel glyph: the palette/menu icon matches the panel's
+      // own header (BacklinksPanel.tsx) and the header toggle.
+      icon: Link2,
       run: (ctx) => ctx.ui.toggleBacklinks?.(),
+    }),
+    cmd("outline.toggle", {
+      icon: TableOfContents,
+      run: (ctx) => ctx.ui.toggleOutline?.(),
     }),
     cmd("terminal.toggle", {
       icon: TerminalSquare,
@@ -348,6 +355,36 @@ export function buildCommands(deps: RegistryDeps): Command[] {
         if (!note) return;
         deps.revealBacklink(t.path, t.line, t.raw);
         ctx.dispatch({ type: "openNote", note });
+      },
+    }),
+    // Enter on (or click of) an Outline-panel row: put the caret on that
+    // heading in the active note's own editor. No dispatch at all — the note
+    // is already the shown one; the jump is the whole verb.
+    cmd("outline.jump", {
+      icon: TableOfContents,
+      targetKind: "heading",
+      palette: false, // acts on a specific row
+      when: (ctx) => ctx.target?.kind === "heading",
+      run: (ctx) => {
+        const t = ctx.target;
+        if (t?.kind === "heading") deps.jumpToHeading(t.docId, t.line, t.text);
+      },
+    }),
+    // The heading's wikilink, ready to paste: [[Title#Heading]] — or plain
+    // [[Title]] when the row IS the H1, whose text is the tab title
+    // (filenames follow the H1), because [[Title#Title]] would be a strange
+    // spelling of the note itself.
+    cmd("outline.copyLink", {
+      icon: Copy,
+      targetKind: "heading",
+      palette: false, // acts on a specific row
+      when: (ctx) => ctx.target?.kind === "heading",
+      run: (ctx) => {
+        const t = ctx.target;
+        if (t?.kind !== "heading") return;
+        const title = focusedTab(ctx.selected)?.title;
+        if (!title) return;
+        deps.copyText(t.text === title ? `[[${title}]]` : `[[${title}#${t.text}]]`);
       },
     }),
     cmd("note.copyPath", {

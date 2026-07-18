@@ -74,7 +74,8 @@ Rules:
   ⌘G next → ⇧⌘G previous.
 - **⌥ (Alt)** — secondary/rare variants: ⌥⌘F replace, ⌥⌘B sidebar, ⌥⌘L
   backlinks (the sidebar's right-hand mirror, on the letter the sidebar
-  couldn't give it: B is taken, so L — links), ⌥⌘P
+  couldn't give it: B is taken, so L — links), ⌥⌘O outline (the right
+  panel's other face; O for outline, and ⌘O itself stays free), ⌥⌘P
   full-text search (the ⌥-variant of ⌘P quick-open; the shift-scope rule would
   want ⇧⌘F — find, but across notes — but ⇧⌘F is the editor's working replace
   fallback under cmux, and search must stay reachable from editor focus).
@@ -119,6 +120,7 @@ CodeMirror and never at the window level.
 | Toggle Terminal       | ⌃`                        | from terminal focus it closes the drawer |
 | Toggle Sidebar        | ⌥⌘B                       | |
 | Toggle Backlinks      | ⌥⌘L                       | right-hand panel: the notes whose `[[wikilinks]]` point at the current note (the same scan agents get from the MCP `backlinks` tool). Rows are the standard keyboard list; Enter/click opens the linking note with the link's line revealed and selected, the search overlay's open-at-the-hit |
+| Toggle Outline        | ⌥⌘O                       | the right panel's other face: the active note's headings, derived live from the editor doc (`headingsOf` — the fence-aware scan shared with the MCP appender and the heading reveal). The two right-panel toggles are radio-with-off: opening one closes the other, since they share the one slot. Enter/click moves the caret to the heading in the note's own editor |
 | Settings…             | ⌘,                        | opens settings.json in the OS editor (architecture.md §6: the file is the UI) |
 | Restart Note Shell    | — (palette)               | kills the current note's shells; its frontmatter params apply at respawn (architecture.md §6a) |
 | Edit Note Profile…    | — (palette; edit button on the block, hover/caret-revealed like block controls; ⌘-click the name as accelerator) | opens the profile the note's frontmatter names in Ledge's key/value dialog (macOS binds no app to .env), created seeded if new; hidden when it names none. The button is primary — it lives in the overlay layer where the pointer cursor works; ⌘-click (not click: a plain click is a caret move on editable text) goes solid-underline while ⌘ is held |
@@ -146,6 +148,7 @@ Row verbs, by row kind. Each fires only while a row of that kind has focus
 | Trash     | —                 | Delete Permanently… (confirmed) | `r` Restore |
 | Workspace | Switch to it      | Close Workspace            | `r` Rename, `i` Change Icon |
 | Backlink  | Open at the link  | —                          | menu: Copy Path (the note-row command on the linking note) |
+| Heading   | Jump to Heading   | —                          | `c` Copy Link — the heading's `[[Title#Heading]]` (plain `[[Title]]` when the row is the H1) |
 
 ## 4. Destructive actions
 
