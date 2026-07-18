@@ -271,6 +271,16 @@ body {
 .ledge-mdlink-live span {
   cursor: pointer;
 }
+/* A rendered wikilink whose title names no note (editor/wikilinks.ts):
+   still link-shaped — it wants to be one — but muted, and with no hand
+   cursor or hotspot: a plain click is the ordinary caret move, which
+   reveals the raw [[...]] for fixing. */
+.ledge-wikilink-dangling,
+.ledge-wikilink-dangling span {
+  color: var(--ed-muted);
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
 /* The WKWebView-proof hand: a body-parented layer pinned over the editor
    (same trick as .ledge-overlay — elements outside the editing context
    honour `cursor`), holding one invisible click-through-proof div per

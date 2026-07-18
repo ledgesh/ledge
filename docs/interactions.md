@@ -125,7 +125,8 @@ CodeMirror and never at the window level.
 | Find Next / Previous  | ⌘G / ⇧⌘G (also F3 / ⇧F3)  | editor only |
 | Run Block Inline      | ⌘↩                        | cursor inside a runnable block |
 | Run Block in Terminal | ⇧⌘↩                       | |
-| Open Link             | — (palette; click the rendered link as accelerator) | follows the link under the caret (editor/livePreview.ts). A RENDERED link (syntax concealed, including inside a rendered table and bare URLs the caret is outside) opens on plain click — while concealed it is a widget, not editable text, same reasoning as the checkbox. A REVEALED link is raw text being edited: plain click is a caret move, ⌘-click opens (same grammar as the profile name above; the underline goes solid while ⌘ is held). Mouse-editing a rendered link: click adjacent text or arrow in, which reveals it. Schemes are allowlisted (shared/links.ts) and re-checked Bun-side |
+| Open Link             | — (palette; click the rendered link as accelerator) | follows the link under the caret (editor/livePreview.ts) — a URL leaves the app, a `[[wikilink]]` opens the note it names. A RENDERED link (syntax concealed, including inside a rendered table and bare URLs the caret is outside) opens on plain click — while concealed it is a widget, not editable text, same reasoning as the checkbox. A REVEALED link is raw text being edited: plain click is a caret move, ⌘-click opens (same grammar as the profile name above; the underline goes solid while ⌘ is held). Mouse-editing a rendered link: click adjacent text or arrow in, which reveals it. Schemes are allowlisted (shared/links.ts) and re-checked Bun-side |
+| Link to Note (`[[`)   | — (typed, not a command)  | `[[` in the editor pops the note-title picker (editor/wikilinks.ts; Enter accepts and closes the `]]`, Escape closes the popup only). `[[Title]]` resolves by title, case-insensitive exact, against the note's OWN workspace — resolved renders link-styled and opens on the Open Link grammar above; DANGLING renders muted with no hand cursor, and a plain click is the ordinary caret move that reveals it for fixing (a dead "open" affordance on a link that goes nowhere would be worse). `[[Title#Heading]]` opens with that ATX heading revealed, degrading to the top of the note when the heading is gone |
 | Toggle Checkbox       | — (palette; click the rendered box as accelerator) | toggles the `[ ]`/`[x]` on the caret's line (editor/livePreview.ts). The box is a widget, not editable text, so a plain click may act — the caret-move grammar protects text, and the box is not text |
 | Rename Workspace…     | `r` (also menu / palette / double-click) | |
 | Change Icon…          | `i` (also menu / palette) | opens the icon grid on the workspace's row |
@@ -212,7 +213,9 @@ topmost layer only:
    outside)
 2. Dialogs: confirm, and the profile editor
 3. Palette / quick-open overlay
-4. Editor find panel (CodeMirror-internal, editor focus only)
+4. Editor find panel, and the `[[` completion popup (both CodeMirror-internal,
+   editor focus only; the popup's Escape is consumed by its keymap before the
+   window ever sees it, per the §7 consume rule)
 5. Terminal drawer (terminal focus only — documented tradeoff: full-screen
    TUIs in the drawer can't receive a bare Escape)
 

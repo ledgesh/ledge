@@ -9,7 +9,9 @@
 //
 // What conceals: emphasis/strong/strikethrough marks, inline-code backticks,
 // ATX heading #s (with their separator space), link/image/autolink syntax
-// (the text stays, styled as a link), code-fence ``` marks, the `- ` bullet
+// (the text stays, styled as a link), wikilink `[[` `]]` brackets (the target
+// stays, styled resolved or dangling — editor/wikilinks.ts owns the grammar
+// and resolution), code-fence ``` marks, the `- ` bullet
 // on task lines (the checkbox is the bullet), escape backslashes, backslash
 // hard breaks, decodable HTML entities (drawn as their character), and
 // `---` thematic breaks (drawn as a rule). Tables and images are the
@@ -34,7 +36,7 @@
 // the plugin and click handler below are the thin wrappers.
 import type { SyntaxNode, Tree } from "@lezer/common";
 import { syntaxTree } from "@codemirror/language";
-import type { EditorState, Extension, Range } from "@codemirror/state";
+import { StateEffect, type EditorState, type Extension, type Range } from "@codemirror/state";
 import {
   Decoration,
   type DecorationSet,
@@ -46,22 +48,27 @@ import {
 import { openableUrl } from "../../shared/links";
 import { tooltip } from "../commands/format";
 import { frontmatterRange } from "./frontmatter";
-import { openExternal } from "./bridge";
+import { openExternal, openWikiNote, wikiNotes } from "./bridge";
+import { sessionIdFacet } from "./session";
+import { parseWikiTarget, resolveWikiTitle, WIKILINK_NODE, wikiTargetAt } from "./wikilinks";
 
 export interface Span {
   from: number;
   to: number;
 }
 
-/** One concealment decision. `link` and `done` mark visible text (never
- * remove it); `link`'s `url` is openableUrl-approved, or null when the link
- * has no openable target (reference links, relative paths) and should be
- * styled only. `task` replaces a `[ ]`/`[x]` marker with a real checkbox,
- * `rule` a `---` line with a drawn rule, `entity` an HTML entity with its
- * decoded character. */
+/** One concealment decision. `link`, `wikilink` and `done` mark visible text
+ * (never remove it); `link`'s `url` is openableUrl-approved, or null when the
+ * link has no openable target (reference links, relative paths) and should be
+ * styled only. `wikilink` carries the raw `[[target]]` inner text — whether it
+ * resolves to a note is decided at draw time (editor/wikilinks.ts), not here:
+ * the core stays pure while the note list lives in the store. `task` replaces
+ * a `[ ]`/`[x]` marker with a real checkbox, `rule` a `---` line with a drawn
+ * rule, `entity` an HTML entity with its decoded character. */
 export type Conceal =
   | (Span & { kind: "hide" })
   | (Span & { kind: "link"; url: string | null })
+  | (Span & { kind: "wikilink"; target: string })
   | (Span & { kind: "fenceInfo" })
   | (Span & { kind: "task"; checked: boolean })
   | (Span & { kind: "done" })
@@ -148,6 +155,23 @@ export function concealments(
           const pad = doc.sliceString(node.from - 1, node.from) === " " ? 1 : 0;
           out.push({ kind: "hide", from: node.from - pad, to: node.to });
         }
+        return;
+      }
+
+      // A wikilink conceals its `[[` `]]` brackets and keeps the target text,
+      // same reveal rule as ordinary links. The inner text is emitted with the
+      // raw target so the drawing side can style resolved vs dangling.
+      if (name === WIKILINK_NODE) {
+        const el = node.node;
+        if (revealed(el)) return;
+        out.push({ kind: "hide", from: el.from, to: el.from + 2 });
+        out.push({ kind: "hide", from: el.to - 2, to: el.to });
+        out.push({
+          kind: "wikilink",
+          from: el.from + 2,
+          to: el.to - 2,
+          target: doc.sliceString(el.from + 2, el.to - 2),
+        });
         return;
       }
 
@@ -359,6 +383,29 @@ const LINK_OPENABLE = Decoration.mark({
 const LINK_PLAIN = Decoration.mark({ class: "ledge-mdlink" });
 const DONE = Decoration.mark({ class: "ledge-task-done" });
 
+// A rendered wikilink whose title resolves: opens on plain click, hand cursor
+// via the hotspot layer keying on data-wiki (the same story as data-url).
+const liveWikiMarks = new Map<string, Decoration>();
+function liveWiki(target: string): Decoration {
+  let mark = liveWikiMarks.get(target);
+  if (!mark) {
+    if (liveWikiMarks.size > 200) liveWikiMarks.clear();
+    mark = Decoration.mark({
+      class: "ledge-mdlink ledge-mdlink-live",
+      attributes: { title: "Click to open note", "data-wiki": target },
+    });
+    liveWikiMarks.set(target, mark);
+  }
+  return mark;
+}
+// A rendered wikilink naming no note. Deliberately still link-shaped but
+// visibly quieter: dangling is a statement about the title, not an error, and
+// a plain click on it is a caret move that reveals the raw text for fixing.
+const WIKI_DANGLING = Decoration.mark({
+  class: "ledge-wikilink-dangling",
+  attributes: { title: "No note with this title" },
+});
+
 // A concealed task marker, as a real checkbox. The input handles its own
 // mousedown (ignoreEvent keeps CodeMirror from treating it as a click into
 // the text) and toggles the `[ ]`/`[x]` in the DOCUMENT — the widget never
@@ -459,7 +506,16 @@ function buildDecorations(state: EditorState): DecorationSet {
       ranges.push(Decoration.replace({ widget: new RuleWidget() }).range(s.from, s.to));
     else if (s.kind === "entity")
       ranges.push(Decoration.replace({ widget: new EntityWidget(s.text) }).range(s.from, s.to));
-    else {
+    else if (s.kind === "wikilink") {
+      // Resolution happens here, at draw time, against the note's own
+      // workspace list — never in the pure core. Emitted only untouched
+      // (concealed), so a resolved one is always the plain-click kind.
+      const parsed = parseWikiTarget(s.target);
+      const resolved =
+        parsed !== null &&
+        resolveWikiTitle(parsed.title, wikiNotes(state.facet(sessionIdFacet))) !== null;
+      ranges.push((resolved ? liveWiki(s.target) : WIKI_DANGLING).range(s.from, s.to));
+    } else {
       // A link mark whose element the selection is not touching is rendered
       // (concealed links are only ever emitted untouched; bare URLs are
       // emitted always) — plain click opens it, and the tooltip says so.
@@ -468,6 +524,16 @@ function buildDecorations(state: EditorState): DecorationSet {
     }
   }
   return Decoration.set(ranges, true);
+}
+
+// The store's note lists changed (create/rename/delete), so a wikilink's
+// resolved-vs-dangling answer may have too. App broadcasts this to every
+// pooled editor; the conceal plugin rebuilds on it like on an edit.
+const wikiRefresh = StateEffect.define<null>();
+
+/** Redraw `view`'s wikilinks against the current note lists. */
+export function refreshWikilinks(view: EditorView): void {
+  view.dispatch({ effects: wikiRefresh.of(null) });
 }
 
 // Rebuilt on selection moves as well as edits — the reveal follows the caret.
@@ -480,7 +546,13 @@ const concealPlugin = ViewPlugin.fromClass(
       this.decorations = buildDecorations(view.state);
     }
     update(u: ViewUpdate) {
-      if (u.docChanged || u.selectionSet) this.decorations = buildDecorations(u.state);
+      if (
+        u.docChanged ||
+        u.selectionSet ||
+        u.transactions.some((t) => t.effects.some((e) => e.is(wikiRefresh)))
+      ) {
+        this.decorations = buildDecorations(u.state);
+      }
     }
   },
   { decorations: (v) => v.decorations },
@@ -500,6 +572,19 @@ const clickToOpen = EditorView.domEventHandlers({
     if (event.button !== 0) return false;
     const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
     if (pos === null) return false;
+    // Wikilinks first (a WikiLink node can never nest a Link, so first hit
+    // wins). Same click grammar as URLs; a DANGLING one falls through to the
+    // caret move — clicking it is how you reveal and fix the title.
+    const wiki = wikiTargetAt(view.state.doc, syntaxTree(view.state), pos);
+    if (wiki) {
+      if (!event.metaKey && touches(wiki, view.state.selection.ranges)) return false;
+      const docId = view.state.facet(sessionIdFacet);
+      const parsed = parseWikiTarget(wiki.target);
+      if (!parsed || !resolveWikiTitle(parsed.title, wikiNotes(docId))) return false;
+      event.preventDefault();
+      openWikiNote(docId, wiki.target);
+      return true;
+    }
     const link = linkAt(view.state.doc, syntaxTree(view.state), pos);
     if (!link?.url) return false;
     if (!event.metaKey && touches(link, view.state.selection.ranges)) return false;
@@ -590,6 +675,22 @@ const hotspotPlugin = ViewPlugin.fromClass(
           });
         }
       }
+      // Rendered wikilinks: same layer, but the click opens a NOTE (via the
+      // bridge into the store) instead of leaving the app.
+      for (const el of view.contentDOM.querySelectorAll<HTMLElement>("[data-wiki]")) {
+        const target = el.dataset.wiki;
+        if (!target) continue;
+        for (const r of el.getClientRects()) {
+          spots.push({
+            left: r.left - base.left,
+            top: r.top - base.top,
+            width: r.width,
+            height: r.height,
+            title: "Click to open note",
+            act: () => openWikiNote(view.state.facet(sessionIdFacet), target),
+          });
+        }
+      }
       for (const el of view.contentDOM.querySelectorAll<HTMLInputElement>("input.ledge-task")) {
         const r = el.getBoundingClientRect();
         spots.push({
@@ -637,9 +738,17 @@ const hotspotPlugin = ViewPlugin.fromClass(
   },
 );
 
-/** The keyboard/palette path to ⌘-click (the "Open Link" command). */
+/** The keyboard/palette path to ⌘-click (the "Open Link" command). Covers
+ * both kinds of link a caret can sit on: a wikilink opens its note, a URL
+ * leaves the app. */
 export function openLinkAtCursor(view: EditorView): boolean {
-  const url = linkTargetAt(view.state.doc, syntaxTree(view.state), view.state.selection.main.head);
+  const head = view.state.selection.main.head;
+  const wiki = wikiTargetAt(view.state.doc, syntaxTree(view.state), head);
+  if (wiki) {
+    openWikiNote(view.state.facet(sessionIdFacet), wiki.target);
+    return true;
+  }
+  const url = linkTargetAt(view.state.doc, syntaxTree(view.state), head);
   if (!url) return false;
   openExternal(url);
   return true;

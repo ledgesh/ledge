@@ -12,6 +12,7 @@ import { livePreview } from "./livePreview";
 import { tableRendering } from "./tables";
 import { imagePasteInsert, imageRendering } from "./images";
 import { quoteExit } from "./quotes";
+import { wikiCompletion, wikiLinkExtension } from "./wikilinks";
 import { wrapping } from "./wrap";
 import { findReplace } from "./find";
 import { fromDisk, sessionIdFacet } from "./session";
@@ -286,6 +287,30 @@ const theme = EditorView.theme({
     fontSize: "16px",
   },
   ".ledge-search-close:hover": { color: "var(--fg)" },
+
+  // The `[[` completion popup (editor/wikilinks.ts), styled to the app chrome
+  // like the find panel above: shadcn surface tokens, the palette's row
+  // rhythm, so the picker reads as Ledge and not as CodeMirror's default.
+  ".cm-tooltip.cm-tooltip-autocomplete": {
+    backgroundColor: "hsl(var(--card))",
+    color: "hsl(var(--card-foreground))",
+    border: "1px solid hsl(var(--border))",
+    borderRadius: "8px",
+    overflow: "hidden",
+    boxShadow: "0 8px 24px rgb(0 0 0 / 0.18)",
+  },
+  ".cm-tooltip.cm-tooltip-autocomplete > ul": {
+    fontFamily: "-apple-system, system-ui, sans-serif",
+    fontSize: "12px",
+    maxHeight: "12em",
+  },
+  ".cm-tooltip.cm-tooltip-autocomplete > ul > li": {
+    padding: "3px 10px",
+  },
+  ".cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected]": {
+    backgroundColor: "hsl(var(--accent))",
+    color: "hsl(var(--accent-foreground))",
+  },
 });
 
 // Build a fully-wired editor into `parent`, seeded with `doc`. `sessionId` is the
@@ -318,8 +343,14 @@ export function createEditor(parent: HTMLElement, doc: string, sessionId: string
         // see an empty quote line first (editor/quotes.ts). Not gated by
         // livePreview — it is editing behavior, not rendering.
         quoteExit(),
+        // The `[[` note picker (editor/wikilinks.ts). Editing behavior like
+        // quoteExit, so not gated by livePreview: a raw-markdown editor still
+        // completes titles — the link just draws as text there.
+        wikiCompletion(),
         keymap.of([...defaultKeymap, ...historyKeymap]),
-        markdown({ base: markdownLanguage, codeLanguages: languages }),
+        // wikiLinkExtension teaches the parser `[[...]]` so wikilinks are real
+        // tree nodes in both modes; livePreview owns their concealment.
+        markdown({ base: markdownLanguage, codeLanguages: languages, extensions: [wikiLinkExtension] }),
         syntaxHighlighting(highlight),
         theme,
         EditorView.theme({ "&": { fontSize: `${settings().editor.fontSize}px` } }),

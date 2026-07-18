@@ -4,7 +4,7 @@
 // rides the typed Electrobun RPC. blocks.ts and setup.ts still call the same
 // `toNative(...)` they always did, so the editor code is unchanged. main.tsx
 // wires the two ends once the Electroview RPC exists.
-import type { RunEvent } from "../../shared/rpc-schema";
+import type { NoteMeta, RunEvent } from "../../shared/rpc-schema";
 
 /** Where a block's output goes when it runs. */
 export type RunDestination = "inline" | "terminal";
@@ -91,6 +91,15 @@ interface BridgeHandlers {
   // to the linkOpen RPC; Bun re-validates the scheme (shared/links.ts) before
   // anything reaches `open`.
   openLink: (url: string) => void;
+  // The notes of the workspace folder the given doc belongs to — what a
+  // wikilink resolves against (editor/wikilinks.ts) and what the `[[` picker
+  // lists. App wires it (the store owns the lists); a synchronous snapshot,
+  // because decoration passes cannot await.
+  wikiNotes: (docId: string) => NoteMeta[];
+  // Follow a wikilink: resolve `target` in the doc's own workspace and open
+  // the note it names (App wires it — dispatching openNote needs the store).
+  // A dangling target is a no-op, never an error.
+  openWikiNote: (docId: string, target: string) => void;
 }
 const handlers: Partial<BridgeHandlers> = {};
 
@@ -126,6 +135,19 @@ export function editProfile(name: string): void {
 // Link" command).
 export function openExternal(url: string): void {
   handlers.openLink?.(url);
+}
+
+// The wikilink resolution set for a doc's workspace (editor/wikilinks.ts).
+// Empty when unconfigured (an editor outside the app, e.g. a unit test):
+// every link is dangling rather than anything throwing mid-decoration.
+export function wikiNotes(docId: string): NoteMeta[] {
+  return handlers.wikiNotes?.(docId) ?? [];
+}
+
+// Follow a wikilink in `docId`'s note (livePreview.ts click/hotspot and the
+// "Open Link" command).
+export function openWikiNote(docId: string, target: string): void {
+  handlers.openWikiNote?.(docId, target);
 }
 
 // Web -> Bun. Note edits do not come through here: persistence is a direct

@@ -15,7 +15,7 @@ import { onRunEvent } from "../editor/bridge";
 import { fromDisk } from "../editor/session";
 import { readNote } from "../notes/channel";
 import { bindDoc, docIdAt, releaseDoc, seedSlug, type DocHandlers } from "../notes/store";
-import { revealSelection } from "./reveal";
+import { revealHeading, revealSelection } from "./reveal";
 import type { RunEvent } from "../../shared/rpc-schema";
 import type { TabState } from "./tree";
 
@@ -67,16 +67,28 @@ interface Entry {
 
 const pool = new Map<string, Entry>();
 
-// --- search reveals ---------------------------------------------------------
+// --- reveals ----------------------------------------------------------------
 //
-// "Open this note AND show me the matched line" from the search overlay.
+// "Open this note AND show me a place in it" — the matched line from the
+// search overlay, or the `#heading` anchor of a followed wikilink.
 // Keyed by path, not docId: the hit's path is the only handle the overlay
 // holds — the docId does not exist until the tab opens. One-shot: a request is
 // consumed by the first editor that can honor it, so a stale one can never
 // yank the selection around on some later tab switch.
-const pendingReveals = new Map<string, { line: number; query: string }>();
+type RevealRequest = { line: number; query: string } | { heading: string };
+
+const pendingReveals = new Map<string, RevealRequest>();
 
 export function requestReveal(path: string, line: number, query: string): void {
+  queueReveal(path, { line, query });
+}
+
+/** A wikilink's `#heading` anchor: reveal that heading when `path` opens. */
+export function requestHeadingReveal(path: string, heading: string): void {
+  queueReveal(path, { heading });
+}
+
+function queueReveal(path: string, req: RevealRequest): void {
   // A note already open with its text on screen gets the reveal immediately:
   // its tab may already be the active one, in which case no attach — the
   // other consumer below — will ever revisit it. A detached (background-tab)
@@ -85,10 +97,10 @@ export function requestReveal(path: string, line: number, query: string): void {
   const docId = docIdAt(path);
   const entry = docId ? pool.get(docId) : undefined;
   if (entry && entry.host.isConnected) {
-    applyReveal(entry.view, { line, query });
+    applyReveal(entry.view, req);
     return;
   }
-  pendingReveals.set(path, { line, query });
+  pendingReveals.set(path, req);
 }
 
 function takeReveal(path: string, view: EditorView): void {
@@ -98,8 +110,11 @@ function takeReveal(path: string, view: EditorView): void {
   applyReveal(view, req);
 }
 
-function applyReveal(view: EditorView, req: { line: number; query: string }): void {
-  const sel = revealSelection(view.state.doc, req.line, req.query);
+function applyReveal(view: EditorView, req: RevealRequest): void {
+  const sel =
+    "heading" in req
+      ? revealHeading(view.state.doc, req.heading)
+      : revealSelection(view.state.doc, req.line, req.query);
   view.dispatch({
     selection: { anchor: sel.anchor, head: sel.head },
     effects: EditorView.scrollIntoView(sel.anchor, { y: "center" }),
@@ -216,4 +231,11 @@ export function focusEditor(docId: string): void {
 // editor (the palette's Find/Run entries refocus and then drive the view).
 export function getEditorView(docId: string): EditorView | null {
   return pool.get(docId)?.view ?? null;
+}
+
+// Every pooled view, attached or not. App broadcasts wikilink refreshes over
+// this when the note lists change (livePreview.refreshWikilinks): a detached
+// background editor takes the redraw too, so it comes back correct.
+export function allEditorViews(): EditorView[] {
+  return [...pool.values()].map((e) => e.view);
 }

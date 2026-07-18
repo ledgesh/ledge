@@ -64,7 +64,13 @@ Bun therefore validates everything and derives anything derivable:
 - **Paths are opaque handles.** The view holds only paths and roots it was
   handed by Bun (`workspaceList`, `noteList`, `noteCreate`, `noteDelete`'s
   trashed location) and passes them back unmodified. View code that
-  constructs or edits a path is a bug.
+  constructs or edits a path is a bug. Wikilinks (`[[Title]]`,
+  `editor/wikilinks.ts`) are the worked example of staying inside this rule:
+  they address a note by TITLE — deliberately, because filenames follow the
+  H1 and a stored path would rot on every retitle — and resolve entirely
+  view-side against the store's `noteList`-provided metas, scoped to the
+  note's own workspace. Following one dispatches `openNote` with a path Bun
+  already vouched for; no link-derived string ever crosses the RPC.
 - **Spawn params are the one deliberate exception** to "the view never names
   anything": `sessionConfigure` carries a cwd, env vars, and file references
   the view parsed out of a note's frontmatter (`shared/frontmatter.ts`). This

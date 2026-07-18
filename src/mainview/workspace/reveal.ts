@@ -20,3 +20,28 @@ export function revealSelection(
   if (col < 0) return { anchor: l.from, head: l.from };
   return { anchor: l.from + col, head: l.from + col + q.length };
 }
+
+// An ATX heading line and its text: `## Title` with an optional closing run
+// of #s. Setext headings are deliberately out — the wikilink anchor grammar
+// this serves ([[note#heading]], editor/wikilinks.ts) is typed by people
+// looking at rendered notes, where ATX is what Ledge's own headings are.
+const ATX_LINE = /^#{1,6}\s+(.+?)(?:\s+#+\s*)?$/;
+
+/**
+ * Where a `#heading` anchor lands: the first ATX heading whose text matches
+ * (case-insensitive, whitespace-trimmed — the raw heading text, not its
+ * slug). Same degradation stance as revealSelection: the anchor is a claim
+ * about the note, and a note that has moved on gets the top of the document
+ * rather than a throw.
+ */
+export function revealHeading(doc: Text, heading: string): { anchor: number; head: number } {
+  const want = heading.trim().toLowerCase();
+  if (want !== "") {
+    for (let i = 1; i <= doc.lines; i += 1) {
+      const l = doc.line(i);
+      const m = ATX_LINE.exec(l.text);
+      if (m && m[1]!.trim().toLowerCase() === want) return { anchor: l.from, head: l.from };
+    }
+  }
+  return { anchor: 0, head: 0 };
+}

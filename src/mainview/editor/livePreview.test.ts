@@ -6,8 +6,11 @@
 import { describe, expect, test } from "bun:test";
 import { GFM, parser } from "@lezer/markdown";
 import { concealments, linkAt, linkTargetAt, type Conceal, type Span } from "./livePreview";
+import { wikiLinkExtension } from "./wikilinks";
 
-const md = parser.configure([GFM]);
+// GFM plus the wikilink grammar — the same pair the editor's parser carries
+// (editor/setup.ts), so the core is tested against the tree it will see.
+const md = parser.configure([GFM, wikiLinkExtension]);
 
 const doc = (text: string) => ({
   sliceString: (from: number, to: number) => text.slice(from, to),
@@ -81,6 +84,24 @@ describe("concealments", () => {
 
   test("a link title is syntax too", () => {
     expect(visible('x\n\n[a](https://b.co "tip")')).toBe("x\n\na");
+  });
+
+  test("a wikilink conceals its brackets and keeps the target, carried raw", () => {
+    expect(visible("x\n\nsee [[Meeting Notes]] end")).toBe("x\n\nsee Meeting Notes end");
+    const spans = conceal("x\n\nsee [[Meeting Notes#Setup]] end").filter((c) => c.kind === "wikilink");
+    expect(spans).toEqual([
+      { kind: "wikilink", from: 9, to: 28, target: "Meeting Notes#Setup" },
+    ]);
+  });
+
+  test("a selection touching a wikilink reveals its raw syntax", () => {
+    const text = "x\n\n[[Notes]]";
+    expect(visible(text, [{ from: 5, to: 5 }])).toBe(text);
+    expect(conceal(text, [{ from: 5, to: 5 }]).filter((c) => c.kind === "wikilink")).toEqual([]);
+  });
+
+  test("an empty [[]] is not a wikilink — ordinary link parsing takes it back", () => {
+    expect(conceal("x\n\ntype [[]] here").filter((c) => c.kind === "wikilink")).toEqual([]);
   });
 
   test("an unopenable target still conceals but promises no click", () => {

@@ -9,12 +9,14 @@ import { Sidebar } from "@/workspace/Sidebar";
 import { WorkspaceView } from "@/workspace/WorkspaceView";
 import { HostPicker } from "@/components/HostPicker";
 import { LOCAL_HOST } from "../shared/frontmatter";
-import { flushAll, paramsOf } from "@/notes/store";
+import { flushAll, folderOf, paramsOf } from "@/notes/store";
+import { parseWikiTarget, resolveWikiTitle } from "@/editor/wikilinks";
+import { refreshWikilinks } from "@/editor/livePreview";
 import { refreshFolder } from "@/workspace/actions";
-import { allDocIds, useWorkspace, WorkspaceProvider, type AppState } from "@/workspace/store";
+import { allDocIds, notesOf, useWorkspace, WorkspaceProvider, type AppState } from "@/workspace/store";
 import { flushLayout, scheduleLayoutSave } from "@/workspace/persist";
 import { findTabBy, focusedDocId } from "@/workspace/tree";
-import { releaseEditor } from "@/workspace/editorPool";
+import { allEditorViews, releaseEditor, requestHeadingReveal } from "@/workspace/editorPool";
 import { CommandProvider, useCommands } from "@/commands/CommandProvider";
 import { ProfileEditor } from "@/components/ProfileEditor";
 import { configureUi } from "@/commands/glue";
@@ -141,6 +143,10 @@ function Shell() {
   termOpenRef.current = termOpen;
   const activeDocRef = useRef(activeDocId);
   activeDocRef.current = activeDocId;
+  // The wikilink handlers below resolve against the store's CURRENT note
+  // lists; the bridge registration is a stable closure, so a ref carries them.
+  const stateRef = useRef(state);
+  stateRef.current = state;
 
   useEffect(() => {
     configureUi({
@@ -192,8 +198,35 @@ function Shell() {
       // The ⌘-clicked frontmatter profile name lands on the same dialog as
       // the "Edit Note Profile…" command.
       openProfileEditor: setProfileEditing,
+      // Wikilinks resolve against the note's OWN workspace list — the same
+      // scoping stance as the browser and the overlays. Both stay view-side:
+      // the resolved path is one Bun handed the store, and openNote is a
+      // plain dispatch, so no new path shape crosses the RPC.
+      wikiNotes: (docId) => {
+        const folder = folderOf(docId);
+        return folder ? notesOf(stateRef.current, folder) : [];
+      },
+      openWikiNote: (docId, target) => {
+        const folder = folderOf(docId);
+        if (!folder) return;
+        const parsed = parseWikiTarget(target);
+        if (!parsed) return;
+        const note = resolveWikiTitle(parsed.title, notesOf(stateRef.current, folder));
+        if (!note) return;
+        // The reveal is registered before the open — the Overlay's search
+        // pattern: openNote's render is what attaches the editor it lands in.
+        if (parsed.heading) requestHeadingReveal(note.path, parsed.heading);
+        dispatch({ type: "openNote", note });
+      },
     });
-  }, [exec, runInTerminal]);
+  }, [exec, runInTerminal, dispatch]);
+
+  // A note list changed (created, renamed, deleted, refreshed): every pooled
+  // editor redraws its wikilinks, so a dangling link resolves the moment its
+  // note comes to exist — and un-resolves when it goes.
+  useEffect(() => {
+    for (const view of allEditorViews()) refreshWikilinks(view);
+  }, [state.notes]);
 
   const onTerminalReady = useCallback(() => {
     if (pending.current) {
