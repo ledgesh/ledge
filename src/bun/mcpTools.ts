@@ -1,9 +1,13 @@
-// The read tier of the MCP server: what an agent may learn from the notes.
-// Every tool routes through bun/notes.ts, so the registry and assertNote
-// guards gate agents exactly as they gate the webview — and the read-only
-// scope is deliberate risk sequencing: agents that WRITE notes go through
-// their own shell today (which the external-edit safety work made survivable),
-// and write tools join this list only once the read tier has proven out.
+// The MCP server's tools: what an agent may learn from the notes, plus the
+// write tier that joined once the read tier proved out. Every tool routes
+// through bun/notes.ts, so the registry and assertNote guards gate agents
+// exactly as they gate the webview — and a write arrives with the store's
+// invariants intact: create_note names files by H1 slug through uniqueName
+// (an agent cannot choose a filename, let alone clobber one), append_note
+// saves through writeNote's baseMtimeMs guard (a concurrent edit is moved to
+// the trash, never destroyed), and the running app sees either as an ordinary
+// external edit through its watcher — the same survivability story the
+// agent's own shell already had.
 //
 // Notes are addressed by TITLE first — the same rename-proof choice wikilinks
 // made (shared/wikilinks.ts): filenames follow the H1, so a path an agent
@@ -16,7 +20,7 @@ import { MAX_HITS } from "../shared/search";
 import { headingOf, labelOf } from "../shared/slug";
 import { resolveWikiTitle, wikiRefsOf } from "../shared/wikilinks";
 import type { McpTool } from "./mcp";
-import { listNotes, readNote, searchNotes } from "./notes";
+import { createNote, listNotes, readNote, searchNotes, writeNote } from "./notes";
 import { assertRegisteredRoot, availableRoots, listWorkspaceRoots, loadWorkspaces, rootContaining } from "./workspaces";
 
 // Agents read timestamps, not epoch millis.
@@ -91,13 +95,57 @@ async function locate(args: Record<string, unknown>): Promise<Located & { text: 
     };
   }
   if (typeof title === "string" && title.trim() !== "") {
-    const meta = resolveWikiTitle(title, await notesIn(args["workspace"]));
+    // The current workspace breaks ties, the way the editor already does: a
+    // [[wikilink]] in the current note resolves within its own workspace, so
+    // an agent launched from that note should agree with it when the same
+    // title exists elsewhere. An explicit workspace argument is a narrower
+    // scope and already wins; a stale $LEDGE_WORKSPACE (or a title that only
+    // exists elsewhere) costs nothing — the global pass decides as before.
+    let meta: Located | null = null;
+    const envWs = process.env["LEDGE_WORKSPACE"];
+    if (envWs && !(typeof args["workspace"] === "string" && args["workspace"] !== "")) {
+      try {
+        meta = resolveWikiTitle(title, await notesIn(envWs));
+      } catch {
+        meta = null;
+      }
+    }
+    meta ??= resolveWikiTitle(title, await notesIn(args["workspace"]));
     if (!meta) throw new Error(`no note titled "${title}" — titles match case-insensitively but exactly; try list_notes or search_notes`);
     const file = await readNote(meta.path);
     if (file === null) throw new Error(`note "${title}" vanished mid-read; try again`);
     return { ...meta, text: file.text, mtimeMs: file.mtimeMs };
   }
   throw new Error("give either a title or a path");
+}
+
+// The workspace a created note lands in. An explicit argument wins; with
+// none, $LEDGE_WORKSPACE — stamped beside $LEDGE_NOTE into every note shell's
+// spawn — means "here"; with no environment either, a sole workspace is
+// unambiguous. Only past all three is it the agent's problem, and the error
+// says what would fix it. The env can name a since-detached root (facts are
+// spawn-time), so its failure explains itself instead of leaking the bare
+// guard message for a path the agent never supplied.
+function targetWorkspace(args: Record<string, unknown>): string {
+  const asked = args["workspace"];
+  if (typeof asked === "string" && asked !== "") return assertRegisteredRoot(asked);
+  const env = process.env["LEDGE_WORKSPACE"];
+  if (env) {
+    try {
+      return assertRegisteredRoot(env);
+    } catch {
+      throw new Error(
+        `LEDGE_WORKSPACE names ${env}, which is no longer a registered workspace root — name one explicitly (list_workspaces shows them)`,
+      );
+    }
+  }
+  const roots = availableRoots();
+  if (roots.length === 1) return roots[0]!;
+  throw new Error(
+    roots.length === 0
+      ? "no workspace is available to create in (unmounted volume? list_workspaces shows what Ledge knows)"
+      : "several workspaces exist — name one (list_workspaces shows them), or call from a shell in a Ledge note's terminal, where LEDGE_WORKSPACE names the current one",
+  );
 }
 
 // Backlink context is one result row, not a paragraph.
@@ -110,7 +158,8 @@ function contextOf(lines: string[], line: number): string {
 const TITLE_OR_PATH_PROPS = {
   title: {
     type: "string",
-    description: "The note's title (its H1). Case-insensitive exact match; survives renames. Preferred.",
+    description:
+      "The note's title (its H1). Case-insensitive exact match; survives renames. Preferred. A title several notes share resolves in the current session's workspace first, then newest-first across all of them.",
   },
   path: { type: "string", description: "A note path previously returned by list_notes, search_notes, or backlinks." },
   workspace: { type: "string", description: "Restrict title resolution to one workspace root." },
@@ -223,6 +272,64 @@ export const ledgeTools: McpTool[] = [
         }
       }
       return { target: { path: target.path, title: target.title, workspace: target.workspace }, backlinks };
+    },
+  },
+  {
+    name: "create_note",
+    description:
+      "Create a new note. Start the text with an H1 (`# Title`) — the filename is derived from it, and the title is how every other tool (and the user's [[wikilinks]]) will address the note; without one it is created as untitled. Names never clobber: a duplicate title gets a numbered file. With no `workspace`, the note lands in the current session's workspace (Ledge sets LEDGE_WORKSPACE in every note's shells), or in the only workspace when just one exists.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        text: { type: "string", description: "The note's full Markdown text, H1 first." },
+        workspace: { type: "string", description: "A workspace root from list_workspaces." },
+      },
+      required: ["text"],
+      additionalProperties: false,
+    },
+    handler: async (args) => {
+      const text = args["text"];
+      if (typeof text !== "string" || text.trim() === "") {
+        throw new Error("give the note's text (start it with `# Title` — the title is how the note will be addressed)");
+      }
+      await loadWorkspaces();
+      const root = targetWorkspace(args);
+      const meta = await createNote(root, text);
+      return { path: meta.path, title: meta.title, workspace: root, modified: iso(meta.mtimeMs) };
+    },
+  },
+  {
+    name: "append_note",
+    description:
+      "Append Markdown to an existing note, as a new block separated by one blank line. Address the note by title (preferred) or path; with neither, appends to the current note — the one whose terminal this session was launched from. The note's H1 (and so its title and filename) is untouched. If someone else saved the note mid-append, their version is preserved in the workspace's trash and `divergedTo` names where.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        text: { type: "string", description: "The Markdown to append." },
+        ...TITLE_OR_PATH_PROPS,
+      },
+      required: ["text"],
+      additionalProperties: false,
+    },
+    handler: async (args) => {
+      const text = args["text"];
+      if (typeof text !== "string" || text.trim() === "") throw new Error("give the text to append");
+      await loadWorkspaces();
+      const n = await locate(args);
+      // Block semantics: exactly one blank line between old content and new,
+      // one trailing newline — however either side was terminated. Leading
+      // blank lines in the addition would double the separator, so they go;
+      // first-line indentation stays (it can be meaningful Markdown).
+      const base = n.text.replace(/\s+$/u, "");
+      const addition = text.replace(/^(?:[ \t]*\n)+/u, "").replace(/\s+$/u, "");
+      const joined = (base === "" ? "" : base + "\n\n") + addition + "\n";
+      // baseMtimeMs is the version locate() just read: a foreign write landing
+      // inside this handler's read-modify-write window is moved to the trash
+      // by writeNote's guard, never silently lost under the append.
+      const res = await writeNote(n.path, joined, n.mtimeMs);
+      const out: Record<string, unknown> = { path: n.path, title: n.title, workspace: n.workspace, modified: iso(res.mtimeMs) };
+      if (res.divergedTo !== null) out["divergedTo"] = res.divergedTo;
+      return out;
     },
   },
 ];

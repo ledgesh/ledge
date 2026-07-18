@@ -29,25 +29,35 @@ entry is an undocumented protocol change.
 
 One more entry point exists beside the app: **the MCP server**
 (`src/bun/mcp.ts`, `bun run mcp`), a separate process that agent CLIs spawn
-over stdio to read notes. It is not a third participant in the RPC — it never
-talks to the running app — but it is Bun-side code under Bun-side rules: every
-tool routes through `bun/notes.ts` and the workspace registry, so the path
-guards and filesystem invariants have one definition however a caller arrives.
-Being a separate process, it re-reads the registry file on every tool call
-(one small JSON read) rather than holding the app's load-time snapshot — a
+over stdio to read and write notes. It is not a third participant in the RPC —
+it never talks to the running app — but it is Bun-side code under Bun-side
+rules: every tool routes through `bun/notes.ts` and the workspace registry, so
+the path guards and filesystem invariants have one definition however a caller
+arrives. Being a separate process, it re-reads the registry file on every tool
+call (one small JSON read) rather than holding the app's load-time snapshot — a
 workspace attached mid-session is visible to agents without a restart. Its
 protocol is a hand-rolled JSON-RPC subset (`initialize`/`tools/*`, one
 message per line; §8's stance — the SDK earns its place if resources or
 prompts ever join), its stdout belongs to that protocol (logs go to stderr),
-and its tool set is deliberately READ-ONLY for now: write tools are a
-separate, later decision, sequenced behind the external-edit safety work that
-makes agent writes survivable at all. Title-addressed reads reuse
+and its tool set grew in deliberate tiers: reads first, then two writes
+(`create_note`, `append_note`) once the read tier proved out — both through
+the store, so an agent's write gets H1-slug naming via `uniqueName` (agents
+never choose filenames) and rides `writeNote`'s `baseMtimeMs` divergence
+guard, and the running app perceives it as an ordinary external edit through
+its watcher (the external-edit safety work is what made this tier acceptable
+at all). Title-addressed reads reuse
 `shared/wikilinks.ts` — the same resolution the editor uses, hoisted to
 shared/ for exactly this second consumer. Called with no target at all,
 `read_note`/`backlinks` fall back to `$LEDGE_NOTE` — the note whose terminal
 the agent was launched from, stamped into every note shell's spawn (§2) and
 inherited down the agent → server process chain — so "the note I am sitting
-in" needs no argument.
+in" needs no argument. `$LEDGE_WORKSPACE` rides the same chain and makes
+"here" work too: `create_note` defaults into it, and an ambiguous title
+resolves there first, before the global newest-first pass — the same scoping
+the current note's own wikilinks get. The server's initialize `instructions`
+state both facts outright (this note is X, this workspace is Y), because
+that context is what actually steers an agent; tool-description hints alone
+proved not to.
 
 ## 2. The trust boundary
 

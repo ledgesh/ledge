@@ -1,4 +1,4 @@
-// The Ledge MCP server: how agents read the user's notes. Agent CLIs (Claude
+// The Ledge MCP server: how agents read and write the user's notes. Agent CLIs (Claude
 // Code, Codex, Gemini — anything speaking MCP) spawn this file as a THIRD
 // process, entirely separate from the running app, and talk JSON-RPC 2.0 over
 // stdio, one message per line. It is Bun-side code in the architectural sense
@@ -46,11 +46,12 @@ const LATEST_PROTOCOL = "2025-06-18";
 // but tests exercise both shapes through one dispatcher.
 function instructions(): string {
   const note = process.env["LEDGE_NOTE"];
+  const ws = process.env["LEDGE_WORKSPACE"];
   const here = note
-    ? `This session was launched from inside the Ledge note at ${note}. When the user says "this note" or "the current note", they mean that one: call read_note with NO arguments to fetch it (backlinks with no arguments targets it too).`
+    ? `This session was launched from inside the Ledge note at ${note}${ws ? ` (workspace: ${ws})` : ""}. When the user says "this note" or "the current note", they mean that one: call read_note with NO arguments to fetch it (backlinks with no arguments targets it too, and append_note with only \`text\` appends to it).${ws ? ` When they say "this workspace" or "here", they mean ${ws} — pass it as the \`workspace\` argument to scope a tool to it (create_note already defaults into it).` : ""}`
     : `When an agent runs inside a Ledge note's terminal, $LEDGE_NOTE names that note and read_note with no arguments reads it; this session was not launched from one, so notes must be named explicitly.`;
   return (
-    "Ledge is the user's local Markdown notes app; these tools read their notes. " +
+    "Ledge is the user's local Markdown notes app; these tools read and write their notes. " +
     "Notes are addressed by TITLE (their H1, case-insensitive) — titles survive file renames, paths may not. " +
     here
   );
@@ -79,8 +80,9 @@ function isRecord(v: unknown): v is Record<string, unknown> {
  * One request line in, one response line out (or null: notifications and
  * blank lines get no answer). Deliberately stateless — the server does not
  * track whether initialize happened, because refusing a tools/call from a
- * client that skipped the handshake protects nothing here: every tool is
- * read-only over files the agent's own shell could read anyway.
+ * client that skipped the handshake protects nothing here: every tool touches
+ * only notes the agent's own shell could read and write anyway — and the
+ * write tools go through the same guarded store the app itself uses.
  */
 export function createDispatcher(tools: readonly McpTool[]): (line: string) => Promise<string | null> {
   const byName = new Map(tools.map((t) => [t.name, t]));

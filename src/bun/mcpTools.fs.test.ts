@@ -1,8 +1,9 @@
-// The MCP read tools against a real filesystem: what an agent actually gets.
-// The interesting decisions are the ones an agent would trip over — title
-// resolution across workspaces (newest wins), the registry re-read that keeps
-// a long-lived server honest about workspaces attached mid-session, and the
-// guards holding for paths an agent invents.
+// The MCP tools against a real filesystem: what an agent actually gets, and
+// what its writes actually do. The interesting decisions are the ones an
+// agent would trip over — title resolution across workspaces (newest wins),
+// the registry re-read that keeps a long-lived server honest about workspaces
+// attached mid-session, the guards holding for paths an agent invents, and
+// the write tier inheriting the store's naming and never-clobber rules.
 //
 // Same scratch-home discipline as notes.fs.test.ts: the preload pointed
 // APP_HOME at a temp dir before anything imported, and the guard re-checks.
@@ -11,7 +12,7 @@ import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
 import { APP_HOME, WORKSPACES_PATH, createManaged, loadWorkspaces } from "./workspaces";
-import { createNote } from "./notes";
+import { createNote, readNote } from "./notes";
 import { ledgeTools } from "./mcpTools";
 
 if (!resolve(APP_HOME).startsWith(resolve(tmpdir()) + sep)) {
@@ -166,6 +167,155 @@ describe("the current-note default (LEDGE_NOTE)", () => {
   test("outside any note terminal, no arguments is an error that says where the default comes from", async () => {
     delete process.env["LEDGE_NOTE"];
     expect(call("read_note", {})).rejects.toThrow("LEDGE_NOTE");
+  });
+});
+
+// The current-workspace tie-break: an ambiguous title resolves the way the
+// current note's own [[wikilinks]] would — within its workspace — before the
+// global newest-first pass gets a say. Same deixis chain as LEDGE_NOTE; the
+// two are stamped together.
+describe("the current-workspace tie-break (LEDGE_WORKSPACE)", () => {
+  const HAD = Object.hasOwn(process.env, "LEDGE_WORKSPACE");
+  const OLD = process.env["LEDGE_WORKSPACE"];
+  afterEach(() => {
+    if (HAD) process.env["LEDGE_WORKSPACE"] = OLD;
+    else delete process.env["LEDGE_WORKSPACE"];
+  });
+
+  test("an ambiguous title prefers the current workspace over a fresher note elsewhere", async () => {
+    const here = await createNote(ROOT, "# Plan\nhere");
+    const there = await createNote(OTHER, "# Plan\nthere");
+    await ageTo(here.path, 1_000_000);
+    await ageTo(there.path, 2_000_000);
+    process.env["LEDGE_WORKSPACE"] = ROOT;
+    expect((await call("read_note", { title: "Plan" })).text).toBe("# Plan\nhere");
+    // An explicit workspace argument is a narrower ask and beats the env.
+    expect((await call("read_note", { title: "Plan", workspace: OTHER })).text).toBe("# Plan\nthere");
+  });
+
+  test("a title the current workspace lacks still resolves globally", async () => {
+    await createNote(OTHER, "# Elsewhere Only\nfound");
+    process.env["LEDGE_WORKSPACE"] = ROOT;
+    expect((await call("read_note", { title: "Elsewhere Only" })).text).toContain("found");
+  });
+
+  test("a stale LEDGE_WORKSPACE costs nothing — global newest-first decides", async () => {
+    const a = await createNote(ROOT, "# Plan\nold");
+    const b = await createNote(OTHER, "# Plan\nnew");
+    await ageTo(a.path, 1_000_000);
+    await ageTo(b.path, 2_000_000);
+    process.env["LEDGE_WORKSPACE"] = join(tmpdir(), "ledge-detached-nowhere");
+    expect((await call("read_note", { title: "Plan" })).text).toBe("# Plan\nnew");
+  });
+
+  test("backlinks resolves its target under the same preference", async () => {
+    const here = await createNote(ROOT, "# Target\nhere");
+    const there = await createNote(OTHER, "# Target\nthere");
+    await ageTo(here.path, 1_000_000);
+    await ageTo(there.path, 2_000_000);
+    await createNote(ROOT, "# Pointer\n[[Target]]");
+    process.env["LEDGE_WORKSPACE"] = ROOT;
+    const out = await call("backlinks", { title: "Target" });
+    expect(out.target.path).toBe(here.path);
+    expect(out.backlinks.map((b: { title: string }) => b.title)).toEqual(["Pointer"]);
+  });
+});
+
+// The write tier. Both tools route through the store, so what these really
+// pin down is that an agent's write inherits the app's rules — H1-slug
+// naming, uniqueName dedup, block-append semantics — rather than getting a
+// laxer parallel path.
+describe("create_note", () => {
+  const HAD = Object.hasOwn(process.env, "LEDGE_WORKSPACE");
+  const OLD = process.env["LEDGE_WORKSPACE"];
+  afterEach(() => {
+    if (HAD) process.env["LEDGE_WORKSPACE"] = OLD;
+    else delete process.env["LEDGE_WORKSPACE"];
+  });
+
+  test("names the file from the H1 and writes the text", async () => {
+    delete process.env["LEDGE_WORKSPACE"];
+    const out = await call("create_note", { workspace: ROOT, text: "# Fresh Idea\n\nbody" });
+    expect(out.path).toBe(join(ROOT, "fresh-idea.md"));
+    expect(out.title).toBe("Fresh Idea");
+    expect(out.workspace).toBe(ROOT);
+    expect((await readNote(out.path))?.text).toBe("# Fresh Idea\n\nbody");
+  });
+
+  test("a duplicate title gets a numbered file; the first note is untouched", async () => {
+    const first = await call("create_note", { workspace: ROOT, text: "# Plan\nold" });
+    const second = await call("create_note", { workspace: ROOT, text: "# Plan\nnew" });
+    expect(second.path).toBe(join(ROOT, "plan-2.md"));
+    expect((await readNote(first.path))?.text).toBe("# Plan\nold");
+  });
+
+  test("headingless text is created as untitled, not refused", async () => {
+    const out = await call("create_note", { workspace: ROOT, text: "just a thought" });
+    expect(out.path).toBe(join(ROOT, "untitled.md"));
+  });
+
+  test("with no workspace argument, $LEDGE_WORKSPACE says where 'here' is", async () => {
+    process.env["LEDGE_WORKSPACE"] = OTHER;
+    const out = await call("create_note", { text: "# From The Terminal\n" });
+    expect(out.workspace).toBe(OTHER);
+    expect(out.path).toBe(join(OTHER, "from-the-terminal.md"));
+  });
+
+  test("a stale $LEDGE_WORKSPACE explains itself instead of leaking the guard", async () => {
+    process.env["LEDGE_WORKSPACE"] = join(tmpdir(), "ledge-detached-nowhere");
+    expect(call("create_note", { text: "# Lost\n" })).rejects.toThrow("LEDGE_WORKSPACE");
+  });
+
+  test("no argument, no env: a sole workspace is the default, several must be named", async () => {
+    delete process.env["LEDGE_WORKSPACE"];
+    expect(call("create_note", { text: "# Homeless\n" })).rejects.toThrow("several workspaces");
+    await writeFile(WORKSPACES_PATH, JSON.stringify({ version: 1, roots: [ROOT] }));
+    const out = await call("create_note", { text: "# Homed\n" });
+    expect(out.workspace).toBe(ROOT);
+  });
+
+  test("an unregistered workspace argument is refused; empty text is too", async () => {
+    expect(call("create_note", { workspace: "/etc", text: "# Nope\n" })).rejects.toThrow(
+      "not a registered workspace root",
+    );
+    expect(call("create_note", { workspace: ROOT, text: "  \n" })).rejects.toThrow("give the note's text");
+  });
+});
+
+describe("append_note", () => {
+  const HAD = Object.hasOwn(process.env, "LEDGE_NOTE");
+  const OLD = process.env["LEDGE_NOTE"];
+  afterEach(() => {
+    if (HAD) process.env["LEDGE_NOTE"] = OLD;
+    else delete process.env["LEDGE_NOTE"];
+  });
+
+  test("appends as a new block: one blank line between, one trailing newline", async () => {
+    const n = await createNote(ROOT, "# Log\n\nfirst entry\n\n\n");
+    const out = await call("append_note", { title: "Log", text: "\n\nsecond entry\n\n" });
+    expect(out.path).toBe(n.path);
+    expect(out.divergedTo).toBeUndefined();
+    expect((await readNote(n.path))?.text).toBe("# Log\n\nfirst entry\n\nsecond entry\n");
+  });
+
+  test("no title or path appends to the current note ($LEDGE_NOTE)", async () => {
+    const n = await createNote(ROOT, "# Current\n");
+    process.env["LEDGE_NOTE"] = n.path;
+    await call("append_note", { text: "from the agent" });
+    expect((await readNote(n.path))?.text).toBe("# Current\n\nfrom the agent\n");
+  });
+
+  test("the title and filename survive an append untouched", async () => {
+    const n = await createNote(ROOT, "# Sturdy\nbody");
+    const out = await call("append_note", { path: n.path, text: "# Not A New Title\nmore" });
+    expect(out.path).toBe(n.path);
+    expect(out.title).toBe("Sturdy");
+    expect((await readNote(n.path))?.text).toContain("# Not A New Title");
+  });
+
+  test("empty additions and unknown targets are refused", async () => {
+    expect(call("append_note", { title: "Anything", text: "  \n " })).rejects.toThrow("give the text to append");
+    expect(call("append_note", { title: "No Such Note", text: "hi" })).rejects.toThrow('no note titled');
   });
 });
 

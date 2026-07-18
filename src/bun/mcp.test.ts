@@ -59,11 +59,14 @@ describe("lifecycle", () => {
 // terminal, the server TELLS the agent which note "this note" is, instead of
 // hoping it discovers the no-argument fallback in a tool description.
 describe("instructions", () => {
-  const HAD = Object.hasOwn(process.env, "LEDGE_NOTE");
-  const OLD = process.env["LEDGE_NOTE"];
+  const SAVED = new Map<string, string | undefined>(
+    ["LEDGE_NOTE", "LEDGE_WORKSPACE"].map((k) => [k, Object.hasOwn(process.env, k) ? process.env[k] : undefined]),
+  );
   afterEach(() => {
-    if (HAD) process.env["LEDGE_NOTE"] = OLD;
-    else delete process.env["LEDGE_NOTE"];
+    for (const [k, v] of SAVED) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
   });
 
   async function initInstructions(): Promise<string> {
@@ -71,15 +74,27 @@ describe("instructions", () => {
     return (res?.["result"] as Record<string, unknown>)["instructions"] as string;
   }
 
-  test("launched from a note's terminal, they name the note outright", async () => {
+  test("launched from a note's terminal, they name the note AND its workspace outright", async () => {
     process.env["LEDGE_NOTE"] = "/ws/current.md";
+    process.env["LEDGE_WORKSPACE"] = "/ws";
     const text = await initInstructions();
     expect(text).toContain("/ws/current.md");
     expect(text).toContain("NO arguments");
+    expect(text).toContain('"this workspace"');
+    expect(text).toContain("(workspace: /ws)");
+  });
+
+  test("a note without a workspace fact still names the note, and claims nothing about 'here'", async () => {
+    process.env["LEDGE_NOTE"] = "/ws/current.md";
+    delete process.env["LEDGE_WORKSPACE"];
+    const text = await initInstructions();
+    expect(text).toContain("/ws/current.md");
+    expect(text).not.toContain("this workspace");
   });
 
   test("launched anywhere else, they say notes must be named", async () => {
     delete process.env["LEDGE_NOTE"];
+    delete process.env["LEDGE_WORKSPACE"];
     const text = await initInstructions();
     expect(text).not.toContain("this session was launched from");
     expect(text).toContain("named explicitly");
