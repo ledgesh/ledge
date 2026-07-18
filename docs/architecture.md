@@ -27,6 +27,24 @@ schema. Each schema entry carries a comment saying what it is for and when it
 fires — the schema doubles as the protocol's documentation, so an uncommented
 entry is an undocumented protocol change.
 
+One more entry point exists beside the app: **the MCP server**
+(`src/bun/mcp.ts`, `bun run mcp`), a separate process that agent CLIs spawn
+over stdio to read notes. It is not a third participant in the RPC — it never
+talks to the running app — but it is Bun-side code under Bun-side rules: every
+tool routes through `bun/notes.ts` and the workspace registry, so the path
+guards and filesystem invariants have one definition however a caller arrives.
+Being a separate process, it re-reads the registry file on every tool call
+(one small JSON read) rather than holding the app's load-time snapshot — a
+workspace attached mid-session is visible to agents without a restart. Its
+protocol is a hand-rolled JSON-RPC subset (`initialize`/`tools/*`, one
+message per line; §8's stance — the SDK earns its place if resources or
+prompts ever join), its stdout belongs to that protocol (logs go to stderr),
+and its tool set is deliberately READ-ONLY for now: write tools are a
+separate, later decision, sequenced behind the external-edit safety work that
+makes agent writes survivable at all. Title-addressed reads reuse
+`shared/wikilinks.ts` — the same resolution the editor uses, hoisted to
+shared/ for exactly this second consumer.
+
 ## 2. The trust boundary
 
 **The view is the least-trusted end of the RPC.** Not because it is hostile,

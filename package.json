@@ -9,6 +9,7 @@
     "dev:hmr": "concurrently -k \"bun run hmr\" \"electrobun dev\"",
     "hmr": "vite --port 5173",
     "build": "vite build && electrobun build",
+    "mcp": "bun src/bun/mcp.ts",
     "test": "bun test",
     "test:watch": "bun test --watch",
     "test:e2e": "playwright test"

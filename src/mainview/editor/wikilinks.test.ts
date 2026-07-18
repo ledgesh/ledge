@@ -1,6 +1,6 @@
-// The wikilink grammar and its decisions: what parses as a `[[...]]` node,
-// how a target splits into title + heading, which note a title resolves to,
-// and what the `[[` picker offers. Parser assertions run against
+// The wikilink CodeMirror seams: what parses as a `[[...]]` node and what the
+// `[[` picker offers. (The pure target/resolution decisions are tested with
+// their code in shared/wikilinks.test.ts.) Parser assertions run against
 // @lezer/markdown directly (livePreview.test.ts's move); completion
 // assertions build a real EditorState — still no DOM.
 import { describe, expect, test } from "bun:test";
@@ -11,13 +11,7 @@ import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { CompletionContext, type CompletionResult } from "@codemirror/autocomplete";
 import type { NoteMeta } from "../../shared/rpc-schema";
 import { configureBridge } from "./bridge";
-import {
-  parseWikiTarget,
-  resolveWikiTitle,
-  wikiCompletionSource,
-  wikiLinkExtension,
-  wikiTargetAt,
-} from "./wikilinks";
+import { wikiCompletionSource, wikiLinkExtension, wikiTargetAt } from "./wikilinks";
 
 const md = parser.configure([GFM, wikiLinkExtension]);
 
@@ -74,50 +68,6 @@ describe("wikiLinkExtension", () => {
 
   test("a wikilink inside a code fence is code, not a link", () => {
     expect(wikiSpans("```\n[[Not A Link]]\n```")).toEqual([]);
-  });
-});
-
-describe("parseWikiTarget", () => {
-  test("a bare title has no heading", () => {
-    expect(parseWikiTarget("Meeting Notes")).toEqual({ title: "Meeting Notes", heading: null });
-  });
-
-  test("the first # splits title from heading, both trimmed", () => {
-    expect(parseWikiTarget(" Notes # Setup ")).toEqual({ title: "Notes", heading: "Setup" });
-  });
-
-  test("a heading may itself contain # (only the first splits)", () => {
-    expect(parseWikiTarget("Notes#a#b")).toEqual({ title: "Notes", heading: "a#b" });
-  });
-
-  test("a trailing bare # is no heading", () => {
-    expect(parseWikiTarget("Notes#")).toEqual({ title: "Notes", heading: null });
-  });
-
-  test("no title means no target — [[#h]] and whitespace are dangling by construction", () => {
-    expect(parseWikiTarget("#Setup")).toBeNull();
-    expect(parseWikiTarget("   ")).toBeNull();
-  });
-});
-
-describe("resolveWikiTitle", () => {
-  const notes = [note("Alpha"), note("beta"), note("Beta", "/ws/Beta-2.md")];
-
-  test("exact title match wins", () => {
-    expect(resolveWikiTitle("Alpha", notes)?.path).toBe("/ws/Alpha.md");
-  });
-
-  test("matching is case-insensitive, but an exact-case hit beats a folded one", () => {
-    expect(resolveWikiTitle("BETA", notes)?.path).toBe("/ws/beta.md");
-    expect(resolveWikiTitle("Beta", notes)?.path).toBe("/ws/Beta-2.md");
-  });
-
-  test("no fuzz: a near-miss is dangling, never the nearest note", () => {
-    expect(resolveWikiTitle("Alphas", notes)).toBeNull();
-  });
-
-  test("titles compare trimmed on both sides", () => {
-    expect(resolveWikiTitle("  alpha  ", notes)?.path).toBe("/ws/Alpha.md");
   });
 });
 

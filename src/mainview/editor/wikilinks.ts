@@ -13,13 +13,15 @@
 // dispatches openNote with one of those known paths. No new path shape ever
 // crosses the RPC (architecture.md §2).
 //
-// This module is the pure core plus the two CodeMirror seams:
+// This module is the CodeMirror seams:
 // - `wikiLinkExtension` teaches @lezer/markdown the `[[...]]` inline syntax
 //   (a real parse node, so concealment/click/reveal reuse the same tree
 //   machinery as ordinary links in livePreview.ts);
-// - `parseWikiTarget` / `resolveWikiTitle` are the tested decisions;
 // - `wikiCompletionSource` is the `[[` picker (phase 2), reading the note
 //   list through the editor bridge.
+// The pure decisions — `parseWikiTarget` / `resolveWikiTitle` — moved to
+// shared/wikilinks.ts when the MCP server started resolving the same titles
+// Bun-side; re-exported here so editor code keeps one import for wikilinks.
 import type { SyntaxNode, Tree } from "@lezer/common";
 import type { MarkdownConfig } from "@lezer/markdown";
 import { tags } from "@lezer/highlight";
@@ -33,8 +35,11 @@ import {
   type CompletionResult,
 } from "@codemirror/autocomplete";
 import type { NoteMeta } from "../../shared/rpc-schema";
+import { parseWikiTarget, resolveWikiTitle } from "../../shared/wikilinks";
 import { wikiNotes } from "./bridge";
 import { sessionIdFacet } from "./session";
+
+export { parseWikiTarget, resolveWikiTitle };
 
 export const WIKILINK_NODE = "WikiLink";
 
@@ -72,36 +77,6 @@ export const wikiLinkExtension: MarkdownConfig = {
     },
   ],
 };
-
-/** A wikilink's inner text, split into the note title and the optional
- * `#heading` anchor. Null when there is no title to resolve (`[[#h]]`,
- * whitespace) — such a link is dangling by construction. */
-export function parseWikiTarget(raw: string): { title: string; heading: string | null } | null {
-  const hash = raw.indexOf("#");
-  const title = (hash < 0 ? raw : raw.slice(0, hash)).trim();
-  if (!title) return null;
-  const heading = hash < 0 ? null : raw.slice(hash + 1).trim();
-  return { title, heading: heading || null };
-}
-
-/**
- * The note `title` names, or null. Case-insensitive exact match — not fuzzy:
- * a link that silently opened the *nearest* title would follow typos to the
- * wrong note, and dangling-when-wrong is the honest failure. An exact-case
- * match wins over a case-folded one; remaining ties go to the first in list
- * order (newest mtime first, as the store holds them).
- */
-export function resolveWikiTitle(title: string, notes: readonly NoteMeta[]): NoteMeta | null {
-  const want = title.trim().toLowerCase();
-  if (!want) return null;
-  let folded: NoteMeta | null = null;
-  for (const n of notes) {
-    const t = n.title.trim();
-    if (t === title.trim()) return n;
-    if (folded === null && t.toLowerCase() === want) folded = n;
-  }
-  return folded;
-}
 
 // A title the `[[...]]` grammar can actually express: brackets would end (or
 // break) the link, `#` would read as an anchor. Notes named outside the
