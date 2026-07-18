@@ -9,6 +9,7 @@
 import {
   ArrowLeft,
   ArrowRight,
+  Bold,
   Columns2,
   Command as CommandIcon,
   Copy,
@@ -16,8 +17,10 @@ import {
   FilePlus,
   FileText,
   FolderOpen,
+  Italic,
   KeyRound,
   Layers,
+  Link,
   Link2,
   PanelLeft,
   Pencil,
@@ -444,6 +447,11 @@ export function buildCommands(deps: RegistryDeps): Command[] {
     // the accelerator. Same always-visible, no-op-off-target contract as
     // link.open above.
     cmd("task.toggle", editorCommand(deps, SquareCheck, (ed, docId) => ed.toggleTask(docId))),
+    // Markdown formatting (editor/formatting.ts): the ⌘B/⌘I/⌘K trio, bound in
+    // CodeMirror like every editor-internal chord.
+    cmd("format.bold", editorCommand(deps, Bold, (ed, docId) => ed.bold(docId))),
+    cmd("format.italic", editorCommand(deps, Italic, (ed, docId) => ed.italic(docId))),
+    cmd("format.link", editorCommand(deps, Link, (ed, docId) => ed.insertLink(docId))),
   ];
 
   // Indexed quick-jumps, one command per slot so the dispatcher and the

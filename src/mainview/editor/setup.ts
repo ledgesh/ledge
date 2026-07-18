@@ -15,6 +15,7 @@ import { imagePasteInsert, imageRendering } from "./images";
 import { quoteExit } from "./quotes";
 import { wikiCompletion, wikiLinkExtension } from "./wikilinks";
 import { wrapping } from "./wrap";
+import { formatting } from "./formatting";
 import { findReplace } from "./find";
 import { fromDisk, sessionIdFacet } from "./session";
 import { folderOf, noteChanged, saveNow } from "../notes/store";
@@ -334,6 +335,9 @@ export function createEditor(parent: HTMLElement, doc: string, sessionId: string
         findReplace(),
         appKeymap,
         clipboardKeymap,
+        // ⌘B/⌘I/⌘K (editor/formatting.ts). Editing behavior like quoteExit:
+        // not gated by livePreview — raw markdown toggles the same markers.
+        formatting(),
         ledgeBlocks(),
         ledgeFrontmatter(),
         // The settings knob is the escape hatch back to fully-raw markdown

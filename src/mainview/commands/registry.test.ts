@@ -38,6 +38,9 @@ function stubDeps(calls: string[] = [], noteHead: string | null = null): Registr
       runInTerminal: record("runInTerminal"),
       openLink: record("openLink"),
       toggleTask: record("toggleTask"),
+      bold: record("bold"),
+      italic: record("italic"),
+      insertLink: record("insertLink"),
     },
   };
 }
@@ -188,7 +191,8 @@ describe("registry", () => {
     const docId = leaf.tabs[0]!.docId;
     find(cmds, "editor.find").run(makeCtx(state));
     find(cmds, "block.runInline").run(makeCtx(state));
-    expect(calls).toEqual([`find:${docId}`, `runInline:${docId}`]);
+    find(cmds, "format.bold").run(makeCtx(state));
+    expect(calls).toEqual([`find:${docId}`, `runInline:${docId}`, `bold:${docId}`]);
   });
 
   test("run: settings.open routes to the openSettings edge", () => {

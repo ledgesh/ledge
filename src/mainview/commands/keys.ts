@@ -69,8 +69,8 @@ export const COMMANDS = {
   "sidebar.toggle": { title: "Toggle Sidebar", keys: ["Alt-Mod-b"] },
   // The right-hand Backlinks panel: which notes [[link]] to the current one.
   // ⌥⌘L is the sidebar's ⌥-tier move with the letter the sidebar couldn't
-  // give it: B is taken (and ⌘B/⌘L-adjacent chords are reserved for
-  // formatting), so L — links — carries it.
+  // give it: B is taken (⌘B is Bold, ⌥⌘B the sidebar), so L — links —
+  // carries it.
   "backlinks.toggle": { title: "Toggle Backlinks", keys: ["Alt-Mod-l"] },
   // The right panel's other face: the active note's headings, live. Same
   // ⌥-tier as its sibling toggles; O for outline (⌘O itself stays free).
@@ -137,9 +137,16 @@ export const COMMANDS = {
   "editor.findPrev": { title: "Find Previous", keys: ["Mod-Shift-g", "Shift-F3"] },
   "block.runInline": { title: "Run Block Inline", keys: ["Mod-Enter"] },
   "block.runInTerminal": { title: "Run Block in Terminal", keys: ["Mod-Shift-Enter"] },
+  // Markdown formatting (editor/formatting.ts) — the chords that were held in
+  // RESERVED_KEYS until they could mean exactly this. Bold/italic toggle the
+  // markers around the selection or the word at the caret; ⌘K wraps the
+  // selection as a [text](url) link with the caret in the missing half.
+  "format.bold": { title: "Bold", keys: ["Mod-b"] },
+  "format.italic": { title: "Italic", keys: ["Mod-i"] },
+  "format.link": { title: "Insert Link", keys: ["Mod-k"] },
   // Palette-only: ⌘-click on the link itself is the accelerator
   // (editor/livePreview.ts), same grammar as the frontmatter profile name.
-  // No chord: not frequent enough to spend one, and ⌘K is reserved below.
+  // No chord: not frequent enough to spend one, and ⌘K is Insert Link above.
   "link.open": { title: "Open Link" },
   // Palette-only: clicking the rendered checkbox is the accelerator
   // (editor/livePreview.ts TaskWidget); this is the keyboard path for a
@@ -156,10 +163,12 @@ export const COMMANDS = {
 
 export type CommandId = keyof typeof COMMANDS;
 
-// Keys deliberately left unbound (docs/interactions.md §2): ⌘B/⌘I/⌘K are
-// reserved for future Markdown formatting, and Mod-d select-next-occurrence
-// stays out of the editor keymap because ⌘D is the split key.
-export const RESERVED_KEYS = ["Mod-b", "Mod-i", "Mod-k"] as const;
+// Keys deliberately left unbound (docs/interactions.md §2). Currently empty:
+// ⌘B/⌘I/⌘K sat here until formatting spent them (format.* above). The list
+// stays — with its keys.test.ts guard — so the next hold has somewhere
+// enforceable to live. Mod-d select-next-occurrence is a different kind of
+// unbound: editor/find.ts omits it because ⌘D is the split key.
+export const RESERVED_KEYS: readonly string[] = [];
 
 // The indexed quick-jumps, generated per item rather than listed above:
 // ⌘1…9 switches workspace, ⌃1…9 selects a tab in the focused pane. The

@@ -88,10 +88,13 @@ Rules:
   commands may never claim the same bare key on the same row kind
   (`registry.test.ts` enforces both). A text field inside a row (the inline
   rename) is typing, not a row — the dispatcher checks for one first.
-- **Reserved (unbound on purpose):** ⌘B, ⌘I, ⌘K are held for future Markdown
-  formatting — which is why the sidebar is ⌥⌘B, not VS Code's ⌘B. ⌘D is the
-  split key (iTerm/cmux muscle memory); `editor/find.ts` deliberately omits
-  Mod-d select-next-occurrence for the same reason.
+- **Formatting chords:** ⌘B, ⌘I, ⌘K are the Markdown formatting trio
+  (Bold / Italic / Insert Link) — they sat in `RESERVED_KEYS` until they could
+  mean exactly this, which is why the sidebar is ⌥⌘B, not VS Code's ⌘B.
+  `RESERVED_KEYS` (now empty) and its `keys.test.ts` guard remain the
+  mechanism for holding a chord on purpose. ⌘D is the split key (iTerm/cmux
+  muscle memory); `editor/find.ts` deliberately omits Mod-d
+  select-next-occurrence for the same reason.
 
 ## 3. Keymap
 
@@ -130,6 +133,8 @@ CodeMirror and never at the window level.
 | Find Next / Previous  | ⌘G / ⇧⌘G (also F3 / ⇧F3)  | editor only |
 | Run Block Inline      | ⌘↩                        | cursor inside a runnable block |
 | Run Block in Terminal | ⇧⌘↩                       | |
+| Bold / Italic         | ⌘B / ⌘I                   | editor only (editor/formatting.ts); toggles `**`/`*` around the selection or the word at the caret — a bare caret drops an empty marker pair to type into. Run-based so the chords compose: ⌘I on `**bold**` stacks to `***both***` and ⌘I again peels only its own star |
+| Insert Link           | ⌘K                        | editor only; wraps the selection as `[text](url)` — a selected URL becomes the destination with the caret in the empty label, any other selection (or the word at the caret) becomes the label with the caret in the empty destination |
 | Open Link             | — (palette; click the rendered link as accelerator) | follows the link under the caret (editor/livePreview.ts) — a URL leaves the app, a `[[wikilink]]` opens the note it names. A RENDERED link (syntax concealed, including inside a rendered table and bare URLs the caret is outside) opens on plain click — while concealed it is a widget, not editable text, same reasoning as the checkbox. A REVEALED link is raw text being edited: plain click is a caret move, ⌘-click opens (same grammar as the profile name above; the underline goes solid while ⌘ is held). Mouse-editing a rendered link: click adjacent text or arrow in, which reveals it. Schemes are allowlisted (shared/links.ts) and re-checked Bun-side |
 | Link to Note (`[[`)   | — (typed, not a command)  | `[[` in the editor pops the note-title picker (editor/wikilinks.ts; Enter accepts and closes the `]]`, Escape closes the popup only). `[[Title]]` resolves by title, case-insensitive exact, against the note's OWN workspace — resolved renders link-styled and opens on the Open Link grammar above; DANGLING renders muted with no hand cursor, and a plain click is the ordinary caret move that reveals it for fixing (a dead "open" affordance on a link that goes nowhere would be worse). `[[Title#Heading]]` opens with that ATX heading revealed, degrading to the top of the note when the heading is gone |
 | Toggle Checkbox       | — (palette; click the rendered box as accelerator) | toggles the `[ ]`/`[x]` on the caret's line (editor/livePreview.ts). The box is a widget, not editable text, so a plain click may act — the caret-move grammar protects text, and the box is not text |

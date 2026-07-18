@@ -13,6 +13,7 @@ import { revealSelection } from "@/workspace/reveal";
 import { openReplace } from "@/editor/find";
 import { runBlock } from "@/editor/blocks";
 import { openLinkAtCursor, toggleTaskAt } from "@/editor/livePreview";
+import { insertLink, toggleBold, toggleItalic } from "@/editor/formatting";
 import { saveNow } from "@/notes/store";
 import { copyText } from "@/lib/clipboard";
 import { installCli } from "@/lib/cli";
@@ -84,5 +85,8 @@ export const registryDeps: RegistryDeps = {
     openLink: (docId) => withView(docId, (view) => openLinkAtCursor(view)),
     toggleTask: (docId) =>
       withView(docId, (view) => toggleTaskAt(view, view.state.selection.main.head)),
+    bold: (docId) => withView(docId, (view) => toggleBold(view)),
+    italic: (docId) => withView(docId, (view) => toggleItalic(view)),
+    insertLink: (docId) => withView(docId, (view) => insertLink(view)),
   },
 };

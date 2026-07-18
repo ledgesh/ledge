@@ -124,6 +124,12 @@ export interface RegistryDeps {
     // Toggle the task checkbox on the caret's line (livePreview.ts); no-op
     // when the line has none.
     toggleTask(docId: string): void;
+    // Markdown formatting (formatting.ts): toggle **strong**/*emphasis*
+    // around the selection or the word at the caret; wrap the selection as a
+    // [text](url) link.
+    bold(docId: string): void;
+    italic(docId: string): void;
+    insertLink(docId: string): void;
   };
 }
 
