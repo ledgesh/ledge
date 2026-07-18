@@ -281,6 +281,34 @@ body {
   text-decoration: underline dotted;
   text-underline-offset: 2px;
 }
+/* Inline #tags (editor/tags.ts + livePreview.ts): a quiet pill in the link
+   color. Styled ALWAYS — nothing conceals, so the text never jumps between
+   touched and rendered — and the hand cursor over the live (untouched) ones
+   comes from the hotspot layer below, like every rendered link. */
+.ledge-hashtag,
+.ledge-hashtag span {
+  color: var(--link);
+  background: color-mix(in srgb, var(--link) 12%, transparent);
+  border-radius: 4px;
+}
+.ledge-hashtag-live,
+.ledge-hashtag-live span {
+  cursor: pointer;
+}
+/* Declared tags on the frontmatter tags: line (editor/frontmatter.ts):
+   the profile name's affordance stack — link-colored dotted underline
+   against the muted block, solid while ⌘ says a click follows. */
+.cm-line.ledge-fm .ledge-fm-tag,
+.cm-line.ledge-fm .ledge-fm-tag span {
+  color: var(--link);
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+.ledge-meta .cm-line.ledge-fm .ledge-fm-tag,
+.ledge-meta .cm-line.ledge-fm .ledge-fm-tag span {
+  text-decoration-style: solid;
+}
+
 /* The WKWebView-proof hand: a body-parented layer pinned over the editor
    (same trick as .ledge-overlay — elements outside the editing context
    honour `cursor`), holding one invisible click-through-proof div per

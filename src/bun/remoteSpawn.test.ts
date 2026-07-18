@@ -8,6 +8,7 @@ const noParams = (over: Partial<NoteParams> = {}): NoteParams => ({
   envFile: null,
   env: {},
   hosts: ["web1"],
+  tags: [],
   ...over,
 });
 

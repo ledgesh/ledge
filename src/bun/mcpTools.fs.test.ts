@@ -490,3 +490,39 @@ describe("backlinks", () => {
     expect(out.backlinks.map((b: { title: string }) => b.title)).toEqual(["Pointer"]);
   });
 });
+
+describe("tags", () => {
+  test("the directory merges frontmatter and inline tags across workspaces, counting notes", async () => {
+    await createNote(ROOT, "# One\n\n#work twice #work\n");
+    await createNote(ROOT, "---\ntags: work, home\n---\n# Two\n\nbody\n");
+    await createNote(OTHER, "# Far\n\n#Work elsewhere\n");
+    // Counts are notes bearing the tag (One's two occurrences count once),
+    // summed across workspaces; identity folds case, first spelling wins.
+    const out = await call("tags");
+    expect(out.tags).toEqual([
+      { tag: "home", count: 1 },
+      { tag: "work", count: 3 },
+    ]);
+    const scoped = await call("tags", { workspace: OTHER });
+    expect(scoped.tags).toEqual([{ tag: "Work", count: 1 }]);
+  });
+
+  test("with a tag: occurrences newest note first; the query folds case and sheds its #", async () => {
+    const old = await createNote(ROOT, "# Old\n\n#work early\n");
+    await ageTo(old.path, 1000);
+    await createNote(ROOT, "# New\n\nthen #Work again\n");
+    const out = await call("tags", { tag: "#WORK" });
+    expect(out.truncated).toBe(false);
+    expect(out.hits.map((h: { title: string }) => h.title)).toEqual(["New", "Old"]);
+    expect(out.hits[0].line).toBe(3);
+    expect(out.hits[0].context).toBe("then #Work again");
+    expect(out.hits[0].workspace).toBe(ROOT);
+    expect(out.hits[0].modified).toMatch(/^\d{4}-/);
+  });
+
+  test("an empty or bare-# tag argument asks for the directory, not an error", async () => {
+    await createNote(ROOT, "# T\n\n#solo\n");
+    expect((await call("tags", { tag: "" })).tags).toEqual([{ tag: "solo", count: 1 }]);
+    expect((await call("tags", { tag: "#" })).tags).toEqual([{ tag: "solo", count: 1 }]);
+  });
+});

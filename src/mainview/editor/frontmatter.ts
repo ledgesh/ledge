@@ -13,8 +13,15 @@
 // gets parsed, never one line more or less.
 import { StateField, type EditorState, type Extension, type Range } from "@codemirror/state";
 import { Decoration, type DecorationSet, EditorView, ViewPlugin } from "@codemirror/view";
-import { frontmatterEnd, isProfileName, parseFrontmatter, unquote } from "../../shared/frontmatter";
-import { editProfile } from "./bridge";
+import {
+  frontmatterEnd,
+  isProfileName,
+  isTagToken,
+  parseFrontmatter,
+  unquote,
+} from "../../shared/frontmatter";
+import { editProfile, openTag } from "./bridge";
+import { sessionIdFacet } from "./session";
 
 // Enough of a note to find the block's end — the same cap as everywhere else
 // that peeks at a head (bun/notes.ts HEAD_BYTES), with the same accepted edge:
@@ -54,6 +61,29 @@ export function profileValueSpan(
   const name = unquote(m[2]!);
   if (!isProfileName(name)) return null;
   return { from: m[1]!.length, to: m[1]!.length + m[2]!.length, name };
+}
+
+/**
+ * The `tags:` value's per-token character spans within one block line —
+ * profileValueSpan's multi-token sibling. Only tokens the parser would accept
+ * are spans (a refused token is no link, the profile rule); each carries the
+ * tag the click should show, leading `#` stripped. A wholly-quoted list
+ * (`tags: "a b"`) yields nothing: the quote glues into the first token and
+ * fails isTagToken — styling degrades, parsing doesn't. Pure, like its
+ * sibling, so the mapping is testable without an editor.
+ */
+export function tagsValueSpans(lineText: string): { from: number; to: number; tag: string }[] {
+  const m = /^(tags[ \t]*:[ \t]*)(\S.*?)[ \t]*$/.exec(lineText.replace(/\r$/, ""));
+  if (!m) return [];
+  const base = m[1]!.length;
+  const out: { from: number; to: number; tag: string }[] = [];
+  for (const tok of m[2]!.matchAll(/[^,\s]+/g)) {
+    const raw = tok[0]!;
+    const tag = raw.startsWith("#") ? raw.slice(1) : raw;
+    if (!isTagToken(tag)) continue;
+    out.push({ from: base + tok.index!, to: base + tok.index! + raw.length, tag });
+  }
+  return out;
 }
 
 /**
@@ -109,6 +139,12 @@ const PROFILE = Decoration.mark({
   class: "ledge-fm-profile",
   attributes: { title: "⌘-click to edit profile" },
 });
+// A declared tag, ⌘-clickable like the profile name — the same follow-vs-
+// edit grammar, landing where every tag click lands (the Tags panel).
+const FM_TAG = Decoration.mark({
+  class: "ledge-fm-tag",
+  attributes: { title: "⌘-click to show tagged notes" },
+});
 
 function build(state: EditorState): DecorationSet {
   const span = frontmatterLineSpan(state.sliceDoc(0, Math.min(HEAD_BYTES, state.doc.length)));
@@ -120,6 +156,9 @@ function build(state: EditorState): DecorationSet {
     if (n !== span.first && n !== span.last) {
       const p = profileValueSpan(line.text);
       if (p) ranges.push(PROFILE.range(line.from + p.from, line.from + p.to));
+      for (const t of tagsValueSpans(line.text)) {
+        ranges.push(FM_TAG.range(line.from + t.from, line.from + t.to));
+      }
     }
   }
   return Decoration.set(ranges, true);
@@ -151,9 +190,19 @@ const clickToEdit = EditorView.domEventHandlers({
     const line = view.state.doc.lineAt(pos);
     if (line.number <= span.first || line.number >= span.last) return false;
     const p = profileValueSpan(line.text);
-    if (!p || pos < line.from + p.from || pos > line.from + p.to) return false;
-    editProfile(p.name);
-    return true;
+    if (p && pos >= line.from + p.from && pos <= line.from + p.to) {
+      editProfile(p.name);
+      return true;
+    }
+    // The tags: line's tokens follow the same grammar: ⌘-click follows (to
+    // the Tags panel), plain click edits.
+    for (const t of tagsValueSpans(line.text)) {
+      if (pos >= line.from + t.from && pos <= line.from + t.to) {
+        openTag(view.state.facet(sessionIdFacet), t.tag);
+        return true;
+      }
+    }
+    return false;
   },
 });
 

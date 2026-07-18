@@ -7,10 +7,12 @@ import { describe, expect, test } from "bun:test";
 import { GFM, parser } from "@lezer/markdown";
 import { concealments, linkAt, linkTargetAt, type Conceal, type Span } from "./livePreview";
 import { wikiLinkExtension } from "./wikilinks";
+import { hashtagExtension } from "./tags";
 
-// GFM plus the wikilink grammar — the same pair the editor's parser carries
-// (editor/setup.ts), so the core is tested against the tree it will see.
-const md = parser.configure([GFM, wikiLinkExtension]);
+// GFM plus the wikilink and hashtag grammars — the same set the editor's
+// parser carries (editor/setup.ts), so the core is tested against the tree
+// it will see.
+const md = parser.configure([GFM, wikiLinkExtension, hashtagExtension]);
 
 const doc = (text: string) => ({
   sliceString: (from: number, to: number) => text.slice(from, to),
@@ -37,6 +39,12 @@ function links(text: string, sel?: Span[]): Array<{ text: string; url: string | 
   return conceal(text, sel)
     .filter((c): c is Span & { kind: "link"; url: string | null } => c.kind === "link")
     .map((c) => ({ text: text.slice(c.from, c.to), url: c.url }));
+}
+
+function tags_(text: string, sel?: Span[], exclude?: Span | null): Array<{ text: string; tag: string }> {
+  return conceal(text, sel, exclude)
+    .filter((c): c is Span & { kind: "tag"; tag: string } => c.kind === "tag")
+    .map((c) => ({ text: text.slice(c.from, c.to), tag: c.tag }));
 }
 
 describe("concealments", () => {
@@ -221,6 +229,25 @@ describe("concealments", () => {
   test("the excluded region (frontmatter) stays raw wholesale", () => {
     const text = "# A\n\n# B";
     expect(visible(text, [{ from: 4, to: 4 }], { from: 0, to: 3 })).toBe("# A\n\nB");
+  });
+
+  test("an inline #tag hides nothing but is marked, carrying its bare text", () => {
+    const text = "x\n\ndo #work now";
+    expect(visible(text)).toBe(text);
+    expect(tags_(text)).toEqual([{ text: "#work", tag: "work" }]);
+  });
+
+  test("a #tag is emitted even under the caret — the bare-URL stance", () => {
+    // Touched-vs-not is a draw-time decision (plain mark vs armed one);
+    // the core reports the tag either way so the styling never blinks.
+    const text = "x\n\ndo #work now";
+    expect(tags_(text, [{ from: 5, to: 5 }])).toEqual([{ text: "#work", tag: "work" }]);
+  });
+
+  test("a #tag in the excluded region (frontmatter) is not emitted", () => {
+    const text = "tags: x\n\ndo #work now";
+    expect(tags_(text, undefined, { from: 0, to: 7 })).toEqual([{ text: "#work", tag: "work" }]);
+    expect(tags_("tags: #x\n\nplain", undefined, { from: 0, to: 8 })).toEqual([]);
   });
 });
 

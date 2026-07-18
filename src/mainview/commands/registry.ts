@@ -17,6 +17,7 @@ import {
   FilePlus,
   FileText,
   FolderOpen,
+  Hash,
   Italic,
   KeyRound,
   Layers,
@@ -247,6 +248,10 @@ export function buildCommands(deps: RegistryDeps): Command[] {
       icon: TableOfContents,
       run: (ctx) => ctx.ui.toggleOutline?.(),
     }),
+    cmd("tags.toggle", {
+      icon: Hash,
+      run: (ctx) => ctx.ui.toggleTags?.(),
+    }),
     cmd("terminal.toggle", {
       icon: TerminalSquare,
       // The editor's CodeMirror keymap and the terminal's xterm handler own
@@ -388,6 +393,37 @@ export function buildCommands(deps: RegistryDeps): Command[] {
         const title = focusedTab(ctx.selected)?.title;
         if (!title) return;
         deps.copyText(t.text === title ? `[[${title}]]` : `[[${title}#${t.text}]]`);
+      },
+    }),
+    // Enter on (or click of) a tag anywhere — a Tags-panel directory row, a
+    // tag row in the overlay, a rendered #tag in the editor (via the bridge):
+    // show the notes bearing it, in the panel's drill-in. One verb, three
+    // surfaces, so they cannot diverge.
+    cmd("tag.open", {
+      icon: Hash,
+      targetKind: "tag",
+      palette: false, // acts on a specific tag
+      when: (ctx) => ctx.target?.kind === "tag",
+      run: (ctx) => {
+        const t = ctx.target;
+        if (t?.kind === "tag") ctx.ui.showTag?.(t.tag);
+      },
+    }),
+    // Enter on a Tags-panel occurrence row: open the bearing note with the
+    // tag's line revealed — backlink.open's body with a tag target, down to
+    // the reveal-before-open ordering and the vanished-note no-op.
+    cmd("tag.openNote", {
+      icon: FileText,
+      targetKind: "tagnote",
+      palette: false, // acts on a specific row
+      when: (ctx) => ctx.target?.kind === "tagnote",
+      run: (ctx) => {
+        const t = ctx.target;
+        if (t?.kind !== "tagnote") return;
+        const note = notesOf(ctx.state, ctx.selected.folder).find((n) => n.path === t.path);
+        if (!note) return;
+        deps.revealBacklink(t.path, t.line, t.raw);
+        ctx.dispatch({ type: "openNote", note });
       },
     }),
     cmd("note.copyPath", {

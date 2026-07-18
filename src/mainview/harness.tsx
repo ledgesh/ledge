@@ -11,10 +11,11 @@
 // is index.html, so none of this ships.
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import type { BacklinkHit, NoteMeta, TrashMeta, WorkspaceRootInfo } from "../shared/rpc-schema";
+import type { BacklinkHit, NoteMeta, TagHit, TrashMeta, WorkspaceRootInfo } from "../shared/rpc-schema";
 import { headingOf, labelOf, slugify, slugOf } from "../shared/slug";
 import { collectHits, type SearchHit } from "../shared/search";
 import { resolveWikiTitle, wikiRefsOf } from "../shared/wikilinks";
+import { normalizeTag, tagDirectoryOf, tagRefsOf, type TagInfo } from "../shared/tags";
 import { configureBridge } from "./editor/bridge";
 import { configureTerminal } from "./terminal/channel";
 import { configureNotes, dispatchExternalOpen, type ExternalOpenInfo } from "./notes/channel";
@@ -241,6 +242,31 @@ class FakeStore {
     return out;
   }
 
+  // The real tagsIn is listNotes + tagRefsOf + tagDirectoryOf; the fake
+  // composes the same shared pieces, the search/backlinks cannot-drift rule.
+  tags(root: string): TagInfo[] {
+    const perNote = this.list(root).flatMap((meta) => {
+      const text = this.readNote(meta.path);
+      return text === null ? [] : [{ path: meta.path, refs: tagRefsOf(text) }];
+    });
+    return tagDirectoryOf(perNote);
+  }
+
+  tagged(root: string, tag: string): TagHit[] {
+    const want = normalizeTag(tag);
+    const out: TagHit[] = [];
+    for (const meta of this.list(root)) {
+      const text = this.readNote(meta.path);
+      if (text === null) continue;
+      const lines = text.split("\n");
+      for (const ref of tagRefsOf(text)) {
+        if (normalizeTag(ref.tag) !== want) continue;
+        out.push({ ...meta, line: ref.line, context: (lines[ref.line - 1] ?? "").trim(), raw: ref.raw });
+      }
+    }
+    return out;
+  }
+
   empty(root: string): number {
     const data = this.ensureRoot(root);
     const n = data.trash.size;
@@ -264,6 +290,8 @@ configureNotes({
   read: async (path) => store.readFile(path),
   search: (folder, query) => store.search(folder, query),
   backlinks: async (path) => store.backlinks(path),
+  tags: async (folder) => store.tags(folder),
+  tagged: async (folder, tag) => store.tagged(folder, tag),
   write: async (path, text, baseMtimeMs) => store.write(path, text, baseMtimeMs),
   create: async (folder, text) => store.create(folder, text),
   retitle: async (path, text) => store.retitle(path, text),

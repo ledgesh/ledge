@@ -23,6 +23,7 @@ const params = (p: Partial<NoteParams>): NoteParams => ({
   envFile: null,
   env: {},
   hosts: [],
+  tags: [],
   ...p,
 });
 

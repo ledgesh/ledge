@@ -75,10 +75,12 @@ Rules:
 - **⌥ (Alt)** — secondary/rare variants: ⌥⌘F replace, ⌥⌘B sidebar, ⌥⌘L
   backlinks (the sidebar's right-hand mirror, on the letter the sidebar
   couldn't give it: B is taken, so L — links), ⌥⌘O outline (the right
-  panel's other face; O for outline, and ⌘O itself stays free), ⌥⌘P
-  full-text search (the ⌥-variant of ⌘P quick-open; the shift-scope rule would
-  want ⇧⌘F — find, but across notes — but ⇧⌘F is the editor's working replace
-  fallback under cmux, and search must stay reachable from editor focus).
+  panel's other face; O for outline, and ⌘O itself stays free), ⌥⌘T tags
+  (the right panel's third face; ⌘T itself is the New Note alias, but the
+  ⌥⌘T slot was free), ⌥⌘P full-text search (the ⌥-variant of ⌘P quick-open;
+  the shift-scope rule would want ⇧⌘F — find, but across notes — but ⇧⌘F is
+  the editor's working replace fallback under cmux, and search must stay
+  reachable from editor focus).
 - **Bare keys** — the verbs of a focused list row, and *only* those. They live
   in `listKeys`, never `keys`, and the resolver consults them solely in the
   `list` focus domain: anywhere else an unmodified key is typing, and the one
@@ -119,11 +121,12 @@ CodeMirror and never at the window level.
 | Switch to Workspace N | ⌘1…9                      | badge shows while ⌘ held |
 | Go to Note…           | ⌘P                        | |
 | Command Palette…      | ⇧⌘P                       | also: type `>` as the first character in ⌘P |
-| Search Notes…         | ⌥⌘P                       | full-text over note bodies (one case-insensitive substring — shared/search.ts owns the grammar); also: type `#` as the first character in ⌘P. Enter opens the note with the matched line revealed and selected |
+| Search Notes…         | ⌥⌘P                       | full-text over note bodies (one case-insensitive substring — shared/search.ts owns the grammar); also: type `#` as the first character in ⌘P. Enter opens the note with the matched line revealed and selected. A `#`-leading query additionally surfaces the workspace's matching tags as rows ABOVE the text hits (a #tag is text too, so its occurrences still list below); Enter on a tag row lands in the Tags panel drilled into it |
 | Toggle Terminal       | ⌃`                        | from terminal focus it closes the drawer |
 | Toggle Sidebar        | ⌥⌘B                       | |
 | Toggle Backlinks      | ⌥⌘L                       | right-hand panel: the notes whose `[[wikilinks]]` point at the current note (the same scan agents get from the MCP `backlinks` tool). Rows are the standard keyboard list; Enter/click opens the linking note with the link's line revealed and selected, the search overlay's open-at-the-hit |
-| Toggle Outline        | ⌥⌘O                       | the right panel's other face: the active note's headings, derived live from the editor doc (`headingsOf` — the fence-aware scan shared with the MCP appender and the heading reveal). The two right-panel toggles are radio-with-off: opening one closes the other, since they share the one slot. Enter/click moves the caret to the heading in the note's own editor |
+| Toggle Outline        | ⌥⌘O                       | the right panel's second face: the active note's headings, derived live from the editor doc (`headingsOf` — the fence-aware scan shared with the MCP appender and the heading reveal). The right-panel toggles are radio-with-off: opening one closes the others, since they share the one slot. Enter/click moves the caret to the heading in the note's own editor |
+| Toggle Tags           | ⌥⌘T                       | the right panel's third face: the workspace's tag directory — every tag its notes carry (inline `#hashtags` and frontmatter `tags:` lines, shared/tags.ts owns the grammar; the same scan agents get from the MCP `tags` tool), alphabetical with per-NOTE counts. Enter/click on a tag drills into its occurrences; Enter/click on an occurrence opens the bearing note with the tag's line revealed (the backlink grammar). Clicking a rendered `#tag` in the editor, a `#`-query tag row in the overlay, or ⌘-clicking a frontmatter `tags:` token all land in the same drill-in. Rendered tags open on plain click (they are pills, not editable text — the checkbox reasoning); a tag under the caret is revealed text: plain click moves the caret, ⌘-click follows. Typing `#` plus a character in the editor pops the tag picker (the workspace's own tags; a bare `#` stays quiet — headings start that way) |
 | Settings…             | ⌘,                        | opens settings.json in the OS editor (architecture.md §6: the file is the UI) |
 | Restart Note Shell    | — (palette)               | kills the current note's shells; its frontmatter params apply at respawn (architecture.md §6a) |
 | Edit Note Profile…    | — (palette; edit button on the block, hover/caret-revealed like block controls; ⌘-click the name as accelerator) | opens the profile the note's frontmatter names in Ledge's key/value dialog (macOS binds no app to .env), created seeded if new; hidden when it names none. The button is primary — it lives in the overlay layer where the pointer cursor works; ⌘-click (not click: a plain click is a caret move on editable text) goes solid-underline while ⌘ is held |
@@ -154,6 +157,8 @@ Row verbs, by row kind. Each fires only while a row of that kind has focus
 | Workspace | Switch to it      | Close Workspace            | `r` Rename, `i` Change Icon |
 | Backlink  | Open at the link  | —                          | menu: Copy Path (the note-row command on the linking note) |
 | Heading   | Jump to Heading   | —                          | `c` Copy Link — the heading's `[[Title#Heading]]` (plain `[[Title]]` when the row is the H1) |
+| Tag       | Show Notes (drill in) | —                      | the same `tag.open` verb every tag click runs |
+| Tag note  | Open at the tag   | —                          | menu: Copy Path (the note-row command on the bearing note) |
 
 ## 4. Destructive actions
 
@@ -281,12 +286,15 @@ The one user-facing surface that is not a command in the registry: a shell
 verb table (`src/bun/cli.ts`), governed here so it stays coherent with the
 app rather than growing its own dialect.
 
-- **Verbs are unix-shaped and few**: `ls`, `cat`, `search`, `new`, `append`,
-  `workspaces`, `open`, `install`, `mcp`, `help`. A bare `ledge` opens the
-  app; a bare non-verb argument is a title to open (`ledge open <title>` is
-  the spelled-out escape for a note titled like a verb). New verbs argue for
-  themselves the way new commands do (§1): every verb is surface users must
-  learn and help text must carry.
+- **Verbs are unix-shaped and few**: `ls`, `cat`, `search`, `tags`, `new`,
+  `append`, `workspaces`, `open`, `install`, `mcp`, `help`. A bare `ledge`
+  opens the app; a bare non-verb argument is a title to open
+  (`ledge open <title>` is the spelled-out escape for a note titled like a
+  verb). New verbs argue for themselves the way new commands do (§1): every
+  verb is surface users must learn and help text must carry. `ledge tags`
+  prints the directory (`#tag  count` rows); `ledge tags <tag>` prints
+  occurrences grep-shaped like `search` (path:line: text, hitless = exit 1),
+  scoped by the same cwd chain.
 - **Semantics come from the MCP tool handlers, never beside them.** A verb
   that reads or writes notes dispatches through `bun/mcpTools.ts`, so title
   resolution, workspace deixis, naming, and the divergence guard cannot

@@ -5,6 +5,7 @@
 import type { Settings } from "./settings";
 import type { NoteParams } from "./frontmatter";
 import type { SearchHit } from "./search";
+import type { TagInfo } from "./tags";
 
 /** A streamed update about one running block, pushed Bun -> webview. */
 export type RunEvent =
@@ -69,6 +70,20 @@ export interface TrashMeta {
  * on still lands on the link (workspace/reveal.ts).
  */
 export interface BacklinkHit extends NoteMeta {
+  line: number;
+  context: string;
+  raw: string;
+}
+
+/**
+ * One tag occurrence, as the Tags panel's drill-in lists it. Deliberately
+ * BacklinkHit's shape: the bearing note's meta (opening the hit is an
+ * ordinary openNote), the 1-based line the tag sits on (a body `#tag` line,
+ * or the frontmatter `tags:` line), that line's trimmed text for the row, and
+ * the tag exactly as written there (`raw`) — the reveal query, re-found on
+ * the line like a backlink's.
+ */
+export interface TagHit extends NoteMeta {
   line: number;
   context: string;
   raw: string;
@@ -181,6 +196,22 @@ export type LedgeRPC = {
       // linking notes' editors resolve them. Only the path crosses the RPC;
       // its root is derived Bun-side like every per-note call.
       noteBacklinks: { params: { path: string }; response: { backlinks: BacklinkHit[] } };
+      // One workspace's tag directory: every tag its notes carry (frontmatter
+      // `tags:` and inline #hashtags, shared/tags.ts owns the grammar), with
+      // per-NOTE counts, alphabetical. Sent when the Tags panel's directory is
+      // showing and on the notesChanged push; also feeds the overlay's tag
+      // rows and the editor's # completion vocabulary. Bun owns the scan for
+      // noteSearch's reason — the view never holds note bodies — and it is
+      // scoped to one root because tags are, like wikilinks: a tag names notes
+      // within a workspace, not across them. Scan-on-demand, no index: the
+      // backlinksTo cost class, accepted for the same reasons.
+      tagList: { params: { root: string }; response: { tags: TagInfo[] } };
+      // The occurrences of one tag across a workspace, newest note first —
+      // the Tags panel's drill-in. Same scan as tagList over the same scope,
+      // filtered to one case-folded identity; each hit carries the note plus
+      // the occurrence line, so the view can list, open, and reveal without a
+      // second request (noteSearch's shape).
+      tagNotes: { params: { root: string; tag: string }; response: { hits: TagHit[] } };
       // One workspace's deleted notes still recoverable, newest first. Read at
       // boot and at every folder refresh, alongside noteList: the count is on
       // screen whether or not the section is expanded, so the trash cannot

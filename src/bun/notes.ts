@@ -15,10 +15,11 @@
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { mkdir, readdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import type { Stats } from "node:fs";
-import type { BacklinkHit, NoteMeta, TrashMeta } from "../shared/rpc-schema";
+import type { BacklinkHit, NoteMeta, TagHit, TrashMeta } from "../shared/rpc-schema";
 import { headingOf, labelOf, slugOf, titleOf } from "../shared/slug";
 import { collectHits, type SearchHit } from "../shared/search";
 import { resolveWikiTitle, wikiRefsOf } from "../shared/wikilinks";
+import { normalizeTag, tagDirectoryOf, tagRefsOf, type TagInfo } from "../shared/tags";
 import { loadIgnore } from "./ignore";
 import { assertRegisteredRoot, isInside, kindOf, rootContaining, uniqueName } from "./workspaces";
 
@@ -190,6 +191,47 @@ export async function backlinksTo(path: string): Promise<BacklinkHit[]> {
     const lines = file.text.split("\n");
     for (const ref of wikiRefsOf(file.text)) {
       if (resolveWikiTitle(ref.title, metas)?.path !== target) continue;
+      out.push({ ...meta, line: ref.line, context: contextOf(lines, ref.line), raw: ref.raw });
+    }
+  }
+  return out;
+}
+
+// One workspace's tag directory — the ONE tag scan, shared by the Tags
+// panel (rpc tagList), the overlay's tag rows, the # completion vocabulary,
+// and the MCP `tags` tool, so agents and the UI can never disagree about
+// what tags exist. Built on listNotes for searchNotes' reason (listed and
+// tagged cannot drift apart), reading whole bodies because inline #hashtags
+// live there — the accepted backlinksTo cost, scan-on-demand with no index.
+// Grammar, aggregation, and ordering all live in shared/tags.ts; a note
+// deleted mid-scan costs that note only.
+export async function tagsIn(root: string): Promise<TagInfo[]> {
+  const perNote: { path: string; refs: ReturnType<typeof tagRefsOf> }[] = [];
+  for (const meta of await listNotes(root)) {
+    const file = await readNote(meta.path);
+    if (file === null) continue;
+    perNote.push({ path: meta.path, refs: tagRefsOf(file.text) });
+  }
+  return tagDirectoryOf(perNote);
+}
+
+// Every occurrence of one tag across a workspace, newest note first (the
+// Tags panel's drill-in, rpc tagNotes; also the MCP `tags` tool's second
+// mode). Same walk as tagsIn, filtered to one case-folded identity; rows
+// carry line/context/raw exactly as backlinksTo's do, and for the same
+// reveal. The empty tag is refused rather than answered: it would "match"
+// nothing meaningfully, and a blank query reaching this deep is a caller bug
+// worth surfacing.
+export async function notesTagged(root: string, tag: string): Promise<TagHit[]> {
+  const want = normalizeTag(tag);
+  if (!want) throw new Error("empty tag");
+  const out: TagHit[] = [];
+  for (const meta of await listNotes(root)) {
+    const file = await readNote(meta.path);
+    if (file === null) continue;
+    const lines = file.text.split("\n");
+    for (const ref of tagRefsOf(file.text)) {
+      if (normalizeTag(ref.tag) !== want) continue;
       out.push({ ...meta, line: ref.line, context: contextOf(lines, ref.line), raw: ref.raw });
     }
   }

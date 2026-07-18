@@ -10,12 +10,20 @@
 // over the sigil switches back. Only the first typed character triggers a
 // switch, so a note whose title contains either character stays findable, and
 // the direct chords always land in their mode.
+//
+// A search whose query starts with "#" is also how tags surface here: rows
+// prefix-matching the workspace's tag directory render ABOVE the text hits
+// (a #tag is text too, so the hits below still find its occurrences), and
+// Enter on one routes to the Tags panel drilled into it (tag.open). No
+// fourth mode and no second sigil — the "#" the search sigil already spends
+// is the one tags are written with.
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Command as CommandIcon, FileText, TextSearch } from "lucide-react";
+import { Command as CommandIcon, FileText, Hash, TextSearch } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { notesOf, useWorkspace } from "@/workspace/store";
 import { filterNotes, fuzzyFilter } from "@/notes/fuzzy";
-import { searchNotes, type SearchHit } from "@/notes/channel";
+import { listTags, searchNotes, type SearchHit } from "@/notes/channel";
+import { normalizeTag, type TagInfo } from "../../shared/tags";
 import { requestReveal } from "@/workspace/editorPool";
 import { pushLayer } from "./layers";
 import { useCommands } from "./CommandProvider";
@@ -49,6 +57,36 @@ export function Overlay({ initialMode, onClose }: { initialMode: OverlayMode; on
     () => (mode === "notes" ? filterNotes(q, folderNotes) : []),
     [mode, q, folderNotes],
   );
+
+  // The tag rows' vocabulary: fetched when search mode is entered (and per
+  // folder), not per keystroke — the directory changes with the notes, not
+  // with the query.
+  const [tags, setTags] = useState<TagInfo[]>([]);
+  useEffect(() => {
+    if (!isSearch) return;
+    let stale = false;
+    listTags(selected.folder).then(
+      (t) => {
+        if (!stale) setTags(t);
+      },
+      () => {
+        if (!stale) setTags([]);
+      },
+    );
+    return () => {
+      stale = true;
+    };
+  }, [isSearch, selected.folder]);
+
+  // Tag rows show only for a #-leading query — the sigil route's query always
+  // is one; a direct ⌥⌘P query opts in by spelling the tag as written. A bare
+  // "#" lists the whole directory.
+  const tagPrefix = isSearch && query.startsWith("#") ? query.slice(1) : null;
+  const tagRows = useMemo(() => {
+    if (tagPrefix === null) return [];
+    const want = normalizeTag(tagPrefix);
+    return tags.filter((t) => normalizeTag(t.tag).startsWith(want));
+  }, [tagPrefix, tags]);
 
   // Search mode asks Bun, debounced, and guards against answers landing out of
   // order: only the reply to the query still on screen may set the list.
@@ -85,7 +123,9 @@ export function Overlay({ initialMode, onClose }: { initialMode: OverlayMode; on
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isCommands, q, commands, state]);
 
-  const count = isCommands ? items.length : isSearch ? hits.length : notes.length;
+  // In search mode the keyboard walks ONE list: tag rows first, text hits
+  // after — the index arithmetic in open() and the render agree on that.
+  const count = isCommands ? items.length : isSearch ? tagRows.length + hits.length : notes.length;
   // A stale index from a longer result set would point past the end.
   const active = Math.min(index, Math.max(count - 1, 0));
 
@@ -113,7 +153,16 @@ export function Overlay({ initialMode, onClose }: { initialMode: OverlayMode; on
       onClose();
       exec(item.id);
     } else if (isSearch) {
-      const hit = hits[i];
+      if (i < tagRows.length) {
+        const t = tagRows[i];
+        if (!t) return;
+        // Close first, like a command: tag.open lands in the Tags panel, and
+        // the overlay's focus must be out of the way before it shows.
+        onClose();
+        exec("tag.open", { kind: "tag", tag: t.tag });
+        return;
+      }
+      const hit = hits[i - tagRows.length];
       if (!hit) return;
       // The reveal is registered before the open: openNote's render is what
       // attaches (or creates) the editor the reveal lands in.
@@ -224,13 +273,10 @@ export function Overlay({ initialMode, onClose }: { initialMode: OverlayMode; on
               );
             })
           ) : isSearch ? (
-            hits.map((hit, i) => {
-              // The snippet with its match set off: col/length index the query
-              // inside it (shared/search.ts windows long lines around it).
-              const len = q.trim().length;
-              return (
+            <>
+              {tagRows.map((t, i) => (
                 <div
-                  key={`${hit.path}:${hit.line}`}
+                  key={`tag:${t.tag}`}
                   data-active={i === active ? "" : undefined}
                   className={cn(
                     "flex cursor-default items-center gap-2 rounded px-2.5 py-1.5",
@@ -239,20 +285,44 @@ export function Overlay({ initialMode, onClose }: { initialMode: OverlayMode; on
                   onMouseMove={() => setIndex(i)}
                   onClick={() => open(i)}
                 >
-                  <TextSearch className="size-3.5 shrink-0 text-muted-foreground" />
-                  <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
-                    {hit.snippet.slice(0, hit.col)}
-                    <span className="rounded-[2px] bg-primary/15 font-medium text-foreground">
-                      {hit.snippet.slice(hit.col, hit.col + len)}
-                    </span>
-                    {hit.snippet.slice(hit.col + len)}
-                  </span>
-                  <span className="max-w-[35%] shrink-0 truncate text-[11px] text-muted-foreground">
-                    {hit.title}
+                  <Hash className="size-3.5 shrink-0 text-muted-foreground" />
+                  <span className="min-w-0 flex-1 truncate text-sm">#{t.tag}</span>
+                  <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
+                    {t.count} {t.count === 1 ? "note" : "notes"}
                   </span>
                 </div>
-              );
-            })
+              ))}
+              {hits.map((hit, hi) => {
+                const i = hi + tagRows.length;
+                // The snippet with its match set off: col/length index the query
+                // inside it (shared/search.ts windows long lines around it).
+                const len = q.trim().length;
+                return (
+                  <div
+                    key={`${hit.path}:${hit.line}`}
+                    data-active={i === active ? "" : undefined}
+                    className={cn(
+                      "flex cursor-default items-center gap-2 rounded px-2.5 py-1.5",
+                      i === active && "bg-accent",
+                    )}
+                    onMouseMove={() => setIndex(i)}
+                    onClick={() => open(i)}
+                  >
+                    <TextSearch className="size-3.5 shrink-0 text-muted-foreground" />
+                    <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
+                      {hit.snippet.slice(0, hit.col)}
+                      <span className="rounded-[2px] bg-primary/15 font-medium text-foreground">
+                        {hit.snippet.slice(hit.col, hit.col + len)}
+                      </span>
+                      {hit.snippet.slice(hit.col + len)}
+                    </span>
+                    <span className="max-w-[35%] shrink-0 truncate text-[11px] text-muted-foreground">
+                      {hit.title}
+                    </span>
+                  </div>
+                );
+              })}
+            </>
           ) : (
             notes.map((note, i) => (
               <div

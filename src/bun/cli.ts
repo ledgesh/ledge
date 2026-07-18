@@ -141,6 +141,8 @@ usage:
   ledge ls [--all]             list notes (scoped to the workspace containing cwd)
   ledge cat <title|path>       print a note's markdown
   ledge search <query...>      full-text search; prints path:line: match
+  ledge tags [tag]             list tags (#name + note count), or the notes
+                               bearing one; prints path:line: match
   ledge new [title...]         create a note (body read from piped stdin)
   ledge append [title...]      append to a note; no title = the current note
          -m <text>             the text to append (or pipe it on stdin)
@@ -299,6 +301,37 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
           for (const h of res.hits) io.out(`${hitPath(h.path, io.cwd())}:${h.line}: ${h.snippet}`);
           if (res.truncated) io.err(`ledge: more matches than shown — narrow the query`);
           return res.hits.length > 0 ? 0 : 1; // grep's contract: no match is exit 1
+        }
+        case "tags": {
+          // Bare: the directory. With a tag: its occurrences, grep-shaped
+          // like search (path:line: text, hitless = exit 1). Scoping rides
+          // the same chain as ls/search: -w, else the cwd workspace, --all
+          // goes wide.
+          const arg = positionals.join(" ");
+          const ws = scope ?? (flags.all ? null : here);
+          const base: Record<string, unknown> = ws !== null ? { workspace: ws } : {};
+          if (arg === "") {
+            const res = await tool("tags", base);
+            if (flags.json) {
+              io.out(JSON.stringify(res, null, 2));
+              return 0;
+            }
+            if (res.tags.length === 0) {
+              io.err(ws !== null ? `no tags in ${tildify(ws)}` : "no tags");
+              return 0;
+            }
+            const width = res.tags.reduce((w: number, t: { tag: string }) => Math.max(w, t.tag.length + 1), 0);
+            for (const t of res.tags) io.out(`${`#${t.tag}`.padEnd(width)}  ${t.count}`);
+            return 0;
+          }
+          const res = await tool("tags", { ...base, tag: arg });
+          if (flags.json) {
+            io.out(JSON.stringify(res, null, 2));
+            return res.hits.length > 0 ? 0 : 1;
+          }
+          for (const h of res.hits) io.out(`${hitPath(h.path, io.cwd())}:${h.line}: ${h.context}`);
+          if (res.truncated) io.err(`ledge: more matches than shown`);
+          return res.hits.length > 0 ? 0 : 1; // grep's contract, like search
         }
         case "new": {
           const title = positionals.join(" ");

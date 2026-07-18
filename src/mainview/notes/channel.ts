@@ -2,9 +2,10 @@
 // and the editor pool call these, and main.tsx binds them to the Electroview RPC
 // once it exists. Keeping the shim separate means the persistence logic
 // (notes/store.ts) is testable without an RPC or a webview.
-import type { BacklinkHit, ExternalOpenInfo, NoteMeta, TrashMeta } from "../../shared/rpc-schema";
+import type { BacklinkHit, ExternalOpenInfo, NoteMeta, TagHit, TrashMeta } from "../../shared/rpc-schema";
 import type { NoteParams } from "../../shared/frontmatter";
 import type { SearchHit } from "../../shared/search";
+import type { TagInfo } from "../../shared/tags";
 
 // What a read hands back: the note's text plus its disk version, which the
 // store echoes into the next write's baseMtimeMs (external-edit guard).
@@ -27,6 +28,8 @@ interface NoteHandlers {
   read: (path: string) => Promise<NoteFile | null>;
   search: (folder: string, query: string) => Promise<SearchHit[]>;
   backlinks: (path: string) => Promise<BacklinkHit[]>;
+  tags: (folder: string) => Promise<TagInfo[]>;
+  tagged: (folder: string, tag: string) => Promise<TagHit[]>;
   write: (path: string, text: string, baseMtimeMs: number | null) => Promise<WriteResult>;
   create: (folder: string, text: string) => Promise<NoteMeta>;
   retitle: (path: string, text: string) => Promise<NoteMeta>;
@@ -77,6 +80,20 @@ export function searchNotes(folder: string, query: string): Promise<SearchHit[]>
 // linking notes' editors do.
 export function backlinksOf(path: string): Promise<BacklinkHit[]> {
   return bridge().backlinks(path);
+}
+
+// One workspace's tag directory (frontmatter tags: + inline #hashtags,
+// shared/tags.ts owns the grammar), alphabetical with per-note counts. Feeds
+// the Tags panel, the overlay's tag rows, and the # completion vocabulary —
+// Bun scans, the searchNotes stance again.
+export function listTags(folder: string): Promise<TagInfo[]> {
+  return bridge().tags(folder);
+}
+
+// Every occurrence of one tag across a workspace, newest note first, rows
+// carrying line/context/raw for the same list-open-reveal as backlinks.
+export function notesTagged(folder: string, tag: string): Promise<TagHit[]> {
+  return bridge().tagged(folder, tag);
 }
 
 // `baseMtimeMs` is the disk version this note last read or wrote (null before
@@ -171,4 +188,4 @@ export function takeOpenRequest(): Promise<ExternalOpenInfo | null> {
   return bridge().takeOpenRequest();
 }
 
-export type { BacklinkHit, ExternalOpenInfo, NoteMeta, TrashMeta, SearchHit };
+export type { BacklinkHit, ExternalOpenInfo, NoteMeta, TagHit, TrashMeta, SearchHit };

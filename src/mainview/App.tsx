@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link2, PanelLeft, TableOfContents, TerminalSquare, X } from "lucide-react";
+import { Hash, Link2, PanelLeft, TableOfContents, TerminalSquare, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ResizeHandle } from "@/components/ResizeHandle";
 import { TerminalDrawer } from "@/terminal/TerminalDrawer";
@@ -8,6 +8,7 @@ import { sendTerminalPaste, closeSession, onTerminalExit, terminalStatus } from 
 import { Sidebar } from "@/workspace/Sidebar";
 import { BacklinksPanel } from "@/workspace/BacklinksPanel";
 import { OutlinePanel } from "@/workspace/OutlinePanel";
+import { TagsPanel } from "@/workspace/TagsPanel";
 import { WorkspaceView } from "@/workspace/WorkspaceView";
 import { HostPicker } from "@/components/HostPicker";
 import { LOCAL_HOST } from "../shared/frontmatter";
@@ -19,7 +20,8 @@ import { allDocIds, notesOf, useWorkspace, WorkspaceProvider, type AppState } fr
 import { flushLayout, scheduleLayoutSave } from "@/workspace/persist";
 import { findTabBy, focusedDocId } from "@/workspace/tree";
 import { allEditorViews, releaseEditor, reloadOpenNotes, requestHeadingReveal } from "@/workspace/editorPool";
-import { onExternalOpen, onNotesChanged, takeOpenRequest, type ExternalOpenInfo } from "@/notes/channel";
+import { listTags, onExternalOpen, onNotesChanged, takeOpenRequest, type ExternalOpenInfo } from "@/notes/channel";
+import type { TagInfo } from "../shared/tags";
 import { CommandProvider, useCommands } from "@/commands/CommandProvider";
 import { ProfileEditor } from "@/components/ProfileEditor";
 import { configureUi } from "@/commands/glue";
@@ -52,13 +54,27 @@ function Shell() {
   const [termHeight, setTermHeight] = useState(280);
   const [sidebarWidth, setSidebarWidth] = useState(224);
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  // The right-hand panel: one slot, two faces (Backlinks, Outline) — the
-  // toggles are radio-with-off, opening one closes the other. Closed by
+  // The right-hand panel: one slot, three faces (Backlinks, Outline, Tags) —
+  // the toggles are radio-with-off, opening one closes the others. Closed by
   // default (it earns its width per session), sized within the sidebar's own
   // bounds — the two sides are mirrors. The width is the SLOT's, shared by
-  // both faces, so swapping faces doesn't reflow the editor.
-  const [rightPanel, setRightPanel] = useState<"backlinks" | "outline" | null>(null);
+  // all faces, so swapping faces doesn't reflow the editor.
+  const [rightPanel, setRightPanel] = useState<"backlinks" | "outline" | "tags" | null>(null);
   const [rightWidth, setRightWidth] = useState(260);
+  // The tag the Tags face is drilled into, or null for the directory. Shell's
+  // because clicks elsewhere route INTO it (ui.showTag): a rendered #tag in
+  // the editor and a tag row in the overlay both land here. It survives face
+  // swaps and toggles — the back affordance is one click, and losing the
+  // drill-in every time the panel blinks would punish the routing that makes
+  // it useful.
+  const [tagShown, setTagShown] = useState<string | null>(null);
+  // The one "land on this tag" move, shared by the ui hook (panel/overlay
+  // rows via tag.open) and the editor bridge (clicked #tags): open the Tags
+  // face drilled into it.
+  const showTag = useCallback((tag: string) => {
+    setTagShown(tag);
+    setRightPanel("tags");
+  }, []);
   const [overlay, setOverlay] = useState<OverlayMode | null>(null);
   // The profile the editor dialog is open on, or null. Shell owns it like the
   // rest of the chrome: the command reaches it through the ui hook below.
@@ -198,6 +214,8 @@ function Shell() {
       toggleSidebar: () => setSidebarOpen((o) => !o),
       toggleBacklinks: () => setRightPanel((p) => (p === "backlinks" ? null : "backlinks")),
       toggleOutline: () => setRightPanel((p) => (p === "outline" ? null : "outline")),
+      toggleTags: () => setRightPanel((p) => (p === "tags" ? null : "tags")),
+      showTag,
       openOverlay: setOverlay,
       openProfileEditor: setProfileEditing,
     });
@@ -233,8 +251,34 @@ function Shell() {
         if (parsed.heading) requestHeadingReveal(note.path, parsed.heading);
         dispatch({ type: "openNote", note });
       },
+      // The # completion's vocabulary: the per-folder snapshot kept fresh
+      // below. Synchronous like wikiNotes — a decoration/completion pass
+      // cannot await.
+      workspaceTags: (docId) => {
+        const folder = folderOf(docId);
+        return folder ? (tagVocab.current.get(folder) ?? []) : [];
+      },
+      // A clicked #tag (rendered, frontmatter, or via the Open Link command)
+      // lands where every tag click lands.
+      openTag: (_docId, tag) => showTag(tag),
     });
-  }, [exec, runInTerminal, dispatch]);
+  }, [exec, runInTerminal, dispatch, showTag]);
+
+  // The tag vocabulary the # completion reads (bridge workspaceTags above):
+  // the selected workspace's directory, refetched when its note lists change
+  // — the same freshness signal the wikilink redraw below rides. A ref, not
+  // state: nothing renders from it, the completion reads it on demand.
+  const tagVocab = useRef(new Map<string, TagInfo[]>());
+  useEffect(() => {
+    const folder = selected.folder;
+    void listTags(folder).then(
+      (t) => tagVocab.current.set(folder, t),
+      () => {
+        // A failed scan keeps the last snapshot: a stale vocabulary beats an
+        // empty popup during a transient (unmounted volume mid-session).
+      },
+    );
+  }, [state.notes, selected.folder]);
 
   // A note list changed (created, renamed, deleted, refreshed): every pooled
   // editor redraws its wikilinks, so a dangling link resolves the moment its
@@ -419,6 +463,15 @@ function Shell() {
               distinguishable icons. */}
           <Link2 className="size-4" />
         </Button>
+        <Button
+          variant={rightPanel === "tags" ? "secondary" : "ghost"}
+          size="icon"
+          className="size-7"
+          onClick={() => exec("tags.toggle")}
+          title={tooltip("tags.toggle")}
+        >
+          <Hash className="size-4" />
+        </Button>
       </header>
 
       <div ref={stackRef} className="flex min-h-0 flex-1 flex-col">
@@ -451,7 +504,13 @@ function Shell() {
                 title={`Drag to resize ${rightPanel}`}
               />
               <div style={{ width: rightWidth }} className="min-w-0 shrink-0">
-                {rightPanel === "backlinks" ? <BacklinksPanel /> : <OutlinePanel />}
+                {rightPanel === "backlinks" ? (
+                  <BacklinksPanel />
+                ) : rightPanel === "outline" ? (
+                  <OutlinePanel />
+                ) : (
+                  <TagsPanel tag={tagShown} onBack={() => setTagShown(null)} />
+                )}
               </div>
             </>
           )}

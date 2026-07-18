@@ -38,6 +38,7 @@ import type { NoteMeta } from "../../shared/rpc-schema";
 import { parseWikiTarget, resolveWikiTitle } from "../../shared/wikilinks";
 import { wikiNotes } from "./bridge";
 import { sessionIdFacet } from "./session";
+import { tagCompletionSource } from "./tags";
 
 export { parseWikiTarget, resolveWikiTitle };
 
@@ -145,8 +146,11 @@ export function wikiCompletionSource(context: CompletionContext): CompletionResu
   return { from: m.from + 2, options, validFor: /^[^\[\]]*$/ };
 }
 
-/** The `[[` picker as an editor extension. `override` because this is the
- * app's only completion source: nothing language-provided should ever pop. */
-export function wikiCompletion(): Extension {
-  return autocompletion({ override: [wikiCompletionSource], icons: false });
+/** The app's completions as one editor extension: the `[[` note picker and
+ * the `#` tag picker (editor/tags.ts). ONE `autocompletion()` with both
+ * sources in its `override` — a second instance would race this one, and
+ * `override` is deliberate: nothing language-provided should ever pop. A new
+ * completion source joins this array, never its own autocompletion(). */
+export function appCompletion(): Extension {
+  return autocompletion({ override: [wikiCompletionSource, tagCompletionSource], icons: false });
 }

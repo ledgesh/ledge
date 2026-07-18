@@ -29,6 +29,13 @@ export type CommandTarget =
   // as the reveal query: the jump re-finds it on the line, so a doc that
   // shifted since the row rendered still lands on the heading.
   | { kind: "heading"; docId: string; line: number; text: string }
+  // A row in the Tags panel's directory (or a tag row in the overlay, or a
+  // rendered #tag in the editor): one tag of the selected workspace. The
+  // spelling rides as displayed; matching folds case Bun-side.
+  | { kind: "tag"; tag: string }
+  // A row in the Tags panel's drill-in: the note BEARING the tag, plus where
+  // the tag sits — backlink's shape, for backlink's open-at-the-place verb.
+  | { kind: "tagnote"; path: string; line: number; raw: string }
   | { kind: "tab"; paneId: string; tabId: string }
   | { kind: "pane"; paneId: string };
 
@@ -42,6 +49,11 @@ export interface UiHooks {
   toggleSidebar(): void;
   toggleBacklinks(): void;
   toggleOutline(): void;
+  toggleTags(): void;
+  // Open the right panel on the Tags face, drilled into one tag — where every
+  // tag click lands (a panel directory row, an overlay tag row, a rendered
+  // #tag in the editor via the bridge).
+  showTag(tag: string): void;
   openOverlay(mode: "notes" | "commands" | "search"): void;
   beginRenameWorkspace(id: string): void;
   // Open the icon picker on a workspace, anchored to its row in the strip.

@@ -13,7 +13,8 @@ import { livePreview } from "./livePreview";
 import { tableRendering } from "./tables";
 import { imagePasteInsert, imageRendering } from "./images";
 import { quoteExit } from "./quotes";
-import { wikiCompletion, wikiLinkExtension } from "./wikilinks";
+import { appCompletion, wikiLinkExtension } from "./wikilinks";
+import { hashtagExtension } from "./tags";
 import { wrapping } from "./wrap";
 import { formatting } from "./formatting";
 import { findReplace } from "./find";
@@ -352,14 +353,20 @@ export function createEditor(parent: HTMLElement, doc: string, sessionId: string
         // see an empty quote line first (editor/quotes.ts). Not gated by
         // livePreview — it is editing behavior, not rendering.
         quoteExit(),
-        // The `[[` note picker (editor/wikilinks.ts). Editing behavior like
+        // The `[[` note picker and the `#` tag picker (editor/wikilinks.ts +
+        // editor/tags.ts, one autocompletion). Editing behavior like
         // quoteExit, so not gated by livePreview: a raw-markdown editor still
-        // completes titles — the link just draws as text there.
-        wikiCompletion(),
+        // completes titles and tags — they just draw as text there.
+        appCompletion(),
         keymap.of([...defaultKeymap, ...historyKeymap]),
-        // wikiLinkExtension teaches the parser `[[...]]` so wikilinks are real
-        // tree nodes in both modes; livePreview owns their concealment.
-        markdown({ base: markdownLanguage, codeLanguages: languages, extensions: [wikiLinkExtension] }),
+        // wikiLinkExtension and hashtagExtension teach the parser `[[...]]`
+        // and `#tag` so both are real tree nodes in both modes; livePreview
+        // owns their styling.
+        markdown({
+          base: markdownLanguage,
+          codeLanguages: languages,
+          extensions: [wikiLinkExtension, hashtagExtension],
+        }),
         syntaxHighlighting(highlight),
         theme,
         EditorView.theme({ "&": { fontSize: `${settings().editor.fontSize}px` } }),

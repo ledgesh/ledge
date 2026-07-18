@@ -66,6 +66,8 @@ function fakeBridge() {
     read: async () => null,
     search: async () => [],
     backlinks: async () => [],
+    tags: async () => [],
+    tagged: async () => [],
     takeOpenRequest: async () => null,
     write: async (path, text, baseMtimeMs) => {
       if (state.gate) await state.gate.promise;
@@ -764,7 +766,7 @@ describe("params syncing", () => {
     noteChanged("doc-1", "# Note\n\nbody\n");
     await saveNow("doc-1");
     expect(fs.configures).toHaveLength(3);
-    expect(fs.configures[2].params).toEqual({ cwd: null, profile: null, envFile: null, env: {}, hosts: [] });
+    expect(fs.configures[2].params).toEqual({ cwd: null, profile: null, envFile: null, env: {}, hosts: [], tags: [] });
   });
 
   test("a comment-only frontmatter change re-sends nothing", async () => {
@@ -796,7 +798,7 @@ describe("workspace default cwd", () => {
     expect(fs.configures).toHaveLength(1);
     expect(fs.configures[0]).toEqual({
       sessionId: "doc-1",
-      params: { cwd: FOLDER, profile: null, envFile: null, env: {}, hosts: [] },
+      params: { cwd: FOLDER, profile: null, envFile: null, env: {}, hosts: [], tags: [] },
       notePath: null,
     });
   });

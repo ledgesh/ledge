@@ -207,6 +207,35 @@ describe("search", () => {
   });
 });
 
+describe("tags", () => {
+  test("bare: #tag rows with note counts, scoped to the cwd workspace; --all goes wide", async () => {
+    await run(["new", "Tagged"], { cwd: ROOT, stdin: "about #work and #home\n" });
+    await run(["new", "Far"], { cwd: OTHER, stdin: "#elsewhere\n" });
+    const r = await run(["tags"], { cwd: ROOT });
+    expect(r.code).toBe(0);
+    expect(r.out).toEqual(["#home  1", "#work  1"]);
+    const wide = await run(["tags", "--all"], { cwd: ROOT });
+    expect(wide.out.length).toBe(3);
+  });
+
+  test("with a tag: grep-shaped occurrence rows; no match exits 1", async () => {
+    await run(["new", "Tagged"], { cwd: ROOT, stdin: "about #work today\n" });
+    const r = await run(["tags", "work"], { cwd: ROOT });
+    expect(r.code).toBe(0);
+    expect(r.out).toEqual(["tagged.md:3: about #work today"]);
+    const miss = await run(["tags", "nope"], { cwd: ROOT });
+    expect(miss.code).toBe(1);
+    expect(miss.out).toEqual([]);
+  });
+
+  test("--json prints the handler's shape, not rows", async () => {
+    await run(["new", "Tagged"], { cwd: ROOT, stdin: "#work\n" });
+    const r = await run(["tags", "--json"], { cwd: ROOT });
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.out.join("\n")).tags).toEqual([{ tag: "work", count: 1 }]);
+  });
+});
+
 describe("workspaces", () => {
   test("one row per root, kind included", async () => {
     const r = await run(["workspaces"]);

@@ -23,11 +23,13 @@ import {
   emptyTrash,
   listNotes,
   listTrash,
+  notesTagged,
   purgeTrash,
   readNote,
   restoreNote,
   retitleNote,
   searchNotes,
+  tagsIn,
   writeNote,
 } from "./notes";
 import {
@@ -362,6 +364,8 @@ const rpc = BrowserView.defineRPC<LedgeRPC>({
       // backlinksTo derives and guards the root itself (assertNote), the
       // per-note-call stance: the view sends only the path.
       noteBacklinks: async ({ path }) => ({ backlinks: await backlinksTo(path) }),
+      tagList: async ({ root }) => ({ tags: await tagsIn(root) }),
+      tagNotes: async ({ root, tag }) => ({ hits: await notesTagged(root, tag) }),
       trashList: async ({ root }) => ({ items: await listTrash(root) }),
       trashRestore: async ({ path }) => ({ note: await restoreNote(path) }),
       trashDelete: async ({ path }) => ({ removed: await deleteTrashed(path) }),

@@ -104,6 +104,8 @@ configureNotes({
   read: (path) => electrobun.rpc!.request.noteRead({ path }).then((r) => r.note),
   search: (folder, query) => electrobun.rpc!.request.noteSearch({ root: folder, query }).then((r) => r.hits),
   backlinks: (path) => electrobun.rpc!.request.noteBacklinks({ path }).then((r) => r.backlinks),
+  tags: (folder) => electrobun.rpc!.request.tagList({ root: folder }).then((r) => r.tags),
+  tagged: (folder, tag) => electrobun.rpc!.request.tagNotes({ root: folder, tag }).then((r) => r.hits),
   write: (path, text, baseMtimeMs) => electrobun.rpc!.request.noteWrite({ path, text, baseMtimeMs }),
   create: (folder, text) => electrobun.rpc!.request.noteCreate({ root: folder, text }).then((r) => r.note),
   retitle: (path, text) => electrobun.rpc!.request.noteRetitle({ path, text }).then((r) => r.note),
@@ -190,4 +192,3 @@ async function boot(): Promise<void> {
 }
 
 void boot();
-

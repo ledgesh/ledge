@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { effectiveProfileLine, frontmatterLineSpan, profileValueSpan } from "./frontmatter";
+import { effectiveProfileLine, frontmatterLineSpan, profileValueSpan, tagsValueSpans } from "./frontmatter";
 
 describe("frontmatterLineSpan", () => {
   test("no frontmatter, no span", () => {
@@ -51,6 +51,32 @@ describe("profileValueSpan", () => {
     expect(profileValueSpan("profile: ../evil")).toBeNull();
     expect(profileValueSpan("profile: two words")).toBeNull();
     expect(profileValueSpan("profile:")).toBeNull();
+  });
+});
+
+describe("tagsValueSpans", () => {
+  test("each accepted token is a span; the tag is the bare spelling", () => {
+    expect(tagsValueSpans("tags: work, #home")).toEqual([
+      { from: 6, to: 10, tag: "work" },
+      { from: 12, to: 17, tag: "home" },
+    ]);
+  });
+
+  test("a refused token is no link, and costs only itself", () => {
+    // Same stance as the profile name: clicking it could only show a tag the
+    // parser would never count.
+    expect(tagsValueSpans("tags: work 123 home").map((t) => t.tag)).toEqual(["work", "home"]);
+    expect(tagsValueSpans("tags:")).toEqual([]);
+  });
+
+  test("other keys and indented lines are not tag lines", () => {
+    expect(tagsValueSpans("cwd: ~/x")).toEqual([]);
+    expect(tagsValueSpans("  tags: work")).toEqual([]);
+    expect(tagsValueSpans("tagsy: work")).toEqual([]);
+  });
+
+  test("a wholly-quoted list degrades to no spans — styling, not parsing", () => {
+    expect(tagsValueSpans('tags: "work home"')).toEqual([]);
   });
 });
 

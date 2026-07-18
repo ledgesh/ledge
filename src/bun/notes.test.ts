@@ -3,7 +3,7 @@
 // workspaces.test.ts); the path-guard refusals that need registered roots
 // live in notes.fs.test.ts, where roots exist to register.
 import { describe, expect, test } from "bun:test";
-import { deleteTrashed, titleOf } from "./notes";
+import { deleteTrashed, notesTagged, titleOf } from "./notes";
 
 describe("titleOf", () => {
   test("drops the directory and the extension", () => {
@@ -12,6 +12,15 @@ describe("titleOf", () => {
 
   test("keeps inner dots", () => {
     expect(titleOf("/Users/x/.ledge/scratch/v1.2.notes.md")).toBe("v1.2.notes");
+  });
+});
+
+describe("notesTagged", () => {
+  test("an empty tag is refused before any filesystem work", async () => {
+    // "" and "#" both normalize to nothing: a blank query this deep is a
+    // caller bug, not a scan that matches nothing.
+    expect(notesTagged("/anywhere", "")).rejects.toThrow(/empty tag/);
+    expect(notesTagged("/anywhere", "#")).rejects.toThrow(/empty tag/);
   });
 });
 

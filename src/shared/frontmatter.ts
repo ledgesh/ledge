@@ -18,7 +18,7 @@
 // the block and never a crash. The note is hand-edited text; a typo has to
 // degrade as gently as one in settings.json does.
 
-/** Spawn parameters a note may declare. null / {} / [] mean "not declared". */
+/** Parameters a note may declare. null / {} / [] mean "not declared". */
 export interface NoteParams {
   // Working directory for the note's shells (inline-run, overflow, terminal).
   cwd: string | null;
@@ -35,6 +35,13 @@ export interface NoteParams {
   // More than one entry means every run asks which member to target; the list
   // is an allowlist, enforced Bun-side (bun/index.ts resolveHost).
   hosts: string[];
+  // The note's declared tags, spelled as written (leading "#" stripped;
+  // identity is case-folded at comparison time, shared/tags.ts normalizeTag).
+  // The one key that never feeds a spawn: it lives here — and rides
+  // sessionConfigure inertly — because the block has ONE parser, not because
+  // the shell cares. Inline #hashtags in the body are the other tag source;
+  // shared/tags.ts tagRefsOf merges the two.
+  tags: string[];
 }
 
 /** The reserved `host:` member meaning "this machine, no ssh". */
@@ -78,6 +85,41 @@ export function isHostName(name: string): boolean {
   return /^[A-Za-z0-9_.@:-]+$/.test(name) && !name.startsWith("-");
 }
 
+// A tag as BOTH grammars accept it: the inline `#tag` scanner
+// (shared/tags.ts) and the `tags:` list here must agree on what counts as a
+// tag, or a note could declare a tag it can never write inline. Letters (any
+// script), digits, "_", "-", "/" — and at least one letter or "_", so `#123`
+// and `#2024` stay plain text (an issue number, a year — not a tag). "/" is
+// an accepted spelling (`project/ledge`) with no hierarchy semantics.
+export function isTagToken(token: string): boolean {
+  return /^[\p{L}\p{N}_/-]+$/u.test(token) && /[\p{L}_]/u.test(token);
+}
+
+/**
+ * Split a `tags:` value into its accepted tags and the tokens refused.
+ * `tag` is the spelling with any leading "#" stripped; `raw` is the token
+ * exactly as written (the reveal re-finds it on the line). Case-folded
+ * dedupe, first spelling wins. Exported for shared/tags.ts, which locates
+ * the `tags:` line for occurrence refs: what the two ends accept from that
+ * line must be the SAME list, so the split lives once, here.
+ */
+export function splitTagList(value: string): {
+  accepted: { tag: string; raw: string }[];
+  rejected: string[];
+} {
+  const accepted: { tag: string; raw: string }[] = [];
+  const rejected: string[] = [];
+  for (const token of value.split(/[,\s]+/)) {
+    if (!token) continue;
+    const tag = token.startsWith("#") ? token.slice(1) : token;
+    if (!isTagToken(tag)) rejected.push(token);
+    else if (!accepted.some((a) => a.tag.toLowerCase() === tag.toLowerCase())) {
+      accepted.push({ tag, raw: token });
+    }
+  }
+  return { accepted, rejected };
+}
+
 // Env var names as execve and every shell agree on them. Anything else (spaces,
 // "=", unicode) would be legal in envp but unreachable from a shell, which for
 // a notes app means it is a typo. Shared with the dotenv parsing in
@@ -112,7 +154,7 @@ export function frontmatterEnd(text: string): number {
 /** Parse a note's frontmatter into spawn params (see the header for grammar). */
 export function parseFrontmatter(text: string): Frontmatter {
   const end = frontmatterEnd(text);
-  const params: NoteParams = { cwd: null, profile: null, envFile: null, env: {}, hosts: [] };
+  const params: NoteParams = { cwd: null, profile: null, envFile: null, env: {}, hosts: [], tags: [] };
   const problems: string[] = [];
   if (end === 0) return { params, problems, end };
 
@@ -188,6 +230,22 @@ export function parseFrontmatter(text: string): Frontmatter {
           if (!token) continue;
           if (!isHostName(token)) problems.push(`"host" entry is not an ssh destination: "${token}"`);
           else if (!params.hosts.includes(token)) params.hosts.push(token);
+        }
+        break;
+      }
+      case "tags": {
+        // One line, space- or comma-separated: `tags: work, #project/ledge`.
+        // A leading "#" per token is accepted and stripped — people write
+        // tags the way the body spells them. Per-token degradation,
+        // host-style: a bad token costs itself, the tags beside it survive.
+        if (!value) {
+          problems.push(`"tags" must name at least one tag`);
+          break;
+        }
+        const { accepted, rejected } = splitTagList(value);
+        params.tags = accepted.map((a) => a.tag); // a repeated tags: line replaces
+        for (const bad of rejected) {
+          problems.push(`"tags" entry is not a tag (letters, digits, "_", "-", "/"): "${bad}"`);
         }
         break;
       }

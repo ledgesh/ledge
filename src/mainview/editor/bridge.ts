@@ -5,6 +5,7 @@
 // `toNative(...)` they always did, so the editor code is unchanged. main.tsx
 // wires the two ends once the Electroview RPC exists.
 import type { NoteMeta, RunEvent } from "../../shared/rpc-schema";
+import type { TagInfo } from "../../shared/tags";
 
 /** Where a block's output goes when it runs. */
 export type RunDestination = "inline" | "terminal";
@@ -100,6 +101,14 @@ interface BridgeHandlers {
   // the note it names (App wires it — dispatching openNote needs the store).
   // A dangling target is a no-op, never an error.
   openWikiNote: (docId: string, target: string) => void;
+  // The doc's workspace tag directory — the `#` completion's vocabulary
+  // (editor/tags.ts). App wires it to a per-folder snapshot it keeps fresh;
+  // synchronous for wikiNotes' reason: completion sources cannot await a
+  // scan, and a slightly stale vocabulary beats a popup that stalls.
+  workspaceTags: (docId: string) => TagInfo[];
+  // Follow a #tag: open the Tags panel drilled into it (App wires it to
+  // ui.showTag — the same tag.open verb every other tag surface runs).
+  openTag: (docId: string, tag: string) => void;
 }
 const handlers: Partial<BridgeHandlers> = {};
 
@@ -148,6 +157,18 @@ export function wikiNotes(docId: string): NoteMeta[] {
 // "Open Link" command).
 export function openWikiNote(docId: string, target: string): void {
   handlers.openWikiNote?.(docId, target);
+}
+
+// The tag vocabulary for a doc's workspace (editor/tags.ts completion).
+// Empty when unconfigured, wikiNotes' stance: no popup rather than a throw.
+export function workspaceTags(docId: string): TagInfo[] {
+  return handlers.workspaceTags?.(docId) ?? [];
+}
+
+// Follow a #tag in `docId`'s note (livePreview.ts click/hotspot, the "Open
+// Link" command, and the frontmatter tags: line's ⌘-click).
+export function openTag(docId: string, tag: string): void {
+  handlers.openTag?.(docId, tag);
 }
 
 // Web -> Bun. Note edits do not come through here: persistence is a direct

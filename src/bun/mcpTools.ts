@@ -19,8 +19,9 @@ import type { NoteMeta } from "../shared/rpc-schema";
 import { MAX_HITS } from "../shared/search";
 import { headingOf, labelOf } from "../shared/slug";
 import { appendToNote, headingsOf, resolveWikiTitle } from "../shared/wikilinks";
+import { normalizeTag } from "../shared/tags";
 import type { McpTool } from "./mcp";
-import { backlinksTo, createNote, listNotes, readNote, searchNotes, writeNote } from "./notes";
+import { backlinksTo, createNote, listNotes, notesTagged, readNote, searchNotes, tagsIn, writeNote } from "./notes";
 import { assertRegisteredRoot, availableRoots, listWorkspaceRoots, loadWorkspaces, rootContaining } from "./workspaces";
 
 // Agents read timestamps, not epoch millis.
@@ -261,6 +262,66 @@ export const ledgeTools: McpTool[] = [
         context,
       }));
       return { target: { path: target.path, title: target.title, workspace: target.workspace }, backlinks };
+    },
+  },
+  {
+    name: "tags",
+    description:
+      "List tags, or find the notes bearing one. Notes carry tags two ways — inline #hashtags in the body, and a `tags:` line in the note's frontmatter block (comma- or space-separated; a leading # per entry is fine) — and this tool sees both. Without `tag`: the tag directory, alphabetical, each with how many notes bear it. With `tag`: every occurrence (note, 1-based line, that line's text), newest notes first, capped — `truncated` says whether anything was cut. Tags match case-insensitively, with or without the leading #.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tag: { type: "string", description: "A tag, with or without its leading #. Omit for the directory." },
+        workspace: { type: "string", description: "A workspace root from list_workspaces." },
+      },
+      additionalProperties: false,
+    },
+    handler: async (args) => {
+      await loadWorkspaces();
+      const workspace = args["workspace"];
+      const roots =
+        typeof workspace === "string" && workspace !== "" ? [assertRegisteredRoot(workspace)] : availableRoots();
+      const tag = args["tag"];
+      // The scans are tagsIn/notesTagged (bun/notes.ts) — the same definitions
+      // the app's Tags panel reads over RPC, so agents and the UI can never
+      // disagree about what tags exist. Cross-workspace merge and failure
+      // stance are search_notes': unscoped, a workspace that fails to scan
+      // costs itself only; a NAMED one failing is the caller's answer.
+      if (typeof tag === "string" && normalizeTag(tag) !== "") {
+        const all: Array<{ path: string; title: string; workspace: string; mtimeMs: number; line: number; context: string }> = [];
+        for (const root of roots) {
+          try {
+            for (const h of await notesTagged(root, tag)) {
+              all.push({ path: h.path, title: h.title, workspace: root, mtimeMs: h.mtimeMs, line: h.line, context: h.context });
+            }
+          } catch (err) {
+            if (typeof workspace === "string" && workspace !== "") throw err;
+            console.error("[mcp] skipping unscannable workspace", root, err);
+          }
+        }
+        all.sort((a, b) => b.mtimeMs - a.mtimeMs);
+        const hits = all.slice(0, MAX_HITS);
+        return {
+          hits: hits.map(({ mtimeMs, ...h }) => ({ ...h, modified: iso(mtimeMs) })),
+          truncated: all.length > MAX_HITS,
+        };
+      }
+      // Directory mode. Counts sum across workspaces (their note sets are
+      // disjoint); identity folds case, first-seen spelling wins the merge.
+      const merged = new Map<string, { tag: string; count: number }>();
+      for (const root of roots) {
+        try {
+          for (const t of await tagsIn(root)) {
+            const entry = merged.get(normalizeTag(t.tag));
+            if (entry) entry.count += t.count;
+            else merged.set(normalizeTag(t.tag), { tag: t.tag, count: t.count });
+          }
+        } catch (err) {
+          if (typeof workspace === "string" && workspace !== "") throw err;
+          console.error("[mcp] skipping unscannable workspace", root, err);
+        }
+      }
+      return { tags: [...merged.values()].sort((a, b) => a.tag.localeCompare(b.tag)) };
     },
   },
   {

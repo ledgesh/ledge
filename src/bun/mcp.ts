@@ -60,6 +60,7 @@ function instructions(): string {
   return (
     "Ledge is the user's local Markdown notes app; these tools read and write their notes. " +
     "Notes are addressed by TITLE (their H1, case-insensitive) — titles survive file renames, paths may not. " +
+    "Notes may carry tags — inline #hashtags in the body, or a frontmatter `tags:` line; the `tags` tool lists a workspace's tags, or the notes bearing one. " +
     here +
     oneShot
   );

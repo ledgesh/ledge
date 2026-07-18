@@ -95,6 +95,17 @@ describe("instructions", () => {
     expect(text).not.toContain("this workspace");
   });
 
+  test("they teach the tag convention whatever the launch context", async () => {
+    // The initialize instructions are the steering lever: an agent that never
+    // hears about tags will never write one.
+    delete process.env["LEDGE_NOTE"];
+    delete process.env["LEDGE_WORKSPACE"];
+    const text = await initInstructions();
+    expect(text).toContain("#hashtags");
+    expect(text).toContain("`tags:` line");
+    expect(text).toContain("`tags` tool");
+  });
+
   test("launched anywhere else, they say notes must be named", async () => {
     delete process.env["LEDGE_NOTE"];
     delete process.env["LEDGE_WORKSPACE"];

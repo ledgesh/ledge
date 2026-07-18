@@ -21,11 +21,13 @@ import {
   emptyTrash,
   listNotes,
   listTrash,
+  notesTagged,
   purgeTrash,
   readNote,
   restoreNote,
   retitleNote,
   searchNotes,
+  tagsIn,
   trashDirOf,
   writeNote,
 } from "./notes";
@@ -359,6 +361,83 @@ describe("backlinksTo", () => {
 
   test("a path outside every registered root is refused before any scan", async () => {
     expect(backlinksTo("/etc/passwd.md")).rejects.toThrow(/outside every workspace root/);
+  });
+});
+
+describe("tagsIn", () => {
+  test("frontmatter and inline tags merge; counts are notes, not occurrences", async () => {
+    await createNote(ROOT, "# Alpha\n\n#work stuff\nmore #work here\n");
+    await createNote(ROOT, "---\ntags: work, home\n---\n# Beta\n\nbody\n");
+    expect(await tagsIn(ROOT)).toEqual([
+      { tag: "home", count: 1 },
+      { tag: "work", count: 2 },
+    ]);
+  });
+
+  test("identity folds case; the display spelling is the most frequent one", async () => {
+    await createNote(ROOT, "# One\n\n#Work\n#Work\n");
+    await createNote(ROOT, "# Two\n\n#work\n");
+    expect(await tagsIn(ROOT)).toEqual([{ tag: "Work", count: 2 }]);
+  });
+
+  test("a #tag in a fence is pasted text; a tagless workspace is empty", async () => {
+    await createNote(ROOT, "# Logs\n\n```\n#not-a-tag\n```\n");
+    expect(await tagsIn(ROOT)).toEqual([]);
+  });
+
+  test("the scan is workspace-scoped, and inherits listNotes' skips", async () => {
+    await createNote(await secondRoot(), "# Far\n\n#elsewhere\n");
+    await deleteNote((await createNote(ROOT, "# Deleted\n\n#gone\n")).path);
+    await writeFile(join(ROOT, ".stray.md"), "#hidden\n");
+    expect(await tagsIn(ROOT)).toEqual([]);
+  });
+
+  test("an unregistered root is refused before any scan", async () => {
+    expect(tagsIn("/nowhere")).rejects.toThrow();
+  });
+});
+
+describe("notesTagged", () => {
+  test("finds each occurrence with its line, context, and the tag as written", async () => {
+    await createNote(ROOT, "---\ntags: #work\n---\n# Beta\n\nplain\nthen #Work again\n");
+    const hits = await notesTagged(ROOT, "work");
+    expect(hits).toEqual([
+      {
+        path: join(ROOT, "beta.md"),
+        title: "Beta",
+        mtimeMs: expect.any(Number),
+        line: 2,
+        context: "tags: #work",
+        raw: "#work",
+      },
+      {
+        path: join(ROOT, "beta.md"),
+        title: "Beta",
+        mtimeMs: expect.any(Number),
+        line: 7,
+        context: "then #Work again",
+        raw: "#Work",
+      },
+    ]);
+  });
+
+  test("the query folds like the tags do, from either spelling", async () => {
+    await createNote(ROOT, "# Alpha\n\n#Work\n");
+    expect((await notesTagged(ROOT, "#wOrK")).map((h) => h.raw)).toEqual(["#Work"]);
+  });
+
+  test("hits arrive newest note first, the order listNotes shows", async () => {
+    const old = await createNote(ROOT, "# Old\n\n#shared\n");
+    await createNote(ROOT, "# New\n\n#shared\n");
+    await utimes(old.path, new Date(0), new Date(0));
+    expect((await notesTagged(ROOT, "shared")).map((h) => h.title)).toEqual(["New", "Old"]);
+  });
+
+  test("scoped to the given root: another workspace's tags are not hits", async () => {
+    const other = await secondRoot();
+    await createNote(other, "# Far\n\n#shared\n");
+    expect(await notesTagged(ROOT, "shared")).toEqual([]);
+    expect((await notesTagged(other, "shared")).map((h) => h.title)).toEqual(["Far"]);
   });
 });
 

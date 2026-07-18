@@ -77,6 +77,11 @@ export const COMMANDS = {
   // The two right-panel toggles are radio-with-off — opening one closes the
   // other, since they share the one slot.
   "outline.toggle": { title: "Toggle Outline", keys: ["Alt-Mod-o"] },
+  // The right panel's third face: the workspace's tag directory (every #tag
+  // its notes carry, with counts), drilling into the notes bearing one. Same
+  // ⌥-tier as its sibling toggles; T — ⌘T itself is the New Note alias, but
+  // the ⌥⌘T slot was free.
+  "tags.toggle": { title: "Toggle Tags", keys: ["Alt-Mod-t"] },
   "terminal.toggle": { title: "Toggle Terminal", keys: ["Ctrl-`"] },
   "terminal.close": { title: "Close Terminal" },
   "settings.open": { title: "Settings…", keys: ["Mod-,"] },
@@ -113,6 +118,12 @@ export const COMMANDS = {
   // row verb note rows spend on Copy Path.
   "outline.jump": { title: "Jump to Heading", listKeys: ["Enter"] },
   "outline.copyLink": { title: "Copy Link", listKeys: ["c"] },
+  // Tags-panel rows. A directory row's Enter drills into its tag — the same
+  // verb a rendered #tag in the editor or a tag row in the overlay runs. An
+  // occurrence row's Enter opens the bearing note with the tag's line
+  // revealed and selected — backlink.open's behavior with a tag target.
+  "tag.open": { title: "Show Notes", listKeys: ["Enter"] },
+  "tag.openNote": { title: "Open", listKeys: ["Enter"] },
   "note.delete": { title: "Delete", listKeys: ["d", "Backspace"] },
   "note.deleteCurrent": { title: "Delete Note", keys: ["Mod-Backspace"] },
   "note.copyPath": { title: "Copy Path", listKeys: ["c"] },

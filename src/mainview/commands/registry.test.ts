@@ -275,6 +275,42 @@ describe("registry", () => {
     expect(calls).toEqual(["jumpToHeading:doc1:7:Setup"]);
   });
 
+  test("run: tags.toggle and tag.open route through the ui hooks", () => {
+    const calls: string[] = [];
+    const cmds = buildCommands(stubDeps());
+    const ctx: CommandCtx = {
+      ...makeCtx(initialState(FOLDER, [])),
+      ui: {
+        toggleTags: () => calls.push("toggleTags"),
+        showTag: (tag: string) => calls.push(`showTag:${tag}`),
+      },
+    };
+    find(cmds, "tags.toggle").run(ctx);
+    find(cmds, "tag.open").run({ ...ctx, target: { kind: "tag", tag: "work" } });
+    expect(calls).toEqual(["toggleTags", "showTag:work"]);
+  });
+
+  test("run: tag.openNote reveals before opening, and a vanished note is a no-op", () => {
+    const n = note(`${FOLDER}/a.md`, "Alpha");
+    const calls: string[] = [];
+    const cmds = buildCommands(stubDeps(calls));
+    const dispatched: Action[] = [];
+    const ctx: CommandCtx = {
+      ...makeCtx(initialState(FOLDER, [n]), dispatched),
+      target: { kind: "tagnote", path: n.path, line: 4, raw: "#work" },
+    };
+    find(cmds, "tag.openNote").run(ctx);
+    // backlink.open's contract: the reveal is registered BEFORE the open.
+    expect(calls).toEqual([`revealBacklink:${n.path}:4:#work`]);
+    expect(dispatched).toEqual([{ type: "openNote", note: n }]);
+
+    find(cmds, "tag.openNote").run({
+      ...ctx,
+      target: { kind: "tagnote", path: "/gone.md", line: 1, raw: "#x" },
+    });
+    expect(dispatched).toHaveLength(1);
+  });
+
   test("run: outline.copyLink copies [[Title#Heading]] — plain [[Title]] for the H1 itself", () => {
     // The focused tab is the initial demo tab, titled "Welcome"; a subheading
     // gets the anchored form, the H1 (its text IS the title) gets the plain

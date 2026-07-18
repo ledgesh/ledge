@@ -48,9 +48,10 @@ import {
 import { openableUrl } from "../../shared/links";
 import { tooltip } from "../commands/format";
 import { frontmatterRange } from "./frontmatter";
-import { openExternal, openWikiNote, wikiNotes } from "./bridge";
+import { openExternal, openTag, openWikiNote, wikiNotes } from "./bridge";
 import { sessionIdFacet } from "./session";
 import { parseWikiTarget, resolveWikiTitle, WIKILINK_NODE, wikiTargetAt } from "./wikilinks";
+import { HASHTAG_NODE, tagAt } from "./tags";
 
 export interface Span {
   from: number;
@@ -73,7 +74,11 @@ export type Conceal =
   | (Span & { kind: "task"; checked: boolean })
   | (Span & { kind: "done" })
   | (Span & { kind: "rule" })
-  | (Span & { kind: "entity"; text: string });
+  | (Span & { kind: "entity"; text: string })
+  // An inline #hashtag (editor/tags.ts) — emitted ALWAYS, the bare-URL
+  // stance: nothing conceals, the kind exists so the draw side can style
+  // and arm it. `tag` is the text without the `#`.
+  | (Span & { kind: "tag"; tag: string });
 
 // The slice of a document the core needs: CodeMirror's Text satisfies it, and
 // tests wrap a plain string.
@@ -259,6 +264,21 @@ export function concealments(
         return;
       }
 
+      // An inline #hashtag: nothing to hide (the # is part of how a tag
+      // reads), but it is a navigable thing and should say so. Skipped in
+      // the frontmatter block — its tags: line has its own styling
+      // (editor/frontmatter.ts), and a # there opens a comment.
+      if (name === HASHTAG_NODE) {
+        if (exclude !== null && node.from <= exclude.to && node.to >= exclude.from) return;
+        out.push({
+          kind: "tag",
+          from: node.from,
+          to: node.to,
+          tag: doc.sliceString(node.from + 1, node.to),
+        });
+        return;
+      }
+
       // A bare GFM autolink (https://… loose in prose): nothing to hide,
       // but it is a link and should say so. Skipped inside Link/Autolink,
       // whose handler above owns it.
@@ -406,6 +426,26 @@ const WIKI_DANGLING = Decoration.mark({
   attributes: { title: "No note with this title" },
 });
 
+// An inline #tag the selection is not touching: opens the Tags panel on
+// plain click, hand cursor via the hotspot layer keying on data-tag (the
+// data-url/data-wiki story). The touched variant below is the same pill
+// without the affordance — the caret is in it, so a click is a caret move
+// and ⌘-click (clickToOpen) is the opener, the link grammar throughout.
+const liveTagMarks = new Map<string, Decoration>();
+function liveTag(tag: string): Decoration {
+  let mark = liveTagMarks.get(tag);
+  if (!mark) {
+    if (liveTagMarks.size > 200) liveTagMarks.clear();
+    mark = Decoration.mark({
+      class: "ledge-hashtag ledge-hashtag-live",
+      attributes: { title: "Click to show tagged notes", "data-tag": tag },
+    });
+    liveTagMarks.set(tag, mark);
+  }
+  return mark;
+}
+const TAG_PLAIN = Decoration.mark({ class: "ledge-hashtag" });
+
 // A concealed task marker, as a real checkbox. The input handles its own
 // mousedown (ignoreEvent keeps CodeMirror from treating it as a click into
 // the text) and toggles the `[ ]`/`[x]` in the DOCUMENT — the widget never
@@ -515,6 +555,12 @@ function buildDecorations(state: EditorState): DecorationSet {
         parsed !== null &&
         resolveWikiTitle(parsed.title, wikiNotes(state.facet(sessionIdFacet))) !== null;
       ranges.push((resolved ? liveWiki(s.target) : WIKI_DANGLING).range(s.from, s.to));
+    } else if (s.kind === "tag") {
+      // Emitted always (bare-URL stance), so touched-ness decides here: a
+      // touched tag is text being edited and must not arm a hotspot under
+      // the caret.
+      const live = !touches(s, state.selection.ranges);
+      ranges.push((live ? liveTag(s.tag) : TAG_PLAIN).range(s.from, s.to));
     } else {
       // A link mark whose element the selection is not touching is rendered
       // (concealed links are only ever emitted untouched; bare URLs are
@@ -583,6 +629,17 @@ const clickToOpen = EditorView.domEventHandlers({
       if (!parsed || !resolveWikiTitle(parsed.title, wikiNotes(docId))) return false;
       event.preventDefault();
       openWikiNote(docId, wiki.target);
+      return true;
+    }
+    // Tags next: same grammar — rendered opens on plain click, touched
+    // (revealed under the caret) needs ⌘. Unlike a dangling wikilink there
+    // is no unresolvable case: a tag always leads to the panel, even when
+    // its only bearer is this very line.
+    const tag = tagAt(view.state.doc, syntaxTree(view.state), pos);
+    if (tag) {
+      if (!event.metaKey && touches(tag, view.state.selection.ranges)) return false;
+      event.preventDefault();
+      openTag(view.state.facet(sessionIdFacet), tag.tag);
       return true;
     }
     const link = linkAt(view.state.doc, syntaxTree(view.state), pos);
@@ -691,6 +748,21 @@ const hotspotPlugin = ViewPlugin.fromClass(
           });
         }
       }
+      // Rendered #tags: same layer, the click routes to the Tags panel.
+      for (const el of view.contentDOM.querySelectorAll<HTMLElement>("[data-tag]")) {
+        const tag = el.dataset.tag;
+        if (!tag) continue;
+        for (const r of el.getClientRects()) {
+          spots.push({
+            left: r.left - base.left,
+            top: r.top - base.top,
+            width: r.width,
+            height: r.height,
+            title: "Click to show tagged notes",
+            act: () => openTag(view.state.facet(sessionIdFacet), tag),
+          });
+        }
+      }
       for (const el of view.contentDOM.querySelectorAll<HTMLInputElement>("input.ledge-task")) {
         const r = el.getBoundingClientRect();
         spots.push({
@@ -739,13 +811,18 @@ const hotspotPlugin = ViewPlugin.fromClass(
 );
 
 /** The keyboard/palette path to ⌘-click (the "Open Link" command). Covers
- * both kinds of link a caret can sit on: a wikilink opens its note, a URL
- * leaves the app. */
+ * every kind of link a caret can sit on: a wikilink opens its note, a #tag
+ * opens the Tags panel, a URL leaves the app. */
 export function openLinkAtCursor(view: EditorView): boolean {
   const head = view.state.selection.main.head;
   const wiki = wikiTargetAt(view.state.doc, syntaxTree(view.state), head);
   if (wiki) {
     openWikiNote(view.state.facet(sessionIdFacet), wiki.target);
+    return true;
+  }
+  const tag = tagAt(view.state.doc, syntaxTree(view.state), head);
+  if (tag) {
+    openTag(view.state.facet(sessionIdFacet), tag.tag);
     return true;
   }
   const url = linkTargetAt(view.state.doc, syntaxTree(view.state), head);

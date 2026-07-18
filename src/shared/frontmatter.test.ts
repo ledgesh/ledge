@@ -48,15 +48,15 @@ describe("frontmatterEnd", () => {
 describe("parseFrontmatter", () => {
   test("a note with no frontmatter yields empty params and no problems", () => {
     const { params, problems, end } = parseFrontmatter("# Title\nbody");
-    expect(params).toEqual({ cwd: null, profile: null, envFile: null, env: {}, hosts: [] });
+    expect(params).toEqual({ cwd: null, profile: null, envFile: null, env: {}, hosts: [], tags: [] });
     expect(problems).toEqual([]);
     expect(end).toBe(0);
   });
 
-  test("all five keys parse together", () => {
+  test("all six keys parse together", () => {
     const { params, problems } = parseFrontmatter(
       fm(
-        "cwd: ~/Projects/ledge\nprofile: petstore\nenvFile: ./.env\nhost: web1 deploy@prod\nenv:\n  NODE_ENV: development\n  PORT: 3000\n",
+        "cwd: ~/Projects/ledge\nprofile: petstore\nenvFile: ./.env\nhost: web1 deploy@prod\ntags: work, ledge\nenv:\n  NODE_ENV: development\n  PORT: 3000\n",
       ),
     );
     expect(params).toEqual({
@@ -65,6 +65,7 @@ describe("parseFrontmatter", () => {
       envFile: "./.env",
       env: { NODE_ENV: "development", PORT: "3000" },
       hosts: ["web1", "deploy@prod"],
+      tags: ["work", "ledge"],
     });
     expect(problems).toEqual([]);
   });
@@ -199,6 +200,56 @@ describe("parseFrontmatter", () => {
     expect(parseFrontmatter(fm("host: web1\nhost: db-2\n")).params.hosts).toEqual(["db-2"]);
   });
 
+  test("tags: parses a flat list, comma- or space-separated", () => {
+    expect(parseFrontmatter(fm("tags: work\n")).params.tags).toEqual(["work"]);
+    expect(parseFrontmatter(fm("tags: work home\n")).params.tags).toEqual(["work", "home"]);
+    expect(parseFrontmatter(fm("tags: work, home,project/ledge\n")).params.tags).toEqual([
+      "work",
+      "home",
+      "project/ledge",
+    ]);
+  });
+
+  test("tags: accepts the body's own spelling — a leading # comes off", () => {
+    const { params, problems } = parseFrontmatter(fm("tags: #work, home\n"));
+    expect(params.tags).toEqual(["work", "home"]);
+    expect(problems).toEqual([]);
+  });
+
+  test("a tags entry is a tag by construction or refused", () => {
+    // Same grammar as inline #tags: at least one letter or "_", nothing
+    // outside letters/digits/_/-//. An all-digit token is a year or an issue
+    // number, not a tag.
+    for (const bad of ["123", "2024", "b@d", "a.b", "#"]) {
+      const { params, problems } = parseFrontmatter(fm(`tags: ${bad}\n`));
+      expect(params.tags).toEqual([]);
+      expect(problems.length).toBeGreaterThanOrEqual(1);
+    }
+    expect(parseFrontmatter(fm("tags: fff _draft café\n")).params.tags).toEqual([
+      "fff",
+      "_draft",
+      "café",
+    ]);
+  });
+
+  test("a bad tags entry costs itself, not the tags beside it", () => {
+    const { params, problems } = parseFrontmatter(fm("tags: work 123 home\n"));
+    expect(params.tags).toEqual(["work", "home"]);
+    expect(problems.length).toBe(1);
+  });
+
+  test("tags dedupe case-folded, and a repeated tags: line replaces the list", () => {
+    // First spelling wins the dedupe; identity is the folded form.
+    expect(parseFrontmatter(fm("tags: Work work\n")).params.tags).toEqual(["Work"]);
+    expect(parseFrontmatter(fm("tags: work\ntags: home\n")).params.tags).toEqual(["home"]);
+  });
+
+  test("an empty tags: line is reported and keeps the earlier list", () => {
+    const { params, problems } = parseFrontmatter(fm("tags: work\ntags:\n"));
+    expect(params.tags).toEqual(["work"]);
+    expect(problems.length).toBe(1);
+  });
+
   test("CRLF notes parse the same as LF ones", () => {
     const { params, problems } = parseFrontmatter("---\r\ncwd: /x\r\nenv:\r\n  A: 1\r\n---\r\n# T\r\n");
     expect(params.cwd).toBe("/x");
@@ -208,7 +259,7 @@ describe("parseFrontmatter", () => {
 
   test("an empty block is valid and empty", () => {
     const { params, problems, end } = parseFrontmatter("---\n---\n# Title\n");
-    expect(params).toEqual({ cwd: null, profile: null, envFile: null, env: {}, hosts: [] });
+    expect(params).toEqual({ cwd: null, profile: null, envFile: null, env: {}, hosts: [], tags: [] });
     expect(problems).toEqual([]);
     expect(end).toBeGreaterThan(0);
   });

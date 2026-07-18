@@ -21,6 +21,7 @@ export interface TargetDataset {
   targetTab?: string;
   targetLine?: string;
   targetRaw?: string;
+  targetTag?: string;
 }
 
 // The attribute a row marks itself with. The values mirror CommandTarget's
@@ -45,6 +46,17 @@ export function targetAttrs(target: CommandTarget): Record<string, string> {
         "data-target-id": target.docId,
         "data-target-line": String(target.line),
         "data-target-raw": target.text,
+      };
+    case "tag":
+      return { "data-target-kind": "tag", "data-target-tag": target.tag };
+    case "tagnote":
+      // Backlink's attribute shape: raw is the tag as written on the line,
+      // the reveal query.
+      return {
+        "data-target-kind": "tagnote",
+        "data-target-path": target.path,
+        "data-target-line": String(target.line),
+        "data-target-raw": target.raw,
       };
     case "workspace":
       return { "data-target-kind": "workspace", "data-target-id": target.id };
@@ -82,6 +94,16 @@ export function targetFromDataset(d: TargetDataset): CommandTarget | undefined {
       const line = Number(d.targetLine);
       return d.targetId && Number.isInteger(line) && line >= 1
         ? { kind: "heading", docId: d.targetId, line, text: d.targetRaw ?? "" }
+        : undefined;
+    }
+    case "tag":
+      return d.targetTag ? { kind: "tag", tag: d.targetTag } : undefined;
+    case "tagnote": {
+      // Backlink's decoding rules: a garbled line yields no target; a missing
+      // raw degrades to line start rather than dropping the open.
+      const line = Number(d.targetLine);
+      return d.targetPath && Number.isInteger(line) && line >= 1
+        ? { kind: "tagnote", path: d.targetPath, line, raw: d.targetRaw ?? "" }
         : undefined;
     }
     case "workspace":

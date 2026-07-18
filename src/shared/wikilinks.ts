@@ -107,8 +107,10 @@ function fenceSpans(lines: readonly string[]): FenceSpan[] {
   return out;
 }
 
-// Yields only the CONTENT lines — everything outside every fence span.
-function* contentLines(lines: readonly string[]): Generator<{ line: string; i: number }> {
+/** Yields only the CONTENT lines — everything outside every fence span.
+ * Exported for shared/tags.ts: the inline `#tag` scan skips fenced code by
+ * the same walk as the wikilink scan, one definition instead of a drift. */
+export function* contentLines(lines: readonly string[]): Generator<{ line: string; i: number }> {
   const spans = fenceSpans(lines);
   let s = 0;
   for (let i = 0; i < lines.length; i += 1) {
