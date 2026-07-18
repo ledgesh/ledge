@@ -4,12 +4,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "vite build && electrobun dev",
-    "dev": "electrobun dev --watch",
-    "dev:hmr": "concurrently -k \"bun run hmr\" \"electrobun dev\"",
+    "start": "vite build && bun run build:cli && electrobun dev",
+    "dev": "bun run build:cli && electrobun dev --watch",
+    "dev:hmr": "bun run build:cli && concurrently -k \"bun run hmr\" \"electrobun dev\"",
     "hmr": "vite --port 5173",
-    "build": "vite build && electrobun build",
+    "build": "vite build && bun run build:cli && electrobun build",
+    "build:cli": "bun build src/bun/cli.ts --target=bun --outdir=dist-cli",
     "mcp": "bun src/bun/mcp.ts",
+    "cli": "bun src/bun/cli.ts",
     "test": "bun test",
     "test:watch": "bun test --watch",
     "test:e2e": "playwright test"

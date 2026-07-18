@@ -34,6 +34,7 @@ bun run test:e2e     # UI behavior in headless WebKit (Playwright harness)
 bunx tsc --noEmit    # typecheck
 bunx vite build      # build the view
 bun run dev          # launch (bunx electrobun dev; bare `electrobun` is not on PATH)
+bun run cli <verb>   # the `ledge` CLI from the checkout (src/bun/cli.ts; interactions.md §9)
 ```
 
 Done means: tsc clean, build clean, tests green (e2e too when UI behavior

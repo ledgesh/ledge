@@ -13,6 +13,10 @@ function stubDeps(calls: string[] = [], noteHead: string | null = null): Registr
   return {
     copyText: record("copyText"),
     openSettings: () => calls.push("openSettings"),
+    installCli: async () => {
+      calls.push("installCli");
+      return { ok: true, message: "installed" };
+    },
     createWorkspace: async () => {
       calls.push("createWorkspace");
       return null;
@@ -190,6 +194,18 @@ describe("registry", () => {
     const cmds = buildCommands(stubDeps(calls));
     find(cmds, "settings.open").run(makeCtx(initialState(FOLDER, [])));
     expect(calls).toEqual(["openSettings"]);
+  });
+
+  test("run: cli.install routes to the installCli edge and surfaces the outcome", async () => {
+    const calls: string[] = [];
+    const cmds = buildCommands(stubDeps(calls));
+    const notices: string[] = [];
+    const ctx = makeCtx(initialState(FOLDER, []));
+    ctx.ui.showNotice = (m) => notices.push(m);
+    find(cmds, "cli.install").run(ctx);
+    await Bun.sleep(0); // the run fires and forgets; the surface lands a microtask later
+    expect(calls).toEqual(["installCli"]);
+    expect(notices).toEqual(["installed"]);
   });
 
   test("run: session.restart routes the focused docId to the restart edge", () => {

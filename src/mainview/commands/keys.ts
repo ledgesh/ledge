@@ -70,6 +70,9 @@ export const COMMANDS = {
   "terminal.toggle": { title: "Toggle Terminal", keys: ["Ctrl-`"] },
   "terminal.close": { title: "Close Terminal" },
   "settings.open": { title: "Settings…", keys: ["Mod-,"] },
+  // Palette-only (a once-per-machine act earns no chord): writes the `ledge`
+  // shim so the notes are reachable from any terminal (bun/cliShim.ts).
+  "cli.install": { title: "Install Shell Command (ledge)" },
 
   // Per-note params (frontmatter). Both palette/menu-only: neither is frequent
   // enough to spend a chord on. Restart is the escape hatch for restart-applies

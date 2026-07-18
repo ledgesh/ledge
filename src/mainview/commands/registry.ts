@@ -251,6 +251,19 @@ export function buildCommands(deps: RegistryDeps): Command[] {
       icon: SettingsIcon,
       run: () => deps.openSettings(),
     }),
+    // Put `ledge` on the PATH. The outcome always surfaces — an install whose
+    // result you have to go hunting for in a bin dir did not finish its job:
+    // success (where it landed, whether PATH sees it) in the neutral strip,
+    // failure (a foreign file squatting the name) in the error strip.
+    cmd("cli.install", {
+      icon: TerminalSquare,
+      run: (ctx) => {
+        void deps.installCli().then((r) => {
+          if (r.ok) ctx.ui.showNotice?.(r.message);
+          else ctx.ui.showError?.(r.message);
+        });
+      },
+    }),
 
     // --- per-note params (frontmatter) ----------------------------------------
     // Kill the current note's shells; the next run/attach respawns them with

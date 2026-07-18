@@ -27,6 +27,16 @@ export interface NoteMeta {
   mtimeMs: number;
 }
 
+/** A CLI open request after Bun resolved and guarded it (bun/openRequest.ts):
+ * the note as a full NoteMeta — the store's openNote takes nothing less —
+ * plus the workspace root holding it, so the view can select that workspace
+ * without a lookup. Rides both directions of `ledge <title>`: the
+ * openRequestTake pull (cold start) and the openExternal push (app already
+ * running). */
+export interface ExternalOpenInfo extends NoteMeta {
+  root: string;
+}
+
 /**
  * The directory pasted images land in, under each workspace root. Part of the
  * cross-boundary contract, not just a Bun detail: assetPaste returns
@@ -294,6 +304,12 @@ export type LedgeRPC = {
       // Open settings.json in the OS default editor (the ⌘, command). The view
       // cannot name the file — Bun knows where it lives.
       settingsOpen: { params: {}; response: { ok: boolean } };
+      // Write the `ledge` CLI shim onto the PATH (the Install Shell Command
+      // palette entry). Bun composes the whole outcome message: it alone
+      // knows the shim's landing dir, the PATH answer, and the failure — the
+      // view only surfaces the text (notice strip on ok, error strip
+      // otherwise). Never throws across the RPC; failure is data here.
+      cliInstall: { params: {}; response: { ok: boolean; message: string } };
       // Read one local image referenced by a note (`![](.ledge-assets/x.png)`) for the
       // editor's rendered preview. The webview cannot touch the filesystem, so
       // the bytes ride the RPC base64-encoded. `src` is the markdown-relative
@@ -327,6 +343,13 @@ export type LedgeRPC = {
       // storage in the app home. Sent debounced on every layout change and
       // flushed on blur/pagehide, like note autosave.
       layoutSave: { params: { text: string }; response: { ok: boolean } };
+      // Take (consume) any pending CLI open request — the boot-time half of
+      // `ledge <title>` (bun/openRequest.ts). The view calls this once, after
+      // its subscriber wiring is up: a push at boot could fire before anyone
+      // listens, so the cold-start path is a pull. `open` carries a full
+      // NoteMeta plus its root so the view can select the workspace and open
+      // the tab without a lookup; null means nothing (valid) was pending.
+      openRequestTake: { params: {}; response: { open: ExternalOpenInfo | null } };
       // Open a note link in the OS default handler (browser, mail client).
       // Sent by the editor's ⌘-click and the "Open Link" command. The URL is
       // re-validated Bun-side against the same scheme allowlist the view used
@@ -368,6 +391,11 @@ export type LedgeRPC = {
       // focus refresh stays as the belt for a watcher that misses (an unmounted
       // volume's root is not watched until the next boot).
       notesChanged: { root: string };
+      // A CLI open request arrived while the app is running (the app-home
+      // watcher saw the request file; bun/openRequest.ts validated it). Same
+      // payload as openRequestTake's answer; the view selects the workspace
+      // showing `root` and opens the note's tab.
+      openExternal: ExternalOpenInfo;
     };
   };
 };

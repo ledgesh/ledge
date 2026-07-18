@@ -3,8 +3,9 @@
 # Dependencies
 node_modules/
 
-# Build output (Vite view build + Electrobun app bundle)
+# Build output (Vite view build + Electrobun app bundle + bundled CLI)
 dist/
+dist-cli/
 build/
 
 # Logs

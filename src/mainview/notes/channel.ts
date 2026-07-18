@@ -2,7 +2,7 @@
 // and the editor pool call these, and main.tsx binds them to the Electroview RPC
 // once it exists. Keeping the shim separate means the persistence logic
 // (notes/store.ts) is testable without an RPC or a webview.
-import type { NoteMeta, TrashMeta } from "../../shared/rpc-schema";
+import type { ExternalOpenInfo, NoteMeta, TrashMeta } from "../../shared/rpc-schema";
 import type { NoteParams } from "../../shared/frontmatter";
 import type { SearchHit } from "../../shared/search";
 
@@ -37,6 +37,11 @@ interface NoteHandlers {
   // Fire-and-forget, not a Promise: the store sends params on the save path
   // and nothing there can act on an acknowledgement.
   configureSession: (sessionId: string, params: NoteParams, notePath: string | null) => void;
+  // Consume any CLI open request pending from before launch (`ledge <title>`
+  // with the app closed). Called once at boot, AFTER the openExternal
+  // subscription is up — the pull exists because a push at boot could fire
+  // before anyone listens.
+  takeOpenRequest: () => Promise<ExternalOpenInfo | null>;
 }
 
 let handlers: NoteHandlers | null = null;
@@ -136,4 +141,25 @@ export function dispatchNotesChanged(root: string): void {
   for (const fn of changeSubs) fn(root);
 }
 
-export type { NoteMeta, TrashMeta, SearchHit };
+// --- external open requests --------------------------------------------------
+// `ledge <title>` with the app already running (rpc openExternal): Bun has
+// resolved the title, guarded the path, and read the meta; the view's whole
+// job is to select the workspace and open the tab. Same subscriber shape as
+// notesChanged, and for the same reason: a push the view reacts to.
+
+const openSubs = new Set<(open: ExternalOpenInfo) => void>();
+
+export function onExternalOpen(fn: (open: ExternalOpenInfo) => void): () => void {
+  openSubs.add(fn);
+  return () => openSubs.delete(fn);
+}
+
+export function dispatchExternalOpen(open: ExternalOpenInfo): void {
+  for (const fn of openSubs) fn(open);
+}
+
+export function takeOpenRequest(): Promise<ExternalOpenInfo | null> {
+  return bridge().takeOpenRequest();
+}
+
+export type { ExternalOpenInfo, NoteMeta, TrashMeta, SearchHit };

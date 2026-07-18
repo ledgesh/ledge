@@ -49,6 +49,10 @@ export interface UiHooks {
   // Show an error under the note list (the browser's error strip): where a
   // failed workspace create/attach reports, same surface as a failed delete.
   showError(message: string): void;
+  // The same strip in a neutral tone, for outcomes that are answers rather
+  // than failures (where the CLI shim landed). Expires on its own — a
+  // confirmation that never leaves becomes chrome.
+  showNotice(message: string): void;
 }
 
 export interface CommandCtx {
@@ -65,6 +69,9 @@ export interface RegistryDeps {
   copyText(text: string): void;
   // Open settings.json in the OS editor (an RPC edge, like copyText).
   openSettings(): void;
+  // Write the `ledge` CLI shim onto the PATH. Resolves to the outcome to
+  // surface — Bun composes the message; ok picks the strip's tone.
+  installCli(): Promise<{ ok: boolean; message: string }>;
   // Workspace lifecycle (workspace/actions.ts): each needs a Bun round trip
   // (create a folder / open the native picker / detach the registry entry),
   // so the reducer cannot do it alone. Each resolves to an error message to

@@ -43,6 +43,10 @@ export function NoteBrowser() {
   // A failed delete or restore, shown under the list rather than thrown away into
   // the console.
   const [error, setError] = useState<string | null>(null);
+  // The same strip in a neutral tone: an outcome that is an answer, not a
+  // failure (where the CLI shim landed). Unlike an error it expires — a
+  // confirmation that never leaves becomes chrome.
+  const [notice, setNotice] = useState<string | null>(null);
   // The note just deleted, offered back. Keyed by its path in the trash.
   const [undo, setUndo] = useState<{ trashed: string; title: string } | null>(null);
   const nav = useListNav();
@@ -65,6 +69,14 @@ export function NoteBrowser() {
     const t = setTimeout(() => setUndo(null), UNDO_MS);
     return () => clearTimeout(t);
   }, [undo]);
+
+  // Same clock as the undo offer: both are transient strips, and one knob is
+  // plenty.
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(null), UNDO_MS);
+    return () => clearTimeout(t);
+  }, [notice]);
 
   const trash = (note: NoteMeta) => {
     setError(null);
@@ -96,6 +108,7 @@ export function NoteBrowser() {
       // surface (a refused attach, a failed create): same sidebar, same shape
       // of failure report.
       showError: (message) => setError(message),
+      showNotice: (message) => setNotice(message),
     });
   }, []);
 
@@ -132,6 +145,10 @@ export function NoteBrowser() {
 
       {error && (
         <p className="border-t px-3 py-1.5 text-[11px] leading-snug text-destructive">{error}</p>
+      )}
+
+      {notice && (
+        <p className="border-t px-3 py-1.5 text-[11px] leading-snug text-muted-foreground">{notice}</p>
       )}
 
       {undo && (

@@ -27,7 +27,7 @@ schema. Each schema entry carries a comment saying what it is for and when it
 fires — the schema doubles as the protocol's documentation, so an uncommented
 entry is an undocumented protocol change.
 
-One more entry point exists beside the app: **the MCP server**
+Two more entry points exist beside the app. The first is **the MCP server**
 (`src/bun/mcp.ts`, `bun run mcp`), a separate process that agent CLIs spawn
 over stdio to read and write notes. It is not a third participant in the RPC —
 it never talks to the running app — but it is Bun-side code under Bun-side
@@ -71,6 +71,32 @@ and the `$LEDGE_NOTE`/`$LEDGE_WORKSPACE` facts, and closes the loop: a note
 can hold a prompt that reads and writes notes. No new machinery earned its
 keep here — it is one default entry in an existing map (the settings comment
 documents the redirect trick and how to point it at another CLI).
+
+The second is **the CLI** (`src/bun/cli.ts`, `bun run cli`, `ledge` once the
+shim is installed) — the same third-process pattern taken one step further:
+its note verbs dispatch through the MCP server's own tool handlers
+(`bun/mcpTools.ts`), so the CLI cannot acquire semantics the tools lack, and
+both stay gated by the registry and `assertNote` with one definition. It
+adds two things of its own. **Cwd deixis**: a working directory inside a
+registered root is "here", folded into the `$LEDGE_WORKSPACE` chain (§2)
+the handlers already honor rather than a parallel rule. And **the open
+request** (`bun/openRequest.ts`): `ledge <title>` resolves the title
+CLI-side, writes `.open-request.json` in the app home (temp-plus-rename),
+and launches/activates the app; the app consumes it — read, delete,
+re-guard the path like any view-supplied one — via an app-home watcher
+while running and the `openRequestTake` pull at boot (the pull exists
+because a boot-time push could fire before the view listens). A file, not a
+socket, deliberately: external actors already reach the app through the
+filesystem (the watcher), and a request file needs no always-listening
+ingress. Requests expire (60s) — "open this now" is not a standing
+instruction — and every invalid request costs exactly itself. The `ledge`
+shim on PATH (`bun/cliShim.ts`; `ledge install`, or the app's Install Shell
+Command palette entry) execs the exact runtime and entry that wrote it —
+the bundle's own bun against `Resources/app/bun/cli.js` (prebuilt by
+`build:cli`, placed by `build.copy`), or the dev machine's bun against the
+checkout — and refuses to overwrite anything that is not recognizably its
+own output. Verb conventions, deixis, and output discipline are
+interactions.md §9's.
 
 ## 2. The trust boundary
 

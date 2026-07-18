@@ -13,6 +13,7 @@ import { runBlock } from "@/editor/blocks";
 import { openLinkAtCursor, toggleTaskAt } from "@/editor/livePreview";
 import { saveNow } from "@/notes/store";
 import { copyText } from "@/lib/clipboard";
+import { installCli } from "@/lib/cli";
 import { openSettingsFile } from "@/lib/settings";
 import { restartSession } from "@/terminal/channel";
 import { attachWorkspace, closeWorkspace, createWorkspace } from "@/workspace/actions";
@@ -42,6 +43,7 @@ function withView(docId: string, fn: (view: NonNullable<ReturnType<typeof getEdi
 export const registryDeps: RegistryDeps = {
   copyText,
   openSettings: openSettingsFile,
+  installCli,
   createWorkspace,
   attachWorkspace,
   closeWorkspace,

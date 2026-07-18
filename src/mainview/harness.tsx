@@ -16,9 +16,10 @@ import { headingOf, labelOf, slugify, slugOf } from "../shared/slug";
 import { collectHits, type SearchHit } from "../shared/search";
 import { configureBridge } from "./editor/bridge";
 import { configureTerminal } from "./terminal/channel";
-import { configureNotes } from "./notes/channel";
+import { configureNotes, dispatchExternalOpen, type ExternalOpenInfo } from "./notes/channel";
 import { configureWorkspaces, recordWorkspaceKinds } from "./workspace/channel";
 import { configureClipboard } from "./lib/clipboard";
+import { configureCli } from "./lib/cli";
 import { configureAssets } from "./lib/assets";
 import { configureSettings } from "./lib/settings";
 import { DEFAULT_SETTINGS } from "../shared/settings";
@@ -253,6 +254,9 @@ configureNotes({
   // No shells here (see configureBridge below), so params have nothing to
   // configure; the send is simply absorbed.
   configureSession: () => {},
+  // Nothing pending at harness boot; specs drive the live-push path instead,
+  // through window.__harness.externalOpen below.
+  takeOpenRequest: async () => null,
 });
 
 // The registry fake: attach always offers EXTERNAL — the folder the "native
@@ -378,6 +382,12 @@ configureSettings(
   },
 );
 
+// The shim write is a native seam; the harness answers with a canned success
+// so the palette command and its notice strip are drivable end to end.
+configureCli({
+  install: async () => ({ ok: true, message: "ledge installed: ~/.local/bin/ledge" }),
+});
+
 declare global {
   interface Window {
     __harness: {
@@ -388,6 +398,9 @@ declare global {
       termAttaches: () => { sessionId: string; host: string | null }[];
       termPastes: () => { sessionId: string; text: string; host: string | null }[];
       inlineRuns: () => { sessionId: string; host: string | null }[];
+      // Simulate the CLI's openExternal push (a Bun-side watcher event has no
+      // visible surface to drive it from).
+      externalOpen: (open: ExternalOpenInfo) => void;
       store: FakeStore;
     };
   }
@@ -400,6 +413,7 @@ window.__harness = {
   termAttaches: () => termAttaches.map((a) => ({ ...a })),
   termPastes: () => termPastes.map((p) => ({ ...p })),
   inlineRuns: () => inlineRuns.map((r) => ({ ...r })),
+  externalOpen: (open) => dispatchExternalOpen(open),
   store,
 };
 

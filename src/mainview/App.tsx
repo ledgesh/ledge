@@ -17,7 +17,7 @@ import { allDocIds, notesOf, useWorkspace, WorkspaceProvider, type AppState } fr
 import { flushLayout, scheduleLayoutSave } from "@/workspace/persist";
 import { findTabBy, focusedDocId } from "@/workspace/tree";
 import { allEditorViews, releaseEditor, reloadOpenNotes, requestHeadingReveal } from "@/workspace/editorPool";
-import { onNotesChanged } from "@/notes/channel";
+import { onExternalOpen, onNotesChanged, takeOpenRequest, type ExternalOpenInfo } from "@/notes/channel";
 import { CommandProvider, useCommands } from "@/commands/CommandProvider";
 import { ProfileEditor } from "@/components/ProfileEditor";
 import { configureUi } from "@/commands/glue";
@@ -314,6 +314,38 @@ function Shell() {
     // re-render often, their folder set changes rarely.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dispatch, foldersKey]);
+
+  // `ledge <title>`: an open request from the CLI. Bun already resolved the
+  // title and guarded the path (bun/openRequest.ts); the view's whole share
+  // is selecting the workspace that shows the note's root, then the ordinary
+  // openNote (whose fresh-tab branch lands in the SELECTED workspace — hence
+  // the select first; its already-open branch finds a live tab anywhere on
+  // its own). A root no workspace shows is dropped with a warning rather
+  // than grown a workspace: the layout self-heals per workspace
+  // (architecture.md §6) and this path must not bypass that. Subscription
+  // first, THEN the one-shot boot pull — the pull exists precisely because a
+  // push at boot could fire before anyone listens. Workspaces are read
+  // through a ref: the handler needs whatever exists at event time, not a
+  // resubscribe per state change.
+  const wsRef = useRef(state.workspaces);
+  wsRef.current = state.workspaces;
+  useEffect(() => {
+    const openExternal = (open: ExternalOpenInfo) => {
+      const ws = wsRef.current.find((w) => w.folder === open.root);
+      if (!ws) {
+        console.warn("[cli] no workspace shows", open.root, "— ignoring the open request for", open.path);
+        return;
+      }
+      dispatch({ type: "selectWorkspace", id: ws.id });
+      dispatch({ type: "openNote", note: { path: open.path, title: open.title, mtimeMs: open.mtimeMs } });
+    };
+    const off = onExternalOpen(openExternal);
+    void takeOpenRequest().then((open) => {
+      if (open) openExternal(open);
+    });
+    return off;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dispatch]);
 
   // Suppress the WebView's native context menu app-wide. In this dev WKWebView it
   // carries only debug items (Reload, Inspect Element), unwanted in a notes app.

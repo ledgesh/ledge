@@ -4,9 +4,10 @@ import Electrobun, { Electroview } from "electrobun/view";
 import type { LedgeRPC, NoteMeta, TrashMeta, WorkspaceRootInfo } from "../shared/rpc-schema";
 import { configureBridge, dispatchRunEvent, setTerminalBusy } from "./editor/bridge";
 import { bytesToB64, configureTerminal, dispatchTerminalOutput, dispatchTerminalExit } from "./terminal/channel";
-import { configureNotes, dispatchNotesChanged } from "./notes/channel";
+import { configureNotes, dispatchExternalOpen, dispatchNotesChanged } from "./notes/channel";
 import { configureWorkspaces, recordWorkspaceKinds } from "./workspace/channel";
 import { configureClipboard } from "./lib/clipboard";
+import { configureCli } from "./lib/cli";
 import { configureAssets } from "./lib/assets";
 import { configureSettings } from "./lib/settings";
 import { DEFAULT_SETTINGS, type Settings } from "../shared/settings";
@@ -26,6 +27,7 @@ const rpc = Electroview.defineRPC<LedgeRPC>({
       terminalBusy: ({ sessionId, busy }) => setTerminalBusy(sessionId, busy),
       terminalExit: ({ sessionId }) => dispatchTerminalExit(sessionId),
       notesChanged: ({ root }) => dispatchNotesChanged(root),
+      openExternal: (open) => dispatchExternalOpen(open),
     },
   },
 });
@@ -109,6 +111,7 @@ configureNotes({
   restore: (path) => electrobun.rpc!.request.trashRestore({ path }).then((r) => r.note),
   removeTrashed: (path) => electrobun.rpc!.request.trashDelete({ path }).then((r) => r.removed),
   empty: (folder) => electrobun.rpc!.request.trashEmpty({ root: folder }).then((r) => r.removed),
+  takeOpenRequest: () => electrobun.rpc!.request.openRequestTake({}).then((r) => r.open),
   configureSession: (sessionId, params, notePath) => {
     void electrobun.rpc!.request.sessionConfigure({ sessionId, params, notePath });
   },
@@ -174,6 +177,9 @@ async function boot(): Promise<void> {
     writeProfile: async (name, text) => {
       await electrobun.rpc!.request.profileWrite({ name, text });
     },
+  });
+  configureCli({
+    install: () => electrobun.rpc!.request.cliInstall({}),
   });
   createRoot(document.getElementById("root")!).render(
     <StrictMode>

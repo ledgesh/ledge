@@ -262,3 +262,34 @@ rather than adding their own capture-phase listeners.
   chord — it works from anywhere, while the verb needs the row focused.
 - The ⌘N / ⌃N held-modifier badges on workspaces and tabs stay, and their
   semantics are pinned to `keys.ts` by test.
+
+## 9. The CLI (`ledge`)
+
+The one user-facing surface that is not a command in the registry: a shell
+verb table (`src/bun/cli.ts`), governed here so it stays coherent with the
+app rather than growing its own dialect.
+
+- **Verbs are unix-shaped and few**: `ls`, `cat`, `search`, `new`, `append`,
+  `workspaces`, `open`, `install`, `mcp`, `help`. A bare `ledge` opens the
+  app; a bare non-verb argument is a title to open (`ledge open <title>` is
+  the spelled-out escape for a note titled like a verb). New verbs argue for
+  themselves the way new commands do (§1): every verb is surface users must
+  learn and help text must carry.
+- **Semantics come from the MCP tool handlers, never beside them.** A verb
+  that reads or writes notes dispatches through `bun/mcpTools.ts`, so title
+  resolution, workspace deixis, naming, and the divergence guard cannot
+  drift from what agents (and the app) get. Error guidance is the handlers'
+  text with tool names translated to CLI verbs (`humanize` in cli.ts).
+- **"Here" is the cwd.** A cwd inside a registered root scopes `ls`/`search`
+  (`--all` widens), anchors `new`, and tie-breaks title resolution — folded
+  into the same `$LEDGE_WORKSPACE` chain a note terminal's shells already
+  ride, not a parallel rule. `$LEDGE_NOTE` works too: `ledge append -m …`
+  in a note's terminal targets that note.
+- **stdout is for results, stderr for talk.** Raw markdown from `cat`, rows
+  from lists, the created path from `new`, handler JSON under `--json`;
+  confirmations, errors, and truncation notes go to stderr. Exit codes:
+  0 ok, 1 failure (including a hitless `search`, grep's contract), 2 usage.
+- **Install Shell Command (ledge)** is the palette entry that writes the
+  shim (bun/cliShim.ts); its outcome always surfaces — success in the
+  browser's notice strip, failure in the error strip (§4's surface, neutral
+  tone). `ledge install [dir]` is the same act from a terminal.

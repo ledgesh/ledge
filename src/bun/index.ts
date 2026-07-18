@@ -9,8 +9,9 @@
 // raw, driving xterm.js. Keeping them per note means a `cd` in one note never
 // leaks into another. All of them talk to the view over typed RPC.
 import { BrowserView, BrowserWindow, Updater, Utils } from "electrobun/bun";
+import { watch } from "node:fs";
 import { homedir } from "node:os";
-import { resolve } from "node:path";
+import { basename, resolve } from "node:path";
 import { PtyProcess } from "./pty";
 import { InlinePool, type InlineEvent } from "./inlinePool";
 import { readProfile, writeProfile } from "./profiles";
@@ -41,6 +42,8 @@ import {
   rootContaining,
 } from "./workspaces";
 import { readLayout, writeLayout } from "./layout";
+import { installShim, tildify } from "./cliShim";
+import { OPEN_REQUEST_PATH, takeOpenRequest } from "./openRequest";
 import { syncWatchers } from "./watch";
 import { pasteImageAsset, readAsset } from "./assets";
 import { interpretersFor, runnerFor } from "./runner";
@@ -548,6 +551,42 @@ const rpc = BrowserView.defineRPC<LedgeRPC>({
         await openSettingsFile();
         return { ok: true };
       },
+      // The CLI installer, from the app side. The entry is cli.js beside this
+      // module in the bundle (build.copy in electrobun.config.ts put it
+      // there), and execPath is the bundle's own bun — the exact pair the
+      // shim will exec (bun/cliShim.ts). The message is composed here, not
+      // in the view: the landing dir, the PATH verdict, and any failure are
+      // Bun-side facts.
+      cliInstall: async () => {
+        try {
+          const res = await installShim({
+            execPath: process.execPath,
+            entryPath: resolve(import.meta.dir, "cli.js"),
+            pathVar: process.env["PATH"] ?? "",
+          });
+          return {
+            ok: true,
+            message: res.onPath
+              ? `ledge installed: ${tildify(res.path)}`
+              : `ledge installed: ${tildify(res.path)} — its folder is not on your PATH yet`,
+          };
+        } catch (err) {
+          return { ok: false, message: `Install failed: ${err instanceof Error ? err.message : String(err)}` };
+        }
+      },
+      // The cold-start half of `ledge <title>`: the view pulls once at boot,
+      // after its subscriber wiring is up. Consume-and-validate lives in
+      // bun/openRequest.ts, shared with the app-home watcher. The watcher
+      // starts only AFTER this first pull (startOpenRequestWatcher below):
+      // Bun's watcher is alive seconds before the webview can hear a push,
+      // and in that window it would consume a request whose push then lands
+      // on nobody — the live probe caught exactly that. Deferring the
+      // watcher leaves a mid-boot request in the file for this pull to find.
+      openRequestTake: async () => {
+        const open = await takeOpenRequest();
+        startOpenRequestWatcher();
+        return { open };
+      },
       // openableUrl is the guard here, not a convenience: `open` treats a
       // non-URL argument as a file path (and launches .app bundles), so only
       // the allowlisted schemes may pass. Re-checked on this side because the
@@ -579,6 +618,32 @@ function refreshWatchers(): void {
   syncWatchers(availableRoots(), (root) => rpc.send.notesChanged({ root }));
 }
 refreshWatchers();
+
+// Watch the app home for the CLI's open request (`ledge <title>` with the
+// app already running; bun/openRequest.ts). Non-recursive and its own
+// watcher, not one of syncWatchers': roots and the app home have different
+// lifecycles, and this one filters to a single filename. takeOpenRequest
+// consumes the file and re-validates the path, so the watcher itself decides
+// nothing; a null take (invalid, stale, or our own unlink echoing) is silent.
+// NOT started at launch: the view's first openRequestTake starts it (see the
+// handler above for the boot race this closes). Best-effort like every
+// watcher: on failure that boot pull still serves the app-was-closed flow.
+let openRequestWatcherStarted = false;
+function startOpenRequestWatcher(): void {
+  if (openRequestWatcherStarted) return;
+  openRequestWatcherStarted = true;
+  try {
+    const requestName = basename(OPEN_REQUEST_PATH);
+    watch(APP_HOME, (_event, filename) => {
+      if (filename !== requestName) return;
+      void takeOpenRequest().then((open) => {
+        if (open !== null) rpc.send.openExternal(open);
+      });
+    });
+  } catch (err) {
+    console.warn("[cli] could not watch the app home for open requests:", err);
+  }
+}
 
 // Drain every live shell on a short interval. (poll()-gated reads never block;
 // see pty.ts.) Inline shells are sliced into per-block events (block ids are
