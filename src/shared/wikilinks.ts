@@ -42,11 +42,15 @@ export function resolveWikiTitle<N extends WikiNote>(title: string, notes: reado
   return folded;
 }
 
-/** One wikilink occurrence in a note's text, located by 1-based line. */
+/** One wikilink occurrence in a note's text, located by 1-based line. `raw`
+ * is the matched `[[...]]` text exactly as written — the backlinks panel's
+ * reveal re-finds it on the line (workspace/reveal.ts revealSelection), so it
+ * must be the file's own spelling, not a normalized reconstruction. */
 export interface WikiRef {
   title: string;
   heading: string | null;
   line: number;
+  raw: string;
 }
 
 // The editor grammar in one regex: `[[` then at least one character that is
@@ -68,7 +72,7 @@ export function wikiRefsOf(text: string): WikiRef[] {
   for (const { line, i } of contentLines(text.split("\n"))) {
     for (const m of line.matchAll(WIKI_RE)) {
       const parsed = parseWikiTarget(m[1]!);
-      if (parsed) out.push({ ...parsed, line: i + 1 });
+      if (parsed) out.push({ ...parsed, line: i + 1, raw: m[0] });
     }
   }
   return out;

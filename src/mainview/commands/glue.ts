@@ -7,7 +7,7 @@
 // confirmation), and commands reach them through ctx.ui without the registry
 // importing any component.
 import { openSearchPanel } from "@codemirror/search";
-import { focusEditor, getEditorView } from "@/workspace/editorPool";
+import { focusEditor, getEditorView, requestReveal } from "@/workspace/editorPool";
 import { openReplace } from "@/editor/find";
 import { runBlock } from "@/editor/blocks";
 import { openLinkAtCursor, toggleTaskAt } from "@/editor/livePreview";
@@ -48,6 +48,10 @@ export const registryDeps: RegistryDeps = {
   attachWorkspace,
   closeWorkspace,
   restartSession,
+  // Open-at-the-link for a Backlinks row: the raw [[...]] text is the reveal
+  // query, re-found on the line (workspace/reveal.ts) so a file that has
+  // moved on still lands on the link.
+  revealBacklink: (path, line, raw) => requestReveal(path, line, raw),
   noteHead: (docId) => {
     const view = getEditorView(docId);
     if (!view) return null;

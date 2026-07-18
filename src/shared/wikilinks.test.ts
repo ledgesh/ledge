@@ -52,11 +52,19 @@ describe("resolveWikiTitle", () => {
 });
 
 describe("wikiRefsOf", () => {
-  test("finds every link with its 1-based line", () => {
+  test("finds every link with its 1-based line and the match as written", () => {
     expect(wikiRefsOf("a [[One]] b\nplain\nsee [[Two#Setup]] and [[Three]]")).toEqual([
-      { title: "One", heading: null, line: 1 },
-      { title: "Two", heading: "Setup", line: 3 },
-      { title: "Three", heading: null, line: 3 },
+      { title: "One", heading: null, line: 1, raw: "[[One]]" },
+      { title: "Two", heading: "Setup", line: 3, raw: "[[Two#Setup]]" },
+      { title: "Three", heading: null, line: 3, raw: "[[Three]]" },
+    ]);
+  });
+
+  test("raw keeps the file's own spelling, not the parsed normalization", () => {
+    // The title trims and the empty heading drops, but `raw` must stay what a
+    // reveal can re-find in the line verbatim.
+    expect(wikiRefsOf("x [[ Spaced #]] y")).toEqual([
+      { title: "Spaced", heading: null, line: 1, raw: "[[ Spaced #]]" },
     ]);
   });
 
@@ -73,15 +81,15 @@ describe("wikiRefsOf", () => {
 
   test("fenced code is not scanned — pasted logs are not links", () => {
     expect(wikiRefsOf("```\n[[Not A Link]]\n```\n[[Real]]")).toEqual([
-      { title: "Real", heading: null, line: 4 },
+      { title: "Real", heading: null, line: 4, raw: "[[Real]]" },
     ]);
   });
 
   test("a fence closes only on its own character and length", () => {
     // The ~~~ line inside a ``` fence is content, and a shorter ```` closer
     // does not close a ````` fence.
-    expect(wikiRefsOf("```\n~~~\n[[A]]\n```\n[[B]]")).toEqual([{ title: "B", heading: null, line: 5 }]);
-    expect(wikiRefsOf("`````\n```\n[[A]]\n`````\n[[B]]")).toEqual([{ title: "B", heading: null, line: 5 }]);
+    expect(wikiRefsOf("```\n~~~\n[[A]]\n```\n[[B]]")).toEqual([{ title: "B", heading: null, line: 5, raw: "[[B]]" }]);
+    expect(wikiRefsOf("`````\n```\n[[A]]\n`````\n[[B]]")).toEqual([{ title: "B", heading: null, line: 5, raw: "[[B]]" }]);
   });
 
   test("an unclosed fence swallows the rest of the note", () => {

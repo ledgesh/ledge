@@ -65,6 +65,7 @@ function fakeBridge() {
     list: async () => [],
     read: async () => null,
     search: async () => [],
+    backlinks: async () => [],
     takeOpenRequest: async () => null,
     write: async (path, text, baseMtimeMs) => {
       if (state.gate) await state.gate.promise;

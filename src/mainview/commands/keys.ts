@@ -67,6 +67,11 @@ export const COMMANDS = {
   // the OS editor (there is no settings panel — the file is the UI, and edits
   // apply at the next launch; docs/architecture.md "Settings").
   "sidebar.toggle": { title: "Toggle Sidebar", keys: ["Alt-Mod-b"] },
+  // The right-hand Backlinks panel: which notes [[link]] to the current one.
+  // ⌥⌘L is the sidebar's ⌥-tier move with the letter the sidebar couldn't
+  // give it: B is taken (and ⌘B/⌘L-adjacent chords are reserved for
+  // formatting), so L — links — carries it.
+  "backlinks.toggle": { title: "Toggle Backlinks", keys: ["Alt-Mod-l"] },
   "terminal.toggle": { title: "Toggle Terminal", keys: ["Ctrl-`"] },
   "terminal.close": { title: "Close Terminal" },
   "settings.open": { title: "Settings…", keys: ["Mod-,"] },
@@ -91,6 +96,11 @@ export const COMMANDS = {
   // from page focus only: inside the editor, CodeMirror's Mod-Backspace
   // (delete-to-line-start) wins by the preventDefault contract.
   "note.open": { title: "Open", listKeys: ["Enter"] },
+  // A Backlinks-panel row: opens the LINKING note with its [[link]] line
+  // revealed and selected — the search overlay's open-at-the-hit, as a row
+  // verb. Its own command (not note.open) because the target kind differs and
+  // the behavior is open-at-a-place, not just open.
+  "backlink.open": { title: "Open", listKeys: ["Enter"] },
   "note.delete": { title: "Delete", listKeys: ["d", "Backspace"] },
   "note.deleteCurrent": { title: "Delete Note", keys: ["Mod-Backspace"] },
   "note.copyPath": { title: "Copy Path", listKeys: ["c"] },

@@ -61,6 +61,20 @@ export interface TrashMeta {
 }
 
 /**
+ * One incoming wikilink, as the Backlinks panel shows it: the linking note's
+ * meta (a full NoteMeta, so opening the hit is an ordinary openNote), the
+ * 1-based line the link sits on, that line's trimmed text for the row
+ * (`context`, capped Bun-side), and the `[[...]]` match exactly as written
+ * (`raw`) — the reveal query, re-found on the line so a file that has moved
+ * on still lands on the link (workspace/reveal.ts).
+ */
+export interface BacklinkHit extends NoteMeta {
+  line: number;
+  context: string;
+  raw: string;
+}
+
+/**
  * One registered workspace root (bun/workspaces.ts). `root` is the folder's
  * absolute path — the opaque handle the view passes back on every scoped call.
  * `kind` says who created it: "managed" folders live directly in ~/.ledge and
@@ -158,6 +172,15 @@ export type LedgeRPC = {
       // first, each carrying the note plus the matched line, so the view can
       // list, open, and reveal without a second request.
       noteSearch: { params: { root: string; query: string }; response: { hits: SearchHit[] } };
+      // The notes whose [[wikilinks]] point at this note, for the Backlinks
+      // panel. Sent when the panel is open and the shown note (or its folder's
+      // files, via the notesChanged push) changes. Bun owns the scan for
+      // noteSearch's reason — the view never holds note bodies — and it is the
+      // SAME scan the MCP backlinks tool runs (bun/notes.ts backlinksTo):
+      // links resolve by title within the note's own workspace, exactly as the
+      // linking notes' editors resolve them. Only the path crosses the RPC;
+      // its root is derived Bun-side like every per-note call.
+      noteBacklinks: { params: { path: string }; response: { backlinks: BacklinkHit[] } };
       // One workspace's deleted notes still recoverable, newest first. Read at
       // boot and at every folder refresh, alongside noteList: the count is on
       // screen whether or not the section is expanded, so the trash cannot

@@ -27,6 +27,7 @@ function stubDeps(calls: string[] = [], noteHead: string | null = null): Registr
     },
     closeWorkspace: (id) => calls.push(`closeWorkspace:${id}`),
     restartSession: record("restartSession"),
+    revealBacklink: (path, line, raw) => calls.push(`revealBacklink:${path}:${line}:${raw}`),
     noteHead: () => noteHead,
     editor: {
       find: record("find"),

@@ -19,6 +19,8 @@ export interface TargetDataset {
   targetId?: string;
   targetPane?: string;
   targetTab?: string;
+  targetLine?: string;
+  targetRaw?: string;
 }
 
 // The attribute a row marks itself with. The values mirror CommandTarget's
@@ -28,6 +30,13 @@ export function targetAttrs(target: CommandTarget): Record<string, string> {
     case "note":
     case "trash":
       return { "data-target-kind": target.kind, "data-target-path": target.path };
+    case "backlink":
+      return {
+        "data-target-kind": "backlink",
+        "data-target-path": target.path,
+        "data-target-line": String(target.line),
+        "data-target-raw": target.raw,
+      };
     case "workspace":
       return { "data-target-kind": "workspace", "data-target-id": target.id };
     case "tab":
@@ -49,6 +58,15 @@ export function targetFromDataset(d: TargetDataset): CommandTarget | undefined {
       return d.targetPath ? { kind: "note", path: d.targetPath } : undefined;
     case "trash":
       return d.targetPath ? { kind: "trash", path: d.targetPath } : undefined;
+    case "backlink": {
+      // The line rides the DOM as a string; a row that lost (or garbled) it
+      // yields no target at all, per the half-built-target rule above. raw may
+      // legitimately be absent-as-empty — the reveal degrades to line start.
+      const line = Number(d.targetLine);
+      return d.targetPath && Number.isInteger(line) && line >= 1
+        ? { kind: "backlink", path: d.targetPath, line, raw: d.targetRaw ?? "" }
+        : undefined;
+    }
     case "workspace":
       return d.targetId ? { kind: "workspace", id: d.targetId } : undefined;
     case "tab":

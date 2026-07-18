@@ -16,6 +16,7 @@ import { PtyProcess } from "./pty";
 import { InlinePool, type InlineEvent } from "./inlinePool";
 import { readProfile, writeProfile } from "./profiles";
 import {
+  backlinksTo,
   createNote,
   deleteNote,
   deleteTrashed,
@@ -358,6 +359,9 @@ const rpc = BrowserView.defineRPC<LedgeRPC>({
       noteRetitle: async ({ path, text }) => ({ note: await retitleNote(path, text) }),
       noteDelete: async ({ path }) => ({ trashed: await deleteNote(path) }),
       noteSearch: async ({ root, query }) => ({ hits: await searchNotes(root, query) }),
+      // backlinksTo derives and guards the root itself (assertNote), the
+      // per-note-call stance: the view sends only the path.
+      noteBacklinks: async ({ path }) => ({ backlinks: await backlinksTo(path) }),
       trashList: async ({ root }) => ({ items: await listTrash(root) }),
       trashRestore: async ({ path }) => ({ note: await restoreNote(path) }),
       trashDelete: async ({ path }) => ({ removed: await deleteTrashed(path) }),

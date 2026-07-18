@@ -103,6 +103,7 @@ configureNotes({
   list: (folder) => electrobun.rpc!.request.noteList({ root: folder }).then((r) => r.notes),
   read: (path) => electrobun.rpc!.request.noteRead({ path }).then((r) => r.note),
   search: (folder, query) => electrobun.rpc!.request.noteSearch({ root: folder, query }).then((r) => r.hits),
+  backlinks: (path) => electrobun.rpc!.request.noteBacklinks({ path }).then((r) => r.backlinks),
   write: (path, text, baseMtimeMs) => electrobun.rpc!.request.noteWrite({ path, text, baseMtimeMs }),
   create: (folder, text) => electrobun.rpc!.request.noteCreate({ root: folder, text }).then((r) => r.note),
   retitle: (path, text) => electrobun.rpc!.request.noteRetitle({ path, text }).then((r) => r.note),

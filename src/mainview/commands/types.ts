@@ -17,6 +17,12 @@ export type CommandTarget =
   | { kind: "workspace"; id: string }
   | { kind: "note"; path: string }
   | { kind: "trash"; path: string }
+  // A row in the Backlinks panel: the LINKING note, plus where its link sits —
+  // the 1-based line and the `[[...]]` text as written, which is the reveal
+  // query (workspace/reveal.ts re-finds it on the line). A distinct kind from
+  // "note" because the verb is different: Enter opens the note AT ITS LINK,
+  // not at wherever the editor last was.
+  | { kind: "backlink"; path: string; line: number; raw: string }
   | { kind: "tab"; paneId: string; tabId: string }
   | { kind: "pane"; paneId: string };
 
@@ -28,6 +34,7 @@ export interface UiHooks {
   toggleTerminal(): void;
   closeTerminal(): void;
   toggleSidebar(): void;
+  toggleBacklinks(): void;
   openOverlay(mode: "notes" | "commands" | "search"): void;
   beginRenameWorkspace(id: string): void;
   // Open the icon picker on a workspace, anchored to its row in the strip.
@@ -82,6 +89,12 @@ export interface RegistryDeps {
   // Kill a note's shells so the next run respawns them with its current
   // frontmatter params.
   restartSession(docId: string): void;
+  // Queue "open with this line's link selected" (editorPool requestReveal) —
+  // called BEFORE the openNote dispatch, the search overlay's pattern: the
+  // open's render is what attaches the editor the reveal lands in. A dep, not
+  // inline, because requestReveal lives in the editor stack and the registry
+  // must stay importable by pure unit tests.
+  revealBacklink(path: string, line: number, raw: string): void;
   // The head of a note's live document — enough of it to parse frontmatter —
   // or null when no editor holds that doc. A head, not the whole text: `when`
   // runs on every menu/palette render, and a note carrying a pasted blob

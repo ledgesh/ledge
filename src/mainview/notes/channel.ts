@@ -2,7 +2,7 @@
 // and the editor pool call these, and main.tsx binds them to the Electroview RPC
 // once it exists. Keeping the shim separate means the persistence logic
 // (notes/store.ts) is testable without an RPC or a webview.
-import type { ExternalOpenInfo, NoteMeta, TrashMeta } from "../../shared/rpc-schema";
+import type { BacklinkHit, ExternalOpenInfo, NoteMeta, TrashMeta } from "../../shared/rpc-schema";
 import type { NoteParams } from "../../shared/frontmatter";
 import type { SearchHit } from "../../shared/search";
 
@@ -26,6 +26,7 @@ interface NoteHandlers {
   list: (folder: string) => Promise<NoteMeta[]>;
   read: (path: string) => Promise<NoteFile | null>;
   search: (folder: string, query: string) => Promise<SearchHit[]>;
+  backlinks: (path: string) => Promise<BacklinkHit[]>;
   write: (path: string, text: string, baseMtimeMs: number | null) => Promise<WriteResult>;
   create: (folder: string, text: string) => Promise<NoteMeta>;
   retitle: (path: string, text: string) => Promise<NoteMeta>;
@@ -68,6 +69,14 @@ export function readNote(path: string): Promise<NoteFile | null> {
 // the view never holds the corpus, only the result list.
 export function searchNotes(folder: string, query: string): Promise<SearchHit[]> {
   return bridge().search(folder, query);
+}
+
+// The notes whose [[wikilinks]] point at this note, for the Backlinks panel.
+// Bun scans (the same searchNotes stance: the view never holds the corpus)
+// and resolves titles within the note's own workspace, the same way the
+// linking notes' editors do.
+export function backlinksOf(path: string): Promise<BacklinkHit[]> {
+  return bridge().backlinks(path);
 }
 
 // `baseMtimeMs` is the disk version this note last read or wrote (null before
@@ -162,4 +171,4 @@ export function takeOpenRequest(): Promise<ExternalOpenInfo | null> {
   return bridge().takeOpenRequest();
 }
 
-export type { ExternalOpenInfo, NoteMeta, TrashMeta, SearchHit };
+export type { BacklinkHit, ExternalOpenInfo, NoteMeta, TrashMeta, SearchHit };

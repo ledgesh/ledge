@@ -11,9 +11,10 @@
 // is index.html, so none of this ships.
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import type { NoteMeta, TrashMeta, WorkspaceRootInfo } from "../shared/rpc-schema";
+import type { BacklinkHit, NoteMeta, TrashMeta, WorkspaceRootInfo } from "../shared/rpc-schema";
 import { headingOf, labelOf, slugify, slugOf } from "../shared/slug";
 import { collectHits, type SearchHit } from "../shared/search";
+import { resolveWikiTitle, wikiRefsOf } from "../shared/wikilinks";
 import { configureBridge } from "./editor/bridge";
 import { configureTerminal } from "./terminal/channel";
 import { configureNotes, dispatchExternalOpen, type ExternalOpenInfo } from "./notes/channel";
@@ -221,6 +222,25 @@ class FakeStore {
     return collectHits(query, this.list(root), (p) => this.readNote(p));
   }
 
+  // The real backlinksTo is listNotes + the shared wikilink scan; same
+  // composition here, for the same cannot-drift reason as search above.
+  backlinks(path: string): BacklinkHit[] {
+    const { root } = this.rootOf(path);
+    const metas = this.list(root);
+    const out: BacklinkHit[] = [];
+    for (const meta of metas) {
+      if (meta.path === path) continue;
+      const text = this.readNote(meta.path);
+      if (text === null) continue;
+      const lines = text.split("\n");
+      for (const ref of wikiRefsOf(text)) {
+        if (resolveWikiTitle(ref.title, metas)?.path !== path) continue;
+        out.push({ ...meta, line: ref.line, context: (lines[ref.line - 1] ?? "").trim(), raw: ref.raw });
+      }
+    }
+    return out;
+  }
+
   empty(root: string): number {
     const data = this.ensureRoot(root);
     const n = data.trash.size;
@@ -243,6 +263,7 @@ configureNotes({
   list: async (folder) => store.list(folder),
   read: async (path) => store.readFile(path),
   search: (folder, query) => store.search(folder, query),
+  backlinks: async (path) => store.backlinks(path),
   write: async (path, text, baseMtimeMs) => store.write(path, text, baseMtimeMs),
   create: async (folder, text) => store.create(folder, text),
   retitle: async (path, text) => store.retitle(path, text),

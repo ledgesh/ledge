@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
 import { APP_HOME, attachExternal, createManaged, loadWorkspaces } from "./workspaces";
 import {
+  backlinksTo,
   createNote,
   deleteNote,
   deleteTrashed,
@@ -292,6 +293,72 @@ describe("searchNotes", () => {
     await createNote(ROOT, "# Something\n\nbody\n");
     expect(await searchNotes(ROOT, "")).toEqual([]);
     expect(await searchNotes(ROOT, "   ")).toEqual([]);
+  });
+});
+
+describe("backlinksTo", () => {
+  test("finds each occurrence with its line, context, and the match as written", async () => {
+    const target = await createNote(ROOT, "# Target\n\nbody\n");
+    await createNote(ROOT, "# Linker\n\nsee [[Target]] here\nplain\nand [[target#Notes]] again\n");
+    const hits = await backlinksTo(target.path);
+    expect(hits).toEqual([
+      {
+        path: join(ROOT, "linker.md"),
+        title: "Linker",
+        mtimeMs: expect.any(Number),
+        line: 3,
+        context: "see [[Target]] here",
+        raw: "[[Target]]",
+      },
+      {
+        path: join(ROOT, "linker.md"),
+        title: "Linker",
+        mtimeMs: expect.any(Number),
+        line: 5,
+        context: "and [[target#Notes]] again",
+        raw: "[[target#Notes]]",
+      },
+    ]);
+  });
+
+  test("a [[link]] inside a fence is pasted text, not a backlink", async () => {
+    const target = await createNote(ROOT, "# Target\n\nbody\n");
+    await createNote(ROOT, "# Logs\n\n```\n[[Target]]\n```\n");
+    expect(await backlinksTo(target.path)).toEqual([]);
+  });
+
+  test("a note is not linked from itself", async () => {
+    const target = await createNote(ROOT, "# Target\n\nsee [[Target]]\n");
+    expect(await backlinksTo(target.path)).toEqual([]);
+  });
+
+  test("the scan is workspace-scoped, like the links themselves", async () => {
+    const target = await createNote(ROOT, "# Target\n\nbody\n");
+    // The other workspace's [[Target]] resolves within ITS root (where no
+    // Target exists — dangling), never across into this one.
+    await createNote(await secondRoot(), "# Far\n\nsee [[Target]]\n");
+    expect(await backlinksTo(target.path)).toEqual([]);
+  });
+
+  test("an ambiguous title backlinks the note a click would open: newest first", async () => {
+    const older = await createNote(ROOT, "# Plan\n\none\n");
+    const newer = await createNote(ROOT, "# Plan\n\ntwo\n");
+    await createNote(ROOT, "# Linker\n\nsee [[Plan]]\n");
+    await utimes(older.path, new Date(0), new Date(0));
+    expect((await backlinksTo(newer.path)).map((h) => h.title)).toEqual(["Linker"]);
+    expect(await backlinksTo(older.path)).toEqual([]);
+  });
+
+  test("a context line is one row, not a paragraph: long lines truncate", async () => {
+    const target = await createNote(ROOT, "# Target\n\nbody\n");
+    await createNote(ROOT, `# Linker\n\n[[Target]] ${"x".repeat(300)}\n`);
+    const [hit] = await backlinksTo(target.path);
+    expect(hit!.context.length).toBe(201); // 200 + the ellipsis
+    expect(hit!.context.endsWith("…")).toBe(true);
+  });
+
+  test("a path outside every registered root is refused before any scan", async () => {
+    expect(backlinksTo("/etc/passwd.md")).rejects.toThrow(/outside every workspace root/);
   });
 });
 

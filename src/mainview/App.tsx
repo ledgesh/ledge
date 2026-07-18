@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { PanelLeft, TerminalSquare, X } from "lucide-react";
+import { PanelLeft, PanelRight, TerminalSquare, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ResizeHandle } from "@/components/ResizeHandle";
 import { TerminalDrawer } from "@/terminal/TerminalDrawer";
 import { configureBridge, requestHostPick, type HostPickRequest } from "@/editor/bridge";
 import { sendTerminalPaste, closeSession, onTerminalExit, terminalStatus } from "@/terminal/channel";
 import { Sidebar } from "@/workspace/Sidebar";
+import { BacklinksPanel } from "@/workspace/BacklinksPanel";
 import { WorkspaceView } from "@/workspace/WorkspaceView";
 import { HostPicker } from "@/components/HostPicker";
 import { LOCAL_HOST } from "../shared/frontmatter";
@@ -50,6 +51,10 @@ function Shell() {
   const [termHeight, setTermHeight] = useState(280);
   const [sidebarWidth, setSidebarWidth] = useState(224);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  // The right-hand Backlinks panel: closed by default (it earns its width per
+  // session), sized within the sidebar's own bounds — the two are mirrors.
+  const [backlinksOpen, setBacklinksOpen] = useState(false);
+  const [backlinksWidth, setBacklinksWidth] = useState(260);
   const [overlay, setOverlay] = useState<OverlayMode | null>(null);
   // The profile the editor dialog is open on, or null. Shell owns it like the
   // rest of the chrome: the command reaches it through the ui hook below.
@@ -60,6 +65,9 @@ function Shell() {
 
   const resizeSidebar = useCallback((w: number) => {
     setSidebarWidth(Math.max(SIDEBAR_MIN, Math.min(w, SIDEBAR_MAX)));
+  }, []);
+  const resizeBacklinks = useCallback((w: number) => {
+    setBacklinksWidth(Math.max(SIDEBAR_MIN, Math.min(w, SIDEBAR_MAX)));
   }, []);
   const resizeTerm = useCallback((h: number) => {
     const avail = stackRef.current?.clientHeight ?? window.innerHeight;
@@ -184,6 +192,7 @@ function Shell() {
       },
       closeTerminal: () => setTermOpen(false),
       toggleSidebar: () => setSidebarOpen((o) => !o),
+      toggleBacklinks: () => setBacklinksOpen((o) => !o),
       openOverlay: setOverlay,
       openProfileEditor: setProfileEditing,
     });
@@ -386,6 +395,15 @@ function Shell() {
           <TerminalSquare />
           Terminal
         </Button>
+        <Button
+          variant={backlinksOpen ? "secondary" : "ghost"}
+          size="icon"
+          className="size-7"
+          onClick={() => exec("backlinks.toggle")}
+          title={tooltip("backlinks.toggle")}
+        >
+          <PanelRight className="size-4" />
+        </Button>
       </header>
 
       <div ref={stackRef} className="flex min-h-0 flex-1 flex-col">
@@ -406,6 +424,22 @@ function Shell() {
           <main className="min-h-0 min-w-0 flex-1">
             <WorkspaceView />
           </main>
+          {backlinksOpen && (
+            <>
+              {/* The handle sits on the panel's far side (its left), so the
+                  delta inverts — the terminal-drawer arrangement, rotated. */}
+              <ResizeHandle
+                axis="x"
+                invert
+                current={backlinksWidth}
+                onResize={resizeBacklinks}
+                title="Drag to resize backlinks"
+              />
+              <div style={{ width: backlinksWidth }} className="min-w-0 shrink-0">
+                <BacklinksPanel />
+              </div>
+            </>
+          )}
         </div>
 
         {termOpen && (

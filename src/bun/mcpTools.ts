@@ -18,9 +18,9 @@ import { resolve } from "node:path";
 import type { NoteMeta } from "../shared/rpc-schema";
 import { MAX_HITS } from "../shared/search";
 import { headingOf, labelOf } from "../shared/slug";
-import { appendToNote, headingsOf, resolveWikiTitle, wikiRefsOf } from "../shared/wikilinks";
+import { appendToNote, headingsOf, resolveWikiTitle } from "../shared/wikilinks";
 import type { McpTool } from "./mcp";
-import { createNote, listNotes, readNote, searchNotes, writeNote } from "./notes";
+import { backlinksTo, createNote, listNotes, readNote, searchNotes, writeNote } from "./notes";
 import { assertRegisteredRoot, availableRoots, listWorkspaceRoots, loadWorkspaces, rootContaining } from "./workspaces";
 
 // Agents read timestamps, not epoch millis.
@@ -148,13 +148,6 @@ function targetWorkspace(args: Record<string, unknown>): string {
   );
 }
 
-// Backlink context is one result row, not a paragraph.
-const CONTEXT_MAX = 200;
-function contextOf(lines: string[], line: number): string {
-  const text = (lines[line - 1] ?? "").trim();
-  return text.length > CONTEXT_MAX ? `${text.slice(0, CONTEXT_MAX)}…` : text;
-}
-
 const TITLE_OR_PATH_PROPS = {
   title: {
     type: "string",
@@ -256,21 +249,17 @@ export const ledgeTools: McpTool[] = [
     handler: async (args) => {
       await loadWorkspaces();
       const target = await locate(args);
-      // Wikilinks are workspace-scoped (a title in one workspace cannot name
-      // a note in another), so the scan is too — and resolution runs against
-      // the SAME meta list the linking notes' editors would use.
-      const metas = await notesIn(target.workspace);
-      const backlinks: Array<{ path: string; title: string; line: number; context: string }> = [];
-      for (const meta of metas) {
-        if (meta.path === target.path) continue; // a note is not "linked from" itself
-        const file = await readNote(meta.path);
-        if (file === null) continue; // deleted mid-scan costs that note only
-        const lines = file.text.split("\n");
-        for (const ref of wikiRefsOf(file.text)) {
-          if (resolveWikiTitle(ref.title, metas)?.path !== target.path) continue;
-          backlinks.push({ path: meta.path, title: meta.title, line: ref.line, context: contextOf(lines, ref.line) });
-        }
-      }
+      // The scan is backlinksTo (bun/notes.ts) — the same definition the app's
+      // Backlinks panel reads over RPC, workspace-scoped because wikilinks
+      // are. Its hits carry the panel's extra fields (mtimeMs, the raw match);
+      // this response keeps its original shape — agent output should not
+      // churn under a UI feature.
+      const backlinks = (await backlinksTo(target.path)).map(({ path, title, line, context }) => ({
+        path,
+        title,
+        line,
+        context,
+      }));
       return { target: { path: target.path, title: target.title, workspace: target.workspace }, backlinks };
     },
   },

@@ -15,9 +15,10 @@
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { mkdir, readdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import type { Stats } from "node:fs";
-import type { NoteMeta, TrashMeta } from "../shared/rpc-schema";
+import type { BacklinkHit, NoteMeta, TrashMeta } from "../shared/rpc-schema";
 import { headingOf, labelOf, slugOf, titleOf } from "../shared/slug";
 import { collectHits, type SearchHit } from "../shared/search";
+import { resolveWikiTitle, wikiRefsOf } from "../shared/wikilinks";
 import { loadIgnore } from "./ignore";
 import { assertRegisteredRoot, isInside, kindOf, rootContaining, uniqueName } from "./workspaces";
 
@@ -157,6 +158,42 @@ export async function listNotes(root: string): Promise<NoteMeta[]> {
 // and nothing else.
 export async function searchNotes(root: string, query: string): Promise<SearchHit[]> {
   return collectHits(query, await listNotes(root), async (path) => (await readNote(path))?.text ?? null);
+}
+
+// Backlink context is one result row, not a paragraph.
+const CONTEXT_MAX = 200;
+function contextOf(lines: string[], line: number): string {
+  const text = (lines[line - 1] ?? "").trim();
+  return text.length > CONTEXT_MAX ? `${text.slice(0, CONTEXT_MAX)}…` : text;
+}
+
+// Every wikilink in the note's own workspace that points at it — the ONE
+// backlink definition, shared by the MCP `backlinks` tool and the app's
+// Backlinks panel (rpc noteBacklinks), so agents and the UI can never
+// disagree about who links where. The root is derived from the path (the
+// per-note-call stance), and the scan is scoped to it because wikilinks are:
+// a title in one workspace cannot name a note in another. Resolution runs
+// against the SAME newest-first meta list the linking notes' editors would
+// use — listNotes' sort IS resolveWikiTitle's tie order, so an ambiguous
+// title lands on the note a click in the linking note would open. Reading
+// every body is searchNotes' accepted cost; a note deleted mid-scan costs
+// that note only.
+export async function backlinksTo(path: string): Promise<BacklinkHit[]> {
+  const root = assertNote(path);
+  const target = resolve(path);
+  const metas = await listNotes(root);
+  const out: BacklinkHit[] = [];
+  for (const meta of metas) {
+    if (meta.path === target) continue; // a note is not "linked from" itself
+    const file = await readNote(meta.path);
+    if (file === null) continue;
+    const lines = file.text.split("\n");
+    for (const ref of wikiRefsOf(file.text)) {
+      if (resolveWikiTitle(ref.title, metas)?.path !== target) continue;
+      out.push({ ...meta, line: ref.line, context: contextOf(lines, ref.line), raw: ref.raw });
+    }
+  }
+  return out;
 }
 
 // Read a note, or null if it is gone (deleted behind our back, say). The mtime

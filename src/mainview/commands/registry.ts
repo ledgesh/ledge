@@ -19,6 +19,7 @@ import {
   KeyRound,
   Layers,
   PanelLeft,
+  PanelRight,
   Pencil,
   Play,
   Plus,
@@ -232,6 +233,10 @@ export function buildCommands(deps: RegistryDeps): Command[] {
       icon: PanelLeft,
       run: (ctx) => ctx.ui.toggleSidebar?.(),
     }),
+    cmd("backlinks.toggle", {
+      icon: PanelRight,
+      run: (ctx) => ctx.ui.toggleBacklinks?.(),
+    }),
     cmd("terminal.toggle", {
       icon: TerminalSquare,
       // The editor's CodeMirror keymap and the terminal's xterm handler own
@@ -323,6 +328,26 @@ export function buildCommands(deps: RegistryDeps): Command[] {
       run: (ctx) => {
         const note = targetNote(ctx);
         if (note) ctx.ui.deleteNoteWithUndo?.(note);
+      },
+    }),
+    // Enter on (or click of, or the menu on) a Backlinks-panel row: open the
+    // linking note with its link line revealed. The reveal is registered
+    // BEFORE the open — the search overlay's pattern (Overlay.tsx): openNote's
+    // render is what attaches the editor the reveal lands in. The meta comes
+    // from the selected workspace's list, where a backlink must live — the
+    // scan is workspace-scoped; a hit whose note vanished since is a no-op.
+    cmd("backlink.open", {
+      icon: FileText,
+      targetKind: "backlink",
+      palette: false, // acts on a specific row
+      when: (ctx) => ctx.target?.kind === "backlink",
+      run: (ctx) => {
+        const t = ctx.target;
+        if (t?.kind !== "backlink") return;
+        const note = notesOf(ctx.state, ctx.selected.folder).find((n) => n.path === t.path);
+        if (!note) return;
+        deps.revealBacklink(t.path, t.line, t.raw);
+        ctx.dispatch({ type: "openNote", note });
       },
     }),
     cmd("note.copyPath", {
