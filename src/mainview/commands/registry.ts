@@ -10,6 +10,7 @@ import {
   ArrowLeft,
   ArrowRight,
   Bold,
+  Braces,
   CalendarDays,
   Columns2,
   Command as CommandIcon,
@@ -490,6 +491,31 @@ export function buildCommands(deps: RegistryDeps): Command[] {
         if (name) ctx.ui.openProfileEditor?.(name);
       },
     }),
+    // Put the caret inside the current note's frontmatter, creating the block
+    // when there is none — the front door to the per-note params (editor/
+    // frontmatterEdit.ts does the editing). ONE command with a live title
+    // rather than the templateOn/Off two-faces move, because this one holds a
+    // chord and the dispatcher ignores `when`: two commands on ⌥⌘, would
+    // always fire the first. Built literally (not via cmd()) for exactly that
+    // title; keys.ts still owns the identity.
+    {
+      id: "frontmatter.edit",
+      title: (ctx) => {
+        const docId = focusedDocId(ctx.selected);
+        const head = docId === null ? null : deps.noteHead(docId);
+        return head !== null && parseFrontmatter(head).end > 0 ? "Edit Frontmatter" : "Add Frontmatter";
+      },
+      keys: keysOf("frontmatter.edit"),
+      icon: Braces,
+      when: (ctx) => {
+        const docId = focusedDocId(ctx.selected);
+        return docId !== null && deps.noteHead(docId) !== null;
+      },
+      run: (ctx) => {
+        const docId = focusedDocId(ctx.selected);
+        if (docId) deps.editor.editFrontmatter(docId);
+      },
+    },
 
     // --- notes ---------------------------------------------------------------
     cmd("note.open", {

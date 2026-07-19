@@ -14,6 +14,7 @@ import { openReplace } from "@/editor/find";
 import { runBlock } from "@/editor/blocks";
 import { openLinkAtCursor, toggleTaskAt } from "@/editor/livePreview";
 import { insertLink, toggleBold, toggleItalic } from "@/editor/formatting";
+import { editFrontmatter } from "@/editor/frontmatterEdit";
 import { toggleTemplateFlag } from "@/editor/templateFlag";
 import { saveNow } from "@/notes/store";
 import {
@@ -117,5 +118,6 @@ export const registryDeps: RegistryDeps = {
     italic: (docId) => withView(docId, (view) => toggleItalic(view)),
     insertLink: (docId) => withView(docId, (view) => insertLink(view)),
     toggleTemplate: (docId) => withView(docId, (view) => toggleTemplateFlag(view)),
+    editFrontmatter: (docId) => withView(docId, (view) => editFrontmatter(view)),
   },
 };

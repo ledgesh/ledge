@@ -1,8 +1,17 @@
 // Frontmatter in the editor: the params block renders dimmed (editor/
 // frontmatter.ts line decorations), and the note's title still comes from the
 // first H1 AFTER the block — typing frontmatter must never rename a note to
-// "---" or to untitled.
-import { expect, test } from "@playwright/test";
+// "---" or to untitled. Plus the block's front door (⌥⌘, — editor/
+// frontmatterEdit.ts), the fence auto-close (editor/fences.ts), and the
+// in-block completion (editor/frontmatterComplete.ts).
+import { expect, test, type Locator, type Page } from "@playwright/test";
+
+// Wait until the popup accepts Enter (see wikilinks.spec.ts for the full
+// story: the disabled re-query window plus the 75ms interactionDelay).
+const completionAcceptReady = async (page: Page, popup: Locator) => {
+  await expect(popup).not.toHaveClass(/cm-tooltip-autocomplete-disabled/);
+  await page.waitForTimeout(100);
+};
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/harness.html");
@@ -93,6 +102,74 @@ test("the profile editor round-trips a variable through the palette command", as
   await expect(reopened.getByRole("button", { name: "Save" })).toBeDisabled();
   await page.keyboard.press("Escape");
   await expect(reopened).toBeHidden();
+});
+
+test("⌥⌘, creates the block with the caret inside; the palette face flips to Edit", async ({ page }) => {
+  await page.keyboard.press("Meta+n");
+  // No block yet: the palette says what will happen — Add.
+  await page.keyboard.press("Meta+Shift+P");
+  await page.keyboard.type("frontmatter");
+  await expect(page.getByText("Add Frontmatter")).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  await page.keyboard.press("Alt+Meta+,");
+  await expect(page.locator(".cm-line.ledge-fm-fence")).toHaveCount(2);
+  // The caret landed on the body line between the fences: typing lands in
+  // the block (and pops the key completion — dismissed, it is just typing).
+  await page.keyboard.type("cwd");
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".cm-line.ledge-fm", { hasText: "cwd" })).toBeVisible();
+
+  // With a block, the same chord's face is Edit.
+  await page.keyboard.press("Meta+Shift+P");
+  await page.keyboard.type("frontmatter");
+  await expect(page.getByText("Edit Frontmatter")).toBeVisible();
+  await page.keyboard.press("Escape");
+});
+
+test("Enter closes an unterminated fence: line-1 --- and ``` openers alike", async ({ page }) => {
+  await page.keyboard.press("Meta+n");
+  await page.keyboard.press("Meta+a");
+  await page.keyboard.type("---");
+  await page.keyboard.press("Enter");
+  // The closing fence arrived with the Enter; the caret sits between.
+  await expect(page.locator(".cm-line.ledge-fm-fence")).toHaveCount(2);
+  await page.keyboard.type("tags");
+  await page.keyboard.press("Escape"); // the key popup — typing, not picking
+  await expect(page.locator(".cm-line.ledge-fm", { hasText: "tags" })).toBeVisible();
+
+  // A code fence below the block: Enter after the opener closes it in place
+  // (both fences revealed, because the caret is inside the block).
+  await page.keyboard.press("Meta+ArrowDown");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("```sh");
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".cm-line.ledge-code-top")).toHaveText("```sh");
+  await expect(page.locator(".cm-line.ledge-code-bottom")).toHaveText("```");
+});
+
+test("the block completes its keys and values, hints attached", async ({ page }) => {
+  await page.keyboard.press("Meta+n");
+  await page.keyboard.press("Meta+a");
+  await page.keyboard.type("---");
+  await page.keyboard.press("Enter");
+
+  // Key position: the option carries its one-line hint — the popup is the
+  // documentation — and accepting writes the colon too.
+  const popup = page.locator(".cm-tooltip-autocomplete");
+  await page.keyboard.type("te");
+  await expect(popup).toBeVisible();
+  await expect(popup.locator("li", { hasText: "template" })).toContainText("daily seeds ⌘J");
+  await completionAcceptReady(page, popup);
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".cm-line.ledge-fm", { hasText: "template:" })).toBeVisible();
+
+  // Value position: the grammar's own values complete in place.
+  await page.keyboard.type("d");
+  await expect(popup).toBeVisible();
+  await completionAcceptReady(page, popup);
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".cm-line.ledge-fm", { hasText: "template: daily" })).toBeVisible();
 });
 
 test("profile fields copy and paste through the clipboard bridge, mask notwithstanding", async ({ page }) => {

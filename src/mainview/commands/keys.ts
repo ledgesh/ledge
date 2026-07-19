@@ -138,6 +138,13 @@ export const COMMANDS = {
   // secrets.
   "session.restart": { title: "Restart Note Shell" },
   "profile.open": { title: "Edit Note Profile…" },
+  // The block itself: put the caret inside the note's frontmatter, creating
+  // empty fences first when there is none (the registry retitles it "Add
+  // Frontmatter" then — one command, or the chord would fire the wrong face:
+  // the dispatcher ignores `when`). ⌥⌘, is the ⌥-tier variant of ⌘, (§2):
+  // Settings, but the NOTE's — frontmatter is the per-note settings block,
+  // same file-is-the-UI stance, and the chord says so.
+  "frontmatter.edit": { title: "Edit Frontmatter", keys: ["Alt-Mod-,"] },
 
   // Notes. note.delete is the row form (context menu, and `d`/⌫ on a focused
   // row); note.deleteCurrent is the ⌘⌫ / palette form acting on the focused

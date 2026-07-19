@@ -12,6 +12,7 @@ import { ledgeFrontmatter } from "./frontmatter";
 import { livePreview } from "./livePreview";
 import { tableRendering } from "./tables";
 import { imagePasteInsert, imageRendering } from "./images";
+import { fenceClose } from "./fences";
 import { quoteExit } from "./quotes";
 import { appCompletion, wikiLinkExtension } from "./wikilinks";
 import { hashtagExtension } from "./tags";
@@ -356,6 +357,10 @@ export function createEditor(parent: HTMLElement, doc: string, sessionId: string
         // see an empty quote line first (editor/quotes.ts). Not gated by
         // livePreview — it is editing behavior, not rendering.
         quoteExit(),
+        // Enter on an unterminated `---` (line 1) or ``` opener inserts the
+        // closing fence (editor/fences.ts). Editing behavior like quoteExit,
+        // so not gated by livePreview either.
+        fenceClose(),
         // The `[[` note picker and the `#` tag picker (editor/wikilinks.ts +
         // editor/tags.ts, one autocompletion). Editing behavior like
         // quoteExit, so not gated by livePreview: a raw-markdown editor still

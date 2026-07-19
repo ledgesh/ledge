@@ -53,7 +53,8 @@ export function domainMatches(domains: readonly FocusDomain[], domain: FocusDoma
 }
 
 // With Shift held, punctuation arrives as its shifted character ("}" for
-// Shift-]), so bindings like Mod-Shift-] would never match on e.key alone.
+// Shift-]), and macOS Option can transform it too ("≤" for ⌥-,) — so bindings
+// like Mod-Shift-] or Alt-Mod-, would never match on e.key alone.
 // e.code names the physical key; map the ones we could plausibly bind back to
 // their base character.
 const CODE_BASE: Record<string, string> = {
@@ -76,7 +77,7 @@ export function eventToChord(
   let key = e.key;
   // Shifted letters arrive uppercase; bindings store lowercase.
   if (/^[A-Z]$/.test(key)) key = key.toLowerCase();
-  if (e.shiftKey && e.code) {
+  if ((e.shiftKey || e.altKey) && e.code) {
     const base = CODE_BASE[e.code];
     if (base) key = base;
     // Shift+digit arrives as the symbol ("!" for 1); recover the digit.

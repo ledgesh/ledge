@@ -60,6 +60,7 @@ function stubDeps(
       italic: record("italic"),
       insertLink: record("insertLink"),
       toggleTemplate: record("toggleTemplate"),
+      editFrontmatter: record("editFrontmatter"),
     },
   };
 }
@@ -419,6 +420,30 @@ describe("registry", () => {
 
     const noEditor = buildCommands(stubDeps([], null));
     expect(find(noEditor, "profile.open").when!(ctx)).toBe(false);
+  });
+
+  test("frontmatter.edit: the title says what will happen, the run routes the focused doc", () => {
+    // One command with a live title (not the two-faces move): it holds a
+    // chord, and the dispatcher ignores `when`, so a second command on ⌥⌘,
+    // could never fire.
+    const state = initialState(FOLDER, []);
+    const docId = state.workspaces[0]!.root.kind === "leaf" ? state.workspaces[0]!.root.tabs[0]!.docId : "";
+    const ctx = makeCtx(state);
+    const calls: string[] = [];
+    const without = buildCommands(stubDeps(calls, "# Plain note\n"));
+    const title = (cmds: Command[]) =>
+      (find(cmds, "frontmatter.edit").title as (c: CommandCtx) => string)(ctx);
+    expect(title(without)).toBe("Add Frontmatter");
+    expect(find(without, "frontmatter.edit").when!(ctx)).toBe(true);
+    find(without, "frontmatter.edit").run(ctx);
+    expect(calls).toEqual([`editFrontmatter:${docId}`]);
+
+    const withBlock = buildCommands(stubDeps([], "---\ncwd: /x\n---\n# T\n"));
+    expect(title(withBlock)).toBe("Edit Frontmatter");
+
+    // No live editor for the doc: hidden, like the other frontmatter verbs.
+    const noEditor = buildCommands(stubDeps([], null));
+    expect(find(noEditor, "frontmatter.edit").when!(ctx)).toBe(false);
   });
 
   test("run: note.copyPath copies the targeted row's path", () => {

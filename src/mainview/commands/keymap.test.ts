@@ -36,6 +36,13 @@ describe("eventToChord", () => {
     expect(c.key).toBe("1");
   });
 
+  test("⌥-transformed punctuation recovers the base key from e.code", () => {
+    // macOS Option types "≤" on the comma key; Alt-Mod-, must still match.
+    const c = eventToChord(ev({ key: "≤", code: "Comma", metaKey: true, altKey: true }));
+    expect(c.key).toBe(",");
+    expect(c.alt).toBe(true);
+  });
+
   test("backtick, digits, and named keys pass through", () => {
     expect(eventToChord(ev({ key: "`", code: "Backquote", ctrlKey: true })).key).toBe("`");
     expect(eventToChord(ev({ key: "1", code: "Digit1", ctrlKey: true })).key).toBe("1");

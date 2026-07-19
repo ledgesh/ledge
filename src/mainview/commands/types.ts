@@ -178,6 +178,10 @@ export interface RegistryDeps {
     // editor (editor/templateFlag.ts): an ordinary undoable edit, so autosave
     // and the watcher-driven list refresh carry the change everywhere else.
     toggleTemplate(docId: string): void;
+    // Put the caret inside the note's frontmatter block, creating empty
+    // fences at the top when there is none (editor/frontmatterEdit.ts) —
+    // the same ordinary-undoable-edit stance as toggleTemplate.
+    editFrontmatter(docId: string): void;
   };
 }
 
