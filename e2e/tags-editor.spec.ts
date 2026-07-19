@@ -4,7 +4,7 @@
 // it, the `#` picker offers the workspace's own tags, and the frontmatter
 // tags: line's tokens style like the profile name. Real WebKit because the
 // pill styling, the hotspot click, and the popup are exactly what unit tests
-// cannot see (docs/testing.md §5).
+// cannot see (testing.md §5).
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
 const noteRow = (page: Page, title: string) =>

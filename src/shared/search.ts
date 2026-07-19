@@ -11,7 +11,7 @@
 // Lives in shared/, not bun/, because the matcher is contract rather than
 // plumbing: Bun executes it over the files it owns (bun/notes.ts searchNotes),
 // and the e2e harness's fake store must mirror the real store's semantics
-// exactly (docs/testing.md §5) — one definition instead of a mirrored pair
+// exactly (testing.md §5) — one definition instead of a mirrored pair
 // that drifts.
 
 /** One matched line, carrying the note it lives in (the NoteMeta fields ride

@@ -5,7 +5,7 @@
 // guard against something already reversible. The callers are the two actions
 // that destroy a note outright — Empty Trash, and Delete Permanently on one
 // trashed note — and nothing else should join them without also being an
-// unlink (docs/interactions.md §4).
+// unlink (interactions.md §4).
 import { useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { pushLayer } from "@/commands/layers";

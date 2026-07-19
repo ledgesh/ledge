@@ -37,7 +37,7 @@ export interface NoteMeta {
   // fixtures and metas that are not templates say nothing at all.
   template?: true | "daily";
   // Present when the note is locked (its frontmatter carries the crypto
-  // header, docs/locking.md): the sidebar/⌘P lock glyph, the scans' skip,
+  // header, locking.md): the sidebar/⌘P lock glyph, the scans' skip,
   // and the agent listings' flag all read this. Rides the same head read
   // the title does — the plaintext head is designed to answer it.
   locked?: true;
@@ -258,7 +258,7 @@ export type LedgeRPC = {
       // list, open, and reveal without a second request.
       // `lockedSkipped` counts the workspace's locked notes, whose bodies the
       // scan deliberately never reads (vault state irrelevant —
-      // docs/locking.md §4); the overlay renders it as a muted footer so the
+      // locking.md §4); the overlay renders it as a muted footer so the
       // skip is visible where the answer would have been. The same count
       // rides every body scan below.
       noteSearch: { params: { root: string; query: string }; response: { hits: SearchHit[]; lockedSkipped: number } };
@@ -461,7 +461,7 @@ export type LedgeRPC = {
       // dot-entries) — the view is the least-trusted end, and without the
       // extension check this call would read any note. null when missing.
       // `sealed: true` means the file exists but is a SEALED image
-      // (docs/locking.md §5) and the vault is locked: the widget shows the
+      // (locking.md §5) and the vault is locked: the widget shows the
       // locked-image placeholder, not a broken one. Sealed assets decrypt
       // Bun-side when the vault is open and ride back as ordinary bytes.
       assetRead: {
@@ -477,7 +477,7 @@ export type LedgeRPC = {
       // file itself via uniqueName — the view never names a file.
       // `notePath` is the PASTING note's file, when it has one: Bun derives
       // from the note itself — never from a view flag — whether the paste
-      // must be sealed at birth (the note is locked, docs/locking.md §5).
+      // must be sealed at birth (the note is locked, locking.md §5).
       assetPaste: { params: { root: string; notePath?: string | null }; response: { src: string | null } };
       // The persisted session layout (.layout.json in the app home): which
       // workspaces exist, which folder each owns, their pane trees, and which
@@ -501,7 +501,7 @@ export type LedgeRPC = {
       // NoteMeta plus its root so the view can select the workspace and open
       // the tab without a lookup; null means nothing (valid) was pending.
       openRequestTake: { params: {}; response: { open: ExternalOpenInfo | null } };
-      // --- the vault (note locking, docs/locking.md) ---------------------
+      // --- the vault (note locking, locking.md) ---------------------
       // Current state, fetched at boot and after any transition the view did
       // not drive itself. "none" = no vault exists yet (the first Lock This
       // Note runs creation instead of unlock).
@@ -527,14 +527,14 @@ export type LedgeRPC = {
       // template path also cannot bypass it). Body and header transition on
       // disk; the response meta carries the new locked flag for the lists.
       // `sealedShared` names swept images OTHER unlocked notes also show
-      // (docs/locking.md §5) — the view surfaces it as a notice; sealing
+      // (locking.md §5) — the view surfaces it as a notice; sealing
       // proceeds either way, since a refusal would deadlock locking two
       // notes that share an image.
       noteLock: { params: { path: string }; response: { note: NoteMeta; sealedShared: string[] } };
       noteRemoveLock: { params: { path: string }; response: { note: NoteMeta } };
       // Change the passphrase: new salt + master key, every locked note's
       // header and sealed image's key wrap rewritten across all available
-      // roots — headers and wraps only, bodies never (docs/locking.md §3).
+      // roots — headers and wraps only, bodies never (locking.md §3).
       // Unlocked only; `rewrapped` is the count for the notice.
       vaultChangePassphrase: { params: { passphrase: string }; response: { ok: boolean; rewrapped: number } };
       // Open a note link in the OS default handler (browser, mail client).

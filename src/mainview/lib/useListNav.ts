@@ -62,7 +62,7 @@ export function useListNav(): ListNav {
       // Only the pure navigation keys are consumed here. Everything else —
       // including the row verbs and every ⌘ chord — falls through to the
       // window dispatcher, which is the one place that decides what a key
-      // means (docs/interactions.md §7).
+      // means (interactions.md §7).
       const dir =
         e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : e.key === "Home" ? "first" : e.key === "End" ? "last" : null;
       if (dir === null || e.metaKey || e.ctrlKey || e.altKey) return;

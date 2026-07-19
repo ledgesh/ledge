@@ -3,7 +3,7 @@
 // and applies the Bun-side settings (shell, trash TTL); the view receives the
 // validated snapshot over RPC and applies the rest (fonts, runnable fences).
 //
-// The policy for what belongs in here is docs/architecture.md ("Settings");
+// The policy for what belongs in here is architecture.md ("Settings");
 // the short version: a setting exists only where the hardcoded default
 // demonstrably fails someone, and it applies at launch, never live.
 

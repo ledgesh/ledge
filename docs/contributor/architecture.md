@@ -1,7 +1,7 @@
 # Ledge architecture & boundaries
 
 Normative rules for where code lives, what may talk to what, and which
-invariants hold at each boundary. `docs/interactions.md` governs how actions
+invariants hold at each boundary. `interactions.md` governs how actions
 are exposed to the user; this document governs how the code underneath is
 allowed to be shaped. Like that one, a rule here is normative: code that
 disagrees with it is wrong, or the rule is — change one deliberately.
@@ -277,7 +277,7 @@ Bun therefore validates everything and derives anything derivable:
   every preload and probe already speaks it. Nothing in the app sets it;
   every `bun test` run gets a scratch one via preload, and anything that
   exercises the real app against real files must set it (see
-  `docs/testing.md` §§2, 6). **`LEDGE_PROFILES_DIR`** is the same override
+  `testing.md` §§2, 6). **`LEDGE_PROFILES_DIR`** is the same override
   for the profiles dir (§6a), for the same reason: no test or probe may
   read — or seed — the real one.
 
@@ -285,7 +285,7 @@ Bun therefore validates everything and derives anything derivable:
 
 Per-note encryption — the vault, the envelope, the readNote/writeNote seam
 behavior, the agents-never-read invariant, and the sealed-image sweep — is
-its own sibling standard: **docs/locking.md**. It rides the invariants above
+its own sibling standard: **locking.md**. It rides the invariants above
 (temp-plus-rename writes, rename-not-unlink trash, the assertNote guards)
 rather than amending them; the two facts worth knowing from here are that
 `bun/vault.ts` owns keys and byte shapes (node:crypto only, §8-clean), and
@@ -649,7 +649,7 @@ not one. (This was a deliberate choice, not an accident of history.)
 
 Dev-only tooling gets the same test but a lower bar, since it never ships:
 `@playwright/test` is in because nothing in the existing set can execute a
-real DOM (`docs/testing.md` §5) — the canonical example of a reason that
+real DOM (`testing.md` §5) — the canonical example of a reason that
 clears it.
 
 Bun-side: prefer `bun:ffi` and POSIX over native modules — node-pty is out for

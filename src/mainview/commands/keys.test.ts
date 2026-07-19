@@ -58,7 +58,7 @@ describe("command key table", () => {
   test("row verbs are bare keys", () => {
     // A modifier on a listKey would be a chord wearing the wrong hat: the
     // resolver only consults listKeys for unmodified events, so it could never
-    // fire (docs/interactions.md §2).
+    // fire (interactions.md §2).
     for (const id of ids) {
       for (const binding of listKeysOf(id)) {
         expect({ id, binding, ...parseKey(binding) }).toMatchObject({
@@ -79,7 +79,7 @@ describe("command key table", () => {
   });
 
   test("the shift rule pairs scope siblings on the same base key", () => {
-    // docs/interactions.md §2: ⇧ means "bigger scope" of the same key.
+    // interactions.md §2: ⇧ means "bigger scope" of the same key.
     const pairs: Array<[CommandId, CommandId]> = [
       ["tab.close", "pane.close"],
       ["pane.splitRight", "pane.splitDown"],

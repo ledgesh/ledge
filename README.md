@@ -27,3 +27,16 @@ bun run build      # production build
 
 Requires [Bun](https://bun.sh). The first `electrobun dev` downloads the
 Electrobun core (~27 MB) and assembles a real `.app` under `build/`.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). The normative standards live in
+`docs/contributor/`: [architecture](docs/contributor/architecture.md),
+[interactions](docs/contributor/interactions.md),
+[locking](docs/contributor/locking.md), and
+[testing](docs/contributor/testing.md). The end-user manual (the same pages
+the app ships as its built-in docs) lives in [docs/user/](docs/user).
+
+## License
+
+[Apache License 2.0](LICENSE). Copyright 2026 Dan Stevens.

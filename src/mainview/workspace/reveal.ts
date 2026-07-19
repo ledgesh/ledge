@@ -1,5 +1,5 @@
 // Where to put the selection when a search hit opens its note — the pure core
-// of the editor pool's reveal (docs/testing.md §2: the decision is tested
+// of the editor pool's reveal (testing.md §2: the decision is tested
 // here; the dispatch that acts on it stays a thin wrapper in editorPool.ts).
 //
 // The hit's line number is a claim about the file at search time, and the file

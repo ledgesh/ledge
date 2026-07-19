@@ -1,4 +1,4 @@
-// The list-row grammar (docs/interactions.md §1 R5/R6, §2 bare keys), driven
+// The list-row grammar (interactions.md §1 R5/R6, §2 bare keys), driven
 // end-to-end in headless WebKit: click focuses a row, bare keys act on the
 // focused row and ONLY there, destructive-irreversible actions confirm with
 // focus on Cancel. This is the layer the unit tests cannot see — the

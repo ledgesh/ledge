@@ -1,6 +1,6 @@
 // The vault's crypto and text surgery, against the scratch app home (the
 // preload's LEDGE_NOTES_ROOT — .vault.json lands there). The envelope round
-// trips are the honesty tests for docs/locking.md §2: what seals must open,
+// trips are the honesty tests for locking.md §2: what seals must open,
 // what is tampered with must refuse, and a locked note must stay openable
 // with the passphrase ALONE (no vault file — the self-containment property
 // syncing depends on).

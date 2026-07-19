@@ -1,6 +1,6 @@
 // The workspace icon picker: a grid popover anchored to the workspace's row in
 // the strip. Reached from the row's context menu, the `i` row verb, and the
-// palette (docs/interactions.md §1) — which is why it anchors to the row rather
+// palette (interactions.md §1) — which is why it anchors to the row rather
 // than to a click point: the palette has no click point, and the popover has to
 // appear next to the thing it is about either way.
 //

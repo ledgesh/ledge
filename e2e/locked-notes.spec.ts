@@ -1,4 +1,4 @@
-// Note locking, end to end in the harness (docs/locking.md §9): the harness
+// Note locking, end to end in the harness (locking.md §9): the harness
 // seeds a LOCKED note ("Codebook", passphrase "letmein", vault state locked at
 // boot — harness.tsx) whose body carries a needle no surface may show while
 // held. What only the harness can prove is the view half: the placeholder

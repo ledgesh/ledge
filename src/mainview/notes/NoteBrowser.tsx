@@ -219,7 +219,7 @@ export function NoteBrowser() {
               row in this workspace is noise, not discoverability. */}
           {!readOnly && (
             <>
-          {/* The lock faces, two-faces like the palette (docs/locking.md §7):
+          {/* The lock faces, two-faces like the palette (locking.md §7):
               a plain row offers Lock This Note… (greyed on templates — the
               marker exclusivity), a locked row offers Remove Lock… plus the
               vault verb matching the state the row's glyph shows: Unlock
@@ -295,7 +295,7 @@ function TrashSection({
   // The section owns both confirmations, so the trash.empty and trash.delete
   // commands open them here rather than deleting directly: the confirm IS the
   // command's behavior, because these are the app's two irreversible actions
-  // (docs/interactions.md §4). Opening the section is not required — a row verb
+  // (interactions.md §4). Opening the section is not required — a row verb
   // can only fire on a row you can see.
   useEffect(() => {
     configureUi({

@@ -1,4 +1,4 @@
-// The modal layer stack (docs/interactions.md §6). Every transient surface —
+// The modal layer stack (interactions.md §6). Every transient surface —
 // context menu, confirm dialog, palette overlay — registers itself here on
 // mount and disposes on unmount. One capture-phase Escape listener addresses
 // only the topmost layer, replacing the per-component capture listeners whose

@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { frontmatterEditPlan } from "./frontmatterEdit";
 
 // The pure half only: editFrontmatter is the thin view wrapper (dispatch +
-// scroll), per the pure-core/DOM-wrapper split (docs/testing.md).
+// scroll), per the pure-core/DOM-wrapper split (testing.md).
 describe("frontmatterEditPlan", () => {
   test("no block: opens one at the top, caret on the empty body line", () => {
     expect(frontmatterEditPlan("# Title\n\nbody\n")).toEqual({

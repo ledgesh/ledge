@@ -111,7 +111,7 @@ interface BridgeHandlers {
   openTag: (docId: string, tag: string) => void;
   // Surface a neutral one-liner (App wires it to ui.showNotice — the
   // browser's notice strip). The editor's refusals speak through this: a
-  // swallowed chord diagnoses nothing (docs/locking.md §7).
+  // swallowed chord diagnoses nothing (locking.md §7).
   notice: (message: string) => void;
 }
 const handlers: Partial<BridgeHandlers> = {};

@@ -208,7 +208,7 @@ export function runBlock(view: EditorView, pos: number, destination: RunDestinat
   const block = blockAt(view.state, pos);
   if (!block || !isRunnable(block.lang)) return false;
   // A ```prompt fence's contract is "pipe this body to the agent CLI" — in a
-  // locked note it does not run, either destination (docs/locking.md §8: the
+  // locked note it does not run, either destination (locking.md §8: the
   // send-direction half of the no-agents invariant; Bun re-validates, this is
   // the UI half). The chord answers with the notice strip, not silence, and
   // returns true: the chord was understood and refused, not unclaimed.

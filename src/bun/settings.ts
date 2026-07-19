@@ -4,7 +4,7 @@
 // the per-workspace world: shell path, font sizes, and interpreters are facts
 // about the person, not the folder. Read once at launch (index.ts); changes
 // apply at the next launch, never live — restart-applies is the policy
-// (docs/architecture.md, "Settings"), not a limitation to fix.
+// (architecture.md, "Settings"), not a limitation to fix.
 //
 // The file is JSONC — comments are its documentation (SETTINGS_TEMPLATE) and
 // the ⌘, editor in Ledge is its UI (settingsRead/settingsWrite carry the raw

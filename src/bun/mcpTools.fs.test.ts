@@ -611,7 +611,7 @@ describe("tags", () => {
   });
 });
 
-// --- locked notes: the agent surface (docs/locking.md §8) --------------------
+// --- locked notes: the agent surface (locking.md §8) --------------------
 // The invariant under test: no tool returns a locked body, EVER — including
 // while the app-side vault is unlocked, which is exactly the state these
 // tests set up (createVault leaves it unlocked; the same process serves the

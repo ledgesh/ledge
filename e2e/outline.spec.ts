@@ -3,7 +3,7 @@
 // doc, and a row jumps the caret to its heading. Run in real WebKit because
 // the live derivation (the docEvents broadcast riding CodeMirror's update
 // listener), row focus, and the caret jump are exactly what unit tests cannot
-// see (docs/testing.md §5).
+// see (testing.md §5).
 import { expect, test, type Page } from "@playwright/test";
 
 const noteRow = (page: Page, title: string) =>

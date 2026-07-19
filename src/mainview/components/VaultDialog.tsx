@@ -1,4 +1,4 @@
-// The vault passphrase dialog (docs/locking.md §7): one component, two faces
+// The vault passphrase dialog (locking.md §7): one component, two faces
 // decided by the mirrored vault state — UNLOCK (a vault exists: one field,
 // wrong-passphrase shakes and stays) and SETUP (first lock ever: passphrase
 // twice, and the no-recovery sentence said out loud, once, where it cannot be

@@ -6,23 +6,27 @@ typed RPC in `src/shared/rpc-schema.ts`.
 
 ## Standards — read the one that governs your change
 
-- **[docs/architecture.md](docs/architecture.md)** — process/trust boundaries,
-  filesystem invariants (rename-not-unlink, path guards), state ownership
-  (store vs `useState` vs `configureX` hooks), settings policy (what earns a
-  knob in settings.json), the recipe for adding an RPC method, dependency
-  policy. Read before adding modules, RPC methods, state, settings, or
-  dependencies.
-- **[docs/interactions.md](docs/interactions.md)** — every user-facing action
-  is a command in `src/mainview/commands/`; hotkey allocation, row verbs,
-  destructive-action policy, Escape layering, tooltips. Read before adding
-  any user-facing action, key, menu, or button.
-- **[docs/locking.md](docs/locking.md)** — note locking (per-note
+The standards live in `docs/contributor/`; the end-user manual (compiled into
+the app as its built-in docs, via `src/bun/docsContent.ts`) lives in
+`docs/user/`.
+
+- **[architecture.md](docs/contributor/architecture.md)** — process/trust
+  boundaries, filesystem invariants (rename-not-unlink, path guards), state
+  ownership (store vs `useState` vs `configureX` hooks), settings policy (what
+  earns a knob in settings.json), the recipe for adding an RPC method,
+  dependency policy. Read before adding modules, RPC methods, state, settings,
+  or dependencies.
+- **[interactions.md](docs/contributor/interactions.md)** — every user-facing
+  action is a command in `src/mainview/commands/`; hotkey allocation, row
+  verbs, destructive-action policy, Escape layering, tooltips. Read before
+  adding any user-facing action, key, menu, or button.
+- **[locking.md](docs/contributor/locking.md)** — note locking (per-note
   encryption): the vault and envelope, the readNote/writeNote seam rules,
   the agents-never-read-locked-bodies invariant (MCP/CLI refusals, prompt
   fences), sealed images, and the lock commands' interaction grammar. Read
   before touching anything that reads note or asset bytes, the vault RPCs,
   or the lock UI.
-- **[docs/testing.md](docs/testing.md)** — what must be tested and how:
+- **[testing.md](docs/contributor/testing.md)** — what must be tested and how:
   colocated `bun test`, pure-core/DOM-wrapper split (no happy-dom — do not
   add one), invariant tests, the headless-WebKit harness (`test:e2e`) for UI
   behavior, live WKWebView probe recipe for the native seams (always against

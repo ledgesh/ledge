@@ -578,7 +578,7 @@ describe("the unlink paths", () => {
   });
 });
 
-// --- note locking (docs/locking.md) -----------------------------------------
+// --- note locking (locking.md) -----------------------------------------
 // The honesty tests: after a lock, the plaintext must be GONE from disk — in
 // the note, in every save that follows, and in the divergence guard's trash
 // copies — while titles, tags-in-head, and the agent-facing skips behave

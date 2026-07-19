@@ -49,7 +49,7 @@ refuses to run otherwise.
 
 ## 3. Invariant tests
 
-When a rule in `docs/interactions.md` or `docs/architecture.md` can be a
+When a rule in `interactions.md` or `architecture.md` can be a
 test, it must be one — the doc states the rule, the test enforces it, and a
 violation fails CI instead of waiting for a reader. Existing examples, which
 new rules should imitate:

@@ -8,7 +8,7 @@
 // (this is a macOS-only app). The first key in a list is the one advertised in
 // tooltips and menu chips; the rest are live aliases.
 //
-// The dispatch contract (docs/interactions.md §7): any handler that consumes a
+// The dispatch contract (interactions.md §7): any handler that consumes a
 // chord must preventDefault, and the window dispatcher only sees leftovers.
 
 export interface KeySpec {
@@ -17,7 +17,7 @@ export interface KeySpec {
   // Bare keys that fire only while a matching list row has focus (the note
   // list, the trash, the workspace strip). Kept apart from `keys` because they
   // are not chords: they are typing anywhere else, and the resolver only
-  // consults them in the list domain (docs/interactions.md §2).
+  // consults them in the list domain (interactions.md §2).
   listKeys?: readonly string[];
 }
 
@@ -115,7 +115,7 @@ export const COMMANDS = {
   // Chrome. ⌘, is the macOS settings convention; it opens settings.jsonc in
   // Ledge's own editor dialog (there is no settings panel — the file is the
   // UI, its comments the documentation, and edits apply at the next launch;
-  // docs/architecture.md "Settings").
+  // architecture.md "Settings").
   "sidebar.toggle": { title: "Toggle Sidebar", keys: ["Alt-Mod-b"] },
   // The right-hand Backlinks panel: which notes [[link]] to the current one.
   // ⌥⌘L is the sidebar's ⌥-tier move with the letter the sidebar couldn't
@@ -158,7 +158,7 @@ export const COMMANDS = {
   // same file-is-the-UI stance, and the chord says so.
   "frontmatter.edit": { title: "Edit Frontmatter", keys: ["Alt-Mod-,"] },
 
-  // Note locking (docs/locking.md §7). ⌘L is the walking-away gesture — the
+  // Note locking (locking.md §7). ⌘L is the walking-away gesture — the
   // one lock command frequent enough to earn a chord: of the free ⌘ letters,
   // L is the mnemonic one (Lock; ⌥⌘L backlinks is unrelated and stays).
   // Unlock earns no chord: it is INTERPOSED — opening a locked note prompts
@@ -174,7 +174,7 @@ export const COMMANDS = {
 
   // Notes. note.delete is the row form (context menu, and `d`/⌫ on a focused
   // row); note.deleteCurrent is the ⌘⌫ / palette form acting on the focused
-  // note. Both land in the trash with Undo (docs/interactions.md §4). ⌘⌫ fires
+  // note. Both land in the trash with Undo (interactions.md §4). ⌘⌫ fires
   // from page focus only: inside the editor, CodeMirror's Mod-Backspace
   // (delete-to-line-start) wins by the preventDefault contract.
   "note.open": { title: "Open", listKeys: ["Enter"] },
@@ -246,7 +246,7 @@ export const COMMANDS = {
 
 export type CommandId = keyof typeof COMMANDS;
 
-// Keys deliberately left unbound (docs/interactions.md §2). Currently empty:
+// Keys deliberately left unbound (interactions.md §2). Currently empty:
 // ⌘B/⌘I/⌘K sat here until formatting spent them (format.* above). The list
 // stays — with its keys.test.ts guard — so the next hold has somewhere
 // enforceable to live. Mod-d select-next-occurrence is a different kind of

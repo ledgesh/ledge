@@ -65,7 +65,7 @@ export function fuzzyScore(query: string, text: string): number | null {
 }
 
 // The command palette's boost for chorded commands. A chord is the registry's
-// own frequency claim (docs/interactions.md §2: chords are EARNED by how often
+// own frequency claim (interactions.md §2: chords are EARNED by how often
 // an act is reached for), so between comparable matches the palette surfaces
 // the act the user most likely wants — "daily" puts ⌘J's Open Today's Daily
 // Note above the unchorded template verbs, whose match merely starts earlier

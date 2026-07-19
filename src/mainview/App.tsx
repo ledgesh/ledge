@@ -101,7 +101,7 @@ function Shell() {
   // The vault passphrase dialog, carrying the act that was waiting on it
   // (lock this note, remove that lock) — App performs the follow-up on
   // success, so the user's intent completes instead of dead-ending at the
-  // prompt (docs/locking.md §7). null = closed.
+  // prompt (locking.md §7). null = closed.
   const [vaultDialog, setVaultDialog] = useState<{ then?: VaultFollowUp } | null>(null);
   // The Remove Lock confirmation's subject, or null. A confirm because the
   // consequence is silent EXPOSURE (sync and agent scans see the body), not

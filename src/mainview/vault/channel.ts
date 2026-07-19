@@ -1,4 +1,4 @@
-// The view end of the vault RPC (note locking, docs/locking.md), plus the one
+// The view end of the vault RPC (note locking, locking.md), plus the one
 // piece of vault state the view holds: the CURRENT VaultState, mirrored from
 // Bun. Mirrored, not owned — Bun's key-in-memory is the truth; this cache is
 // what lets the lock glyphs, the placeholder faces, and the two-faces palette
@@ -117,7 +117,7 @@ export function removeNoteLock(path: string): Promise<NoteMeta> {
 }
 
 /** Rewrap every locked note and sealed image under a new passphrase
- * (unlocked only; Bun sweeps, docs/locking.md §3). */
+ * (unlocked only; Bun sweeps, locking.md §3). */
 export function changeVaultPassphrase(passphrase: string): Promise<{ ok: boolean; rewrapped: number }> {
   return bridge().changePassphrase(passphrase);
 }

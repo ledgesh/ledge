@@ -3,7 +3,7 @@
 // context, and opening a row lands in the linking note AT the link — the
 // search overlay's open-at-the-hit as a row verb. Run in real WebKit because
 // panel focus, row focus, and the reveal are exactly what unit tests cannot
-// see (docs/testing.md §5).
+// see (testing.md §5).
 import { expect, test, type Page } from "@playwright/test";
 
 const noteRow = (page: Page, title: string) =>

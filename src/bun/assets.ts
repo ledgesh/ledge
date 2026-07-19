@@ -79,7 +79,7 @@ export function assetPathOf(root: string, src: string): string {
 }
 
 /** What a read hands back: the bytes, or `sealed` — the file exists but is a
- * sealed image (docs/locking.md §5) and the vault is locked, so the widget
+ * sealed image (locking.md §5) and the vault is locked, so the widget
  * shows the locked-image placeholder rather than a broken one. */
 export type AssetRead = { dataB64: string; mime: string } | { sealed: true } | null;
 
@@ -137,7 +137,7 @@ export async function savePastedImage(root: string, bytes: Uint8Array, ext = ".p
   const taken = new Set(await readdir(assetsDir));
   const base = `pasted-${new Date().toISOString().slice(0, 10)}`;
   const name = uniqueName(base, taken, ext);
-  // A paste into a LOCKED note is sealed from the first byte (docs/locking.md
+  // A paste into a LOCKED note is sealed from the first byte (locking.md
   // §5): the plaintext never exists at this path — the never-unlink orphaning
   // stays a storage quirk, not a leak. Same name shape either way; the magic
   // header, not the filename, is what marks it.
@@ -201,7 +201,7 @@ export async function pasteboardImage(root: string): Promise<Uint8Array | null> 
  * there is no image. `seal` when the pasting note is locked (the caller —
  * bun/index.ts — derives that from the note itself, never from the view's
  * say-so). The osascript temp is transient plaintext either way, unlinked
- * immediately: the documented caveat (docs/locking.md §5). */
+ * immediately: the documented caveat (locking.md §5). */
 export async function pasteImageAsset(root: string, seal = false): Promise<string | null> {
   const bytes = await pasteboardImage(root);
   if (!bytes || bytes.length === 0) return null;

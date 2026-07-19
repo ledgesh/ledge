@@ -105,7 +105,7 @@ export function Overlay({
   // Search mode asks Bun, debounced, and guards against answers landing out of
   // order: only the reply to the query still on screen may set the list.
   // lockedSkipped rides each answer: how many locked notes the scan
-  // deliberately never read (docs/locking.md §4) — the footer below makes
+  // deliberately never read (locking.md §4) — the footer below makes
   // the skip visible where the answer would have been.
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [lockedSkipped, setLockedSkipped] = useState(0);

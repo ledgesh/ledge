@@ -3,7 +3,7 @@
 // dangling one styles muted and resolves live when its note comes to exist,
 // and `[[title#heading]]` reveals the heading it names. Run in real WebKit
 // because completion popups, hotspots, and focus are exactly what unit tests
-// cannot see (docs/testing.md §5).
+// cannot see (testing.md §5).
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
 const noteRow = (page: Page, title: string) =>

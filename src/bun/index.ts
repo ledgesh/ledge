@@ -436,7 +436,7 @@ const rpc = BrowserView.defineRPC<LedgeRPC>({
       }),
       noteDelete: async ({ path }) => ({ trashed: await deleteNote(path) }),
       // The scans return their lockedSkipped counts themselves (notes.ts
-      // decides the skip; docs/locking.md §4) — these are passthroughs.
+      // decides the skip; locking.md §4) — these are passthroughs.
       noteSearch: async ({ root, query }) => searchNotes(root, query),
       // backlinksTo derives and guards the root itself (assertNote), the
       // per-note-call stance: the view sends only the path.
@@ -493,7 +493,7 @@ const rpc = BrowserView.defineRPC<LedgeRPC>({
       runBlock: async ({ sessionId, id, code, language, host }) => {
         // A ```prompt fence's whole contract is "pipe this body to the agent
         // CLI", so in a locked note it does not run — the send-direction half
-        // of the no-agents invariant (docs/locking.md §8). Re-validated here
+        // of the no-agents invariant (locking.md §8). Re-validated here
         // whatever the view asked (the two-ended move: its hidden buttons are
         // the UI, this is the guard). Scoped to the `prompt` language: other
         // fences are the user's own compute.

@@ -61,7 +61,7 @@ export async function findTemplate(
 }
 
 // A template's body is about to be stamped into a NEW, unlocked note — the
-// exact opposite of a locked one (docs/locking.md §2's exclusivity, enforced
+// exact opposite of a locked one (locking.md §2's exclusivity, enforced
 // where the read happens so hand-crafted marker combinations cannot slip
 // through the MCP/CLI template path either). Throwing, not skipping: the
 // caller named this note, and a silent fall-through to a same-titled note

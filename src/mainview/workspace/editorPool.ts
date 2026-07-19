@@ -78,7 +78,7 @@ interface Entry {
   view: EditorView;
   offRun: () => void;
   ro: ResizeObserver;
-  // The note is LOCKED (docs/locking.md): true from the moment a read says
+  // The note is LOCKED (locking.md): true from the moment a read says
   // so, whether or not the body was withheld. What the vault relock must
   // evict is exactly the entries wearing this.
   lockedNote: boolean;
@@ -231,7 +231,7 @@ async function loadNote(docId: string, path: string): Promise<void> {
   if (file.held) {
     // The body was withheld (vault locked, or damage): the tab is a
     // placeholder, not an editor — nothing pours, nothing reveals
-    // (docs/locking.md §4). The pending reveal, if any, stays queued for the
+    // (locking.md §4). The pending reveal, if any, stays queued for the
     // unlock's re-load.
     showHeldFace(entry, !!file.damaged);
     return;

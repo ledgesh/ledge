@@ -112,7 +112,7 @@ function PaneBody({ leaf, focused }: { leaf: LeafNode; focused: boolean }) {
   // Unless a list row is driving: opening a note from the sidebar changes this
   // pane's active tab, and yanking focus into the editor would take it right
   // back off the row the user is working — which is what the row verbs act on
-  // (docs/interactions.md §1 R5). Clicking a note shows it; clicking the
+  // (interactions.md §1 R5). Clicking a note shows it; clicking the
   // editor is what says you want to type in it.
   useLayoutEffect(() => {
     if (!focused || !docId) return;

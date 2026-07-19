@@ -42,7 +42,7 @@ export function TagsPanel({ tag, onBack }: { tag: string | null; onBack: () => v
   const [tags, setTags] = useState<TagInfo[] | null>(null);
   const [hits, setHits] = useState<TagHit[] | null>(null);
   // Locked notes still show their frontmatter tags (plaintext head); this
-  // counts their unscanned BODIES for the footer (docs/locking.md §4).
+  // counts their unscanned BODIES for the footer (locking.md §4).
   const [lockedSkipped, setLockedSkipped] = useState(0);
   const [menu, setMenu] = useState<{ hit: TagHit; x: number; y: number } | null>(null);
 

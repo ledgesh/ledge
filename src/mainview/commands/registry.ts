@@ -533,9 +533,9 @@ export function buildCommands(deps: RegistryDeps): Command[] {
       run: (ctx) => ctx.ui.closeTerminal?.(),
     }),
     // Opens settings.jsonc in Ledge's own editor dialog — the file is the
-    // settings UI (docs/architecture.md "Settings"), its comments the
+    // settings UI (architecture.md "Settings"), its comments the
     // documentation; changes apply at the next launch.
-    // --- note locking (docs/locking.md §7) -----------------------------------
+    // --- note locking (locking.md §7) -----------------------------------
     // ⌘L relocks NOW — the walking-away gesture. Flush-then-drop lives in the
     // dep (glue): the view must save dirty locked buffers before Bun forgets
     // how to encrypt them.

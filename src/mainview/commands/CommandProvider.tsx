@@ -2,7 +2,7 @@
 // calls: buttons, menu items, palette rows, and the editor bridge all converge
 // on the same command definitions.
 //
-// The anti-double-fire contract (docs/interactions.md §7): CodeMirror keymaps
+// The anti-double-fire contract (interactions.md §7): CodeMirror keymaps
 // and xterm handlers consume their keys with preventDefault, this listener
 // runs at bubble phase and skips anything already handled, and while a modal
 // layer is open (menu/dialog/palette) it dispatches nothing.

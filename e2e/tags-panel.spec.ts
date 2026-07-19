@@ -5,7 +5,7 @@
 // open-at-the-place with a tag target. The overlay's #-query surfaces the
 // same tags above its text hits and routes into the same drill-in. Run in
 // real WebKit because panel focus, row focus, and the reveal are exactly
-// what unit tests cannot see (docs/testing.md §5).
+// what unit tests cannot see (testing.md §5).
 import { expect, test, type Page } from "@playwright/test";
 
 const noteRow = (page: Page, title: string) =>

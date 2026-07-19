@@ -1,4 +1,4 @@
-// Headless UI tests against the harness build (docs/testing.md §5): the real
+// Headless UI tests against the harness build (testing.md §5): the real
 // view in a real WebKit — the same engine lineage as the WKWebView the app
 // ships in, which is what makes focus/tabindex behavior representative — with
 // the Bun process faked at the seams (src/mainview/harness.tsx).

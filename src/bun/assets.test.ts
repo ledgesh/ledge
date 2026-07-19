@@ -1,7 +1,7 @@
 // The asset guard and the save/read choreography. assetPathOf is the whole
 // safety story for assetRead — the one RPC that takes a view-supplied
 // relative path — so its refusals get named tests the way assertTrashed's do
-// (docs/testing.md §3). Since the per-workspace split the reference resolves
+// (testing.md §3). Since the per-workspace split the reference resolves
 // against a caller-named root, so "which root" is part of the guard too.
 // The filesystem half runs against the scratch app home the preload set
 // (see notes.fs.test.ts for why the guard re-checks it).
@@ -154,7 +154,7 @@ describe("savePastedImage", () => {
   });
 });
 
-// --- sealed images (docs/locking.md §5) --------------------------------------
+// --- sealed images (locking.md §5) --------------------------------------
 import { createNote, lockNote, removeLockNote } from "./notes";
 import { createVault, isSealedAsset, lockVault, resetVaultForTests } from "./vault";
 import { readFile as readRawFile } from "node:fs/promises";

@@ -84,7 +84,7 @@ export interface UiHooks {
   // Open the Empty Trash confirmation.
   confirmEmptyTrash(): void;
   // Open the confirmation for unlinking ONE trashed note. Irreversible, so it
-  // is a confirm rather than an undo (docs/interactions.md §4).
+  // is a confirm rather than an undo (interactions.md §4).
   confirmDeleteTrashed(item: TrashMeta): void;
   // Open the profile editor dialog on one named profile (the in-app UI for
   // profile files; macOS binds no app to ".env", so there is no OS-editor
@@ -194,14 +194,14 @@ export interface RegistryDeps {
   // runs on every menu/palette render, and a note carrying a pasted blob
   // should not be serialized just to ask whether it names a profile.
   noteHead(docId: string): string | null;
-  // The vault (note locking, docs/locking.md). State is the view's mirrored
+  // The vault (note locking, locking.md). State is the view's mirrored
   // copy (vault/channel.ts) — cheap enough for `when` to read per render.
   // The two note ops resolve to an error message to surface, or null (the
   // createWorkspace contract); both refresh the note lists themselves.
   vaultState(): VaultState;
   lockVaultNow(): void;
   // Lock resolves to what to SURFACE: an error, or a notice (the sweep
-  // sealed images other notes also show — proceed-and-say, docs/locking.md
+  // sealed images other notes also show — proceed-and-say, locking.md
   // §5); both null on a quiet success.
   lockNoteNow(folder: string, path: string): Promise<{ error: string | null; notice: string | null }>;
   removeLockNow(folder: string, path: string): Promise<string | null>;

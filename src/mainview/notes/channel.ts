@@ -34,7 +34,7 @@ interface NoteHandlers {
   list: (folder: string) => Promise<NoteMeta[]>;
   read: (path: string) => Promise<NoteFile | null>;
   // The body scans carry lockedSkipped — how many locked notes the answer
-  // deliberately does not cover (docs/locking.md §4) — for the overlay and
+  // deliberately does not cover (locking.md §4) — for the overlay and
   // panel footers.
   search: (folder: string, query: string) => Promise<{ hits: SearchHit[]; lockedSkipped: number }>;
   backlinks: (path: string) => Promise<{ backlinks: BacklinkHit[]; lockedSkipped: number }>;

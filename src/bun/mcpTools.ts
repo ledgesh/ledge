@@ -66,7 +66,7 @@ async function notesIn(workspace: unknown): Promise<Located[]> {
 // then needs no argument. The env names a path, so it can go stale if the
 // note renames itself after the shell spawned — the error says so, because
 // the fix (address it by title) is not guessable from "not found".
-// The one refusal every content tool shares (docs/locking.md §8): a locked
+// The one refusal every content tool shares (locking.md §8): a locked
 // note's body is never available to an agent, whatever the vault's state in
 // the app — the lock is FOR this surface. locate() is the shared resolver
 // read_note/append_note/edit_note/backlinks all pass through, so refusing
@@ -246,7 +246,7 @@ export const ledgeTools: McpTool[] = [
         // nothing; the daily template's row says template: "daily".
         ...(n.template ? { template: n.template } : {}),
         // Agents plan against listings, so a note whose body will refuse
-        // must say so in the row (docs/locking.md §8).
+        // must say so in the row (locking.md §8).
         ...(n.locked ? { locked: true } : {}),
       }));
     },
@@ -304,7 +304,7 @@ export const ledgeTools: McpTool[] = [
       return {
         hits: hits.map(({ mtimeMs, ...h }) => ({ ...h, modified: iso(mtimeMs) })),
         truncated: all.length > MAX_HITS,
-        // Scoped-answer honesty (docs/locking.md §8): an agent must know its
+        // Scoped-answer honesty (locking.md §8): an agent must know its
         // answer does not cover the user's locked notes. Present only when
         // non-zero, so an unlocked corpus reads exactly as before.
         ...(lockedSkipped > 0 ? { lockedNotesSkipped: lockedSkipped } : {}),

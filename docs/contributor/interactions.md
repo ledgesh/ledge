@@ -90,7 +90,7 @@ Rules:
   held for a literal "Open…" someday. ⇧⌘J stays free for a future
   bigger-scope variant.
 - **⌘L** — Lock Notes: relock the vault now, the walking-away gesture
-  (`docs/locking.md` §7 owns the full lock-command grammar — unlock is
+  (`locking.md` §7 owns the full lock-command grammar — unlock is
   interposed, the per-note pair is palette-only two-faces). L is the lock
   mnemonic, and ⌥⌘L backlinks is unrelated.
 - **Bare keys** — the verbs of a focused list row, and *only* those. They live
@@ -150,9 +150,9 @@ CodeMirror and never at the window level.
 | Add / Edit Frontmatter | ⌥⌘,                      | one command with a live title (a keyed command cannot be a two-faces pair — the dispatcher ignores `when`): with no block it inserts empty fences at the top with the caret on the body line between (Add); with one it moves the caret into the block (Edit). The block is still hand-edited text — the command only spares the scroll-up-and-type-fences gesture. Inside the block, completion teaches the grammar (editor/frontmatterComplete.ts, part of the one appCompletion): the seven params keys with one-line hints at line start (accepting writes the colon too; keys already declared are not re-offered), `template:` values (true / daily / false, explained), `tags:` values (the workspace's tags, the `#` picker's vocabulary), `host:` offers the reserved "local" |
 | Fence auto-close      | — (typed, not a command)  | Enter at the end of an unterminated fence opener inserts the closer with the caret on the empty line between (editor/fences.ts): `---` on line 1 when no closing fence answers it (the block otherwise renders as an hr mid-gesture), and a ```/~~~ code-fence opener no later line closes (everything below would restyle as code until the closer exists). Enter on the opener of an already-closed block, mid-line, or on a closing fence is an ordinary newline |
 | Edit Note Profile…    | — (palette; edit button on the block, hover/caret-revealed like block controls; ⌘-click the name as accelerator) | opens the profile the note's frontmatter names in Ledge's key/value dialog (macOS binds no app to .env), created seeded if new; hidden when it names none. The button is primary — it lives in the overlay layer where the pointer cursor works; ⌘-click (not click: a plain click is a caret move on editable text) goes solid-underline while ⌘ is held |
-| Lock Notes            | ⌘L (also a locked row's menu while the vault is unlocked) | relocks the vault now (docs/locking.md §3: the view flushes dirty locked buffers first, then Bun drops the keys; open locked tabs swap to placeholder faces and every decrypted copy — text, undo history, image cache — is evicted). No-op while nothing is unlocked |
+| Lock Notes            | ⌘L (also a locked row's menu while the vault is unlocked) | relocks the vault now (locking.md §3: the view flushes dirty locked buffers first, then Bun drops the keys; open locked tabs swap to placeholder faces and every decrypted copy — text, undo history, image cache — is evicted). No-op while nothing is unlocked |
 | Unlock Notes…         | — (palette; the locked placeholder's button; a locked row's menu while the vault is shut; interposed on opening a locked note) | the passphrase dialog (unlock face, or first-time setup with the no-recovery sentence when no vault exists). Wrong passphrase shakes and stays; the field clears either way |
-| Lock This Note… / Remove Lock… | — (palette / note row menu) | two faces, exactly one visible per the note's live locked flag (the template-marker move). Target-scoped like Delete: the sidebar row's menu acts on the row's note, the palette on the focused tab. Lock sweeps the note's images (sealed in place; shared ones surfaced as a notice) and runs vault setup/unlock first when needed, completing the lock as the follow-up. Remove Lock sits behind one confirm — not §4-destructive (nothing is destroyed), but the consequence is silent exposure: sync and agent scans see the body again. Both live in docs/locking.md §7 |
+| Lock This Note… / Remove Lock… | — (palette / note row menu) | two faces, exactly one visible per the note's live locked flag (the template-marker move). Target-scoped like Delete: the sidebar row's menu acts on the row's note, the palette on the focused tab. Lock sweeps the note's images (sealed in place; shared ones surfaced as a notice) and runs vault setup/unlock first when needed, completing the lock as the follow-up. Remove Lock sits behind one confirm — not §4-destructive (nothing is destroyed), but the consequence is silent exposure: sync and agent scans see the body again. Both live in locking.md §7 |
 | Change Vault Passphrase… | — (palette, unlocked only) | rewraps every locked note's header and sealed image's key wrap under the new passphrase (bodies untouched); reports the count |
 | Delete Note           | ⌘⌫                        | page focus only; in the editor CodeMirror's delete-to-line-start wins |
 | Save                  | ⌘S                        | notes autosave; this skips the debounce |
@@ -177,7 +177,7 @@ Row verbs, by row kind. Each fires only while a row of that kind has focus
 
 | Row       | Enter             | `d` / `⌫`                  | other |
 | --------- | ----------------- | -------------------------- | ----- |
-| Note      | Open              | Delete (to trash, undoable) | `c` Copy Path; menu: the lock faces + the state-matching vault verb (docs/locking.md §7) |
+| Note      | Open              | Delete (to trash, undoable) | `c` Copy Path; menu: the lock faces + the state-matching vault verb (locking.md §7) |
 | Trash     | —                 | Delete Permanently… (confirmed) | `r` Restore |
 | Workspace | Switch to it      | Close Workspace            | `r` Rename, `i` Change Icon |
 | Backlink  | Open at the link  | —                          | menu: Copy Path (the note-row command on the linking note) |
@@ -254,7 +254,7 @@ topmost layer only:
    picker and the host picker: anchored, dismissed by a pick or a press
    outside)
 2. Dialogs: confirm, the profile editor, and the vault passphrase dialog
-   (docs/locking.md §7)
+   (locking.md §7)
 3. Palette / quick-open overlay
 4. Editor find panel, and the `[[` completion popup (both CodeMirror-internal,
    editor focus only; the popup's Escape is consumed by its keymap before the

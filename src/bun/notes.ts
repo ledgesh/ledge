@@ -106,7 +106,7 @@ async function metaFor(path: string, text: string): Promise<NoteMeta> {
 // The same, for a note whose text we do not already have in hand: read just
 // enough of the file to label and flag it. The locked flag rides the same
 // head read the title does (the plaintext head is DESIGNED to fit it,
-// docs/locking.md §2), so the sidebar glyph and the scans' skip both come
+// locking.md §2), so the sidebar glyph and the scans' skip both come
 // from the listing they already had.
 async function metaAt(path: string): Promise<NoteMeta> {
   const head = await headAt(path);
@@ -200,7 +200,7 @@ export async function listNotes(root: string): Promise<NoteMeta[]> {
 // reading blobs to *name* a note, and searching inside them is exactly the
 // job that has to. readNote's null (a note deleted mid-scan) costs that note
 // and nothing else.
-// Locked notes are SKIPPED — always, vault state irrelevant (docs/locking.md
+// Locked notes are SKIPPED — always, vault state irrelevant (locking.md
 // §4): the scans feed overlays and agents alike, and an answer that changed
 // with vault state would leak by inconsistency. The count rides back so every
 // surface can say "N locked notes not searched" where the answer would have
@@ -267,7 +267,7 @@ export async function backlinksTo(path: string): Promise<{ backlinks: BacklinkHi
 // deleted mid-scan costs that note only.
 // A locked note's BODY hashtags are unscannable (searchNotes' skip), but its
 // frontmatter `tags:` line lives in the plaintext head where the user chose
-// to put it (docs/locking.md §6) — so locked notes contribute exactly their
+// to put it (locking.md §6) — so locked notes contribute exactly their
 // head's tags, and still count toward lockedSkipped: the body went unread.
 async function tagSourceOf(meta: NoteMeta): Promise<string | null> {
   if (!meta.locked) return (await readNote(meta.path))?.text ?? null;
@@ -312,7 +312,7 @@ export async function notesTagged(root: string, tag: string): Promise<{ hits: Ta
 }
 
 // What readNote hands back. For an ordinary note, text and disk version. A
-// LOCKED note (docs/locking.md) carries the flag; `held: true` means the body
+// LOCKED note (locking.md) carries the flag; `held: true` means the body
 // was withheld — the vault is locked — and `text` is only the plaintext head,
 // which the caller may label with but must not present as the note. `damaged`
 // rides on held when the body exists but fails authentication (tampered
@@ -398,7 +398,7 @@ export async function writeNote(path: string, text: string, baseMtimeMs: number 
   const dir = dirname(path);
   await mkdir(dir, { recursive: true });
 
-  // What the DISK says governs lock state, not the buffer (docs/locking.md
+  // What the DISK says governs lock state, not the buffer (locking.md
   // §2): the head read is what decides. A buffer cannot MINT a lock — a
   // stray locked: line (pasted from a locked file's text) is stripped, since
   // honoring it would write a "locked" note whose key nobody holds — and it
@@ -471,7 +471,7 @@ export async function isNoteLocked(path: string): Promise<boolean> {
 }
 
 // The probe an unlock falls back to when no vault file exists (synced-in
-// locked notes, docs/locking.md §3): any locked note's self-contained
+// locked notes, locking.md §3): any locked note's self-contained
 // header. First hit wins; scanning label-reads only.
 export async function firstLockedHeader(rootsToScan: string[]): Promise<string | undefined> {
   for (const root of rootsToScan) {
@@ -510,7 +510,7 @@ function assetRefsOf(text: string, root: string): string[] {
 
 // Lock a note: mint its header (random data key wrapped by the master key,
 // salt copied in), stamp the line, seal the body — and SWEEP its images
-// (docs/locking.md §5): every in-root image the note references is sealed in
+// (locking.md §5): every in-root image the note references is sealed in
 // place under its own name, master-key wrapped, so the screenshot is as
 // sealed as the prose around it. An image an UNLOCKED note also shows is
 // sealed anyway and SURFACED, never silently decided and never refused: a

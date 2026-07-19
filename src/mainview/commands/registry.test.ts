@@ -136,7 +136,7 @@ describe("registry", () => {
   test("no two commands claim the same row verb on the same row kind", () => {
     // `r` may mean Rename on a workspace and Restore on a trashed note; it may
     // not mean two things on one row. This is the check that keeps the bare
-    // keys unambiguous as commands are added (docs/interactions.md §2).
+    // keys unambiguous as commands are added (interactions.md §2).
     const seen = new Map<string, string>();
     for (const c of commands) {
       for (const key of c.listKeys ?? []) {

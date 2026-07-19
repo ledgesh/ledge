@@ -35,7 +35,7 @@ export function BacklinksPanel() {
   // null is "no answer yet" — the panel goes quiet rather than flashing the
   // empty state while the first fetch is in flight.
   const [hits, setHits] = useState<BacklinkHit[] | null>(null);
-  // Locked notes' bodies are never scanned (docs/locking.md §4); the footer
+  // Locked notes' bodies are never scanned (locking.md §4); the footer
   // says so where the missing rows would have been.
   const [lockedSkipped, setLockedSkipped] = useState(0);
   const [menu, setMenu] = useState<{ hit: BacklinkHit; x: number; y: number } | null>(null);

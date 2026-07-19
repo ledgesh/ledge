@@ -7,7 +7,7 @@
 
 // "list" is a focused row in a navigable list (the note list, the trash, the
 // workspace strip) — the one domain where BARE keys dispatch (`d` deletes,
-// Enter opens; docs/interactions.md §2). It sits inside the page chrome, so a
+// Enter opens; interactions.md §2). It sits inside the page chrome, so a
 // page-domain command fires there too (see domainMatches): focusing a note row
 // must not cost you ⌘N.
 export type FocusDomain = "page" | "editor" | "terminal" | "list";
@@ -113,7 +113,7 @@ export function matchesKey(binding: string, chord: Chord): boolean {
 
 // The first command whose binding matches the chord and whose domains include
 // the focus domain. Null while a modal layer is open: menus, dialogs, and the
-// palette own the keyboard outright (docs/interactions.md §6).
+// palette own the keyboard outright (interactions.md §6).
 export function resolveChord<T extends KeyedCommand>(
   commands: readonly T[],
   chord: Chord,

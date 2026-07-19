@@ -170,7 +170,7 @@ const clipboardKeymap = Prec.highest(
           const folder = folderOf(view.state.facet(sessionIdFacet));
           if (!folder) return;
           // The note's own path rides along: Bun seals the paste at birth
-          // when the pasting note is LOCKED (docs/locking.md §5) — decided
+          // when the pasting note is LOCKED (locking.md §5) — decided
           // from the disk, the path is only the address.
           const src = await pasteImageAsset(folder, pathOf(view.state.facet(sessionIdFacet)));
           if (!src) return;

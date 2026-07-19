@@ -13,7 +13,7 @@
 
 // What a read resolves to: bytes, `sealed` (the file is a sealed image and
 // the vault is locked — the widget shows the locked placeholder,
-// docs/locking.md §5), or null (missing/broken).
+// locking.md §5), or null (missing/broken).
 export type AssetReadResult = { dataB64: string; mime: string } | { sealed: true } | null;
 
 let readHandler: ((folder: string, src: string) => Promise<AssetReadResult>) | null = null;

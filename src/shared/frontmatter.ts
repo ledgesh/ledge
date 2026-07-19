@@ -54,7 +54,7 @@ export interface NoteParams {
   // when the note retitles. Like tags, it never feeds a spawn; it lives here
   // because the block has one parser.
   template: boolean | "daily";
-  // The note-locking crypto header (docs/locking.md §2): non-null means the
+  // The note-locking crypto header (locking.md §2): non-null means the
   // note's body on disk is ciphertext. The VALUE's structure is Bun's
   // (bun/vault.ts parseLockedHeader); here it is one opaque string, parsed
   // like every key because the block has one grammar. Unlike template: this

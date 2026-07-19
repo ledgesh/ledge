@@ -169,7 +169,7 @@ class ImageWidget extends WidgetType {
       view.requestMeasure();
     };
 
-    // A sealed image (docs/locking.md §5): the file is there, the vault is
+    // A sealed image (locking.md §5): the file is there, the vault is
     // locked. Not "broken" — the honest face is a lock, and unlocking is the
     // fix. The cache eviction on unlock plus the widget's next rebuild (any
     // doc/selection change) swaps in the bytes; locked NOTES re-pour wholesale

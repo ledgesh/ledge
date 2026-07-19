@@ -1,5 +1,5 @@
 // The e2e harness entrypoint: the whole app, with the Bun process replaced by
-// an in-memory fake at the same seams main.tsx wires (docs/testing.md §5).
+// an in-memory fake at the same seams main.tsx wires (testing.md §5).
 //
 // main.tsx binds configureNotes/configureTerminal/configureBridge/
 // configureClipboard to the live Electrobun RPC; this binds them to a Map. The
@@ -251,7 +251,7 @@ class FakeStore {
       : `---\n${line}\n---\n${stripped}`;
   }
 
-  // The Bun-owned-line rule (docs/locking.md §2), fake edition: the marker is
+  // The Bun-owned-line rule (locking.md §2), fake edition: the marker is
   // decided by the DISK text, not the buffer — a save re-stamps or strips.
   private stampLike(diskText: string, incoming: string): string {
     return this.lockedOf(diskText) ? this.stampMarker(incoming) : this.stripMarker(incoming);
@@ -383,7 +383,7 @@ class FakeStore {
   // The real searchNotes is listNotes + the shared matcher; the fake composes
   // the same two pieces (scoped to one root), so the semantics cannot drift —
   // including the locked skip: bodies of locked notes are never scanned,
-  // vault state irrelevant, and the count rides back (docs/locking.md §4).
+  // vault state irrelevant, and the count rides back (locking.md §4).
   async search(root: string, query: string): Promise<{ hits: SearchHit[]; lockedSkipped: number }> {
     const metas = this.list(root);
     const open = metas.filter((m) => !m.locked);

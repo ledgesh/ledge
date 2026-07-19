@@ -1,5 +1,5 @@
 // The vault: key lifecycle and envelope crypto for locked notes
-// (docs/locking.md). One app-wide passphrase; scrypt derives the master key;
+// (locking.md). One app-wide passphrase; scrypt derives the master key;
 // each locked note carries a random data key wrapped by it. Everything is
 // node:crypto (AES-256-GCM throughout) — the dependency policy's zero-new-
 // packages answer — and the master key lives only in this process's memory,
@@ -245,7 +245,7 @@ function requireKey(): Buffer {
 }
 
 // --- the note envelope ------------------------------------------------------
-// On disk (docs/locking.md §2):
+// On disk (locking.md §2):
 //   locked: v1.<b64 salt>.<b64 wrap-nonce>.<b64 wrapped-key+tag>
 // in the frontmatter, and the body as base64 of (body-nonce ‖ ct ‖ tag),
 // 76-col wrapped. The salt is COPIED into every header so a locked note is
@@ -388,7 +388,7 @@ export function splitHead(text: string): { head: string; body: string } {
 }
 
 // --- the asset envelope ------------------------------------------------------
-// Sealed images (docs/locking.md §5): magic ‖ salt ‖ wrap-nonce ‖ wrapped
+// Sealed images (locking.md §5): magic ‖ salt ‖ wrap-nonce ‖ wrapped
 // data key ‖ body nonce ‖ GCM(bytes). Wrapped by the MASTER key, not a
 // note's — assets live in a per-root shared pool and may be referenced from
 // several notes. Sealed IN PLACE under the asset's own name, detected by the
@@ -455,7 +455,7 @@ export function rewrapAssetBytes(sealed: Uint8Array, oldKey: Buffer, newKey: Buf
 }
 
 // --- locked: line surgery ---------------------------------------------------
-// The header line is Bun-OWNED text (docs/locking.md §2): a save can neither
+// The header line is Bun-OWNED text (locking.md §2): a save can neither
 // mint nor drop it, so writeNote re-stamps the disk's value into whatever the
 // buffer says, and only the Remove Lock command strips it. Byte-preserving
 // around the one line it owns: every other frontmatter line is the user's.
