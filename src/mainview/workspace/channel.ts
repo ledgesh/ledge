@@ -25,6 +25,11 @@ interface WorkspaceHandlers {
   // Opens the NATIVE folder picker Bun-side; root null + error null = cancelled.
   attach: () => Promise<AttachResult>;
   detach: (root: string) => Promise<boolean>;
+  // The native picker again, choosing the destination PARENT; Bun renames the
+  // root's folder into it. Same result shape as attach: the new root handle,
+  // a refusal, or the cancelled nulls. `home` skips the picker and targets
+  // the app home (the Move Workspace Folder Home face).
+  move: (root: string, home: boolean) => Promise<AttachResult>;
 }
 
 let handlers: WorkspaceHandlers | null = null;
@@ -110,6 +115,29 @@ export function attachWorkspaceFolder(): Promise<AttachResult> {
 // Deregisters only — the folder and every note in it stay on disk.
 export function detachWorkspaceFolder(root: string): Promise<boolean> {
   return bridge().detach(root);
+}
+
+// Bun runs the destination picker and the rename; the view learns only the
+// new root handle. The kind map is re-recorded under the new handle because a
+// move can flip it (into the app home = managed, out = external) — and the
+// default-cwd consumer must see the flip: a folder moved out of ~/.ledge now
+// anchors its notes' shells. `home` is the pickerless return trip.
+export function moveWorkspaceFolder(root: string, home = false): Promise<AttachResult> {
+  return bridge().move(root, home).then((res) => {
+    if (res.root !== null && res.kind !== null) {
+      kinds.delete(root);
+      kinds.set(res.root, res.kind);
+    }
+    return res;
+  });
+}
+
+// The recorded kind of a root, for the surfaces that show or gate per kind
+// (the Move Home face exists only for external workspaces). Same mirrored
+// Bun-side truth as workspaceDefaultCwd — display and gating, never a guard:
+// Bun re-derives kind on every move.
+export function workspaceKind(folder: string): "managed" | "external" | null {
+  return kinds.get(folder) ?? null;
 }
 
 export type { WorkspaceRootInfo };

@@ -121,10 +121,15 @@ Bun therefore validates everything and derives anything derivable:
   view names no path, the same move as `noteCreate`), or a directory the user
   picked in the NATIVE folder dialog (`workspaceAttach`, which takes no
   arguments: the path comes from the OS dialog Bun-side, never from the
-  view). The registry file `.workspaces.json` is machine-written AND
-  Bun-shaped; the view cannot read or write its bytes. No root may equal or
-  contain another (rootContaining must have a unique answer), or reach the
-  app home itself.
+  view). A registered root RELOCATES under the same rule: `workspaceMove`
+  carries only the root — the destination parent is the native dialog's
+  pick, Bun-side, or Bun's own APP_HOME for the `home: true` return trip —
+  and Bun renames the folder and rewrites the registry line in place
+  (`moveRoot`, which re-runs every registration guard against the
+  destination). The registry file `.workspaces.json` is machine-written
+  AND Bun-shaped; the view cannot read or write its bytes. No root may
+  equal or contain another (rootContaining must have a unique answer), or
+  reach the app home itself.
 - **Every path arriving over RPC is checked before use.** Scoped calls
   (`noteList`, `noteCreate`, `noteSearch`, `trashList`, `trashEmpty`, the
   asset pair) carry a root checked for exact registry membership
@@ -181,7 +186,11 @@ Bun therefore validates everything and derives anything derivable:
   note's OWN root's `.ledge-trash` — per workspace root, not one shared bin,
   so the move never crosses a filesystem (no EXDEV on an external volume)
   and a restore lands back in the workspace it left. Retitle is a rename. Restore
-  is a rename. Detaching a workspace touches no file at all: the registry
+  is a rename. Moving a workspace (`moveRoot`) is ONE rename of the whole
+  folder — cross-volume is refused (EXDEV surfaces the move-in-Finder-then-
+  attach recipe) rather than becoming copy-then-unlink of every note, and
+  the destination name comes from `uniqueName` like every other rename
+  target. Detaching a workspace touches no file at all: the registry
   line goes, the folder stays, re-attachable. Exactly three code paths
   unlink a *note* — `deleteTrashed`, `emptyTrash`, `purgeTrash` — all in
   `bun/notes.ts`, all gated by `assertTrashed`, and the first two sit behind

@@ -18,6 +18,7 @@ import {
   ExternalLink,
   FilePlus,
   FileText,
+  FolderInput,
   FolderOpen,
   Hash,
   Italic,
@@ -408,6 +409,30 @@ export function buildCommands(deps: RegistryDeps): Command[] {
       icon: Shapes,
       targetKind: "workspace",
       run: (ctx) => ctx.ui.pickWorkspaceIcon?.(targetWorkspaceId(ctx)),
+    }),
+    // Relocate the workspace's folder on disk (Bun renames; same volume only).
+    // The cloud-backup move: a managed folder under the hidden ~/.ledge, moved
+    // into iCloud Drive or Dropbox, keeps every note and becomes an external
+    // workspace. Open tabs close — arrangement loss, no confirm
+    // (interactions.md §4). A managed folder goes straight to the native
+    // destination picker; an external one stops at the in-app chooser first
+    // (Sidebar's MoveWorkspaceDialog), because its natural destination — back
+    // under ~/.ledge — is the one place the native dialog cannot reasonably
+    // navigate to (a hidden folder).
+    cmd("workspace.move", {
+      icon: FolderInput,
+      targetKind: "workspace",
+      run: (ctx) => {
+        const id = targetWorkspaceId(ctx);
+        const ws = ctx.state.workspaces.find((w) => w.id === id);
+        if (ws && deps.workspaceKind(ws.folder) === "external") {
+          ctx.ui.pickMoveDestination?.(id);
+          return;
+        }
+        void deps.moveWorkspace(id, ctx.state, ctx.dispatch).then((err) => {
+          if (err) ctx.ui.showError?.(err);
+        });
+      },
     }),
     cmd("workspace.close", {
       icon: Trash2,

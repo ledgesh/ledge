@@ -82,6 +82,27 @@ class FakeStore {
     return true; // the data stays: detach never deletes
   }
 
+  // The fake workspaceMove: rename(2) in Map form. The root key and every
+  // path under it are rekeyed to the destination — data travels whole, and
+  // the registry line is replaced in place, mirroring moveRoot's contract —
+  // including the own-parent no-op (the real one answers the same root back,
+  // and the view's leave-tabs-alone branch keys off exactly that).
+  move(root: string, destParent: string): string {
+    const data = this.roots.get(root);
+    if (!data) throw new Error(`harness: move of unknown root ${root}`);
+    if (root.slice(0, root.lastIndexOf("/")) === destParent) return root;
+    const base = root.split("/").pop()!;
+    let next = `${destParent}/${base}`;
+    for (let n = 2; this.roots.has(next); n += 1) next = `${destParent}/${base}-${n}`;
+    const rekey = (p: string) => next + p.slice(root.length);
+    const notes = new Map([...data.notes].map(([p, v]) => [rekey(p), v] as const));
+    const trash = new Map([...data.trash].map(([p, v]) => [rekey(p), v] as const));
+    this.roots.delete(root);
+    this.roots.set(next, { notes, trash });
+    this.attached = this.attached.map((r) => (r === root ? next : r));
+    return next;
+  }
+
   workspaceList(): WorkspaceRootInfo[] {
     return this.attached.map((root) => ({
       root,
@@ -540,6 +561,15 @@ configureWorkspaces({
     return { root: EXTERNAL, kind: "external", error: null };
   },
   detach: async (root) => store.detach(root),
+  // The "native destination picker" always picks /synced — the cloud-folder
+  // stand-in — so the move flow (folder relocated, notes intact, kind flipped
+  // external) runs in specs without a dialog, attach's move. The home face
+  // targets /harness, the fake app home, and flips the kind back.
+  move: async (root, home) => ({
+    root: store.move(root, home ? "/harness" : "/synced"),
+    kind: home ? "managed" : "external",
+    error: null,
+  }),
 });
 
 // No PTYs here: runs and the terminal are inert. A spec that needs run

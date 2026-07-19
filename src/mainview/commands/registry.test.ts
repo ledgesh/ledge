@@ -30,6 +30,11 @@ function stubDeps(
       return null;
     },
     closeWorkspace: (id) => calls.push(`closeWorkspace:${id}`),
+    moveWorkspace: async (id, _state, _dispatch, home) => {
+      calls.push(`moveWorkspace:${id}${home ? ":home" : ""}`);
+      return null;
+    },
+    workspaceKind: () => "external",
     restartSession: record("restartSession"),
     openDailyNote: async (folder) => {
       calls.push(`openDailyNote:${folder}`);
@@ -415,6 +420,28 @@ describe("registry", () => {
     find(cmds, "workspace.attach").run(makeCtx(state));
     find(cmds, "workspace.close").run(makeCtx(state));
     expect(calls).toEqual(["createWorkspace", "attachWorkspace", `closeWorkspace:${state.selectedId}`]);
+  });
+
+  test("workspace.move forks on kind: managed goes straight to the move action, external stops at the chooser", async () => {
+    // A managed folder's only destination question is "where?", which the
+    // native picker answers; an external folder gets the in-app chooser first
+    // (its natural destination, back under hidden ~/.ledge, is one the native
+    // dialog cannot offer), and the dialog owns whatever happens next.
+    const managedCalls: string[] = [];
+    const state = initialState(FOLDER, []);
+    const managed = buildCommands({ ...stubDeps(managedCalls), workspaceKind: () => "managed" });
+    find(managed, "workspace.move").run(makeCtx(state));
+    await Promise.resolve();
+    expect(managedCalls).toEqual([`moveWorkspace:${state.selectedId}`]);
+
+    const externalCalls: string[] = [];
+    const external = buildCommands(stubDeps(externalCalls)); // stub kind: external
+    const picked: string[] = [];
+    const ctx = makeCtx(state);
+    ctx.ui = { pickMoveDestination: (id: string) => picked.push(id) };
+    find(external, "workspace.move").run(ctx);
+    expect(picked).toEqual([state.selectedId]);
+    expect(externalCalls).toEqual([]);
   });
 
   test("profile.open follows the current note's frontmatter, and only that", () => {

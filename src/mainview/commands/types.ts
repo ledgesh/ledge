@@ -72,6 +72,10 @@ export interface UiHooks {
   beginRenameWorkspace(id: string): void;
   // Open the icon picker on a workspace, anchored to its row in the strip.
   pickWorkspaceIcon(id: string): void;
+  // Open the move-destination chooser (Sidebar's dialog) on an EXTERNAL
+  // workspace: back to ~/.ledge, or the native picker. workspace.move sends
+  // managed workspaces straight to the picker without this stop.
+  pickMoveDestination(id: string): void;
   // Trash the note and offer the Undo strip — the same path as the note list's
   // Delete, so ⌘⌫ and the menu item are one behavior.
   deleteNoteWithUndo(note: NoteMeta): void;
@@ -129,6 +133,13 @@ export interface RegistryDeps {
   createWorkspace(state: AppState, dispatch: (a: Action) => void): Promise<string | null>;
   attachWorkspace(dispatch: (a: Action) => void): Promise<string | null>;
   closeWorkspace(id: string, state: AppState, dispatch: (a: Action) => void): void;
+  // Relocate a workspace's folder on disk (native destination picker + rename,
+  // both Bun-side; `home` skips the picker and targets the app home — the
+  // return trip). Resolves to an error message to surface, or null.
+  moveWorkspace(id: string, state: AppState, dispatch: (a: Action) => void, home?: boolean): Promise<string | null>;
+  // The recorded kind of a workspace folder (view-side mirror of Bun's
+  // derived truth) — what gates the Move Home face to external workspaces.
+  workspaceKind(folder: string): "managed" | "external" | null;
   // Kill a note's shells so the next run respawns them with its current
   // frontmatter params.
   restartSession(docId: string): void;

@@ -49,6 +49,7 @@ import {
   kindOf,
   listWorkspaceRoots,
   loadWorkspaces,
+  moveRoot,
   rootContaining,
   roots,
 } from "./workspaces";
@@ -373,6 +374,26 @@ const rpc = BrowserView.defineRPC<LedgeRPC>({
         const ok = await detachRoot(root);
         refreshWatchers();
         return { ok };
+      },
+      workspaceMove: async ({ root, home }) => {
+        const from = assertRegisteredRoot(root);
+        // home: the destination is APP_HOME, no dialog (the schema comment
+        // says why). Otherwise the same dialog (and same comma-shred caveat)
+        // as workspaceAttach above; the pick is the destination PARENT the
+        // folder moves into.
+        const picked = home
+          ? APP_HOME
+          : (await Utils.openFileDialog({
+              startingFolder: homedir(),
+              canChooseFiles: false,
+              canChooseDirectory: true,
+              allowsMultipleSelection: false,
+            })).join(",");
+        if (!picked) return { root: null, kind: null, error: null }; // cancelled
+        const res = await moveRoot(from, picked);
+        if ("error" in res) return { root: null, kind: null, error: res.error };
+        refreshWatchers();
+        return { root: res.root, kind: kindOf(res.root), error: null };
       },
 
       // --- note store ------------------------------------------------------

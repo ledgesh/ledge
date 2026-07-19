@@ -8,10 +8,12 @@ import {
   createWorkspaceFolder,
   dailyWorkspaceRoot,
   listWorkspaceRoots,
+  moveWorkspaceFolder,
   recordDailyRoot,
   recordWorkspaceKinds,
   resetWorkspaceKinds,
   workspaceDefaultCwd,
+  workspaceKind,
   type AttachResult,
 } from "./channel";
 
@@ -22,7 +24,7 @@ const attachResult = (res: Partial<AttachResult>): AttachResult => ({
   ...res,
 });
 
-function fakeBridge(attach: AttachResult = attachResult({})) {
+function fakeBridge(attach: AttachResult = attachResult({}), move: AttachResult = attachResult({})) {
   configureWorkspaces({
     list: async () => ({
       workspaces: [
@@ -34,6 +36,8 @@ function fakeBridge(attach: AttachResult = attachResult({})) {
     create: async () => "/ws/created",
     attach: async () => attach,
     detach: async () => true,
+    move: async (_root, home) =>
+      home ? attachResult({ root: "/ws/homed", kind: "managed" }) : move,
   });
 }
 
@@ -71,6 +75,33 @@ describe("workspaceDefaultCwd", () => {
   test("boot's direct fetch records through recordWorkspaceKinds", () => {
     recordWorkspaceKinds([{ root: "/ext/boot", kind: "external", available: true }]);
     expect(workspaceDefaultCwd("/ext/boot")).toBe("/ext/boot");
+  });
+
+  test("a move re-records the kind under the new handle — the flip is what the default-cwd consumer must see", async () => {
+    // A managed folder moved out of the app home becomes external: its notes'
+    // shells now anchor to it, where before they had no default.
+    fakeBridge(attachResult({}), attachResult({ root: "/synced/managed", kind: "external" }));
+    await listWorkspaceRoots(); // records /ws/managed as managed
+    await moveWorkspaceFolder("/ws/managed");
+    expect(workspaceDefaultCwd("/synced/managed")).toBe("/synced/managed");
+    expect(workspaceDefaultCwd("/ws/managed")).toBeNull(); // old handle forgotten
+  });
+
+  test("a cancelled move records nothing and forgets nothing", async () => {
+    fakeBridge(attachResult({}), attachResult({}));
+    await listWorkspaceRoots();
+    await moveWorkspaceFolder("/ext/project");
+    expect(workspaceDefaultCwd("/ext/project")).toBe("/ext/project");
+  });
+
+  test("the home trip flips the kind back to managed, and workspaceKind mirrors it", async () => {
+    fakeBridge();
+    await listWorkspaceRoots();
+    expect(workspaceKind("/ext/project")).toBe("external");
+    await moveWorkspaceFolder("/ext/project", true);
+    expect(workspaceKind("/ws/homed")).toBe("managed");
+    expect(workspaceKind("/ext/project")).toBeNull(); // old handle forgotten
+    expect(workspaceDefaultCwd("/ws/homed")).toBeNull(); // managed: no default cwd
   });
 });
 

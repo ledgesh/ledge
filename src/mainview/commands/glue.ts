@@ -27,8 +27,8 @@ import {
 import { copyText } from "@/lib/clipboard";
 import { installCli } from "@/lib/cli";
 import { restartSession } from "@/terminal/channel";
-import { attachWorkspace, closeWorkspace, createWorkspace } from "@/workspace/actions";
-import { dailyWorkspaceRoot } from "@/workspace/channel";
+import { attachWorkspace, closeWorkspace, createWorkspace, moveWorkspace } from "@/workspace/actions";
+import { dailyWorkspaceRoot, workspaceKind } from "@/workspace/channel";
 import type { RegistryDeps, UiHooks } from "./types";
 
 // Enough of a note to parse its frontmatter — mirrors HEAD_BYTES in
@@ -58,6 +58,8 @@ export const registryDeps: RegistryDeps = {
   createWorkspace,
   attachWorkspace,
   closeWorkspace,
+  moveWorkspace,
+  workspaceKind,
   restartSession,
   // Create-or-open today's note, then feed Bun's ExternalOpenInfo to the
   // CLI-open subscriber (App.tsx): select-workspace-then-open has ONE

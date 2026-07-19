@@ -203,6 +203,37 @@ describe("workspaces", () => {
     expect(s).toBe(s0);
   });
 
+  test("workspaceFolderMoved swaps the folder, keeps identity, and closes every tab", () => {
+    const meta: NoteMeta = { path: `${FOLDER}/a.md`, title: "a", mtimeMs: 1 };
+    const s1 = run({ type: "openNote", note: meta });
+    const before = selected(s1);
+    const openDocs = allDocIds(s1);
+    expect(openDocs.length).toBeGreaterThan(0);
+    const s2 = reducer(s1, { type: "workspaceFolderMoved", id: before.id, folder: "/synced/notes" });
+    const after = selected(s2);
+    // Same workspace — id, name, icon — over the new folder…
+    expect(after.id).toBe(before.id);
+    expect(after.name).toBe(before.name);
+    expect(after.folder).toBe("/synced/notes");
+    // …with a fresh pane tree: the old docIds are gone, which is what App's
+    // reconciliation effect turns into editor teardown + closeSession.
+    for (const id of openDocs) expect(allDocIds(s2)).not.toContain(id);
+    // Old folder's lists dropped, new folder's seeded total.
+    expect(s2.notes[FOLDER]).toBeUndefined();
+    expect(s2.trash[FOLDER]).toBeUndefined();
+    expect(notesOf(s2, "/synced/notes")).toEqual([]);
+    expect(trashOf(s2, "/synced/notes")).toEqual([]);
+  });
+
+  test("workspaceFolderMoved is a no-op for an unknown id, the same folder, or a taken folder", () => {
+    const s0 = run(addWs(2));
+    expect(reducer(s0, { type: "workspaceFolderMoved", id: "ws-nope", folder: "/synced/x" })).toBe(s0);
+    const id = s0.workspaces[0].id;
+    expect(reducer(s0, { type: "workspaceFolderMoved", id, folder: FOLDER })).toBe(s0);
+    // One workspace per folder holds against a stale dispatch too.
+    expect(reducer(s0, { type: "workspaceFolderMoved", id, folder: "/ws/extra-2" })).toBe(s0);
+  });
+
   test("renameWorkspace trims, and ignores an all-whitespace name", () => {
     const s0 = initialState(FOLDER);
     const id = s0.selectedId;

@@ -98,6 +98,12 @@ export const COMMANDS = {
   "workspace.open": { title: "Switch to Workspace", listKeys: ["Enter"] },
   "workspace.rename": { title: "Rename Workspace…", listKeys: ["r"] },
   "workspace.icon": { title: "Change Icon…", listKeys: ["i"] },
+  // No chord and no bare key — moving a folder is a rare, deliberate act; the
+  // row's context menu is the canonical home, the palette carries it too.
+  // Managed: straight to the native destination picker, Bun-side like attach.
+  // External: an in-app chooser first (back to ~/.ledge, or that picker),
+  // because the native dialog cannot reasonably navigate into hidden ~/.ledge.
+  "workspace.move": { title: "Move Workspace Folder…" },
   "workspace.close": { title: "Close Workspace", listKeys: ["Backspace"] },
 
   // Chrome. ⌘, is the macOS settings convention; it opens settings.jsonc in

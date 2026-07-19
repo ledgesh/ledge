@@ -148,8 +148,11 @@ async function save(): Promise<void> {
 // Would registering `p` break the no-nesting rule against the kept set? One
 // root inside another would make rootContaining ambiguous, and ambiguity in a
 // path guard is a hole. Returns the offending root, or null when clear.
-function nestingConflict(p: string): string | null {
+// `excluding` is for moveRoot: the root being relocated must not veto its own
+// destination.
+function nestingConflict(p: string, excluding?: string): string | null {
   for (const root of entries.keys()) {
+    if (root === excluding) continue;
     if (isInside(root, p) || isInside(p, root)) return root;
   }
   return null;
@@ -268,4 +271,55 @@ export async function detachRoot(root: string): Promise<boolean> {
   const removed = entries.delete(resolve(root));
   if (removed) await save();
   return removed;
+}
+
+// Relocate a registered root's folder into `destParent` and update its
+// registry line to match — the "put my workspace where iCloud can see it"
+// move, which a managed root under the hidden ~/.ledge otherwise has no path
+// to. `destParent` comes from the native folder dialog (index.ts), the same
+// provenance rule as attachExternal: the view names no path.
+//
+// rename(2) only, deliberately: a cross-volume move would be copy-then-unlink
+// of every note at once — the exact operation the rename-not-unlink stance
+// exists to avoid — so EXDEV is refused with the Finder-then-attach recipe
+// instead of quietly becoming a copier. The folder keeps its name (allocated
+// clobber-safe via uniqueName, the standing rename rule), everything inside —
+// notes, .ledge-trash, .ledge-assets — travels with it, and `kind` needs no
+// bookkeeping: it is derived from location, so moving into the app home makes
+// a root managed and moving out makes it external, by construction.
+export async function moveRoot(root: string, destParent: string): Promise<{ root: string } | { error: string }> {
+  const r = resolve(root);
+  const entry = entries.get(r);
+  if (!entry) return { error: `not a registered workspace root: ${root}` };
+  // An unavailable root is an unmounted volume; there is no folder here to move.
+  if (!entry.available) return { error: `workspace folder is not available: ${root}` };
+  if (!isAbsolute(destParent)) return { error: `not an absolute path: ${destParent}` };
+  const parent = resolve(destParent);
+  const isDir = await stat(parent).then((s) => s.isDirectory()).catch(() => false);
+  if (!isDir) return { error: `not a directory: ${destParent}` };
+  // Its own parent: already there. A no-op, not a rename to a "-2" twin —
+  // uniqueName below would count the folder itself as taken.
+  if (parent === dirname(r)) return { root: r };
+  if (isInside(r, parent)) return { error: "cannot move a workspace into itself" };
+  const taken = new Set(await readdir(parent));
+  const next = resolve(join(parent, uniqueName(basename(r), taken, "")));
+  const reason = invalidRootReason(next);
+  if (reason) return { error: `cannot move to ${destParent}: ${reason}` };
+  const conflict = nestingConflict(next, r);
+  if (conflict) return { error: `cannot move to ${destParent}: nested with the workspace folder ${conflict}` };
+  try {
+    await rename(r, next);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "EXDEV")
+      return { error: "the destination is on a different volume; move the folder in Finder, then Attach Folder as Workspace" };
+    return { error: `move failed: ${err instanceof Error ? err.message : String(err)}` };
+  }
+  // Replace the line in place: listWorkspaceRoots promises registration order,
+  // and a move is a relocation, not a departure and a new arrival.
+  const kept = [...entries].map(([k, v]) => [k === r ? next : k, v] as const);
+  entries.clear();
+  for (const [k, v] of kept) entries.set(k, v);
+  await save();
+  return { root: next };
 }

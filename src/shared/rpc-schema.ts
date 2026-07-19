@@ -151,6 +151,19 @@ export type LedgeRPC = {
       // every note in it stay on disk, re-attachable later. Sent when a
       // workspace is closed (unless it is the last one, which the view refuses).
       workspaceDetach: { params: { root: string }; response: { ok: boolean } };
+      // Relocate a registered root's folder on disk (Move Workspace Folder…):
+      // the NATIVE folder picker chooses the destination parent Bun-side — the
+      // destination never rides the RPC, workspaceAttach's trust move — and Bun
+      // renames the folder into it (same volume only; everything inside
+      // travels). root null + error null means cancelled; a returned root is
+      // the workspace's new handle, with `kind` recomputed since moving into or
+      // out of the app home flips managed/external. Returning the OLD root
+      // unchanged means the chosen destination was already its parent.
+      // `home: true` (Move Workspace Folder Home) skips the picker and targets
+      // Bun's own APP_HOME — the return path for an external workspace, which
+      // needs no dialog precisely because ~/.ledge is hidden and navigating a
+      // picker there is not a reasonable ask. Still no view-named path.
+      workspaceMove: { params: { root: string; home?: boolean }; response: { root: string | null; kind: "managed" | "external" | null; error: string | null } };
       // The note store (notes.ts). Bun owns every path: the view holds paths only
       // as opaque handles it got from here, and Bun rejects any that fall outside
       // the REGISTERED WORKSPACE ROOTS (workspaces.ts): scoped calls name their

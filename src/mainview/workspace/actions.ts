@@ -3,10 +3,12 @@
 // folder, opening the attach dialog, and detaching a closed workspace's folder
 // all orchestrate here.
 import { listNotes, listTrash } from "../notes/channel";
+import { flushAllNow } from "../notes/store";
 import {
   attachWorkspaceFolder as attachFolder,
   createWorkspaceFolder,
   detachWorkspaceFolder,
+  moveWorkspaceFolder,
 } from "./channel";
 import type { Action, AppState } from "./store";
 
@@ -71,6 +73,38 @@ export function closeWorkspace(
     // stale registry line that the next attach of the same folder reuses.
     console.error("[workspace] detach failed", err);
   });
+}
+
+// Move Workspace Folder… (and its Home face, `home: true`): flush pending
+// saves first — they must land while the folder is still where their paths
+// say (⌘L's flush-then-act ordering) — then Bun runs the destination picker
+// (or targets the app home directly) and the rename, and the reducer swaps
+// the workspace onto the new root. Open tabs close with the swap: their paths
+// named the old location, and arrangement loss needs no confirm
+// (interactions.md §4) — every note travels with the folder.
+export async function moveWorkspace(
+  id: string,
+  state: AppState,
+  dispatch: (action: Action) => void,
+  home = false,
+): Promise<string | null> {
+  const ws = state.workspaces.find((w) => w.id === id);
+  if (!ws) return null;
+  await flushAllNow();
+  let res: Awaited<ReturnType<typeof moveWorkspaceFolder>>;
+  try {
+    res = await moveWorkspaceFolder(ws.folder, home);
+  } catch (err) {
+    console.error("[workspace] move failed", err);
+    return err instanceof Error ? err.message : String(err);
+  }
+  if (res.error !== null) return res.error;
+  // Cancelled, or the pick was the folder's own parent (Bun's no-op answer):
+  // nothing moved, so nothing closes.
+  if (res.root === null || res.root === ws.folder) return null;
+  dispatch({ type: "workspaceFolderMoved", id, folder: res.root });
+  await refreshFolder(res.root, dispatch);
+  return null;
 }
 
 // Re-fetch one folder's notes and trash, each failure costing itself only.

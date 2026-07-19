@@ -104,6 +104,7 @@ configureWorkspaces({
   create: (name) => electrobun.rpc!.request.workspaceCreate({ name }).then((r) => r.root),
   attach: () => electrobun.rpc!.request.workspaceAttach({}),
   detach: (root) => electrobun.rpc!.request.workspaceDetach({ root }).then((r) => r.ok),
+  move: (root, home) => electrobun.rpc!.request.workspaceMove({ root, home }),
 });
 
 configureNotes({
