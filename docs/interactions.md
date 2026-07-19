@@ -89,6 +89,10 @@ Rules:
   still free (E J L O R U Y), it is the only mnemonic one, and ⌘O stays
   held for a literal "Open…" someday. ⇧⌘J stays free for a future
   bigger-scope variant.
+- **⌘L** — spoken for: Lock Notes, the note-locking design's walking-away
+  gesture (`docs/locking.md` §7 — design accepted, unimplemented; the
+  keymap row lands here with the feature). L is the lock mnemonic, and
+  ⌥⌘L backlinks is unrelated.
 - **Bare keys** — the verbs of a focused list row, and *only* those. They live
   in `listKeys`, never `keys`, and the resolver consults them solely in the
   `list` focus domain: anywhere else an unmodified key is typing, and the one
