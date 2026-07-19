@@ -16,6 +16,12 @@ typed RPC in `src/shared/rpc-schema.ts`.
   is a command in `src/mainview/commands/`; hotkey allocation, row verbs,
   destructive-action policy, Escape layering, tooltips. Read before adding
   any user-facing action, key, menu, or button.
+- **[docs/locking.md](docs/locking.md)** — note locking (per-note
+  encryption): the vault and envelope, the readNote/writeNote seam rules,
+  the agents-never-read-locked-bodies invariant (MCP/CLI refusals, prompt
+  fences), sealed images, and the lock commands' interaction grammar. Read
+  before touching anything that reads note or asset bytes, the vault RPCs,
+  or the lock UI.
 - **[docs/testing.md](docs/testing.md)** — what must be tested and how:
   colocated `bun test`, pure-core/DOM-wrapper split (no happy-dom — do not
   add one), invariant tests, the headless-WebKit harness (`test:e2e`) for UI

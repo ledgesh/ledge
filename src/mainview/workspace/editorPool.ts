@@ -17,12 +17,15 @@ import { readNote } from "../notes/channel";
 import {
   bindDoc,
   docIdAt,
+  pathOf,
   releaseDoc,
   reloadCandidates,
   reseedDoc,
   seedSlug,
   type DocHandlers,
 } from "../notes/store";
+import { onVaultChanged, vaultState } from "../vault/channel";
+import { evictAssetCache } from "../lib/assets";
 import { changedSpan } from "../lib/textDiff";
 import { revealHeading, revealSelection } from "./reveal";
 import type { RunEvent } from "../../shared/rpc-schema";
@@ -74,9 +77,72 @@ interface Entry {
   view: EditorView;
   offRun: () => void;
   ro: ResizeObserver;
+  // The note is LOCKED (docs/locking.md): true from the moment a read says
+  // so, whether or not the body was withheld. What the vault relock must
+  // evict is exactly the entries wearing this.
+  lockedNote: boolean;
+  // The held placeholder face, present while the body is withheld (vault
+  // locked). The CM view sits empty and hidden beneath it — never holding
+  // ciphertext, never holding plaintext.
+  heldFace: HTMLDivElement | null;
 }
 
 const pool = new Map<string, Entry>();
+
+// --- the locked placeholder face --------------------------------------------
+// Plain DOM like the rest of the pool (the pool lives outside React); the
+// Unlock button reaches the command layer through a configureX seam — the
+// pool cannot import the registry without a cycle, and the button must run
+// the SAME vault.unlock the palette runs.
+
+let lockedUi: { requestUnlock?: () => void } = {};
+
+export function configureLockedUi(fns: { requestUnlock?: () => void }): void {
+  Object.assign(lockedUi, fns);
+}
+
+function showHeldFace(entry: Entry, damaged: boolean): void {
+  entry.view.dom.style.display = "none";
+  if (entry.heldFace) entry.heldFace.remove();
+  // An absolute OVERLAY inside the host, never a sibling in flow: the host
+  // already fills the pane, and a stacked face would grow the page past the
+  // viewport — turning the app's fixed layout scrollable, which (beyond
+  // looking broken) reroutes wheel events away from every horizontal
+  // scroller (the tab strip lost its sideways wheel to exactly this).
+  entry.host.style.position = "relative";
+  const face = document.createElement("div");
+  face.className =
+    "ledge-locked-face absolute inset-0 flex flex-col items-center justify-center gap-3 bg-background p-8 text-center";
+  face.dataset.testid = "locked-face";
+  const glyph = document.createElement("div");
+  glyph.className = "text-muted-foreground";
+  glyph.innerHTML =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>';
+  const msg = document.createElement("p");
+  msg.className = "max-w-sm text-[13px] leading-snug text-muted-foreground";
+  msg.textContent = damaged
+    ? "This locked note's body is damaged: the file was modified outside Ledge. Restore it from a backup or your sync service's history."
+    : "This note is locked. Its body stays sealed on disk, away from agents and search, until you unlock.";
+  face.append(glyph, msg);
+  if (!damaged) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.dataset.testid = "locked-face-unlock";
+    btn.className =
+      "rounded-md border bg-background px-3 py-1.5 text-sm shadow-sm hover:bg-accent hover:text-accent-foreground";
+    btn.textContent = "Unlock Notes…";
+    btn.addEventListener("click", () => lockedUi.requestUnlock?.());
+    face.append(btn);
+  }
+  entry.host.appendChild(face);
+  entry.heldFace = face;
+}
+
+function clearHeldFace(entry: Entry): void {
+  entry.heldFace?.remove();
+  entry.heldFace = null;
+  entry.view.dom.style.display = "";
+}
 
 // --- reveals ----------------------------------------------------------------
 //
@@ -154,9 +220,22 @@ async function loadNote(docId: string, path: string): Promise<void> {
   // file. A note only gets renamed by a heading you edit, never by one you open.
   // The mtime rides along: it is the disk version every later save states as
   // its expectation (the external-edit guard).
+  // Held notes seed too — from the plaintext head, which carries the same H1
+  // the full text would — so an unlock's re-load is an ordinary reload, not
+  // a first sight that could look like a rename.
   seedSlug(docId, file.text, file.mtimeMs);
   const entry = pool.get(docId);
   if (!entry) return; // the tab closed while the read was in flight
+  entry.lockedNote = !!file.locked;
+  if (file.held) {
+    // The body was withheld (vault locked, or damage): the tab is a
+    // placeholder, not an editor — nothing pours, nothing reveals
+    // (docs/locking.md §4). The pending reveal, if any, stays queued for the
+    // unlock's re-load.
+    showHeldFace(entry, !!file.damaged);
+    return;
+  }
+  clearHeldFace(entry);
   entry.view.dispatch({
     changes: { from: 0, to: entry.view.state.doc.length, insert: file.text },
     annotations: [fromDisk.of(true), Transaction.addToHistory.of(false)],
@@ -182,6 +261,25 @@ export async function reloadOpenNotes(): Promise<void> {
     if (file === null || file.mtimeMs === cand.mtimeMs) continue;
     const entry = pool.get(cand.docId);
     if (!entry) continue; // tab closed while the read was in flight
+    // Lock-state transitions arrive through this same path (Lock This Note /
+    // Remove Lock refresh the folder; an external sync can flip a marker
+    // too). The flag must track the disk so a later relock knows what to
+    // evict — and a note that became HELD under us (locked elsewhere while
+    // our vault is locked) swaps to the placeholder instead of pouring its
+    // withheld head into an editor.
+    entry.lockedNote = !!file.locked;
+    if (file.held) {
+      if (!entry.heldFace && reseedDoc(cand.docId, cand.path, file.text, file.mtimeMs)) {
+        evictToHeldFace(cand.docId, entry, !!file.damaged);
+      }
+      continue;
+    }
+    if (entry.heldFace) {
+      // Unlocked content for a tab still wearing the face (an unlock's
+      // re-load raced this reload): the ordinary load path owns that swap.
+      void loadNote(cand.docId, cand.path);
+      continue;
+    }
     if (!reseedDoc(cand.docId, cand.path, file.text, file.mtimeMs)) continue; // dirtied meanwhile
     const view = entry.view;
     // Dispatch the SMALLEST span that changed, never a full-document replace:
@@ -221,11 +319,55 @@ function acquire(tab: TabState, folder: string, handlers: DocHandlers): { entry:
   const ro = new ResizeObserver(() => view.requestMeasure());
   ro.observe(host);
 
-  const entry: Entry = { host, view, offRun, ro };
+  const entry: Entry = { host, view, offRun, ro, lockedNote: false, heldFace: null };
   pool.set(docId, entry);
   if (tab.path) void loadNote(docId, tab.path);
   return { entry, created: true };
 }
+
+// --- vault transitions -------------------------------------------------------
+// One subscription for the whole pool (module-level, like the pool itself):
+// on RELOCK every locked entry is evicted — the view is DESTROYED and rebuilt
+// empty, because a doc replace would leave the plaintext in the undo history,
+// and an eviction that Cmd+Z can reverse is theater — then shown the held
+// face. On UNLOCK every held entry re-loads through the ordinary loadNote,
+// which pours the decrypted text and clears the face. Dirty-buffer safety is
+// upstream: ⌘L flushes before Bun drops keys (glue), and the idle relock
+// proves cleanliness by 15 minutes of silence.
+// Evict one entry's decrypted state and show the held face. The view is
+// DESTROYED and rebuilt empty, because a doc replace would leave the
+// plaintext in the undo history, and an eviction that Cmd+Z can reverse is
+// theater; run panels die with the view for the same reason. The host (and
+// its ResizeObserver) survive.
+function evictToHeldFace(docId: string, entry: Entry, damaged: boolean): void {
+  entry.offRun();
+  entry.view.destroy();
+  const view = createEditor(entry.host, "", docId);
+  entry.view = view;
+  entry.offRun = onRunEvent((ev) => applyRunEvent(view, ev));
+  showHeldFace(entry, damaged);
+}
+
+onVaultChanged(() => {
+  if (vaultState() === "unlocked") {
+    for (const [docId, entry] of pool) {
+      if (!entry.heldFace) continue;
+      const path = pathOf(docId);
+      if (path) void loadNote(docId, path);
+    }
+    return;
+  }
+  let evicted = false;
+  for (const [docId, entry] of pool) {
+    if (!entry.lockedNote || entry.heldFace) continue;
+    evicted = true;
+    evictToHeldFace(docId, entry, false);
+  }
+  // The image cache holds decrypted data URLs by the same promise (RAM the
+  // lock must clear); the flag keeps a no-locked-notes relock from churning
+  // innocent bystanders' cached images.
+  if (evicted) evictAssetCache();
+});
 
 // Parent the editor's host into `container` and re-pin its overlay. Returns the
 // live EditorView so the caller can focus it. `handlers` carries the two ways a

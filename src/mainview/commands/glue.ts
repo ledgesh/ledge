@@ -16,7 +16,8 @@ import { openLinkAtCursor, toggleTaskAt } from "@/editor/livePreview";
 import { insertLink, toggleBold, toggleItalic } from "@/editor/formatting";
 import { editFrontmatter } from "@/editor/frontmatterEdit";
 import { toggleTemplateFlag } from "@/editor/templateFlag";
-import { saveNow } from "@/notes/store";
+import { flushAllNow, saveNow } from "@/notes/store";
+import { lockNoteAndRefresh, lockVault, removeLockAndRefresh, vaultState } from "@/vault/channel";
 import {
   createNote as rpcCreateNote,
   createNoteFromTemplate,
@@ -103,6 +104,16 @@ export const registryDeps: RegistryDeps = {
     if (!view) return null;
     return view.state.sliceDoc(0, Math.min(HEAD_BYTES, view.state.doc.length));
   },
+  vaultState,
+  // Flush THEN drop, awaited in that order (docs/locking.md §3): a dirty
+  // locked buffer must reach disk encrypted while Bun still holds the key.
+  // The eviction of decrypted views rides the vaultChanged push this ends in
+  // (editorPool's subscription), not this call.
+  lockVaultNow: () => {
+    void flushAllNow().then(() => lockVault());
+  },
+  lockNoteNow: lockNoteAndRefresh,
+  removeLockNow: removeLockAndRefresh,
   editor: {
     find: (docId) => withView(docId, (view) => openSearchPanel(view)),
     replace: (docId) => withView(docId, (view) => openReplace(view)),

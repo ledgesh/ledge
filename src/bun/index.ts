@@ -17,21 +17,27 @@ import { InlinePool, type InlineEvent } from "./inlinePool";
 import { readProfile, writeProfile } from "./profiles";
 import {
   backlinksTo,
+  changeVaultPassphrase,
   createNote,
   deleteNote,
   deleteTrashed,
   emptyTrash,
+  firstLockedHeader,
+  isNoteLocked,
   listNotes,
   listTrash,
+  lockNote,
   notesTagged,
   purgeTrash,
   readNote,
+  removeLockNote,
   restoreNote,
   retitleNote,
   searchNotes,
   tagsIn,
   writeNote,
 } from "./notes";
+import { configureVault, createVault, loadVault, lockVault, unlockVault, vaultState } from "./vault";
 import {
   APP_HOME,
   assertRegisteredRoot,
@@ -71,6 +77,12 @@ const settings = await loadSettings();
 // with at least one folder to put a note in.
 await loadWorkspaces();
 await ensureDefault();
+
+// The vault (note locking): salt and passphrase-check loaded so vaultState
+// answers "locked" vs "none" from boot; the master key only ever arrives
+// through vaultUnlock. (The auto-relock push is wired after the RPC exists,
+// below.)
+await loadVault();
 
 // In the dev channel, prefer a running Vite dev server (bun run dev:hmr) so the
 // React view hot-reloads; otherwise load the built view copied into the bundle.
@@ -301,6 +313,20 @@ function sbSnapshot(t: Term): Uint8Array {
   return out;
 }
 
+// Whether the note this session sits in is locked, per the DISK (the head
+// read is live, so a lock landing mid-session refuses the very next run).
+// No admitted note fact means no lock to enforce: a session that is not a
+// note's cannot be a locked note's.
+async function sessionNoteLocked(sessionId: string): Promise<boolean> {
+  const fact = sessionFacts.get(sessionId);
+  if (!fact) return false;
+  try {
+    return await isNoteLocked(fact.note);
+  } catch {
+    return false; // the note moved/vanished: nothing locked to protect
+  }
+}
+
 // Tear down all of a note's shells when its tab closes.
 function closeSession(sessionId: string): void {
   inlinePool.closeSession(sessionId);
@@ -379,18 +405,72 @@ const rpc = BrowserView.defineRPC<LedgeRPC>({
         note: await createFromTemplatePath(root, templatePath, title),
       }),
       noteDelete: async ({ path }) => ({ trashed: await deleteNote(path) }),
-      noteSearch: async ({ root, query }) => ({ hits: await searchNotes(root, query) }),
+      // The scans return their lockedSkipped counts themselves (notes.ts
+      // decides the skip; docs/locking.md §4) — these are passthroughs.
+      noteSearch: async ({ root, query }) => searchNotes(root, query),
       // backlinksTo derives and guards the root itself (assertNote), the
       // per-note-call stance: the view sends only the path.
-      noteBacklinks: async ({ path }) => ({ backlinks: await backlinksTo(path) }),
-      tagList: async ({ root }) => ({ tags: await tagsIn(root) }),
-      tagNotes: async ({ root, tag }) => ({ hits: await notesTagged(root, tag) }),
+      noteBacklinks: async ({ path }) => backlinksTo(path),
+      tagList: async ({ root }) => tagsIn(root),
+      tagNotes: async ({ root, tag }) => notesTagged(root, tag),
+
+      // --- the vault (note locking) ---------------------------------------
+      vaultState: () => ({ state: vaultState() }),
+      vaultCreate: async ({ passphrase }) => {
+        try {
+          await createVault(passphrase);
+        } catch (err) {
+          console.warn("[vault] create refused:", err);
+          return { ok: false };
+        }
+        rpc.send.vaultChanged({ state: vaultState() });
+        return { ok: true };
+      },
+      vaultUnlock: async ({ passphrase }) => {
+        // With no vault file but locked notes on disk (synced from another
+        // machine), a locked note's own self-contained header is the check.
+        const probe = vaultState() === "none" ? await firstLockedHeader(availableRoots()) : undefined;
+        const ok = await unlockVault(passphrase, probe);
+        if (ok) rpc.send.vaultChanged({ state: vaultState() });
+        return { ok };
+      },
+      vaultLock: () => {
+        // The view flushed dirty locked buffers before asking (⌘L's
+        // contract); all Bun drops here is keys.
+        lockVault();
+        rpc.send.vaultChanged({ state: vaultState() });
+        return { ok: true };
+      },
+      noteLock: async ({ path }) => {
+        const res = await lockNote(path);
+        return { note: res.meta, sealedShared: res.sealedShared };
+      },
+      noteRemoveLock: async ({ path }) => ({ note: await removeLockNote(path) }),
+      vaultChangePassphrase: async ({ passphrase }) => {
+        try {
+          const rewrapped = await changeVaultPassphrase(passphrase, availableRoots());
+          return { ok: true, rewrapped };
+        } catch (err) {
+          console.warn("[vault] passphrase change refused:", err);
+          return { ok: false, rewrapped: 0 };
+        }
+      },
       trashList: async ({ root }) => ({ items: await listTrash(root) }),
       trashRestore: async ({ path }) => ({ note: await restoreNote(path) }),
       trashDelete: async ({ path }) => ({ removed: await deleteTrashed(path) }),
       trashEmpty: async ({ root }) => ({ removed: await emptyTrash(root) }),
 
       runBlock: async ({ sessionId, id, code, language, host }) => {
+        // A ```prompt fence's whole contract is "pipe this body to the agent
+        // CLI", so in a locked note it does not run — the send-direction half
+        // of the no-agents invariant (docs/locking.md §8). Re-validated here
+        // whatever the view asked (the two-ended move: its hidden buttons are
+        // the UI, this is the guard). Scoped to the `prompt` language: other
+        // fences are the user's own compute.
+        if (language === "prompt" && (await sessionNoteLocked(sessionId))) {
+          console.warn("[vault] refused a prompt-fence run in a locked note (session", sessionId + ")");
+          return { accepted: false };
+        }
         // The block body goes to a file, rather than being inlined into the
         // command line. That sidesteps quoting, heredocs, and line continuations.
         // What runs the file is the language's business (runner.ts): shell blocks
@@ -451,6 +531,13 @@ const rpc = BrowserView.defineRPC<LedgeRPC>({
         return { ok: true };
       },
       terminalPaste: async ({ sessionId, text, language, host }) => {
+        // The prompt-fence refusal, terminal direction (see runBlock): a
+        // prompt block sent to the drawer is the same locked body reaching
+        // the same agent CLI, one shell over.
+        if (language === "prompt" && (await sessionNoteLocked(sessionId))) {
+          console.warn("[vault] refused a prompt-fence paste in a locked note (session", sessionId + ")");
+          return { ok: false };
+        }
         const t = termFor(sessionId, host);
         // A fenced block in an interpreted language cannot be pasted as-is —
         // zsh would run it as shell. Its runner line is pasted instead (same
@@ -567,8 +654,23 @@ const rpc = BrowserView.defineRPC<LedgeRPC>({
       // src passes assertions (in-root, image extension, no dot-entries)
       // before it is read, and assetPaste names the file itself — the view
       // supplies nothing but handles it was given.
-      assetRead: async ({ root, src }) => ({ image: await readAsset(root, src) }),
-      assetPaste: async ({ root }) => ({ src: await pasteImageAsset(root) }),
+      assetRead: async ({ root, src }) => {
+        const res = await readAsset(root, src);
+        if (res !== null && "sealed" in res) return { image: null, sealed: true };
+        return { image: res };
+      },
+      // Whether the paste is sealed at birth comes from the NOTE, not the
+      // view: the view names the file, Bun asks the disk if it is locked
+      // (the same two-ended stance as every guard). A notePath outside the
+      // pasting root is a view bug and pastes unsealed into nothing — the
+      // guard below throws before any write.
+      assetPaste: async ({ root, notePath }) => {
+        const seal =
+          typeof notePath === "string" && notePath !== "" && rootContaining(notePath) === assertRegisteredRoot(root)
+            ? await isNoteLocked(notePath)
+            : false;
+        return { src: await pasteImageAsset(root, seal) };
+      },
       settingsGet: () => ({ settings }),
       // Session layout: raw bytes both ways; the view owns the shape and the
       // self-healing, Bun owns the file and the atomicity (bun/layout.ts).
@@ -649,6 +751,11 @@ function refreshWatchers(): void {
   syncWatchers(availableRoots(), (root) => rpc.send.notesChanged({ root }));
 }
 refreshWatchers();
+
+// Auto-relock (idle) pushes the same vaultChanged the explicit paths do —
+// the view cannot tell why the vault locked, only that it did, which is the
+// point: one eviction path.
+configureVault({ onAutoLock: () => rpc.send.vaultChanged({ state: vaultState() }) });
 
 // Watch the app home for the CLI's open request (`ledge <title>` with the
 // app already running; bun/openRequest.ts). Non-recursive and its own

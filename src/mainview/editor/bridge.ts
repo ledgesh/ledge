@@ -109,6 +109,10 @@ interface BridgeHandlers {
   // Follow a #tag: open the Tags panel drilled into it (App wires it to
   // ui.showTag — the same tag.open verb every other tag surface runs).
   openTag: (docId: string, tag: string) => void;
+  // Surface a neutral one-liner (App wires it to ui.showNotice — the
+  // browser's notice strip). The editor's refusals speak through this: a
+  // swallowed chord diagnoses nothing (docs/locking.md §7).
+  notice: (message: string) => void;
 }
 const handlers: Partial<BridgeHandlers> = {};
 
@@ -133,6 +137,11 @@ export function resizeInline(sessionId: string, id: string, cols: number, rows: 
 // that run. Called by the inline terminal's onData while the block is running.
 export function inputInline(sessionId: string, id: string, data: string): void {
   handlers.inputInline?.(sessionId, id, data);
+}
+
+// Surface a neutral one-line notice (the browser's strip).
+export function notifyUser(message: string): void {
+  handlers.notice?.(message);
 }
 
 // Open the profile editor on `name` (editor/frontmatter.ts's ⌘-click).

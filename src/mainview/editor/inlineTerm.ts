@@ -106,7 +106,7 @@ export class InlineTerm {
     // flash it; removed on the first byte (write) or at freeze.
     this.waiting = document.createElement("div");
     this.waiting.className = "ledge-term-waiting";
-    this.waiting.textContent = "running — no output yet";
+    this.waiting.textContent = "running, no output yet";
     this.body.appendChild(this.waiting);
     this.host = document.createElement("div");
     this.host.className = "ledge-term-host";

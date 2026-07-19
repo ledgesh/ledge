@@ -32,5 +32,5 @@ test("a silent run names its silence instead of showing a bare header", async ({
   await page.keyboard.insertText('# Untitled\n\n```sh\necho "ready"\n```\n');
   await expect(page.locator(".cm-line", { hasText: 'echo "ready"' })).toBeVisible();
   await page.locator('[data-act="run"]').dispatchEvent("mousedown", { button: 0 });
-  await expect(page.locator(".ledge-term-waiting")).toHaveText("running — no output yet");
+  await expect(page.locator(".ledge-term-waiting")).toHaveText("running, no output yet");
 });

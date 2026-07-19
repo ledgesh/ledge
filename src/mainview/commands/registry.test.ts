@@ -44,6 +44,20 @@ function stubDeps(
       return { path: `${folder}/untitled-template.md`, title: "Untitled Template", mtimeMs: 0 };
     },
     dailyRoot: () => dailyRoot,
+    // The vault stub: state is "unlocked" so the lock verbs run their direct
+    // path in tests (the dialog path is component-owned and e2e's business).
+    vaultState: () => "unlocked",
+    lockVaultNow: () => {
+      calls.push("lockVaultNow");
+    },
+    lockNoteNow: async (folder, path) => {
+      calls.push(`lockNoteNow:${folder}:${path}`);
+      return { error: null, notice: null };
+    },
+    removeLockNow: async (folder, path) => {
+      calls.push(`removeLockNow:${folder}:${path}`);
+      return null;
+    },
     openNoteIn: (root, note) => calls.push(`openNoteIn:${root}:${note.path}`),
     revealBacklink: (path, line, raw) => calls.push(`revealBacklink:${path}:${line}:${raw}`),
     jumpToHeading: (docId, line, text) => calls.push(`jumpToHeading:${docId}:${line}:${text}`),
@@ -539,6 +553,34 @@ describe("registry", () => {
     expect(deleted).toEqual([b.path, b.path]);
   });
 
+  test("run: the lock faces act on their row, not on the current note", () => {
+    // Same stance as the row verbs above: the sidebar menu's Lock This Note…
+    // must lock the row's note even while a different note is focused — and
+    // which face shows follows the TARGET's locked flag, not the focused one's.
+    const a = note("/n/a.md", "A");
+    const b = note("/n/b.md", "B");
+    const sealed = { ...note("/n/s.md", "S"), locked: true };
+    const state = apply(initialState(FOLDER, [a, b, sealed]), { type: "openNote", note: a });
+    const calls: string[] = [];
+    const cmds = buildCommands(stubDeps(calls));
+    const confirmed: string[] = [];
+    const onB: CommandCtx = {
+      ...makeCtx(state),
+      ui: { confirmRemoveLock: (n) => confirmed.push(n.path) },
+      target: { kind: "note", path: b.path },
+    };
+    const onSealed: CommandCtx = { ...onB, target: { kind: "note", path: sealed.path } };
+    expect(find(cmds, "note.lockOn").when!(onB)).toBe(true);
+    expect(find(cmds, "note.lockOn").when!(onSealed)).toBe(false);
+    expect(find(cmds, "note.lockOff").when!(onB)).toBe(false);
+    expect(find(cmds, "note.lockOff").when!(onSealed)).toBe(true);
+    // The vault stub is "unlocked", so both run their direct paths.
+    find(cmds, "note.lockOn").run(onB);
+    expect(calls).toEqual([`lockNoteNow:${FOLDER}:${b.path}`]);
+    find(cmds, "note.lockOff").run(onSealed);
+    expect(confirmed).toEqual([sealed.path]);
+  });
+
   test("run: note.open opens the targeted row's note", () => {
     const n = note("/n/a.md", "A");
     const dispatched: Action[] = [];
@@ -578,6 +620,8 @@ describe("registry", () => {
     expect(find(commands, "note.delete").when!(ctx)).toBe(false);
     expect(find(commands, "note.deleteCurrent").when!(ctx)).toBe(false);
     expect(find(commands, "note.open").when!(ctx)).toBe(false);
+    expect(find(commands, "note.lockOn").when!(ctx)).toBe(false);
+    expect(find(commands, "note.lockOff").when!(ctx)).toBe(false);
   });
 
   test("dispatch: bare row verbs resolve per row kind, and only in the list domain", () => {

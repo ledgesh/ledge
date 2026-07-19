@@ -66,7 +66,17 @@ async function notesIn(workspace: unknown): Promise<Located[]> {
 // then needs no argument. The env names a path, so it can go stale if the
 // note renames itself after the shell spawned — the error says so, because
 // the fix (address it by title) is not guessable from "not found".
-async function locate(args: Record<string, unknown>): Promise<Located & { text: string }> {
+// The one refusal every content tool shares (docs/locking.md §8): a locked
+// note's body is never available to an agent, whatever the vault's state in
+// the app — the lock is FOR this surface. locate() is the shared resolver
+// read_note/append_note/edit_note/backlinks all pass through, so refusing
+// here refuses everywhere at once; steering text, not a bare error, because
+// what a tool says is what an agent does next.
+function refuseLocked(title: string): never {
+  throw new Error(`"${title}" is locked; its body is not available to agents (locked notes are the user's private notes — list_notes flags them)`);
+}
+
+async function locate(args: Record<string, unknown>, opts: { forOpen?: boolean } = {}): Promise<Located & { text: string }> {
   const { title } = args;
   let path = typeof args["path"] === "string" && args["path"] !== "" ? (args["path"] as string) : null;
   let fromEnv = false;
@@ -90,6 +100,11 @@ async function locate(args: Record<string, unknown>): Promise<Located & { text: 
       );
     }
     const p = resolve(path);
+    // `file.locked` and not `held`: the flag refuses even when the app's
+    // vault happens to be unlocked and file.text is real plaintext. forOpen
+    // resolves WITHOUT the body (resolveNoteForOpen strips text): pointing
+    // the app at a locked note is navigation, not disclosure.
+    if (file.locked && !opts.forOpen) refuseLocked(labelOf(headingOf(file.text), p));
     return {
       path: p,
       workspace: rootContaining(p)!,
@@ -116,11 +131,26 @@ async function locate(args: Record<string, unknown>): Promise<Located & { text: 
     }
     meta ??= resolveWikiTitle(title, await notesIn(args["workspace"]));
     if (!meta) throw new Error(`no note titled "${title}" — titles match case-insensitively but exactly; try list_notes or search_notes`);
+    if (meta.locked && !opts.forOpen) refuseLocked(meta.title);
     const file = await readNote(meta.path);
     if (file === null) throw new Error(`note "${title}" vanished mid-read; try again`);
+    if (file.locked && !opts.forOpen) refuseLocked(meta.title); // locked between listing and read
     return { ...meta, text: file.text, mtimeMs: file.mtimeMs };
   }
   throw new Error("give either a title or a path");
+}
+
+/**
+ * Resolve a note to point the APP at (`ledge <title>` / `ledge open`): the
+ * CLI's one resolution that must reach locked notes — opening one lands on
+ * the app's own unlock flow, no body crosses this seam (text is dropped
+ * here; in the CLI process the vault is never unlocked anyway). Lives in
+ * this module so the CLI keeps acquiring semantics from the handler layer,
+ * never beside it (architecture.md §1).
+ */
+export async function resolveNoteForOpen(args: Record<string, unknown>): Promise<{ path: string; title: string; workspace: string }> {
+  const n = await locate(args, { forOpen: true });
+  return { path: n.path, title: n.title, workspace: n.workspace };
 }
 
 // The workspace a created note lands in. An explicit argument wins; with
@@ -196,7 +226,7 @@ export const ledgeTools: McpTool[] = [
   {
     name: "list_notes",
     description:
-      "List notes — title, path, workspace, last modified — newest first, across every available workspace or scoped to one. A note whose frontmatter declares `template: true` (or `template: daily`) carries that value in its row: those are the user's note templates, the ones create_note's `template` argument is usually pointed at — and the `daily` one is what daily_note instantiates.",
+      "List notes — title, path, workspace, last modified — newest first, across every available workspace or scoped to one. A note whose frontmatter declares `template: true` (or `template: daily`) carries that value in its row: those are the user's note templates, the ones create_note's `template` argument is usually pointed at — and the `daily` one is what daily_note instantiates. A row flagged `locked: true` is one of the user's private locked notes: its body cannot be read, searched, or edited by agents.",
     inputSchema: {
       type: "object",
       properties: { workspace: { type: "string", description: "A workspace root from list_workspaces." } },
@@ -213,13 +243,16 @@ export const ledgeTools: McpTool[] = [
         // Present-only-when-marked, like the meta itself: most rows say
         // nothing; the daily template's row says template: "daily".
         ...(n.template ? { template: n.template } : {}),
+        // Agents plan against listings, so a note whose body will refuse
+        // must say so in the row (docs/locking.md §8).
+        ...(n.locked ? { locked: true } : {}),
       }));
     },
   },
   {
     name: "read_note",
     description:
-      "Read a note's full Markdown text. Address it by title (preferred — titles survive renames) or by a path from another tool's result." +
+      "Read a note's full Markdown text. Address it by title (preferred — titles survive renames) or by a path from another tool's result. Locked notes refuse: their bodies are the user's private content, not available to agents (list_notes flags them)." +
       CURRENT_NOTE_HINT,
     inputSchema: { type: "object", properties: TITLE_OR_PATH_PROPS, additionalProperties: false },
     handler: async (args) => {
@@ -231,7 +264,7 @@ export const ledgeTools: McpTool[] = [
   {
     name: "search_notes",
     description:
-      "Full-text search over note bodies: the whole query as ONE case-insensitive substring (no fuzzy matching). Returns matching lines with 1-based line numbers, newest notes first, capped — `truncated` says whether anything was cut.",
+      "Full-text search over note bodies: the whole query as ONE case-insensitive substring (no fuzzy matching). Returns matching lines with 1-based line numbers, newest notes first, capped — `truncated` says whether anything was cut. Locked notes are never searched; `lockedNotesSkipped` says how many the answer therefore does not cover.",
     inputSchema: {
       type: "object",
       properties: {
@@ -249,9 +282,12 @@ export const ledgeTools: McpTool[] = [
       const roots =
         typeof workspace === "string" && workspace !== "" ? [assertRegisteredRoot(workspace)] : availableRoots();
       const all: Array<{ path: string; title: string; workspace: string; mtimeMs: number; line: number; snippet: string }> = [];
+      let lockedSkipped = 0;
       for (const root of roots) {
         try {
-          for (const h of await searchNotes(root, query)) {
+          const res = await searchNotes(root, query);
+          lockedSkipped += res.lockedSkipped;
+          for (const h of res.hits) {
             all.push({ path: h.path, title: h.title, workspace: root, mtimeMs: h.mtimeMs, line: h.line, snippet: h.snippet });
           }
         } catch (err) {
@@ -266,6 +302,10 @@ export const ledgeTools: McpTool[] = [
       return {
         hits: hits.map(({ mtimeMs, ...h }) => ({ ...h, modified: iso(mtimeMs) })),
         truncated: all.length > MAX_HITS,
+        // Scoped-answer honesty (docs/locking.md §8): an agent must know its
+        // answer does not cover the user's locked notes. Present only when
+        // non-zero, so an unlocked corpus reads exactly as before.
+        ...(lockedSkipped > 0 ? { lockedNotesSkipped: lockedSkipped } : {}),
       };
     },
   },
@@ -283,13 +323,18 @@ export const ledgeTools: McpTool[] = [
       // are. Its hits carry the panel's extra fields (mtimeMs, the raw match);
       // this response keeps its original shape — agent output should not
       // churn under a UI feature.
-      const backlinks = (await backlinksTo(target.path)).map(({ path, title, line, context }) => ({
+      const scan = await backlinksTo(target.path);
+      const backlinks = scan.backlinks.map(({ path, title, line, context }) => ({
         path,
         title,
         line,
         context,
       }));
-      return { target: { path: target.path, title: target.title, workspace: target.workspace }, backlinks };
+      return {
+        target: { path: target.path, title: target.title, workspace: target.workspace },
+        backlinks,
+        ...(scan.lockedSkipped > 0 ? { lockedNotesSkipped: scan.lockedSkipped } : {}),
+      };
     },
   },
   {
@@ -317,9 +362,12 @@ export const ledgeTools: McpTool[] = [
       // costs itself only; a NAMED one failing is the caller's answer.
       if (typeof tag === "string" && normalizeTag(tag) !== "") {
         const all: Array<{ path: string; title: string; workspace: string; mtimeMs: number; line: number; context: string }> = [];
+        let lockedSkipped = 0;
         for (const root of roots) {
           try {
-            for (const h of await notesTagged(root, tag)) {
+            const res = await notesTagged(root, tag);
+            lockedSkipped += res.lockedSkipped;
+            for (const h of res.hits) {
               all.push({ path: h.path, title: h.title, workspace: root, mtimeMs: h.mtimeMs, line: h.line, context: h.context });
             }
           } catch (err) {
@@ -332,14 +380,20 @@ export const ledgeTools: McpTool[] = [
         return {
           hits: hits.map(({ mtimeMs, ...h }) => ({ ...h, modified: iso(mtimeMs) })),
           truncated: all.length > MAX_HITS,
+          // Locked notes still show their frontmatter tags (the plaintext
+          // head); the count says their BODY hashtags went unscanned.
+          ...(lockedSkipped > 0 ? { lockedNoteBodiesSkipped: lockedSkipped } : {}),
         };
       }
       // Directory mode. Counts sum across workspaces (their note sets are
       // disjoint); identity folds case, first-seen spelling wins the merge.
       const merged = new Map<string, { tag: string; count: number }>();
+      let lockedSkipped = 0;
       for (const root of roots) {
         try {
-          for (const t of await tagsIn(root)) {
+          const res = await tagsIn(root);
+          lockedSkipped += res.lockedSkipped;
+          for (const t of res.tags) {
             const entry = merged.get(normalizeTag(t.tag));
             if (entry) entry.count += t.count;
             else merged.set(normalizeTag(t.tag), { tag: t.tag, count: t.count });
@@ -349,7 +403,10 @@ export const ledgeTools: McpTool[] = [
           console.error("[mcp] skipping unscannable workspace", root, err);
         }
       }
-      return { tags: [...merged.values()].sort((a, b) => a.tag.localeCompare(b.tag)) };
+      return {
+        tags: [...merged.values()].sort((a, b) => a.tag.localeCompare(b.tag)),
+        ...(lockedSkipped > 0 ? { lockedNoteBodiesSkipped: lockedSkipped } : {}),
+      };
     },
   },
   {

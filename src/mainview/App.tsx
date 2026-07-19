@@ -19,13 +19,17 @@ import { refreshFolder } from "@/workspace/actions";
 import { allDocIds, notesOf, useWorkspace, WorkspaceProvider, type AppState } from "@/workspace/store";
 import { flushLayout, scheduleLayoutSave } from "@/workspace/persist";
 import { findTabBy, focusedDocId } from "@/workspace/tree";
-import { allEditorViews, releaseEditor, reloadOpenNotes, requestHeadingReveal } from "@/workspace/editorPool";
+import { allEditorViews, configureLockedUi, releaseEditor, reloadOpenNotes, requestHeadingReveal } from "@/workspace/editorPool";
+import { VaultDialog } from "@/components/VaultDialog";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { lockNoteAndRefresh, removeLockAndRefresh } from "@/vault/channel";
+import type { VaultFollowUp } from "@/commands/types";
 import { listTags, onExternalOpen, onNotesChanged, takeOpenRequest, type ExternalOpenInfo } from "@/notes/channel";
 import type { TagInfo } from "../shared/tags";
 import { CommandProvider, useCommands } from "@/commands/CommandProvider";
 import { ProfileEditor } from "@/components/ProfileEditor";
 import { SettingsEditor } from "@/components/SettingsEditor";
-import { configureUi } from "@/commands/glue";
+import { configureUi, uiHooks } from "@/commands/glue";
 import { tooltip } from "@/commands/format";
 import { Overlay, type OverlayMode } from "@/commands/Overlay";
 
@@ -93,6 +97,15 @@ function Shell() {
   const [profileEditing, setProfileEditing] = useState<string | null>(null);
   // The ⌘, settings editor dialog (settings.jsonc in an in-app CodeMirror).
   const [settingsEditing, setSettingsEditing] = useState(false);
+  // The vault passphrase dialog, carrying the act that was waiting on it
+  // (lock this note, remove that lock) — App performs the follow-up on
+  // success, so the user's intent completes instead of dead-ending at the
+  // prompt (docs/locking.md §7). null = closed.
+  const [vaultDialog, setVaultDialog] = useState<{ then?: VaultFollowUp } | null>(null);
+  // The Remove Lock confirmation's subject, or null. A confirm because the
+  // consequence is silent EXPOSURE (sync and agent scans see the body), not
+  // because anything is destroyed.
+  const [removeLockConfirm, setRemoveLockConfirm] = useState<{ path: string; title: string; folder: string } | null>(null);
   // The vertical stack (below the header) that holds the editor row and the
   // terminal drawer; its height bounds how tall the terminal can grow.
   const stackRef = useRef<HTMLDivElement>(null);
@@ -236,7 +249,13 @@ function Shell() {
       },
       openProfileEditor: setProfileEditing,
       openSettingsEditor: () => setSettingsEditing(true),
+      openVaultDialog: (then) => setVaultDialog({ then }),
+      confirmRemoveLock: setRemoveLockConfirm,
     });
+    // The locked placeholder's Unlock button runs the same vault.unlock the
+    // palette runs — the pool reaches it through its own configureX seam
+    // (it cannot import the registry without a cycle).
+    configureLockedUi({ requestUnlock: () => exec("vault.unlock") });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => {
@@ -249,6 +268,9 @@ function Shell() {
       // The ⌘-clicked frontmatter profile name lands on the same dialog as
       // the "Edit Note Profile…" command.
       openProfileEditor: setProfileEditing,
+      // The editor's refusal notices (a prompt fence in a locked note) land
+      // on the browser's notice strip like every other neutral outcome.
+      notice: (message) => uiHooks.showNotice?.(message),
       // Wikilinks resolve against the note's OWN workspace list — the same
       // scoping stance as the browser and the overlays. Both stay view-side:
       // the resolved path is one Bun handed the store, and openNote is a
@@ -290,7 +312,7 @@ function Shell() {
   useEffect(() => {
     const folder = selected.folder;
     void listTags(folder).then(
-      (t) => tagVocab.current.set(folder, t),
+      (t) => tagVocab.current.set(folder, t.tags),
       () => {
         // A failed scan keeps the last snapshot: a stale vocabulary beats an
         // empty popup during a transient (unmounted volume mid-session).
@@ -595,6 +617,42 @@ function Shell() {
         <ProfileEditor name={profileEditing} onClose={() => setProfileEditing(null)} />
       )}
       {settingsEditing && <SettingsEditor onClose={() => setSettingsEditing(false)} />}
+      {vaultDialog && (
+        <VaultDialog
+          mode={vaultDialog.then?.changePassphrase ? "change" : "auto"}
+          onNotice={(m) => uiHooks.showNotice?.(m)}
+          onClose={() => setVaultDialog(null)}
+          onUnlocked={() => {
+            // The follow-up: the act the passphrase interrupted. Lock runs
+            // straight through (the user already chose it); remove-lock still
+            // gets its exposure confirm — the unlock only proved identity.
+            const then = vaultDialog.then;
+            if (then?.lock) {
+              void lockNoteAndRefresh(then.lock.folder, then.lock.path).then((res) => {
+                if (res.error) uiHooks.showError?.(res.error);
+                else if (res.notice) uiHooks.showNotice?.(res.notice);
+              });
+            } else if (then?.removeLock) {
+              setRemoveLockConfirm(then.removeLock);
+            }
+          }}
+        />
+      )}
+      {removeLockConfirm && (
+        <ConfirmDialog
+          title="Remove Lock"
+          body={`“${removeLockConfirm.title}” will be decrypted back to plain text on disk: anything that syncs this folder (and any agent scan) can read it again.`}
+          confirmLabel="Remove Lock"
+          onConfirm={() => {
+            const c = removeLockConfirm;
+            setRemoveLockConfirm(null);
+            void removeLockAndRefresh(c.folder, c.path).then((err) => {
+              if (err) uiHooks.showError?.(err);
+            });
+          }}
+          onCancel={() => setRemoveLockConfirm(null)}
+        />
+      )}
       {hostPick && <HostPicker req={hostPick} onClose={() => setHostPick(null)} />}
     </div>
   );

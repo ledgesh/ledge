@@ -607,3 +607,72 @@ describe("tags", () => {
     expect((await call("tags", { tag: "#" })).tags).toEqual([{ tag: "solo", count: 1 }]);
   });
 });
+
+// --- locked notes: the agent surface (docs/locking.md §8) --------------------
+// The invariant under test: no tool returns a locked body, EVER — including
+// while the app-side vault is unlocked, which is exactly the state these
+// tests set up (createVault leaves it unlocked; the same process serves the
+// tools here). If these pass with the vault OPEN, the flag — not the vault
+// state — is what refuses, which is the whole point.
+import { lockNote, removeLockNote } from "./notes";
+import { createVault, resetVaultForTests } from "./vault";
+import { resolveNoteForOpen } from "./mcpTools";
+
+describe("locked notes refuse agents", () => {
+  const SECRET = "the plutonium needle";
+
+  async function seedLocked(): Promise<string> {
+    resetVaultForTests();
+    await createVault("agent-test-pass");
+    const note = await createNote(ROOT, `# Sealed\n\n${SECRET}, #hush and [[Open Note]]\n`);
+    await createNote(ROOT, "# Open Note\n\nplain body\n");
+    await lockNote(note.path);
+    return note.path;
+  }
+
+  test("read/append/edit refuse with steering text; nothing leaks by title or path", async () => {
+    const path = await seedLocked();
+    await expect(call("read_note", { title: "Sealed" })).rejects.toThrow(/locked.*not available to agents/);
+    await expect(call("read_note", { path })).rejects.toThrow(/locked.*not available to agents/);
+    await expect(call("append_note", { title: "Sealed", text: "PS" })).rejects.toThrow(/locked/);
+    await expect(call("edit_note", { title: "Sealed", old_text: "a", new_text: "b" })).rejects.toThrow(/locked/);
+  });
+
+  test("list_notes flags the row; search skips the body and says so", async () => {
+    await seedLocked();
+    const rows = await call("list_notes", { workspace: ROOT });
+    expect(rows.find((r: any) => r.title === "Sealed")?.locked).toBe(true);
+    expect(rows.find((r: any) => r.title === "Open Note")?.locked).toBeUndefined();
+    const res = await call("search_notes", { query: "plutonium", workspace: ROOT });
+    expect(res.hits).toEqual([]);
+    expect(res.lockedNotesSkipped).toBe(1);
+  });
+
+  test("tags see the head only; backlinks scans skip the sealed body", async () => {
+    await seedLocked();
+    const tags = await call("tags", { workspace: ROOT });
+    expect(tags.tags).toEqual([]); // #hush lives in the sealed body
+    expect(tags.lockedNoteBodiesSkipped).toBe(1);
+    const back = await call("backlinks", { title: "Open Note" });
+    expect(back.backlinks).toEqual([]); // the [[Open Note]] link is sealed
+    expect(back.lockedNotesSkipped).toBe(1);
+  });
+
+  test("a locked note cannot seed create_note's template mode", async () => {
+    await seedLocked();
+    await expect(call("create_note", { template: "Sealed", title: "Copy", workspace: ROOT })).rejects.toThrow(
+      /locked.*template/,
+    );
+  });
+
+  test("resolveNoteForOpen reaches a locked title — navigation, not disclosure", async () => {
+    const path = await seedLocked();
+    const n = await resolveNoteForOpen({ title: "Sealed" });
+    expect(n.path).toBe(path);
+    expect(n).not.toHaveProperty("text");
+    // And the lock still comes off for the app's own flow, not for agents.
+    await removeLockNote(path);
+    const after = await call("read_note", { title: "Sealed" });
+    expect(after.text).toContain(SECRET);
+  });
+});

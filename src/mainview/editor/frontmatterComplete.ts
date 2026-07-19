@@ -24,16 +24,16 @@ const KEY_OPTIONS: readonly Completion[] = [
   { label: "cwd", apply: "cwd: ", detail: "working directory for this note's shells" },
   { label: "profile", apply: "profile: ", detail: "named secrets file, kept outside the notes" },
   { label: "envFile", apply: "envFile: ", detail: "project dotenv file, resolved against cwd" },
-  { label: "env", apply: "env:\n  ", detail: "inline vars — indented NAME: value lines" },
-  { label: "host", apply: "host: ", detail: "machines blocks run on — ssh targets, or local" },
-  { label: "tags", apply: "tags: ", detail: "this note's tags — also spelled inline as #tag" },
+  { label: "env", apply: "env:\n  ", detail: "inline vars (indented NAME: value lines)" },
+  { label: "host", apply: "host: ", detail: "machines blocks run on (ssh targets, or local)" },
+  { label: "tags", apply: "tags: ", detail: "this note's tags (also spelled inline as #tag)" },
   { label: "template", apply: "template: ", detail: "true joins the ⌥⌘N picker; daily seeds ⌘J" },
 ];
 
 // Exactly the three values the parser accepts — anything else is a reported
 // typo, so the popup lists the whole grammar.
 const TEMPLATE_VALUES: readonly Completion[] = [
-  { label: "true", detail: "a template — joins New Note from Template (⌥⌘N)" },
+  { label: "true", detail: "a template; joins New Note from Template (⌥⌘N)" },
   { label: "daily", detail: "the template ⌘J instantiates for each day" },
   { label: "false", detail: "explicitly not a template" },
 ];
@@ -95,7 +95,7 @@ export function frontmatterCompletionSource(context: CompletionContext): Complet
     if (listed) return null;
     return {
       from: pos - token.length,
-      options: [{ label: "local", detail: "this machine — no ssh" }],
+      options: [{ label: "local", detail: "this machine (no ssh)" }],
       validFor: /^[A-Za-z]*$/,
     };
   }

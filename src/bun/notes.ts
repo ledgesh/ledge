@@ -15,7 +15,7 @@
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { mkdir, readdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import type { Stats } from "node:fs";
-import type { BacklinkHit, NoteMeta, TagHit, TrashMeta } from "../shared/rpc-schema";
+import { ASSETS_DIRNAME, type BacklinkHit, type NoteMeta, type TagHit, type TrashMeta } from "../shared/rpc-schema";
 import { headingOf, labelOf, slugOf, titleOf } from "../shared/slug";
 import { parseFrontmatter } from "../shared/frontmatter";
 import { collectHits, type SearchHit } from "../shared/search";
@@ -23,6 +23,24 @@ import { resolveWikiTitle, wikiRefsOf } from "../shared/wikilinks";
 import { normalizeTag, tagDirectoryOf, tagRefsOf, type TagInfo } from "../shared/tags";
 import { loadIgnore } from "./ignore";
 import { assertRegisteredRoot, isInside, kindOf, rootContaining, uniqueName } from "./workspaces";
+import {
+  beginPassphraseChange,
+  commitPassphraseChange,
+  isSealedAsset,
+  mintLockedHeader,
+  openAssetBytes,
+  openBody,
+  rewrapAssetBytes,
+  rewrapHeader,
+  sealAssetBytes,
+  sealBody,
+  splitHead,
+  stampLockedLine,
+  stripLockedLine,
+  touchVault,
+  vaultState,
+} from "./vault";
+import { assetPathOf, imageMimeOf, rawAssetBytes, replaceAssetBytes } from "./assets";
 
 // Deleted notes are moved into their own root's .ledge-trash rather than
 // unlinked. Per root, not one shared bin: the move must stay a same-filesystem
@@ -75,25 +93,30 @@ function baseFor(text: string): string {
 // costs no extra read. The marker's value rides along (`true`, or the `daily`
 // role); present-only-when-marked keeps every ordinary meta lean.
 async function metaFor(path: string, text: string): Promise<NoteMeta> {
-  const t = parseFrontmatter(text).params.template;
+  const p = parseFrontmatter(text).params;
   return {
     path,
     title: labelOf(headingOf(text), path),
     mtimeMs: (await stat(path)).mtimeMs,
-    ...(t ? { template: t } : {}),
+    ...(p.template ? { template: p.template } : {}),
+    ...(p.locked !== null ? { locked: true as const } : {}),
   };
 }
 
 // The same, for a note whose text we do not already have in hand: read just
-// enough of the file to label and flag it.
+// enough of the file to label and flag it. The locked flag rides the same
+// head read the title does (the plaintext head is DESIGNED to fit it,
+// docs/locking.md §2), so the sidebar glyph and the scans' skip both come
+// from the listing they already had.
 async function metaAt(path: string): Promise<NoteMeta> {
   const head = await headAt(path);
-  const t = head === null ? false : parseFrontmatter(head).params.template;
+  const p = head === null ? null : parseFrontmatter(head).params;
   return {
     path,
     title: labelOf(head === null ? null : headingOf(head), path),
     mtimeMs: (await stat(path)).mtimeMs,
-    ...(t ? { template: t } : {}),
+    ...(p?.template ? { template: p.template } : {}),
+    ...(p !== null && p.locked !== null ? { locked: true as const } : {}),
   };
 }
 
@@ -176,8 +199,16 @@ export async function listNotes(root: string): Promise<NoteMeta[]> {
 // reading blobs to *name* a note, and searching inside them is exactly the
 // job that has to. readNote's null (a note deleted mid-scan) costs that note
 // and nothing else.
-export async function searchNotes(root: string, query: string): Promise<SearchHit[]> {
-  return collectHits(query, await listNotes(root), async (path) => (await readNote(path))?.text ?? null);
+// Locked notes are SKIPPED — always, vault state irrelevant (docs/locking.md
+// §4): the scans feed overlays and agents alike, and an answer that changed
+// with vault state would leak by inconsistency. The count rides back so every
+// surface can say "N locked notes not searched" where the answer would have
+// been; titles still match in quick-open, which reads metas, not bodies.
+export async function searchNotes(root: string, query: string): Promise<{ hits: SearchHit[]; lockedSkipped: number }> {
+  const metas = await listNotes(root);
+  const open = metas.filter((m) => !m.locked);
+  const hits = await collectHits(query, open, async (path) => (await readNote(path))?.text ?? null);
+  return { hits, lockedSkipped: metas.length - open.length };
 }
 
 // Backlink context is one result row, not a paragraph.
@@ -198,13 +229,22 @@ function contextOf(lines: string[], line: number): string {
 // title lands on the note a click in the linking note would open. Reading
 // every body is searchNotes' accepted cost; a note deleted mid-scan costs
 // that note only.
-export async function backlinksTo(path: string): Promise<BacklinkHit[]> {
+export async function backlinksTo(path: string): Promise<{ backlinks: BacklinkHit[]; lockedSkipped: number }> {
   const root = assertNote(path);
   const target = resolve(path);
   const metas = await listNotes(root);
   const out: BacklinkHit[] = [];
+  let lockedSkipped = 0;
   for (const meta of metas) {
     if (meta.path === target) continue; // a note is not "linked from" itself
+    // A locked note's links point OUT from a body this scan must not read
+    // (searchNotes' skip, same rule); links TO a locked note still resolve —
+    // the target's title is plaintext, and it is other notes' bodies that
+    // carry them.
+    if (meta.locked) {
+      lockedSkipped += 1;
+      continue;
+    }
     const file = await readNote(meta.path);
     if (file === null) continue;
     const lines = file.text.split("\n");
@@ -213,7 +253,7 @@ export async function backlinksTo(path: string): Promise<BacklinkHit[]> {
       out.push({ ...meta, line: ref.line, context: contextOf(lines, ref.line), raw: ref.raw });
     }
   }
-  return out;
+  return { backlinks: out, lockedSkipped };
 }
 
 // One workspace's tag directory — the ONE tag scan, shared by the Tags
@@ -224,14 +264,25 @@ export async function backlinksTo(path: string): Promise<BacklinkHit[]> {
 // live there — the accepted backlinksTo cost, scan-on-demand with no index.
 // Grammar, aggregation, and ordering all live in shared/tags.ts; a note
 // deleted mid-scan costs that note only.
-export async function tagsIn(root: string): Promise<TagInfo[]> {
+// A locked note's BODY hashtags are unscannable (searchNotes' skip), but its
+// frontmatter `tags:` line lives in the plaintext head where the user chose
+// to put it (docs/locking.md §6) — so locked notes contribute exactly their
+// head's tags, and still count toward lockedSkipped: the body went unread.
+async function tagSourceOf(meta: NoteMeta): Promise<string | null> {
+  if (!meta.locked) return (await readNote(meta.path))?.text ?? null;
+  return headAt(meta.path);
+}
+
+export async function tagsIn(root: string): Promise<{ tags: TagInfo[]; lockedSkipped: number }> {
   const perNote: { path: string; refs: ReturnType<typeof tagRefsOf> }[] = [];
+  let lockedSkipped = 0;
   for (const meta of await listNotes(root)) {
-    const file = await readNote(meta.path);
-    if (file === null) continue;
-    perNote.push({ path: meta.path, refs: tagRefsOf(file.text) });
+    if (meta.locked) lockedSkipped += 1;
+    const text = await tagSourceOf(meta);
+    if (text === null) continue;
+    perNote.push({ path: meta.path, refs: tagRefsOf(text) });
   }
-  return tagDirectoryOf(perNote);
+  return { tags: tagDirectoryOf(perNote), lockedSkipped };
 }
 
 // Every occurrence of one tag across a workspace, newest note first (the
@@ -241,20 +292,37 @@ export async function tagsIn(root: string): Promise<TagInfo[]> {
 // reveal. The empty tag is refused rather than answered: it would "match"
 // nothing meaningfully, and a blank query reaching this deep is a caller bug
 // worth surfacing.
-export async function notesTagged(root: string, tag: string): Promise<TagHit[]> {
+export async function notesTagged(root: string, tag: string): Promise<{ hits: TagHit[]; lockedSkipped: number }> {
   const want = normalizeTag(tag);
   if (!want) throw new Error("empty tag");
   const out: TagHit[] = [];
+  let lockedSkipped = 0;
   for (const meta of await listNotes(root)) {
-    const file = await readNote(meta.path);
-    if (file === null) continue;
-    const lines = file.text.split("\n");
-    for (const ref of tagRefsOf(file.text)) {
+    if (meta.locked) lockedSkipped += 1;
+    const text = await tagSourceOf(meta); // locked: head only, tagsIn's rule
+    if (text === null) continue;
+    const lines = text.split("\n");
+    for (const ref of tagRefsOf(text)) {
       if (normalizeTag(ref.tag) !== want) continue;
       out.push({ ...meta, line: ref.line, context: contextOf(lines, ref.line), raw: ref.raw });
     }
   }
-  return out;
+  return { hits: out, lockedSkipped };
+}
+
+// What readNote hands back. For an ordinary note, text and disk version. A
+// LOCKED note (docs/locking.md) carries the flag; `held: true` means the body
+// was withheld — the vault is locked — and `text` is only the plaintext head,
+// which the caller may label with but must not present as the note. `damaged`
+// rides on held when the body exists but fails authentication (tampered
+// outside Ledge) or its header cannot open: withheld is the honest shape for
+// both — degrade, never surface ciphertext or wrong plaintext.
+export interface NoteFile {
+  text: string;
+  mtimeMs: number;
+  locked?: true;
+  held?: true;
+  damaged?: true;
 }
 
 // Read a note, or null if it is gone (deleted behind our back, say). The mtime
@@ -263,13 +331,33 @@ export async function notesTagged(root: string, tag: string): Promise<TagHit[]> 
 // external edit. Stat BEFORE read, deliberately: if a write lands between the
 // two, the text is newer than the mtime we report, so the next comparison
 // still sees a difference and re-reads — stale-looking, never stale-passing.
-export async function readNote(path: string): Promise<{ text: string; mtimeMs: number } | null> {
+//
+// A locked note decrypts here — and ONLY here — when the vault is unlocked:
+// every app-side content path funnels through this seam. The scans never ask
+// (they filter on the meta's locked flag first; the skip is deliberate and
+// vault-state-independent), and the agent surfaces refuse before reading
+// (mcpTools locate), so "unlocked" never leaks anywhere the lock is FOR.
+export async function readNote(path: string): Promise<NoteFile | null> {
   assertNote(path);
+  touchVault();
+  let raw: string;
+  let mtimeMs: number;
   try {
-    const mtimeMs = (await stat(path)).mtimeMs;
-    return { text: await readFile(path, "utf8"), mtimeMs };
+    mtimeMs = (await stat(path)).mtimeMs;
+    raw = await readFile(path, "utf8");
   } catch {
     return null;
+  }
+  const header = parseFrontmatter(raw).params.locked;
+  if (header === null) return { text: raw, mtimeMs };
+  const { head, body } = splitHead(raw);
+  if (vaultState() !== "unlocked") return { text: head, mtimeMs, locked: true, held: true };
+  try {
+    return { text: head + openBody(header, body), mtimeMs, locked: true };
+  } catch (err) {
+    // Bad tag, malformed header, foreign-passphrase note: damage, not "gone".
+    console.warn("[vault] cannot open locked note", path, err);
+    return { text: head, mtimeMs, locked: true, held: true, damaged: true };
   }
 }
 
@@ -304,25 +392,299 @@ export interface WriteResult {
 let tmpCounter = 0;
 export async function writeNote(path: string, text: string, baseMtimeMs: number | null = null): Promise<WriteResult> {
   const root = assertNote(path);
+  touchVault();
   await rootReady(root);
   const dir = dirname(path);
   await mkdir(dir, { recursive: true });
+
+  // What the DISK says governs lock state, not the buffer (docs/locking.md
+  // §2): the head read is what decides. A buffer cannot MINT a lock — a
+  // stray locked: line (pasted from a locked file's text) is stripped, since
+  // honoring it would write a "locked" note whose key nobody holds — and it
+  // cannot DROP one: a save whose buffer lost the line still encrypts under
+  // the disk's header. Only lockNote/removeLockNote change the state.
+  const diskHead = await headAt(path);
+  const diskHeader = diskHead === null ? null : parseFrontmatter(diskHead).params.locked;
+  let outgoing: string;
+  if (diskHeader === null) {
+    const stripped = stripLockedLine(text);
+    if (stripped !== text) console.warn("[vault] dropped a locked: line from a save to an unlocked note:", path);
+    outgoing = stripped;
+    text = stripped;
+  } else {
+    // Saving a locked note NEEDS the vault open (the body must encrypt).
+    // Throwing keeps the edit pending in the view's autosave retry — the
+    // placeholder face makes this near-unreachable, but an unlock that
+    // raced a relock must fail the save, never write plaintext.
+    const { head, body } = splitHead(stampLockedLine(text, diskHeader));
+    outgoing = head + sealBody(diskHeader, body) + "\n";
+    text = head + body;
+  }
+
   let divergedTo: string | null = null;
   if (baseMtimeMs !== null) {
     const disk = await stat(path).catch(() => null); // gone is not a conflict: the write recreates it
     if (disk && disk.mtimeMs !== baseMtimeMs) {
       const current = await readFile(path, "utf8").catch(() => null);
-      if (current === text) return { mtimeMs: disk.mtimeMs, divergedTo: null };
-      if (current !== null) divergedTo = await deleteNote(path);
+      // For a locked note the comparison is PLAINTEXT-equivalent, not byte
+      // equality: sealing is nondeterministic (fresh nonce), so bytes always
+      // differ. Decrypt the disk body; a body that will not open (tampered)
+      // counts as different and takes the trash trip like any foreign write.
+      const same = (() => {
+        if (current === null) return false;
+        if (diskHeader === null) return current === text;
+        try {
+          const d = splitHead(current);
+          return d.head + openBody(parseFrontmatter(current).params.locked ?? diskHeader, d.body) === text;
+        } catch {
+          return false;
+        }
+      })();
+      if (same) return { mtimeMs: disk.mtimeMs, divergedTo: null };
+      if (current !== null) divergedTo = await deleteNote(path); // a locked note's copy moves as ciphertext
     }
   }
   tmpCounter += 1;
   const tmp = join(dir, `.${basename(path)}.tmp-${process.pid}-${tmpCounter}`);
   try {
-    await writeFile(tmp, text, "utf8");
+    await writeFile(tmp, outgoing, "utf8");
     const mtimeMs = (await stat(tmp)).mtimeMs;
     await rename(tmp, path);
     return { mtimeMs, divergedTo };
+  } catch (err) {
+    await unlink(tmp).catch(() => {});
+    throw err;
+  }
+}
+
+// --- locking ----------------------------------------------------------------
+
+// Whether the disk says this note is locked — the head read is the whole
+// answer (the flag lives in the plaintext frontmatter). The runBlock/paste
+// prompt-fence refusal reads this (bun/index.ts): cheap enough to ask per
+// run, and fresh enough that a just-locked note refuses immediately.
+export async function isNoteLocked(path: string): Promise<boolean> {
+  assertNote(path);
+  const head = await headAt(path);
+  return head !== null && parseFrontmatter(head).params.locked !== null;
+}
+
+// The probe an unlock falls back to when no vault file exists (synced-in
+// locked notes, docs/locking.md §3): any locked note's self-contained
+// header. First hit wins; scanning label-reads only.
+export async function firstLockedHeader(rootsToScan: string[]): Promise<string | undefined> {
+  for (const root of rootsToScan) {
+    try {
+      for (const meta of await listNotes(root)) {
+        if (!meta.locked) continue;
+        const head = await headAt(meta.path);
+        const header = head === null ? null : parseFrontmatter(head).params.locked;
+        if (header !== null) return header;
+      }
+    } catch {
+      // an unlistable root costs itself, the boot fetch's stance
+    }
+  }
+  return undefined;
+}
+
+// The in-root image references a note's text carries (`![](…)`) — the set
+// the lock sweep seals and Remove Lock unseals. Resolution reuses the asset
+// guard: a ref that fails it (a remote URL, a traversal, a non-image) is
+// simply not an asset and not swept.
+const IMAGE_REF = /!\[[^\]]*\]\(([^()\s]+)\)/g;
+function assetRefsOf(text: string, root: string): string[] {
+  const out = new Set<string>();
+  for (const m of text.matchAll(IMAGE_REF)) {
+    const ref = m[1]!;
+    try {
+      assetPathOf(root, ref);
+      out.add(ref);
+    } catch {
+      // not an in-root image reference
+    }
+  }
+  return [...out];
+}
+
+// Lock a note: mint its header (random data key wrapped by the master key,
+// salt copied in), stamp the line, seal the body — and SWEEP its images
+// (docs/locking.md §5): every in-root image the note references is sealed in
+// place under its own name, master-key wrapped, so the screenshot is as
+// sealed as the prose around it. An image an UNLOCKED note also shows is
+// sealed anyway and SURFACED, never silently decided and never refused: a
+// hard refusal would deadlock the legitimate "lock both sharing notes" flow
+// (each blocks on the other), while sealing merely extends the lock's own
+// visibility rule to the shared image everywhere it appears — the other
+// note's widget shows the locked face until an unlock, nothing breaks.
+// `sealedShared` names what the user should hear about.
+// Requires the vault unlocked (the RPC layer runs vault creation first on
+// the very first lock). The template exclusivity is checked here, not only
+// in the UI: a template's body exists to be stamped into new notes, the
+// opposite of locked, and the MCP template path must not be reachable into
+// one however the marker arrived.
+export async function lockNote(path: string): Promise<{ meta: NoteMeta; sealedShared: string[] }> {
+  const file = await readNote(path);
+  if (file === null) throw new Error(`no note at ${path}`);
+  if (file.locked) return { meta: await metaAt(path), sealedShared: [] }; // already locked: the outcome asked for
+  const params = parseFrontmatter(file.text).params;
+  if (params.template) throw new Error("a template cannot be locked — remove its template: marker first (its body exists to be copied into new notes)");
+  const header = mintLockedHeader(); // throws when the vault is locked
+
+  const root = assertNote(path);
+  const refs = assetRefsOf(file.text, root);
+  const sealedShared: string[] = [];
+  if (refs.length > 0) {
+    for (const meta of await listNotes(root)) {
+      if (resolve(meta.path) === resolve(path) || meta.locked) continue;
+      const other = await readNote(meta.path);
+      if (other === null) continue;
+      for (const ref of refs) {
+        if (other.text.includes(ref)) sealedShared.push(`${ref} (also shown by "${meta.title}")`);
+      }
+    }
+    for (const ref of refs) {
+      const bytes = await rawAssetBytes(root, ref);
+      if (bytes === null || isSealedAsset(bytes)) continue; // gone, or already sealed
+      await replaceAssetBytes(assetPathOf(root, ref), sealAssetBytes(bytes));
+    }
+  }
+
+  const stamped = stampLockedLine(file.text, header);
+  const { head, body } = splitHead(stamped);
+  await writeSealed(path, head + sealBody(header, body) + "\n", file.mtimeMs);
+  return { meta: await metaAt(path), sealedShared: [...new Set(sealedShared)] };
+}
+
+// Remove a note's lock: decrypt, strip the line, write plaintext — and
+// reverse the image sweep for every referenced asset no OTHER locked note
+// still shows (their claim keeps it sealed; this note's widget shows the
+// sealed placeholder while the vault is closed, which is exactly true). The
+// one sanctioned decrypt-to-disk, command-only by design (a text edit cannot
+// do this — writeNote above re-stamps).
+export async function removeLockNote(path: string): Promise<NoteMeta> {
+  const file = await readNote(path);
+  if (file === null) throw new Error(`no note at ${path}`);
+  if (!file.locked) return metaAt(path); // already plain
+  if (file.held) {
+    throw new Error(file.damaged ? "this note's locked body is damaged; restore the file from a backup first" : "unlock first");
+  }
+  const root = assertNote(path);
+  const refs = assetRefsOf(file.text, root);
+  if (refs.length > 0) {
+    // Which images stay sealed: those any other locked note still references.
+    // The vault is open here (file.held was false), so their bodies decrypt.
+    const claimed = new Set<string>();
+    for (const meta of await listNotes(root)) {
+      if (resolve(meta.path) === resolve(path) || !meta.locked) continue;
+      const other = await readNote(meta.path);
+      if (other === null || other.held) continue;
+      for (const ref of refs) if (other.text.includes(ref)) claimed.add(ref);
+    }
+    for (const ref of refs) {
+      if (claimed.has(ref)) continue;
+      const bytes = await rawAssetBytes(root, ref);
+      if (bytes === null || !isSealedAsset(bytes)) continue;
+      try {
+        await replaceAssetBytes(assetPathOf(root, ref), openAssetBytes(bytes));
+      } catch (err) {
+        // A damaged sealed image costs itself (stays sealed), never the
+        // unlock of the note's own text.
+        console.warn("[vault] could not unseal image during Remove Lock", ref, err);
+      }
+    }
+  }
+  await writeSealed(path, stripLockedLine(file.text), file.mtimeMs);
+  return metaAt(path);
+}
+
+// Change the vault passphrase: new salt, new master key, and every locked
+// note's HEADER plus every sealed image's key wrap rewritten across the given
+// roots — headers and wraps only, never a body byte (the data keys are
+// unchanged; that split is the whole reason per-note keys exist). Commit
+// happens after the sweep, so a crash mid-sweep leaves a coherent old-pass
+// vault with some headers already opening under the new one — both openable,
+// nothing lost, and re-running finishes the job (rewrapHeader throws per
+// already-moved item, which the loop reports and skips).
+export async function changeVaultPassphrase(newPassphrase: string, rootsToScan: string[]): Promise<number> {
+  const { oldKey, newKey, newSalt } = await beginPassphraseChange(newPassphrase);
+  let rewrapped = 0;
+  for (const root of rootsToScan) {
+    let metas: NoteMeta[];
+    try {
+      metas = await listNotes(root);
+    } catch {
+      continue; // an unlistable root costs itself, the boot fetch's stance
+    }
+    for (const meta of metas) {
+      if (!meta.locked) continue;
+      try {
+        const raw = await readFile(meta.path, "utf8");
+        const header = parseFrontmatter(raw).params.locked;
+        if (header === null) continue;
+        await writeSealed(meta.path, stampLockedLine(raw, rewrapHeader(header, oldKey, newKey, newSalt)), (await stat(meta.path)).mtimeMs);
+        rewrapped += 1;
+      } catch (err) {
+        console.warn("[vault] could not rewrap", meta.path, err);
+      }
+    }
+    // Sealed images: any in-root image file carrying the magic. The walk is
+    // listNotes' (dot-entries skipped) plus the app's own assets dir, which
+    // is dotted precisely to be invisible to listings.
+    for (const path of await imageFilesUnder(root)) {
+      try {
+        const bytes = await readFile(path);
+        if (!isSealedAsset(bytes)) continue;
+        await replaceAssetBytes(path, rewrapAssetBytes(bytes, oldKey, newKey, newSalt));
+        rewrapped += 1;
+      } catch (err) {
+        console.warn("[vault] could not rewrap sealed image", path, err);
+      }
+    }
+  }
+  await commitPassphraseChange(newKey, newSalt);
+  return rewrapped;
+}
+
+// Every image file the passphrase sweep must consider: the root's dotted
+// .ledge-assets pool, plus non-dotted in-root images (any of which the lock
+// sweep may have sealed — a note can reference `img/x.png`).
+async function imageFilesUnder(root: string): Promise<string[]> {
+  const out: string[] = [];
+  const walk = async (dir: string): Promise<void> => {
+    let entries;
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (entry.name.startsWith(".") && entry.name !== ASSETS_DIRNAME) continue;
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) await walk(path);
+      else if (entry.isFile() && imageMimeOf(path) !== null) out.push(path);
+    }
+  };
+  await walk(resolve(root));
+  return out;
+}
+
+// The lock/unlock writes: temp-plus-rename with the divergence guard's
+// SHAPE but none of its compare — these are whole-state transitions taken
+// from a just-read version, so a foreign write since simply moves to the
+// trash (rename-not-unlink, as everywhere).
+async function writeSealed(path: string, outgoing: string, baseMtimeMs: number): Promise<void> {
+  const dir = dirname(path);
+  const disk = await stat(path).catch(() => null);
+  if (disk && disk.mtimeMs !== baseMtimeMs) {
+    const moved = await deleteNote(path);
+    if (moved) console.warn("[vault] concurrent edit preserved in trash during a lock state change:", moved);
+  }
+  tmpCounter += 1;
+  const tmp = join(dir, `.${basename(path)}.tmp-${process.pid}-${tmpCounter}`);
+  try {
+    await writeFile(tmp, outgoing, "utf8");
+    await rename(tmp, path);
   } catch (err) {
     await unlink(tmp).catch(() => {});
     throw err;

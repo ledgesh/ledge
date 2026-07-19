@@ -41,6 +41,9 @@ export function TagsPanel({ tag, onBack }: { tag: string | null; onBack: () => v
   // BacklinksPanel stance.
   const [tags, setTags] = useState<TagInfo[] | null>(null);
   const [hits, setHits] = useState<TagHit[] | null>(null);
+  // Locked notes still show their frontmatter tags (plaintext head); this
+  // counts their unscanned BODIES for the footer (docs/locking.md §4).
+  const [lockedSkipped, setLockedSkipped] = useState(0);
   const [menu, setMenu] = useState<{ hit: TagHit; x: number; y: number } | null>(null);
 
   // Refetch when the drill level changes and when the folder's files do —
@@ -55,23 +58,31 @@ export function TagsPanel({ tag, onBack }: { tag: string | null; onBack: () => v
       if (tag === null) {
         void listTags(selected.folder).then(
           (t) => {
-            if (generation.current === gen) setTags(t);
+            if (generation.current !== gen) return;
+            setTags(t.tags);
+            setLockedSkipped(t.lockedSkipped);
           },
           (err) => {
             // A failed scan costs the list, not the app (unmounted volume
             // mid-session, say); empty beats lying with stale rows.
             console.error("[tags] scan failed for", selected.folder, err);
-            if (generation.current === gen) setTags([]);
+            if (generation.current !== gen) return;
+            setTags([]);
+            setLockedSkipped(0);
           },
         );
       } else {
         void notesTagged(selected.folder, tag).then(
           (h) => {
-            if (generation.current === gen) setHits(h);
+            if (generation.current !== gen) return;
+            setHits(h.hits);
+            setLockedSkipped(h.lockedSkipped);
           },
           (err) => {
             console.error("[tags] scan failed for", tag, err);
-            if (generation.current === gen) setHits([]);
+            if (generation.current !== gen) return;
+            setHits([]);
+            setLockedSkipped(0);
           },
         );
       }
@@ -149,6 +160,15 @@ export function TagsPanel({ tag, onBack }: { tag: string | null; onBack: () => v
           ))
         )}
       </div>
+
+      {lockedSkipped > 0 && (
+        <p
+          data-testid="tags-locked-skipped"
+          className="shrink-0 border-t px-3 py-1.5 text-[11px] text-muted-foreground"
+        >
+          {lockedSkipped} locked note {lockedSkipped === 1 ? "body" : "bodies"} not scanned
+        </p>
+      )}
 
       {menu && (
         <ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)}>

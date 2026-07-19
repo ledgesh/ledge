@@ -18,9 +18,10 @@
 // fourth mode and no second sigil — the "#" the search sigil already spends
 // is the one tags are written with.
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CalendarDays, Command as CommandIcon, FileText, Hash, LayoutTemplate, TextSearch } from "lucide-react";
+import { CalendarDays, Command as CommandIcon, FileText, Hash, LayoutTemplate, Lock, LockOpen, TextSearch } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { notesOf, useWorkspace } from "@/workspace/store";
+import { useVaultState } from "@/vault/channel";
 import { CHORD_BOOST, filterNotes, fuzzyFilter } from "@/notes/fuzzy";
 import { listTags, searchNotes, type SearchHit } from "@/notes/channel";
 import { normalizeTag, type TagInfo } from "../../shared/tags";
@@ -49,6 +50,8 @@ export function Overlay({
 }) {
   const { state, dispatch, selected } = useWorkspace();
   const { exec, commands, ctx } = useCommands();
+  // Locked rows' glyph opens with the vault — the NoteBrowser row rule.
+  const vaultOpen = useVaultState() === "unlocked";
   const [query, setQuery] = useState(initialQuery);
   const [index, setIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -78,7 +81,7 @@ export function Overlay({
     let stale = false;
     listTags(selected.folder).then(
       (t) => {
-        if (!stale) setTags(t);
+        if (!stale) setTags(t.tags);
       },
       () => {
         if (!stale) setTags([]);
@@ -101,20 +104,29 @@ export function Overlay({
 
   // Search mode asks Bun, debounced, and guards against answers landing out of
   // order: only the reply to the query still on screen may set the list.
+  // lockedSkipped rides each answer: how many locked notes the scan
+  // deliberately never read (docs/locking.md §4) — the footer below makes
+  // the skip visible where the answer would have been.
   const [hits, setHits] = useState<SearchHit[]>([]);
+  const [lockedSkipped, setLockedSkipped] = useState(0);
   useEffect(() => {
     if (!isSearch || q.trim() === "") {
       setHits([]);
+      setLockedSkipped(0);
       return;
     }
     let stale = false;
     const timer = setTimeout(() => {
       searchNotes(selected.folder, q).then(
         (h) => {
-          if (!stale) setHits(h);
+          if (stale) return;
+          setHits(h.hits);
+          setLockedSkipped(h.lockedSkipped);
         },
         () => {
-          if (!stale) setHits([]);
+          if (stale) return;
+          setHits([]);
+          setLockedSkipped(0);
         },
       );
     }, SEARCH_DEBOUNCE_MS);
@@ -350,13 +362,20 @@ export function Overlay({
                 onClick={() => open(i)}
               >
                 {/* The NoteBrowser row's icon rule: a template note wears
-                    LayoutTemplate, the daily-role note CalendarDays — the
-                    browser and the picker must agree on what kind of thing a
-                    note is. */}
+                    LayoutTemplate, the daily-role note CalendarDays, a locked
+                    note Lock (open while the vault is unlocked) — the browser
+                    and the picker must agree on what kind of thing a note is,
+                    and on whether it is readable right now. */}
                 {note.template === "daily" ? (
                   <CalendarDays className="size-3.5 shrink-0 text-muted-foreground" />
                 ) : note.template ? (
                   <LayoutTemplate className="size-3.5 shrink-0 text-muted-foreground" />
+                ) : note.locked ? (
+                  vaultOpen ? (
+                    <LockOpen className="size-3.5 shrink-0 text-muted-foreground" />
+                  ) : (
+                    <Lock className="size-3.5 shrink-0 text-muted-foreground" />
+                  )
                 ) : (
                   <FileText className="size-3.5 shrink-0 text-muted-foreground" />
                 )}
@@ -365,6 +384,18 @@ export function Overlay({
             ))
           )}
         </div>
+
+        {/* The skip must be visible where the answer would have been: a
+            search that silently omitted locked notes would read as "they
+            don't mention it". One muted line, only when there was a scan. */}
+        {isSearch && q.trim() !== "" && lockedSkipped > 0 && (
+          <p
+            data-testid="search-locked-skipped"
+            className="shrink-0 border-t px-3.5 py-1.5 text-[11px] text-muted-foreground"
+          >
+            {lockedSkipped} locked {lockedSkipped === 1 ? "note" : "notes"} not searched
+          </p>
+        )}
       </div>
     </div>
   );

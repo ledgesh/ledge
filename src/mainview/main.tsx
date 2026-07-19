@@ -5,6 +5,7 @@ import type { LedgeRPC, NoteMeta, TrashMeta, WorkspaceRootInfo } from "../shared
 import { configureBridge, dispatchRunEvent, setTerminalBusy } from "./editor/bridge";
 import { bytesToB64, configureTerminal, dispatchTerminalOutput, dispatchTerminalExit } from "./terminal/channel";
 import { configureNotes, dispatchExternalOpen, dispatchNotesChanged } from "./notes/channel";
+import { configureVault, recordVaultState, refreshVaultState } from "./vault/channel";
 import { configureWorkspaces, recordDailyRoot, recordWorkspaceKinds } from "./workspace/channel";
 import { configureClipboard } from "./lib/clipboard";
 import { configureCli } from "./lib/cli";
@@ -28,6 +29,11 @@ const rpc = Electroview.defineRPC<LedgeRPC>({
       terminalExit: ({ sessionId }) => dispatchTerminalExit(sessionId),
       notesChanged: ({ root }) => dispatchNotesChanged(root),
       openExternal: (open) => dispatchExternalOpen(open),
+      // The vault moved without the view driving it (idle auto-relock), or
+      // this is the echo of a transition it did drive — either way the
+      // mirrored state updates and every subscriber (placeholder faces,
+      // glyphs, palette faces) re-renders from the one record.
+      vaultChanged: ({ state }) => recordVaultState(state),
     },
   },
 });
@@ -86,8 +92,9 @@ configureClipboard({
 // half of ⌘V. References resolve against the asking note's workspace folder;
 // Bun guards both and names the pasted file.
 configureAssets({
-  read: (folder, src) => electrobun.rpc!.request.assetRead({ root: folder, src }).then((r) => r.image),
-  pasteImage: (folder) => electrobun.rpc!.request.assetPaste({ root: folder }).then((r) => r.src),
+  read: (folder, src) =>
+    electrobun.rpc!.request.assetRead({ root: folder, src }).then((r) => (r.sealed ? { sealed: true as const } : r.image)),
+  pasteImage: (folder, notePath) => electrobun.rpc!.request.assetPaste({ root: folder, notePath }).then((r) => r.src),
 });
 
 // Bun owns the workspace folders; the view only ever holds roots and paths it
@@ -102,10 +109,10 @@ configureWorkspaces({
 configureNotes({
   list: (folder) => electrobun.rpc!.request.noteList({ root: folder }).then((r) => r.notes),
   read: (path) => electrobun.rpc!.request.noteRead({ path }).then((r) => r.note),
-  search: (folder, query) => electrobun.rpc!.request.noteSearch({ root: folder, query }).then((r) => r.hits),
-  backlinks: (path) => electrobun.rpc!.request.noteBacklinks({ path }).then((r) => r.backlinks),
-  tags: (folder) => electrobun.rpc!.request.tagList({ root: folder }).then((r) => r.tags),
-  tagged: (folder, tag) => electrobun.rpc!.request.tagNotes({ root: folder, tag }).then((r) => r.hits),
+  search: (folder, query) => electrobun.rpc!.request.noteSearch({ root: folder, query }),
+  backlinks: (path) => electrobun.rpc!.request.noteBacklinks({ path }),
+  tags: (folder) => electrobun.rpc!.request.tagList({ root: folder }),
+  tagged: (folder, tag) => electrobun.rpc!.request.tagNotes({ root: folder, tag }),
   write: (path, text, baseMtimeMs) => electrobun.rpc!.request.noteWrite({ path, text, baseMtimeMs }),
   create: (folder, text) => electrobun.rpc!.request.noteCreate({ root: folder, text }).then((r) => r.note),
   retitle: (path, text) => electrobun.rpc!.request.noteRetitle({ path, text }).then((r) => r.note),
@@ -121,6 +128,18 @@ configureNotes({
   configureSession: (sessionId, params, notePath) => {
     void electrobun.rpc!.request.sessionConfigure({ sessionId, params, notePath });
   },
+});
+
+configureVault({
+  state: () => electrobun.rpc!.request.vaultState({}).then((r) => r.state),
+  create: (passphrase) => electrobun.rpc!.request.vaultCreate({ passphrase }).then((r) => r.ok),
+  unlock: (passphrase) => electrobun.rpc!.request.vaultUnlock({ passphrase }).then((r) => r.ok),
+  lock: async () => {
+    await electrobun.rpc!.request.vaultLock({});
+  },
+  lockNote: (path) => electrobun.rpc!.request.noteLock({ path }),
+  removeLock: (path) => electrobun.rpc!.request.noteRemoveLock({ path }).then((r) => r.note),
+  changePassphrase: (passphrase) => electrobun.rpc!.request.vaultChangePassphrase({ passphrase }),
 });
 
 // Read the workspace registry, every available workspace's notes, and the
@@ -191,6 +210,11 @@ async function boot(): Promise<void> {
   configureCli({
     install: () => electrobun.rpc!.request.cliInstall({}),
   });
+  // After render, not gating it: the mirrored default ("locked") renders
+  // locked notes as placeholders either way, which is correct until — and
+  // almost always after — this lands ("unlocked" cannot survive a relaunch;
+  // the fetch only distinguishes locked from none for the dialog's face).
+  void refreshVaultState().catch(() => {});
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
       <App initial={restoredState(layout, roots, notesByFolder, trashByFolder)} />

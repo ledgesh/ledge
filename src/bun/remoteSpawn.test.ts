@@ -7,6 +7,7 @@ const noParams = (over: Partial<NoteParams> = {}): NoteParams => ({
   profile: null,
   envFile: null,
   env: {},
+  locked: null,
   hosts: ["web1"],
   tags: [],
   template: false,

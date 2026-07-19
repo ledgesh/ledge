@@ -35,6 +35,9 @@ export function BacklinksPanel() {
   // null is "no answer yet" — the panel goes quiet rather than flashing the
   // empty state while the first fetch is in flight.
   const [hits, setHits] = useState<BacklinkHit[] | null>(null);
+  // Locked notes' bodies are never scanned (docs/locking.md §4); the footer
+  // says so where the missing rows would have been.
+  const [lockedSkipped, setLockedSkipped] = useState(0);
   const [menu, setMenu] = useState<{ hit: BacklinkHit; x: number; y: number } | null>(null);
 
   // Refetch when the shown note changes and when its folder's files do. The
@@ -52,18 +55,23 @@ export function BacklinksPanel() {
       const gen = (generation.current += 1);
       if (!path) {
         setHits([]);
+        setLockedSkipped(0);
         return;
       }
       void backlinksOf(path).then(
         (b) => {
-          if (generation.current === gen) setHits(b);
+          if (generation.current !== gen) return;
+          setHits(b.backlinks);
+          setLockedSkipped(b.lockedSkipped);
         },
         (err) => {
           // A failed scan (unmounted volume mid-session, say) costs the list,
           // not the app; the panel shows the empty state rather than lying
           // with stale rows.
           console.error("[backlinks] scan failed for", path, err);
-          if (generation.current === gen) setHits([]);
+          if (generation.current !== gen) return;
+          setHits([]);
+          setLockedSkipped(0);
         },
       );
     };
@@ -114,6 +122,15 @@ export function BacklinksPanel() {
           ))
         )}
       </div>
+
+      {lockedSkipped > 0 && path && (
+        <p
+          data-testid="backlinks-locked-skipped"
+          className="shrink-0 border-t px-3 py-1.5 text-[11px] text-muted-foreground"
+        >
+          {lockedSkipped} locked {lockedSkipped === 1 ? "note" : "notes"} not scanned
+        </p>
+      )}
 
       {menu && (
         <ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)}>

@@ -49,7 +49,7 @@ export async function findTemplate(
   const local = resolveWikiTitle(title, await listNotes(pref));
   if (local) {
     const file = await readNote(local.path);
-    if (file) return { path: local.path, text: file.text };
+    if (file) return { path: local.path, text: templateText(file, title) };
   }
   const others = availableRoots().filter((r) => r !== pref);
   const metas = (await Promise.all(others.map((r) => listNotes(r)))).flat();
@@ -57,7 +57,18 @@ export async function findTemplate(
   const hit = resolveWikiTitle(title, metas);
   if (!hit) return null;
   const file = await readNote(hit.path);
-  return file ? { path: hit.path, text: file.text } : null;
+  return file ? { path: hit.path, text: templateText(file, title) } : null;
+}
+
+// A template's body is about to be stamped into a NEW, unlocked note — the
+// exact opposite of a locked one (docs/locking.md §2's exclusivity, enforced
+// where the read happens so hand-crafted marker combinations cannot slip
+// through the MCP/CLI template path either). Throwing, not skipping: the
+// caller named this note, and a silent fall-through to a same-titled note
+// elsewhere would instantiate something they did not point at.
+function templateText(file: { text: string; locked?: true }, title: string): string {
+  if (file.locked) throw new Error(`"${title}" is locked and cannot be used as a template; remove its lock first`);
+  return file.text;
 }
 
 // Instantiate a template into a NEW note in `root`. The template was asked
@@ -95,6 +106,7 @@ export async function createFromTemplatePath(
   const r = assertRegisteredRoot(root);
   const file = await readNote(templatePath);
   if (!file) throw new Error(`the template note is gone (${templatePath}); pick again`);
+  if (file.locked) throw new Error("a locked note cannot be used as a template; remove its lock first");
   return createNote(r, instantiateTemplate(file.text, title ?? "Untitled", now));
 }
 
@@ -109,7 +121,9 @@ export async function createFromTemplatePath(
 // stance of every daily fact.
 export async function findDailyTemplate(root: string): Promise<{ path: string; text: string } | null> {
   const r = assertRegisteredRoot(root);
-  const marked = (await listNotes(r)).filter((m) => m.template === "daily");
+  // A locked claimant is a hand-crafted file (the commands enforce the
+  // marker exclusivity); it cannot seed a daily note, so it does not claim.
+  const marked = (await listNotes(r)).filter((m) => m.template === "daily" && !m.locked);
   if (marked.length === 0) return null;
   if (marked.length > 1) {
     console.warn(

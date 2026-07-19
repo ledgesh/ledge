@@ -12,7 +12,7 @@
 // `d` deletes, `r` restores. The rows publish their identity as data attributes
 // (commands/target.ts) and the window dispatcher reads it back, so a right-click
 // and a keystroke run the same command against the same note.
-import { CalendarDays, ChevronRight, FileText, LayoutTemplate, Plus, RotateCcw, Trash2 } from "lucide-react";
+import { CalendarDays, ChevronRight, FileText, LayoutTemplate, Lock, LockOpen, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { useListNav } from "@/lib/useListNav";
@@ -25,6 +25,7 @@ import { tooltip } from "@/commands/format";
 import { targetAttrs } from "@/commands/target";
 import { docIdsForPath, notesOf, openNotePaths, trashOf, useWorkspace } from "@/workspace/store";
 import { focusedTab } from "@/workspace/tree";
+import { useVaultState } from "@/vault/channel";
 import { agoLabel } from "./ago";
 import { deleteNote, deleteTrashedNote, emptyTrashNow, restoreNote } from "./actions";
 import type { NoteMeta, TrashMeta } from "./channel";
@@ -38,6 +39,9 @@ const UNDO_MS = 8000;
 export function NoteBrowser() {
   const { state, dispatch, selected } = useWorkspace();
   const { exec } = useCommands();
+  // The vault state drives the locked rows' glyph (closed vs open lock) and
+  // which vault verb their menu carries.
+  const vault = useVaultState();
   // Where the right-click menu sits, keyed by path (the note's identity).
   const [menu, setMenu] = useState<{ path: string; x: number; y: number } | null>(null);
   // A failed delete or restore, shown under the list rather than thrown away into
@@ -62,6 +66,9 @@ export function NoteBrowser() {
   );
   const open = useMemo(() => openNotePaths(state), [state]);
   const current = focusedTab(selected)?.path ?? null;
+  // The note the open menu points at: its live locked flag picks which lock
+  // face (and which vault verb) the menu carries.
+  const menuNote = menu ? notes.find((n) => n.path === menu.path) : undefined;
 
   // The offer expires; the note does not.
   useEffect(() => {
@@ -133,6 +140,7 @@ export function NoteBrowser() {
               note={note}
               current={note.path === current}
               open={open.has(note.path)}
+              unlocked={vault === "unlocked"}
               rowProps={nav.rowProps(note.path, i)}
               onOpen={() => exec("note.open", { kind: "note", path: note.path })}
               onContextMenu={(x, y) => setMenu({ path: note.path, x, y })}
@@ -185,6 +193,33 @@ export function NoteBrowser() {
             target={{ kind: "note", path: menu.path }}
             onClose={() => setMenu(null)}
           />
+          {/* The lock faces, two-faces like the palette (docs/locking.md §7):
+              a plain row offers Lock This Note… (greyed on templates — the
+              marker exclusivity), a locked row offers Remove Lock… plus the
+              vault verb matching the state the row's glyph shows: Unlock
+              Notes… while the vault is shut, Lock Notes (⌘L) while it is
+              open. The vault verbs are vault-wide and say so in their
+              titles; they ride the row menu because the glyph on this row is
+              what advertises the state. */}
+          {menuNote?.locked ? (
+            <>
+              <CommandMenuItem
+                id={vault === "unlocked" ? "vault.lock" : "vault.unlock"}
+                onClose={() => setMenu(null)}
+              />
+              <CommandMenuItem
+                id="note.lockOff"
+                target={{ kind: "note", path: menu.path }}
+                onClose={() => setMenu(null)}
+              />
+            </>
+          ) : (
+            <CommandMenuItem
+              id="note.lockOn"
+              target={{ kind: "note", path: menu.path }}
+              onClose={() => setMenu(null)}
+            />
+          )}
           {/* The command is titled "Delete", deliberately not "Move to Trash":
               that promises the Finder Trash, with Put Back and a Dock icon, and
               this is an app-private folder. No confirmation either: it is
@@ -415,6 +450,7 @@ function NoteRow({
   note,
   current,
   open,
+  unlocked,
   rowProps,
   onOpen,
   onContextMenu,
@@ -422,6 +458,8 @@ function NoteRow({
   note: NoteMeta;
   current: boolean;
   open: boolean;
+  // Vault state, for the locked rows' glyph: open lock while unlocked.
+  unlocked: boolean;
   rowProps: ReturnType<ReturnType<typeof useListNav>["rowProps"]>;
   onOpen: () => void;
   onContextMenu: (x: number, y: number) => void;
@@ -439,13 +477,24 @@ function NoteRow({
       title={note.path}
     >
       {/* A template note (frontmatter template: true) swaps the glyph — the
-          same LayoutTemplate the template commands wear in the palette — and
-          the daily-role note (template: daily) wears ⌘J's own CalendarDays.
-          Icons, not badges: same object, different kind, zero row width. */}
+          same LayoutTemplate the template commands wear in the palette — the
+          daily-role note (template: daily) wears ⌘J's own CalendarDays, and a
+          LOCKED note wears the vault commands' Lock (the markers are
+          mutually exclusive, so the column reads one kind per row).
+          Icons, not badges: same object, different kind, zero row width.
+          A locked note's lock OPENS while the vault is unlocked — the row is
+          where the "readable right now" state is visible without opening
+          anything, and it is what makes ⌘L's effect legible in the list. */}
       {note.template === "daily" ? (
         <CalendarDays className="size-3.5 shrink-0 text-muted-foreground" />
       ) : note.template ? (
         <LayoutTemplate className="size-3.5 shrink-0 text-muted-foreground" />
+      ) : note.locked ? (
+        unlocked ? (
+          <LockOpen data-testid="note-unlocked-glyph" className="size-3.5 shrink-0 text-muted-foreground" />
+        ) : (
+          <Lock data-testid="note-locked-glyph" className="size-3.5 shrink-0 text-muted-foreground" />
+        )
       ) : (
         <FileText className="size-3.5 shrink-0 text-muted-foreground" />
       )}

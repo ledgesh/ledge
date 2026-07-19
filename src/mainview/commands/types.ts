@@ -5,8 +5,20 @@
 import type { ComponentType } from "react";
 import type { Action, AppState } from "@/workspace/store";
 import type { Workspace } from "@/workspace/tree";
-import type { NoteMeta, TrashMeta } from "../../shared/rpc-schema";
+import type { NoteMeta, TrashMeta, VaultState } from "../../shared/rpc-schema";
 import type { FocusDomain } from "./keymap";
+
+// What should happen once the vault dialog succeeds (unlock or first-time
+// setup): the act the user was actually reaching for when the passphrase got
+// in the way. App orchestrates the follow-up; the dialog stays a passphrase
+// prompt and nothing more.
+export interface VaultFollowUp {
+  lock?: { path: string; folder: string };
+  removeLock?: { path: string; title: string; folder: string };
+  // Not a follow-up but a FACE: open the dialog in its change-passphrase
+  // form (new passphrase twice; unlocked only — the command gates).
+  changePassphrase?: true;
+}
 
 // What a context-menu invocation — or a bare key on a focused list row — acts
 // on. Absent for hotkey/palette invocations, which act on the focused/selected
@@ -78,6 +90,14 @@ export interface UiHooks {
   // (components/SettingsEditor.tsx). The file is still the UI; Ledge is just
   // the editor it opens in now.
   openSettingsEditor(): void;
+  // Open the vault passphrase dialog (components/VaultDialog.tsx): the
+  // unlock face when a vault exists, the create-with-no-recovery-sentence
+  // face when none does. `then` carries the act that was waiting on it.
+  openVaultDialog(then?: VaultFollowUp): void;
+  // Open the Remove Lock confirmation: not §4-destructive (nothing is
+  // destroyed — the note decrypts), but the consequence is silent EXPOSURE
+  // (the next sync or agent scan sees the body), which earns the one confirm.
+  confirmRemoveLock(note: { path: string; title: string; folder: string }): void;
   // Show an error under the note list (the browser's error strip): where a
   // failed workspace create/attach reports, same surface as a failed delete.
   showError(message: string): void;
@@ -156,6 +176,17 @@ export interface RegistryDeps {
   // runs on every menu/palette render, and a note carrying a pasted blob
   // should not be serialized just to ask whether it names a profile.
   noteHead(docId: string): string | null;
+  // The vault (note locking, docs/locking.md). State is the view's mirrored
+  // copy (vault/channel.ts) — cheap enough for `when` to read per render.
+  // The two note ops resolve to an error message to surface, or null (the
+  // createWorkspace contract); both refresh the note lists themselves.
+  vaultState(): VaultState;
+  lockVaultNow(): void;
+  // Lock resolves to what to SURFACE: an error, or a notice (the sweep
+  // sealed images other notes also show — proceed-and-say, docs/locking.md
+  // §5); both null on a quiet success.
+  lockNoteNow(folder: string, path: string): Promise<{ error: string | null; notice: string | null }>;
+  removeLockNow(folder: string, path: string): Promise<string | null>;
   editor: {
     find(docId: string): void;
     replace(docId: string): void;

@@ -78,7 +78,7 @@ function problemsOf(text: string): string[] {
   try {
     parsed = JSON.parse(stripJsonc(text));
   } catch (err) {
-    return [`Not valid JSONC — the app would run on defaults: ${err instanceof Error ? err.message : String(err)}`];
+    return [`Not valid JSONC (the app would run on defaults): ${err instanceof Error ? err.message : String(err)}`];
   }
   return parseSettings(parsed).problems;
 }

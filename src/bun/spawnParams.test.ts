@@ -22,6 +22,7 @@ const params = (p: Partial<NoteParams>): NoteParams => ({
   profile: null,
   envFile: null,
   env: {},
+  locked: null,
   hosts: [],
   tags: [],
   template: false,

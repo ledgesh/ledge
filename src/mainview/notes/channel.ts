@@ -9,9 +9,16 @@ import type { TagInfo } from "../../shared/tags";
 
 // What a read hands back: the note's text plus its disk version, which the
 // store echoes into the next write's baseMtimeMs (external-edit guard).
+// `locked` marks a locked note; `held: true` means the body was WITHHELD
+// (vault locked — text is only the plaintext head, and the tab shows the
+// placeholder face, never an editor); `damaged` rides on held when the
+// ciphertext fails authentication (rpc-schema noteRead says the shape).
 export interface NoteFile {
   text: string;
   mtimeMs: number;
+  locked?: true;
+  held?: true;
+  damaged?: true;
 }
 
 // What a guarded write reports: the new disk version, and where an external
@@ -26,10 +33,13 @@ interface NoteHandlers {
   // per-note calls carry just the path — its folder is derivable Bun-side.
   list: (folder: string) => Promise<NoteMeta[]>;
   read: (path: string) => Promise<NoteFile | null>;
-  search: (folder: string, query: string) => Promise<SearchHit[]>;
-  backlinks: (path: string) => Promise<BacklinkHit[]>;
-  tags: (folder: string) => Promise<TagInfo[]>;
-  tagged: (folder: string, tag: string) => Promise<TagHit[]>;
+  // The body scans carry lockedSkipped — how many locked notes the answer
+  // deliberately does not cover (docs/locking.md §4) — for the overlay and
+  // panel footers.
+  search: (folder: string, query: string) => Promise<{ hits: SearchHit[]; lockedSkipped: number }>;
+  backlinks: (path: string) => Promise<{ backlinks: BacklinkHit[]; lockedSkipped: number }>;
+  tags: (folder: string) => Promise<{ tags: TagInfo[]; lockedSkipped: number }>;
+  tagged: (folder: string, tag: string) => Promise<{ hits: TagHit[]; lockedSkipped: number }>;
   write: (path: string, text: string, baseMtimeMs: number | null) => Promise<WriteResult>;
   create: (folder: string, text: string) => Promise<NoteMeta>;
   retitle: (path: string, text: string) => Promise<NoteMeta>;
@@ -78,8 +88,9 @@ export function readNote(path: string): Promise<NoteFile | null> {
 
 // Full-text hits for `query` within one workspace's notes, newest note first
 // (shared/search.ts owns the grammar and the caps). Bun does the scanning —
-// the view never holds the corpus, only the result list.
-export function searchNotes(folder: string, query: string): Promise<SearchHit[]> {
+// the view never holds the corpus, only the result list. lockedSkipped rides
+// along for the overlay's footer: locked notes are never searched.
+export function searchNotes(folder: string, query: string): Promise<{ hits: SearchHit[]; lockedSkipped: number }> {
   return bridge().search(folder, query);
 }
 
@@ -87,21 +98,22 @@ export function searchNotes(folder: string, query: string): Promise<SearchHit[]>
 // Bun scans (the same searchNotes stance: the view never holds the corpus)
 // and resolves titles within the note's own workspace, the same way the
 // linking notes' editors do.
-export function backlinksOf(path: string): Promise<BacklinkHit[]> {
+export function backlinksOf(path: string): Promise<{ backlinks: BacklinkHit[]; lockedSkipped: number }> {
   return bridge().backlinks(path);
 }
 
 // One workspace's tag directory (frontmatter tags: + inline #hashtags,
 // shared/tags.ts owns the grammar), alphabetical with per-note counts. Feeds
 // the Tags panel, the overlay's tag rows, and the # completion vocabulary —
-// Bun scans, the searchNotes stance again.
-export function listTags(folder: string): Promise<TagInfo[]> {
+// Bun scans, the searchNotes stance again. Locked notes contribute exactly
+// their plaintext head's tags; lockedSkipped counts their unscanned bodies.
+export function listTags(folder: string): Promise<{ tags: TagInfo[]; lockedSkipped: number }> {
   return bridge().tags(folder);
 }
 
 // Every occurrence of one tag across a workspace, newest note first, rows
 // carrying line/context/raw for the same list-open-reveal as backlinks.
-export function notesTagged(folder: string, tag: string): Promise<TagHit[]> {
+export function notesTagged(folder: string, tag: string): Promise<{ hits: TagHit[]; lockedSkipped: number }> {
   return bridge().tagged(folder, tag);
 }
 

@@ -271,6 +271,18 @@ Bun therefore validates everything and derives anything derivable:
   for the profiles dir (§6a), for the same reason: no test or probe may
   read — or seed — the real one.
 
+## 3a. Note locking
+
+Per-note encryption — the vault, the envelope, the readNote/writeNote seam
+behavior, the agents-never-read invariant, and the sealed-image sweep — is
+its own sibling standard: **docs/locking.md**. It rides the invariants above
+(temp-plus-rename writes, rename-not-unlink trash, the assertNote guards)
+rather than amending them; the two facts worth knowing from here are that
+`bun/vault.ts` owns keys and byte shapes (node:crypto only, §8-clean), and
+that `.vault.json` in the app home is machine-written AND Bun-shaped like
+the registry — a convenience artifact, not a precious one, since every
+locked note carries its own salt.
+
 ## 4. Identity keys: path vs docId
 
 A note has two keys with two lifetimes, and they are never bound to each

@@ -48,15 +48,15 @@ describe("frontmatterEnd", () => {
 describe("parseFrontmatter", () => {
   test("a note with no frontmatter yields empty params and no problems", () => {
     const { params, problems, end } = parseFrontmatter("# Title\nbody");
-    expect(params).toEqual({ cwd: null, profile: null, envFile: null, env: {}, hosts: [], tags: [], template: false });
+    expect(params).toEqual({ cwd: null, profile: null, envFile: null, env: {}, hosts: [], tags: [], template: false, locked: null });
     expect(problems).toEqual([]);
     expect(end).toBe(0);
   });
 
-  test("all seven keys parse together", () => {
+  test("all eight keys parse together", () => {
     const { params, problems } = parseFrontmatter(
       fm(
-        "cwd: ~/Projects/ledge\nprofile: petstore\nenvFile: ./.env\nhost: web1 deploy@prod\ntags: work, ledge\ntemplate: true\nenv:\n  NODE_ENV: development\n  PORT: 3000\n",
+        "cwd: ~/Projects/ledge\nprofile: petstore\nenvFile: ./.env\nhost: web1 deploy@prod\ntags: work, ledge\ntemplate: true\nlocked: v1.aa.bb.cc\nenv:\n  NODE_ENV: development\n  PORT: 3000\n",
       ),
     );
     expect(params).toEqual({
@@ -67,8 +67,21 @@ describe("parseFrontmatter", () => {
       hosts: ["web1", "deploy@prod"],
       tags: ["work", "ledge"],
       template: true,
+      locked: "v1.aa.bb.cc",
     });
     expect(problems).toEqual([]);
+  });
+
+  test("locked carries its value opaquely; only an empty one costs the line", () => {
+    // The value's structure is Bun's (vault.ts parseLockedHeader) — the
+    // grammar stores whatever non-empty string is there, so a DAMAGED header
+    // still reads as locked (refuse-to-decrypt, never unlocked-after-all).
+    expect(parseFrontmatter(fm("locked: not-even-close\n")).params.locked).toBe("not-even-close");
+    const { params, problems } = parseFrontmatter(fm("locked:\n"));
+    expect(params.locked).toBeNull();
+    expect(problems).toHaveLength(1);
+    // An INDENTED locked under env: is an env var named locked, not a header.
+    expect(parseFrontmatter(fm("env:\n  locked: yes\n")).params.locked).toBeNull();
   });
 
   test("template takes exactly true, false, or daily; anything else costs the line", () => {
@@ -277,7 +290,7 @@ describe("parseFrontmatter", () => {
 
   test("an empty block is valid and empty", () => {
     const { params, problems, end } = parseFrontmatter("---\n---\n# Title\n");
-    expect(params).toEqual({ cwd: null, profile: null, envFile: null, env: {}, hosts: [], tags: [], template: false });
+    expect(params).toEqual({ cwd: null, profile: null, envFile: null, env: {}, hosts: [], tags: [], template: false, locked: null });
     expect(problems).toEqual([]);
     expect(end).toBeGreaterThan(0);
   });

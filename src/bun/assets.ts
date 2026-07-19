@@ -19,10 +19,11 @@
 // scoped to exactly three trash paths, and orphaned images are a cheap price
 // for never joining that list. The one unlink below is the temp-file discard
 // on a failed save — the same sanctioned pattern as writeNote's.
-import { join, resolve, extname, sep } from "node:path";
+import { dirname, join, resolve, extname, sep } from "node:path";
 import { mkdir, readdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { ASSETS_DIRNAME } from "../shared/rpc-schema";
 import { assertRegisteredRoot, isInside, uniqueName } from "./workspaces";
+import { isSealedAsset, openAssetBytes, sealAssetBytes, vaultState } from "./vault";
 
 export function assetsDirOf(root: string): string {
   return join(resolve(root), ASSETS_DIRNAME);
@@ -77,14 +78,29 @@ export function assetPathOf(root: string, src: string): string {
   return path;
 }
 
-/** The bytes behind an image reference, or null when the file is missing. */
-export async function readAsset(root: string, src: string): Promise<{ dataB64: string; mime: string } | null> {
+/** What a read hands back: the bytes, or `sealed` — the file exists but is a
+ * sealed image (docs/locking.md §5) and the vault is locked, so the widget
+ * shows the locked-image placeholder rather than a broken one. */
+export type AssetRead = { dataB64: string; mime: string } | { sealed: true } | null;
+
+/** The bytes behind an image reference, or null when the file is missing.
+ * A SEALED asset (magic-detected, whatever its name) decrypts here when the
+ * vault is open — the one decrypt seam, exactly where the RPC reads. */
+export async function readAsset(root: string, src: string): Promise<AssetRead> {
   const path = assetPathOf(root, src);
+  let bytes: Buffer;
   try {
-    const bytes = await readFile(path);
-    return { dataB64: bytes.toString("base64"), mime: imageMimeOf(path)! };
+    bytes = await readFile(path);
   } catch {
     return null; // deleted or unreadable: the widget shows a broken placeholder
+  }
+  if (!isSealedAsset(bytes)) return { dataB64: bytes.toString("base64"), mime: imageMimeOf(path)! };
+  if (vaultState() !== "unlocked") return { sealed: true };
+  try {
+    return { dataB64: openAssetBytes(bytes).toString("base64"), mime: imageMimeOf(path)! };
+  } catch (err) {
+    console.warn("[vault] cannot open sealed image", path, err);
+    return null; // damaged: broken placeholder is the honest face
   }
 }
 
@@ -112,15 +128,34 @@ async function writeAsset(assetsDir: string, path: string, bytes: Uint8Array): P
  * uniqueName against a readdir snapshot so the rename that follows cannot
  * clobber (the same clobber-safety story as note names, architecture.md §3).
  */
-export async function savePastedImage(root: string, bytes: Uint8Array, ext = ".png"): Promise<string> {
+export async function savePastedImage(root: string, bytes: Uint8Array, ext = ".png", seal = false): Promise<string> {
   const assetsDir = assetsDirOf(assertRegisteredRoot(root));
   await mkdir(assetsDir, { recursive: true });
   const taken = new Set(await readdir(assetsDir));
   const base = `pasted-${new Date().toISOString().slice(0, 10)}`;
   const name = uniqueName(base, taken, ext);
-  await writeAsset(assetsDir, join(assetsDir, name), bytes);
+  // A paste into a LOCKED note is sealed from the first byte (docs/locking.md
+  // §5): the plaintext never exists at this path — the never-unlink orphaning
+  // stays a storage quirk, not a leak. Same name shape either way; the magic
+  // header, not the filename, is what marks it.
+  await writeAsset(assetsDir, join(assetsDir, name), seal ? sealAssetBytes(bytes) : bytes);
   // Forward slash always: this string goes into markdown, not a syscall.
   return `${ASSETS_DIRNAME}/${name}`;
+}
+
+/** Re-write one asset's bytes in place (temp+rename): the lock sweep's seal
+ * and Remove Lock's unseal. The name never changes, so references hold. */
+export async function replaceAssetBytes(path: string, bytes: Uint8Array): Promise<void> {
+  await writeAsset(dirname(path), path, bytes);
+}
+
+/** The raw on-disk bytes of an asset (the sweep reads before sealing). */
+export async function rawAssetBytes(root: string, src: string): Promise<Buffer | null> {
+  try {
+    return await readFile(assetPathOf(root, src));
+  } catch {
+    return null;
+  }
 }
 
 // Read the pasteboard's image as PNG bytes, or null when it holds none.
@@ -159,9 +194,13 @@ export async function pasteboardImage(root: string): Promise<Uint8Array | null> 
   }
 }
 
-/** The whole paste flow: pasteboard → <root>/.ledge-assets, or null when there is no image. */
-export async function pasteImageAsset(root: string): Promise<string | null> {
+/** The whole paste flow: pasteboard → <root>/.ledge-assets, or null when
+ * there is no image. `seal` when the pasting note is locked (the caller —
+ * bun/index.ts — derives that from the note itself, never from the view's
+ * say-so). The osascript temp is transient plaintext either way, unlinked
+ * immediately: the documented caveat (docs/locking.md §5). */
+export async function pasteImageAsset(root: string, seal = false): Promise<string | null> {
   const bytes = await pasteboardImage(root);
   if (!bytes || bytes.length === 0) return null;
-  return savePastedImage(root, bytes);
+  return savePastedImage(root, bytes, ".png", seal);
 }

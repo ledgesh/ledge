@@ -169,6 +169,20 @@ class ImageWidget extends WidgetType {
       view.requestMeasure();
     };
 
+    // A sealed image (docs/locking.md §5): the file is there, the vault is
+    // locked. Not "broken" — the honest face is a lock, and unlocking is the
+    // fix. The cache eviction on unlock plus the widget's next rebuild (any
+    // doc/selection change) swaps in the bytes; locked NOTES re-pour wholesale
+    // on unlock, which rebuilds their widgets immediately.
+    const sealed = () => {
+      box.textContent = "";
+      const note = box.appendChild(document.createElement("span"));
+      note.className = "ledge-mdimage-broken";
+      note.dataset.testid = "sealed-image";
+      note.textContent = "locked image (unlock to view)";
+      view.requestMeasure();
+    };
+
     const img = box.appendChild(document.createElement("img"));
     if (m.alt) img.alt = m.alt;
     img.title = m.alt || "Click to edit image markdown";
@@ -187,7 +201,8 @@ class ImageWidget extends WidgetType {
         broken();
       } else {
         void assetDataUrl(folder, m.src.path).then((url) => {
-          if (url) img.src = url;
+          if (url === "sealed") sealed();
+          else if (url) img.src = url;
           else broken();
         });
       }

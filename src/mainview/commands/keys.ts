@@ -146,6 +146,20 @@ export const COMMANDS = {
   // same file-is-the-UI stance, and the chord says so.
   "frontmatter.edit": { title: "Edit Frontmatter", keys: ["Alt-Mod-,"] },
 
+  // Note locking (docs/locking.md §7). ⌘L is the walking-away gesture — the
+  // one lock command frequent enough to earn a chord: of the free ⌘ letters,
+  // L is the mnemonic one (Lock; ⌥⌘L backlinks is unrelated and stays).
+  // Unlock earns no chord: it is INTERPOSED — opening a locked note prompts
+  // in place, the host-picker move — and the palette entry is the proactive
+  // spelling. The per-note pair is two faces of one act (exactly one shows,
+  // per the note's live locked flag — the template-marker move): rare acts,
+  // palette-only.
+  "vault.lock": { title: "Lock Notes", keys: ["Mod-l"] },
+  "vault.unlock": { title: "Unlock Notes…" },
+  "note.lockOn": { title: "Lock This Note…" },
+  "note.lockOff": { title: "Remove Lock…" },
+  "vault.changePassphrase": { title: "Change Vault Passphrase…" },
+
   // Notes. note.delete is the row form (context menu, and `d`/⌫ on a focused
   // row); note.deleteCurrent is the ⌘⌫ / palette form acting on the focused
   // note. Both land in the trash with Undo (docs/interactions.md §4). ⌘⌫ fires

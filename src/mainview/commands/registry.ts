@@ -25,6 +25,8 @@ import {
   Layers,
   LayoutTemplate,
   Link,
+  Lock,
+  LockOpen,
   Link2,
   PanelLeft,
   Pencil,
@@ -49,6 +51,7 @@ import {
 import { findLeaf, focusedDocId, focusedTab, leafIds } from "@/workspace/tree";
 import { notesOf, trashOf } from "@/workspace/store";
 import { parseFrontmatter } from "../../shared/frontmatter";
+import type { NoteMeta } from "../../shared/rpc-schema";
 import { keysOf, listKeysOf, tabSelectKey, titleOf, workspaceSelectKey, type CommandId } from "./keys";
 import { chipOf } from "./format";
 import type { Command, CommandCtx, RegistryDeps } from "./types";
@@ -250,7 +253,9 @@ export function buildCommands(deps: RegistryDeps): Command[] {
     // file's watcher refresh is what updates the picker's rows.
     cmd("note.templateOn", {
       icon: LayoutTemplate,
-      when: (ctx) => currentTemplateFlag(ctx, deps) === false,
+      // The marker exclusivity's UI half (Bun refuses too): a locked note's
+      // body exists to stay sealed, a template's to be stamped out.
+      when: (ctx) => currentTemplateFlag(ctx, deps) === false && currentNoteMeta(ctx)?.locked !== true,
       run: (ctx) => {
         const docId = focusedDocId(ctx.selected);
         if (docId) deps.editor.toggleTemplate(docId);
@@ -450,6 +455,73 @@ export function buildCommands(deps: RegistryDeps): Command[] {
     // Opens settings.jsonc in Ledge's own editor dialog — the file is the
     // settings UI (docs/architecture.md "Settings"), its comments the
     // documentation; changes apply at the next launch.
+    // --- note locking (docs/locking.md §7) -----------------------------------
+    // ⌘L relocks NOW — the walking-away gesture. Flush-then-drop lives in the
+    // dep (glue): the view must save dirty locked buffers before Bun forgets
+    // how to encrypt them.
+    cmd("vault.lock", {
+      icon: Lock,
+      when: () => deps.vaultState() === "unlocked",
+      run: () => deps.lockVaultNow(),
+    }),
+    // The proactive unlock. Interposed unlock (opening a locked note) rides
+    // the placeholder's own button; this entry is for unlocking ahead of
+    // need. Visible while there is anything a passphrase would open — a
+    // vault, or (vaultless machine, synced-in locked notes) any locked note.
+    cmd("vault.unlock", {
+      icon: LockOpen,
+      when: (ctx) => deps.vaultState() === "locked" || (deps.vaultState() === "none" && anyLockedNote(ctx)),
+      run: (ctx) => ctx.ui.openVaultDialog?.(),
+    }),
+    // The per-note pair: exactly one face shows (the template-marker move),
+    // per the note's LIVE locked flag off the store's lists. Target-scoped
+    // like note.delete — the sidebar row's menu passes its note; the palette
+    // passes none and targetNote falls back to the focused tab. Locking a
+    // note with no vault yet runs first-time setup with the lock as
+    // follow-up; with a locked vault, unlock first, same follow-up — the
+    // dialog carries the intent so the user's act completes instead of
+    // dead-ending.
+    cmd("note.lockOn", {
+      icon: Lock,
+      targetKind: "note",
+      when: (ctx) => {
+        const note = targetNote(ctx);
+        return note !== null && !note.locked && !note.template;
+      },
+      run: (ctx) => {
+        const note = targetNote(ctx);
+        if (!note) return;
+        if (deps.vaultState() !== "unlocked") {
+          ctx.ui.openVaultDialog?.({ lock: { path: note.path, folder: ctx.selected.folder } });
+          return;
+        }
+        void deps.lockNoteNow(ctx.selected.folder, note.path).then((res) => {
+          if (res.error) ctx.ui.showError?.(res.error);
+          else if (res.notice) ctx.ui.showNotice?.(res.notice);
+        });
+      },
+    }),
+    // Unlocked only: the rewrap needs the old master key in hand, and asking
+    // for the old passphrase inside the dialog would duplicate what the
+    // unlock flow already proves.
+    cmd("vault.changePassphrase", {
+      icon: KeyRound,
+      when: () => deps.vaultState() === "unlocked",
+      run: (ctx) => ctx.ui.openVaultDialog?.({ changePassphrase: true }),
+    }),
+    cmd("note.lockOff", {
+      icon: LockOpen,
+      targetKind: "note",
+      when: (ctx) => targetNote(ctx)?.locked === true,
+      run: (ctx) => {
+        const meta = targetNote(ctx);
+        if (!meta) return;
+        const note = { path: meta.path, title: meta.title, folder: ctx.selected.folder };
+        if (deps.vaultState() !== "unlocked") ctx.ui.openVaultDialog?.({ removeLock: note });
+        else ctx.ui.confirmRemoveLock?.(note);
+      },
+    }),
+
     cmd("settings.open", {
       icon: SettingsIcon,
       run: (ctx) => ctx.ui.openSettingsEditor?.(),
@@ -772,6 +844,26 @@ function currentTemplateFlag(ctx: CommandCtx, deps: RegistryDeps): boolean | "da
   if (!docId) return null;
   const head = deps.noteHead(docId);
   return head === null ? null : parseFrontmatter(head).params.template;
+}
+
+// The focused tab's note as the STORE knows it — the template-marker verb's
+// lock check. The store's meta, not the live doc's frontmatter, deliberately:
+// a held tab has no editor (noteHead is null there), while the
+// watcher-refreshed lists carry the locked flag for every note either way.
+// Null for a tab with no file yet: an unsaved scratch note has nothing on
+// disk to lock. (The lock verbs themselves resolve through targetNote — the
+// same store lookup, but row-target aware for the sidebar menu.)
+function currentNoteMeta(ctx: CommandCtx): NoteMeta | null {
+  const tab = focusedTab(ctx.selected);
+  if (!tab?.path) return null;
+  return notesOf(ctx.state, ctx.selected.folder).find((n) => n.path === tab.path) ?? null;
+}
+
+// Whether ANY visible workspace holds a locked note — what makes "Unlock
+// Notes…" meaningful on a machine whose vault file has not arrived (state
+// "none" but synced-in locked notes; Bun's probe unlock handles the rest).
+function anyLockedNote(ctx: CommandCtx): boolean {
+  return ctx.state.workspaces.some((w) => notesOf(ctx.state, w.folder).some((n) => n.locked));
 }
 
 function paneTarget(ctx: CommandCtx): string | undefined {

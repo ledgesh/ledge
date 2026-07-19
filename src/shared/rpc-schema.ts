@@ -36,7 +36,16 @@ export interface NoteMeta {
   // become the live template registry for free. Optional so the many
   // fixtures and metas that are not templates say nothing at all.
   template?: true | "daily";
+  // Present when the note is locked (its frontmatter carries the crypto
+  // header, docs/locking.md): the sidebar/⌘P lock glyph, the scans' skip,
+  // and the agent listings' flag all read this. Rides the same head read
+  // the title does — the plaintext head is designed to answer it.
+  locked?: true;
 }
+
+/** The vault's current state (bun/vault.ts): "none" until the first lock
+ * ever creates it, then locked/unlocked as the master key comes and goes. */
+export type VaultState = "none" | "locked" | "unlocked";
 
 /** A CLI open request after Bun resolved and guarded it (bun/openRequest.ts):
  * the note as a full NoteMeta — the store's openNote takes nothing less —
@@ -154,7 +163,16 @@ export type LedgeRPC = {
       // rides along because it is the note's disk VERSION: the view holds it
       // per open note and hands it back on every noteWrite, which is how a
       // save can tell "my own last state" from "someone else wrote here".
-      noteRead: { params: { path: string }; response: { note: { text: string; mtimeMs: number } | null } };
+      // A LOCKED note carries `locked: true`; `held: true` means the body was
+      // withheld (vault locked — `text` is only the plaintext head, and the
+      // view shows the locked placeholder, not an editor), and `damaged`
+      // rides on held when the ciphertext fails authentication (modified
+      // outside Ledge) — the placeholder says restore-from-backup instead of
+      // prompting for a passphrase that cannot help.
+      noteRead: {
+        params: { path: string };
+        response: { note: { text: string; mtimeMs: number; locked?: true; held?: true; damaged?: true } | null };
+      };
       // Atomic overwrite (temp file plus rename), so a crash mid-save can never
       // truncate a note. Sent on a debounce as you type and on Cmd+S.
       // `baseMtimeMs` is the disk version the view last saw (from noteRead,
@@ -222,7 +240,12 @@ export type LedgeRPC = {
       // notes folder instead of the result list. Hits arrive newest note
       // first, each carrying the note plus the matched line, so the view can
       // list, open, and reveal without a second request.
-      noteSearch: { params: { root: string; query: string }; response: { hits: SearchHit[] } };
+      // `lockedSkipped` counts the workspace's locked notes, whose bodies the
+      // scan deliberately never reads (vault state irrelevant —
+      // docs/locking.md §4); the overlay renders it as a muted footer so the
+      // skip is visible where the answer would have been. The same count
+      // rides every body scan below.
+      noteSearch: { params: { root: string; query: string }; response: { hits: SearchHit[]; lockedSkipped: number } };
       // The notes whose [[wikilinks]] point at this note, for the Backlinks
       // panel. Sent when the panel is open and the shown note (or its folder's
       // files, via the notesChanged push) changes. Bun owns the scan for
@@ -231,7 +254,7 @@ export type LedgeRPC = {
       // links resolve by title within the note's own workspace, exactly as the
       // linking notes' editors resolve them. Only the path crosses the RPC;
       // its root is derived Bun-side like every per-note call.
-      noteBacklinks: { params: { path: string }; response: { backlinks: BacklinkHit[] } };
+      noteBacklinks: { params: { path: string }; response: { backlinks: BacklinkHit[]; lockedSkipped: number } };
       // One workspace's tag directory: every tag its notes carry (frontmatter
       // `tags:` and inline #hashtags, shared/tags.ts owns the grammar), with
       // per-NOTE counts, alphabetical. Sent when the Tags panel's directory is
@@ -241,13 +264,16 @@ export type LedgeRPC = {
       // scoped to one root because tags are, like wikilinks: a tag names notes
       // within a workspace, not across them. Scan-on-demand, no index: the
       // backlinksTo cost class, accepted for the same reasons.
-      tagList: { params: { root: string }; response: { tags: TagInfo[] } };
+      // Locked notes still contribute their frontmatter `tags:` (the
+      // plaintext head is where the user put them); lockedSkipped says their
+      // BODY hashtags went unread.
+      tagList: { params: { root: string }; response: { tags: TagInfo[]; lockedSkipped: number } };
       // The occurrences of one tag across a workspace, newest note first —
       // the Tags panel's drill-in. Same scan as tagList over the same scope,
       // filtered to one case-folded identity; each hit carries the note plus
       // the occurrence line, so the view can list, open, and reveal without a
       // second request (noteSearch's shape).
-      tagNotes: { params: { root: string; tag: string }; response: { hits: TagHit[] } };
+      tagNotes: { params: { root: string; tag: string }; response: { hits: TagHit[]; lockedSkipped: number } };
       // One workspace's deleted notes still recoverable, newest first. Read at
       // boot and at every folder refresh, alongside noteList: the count is on
       // screen whether or not the section is expanded, so the trash cannot
@@ -418,7 +444,14 @@ export type LedgeRPC = {
       // registered root, inside it, an image-extension allowlist, no
       // dot-entries) — the view is the least-trusted end, and without the
       // extension check this call would read any note. null when missing.
-      assetRead: { params: { root: string; src: string }; response: { image: { dataB64: string; mime: string } | null } };
+      // `sealed: true` means the file exists but is a SEALED image
+      // (docs/locking.md §5) and the vault is locked: the widget shows the
+      // locked-image placeholder, not a broken one. Sealed assets decrypt
+      // Bun-side when the vault is open and ride back as ordinary bytes.
+      assetRead: {
+        params: { root: string; src: string };
+        response: { image: { dataB64: string; mime: string } | null; sealed?: boolean };
+      };
       // Save the pasteboard's image (if any) into the workspace root's .ledge-assets/
       // as a PNG and return the markdown-relative reference to embed
       // (`.ledge-assets/pasted-….png`), or null when the pasteboard holds no image.
@@ -426,7 +459,10 @@ export type LedgeRPC = {
       // pasting note's workspace. The image bytes never cross the RPC: Bun
       // reads the pasteboard (osascript; pbpaste is text-only) and names the
       // file itself via uniqueName — the view never names a file.
-      assetPaste: { params: { root: string }; response: { src: string | null } };
+      // `notePath` is the PASTING note's file, when it has one: Bun derives
+      // from the note itself — never from a view flag — whether the paste
+      // must be sealed at birth (the note is locked, docs/locking.md §5).
+      assetPaste: { params: { root: string; notePath?: string | null }; response: { src: string | null } };
       // The persisted session layout (.layout.json in the app home): which
       // workspaces exist, which folder each owns, their pane trees, and which
       // notes are open where. One global file — the workspace list itself is
@@ -449,6 +485,42 @@ export type LedgeRPC = {
       // NoteMeta plus its root so the view can select the workspace and open
       // the tab without a lookup; null means nothing (valid) was pending.
       openRequestTake: { params: {}; response: { open: ExternalOpenInfo | null } };
+      // --- the vault (note locking, docs/locking.md) ---------------------
+      // Current state, fetched at boot and after any transition the view did
+      // not drive itself. "none" = no vault exists yet (the first Lock This
+      // Note runs creation instead of unlock).
+      vaultState: { params: {}; response: { state: VaultState } };
+      // First lock ever: create the vault from a chosen passphrase (scrypt →
+      // master key; .vault.json holds the salt and a key-check, never a
+      // key). Leaves the vault unlocked. Refused when one already exists.
+      vaultCreate: { params: { passphrase: string }; response: { ok: boolean } };
+      // Unlock with the passphrase. ok:false is a wrong passphrase (the
+      // dialog shakes and stays), never an exception. The passphrase crosses
+      // the RPC exactly once per unlock, is used for the KDF, and is
+      // dropped; with no vault FILE but locked notes on disk (synced from
+      // another machine), Bun probes a locked note's own self-contained
+      // header and rebuilds the file on success.
+      vaultUnlock: { params: { passphrase: string }; response: { ok: boolean } };
+      // Relock now (⌘L, and quit). The view flushes dirty locked buffers
+      // BEFORE calling — Bun cannot save what it cannot see — then evicts
+      // its decrypted state on the vaultChanged push this triggers.
+      vaultLock: { params: {}; response: { ok: boolean } };
+      // Lock / unlock one note (the palette two-faces pair). Both require
+      // the vault unlocked; noteLock refuses template-marked notes (the
+      // marker exclusivity, checked Bun-side in notes.ts where the MCP
+      // template path also cannot bypass it). Body and header transition on
+      // disk; the response meta carries the new locked flag for the lists.
+      // `sealedShared` names swept images OTHER unlocked notes also show
+      // (docs/locking.md §5) — the view surfaces it as a notice; sealing
+      // proceeds either way, since a refusal would deadlock locking two
+      // notes that share an image.
+      noteLock: { params: { path: string }; response: { note: NoteMeta; sealedShared: string[] } };
+      noteRemoveLock: { params: { path: string }; response: { note: NoteMeta } };
+      // Change the passphrase: new salt + master key, every locked note's
+      // header and sealed image's key wrap rewritten across all available
+      // roots — headers and wraps only, bodies never (docs/locking.md §3).
+      // Unlocked only; `rewrapped` is the count for the notice.
+      vaultChangePassphrase: { params: { passphrase: string }; response: { ok: boolean; rewrapped: number } };
       // Open a note link in the OS default handler (browser, mail client).
       // Sent by the editor's ⌘-click and the "Open Link" command. The URL is
       // re-validated Bun-side against the same scheme allowlist the view used
@@ -495,6 +567,11 @@ export type LedgeRPC = {
       // payload as openRequestTake's answer; the view selects the workspace
       // showing `root` and opens the note's tab.
       openExternal: ExternalOpenInfo;
+      // The vault's state changed on the Bun side — an unlock, a ⌘L, or the
+      // 15-minute idle auto-relock. On "locked" the view swaps open locked
+      // tabs to placeholders, drops their decrypted bodies, and evicts the
+      // asset data-URL cache; on "unlocked" it re-reads open locked notes.
+      vaultChanged: { state: VaultState };
     };
   };
 };

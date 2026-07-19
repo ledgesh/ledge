@@ -448,6 +448,22 @@ export function flushAll(): void {
   for (const docId of docs.keys()) void saveNow(docId);
 }
 
+// The same, awaited: ⌘L's flush-then-drop needs every dirty LOCKED buffer on
+// disk (encrypted) before Bun forgets how to encrypt it, and fire-and-forget
+// cannot promise that ordering. Flushes everything rather than just locked
+// notes: the extra saves are no-ops for clean buffers, and filtering here
+// would mean this module learning what locked means.
+export function flushAllNow(): Promise<void> {
+  return Promise.all([...docs.keys()].map((docId) => saveNow(docId))).then(() => {});
+}
+
+// The file an open note is currently aimed at, or null (no file yet, or an
+// unknown docId). The editor pool's vault eviction/rehydration reads this —
+// the pool tracks views, the store tracks files, and the docId is the join.
+export function pathOf(docId: string): string | null {
+  return docs.get(docId)?.path ?? null;
+}
+
 // Test seam: forget every registered note.
 export function resetDocs(): void {
   for (const e of docs.values()) if (e.timer !== null) clearTimeout(e.timer);

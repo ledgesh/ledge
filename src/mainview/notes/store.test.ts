@@ -64,10 +64,10 @@ function fakeBridge() {
   configureNotes({
     list: async () => [],
     read: async () => null,
-    search: async () => [],
-    backlinks: async () => [],
-    tags: async () => [],
-    tagged: async () => [],
+    search: async () => ({ hits: [], lockedSkipped: 0 }),
+    backlinks: async () => ({ backlinks: [], lockedSkipped: 0 }),
+    tags: async () => ({ tags: [], lockedSkipped: 0 }),
+    tagged: async () => ({ hits: [], lockedSkipped: 0 }),
     takeOpenRequest: async () => null,
     // The store never calls these (they are command-layer capabilities); the
     // stubs exist to satisfy the handler shape.
@@ -774,7 +774,7 @@ describe("params syncing", () => {
     noteChanged("doc-1", "# Note\n\nbody\n");
     await saveNow("doc-1");
     expect(fs.configures).toHaveLength(3);
-    expect(fs.configures[2].params).toEqual({ cwd: null, profile: null, envFile: null, env: {}, hosts: [], tags: [], template: false });
+    expect(fs.configures[2].params).toEqual({ cwd: null, profile: null, envFile: null, env: {}, hosts: [], tags: [], template: false, locked: null });
   });
 
   test("a comment-only frontmatter change re-sends nothing", async () => {
@@ -806,7 +806,7 @@ describe("workspace default cwd", () => {
     expect(fs.configures).toHaveLength(1);
     expect(fs.configures[0]).toEqual({
       sessionId: "doc-1",
-      params: { cwd: FOLDER, profile: null, envFile: null, env: {}, hosts: [], tags: [], template: false },
+      params: { cwd: FOLDER, profile: null, envFile: null, env: {}, hosts: [], tags: [], template: false, locked: null },
       notePath: null,
     });
   });

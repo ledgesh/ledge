@@ -54,6 +54,14 @@ export interface NoteParams {
   // when the note retitles. Like tags, it never feeds a spawn; it lives here
   // because the block has one parser.
   template: boolean | "daily";
+  // The note-locking crypto header (docs/locking.md §2): non-null means the
+  // note's body on disk is ciphertext. The VALUE's structure is Bun's
+  // (bun/vault.ts parseLockedHeader); here it is one opaque string, parsed
+  // like every key because the block has one grammar. Unlike template: this
+  // is Bun-OWNED text — a save can never mint or drop it (writeNote
+  // re-stamps from disk), only the Lock/Remove Lock commands can — so the
+  // editor completion deliberately never offers it. Never feeds a spawn.
+  locked: string | null;
 }
 
 /** The reserved `host:` member meaning "this machine, no ssh". */
@@ -166,7 +174,7 @@ export function frontmatterEnd(text: string): number {
 /** Parse a note's frontmatter into spawn params (see the header for grammar). */
 export function parseFrontmatter(text: string): Frontmatter {
   const end = frontmatterEnd(text);
-  const params: NoteParams = { cwd: null, profile: null, envFile: null, env: {}, hosts: [], tags: [], template: false };
+  const params: NoteParams = { cwd: null, profile: null, envFile: null, env: {}, hosts: [], tags: [], template: false, locked: null };
   const problems: string[] = [];
   if (end === 0) return { params, problems, end };
 
@@ -269,6 +277,13 @@ export function parseFrontmatter(text: string): Frontmatter {
         else if (value === "false") params.template = false;
         else if (value === "daily") params.template = "daily";
         else problems.push(`"template" must be true, false, or daily: "${value}"`);
+        break;
+      case "locked":
+        // Opaque here; bun/vault.ts owns the structure. A non-empty value
+        // marks the note locked EVEN when malformed — a damaged header must
+        // read as damage (refuse to decrypt), never as "unlocked after all".
+        if (value) params.locked = value;
+        else problems.push(`"locked" is machine-written by Lock This Note — an empty value does nothing`);
         break;
       default:
         // Same reasoning as parseSettings: a misspelled key silently ignored

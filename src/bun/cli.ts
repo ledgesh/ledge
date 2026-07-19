@@ -25,7 +25,7 @@
 import { homedir } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { serve } from "./mcp";
-import { ledgeTools } from "./mcpTools";
+import { ledgeTools, resolveNoteForOpen } from "./mcpTools";
 import { installShim, tildify } from "./cliShim";
 import { writeOpenRequest } from "./openRequest";
 import { loadWorkspaces, rootContaining, roots, workspaceMatches } from "./workspaces";
@@ -109,7 +109,7 @@ export function hitPath(p: string, cwd: string, home: string = homedir()): strin
 
 /** ls rows: title column padded, date, then the variable-width path last. */
 export function formatNoteList(
-  notes: ReadonlyArray<{ title: string; path: string; modified: string; template?: true | "daily" }>,
+  notes: ReadonlyArray<{ title: string; path: string; modified: string; template?: true | "daily"; locked?: boolean }>,
   home: string = homedir(),
 ): string[] {
   const rows = notes.map((n) => ({
@@ -118,8 +118,10 @@ export function formatNoteList(
     path: tildify(n.path, home),
     // The `template:` frontmatter marker, surfaced where the notes are
     // listed — the same discoverability move as the app's ⌥⌘N picker. A
-    // trailing tag, not a column: most rows have nothing to say.
-    tag: n.template === "daily" ? "  (daily template)" : n.template ? "  (template)" : "",
+    // trailing tag, not a column: most rows have nothing to say. `(locked)`
+    // rides the same slot (the markers are mutually exclusive): the shell
+    // must say up front which rows `cat`/`search` will not serve.
+    tag: n.template === "daily" ? "  (daily template)" : n.template ? "  (template)" : n.locked ? "  (locked)" : "",
   }));
   const width = rows.reduce((w, r) => Math.max(w, r.title.length), 0);
   return rows.map((r) => `${r.title.padEnd(width)}  ${r.date}  ${r.path}${r.tag}`);
@@ -313,6 +315,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
           }
           for (const h of res.hits) io.out(`${hitPath(h.path, io.cwd())}:${h.line}: ${h.snippet}`);
           if (res.truncated) io.err(`ledge: more matches than shown — narrow the query`);
+          if (res.lockedNotesSkipped) io.err(`ledge: ${res.lockedNotesSkipped} locked note(s) not searched`);
           return res.hits.length > 0 ? 0 : 1; // grep's contract: no match is exit 1
         }
         case "tags": {
@@ -344,6 +347,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
           }
           for (const h of res.hits) io.out(`${hitPath(h.path, io.cwd())}:${h.line}: ${h.context}`);
           if (res.truncated) io.err(`ledge: more matches than shown`);
+          if (res.lockedNoteBodiesSkipped) io.err(`ledge: ${res.lockedNoteBodiesSkipped} locked note bodies not scanned`);
           return res.hits.length > 0 ? 0 : 1; // grep's contract, like search
         }
         case "new": {
@@ -422,8 +426,11 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
           const words = verb === "open" ? positionals : [verb, ...positionals];
           const arg = words.join(" ");
           if (arg === "") return openApp(io); // bare `ledge open`
-          const n = await tool("read_note", targetArgs(arg, io.cwd(), scope));
-          await writeOpenRequest(n.path as string);
+          // resolveNoteForOpen, not read_note: opening the app AT a note is
+          // navigation, so a LOCKED title still works — the app lands on its
+          // own unlock flow, and no body ever crosses this seam.
+          const n = await resolveNoteForOpen(targetArgs(arg, io.cwd(), scope));
+          await writeOpenRequest(n.path);
           return openApp(io);
         }
       }

@@ -13,14 +13,15 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import type { BacklinkHit, NoteMeta, TagHit, TrashMeta, WorkspaceRootInfo } from "../shared/rpc-schema";
 import { headingOf, labelOf, slugify, slugOf } from "../shared/slug";
-import { parseFrontmatter } from "../shared/frontmatter";
+import { frontmatterEnd, parseFrontmatter } from "../shared/frontmatter";
 import { instantiateTemplate, isoDateOf } from "../shared/template";
 import { collectHits, type SearchHit } from "../shared/search";
 import { resolveWikiTitle, wikiRefsOf } from "../shared/wikilinks";
 import { normalizeTag, tagDirectoryOf, tagRefsOf, type TagInfo } from "../shared/tags";
 import { configureBridge } from "./editor/bridge";
 import { configureTerminal } from "./terminal/channel";
-import { configureNotes, dispatchExternalOpen, dispatchNotesChanged, type ExternalOpenInfo } from "./notes/channel";
+import { configureNotes, dispatchExternalOpen, dispatchNotesChanged, type ExternalOpenInfo, type NoteFile } from "./notes/channel";
+import { configureVault, recordVaultState } from "./vault/channel";
 import { configureWorkspaces, recordWorkspaceKinds } from "./workspace/channel";
 import { configureClipboard } from "./lib/clipboard";
 import { configureCli } from "./lib/cli";
@@ -128,16 +129,101 @@ class FakeStore {
 
   private meta(data: RootData, path: string): NoteMeta {
     const n = data.notes.get(path)!;
-    // The real metaFor's flag, from the same shared parser: `template:`
-    // frontmatter is what puts a note in the ⌥⌘N picker, and the `daily`
-    // role rides the value.
-    const t = parseFrontmatter(n.text).params.template;
+    // The real metaFor's flags, from the same shared parser: `template:`
+    // frontmatter is what puts a note in the ⌥⌘N picker (the `daily` role
+    // rides the value), and a `locked:` value marks the note locked.
+    const p = parseFrontmatter(n.text).params;
     return {
       path,
       title: labelOf(headingOf(n.text), path),
       mtimeMs: n.mtimeMs,
-      ...(t ? { template: t } : {}),
+      ...(p.template ? { template: p.template } : {}),
+      ...(p.locked !== null ? { locked: true as const } : {}),
     };
+  }
+
+  // --- the vault fake --------------------------------------------------------
+  // bun/vault.ts condensed: state + a remembered passphrase; no crypto — the
+  // fake stores plaintext and WITHHOLDS it while locked, which is the exact
+  // behavior surface the specs assert on (placeholder faces, held reads,
+  // skip counts). The `locked:` value is an inert marker string here.
+  vault: { state: "none" | "locked" | "unlocked"; pass: string | null } = { state: "none", pass: null };
+
+  vaultCreate(pass: string): boolean {
+    if (this.vault.state !== "none") return false;
+    this.vault = { state: "unlocked", pass };
+    return true;
+  }
+
+  vaultUnlock(pass: string): boolean {
+    if (this.vault.state === "unlocked") return true;
+    if (this.vault.pass === null || pass !== this.vault.pass) return false;
+    this.vault.state = "unlocked";
+    return true;
+  }
+
+  vaultLock(): void {
+    if (this.vault.state === "unlocked") this.vault.state = "locked";
+  }
+
+  // The plaintext head, the real splitHead's answer: frontmatter block plus
+  // the H1 line (with the blank run between, when a block precedes it).
+  private headOf(text: string): string {
+    const end = frontmatterEnd(text);
+    let pos = end;
+    if (end > 0) pos += /^(?:[ \t]*\r?\n)+/.exec(text.slice(pos))?.[0]?.length ?? 0;
+    const nl = text.indexOf("\n", pos);
+    const firstLine = nl === -1 ? text.slice(pos) : text.slice(pos, nl);
+    if (/^#[ \t]+\S/.test(firstLine)) return text.slice(0, nl === -1 ? text.length : nl + 1);
+    return text.slice(0, end);
+  }
+
+  private lockedOf(text: string): boolean {
+    return parseFrontmatter(text).params.locked !== null;
+  }
+
+  // The marker surgery, bun/vault.ts's stampLockedLine/stripLockedLine in
+  // fake form (the value is inert here — "harness-v1" — but the LINE rules
+  // are the real ones: Bun-owned, disk decides, an emptied block goes).
+  private stripMarker(text: string): string {
+    const end = frontmatterEnd(text);
+    if (end === 0) return text;
+    const block = text.slice(0, end).split("\n");
+    const close = block.lastIndexOf("---");
+    const content = block.slice(1, close).filter((l) => !/^locked\s*:/.test(l));
+    if (content.every((l) => l.trim() === "")) return text.slice(end);
+    return [block[0]!, ...content, ...block.slice(close)].join("\n") + text.slice(end);
+  }
+
+  private stampMarker(text: string): string {
+    const stripped = this.stripMarker(text);
+    const line = "locked: harness-v1";
+    return stripped.startsWith("---\n")
+      ? stripped.replace("---\n", `---\n${line}\n`)
+      : `---\n${line}\n---\n${stripped}`;
+  }
+
+  // The Bun-owned-line rule (docs/locking.md §2), fake edition: the marker is
+  // decided by the DISK text, not the buffer — a save re-stamps or strips.
+  private stampLike(diskText: string, incoming: string): string {
+    return this.lockedOf(diskText) ? this.stampMarker(incoming) : this.stripMarker(incoming);
+  }
+
+  lockNote(path: string): NoteMeta {
+    if (this.vault.state !== "unlocked") throw new Error("the vault is locked");
+    const { data } = this.rootOf(path);
+    const n = data.notes.get(path)!;
+    if (parseFrontmatter(n.text).params.template) throw new Error("a template cannot be locked");
+    if (!this.lockedOf(n.text)) data.notes.set(path, { text: this.stampMarker(n.text), mtimeMs: this.tick() });
+    return this.meta(data, path);
+  }
+
+  removeLock(path: string): NoteMeta {
+    if (this.vault.state !== "unlocked") throw new Error("unlock first");
+    const { data } = this.rootOf(path);
+    const n = data.notes.get(path)!;
+    data.notes.set(path, { text: this.stripMarker(n.text), mtimeMs: this.tick() });
+    return this.meta(data, path);
   }
 
   list(root: string): NoteMeta[] {
@@ -156,10 +242,15 @@ class FakeStore {
   }
 
   // The read the channel handler serves: text plus disk version, like the real
-  // readNote — the store echoes the mtime into write's baseMtimeMs.
-  readFile(path: string): { text: string; mtimeMs: number } | null {
+  // readNote — the store echoes the mtime into write's baseMtimeMs. A locked
+  // note reads whole only while the fake vault is unlocked; otherwise the
+  // body is WITHHELD and `held` says so (the real seam's exact shape).
+  readFile(path: string): NoteFile | null {
     const n = this.rootOf(path).data.notes.get(path);
-    return n ? { text: n.text, mtimeMs: n.mtimeMs } : null;
+    if (!n) return null;
+    if (!this.lockedOf(n.text)) return { text: n.text, mtimeMs: n.mtimeMs };
+    if (this.vault.state !== "unlocked") return { text: this.headOf(n.text), mtimeMs: n.mtimeMs, locked: true, held: true };
+    return { text: n.text, mtimeMs: n.mtimeMs, locked: true };
   }
 
   // Test seam (window.__harness): an "agent" rewriting a note behind the app's
@@ -183,6 +274,14 @@ class FakeStore {
   write(path: string, text: string, baseMtimeMs: number | null): { mtimeMs: number; divergedTo: string | null } {
     const { root, data } = this.rootOf(path);
     const cur = data.notes.get(path);
+    // The disk decides the lock marker, never the buffer (the real
+    // writeNote's rule); a locked save needs the vault open.
+    if (cur) {
+      if (this.lockedOf(cur.text) && this.vault.state !== "unlocked") throw new Error("the vault is locked");
+      text = this.stampLike(cur.text, text);
+    } else {
+      text = this.stripMarker(text);
+    }
     let divergedTo: string | null = null;
     if (cur && baseMtimeMs !== null && cur.mtimeMs !== baseMtimeMs) {
       if (cur.text === text) return { mtimeMs: cur.mtimeMs, divergedTo: null };
@@ -229,19 +328,29 @@ class FakeStore {
   }
 
   // The real searchNotes is listNotes + the shared matcher; the fake composes
-  // the same two pieces (scoped to one root), so the semantics cannot drift.
-  search(root: string, query: string): Promise<SearchHit[]> {
-    return collectHits(query, this.list(root), (p) => this.readNote(p));
+  // the same two pieces (scoped to one root), so the semantics cannot drift —
+  // including the locked skip: bodies of locked notes are never scanned,
+  // vault state irrelevant, and the count rides back (docs/locking.md §4).
+  async search(root: string, query: string): Promise<{ hits: SearchHit[]; lockedSkipped: number }> {
+    const metas = this.list(root);
+    const open = metas.filter((m) => !m.locked);
+    const hits = await collectHits(query, open, (p) => this.readNote(p));
+    return { hits, lockedSkipped: metas.length - open.length };
   }
 
   // The real backlinksTo is listNotes + the shared wikilink scan; same
   // composition here, for the same cannot-drift reason as search above.
-  backlinks(path: string): BacklinkHit[] {
+  backlinks(path: string): { backlinks: BacklinkHit[]; lockedSkipped: number } {
     const { root } = this.rootOf(path);
     const metas = this.list(root);
     const out: BacklinkHit[] = [];
+    let lockedSkipped = 0;
     for (const meta of metas) {
       if (meta.path === path) continue;
+      if (meta.locked) {
+        lockedSkipped += 1;
+        continue;
+      }
       const text = this.readNote(meta.path);
       if (text === null) continue;
       const lines = text.split("\n");
@@ -250,24 +359,35 @@ class FakeStore {
         out.push({ ...meta, line: ref.line, context: (lines[ref.line - 1] ?? "").trim(), raw: ref.raw });
       }
     }
-    return out;
+    return { backlinks: out, lockedSkipped };
   }
 
-  // The real tagsIn is listNotes + tagRefsOf + tagDirectoryOf; the fake
-  // composes the same shared pieces, the search/backlinks cannot-drift rule.
-  tags(root: string): TagInfo[] {
+  // A locked note contributes its plaintext HEAD's tags only (the
+  // frontmatter line stays visible; body hashtags are sealed) — the real
+  // tagsIn's rule, from the same shared pieces.
+  private tagSource(meta: NoteMeta): string | null {
+    const text = this.readNote(meta.path);
+    if (text === null) return null;
+    return meta.locked ? this.headOf(text) : text;
+  }
+
+  tags(root: string): { tags: TagInfo[]; lockedSkipped: number } {
+    let lockedSkipped = 0;
     const perNote = this.list(root).flatMap((meta) => {
-      const text = this.readNote(meta.path);
+      if (meta.locked) lockedSkipped += 1;
+      const text = this.tagSource(meta);
       return text === null ? [] : [{ path: meta.path, refs: tagRefsOf(text) }];
     });
-    return tagDirectoryOf(perNote);
+    return { tags: tagDirectoryOf(perNote), lockedSkipped };
   }
 
-  tagged(root: string, tag: string): TagHit[] {
+  tagged(root: string, tag: string): { hits: TagHit[]; lockedSkipped: number } {
     const want = normalizeTag(tag);
     const out: TagHit[] = [];
+    let lockedSkipped = 0;
     for (const meta of this.list(root)) {
-      const text = this.readNote(meta.path);
+      if (meta.locked) lockedSkipped += 1;
+      const text = this.tagSource(meta);
       if (text === null) continue;
       const lines = text.split("\n");
       for (const ref of tagRefsOf(text)) {
@@ -275,7 +395,7 @@ class FakeStore {
         out.push({ ...meta, line: ref.line, context: (lines[ref.line - 1] ?? "").trim(), raw: ref.raw });
       }
     }
-    return out;
+    return { hits: out, lockedSkipped };
   }
 
   empty(root: string): number {
@@ -324,6 +444,35 @@ store.seedTrash(SCRATCH, "# Older\n\nonce deleted\n");
 // Unattached, waiting for the fake workspaceAttach below.
 store.seed(EXTERNAL, "# Delta\n\ndelta body, external needle\n");
 store.seed(EXTERNAL, "# Epsilon\n\nepsilon body\n");
+// A locked note, sealed at boot: the vault exists and is LOCKED, passphrase
+// "letmein" (e2e/locked-notes.spec.ts). Seeded with the marker in place —
+// the fake's read withholds the body below the head while locked. The body
+// carries a needle no search may surface and a prompt fence for the
+// run-affordance spec. Titled to sort INSIDE the alpha…gamma fixture range
+// (the sidebar is alphabetical, and list-verbs.spec.ts pins the edges) and
+// deliberately tagless: tags-panel.spec.ts pins the workspace's tagless
+// empty state, and the head-tags-stay-visible rule is notes.fs.test.ts's.
+store.seed(
+  SCRATCH,
+  [
+    "---",
+    "locked: harness-v1",
+    "---",
+    "# Codebook",
+    "",
+    "vaulted needle body, #hidden and [[Alpha]]",
+    "",
+    "```prompt",
+    "summarize this note",
+    "```",
+    "",
+    "```sh",
+    "echo still mine",
+    "```",
+    "",
+  ].join("\n"),
+);
+store.vault = { state: "locked", pass: "letmein" };
 
 configureNotes({
   list: async (folder) => store.list(folder),
@@ -349,6 +498,35 @@ configureNotes({
   openDaily: async (folder) => store.openDaily(folder),
   createFromTemplate: async (folder, templatePath, title) => store.createFromTemplatePath(folder, templatePath, title),
 });
+
+// The vault fake at the same seam main.tsx wires. State transitions echo
+// through recordVaultState exactly as the real vaultChanged push would —
+// the app's eviction/reload paths must not care which end drove the change.
+configureVault({
+  state: async () => store.vault.state,
+  create: async (pass) => {
+    const ok = store.vaultCreate(pass);
+    if (ok) recordVaultState("unlocked");
+    return ok;
+  },
+  unlock: async (pass) => {
+    const ok = store.vaultUnlock(pass);
+    if (ok) recordVaultState("unlocked");
+    return ok;
+  },
+  lock: async () => {
+    store.vaultLock();
+    recordVaultState(store.vault.state);
+  },
+  lockNote: async (path) => ({ note: store.lockNote(path), sealedShared: [] }),
+  removeLock: async (path) => store.removeLock(path),
+  changePassphrase: async (pass) => {
+    if (store.vault.state !== "unlocked") return { ok: false, rewrapped: 0 };
+    store.vault.pass = pass;
+    return { ok: true, rewrapped: 1 };
+  },
+});
+recordVaultState(store.vault.state);
 
 // The registry fake: attach always offers EXTERNAL — the folder the "native
 // dialog" picks — so the attach flow (and close → re-attach, proving nothing
@@ -438,7 +616,11 @@ const assets = new Map<string, { dataB64: string; mime: string }>([
 let pasteCount = 0;
 configureAssets({
   read: async (folder, src) => assets.get(`${folder}\0${src}`) ?? null,
-  pasteImage: async (folder) => {
+  // notePath is accepted (the real handler seals pastes into locked notes);
+  // the fake stores plaintext either way — sealed READS are the behavior
+  // surface, and no harness spec pastes into a locked note (its editor is
+  // only reachable unlocked, where pastes are plain until the next lock).
+  pasteImage: async (folder, _notePath) => {
     pasteCount += 1;
     const src = `.ledge-assets/pasted-${pasteCount}.png`;
     assets.set(`${folder}\0${src}`, { dataB64: PIXEL_B64, mime: "image/png" });

@@ -14,6 +14,7 @@ import {
   cancelRun,
   editProfile,
   isTerminalBusy,
+  notifyUser,
   onTerminalBusyChange,
   resizeInline,
   inputInline,
@@ -21,7 +22,7 @@ import {
   type RunDestination,
 } from "./bridge";
 import { declaredHosts, frontmatterRange, profileChipAnchor } from "./frontmatter";
-import { LOCAL_HOST } from "../../shared/frontmatter";
+import { LOCAL_HOST, parseFrontmatter } from "../../shared/frontmatter";
 import { sessionIdFacet } from "./session";
 import { acquireInlineTerm, getInlineTerm, releaseInlineTerm } from "./inlineTerm";
 import { copyText } from "../lib/clipboard";
@@ -196,9 +197,27 @@ export function canRun(view: EditorView, block: { from: number; to: number }, de
     : !isBlockRunning(view.state, block.from, block.to);
 }
 
+// Whether this editor's note is LOCKED (its frontmatter carries the crypto
+// header — the doc is decrypted plaintext, but the note's contract holds).
+// A head read like every frontmatter question: `when`-cheap.
+function noteLocked(state: EditorState): boolean {
+  return parseFrontmatter(state.sliceDoc(0, Math.min(4096, state.doc.length))).params.locked !== null;
+}
+
 export function runBlock(view: EditorView, pos: number, destination: RunDestination): boolean {
   const block = blockAt(view.state, pos);
   if (!block || !isRunnable(block.lang)) return false;
+  // A ```prompt fence's contract is "pipe this body to the agent CLI" — in a
+  // locked note it does not run, either destination (docs/locking.md §8: the
+  // send-direction half of the no-agents invariant; Bun re-validates, this is
+  // the UI half). The chord answers with the notice strip, not silence, and
+  // returns true: the chord was understood and refused, not unclaimed.
+  // Other languages stay runnable — a locked ops note's commands are the
+  // user's own compute, and running them may be the point.
+  if (block.lang === "prompt" && noteLocked(view.state)) {
+    notifyUser(PROMPT_SEALED);
+    return true;
+  }
   // Checked here rather than only on the buttons, so the keymap and the palette
   // are held to the same rule: a disabled-looking button and a live Cmd+Enter
   // would just move the invisible queue somewhere else.
@@ -353,6 +372,10 @@ const CLOSE_ICON = svg('<path d="M4 4l8 8M12 4l-8 8"/>');
 // reason is a quieter version of the same mystery.
 const INLINE_BUSY = "This block is still running";
 const TERM_BUSY = "This note's terminal is busy";
+// A prompt fence's why in a locked note — one sentence for the button
+// tooltip AND the chord's notice (bridge notifyUser), so they cannot drift.
+const PROMPT_SEALED =
+  "Prompt blocks can't be run in locked notes. AI agents aren't allowed to read locked notes.";
 
 // Gray out a run button while its shell cannot take a block. The native `disabled`
 // does the work: it stops the mousedown, so the click cannot queue anything, and
@@ -363,7 +386,7 @@ const TERM_BUSY = "This note's terminal is busy";
 function setBusy(btn: HTMLButtonElement | null, busy: boolean, id: CommandId, why: string, hostHint: string | null): void {
   if (!btn) return;
   btn.disabled = busy;
-  btn.title = busy ? why : hostHint ? `${tooltip(id)} — ${hostHint}` : tooltip(id);
+  btn.title = busy ? why : hostHint ? `${tooltip(id)}: ${hostHint}` : tooltip(id);
 }
 
 function iconButton(markup: string, title: string, onDown: (e: MouseEvent) => void): HTMLButtonElement {
@@ -684,14 +707,22 @@ const overlayPlugin = ViewPlugin.fromClass(
         this.rebuild(m);
         this.sig = m.sig;
       }
+      // A prompt fence in a locked note wears the busy-button grammar
+      // PERMANENTLY: disabled, with the reason as the tooltip. A gray button
+      // with no reason is a mystery (the setBusy comment above), and a
+      // missing button beside the sh fence's live pair is the same mystery,
+      // quieter. runBlock refuses the chords with the same sentence, and Bun
+      // re-validates behind both.
+      const sealedNote = noteLocked(this.view.state);
       for (const c of m.controls) {
         const el = this.layer.querySelector<HTMLElement>(`.ledge-ctl-group[data-block="${c.from}"]`);
         if (!el) continue;
         el.style.top = `${c.top}px`;
         el.style.right = `${c.right}px`;
         el.classList.toggle("caret", c.caret);
-        setBusy(el.querySelector('[data-act="run"]'), c.runBusy, "block.runInline", INLINE_BUSY, m.hostHint);
-        setBusy(el.querySelector('[data-act="term"]'), c.termBusy, "block.runInTerminal", TERM_BUSY, m.hostHint);
+        const sealed = c.lang === "prompt" && sealedNote;
+        setBusy(el.querySelector('[data-act="run"]'), c.runBusy || sealed, "block.runInline", sealed ? PROMPT_SEALED : INLINE_BUSY, m.hostHint);
+        setBusy(el.querySelector('[data-act="term"]'), c.termBusy || sealed, "block.runInTerminal", sealed ? PROMPT_SEALED : TERM_BUSY, m.hostHint);
       }
       for (const c of m.closes) {
         const el = this.layer.querySelector<HTMLElement>(`.ledge-close-wrap[data-close="${c.id}"]`);
@@ -715,6 +746,10 @@ const overlayPlugin = ViewPlugin.fromClass(
         const group = document.createElement("div");
         group.className = "ledge-ctl-group";
         group.dataset.block = String(c.from);
+        // Every runnable fence gets its buttons — a prompt fence in a locked
+        // note included: the update pass right after this rebuild disables
+        // its pair with the sealed reason as tooltip (see the comment there),
+        // so the buttons are born gray, never live.
         if (isRunnable(c.lang)) {
           const runBtn = iconButton(PLAY_ICON, tooltip("block.runInline"), (e) => {
             e.preventDefault();

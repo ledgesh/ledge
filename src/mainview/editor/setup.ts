@@ -20,7 +20,7 @@ import { wrapping } from "./wrap";
 import { formatting } from "./formatting";
 import { findReplace } from "./find";
 import { fromDisk, sessionIdFacet } from "./session";
-import { folderOf, noteChanged, saveNow } from "../notes/store";
+import { folderOf, noteChanged, pathOf, saveNow } from "../notes/store";
 import { copyText, readClipboard } from "../lib/clipboard";
 import { pasteImageAsset } from "../lib/assets";
 import { settings } from "../lib/settings";
@@ -169,7 +169,10 @@ const clipboardKeymap = Prec.highest(
           // the pool, e.g. a test) means nowhere to save — skip.
           const folder = folderOf(view.state.facet(sessionIdFacet));
           if (!folder) return;
-          const src = await pasteImageAsset(folder);
+          // The note's own path rides along: Bun seals the paste at birth
+          // when the pasting note is LOCKED (docs/locking.md §5) — decided
+          // from the disk, the path is only the address.
+          const src = await pasteImageAsset(folder, pathOf(view.state.facet(sessionIdFacet)));
           if (!src) return;
           const sel = view.state.selection.main;
           const { insert, cursor } = imagePasteInsert(view.state.doc, sel, src);

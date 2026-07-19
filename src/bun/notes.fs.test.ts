@@ -9,7 +9,7 @@
 // wipe the app home in beforeEach, and wiping the wrong folder is the one
 // mistake this file must be incapable of.
 import { beforeEach, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, readdir, rm, stat, utimes, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile as readRaw, rm, stat, utimes, writeFile, writeFile as writeRaw } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
 import { APP_HOME, attachExternal, createManaged, loadWorkspaces } from "./workspaces";
@@ -19,11 +19,14 @@ import {
   deleteNote,
   deleteTrashed,
   emptyTrash,
+  isNoteLocked,
   listNotes,
   listTrash,
+  lockNote,
   notesTagged,
   purgeTrash,
   readNote,
+  removeLockNote,
   restoreNote,
   retitleNote,
   searchNotes,
@@ -31,6 +34,7 @@ import {
   trashDirOf,
   writeNote,
 } from "./notes";
+import { createVault, lockVault, resetVaultForTests } from "./vault";
 
 if (!resolve(APP_HOME).startsWith(resolve(tmpdir()) + sep)) {
   throw new Error(`refusing to run filesystem tests against ${APP_HOME} — is the preload configured?`);
@@ -258,7 +262,7 @@ describe("listNotes", () => {
     await mkdir(join(ROOT, "node_modules"));
     await writeFile(join(ROOT, "node_modules", "README.md"), "# Pkg\n\nunmistakable needle\n");
     await createNote(ROOT, "# Mine\n\nunmistakable needle\n");
-    const hits = await searchNotes(ROOT, "unmistakable needle");
+    const { hits } = await searchNotes(ROOT, "unmistakable needle");
     expect(hits.map((h) => h.title)).toEqual(["Mine"]);
   });
 });
@@ -267,7 +271,7 @@ describe("searchNotes", () => {
   test("finds a match in any of the workspace's notes and says where it sits", async () => {
     await createNote(ROOT, "# Recipes\n\nbring the stock to a boil\n");
     await createNote(ROOT, "# Plans\n\nnothing to see\n");
-    const hits = await searchNotes(ROOT, "STOCK");
+    const { hits } = await searchNotes(ROOT, "STOCK");
     expect(hits).toEqual([
       {
         path: join(ROOT, "recipes.md"),
@@ -284,26 +288,26 @@ describe("searchNotes", () => {
     const old = await createNote(ROOT, "# Old\n\nshared term\n");
     await createNote(ROOT, "# New\n\nshared term\n");
     await utimes(old.path, new Date(0), new Date(0));
-    expect((await searchNotes(ROOT, "shared term")).map((h) => h.title)).toEqual(["New", "Old"]);
+    expect((await searchNotes(ROOT, "shared term")).hits.map((h) => h.title)).toEqual(["New", "Old"]);
   });
 
   test("search is scoped like the listing: another workspace's notes are not hits", async () => {
     const other = await secondRoot();
     await createNote(other, "# Elsewhere\n\nsecret needle\n");
-    expect(await searchNotes(ROOT, "secret needle")).toEqual([]);
-    expect((await searchNotes(other, "secret needle")).map((h) => h.title)).toEqual(["Elsewhere"]);
+    expect((await searchNotes(ROOT, "secret needle")).hits).toEqual([]);
+    expect((await searchNotes(other, "secret needle")).hits.map((h) => h.title)).toEqual(["Elsewhere"]);
   });
 
   test("what is invisible to listNotes is invisible to search: trash and dot-entries", async () => {
     await deleteNote((await createNote(ROOT, "# Deleted\n\nsecret needle\n")).path);
     await writeFile(join(ROOT, ".stray.md"), "secret needle\n");
-    expect(await searchNotes(ROOT, "secret needle")).toEqual([]);
+    expect((await searchNotes(ROOT, "secret needle")).hits).toEqual([]);
   });
 
   test("an empty query matches nothing, not every line of every note", async () => {
     await createNote(ROOT, "# Something\n\nbody\n");
-    expect(await searchNotes(ROOT, "")).toEqual([]);
-    expect(await searchNotes(ROOT, "   ")).toEqual([]);
+    expect((await searchNotes(ROOT, "")).hits).toEqual([]);
+    expect((await searchNotes(ROOT, "   ")).hits).toEqual([]);
   });
 });
 
@@ -311,7 +315,7 @@ describe("backlinksTo", () => {
   test("finds each occurrence with its line, context, and the match as written", async () => {
     const target = await createNote(ROOT, "# Target\n\nbody\n");
     await createNote(ROOT, "# Linker\n\nsee [[Target]] here\nplain\nand [[target#Notes]] again\n");
-    const hits = await backlinksTo(target.path);
+    const { backlinks: hits } = await backlinksTo(target.path);
     expect(hits).toEqual([
       {
         path: join(ROOT, "linker.md"),
@@ -335,12 +339,12 @@ describe("backlinksTo", () => {
   test("a [[link]] inside a fence is pasted text, not a backlink", async () => {
     const target = await createNote(ROOT, "# Target\n\nbody\n");
     await createNote(ROOT, "# Logs\n\n```\n[[Target]]\n```\n");
-    expect(await backlinksTo(target.path)).toEqual([]);
+    expect((await backlinksTo(target.path)).backlinks).toEqual([]);
   });
 
   test("a note is not linked from itself", async () => {
     const target = await createNote(ROOT, "# Target\n\nsee [[Target]]\n");
-    expect(await backlinksTo(target.path)).toEqual([]);
+    expect((await backlinksTo(target.path)).backlinks).toEqual([]);
   });
 
   test("the scan is workspace-scoped, like the links themselves", async () => {
@@ -348,7 +352,7 @@ describe("backlinksTo", () => {
     // The other workspace's [[Target]] resolves within ITS root (where no
     // Target exists — dangling), never across into this one.
     await createNote(await secondRoot(), "# Far\n\nsee [[Target]]\n");
-    expect(await backlinksTo(target.path)).toEqual([]);
+    expect((await backlinksTo(target.path)).backlinks).toEqual([]);
   });
 
   test("an ambiguous title backlinks the note a click would open: newest first", async () => {
@@ -356,14 +360,14 @@ describe("backlinksTo", () => {
     const newer = await createNote(ROOT, "# Plan\n\ntwo\n");
     await createNote(ROOT, "# Linker\n\nsee [[Plan]]\n");
     await utimes(older.path, new Date(0), new Date(0));
-    expect((await backlinksTo(newer.path)).map((h) => h.title)).toEqual(["Linker"]);
-    expect(await backlinksTo(older.path)).toEqual([]);
+    expect((await backlinksTo(newer.path)).backlinks.map((h) => h.title)).toEqual(["Linker"]);
+    expect((await backlinksTo(older.path)).backlinks).toEqual([]);
   });
 
   test("a context line is one row, not a paragraph: long lines truncate", async () => {
     const target = await createNote(ROOT, "# Target\n\nbody\n");
     await createNote(ROOT, `# Linker\n\n[[Target]] ${"x".repeat(300)}\n`);
-    const [hit] = await backlinksTo(target.path);
+    const [hit] = (await backlinksTo(target.path)).backlinks;
     expect(hit!.context.length).toBe(201); // 200 + the ellipsis
     expect(hit!.context.endsWith("…")).toBe(true);
   });
@@ -377,7 +381,7 @@ describe("tagsIn", () => {
   test("frontmatter and inline tags merge; counts are notes, not occurrences", async () => {
     await createNote(ROOT, "# Alpha\n\n#work stuff\nmore #work here\n");
     await createNote(ROOT, "---\ntags: work, home\n---\n# Beta\n\nbody\n");
-    expect(await tagsIn(ROOT)).toEqual([
+    expect((await tagsIn(ROOT)).tags).toEqual([
       { tag: "home", count: 1 },
       { tag: "work", count: 2 },
     ]);
@@ -386,19 +390,19 @@ describe("tagsIn", () => {
   test("identity folds case; the display spelling is the most frequent one", async () => {
     await createNote(ROOT, "# One\n\n#Work\n#Work\n");
     await createNote(ROOT, "# Two\n\n#work\n");
-    expect(await tagsIn(ROOT)).toEqual([{ tag: "Work", count: 2 }]);
+    expect((await tagsIn(ROOT)).tags).toEqual([{ tag: "Work", count: 2 }]);
   });
 
   test("a #tag in a fence is pasted text; a tagless workspace is empty", async () => {
     await createNote(ROOT, "# Logs\n\n```\n#not-a-tag\n```\n");
-    expect(await tagsIn(ROOT)).toEqual([]);
+    expect((await tagsIn(ROOT)).tags).toEqual([]);
   });
 
   test("the scan is workspace-scoped, and inherits listNotes' skips", async () => {
     await createNote(await secondRoot(), "# Far\n\n#elsewhere\n");
     await deleteNote((await createNote(ROOT, "# Deleted\n\n#gone\n")).path);
     await writeFile(join(ROOT, ".stray.md"), "#hidden\n");
-    expect(await tagsIn(ROOT)).toEqual([]);
+    expect((await tagsIn(ROOT)).tags).toEqual([]);
   });
 
   test("an unregistered root is refused before any scan", async () => {
@@ -409,7 +413,7 @@ describe("tagsIn", () => {
 describe("notesTagged", () => {
   test("finds each occurrence with its line, context, and the tag as written", async () => {
     await createNote(ROOT, "---\ntags: #work\n---\n# Beta\n\nplain\nthen #Work again\n");
-    const hits = await notesTagged(ROOT, "work");
+    const { hits } = await notesTagged(ROOT, "work");
     expect(hits).toEqual([
       {
         path: join(ROOT, "beta.md"),
@@ -432,21 +436,21 @@ describe("notesTagged", () => {
 
   test("the query folds like the tags do, from either spelling", async () => {
     await createNote(ROOT, "# Alpha\n\n#Work\n");
-    expect((await notesTagged(ROOT, "#wOrK")).map((h) => h.raw)).toEqual(["#Work"]);
+    expect((await notesTagged(ROOT, "#wOrK")).hits.map((h) => h.raw)).toEqual(["#Work"]);
   });
 
   test("hits arrive newest note first, the order listNotes shows", async () => {
     const old = await createNote(ROOT, "# Old\n\n#shared\n");
     await createNote(ROOT, "# New\n\n#shared\n");
     await utimes(old.path, new Date(0), new Date(0));
-    expect((await notesTagged(ROOT, "shared")).map((h) => h.title)).toEqual(["New", "Old"]);
+    expect((await notesTagged(ROOT, "shared")).hits.map((h) => h.title)).toEqual(["New", "Old"]);
   });
 
   test("scoped to the given root: another workspace's tags are not hits", async () => {
     const other = await secondRoot();
     await createNote(other, "# Far\n\n#shared\n");
-    expect(await notesTagged(ROOT, "shared")).toEqual([]);
-    expect((await notesTagged(other, "shared")).map((h) => h.title)).toEqual(["Far"]);
+    expect((await notesTagged(ROOT, "shared")).hits).toEqual([]);
+    expect((await notesTagged(other, "shared")).hits.map((h) => h.title)).toEqual(["Far"]);
   });
 });
 
@@ -571,5 +575,167 @@ describe("the unlink paths", () => {
     // be backdated; that immutability is why listTrash trusts it).
     expect(await purgeTrash(ROOT, -60_000)).toBe(1);
     expect(await listTrash(ROOT)).toEqual([]);
+  });
+});
+
+// --- note locking (docs/locking.md) -----------------------------------------
+// The honesty tests: after a lock, the plaintext must be GONE from disk — in
+// the note, in every save that follows, and in the divergence guard's trash
+// copies — while titles, tags-in-head, and the agent-facing skips behave
+// exactly as §4/§6 promise. The vault module's own crypto is vault.test.ts's;
+// here it is the seams.
+describe("note locking", () => {
+  beforeEach(async () => {
+    resetVaultForTests(); // module state outlives the wiped app home
+    await createVault("test passphrase");
+  });
+
+  const NEEDLE = "plutonium shipment schedule";
+
+  test("locking seals the body on disk; reading decrypts it back, flagged", async () => {
+    const note = await createNote(ROOT, `# Secrets\n\n${NEEDLE}\n`);
+    await lockNote(note.path);
+    const raw = await readRaw(note.path, "utf8");
+    expect(raw).not.toContain(NEEDLE);
+    expect(raw).toContain("locked: v1.");
+    expect(raw).toContain("# Secrets\n"); // the title stays plaintext, deliberately
+    expect(await isNoteLocked(note.path)).toBe(true);
+    const file = await readNote(note.path);
+    expect(file?.locked).toBe(true);
+    expect(file?.held).toBeUndefined();
+    expect(file?.text).toContain(NEEDLE);
+    const metas = await listNotes(ROOT);
+    expect(metas[0]?.locked).toBe(true);
+  });
+
+  test("a save cannot drop the lock: a headerless buffer still encrypts", async () => {
+    const note = await createNote(ROOT, `# Secrets\n\nold\n`);
+    await lockNote(note.path);
+    const { mtimeMs } = (await readNote(note.path))!;
+    await writeNote(note.path, `# Secrets\n\n${NEEDLE}\n`, mtimeMs); // no locked: line at all
+    const raw = await readRaw(note.path, "utf8");
+    expect(raw).toContain("locked: v1.");
+    expect(raw).not.toContain(NEEDLE);
+    expect((await readNote(note.path))?.text).toContain(NEEDLE);
+  });
+
+  test("a save cannot mint a lock: a pasted locked: line is stripped", async () => {
+    const note = await createNote(ROOT, "# Plain\n\nbody\n");
+    await writeNote(note.path, "---\nlocked: v1.forged.forged.forged\n---\n# Plain\n\nbody\n");
+    expect(await readRaw(note.path, "utf8")).toBe("# Plain\n\nbody\n");
+    expect(await isNoteLocked(note.path)).toBe(false);
+  });
+
+  test("vault locked: the body is held, the save refused, the title still labels", async () => {
+    const note = await createNote(ROOT, `# Secrets\n\n${NEEDLE}\n`);
+    await lockNote(note.path);
+    lockVault();
+    const file = await readNote(note.path);
+    expect(file?.locked).toBe(true);
+    expect(file?.held).toBe(true);
+    expect(file?.text).not.toContain(NEEDLE);
+    expect((await listNotes(ROOT))[0]?.title).toBe("Secrets");
+    expect(writeNote(note.path, "# Secrets\n\nedit\n", file!.mtimeMs)).rejects.toThrow(/vault is locked/);
+  });
+
+  test("external tamper surfaces as damage, not as gone and not as plaintext", async () => {
+    const note = await createNote(ROOT, `# Secrets\n\n${NEEDLE}\n`);
+    await lockNote(note.path);
+    const raw = await readRaw(note.path, "utf8");
+    // Corrupt one ciphertext character (the armored region after the head).
+    const at = raw.indexOf("\n", raw.indexOf("# Secrets")) + 3;
+    await writeRaw(note.path, raw.slice(0, at) + (raw[at] === "A" ? "B" : "A") + raw.slice(at + 1));
+    const file = await readNote(note.path);
+    expect(file?.held).toBe(true);
+    expect(file?.damaged).toBe(true);
+  });
+
+  test("the divergence guard's trash copy is ciphertext, never plaintext", async () => {
+    const note = await createNote(ROOT, `# Secrets\n\noriginal\n`);
+    await lockNote(note.path);
+    const base = (await readNote(note.path))!.mtimeMs;
+    // A foreign writer scribbles on the file (mtime moves on).
+    const cipher = await readRaw(note.path, "utf8");
+    await writeRaw(note.path, cipher + "external-scribble\n");
+    await new Promise((r) => setTimeout(r, 5)); // mtime granularity
+    const res = await writeNote(note.path, `# Secrets\n\n${NEEDLE}\n`, base);
+    expect(res.divergedTo).not.toBeNull();
+    const trashed = await readRaw(res.divergedTo!, "utf8");
+    expect(trashed).toContain("external-scribble");
+    expect(trashed).not.toContain(NEEDLE);
+    expect(trashed).not.toContain("original");
+    expect(await readRaw(note.path, "utf8")).not.toContain(NEEDLE);
+  });
+
+  test("scans skip locked bodies — vault UNLOCKED — and count the skip", async () => {
+    await createNote(ROOT, `# Alpha\n\n${NEEDLE} here\n`);
+    const hush = await createNote(ROOT, `---\ntags: work\n---\n# Hush\n\n${NEEDLE} too, #hidden, see [[Alpha]]\n`);
+    await lockNote(hush.path);
+
+    const search = await searchNotes(ROOT, NEEDLE);
+    expect(search.hits.map((h) => h.title)).toEqual(["Alpha"]);
+    expect(search.lockedSkipped).toBe(1);
+
+    const alpha = (await listNotes(ROOT)).find((m) => m.title === "Alpha")!;
+    const back = await backlinksTo(alpha.path);
+    expect(back.backlinks).toEqual([]);
+    expect(back.lockedSkipped).toBe(1);
+
+    // Frontmatter tags live in the plaintext head and stay visible; the body
+    // #hidden does not. Both facts, one note.
+    const tags = await tagsIn(ROOT);
+    expect(tags.tags).toEqual([{ tag: "work", count: 1 }]);
+    expect(tags.lockedSkipped).toBe(1);
+    const tagged = await notesTagged(ROOT, "work");
+    expect(tagged.hits.map((h) => h.title)).toEqual(["Hush"]);
+    expect((await notesTagged(ROOT, "hidden")).hits).toEqual([]);
+  });
+
+  test("remove lock restores the exact original bytes (husk block dropped)", async () => {
+    const original = "# Secrets\n\nround trip body\n";
+    const note = await createNote(ROOT, original);
+    await lockNote(note.path);
+    await removeLockNote(note.path);
+    expect(await readRaw(note.path, "utf8")).toBe(original);
+    expect(await isNoteLocked(note.path)).toBe(false);
+  });
+
+  test("a template cannot be locked (marker exclusivity)", async () => {
+    const t = await createNote(ROOT, "---\ntemplate: true\n---\n# Meeting\n\nagenda\n");
+    expect(lockNote(t.path)).rejects.toThrow(/template/);
+  });
+
+  test("locking needs the vault open", async () => {
+    lockVault();
+    const note = await createNote(ROOT, "# Secrets\n\nbody\n");
+    expect(lockNote(note.path)).rejects.toThrow(/vault is locked/);
+  });
+});
+
+// Passphrase change: headers and asset wraps rewrite, bodies never — and the
+// old passphrase stops opening anything.
+import { changeVaultPassphrase } from "./notes";
+import { loadVault, resetVaultForTests as resetVault2, unlockVault as unlockV, VAULT_PATH as VP } from "./vault";
+import { rm as rmF } from "node:fs/promises";
+
+describe("changeVaultPassphrase", () => {
+  test("rewraps every locked note; only the new passphrase opens afterwards", async () => {
+    resetVaultForTests();
+    await rmF(VP, { force: true });
+    await createVault("old pass");
+    const a = await createNote(ROOT, "# One\n\nfirst secret body\n");
+    const b = await createNote(ROOT, "# Two\n\nsecond secret body\n");
+    await lockNote(a.path);
+    await lockNote(b.path);
+    const rewrapped = await changeVaultPassphrase("new pass", [ROOT]);
+    expect(rewrapped).toBe(2);
+    // Bodies still open in this session (data keys unchanged)…
+    expect((await readNote(a.path))?.text).toContain("first secret body");
+    // …and across a cold start only the NEW passphrase derives the key.
+    resetVault2();
+    await loadVault();
+    expect(await unlockV("old pass")).toBe(false);
+    expect(await unlockV("new pass")).toBe(true);
+    expect((await readNote(b.path))?.text).toContain("second secret body");
   });
 });
