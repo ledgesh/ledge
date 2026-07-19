@@ -19,7 +19,7 @@ echo "run number $count"
 
 Run that twice and the number climbs, because it is the same shell both times.
 
-The terminal drawer is a separate shell from the inline one, but both belong to this note alone, and both start where the note's frontmatter points them (`cwd`, `env` and friends: see [[Getting Started]]). Frontmatter changes apply to freshly spawned shells, so after editing it, run "Restart Note Shell" from the palette: it kills the note's shells and lets them respawn clean. The same command is the escape hatch when an experiment leaves the environment weird.
+The terminal drawer is a separate shell from the inline one, but both belong to this note alone, and both start where the note's frontmatter points them (`cwd`, `env` and friends: see [[Frontmatter and Environments]]). Frontmatter changes apply to freshly spawned shells, so after editing it, run "Restart Note Shell" from the palette: it kills the note's shells and lets them respawn clean. The same command is the escape hatch when an experiment leaves the environment weird.
 
 ## Interpreted languages
 
@@ -34,6 +34,6 @@ TypeScript is special-cased to the Bun runtime bundled with the app, so `ts` blo
 
 ## Make more languages runnable
 
-Settings (⌘,) owns both lists: `blocks.runnable` names the fence languages that get a Run button, and `blocks.interpreters` maps a language to the command that runs it. Add `"lua"` to the first and `"lua": "lua"` to the second, relaunch, and lua fences run. Interpreter values may carry flags (`"python3 -u"`), and `blocks.hostInterpreters` overrides them per machine for runs a note sends over ssh.
+Settings (⌘,) owns both lists: `blocks.runnable` names the fence languages that get a Run button, and `blocks.interpreters` maps a language to the command that runs it. Add `"lua"` to the first and `"lua": "lua"` to the second, relaunch, and lua fences run. Interpreter values may carry flags (`"python3 -u"`), and `blocks.hostInterpreters` overrides them per machine for runs a note sends over ssh ([[Remote Hosts]]).
 
-One more fence worth knowing about: a `prompt` block sends its text to an AI agent (Claude Code by default) with the note's own context attached. More on that later in this manual.
+One more fence worth knowing about: a `prompt` block sends its text to an AI agent (Claude Code by default) with the note's own context attached. [[Agents and Ledge]] has the full story.
