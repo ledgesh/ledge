@@ -1,5 +1,5 @@
 // The built-in documentation: a hidden read-only workspace (kind "docs").
-// The header's book button (and the palette's Documentation entry) opens it;
+// The header's help button (and the palette's Documentation entry) opens it;
 // it never gets a strip row; its pages open, search, and RUN like ordinary
 // notes, but nothing edits, creates, or deletes — the affordances hide, the
 // editor drops keystrokes, and the harness store (like the real one) refuses
@@ -22,7 +22,7 @@ test.beforeEach(async ({ page }) => {
   await expect(noteRow(page, "Alpha")).toBeVisible();
 });
 
-test("the book button opens the docs on Getting Started, with no strip row", async ({ page }) => {
+test("the help button opens the docs on Getting Started, with no strip row", async ({ page }) => {
   await openDocs(page);
   // Landed on the page, not a scratch tab: the tab bar names it.
   await expect(page.locator("[data-tab]", { hasText: "Getting Started" })).toBeVisible();
@@ -54,7 +54,7 @@ test("the editor is read-only: keystrokes land nowhere, and no save ever fires",
   await expect(first).toHaveText("# Getting Started");
   // The fake store's page is untouched (no autosave snuck through).
   const text = await page.evaluate(() =>
-    window.__harness.store.readNote("/harness/.ledge-docs/getting-started.md"),
+    window.__harness.store.readNote("/harness/.ledge-docs/01-getting-started.md"),
   );
   expect(text).toContain("# Getting Started");
   expect(text).not.toContain("VANDALIZED");
@@ -83,6 +83,30 @@ test("no create or delete affordances: buttons hidden, row menu trimmed, verbs r
   await noteRow(page, "Getting Started").click();
   await page.keyboard.press("d");
   await expect(noteRow(page, "Getting Started")).toBeVisible();
+});
+
+test("reopening after closing every docs tab lands back on Getting Started", async ({ page }) => {
+  // The regression: a docs workspace with every page closed (an empty pane —
+  // closeTab does not reseed) has no strip row and nothing on screen — so a
+  // click that merely re-selects it looks like a dead button. It must open
+  // the landing page. This is exactly the state a saved layout with
+  // `"tabs": []` restores... used to restore into at boot.
+  await openDocs(page);
+  await page.keyboard.press("Meta+w"); // close Getting Started; the pane empties
+  await expect(page.locator("[data-tab]")).toHaveCount(0);
+  await page.keyboard.press("Meta+1"); // leave for the user's workspace
+  await expect(noteRow(page, "Alpha")).toBeVisible();
+  await docsButton(page).click();
+  await expect(page.locator("[data-tab]", { hasText: "Getting Started" })).toBeVisible();
+  await expect(page.locator(".cm-line").first()).toHaveText("# Getting Started");
+});
+
+test("pages list in manifest order (numbered paths), not alphabetically by title", async ({ page }) => {
+  await openDocs(page);
+  // About Panes sorts FIRST by title but its filename (03-) sorts last: the
+  // browser must show the manifest's reading order, Getting Started on top.
+  const titles = page.locator('[data-target-kind="note"]');
+  await expect(titles).toHaveText([/Getting Started/, /Workspaces Guide/, /About Panes/]);
 });
 
 test("⌘P and ⌥⌘P are scoped to the docs while it is selected", async ({ page }) => {

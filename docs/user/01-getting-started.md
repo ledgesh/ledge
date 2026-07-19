@@ -12,7 +12,7 @@ Put the cursor in the block below and press ⌘↩, or hover the block and click
 curl -s https://api.github.com/zen
 ```
 
-That was a real shell. Any fenced block whose language is runnable (`sh`, `python`, `node`, and friends, configurable in Settings) gets the same treatment, and ⇧⌘↩ sends a block to the note's terminal drawer instead.
+That was a real shell. Any fenced block whose language is runnable (`sh`, `python`, `node`, and friends, configurable in Settings) gets the same treatment, and ⇧⌘↩ sends a block to the note's terminal drawer instead. The full story is in [[Running Code]].
 
 ## The shell sticks around
 
@@ -38,7 +38,7 @@ A note's first line names it: type `# Shipping Notes` and the file becomes `ship
 - ⌥⌘P searches full text across the workspace
 - ⌥⌘L shows backlinks, ⌥⌘O the outline, ⌥⌘T the tags
 
-Because notes are ordinary files, git, agents, and shell tools work on them directly. Ledge watches the folder and follows along, even mid-edit.
+Because notes are ordinary files, git, agents, and shell tools work on them directly. Ledge watches the folder and follows along, even mid-edit. [[Notes and Workspaces]] covers the files side in full, and [[Finding Things]] the search, links, and tags.
 
 ## Point a note at a project
 

@@ -56,21 +56,27 @@ export function NoteBrowser() {
   const [undo, setUndo] = useState<{ trashed: string; title: string } | null>(null);
   const nav = useListNav();
 
-  // The selected workspace's notes only. Sorted by title, NOT by the mtime
-  // order the store holds them in: an autosave rewrites mtime on every
-  // keystroke burst, so an mtime-sorted list would shuffle itself under the
-  // pointer while you type.
-  const folderNotes = notesOf(state, selected.folder);
-  const notes = useMemo(
-    () => [...folderNotes].sort((a, b) => a.title.localeCompare(b.title)),
-    [folderNotes],
-  );
-  const open = useMemo(() => openNotePaths(state), [state]);
-  const current = focusedTab(selected)?.path ?? null;
   // The built-in Documentation workspace: no create, no delete, no lock —
   // the mutating affordances hide here, and Bun refuses them regardless
   // (bun/workspaces.ts assertWritableRoot).
   const readOnly = workspaceKind(selected.folder) === "docs";
+  // The selected workspace's notes only. Sorted by title, NOT by the mtime
+  // order the store holds them in: an autosave rewrites mtime on every
+  // keystroke burst, so an mtime-sorted list would shuffle itself under the
+  // pointer while you type. The docs workspace sorts by path instead: its
+  // filenames are numbered by the manifest (bun/docsContent.ts), which is how
+  // the manual's pages keep their curated reading order in a browser that
+  // otherwise alphabetizes.
+  const folderNotes = notesOf(state, selected.folder);
+  const notes = useMemo(
+    () =>
+      [...folderNotes].sort((a, b) =>
+        readOnly ? a.path.localeCompare(b.path) : a.title.localeCompare(b.title),
+      ),
+    [folderNotes, readOnly],
+  );
+  const open = useMemo(() => openNotePaths(state), [state]);
+  const current = focusedTab(selected)?.path ?? null;
   // The note the open menu points at: its live locked flag picks which lock
   // face (and which vault verb) the menu carries.
   const menuNote = menu ? notes.find((n) => n.path === menu.path) : undefined;

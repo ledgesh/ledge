@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { BookOpen, Hash, Link2, PanelLeft, TableOfContents, TerminalSquare, X } from "lucide-react";
+import { CircleHelp, Hash, Link2, PanelLeft, TableOfContents, TerminalSquare, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ResizeHandle } from "@/components/ResizeHandle";
 import { TerminalDrawer } from "@/terminal/TerminalDrawer";
@@ -526,7 +526,7 @@ function Shell() {
             onClick={() => exec("docs.open")}
             title={tooltip("docs.open")}
           >
-            <BookOpen className="size-4" />
+            <CircleHelp className="size-4" />
           </Button>
         )}
       </header>

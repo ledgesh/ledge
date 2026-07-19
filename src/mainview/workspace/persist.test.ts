@@ -198,6 +198,26 @@ describe("folders", () => {
     expect(ws.name).toBe("Documentation");
     expect(tabPaths(ws.root)).toEqual([page.path]);
   });
+
+  test("a docs workspace with no surviving page is dropped, even when it was selected", () => {
+    // The real-user bug behind this rule: quit inside the docs workspace with
+    // its pages closed (or with paths a corpus upgrade retired), and restore
+    // would boot into a blank read-only workspace with no strip row saying
+    // where you are — and the help button, "selecting" the already-selected
+    // docs, would look dead. Dropping it restores somewhere real; the help
+    // button recreates it on demand, landing on a page.
+    const stale = note("/docs/getting-started.md", "Getting Started");
+    const current = note("/docs/01-getting-started.md", "Getting Started");
+    let s = initialState(FOLDER, NOTES);
+    s = reducer(s, { type: "addWorkspace", name: "Documentation", folder: "/docs", note: stale });
+    // Selected at quit time: the docs workspace was added last, so it is.
+    const docs: WorkspaceRootInfo = { root: "/docs", kind: "docs", available: true };
+    const after = restoredState(serializeLayout(s), [...ROOTS, docs], { ...NOTES_BY, "/docs": [current] }, {});
+    expect(after.workspaces.some((w) => w.folder === "/docs")).toBe(false);
+    // The rest of the session restored, not a fresh start: dropping the docs
+    // workspace costs exactly itself.
+    expect(after.workspaces[0].folder).toBe(FOLDER);
+  });
 });
 
 describe("pruning", () => {

@@ -20,6 +20,7 @@ import {
   firstLeaf,
   makeNoteTab,
   makeTab,
+  tabPaths,
   uid,
   type LeafNode,
   type PaneNode,
@@ -279,7 +280,15 @@ export function restoreLayout(
       opened,
       workspaces.length + 1,
     );
-    if (ws) workspaces.push(ws);
+    if (!ws) continue;
+    // A docs workspace that restored with no page open is dropped rather than
+    // kept: its panes would hold only reseeded scratch tabs, which in the
+    // read-only docs folder are notes that can never save — and if it was the
+    // SELECTED workspace, the app would boot into that blank with no strip row
+    // to say where it is (a real user hit exactly this). The help button
+    // recreates it on demand, landing on Getting Started.
+    if (info.kind === "docs" && tabPaths(ws.root).length === 0) continue;
+    workspaces.push(ws);
   }
   if (workspaces.length === 0) return null;
 

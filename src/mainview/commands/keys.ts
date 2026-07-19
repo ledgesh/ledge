@@ -67,7 +67,7 @@ export const COMMANDS = {
   // a strip row, absent from ⌘1…9, every mutating verb gated (and refused
   // Bun-side regardless). Selecting any workspace — a strip row, ⌘1…9 — is
   // the way back. No chord: docs are a sometimes destination, so the palette
-  // and the header's book button carry it.
+  // and the header's help button carry it.
   "docs.open": { title: "Documentation" },
   "palette.notes": { title: "Go to Note…", keys: ["Mod-p"] },
   "palette.commands": { title: "Command Palette…", keys: ["Mod-Shift-p"] },

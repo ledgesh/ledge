@@ -13,6 +13,7 @@ import {
   workspaceKind,
 } from "./channel";
 import { notesOf, type Action, type AppState } from "./store";
+import { tabPaths } from "./tree";
 
 // New Workspace: ask Bun for a folder first (it slugs the display name and
 // allocates against what exists), then add the workspace over it. The name
@@ -59,35 +60,52 @@ export async function attachWorkspace(
 
 // Open the built-in Documentation workspace: select it if it is already open,
 // else add it over the docs folder Bun reported at boot, landing on the
-// Getting Started page (else the first page alphabetically — the browser's
-// order). The page list comes from the store when a restored session already
+// Getting Started page (else the first page in path order — the browser's
+// order for docs: the manifest's numbered filenames, bun/docsContent.ts).
+// The page list comes from the store when a restored session already
 // carries it, else one listNotes round trip: the fresh-start boot seeds only
 // the first workspace's lists, and an open that trusted the store alone would
 // land on a scratch tab in a folder that refuses writes. It joins
 // state.workspaces like any workspace — panes, tabs, search, quick-open all
 // just work — and the strip simply declines to show it (Sidebar filters kind
 // "docs").
+//
+// The already-open branch must still land on a page: a docs workspace can be
+// sitting on nothing but a reseeded scratch tab (its pages all closed, so
+// closeTab's reseed rule ran in a folder where an unsaved note can never
+// save), and since the strip never shows the workspace, "selected, showing
+// nothing" is indistinguishable from a dead button — the click has to make
+// the landing page appear, not merely select.
 export async function openDocs(state: AppState, dispatch: (action: Action) => void): Promise<void> {
   const folder = docsFolder();
   if (!folder) return; // Bun never reported one; the command's `when` hides this path
   const existing = state.workspaces.find((w) => w.folder === folder);
-  if (existing) {
+  if (existing && tabPaths(existing.root).length > 0) {
     dispatch({ type: "selectWorkspace", id: existing.id });
     return;
   }
   let notes = notesOf(state, folder);
+  let fetched = false;
   if (notes.length === 0) {
     // A failed list costs the landing page, not the open: the workspace still
     // appears (empty), and the focus refresh re-lists like any folder's.
     notes = await listNotes(folder).catch(() => []);
+    fetched = true;
   }
   const start =
     notes.find((n) => n.title.toLowerCase() === "getting started") ??
-    [...notes].sort((a, b) => a.title.localeCompare(b.title))[0];
-  dispatch({ type: "addWorkspace", name: "Documentation", folder, note: start });
+    [...notes].sort((a, b) => a.path.localeCompare(b.path))[0];
+  if (existing) {
+    dispatch({ type: "selectWorkspace", id: existing.id });
+    // openNote acts on the selected workspace at reduce time, so it follows
+    // the select above and the page opens in the docs workspace's pane.
+    if (start) dispatch({ type: "openNote", note: start });
+  } else {
+    dispatch({ type: "addWorkspace", name: "Documentation", folder, note: start });
+  }
   // The browser (and quick-open) need the page list now, not at the next
   // focus refresh; the reducer seeded the folder empty.
-  dispatch({ type: "notesLoaded", folder, notes });
+  if (fetched) dispatch({ type: "notesLoaded", folder, notes });
 }
 
 // Close Workspace, the folder half: the reducer closes the view (refusing the

@@ -94,7 +94,7 @@ function WorkspaceStrip() {
   const listRef = nav.containerProps.ref;
 
   // The rows the strip shows: every workspace except the built-in docs one,
-  // which is deliberately not a row — the header's book button is its whole
+  // which is deliberately not a row — the header's help button is its whole
   // presence, and while it is selected no row highlights (the way back is any
   // row, or ⌘1…9, which index this same filtered list).
   const strip = state.workspaces.filter((ws) => workspaceKind(ws.folder) !== "docs");

@@ -308,7 +308,13 @@ exactly like a note — from one special root that can never be written:
   `ensureDefault` does not count it (a docs-only registry still creates
   scratch).
 - **The corpus is compiled into the binary** (`bun/docsContent.ts`, text
-  imports of `docs/user/*.md`) and synced into the docs root at every launch
+  imports of `docs/user/*.md`). Manifest filenames carry a numeric prefix
+  (`01-getting-started.md`): the note browser sorts the docs workspace by
+  path instead of title (`NoteBrowser.tsx`), so the numbering is the manual's
+  reading order — no order field travels the RPC, and titles stay clean.
+  Pages are authored one line per paragraph (no hard 80-column wraps: the
+  editor soft-wraps, and a hard wrap renders as a broken line) and synced
+  into the docs root at every launch
   (`bun/docs.ts syncDocs`): byte-matching pages are left untouched, differing
   ones rewritten temp-plus-rename, and pages the manifest dropped are RETIRED
   by rename into `.ledge-docs/.retired/` — the sync owns no unlink. The folder

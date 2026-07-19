@@ -161,6 +161,14 @@ class FakeStore {
     data.notes.set(path, { text, mtimeMs: this.tick() });
   }
 
+  // Seed under a stated filename rather than the H1's slug: the docs pages'
+  // names are manifest artifacts (numbered for reading order, like the real
+  // bun/docsContent.ts), not derived from their titles.
+  seedAt(root: string, name: string, text: string): void {
+    const data = this.ensureRoot(root);
+    data.notes.set(`${root}/${name}`, { text, mtimeMs: this.tick() });
+  }
+
   seedTrash(root: string, text: string): void {
     const data = this.ensureRoot(root);
     const path = `${root}/.ledge-trash/${this.allocate(text, data.trash.keys())}`;
@@ -518,14 +526,19 @@ store.seed(
   ].join("\n"),
 );
 store.vault = { state: "locked", pass: "letmein" };
-// The built-in docs, attached at boot like the real registry does. Two pages:
-// Getting Started (with a runnable block — the read-only editor must still
-// run it) and a second page so the docs browser is a real list. Seeded LAST
-// so the older specs' per-workspace counts (scratch's rows, quick-open's
-// scoped lists) see exactly what they always saw.
+// The built-in docs, attached at boot like the real registry does. Three
+// pages: Getting Started (with a runnable block — the read-only editor must
+// still run it), a second page so the docs browser is a real list, and a
+// third whose TITLE sorts before the others while its numbered filename
+// sorts last, so a spec can tell path order from title order. Filenames are
+// numbered like the real manifest's (bun/docsContent.ts): the browser sorts
+// the docs workspace by path. Seeded LAST so the older specs' per-workspace
+// counts (scratch's rows, quick-open's scoped lists) see exactly what they
+// always saw.
 store.attach(DOCS);
-store.seed(
+store.seedAt(
   DOCS,
+  "01-getting-started.md",
   [
     "# Getting Started",
     "",
@@ -537,7 +550,8 @@ store.seed(
     "",
   ].join("\n"),
 );
-store.seed(DOCS, "# Workspaces Guide\n\nfolders all the way down\n");
+store.seedAt(DOCS, "02-workspaces-guide.md", "# Workspaces Guide\n\nfolders all the way down\n");
+store.seedAt(DOCS, "03-about-panes.md", "# About Panes\n\nsplits and tabs\n");
 
 configureNotes({
   list: async (folder) => store.list(folder),

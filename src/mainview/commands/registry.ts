@@ -10,7 +10,7 @@ import {
   ArrowLeft,
   ArrowRight,
   Bold,
-  BookOpen,
+  CircleHelp,
   Braces,
   CalendarDays,
   Columns2,
@@ -233,11 +233,13 @@ export function buildCommands(deps: RegistryDeps): Command[] {
         }),
     }),
     // Open (or switch to) the built-in Documentation workspace — hidden from
-    // the strip and ⌘1…9, read-only end to end; the header's book button is
+    // the strip and ⌘1…9, read-only end to end; the header's help button is
     // the icon surface. Hidden entirely when Bun reported no docs root (a
     // failed boot, a harness without one).
     cmd("docs.open", {
-      icon: BookOpen,
+      // A question mark, not a book: on a notes app, a book glyph reads as
+      // "another notebook", while ? is the universal help affordance.
+      icon: CircleHelp,
       when: () => deps.docsFolder() !== null,
       run: (ctx) => {
         void deps.openDocs(ctx.state, ctx.dispatch);
