@@ -14,10 +14,11 @@ import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
 import {
   APP_HOME,
+  DOCS_ROOT,
   WORKSPACES_PATH,
   assertRegisteredRoot,
+  assertWritableRoot,
   attachExternal,
-  availableRoots,
   createManaged,
   detachRoot,
   ensureDefault,
@@ -26,10 +27,21 @@ import {
   moveRoot,
   rootContaining,
   roots,
+  writableRoots,
 } from "./workspaces";
 
 if (!resolve(APP_HOME).startsWith(resolve(tmpdir()) + sep)) {
   throw new Error(`refusing to run filesystem tests against ${APP_HOME} — is the preload configured?`);
+}
+
+// The registry as the USER's roots: every load also registers the built-in
+// docs root in memory (its own describe block below pins that), and these
+// filtered views keep the user-root assertions saying what they always said.
+function userRoots(): string[] {
+  return roots().filter((r) => r !== resolve(DOCS_ROOT));
+}
+function userList() {
+  return listWorkspaceRoots().filter((w) => w.kind !== "docs");
 }
 
 // A scratch dir OUTSIDE the app home, for external-root cases. A sibling of
@@ -50,8 +62,8 @@ describe("createManaged", () => {
     expect(root).toBe(join(resolve(APP_HOME), "shipping-notes"));
     expect((await stat(root)).isDirectory()).toBe(true);
     await loadWorkspaces(); // reload from disk: the registration survived
-    expect(roots()).toEqual([root]);
-    expect(listWorkspaceRoots()).toEqual([{ root, kind: "managed", available: true }]);
+    expect(userRoots()).toEqual([root]);
+    expect(userList()).toEqual([{ root, kind: "managed", available: true }]);
   });
 
   test("the same name twice enumerates instead of sharing a folder", async () => {
@@ -78,14 +90,14 @@ describe("attachExternal", () => {
     const dir = await externalDir();
     expect(await attachExternal(dir)).toEqual({ root: resolve(dir) });
     await loadWorkspaces();
-    expect(listWorkspaceRoots()).toEqual([{ root: resolve(dir), kind: "external", available: true }]);
+    expect(userList()).toEqual([{ root: resolve(dir), kind: "external", available: true }]);
   });
 
   test("attaching an already-registered root returns it instead of erroring", async () => {
     const dir = await externalDir();
     await attachExternal(dir);
     expect(await attachExternal(dir)).toEqual({ root: resolve(dir) });
-    expect(roots()).toHaveLength(1);
+    expect(userRoots()).toHaveLength(1);
   });
 
   test("a missing path or a plain file is refused", async () => {
@@ -123,7 +135,7 @@ describe("attachExternal", () => {
     await mkdir(weird);
     expect(await attachExternal(weird)).toEqual({ root: resolve(weird) });
     await loadWorkspaces();
-    expect(roots()).toEqual([resolve(weird)]);
+    expect(userRoots()).toEqual([resolve(weird)]);
   });
 
   test("a sibling whose name merely starts with a root is fine", async () => {
@@ -140,7 +152,7 @@ describe("attachExternal", () => {
     await detachRoot(root);
     expect(rootContaining(join(root, "kept.md"))).toBeNull(); // truly out
     expect(await attachExternal(root)).toEqual({ root });
-    expect(listWorkspaceRoots()).toEqual([{ root, kind: "managed", available: true }]);
+    expect(userList()).toEqual([{ root, kind: "managed", available: true }]);
     expect(await readFile(join(root, "kept.md"), "utf8")).toBe("# Kept\n");
   });
 
@@ -159,10 +171,10 @@ describe("detachRoot", () => {
     await writeFile(join(dir, "note.md"), "# Note\n", "utf8");
     await attachExternal(dir);
     expect(await detachRoot(dir)).toBe(true);
-    expect(roots()).toEqual([]);
+    expect(userRoots()).toEqual([]);
     expect(await readFile(join(dir, "note.md"), "utf8")).toBe("# Note\n");
     await loadWorkspaces(); // the removal persisted too
-    expect(roots()).toEqual([]);
+    expect(userRoots()).toEqual([]);
   });
 
   test("detaching an unknown root is false, not a throw", async () => {
@@ -186,9 +198,9 @@ describe("moveRoot", () => {
     expect(await stat(root).catch(() => null)).toBeNull();
     // The registry followed, kind re-derived from the new location, and it
     // survived a reload from disk.
-    expect(listWorkspaceRoots()).toEqual([{ root: next, kind: "external", available: true }]);
+    expect(userList()).toEqual([{ root: next, kind: "external", available: true }]);
     await loadWorkspaces();
-    expect(roots()).toEqual([next]);
+    expect(userRoots()).toEqual([next]);
   });
 
   test("moving into the app home makes the root managed", async () => {
@@ -197,7 +209,7 @@ describe("moveRoot", () => {
     const res = await moveRoot(dir, APP_HOME);
     const next = (res as { root: string }).root;
     expect(next).toBe(join(resolve(APP_HOME), dir.split(sep).pop()!));
-    expect(listWorkspaceRoots()).toEqual([{ root: next, kind: "managed", available: true }]);
+    expect(userList()).toEqual([{ root: next, kind: "managed", available: true }]);
   });
 
   test("a taken name at the destination enumerates instead of clobbering", async () => {
@@ -215,7 +227,7 @@ describe("moveRoot", () => {
     const root = await createManaged("Scratch");
     expect(await moveRoot(root, APP_HOME)).toEqual({ root });
     expect((await stat(root)).isDirectory()).toBe(true);
-    expect(roots()).toEqual([root]);
+    expect(userRoots()).toEqual([root]);
   });
 
   test("registration order is preserved — a move is a relocation, not a re-registration", async () => {
@@ -224,7 +236,7 @@ describe("moveRoot", () => {
     const c = await createManaged("Gamma");
     const dest = await externalDir();
     const next = ((await moveRoot(b, dest)) as { root: string }).root;
-    expect(roots()).toEqual([a, next, c]);
+    expect(userRoots()).toEqual([a, next, c]);
   });
 
   test("refusals: unregistered, into itself, into another root, deeper into the app home", async () => {
@@ -239,7 +251,7 @@ describe("moveRoot", () => {
     expect(await moveRoot(root, deep)).toHaveProperty("error");
     // Every refusal left the folder and the registry untouched.
     expect((await stat(root)).isDirectory()).toBe(true);
-    expect(roots()).toEqual([root, resolve(other)]);
+    expect(userRoots()).toEqual([root, resolve(other)]);
   });
 
   test("a missing destination, or a plain file, is refused", async () => {
@@ -265,7 +277,7 @@ describe("loadWorkspaces healing", () => {
   test("an unparseable registry is renamed aside and the run continues empty", async () => {
     await writeFile(WORKSPACES_PATH, "{ not json", "utf8");
     await loadWorkspaces();
-    expect(roots()).toEqual([]);
+    expect(userRoots()).toEqual([]);
     // The bytes survive for forensics; no note file was touched.
     const aside = (await readdir(APP_HOME)).filter((n) => n.startsWith(".workspaces.json.bad-"));
     expect(aside).toHaveLength(1);
@@ -282,7 +294,7 @@ describe("loadWorkspaces healing", () => {
       "utf8",
     );
     await loadWorkspaces();
-    expect(roots()).toEqual([resolve(good)]);
+    expect(userRoots()).toEqual([resolve(good)]);
   });
 
   test("a missing external root is kept, unavailable — an unmounted volume is not data loss", async () => {
@@ -290,16 +302,16 @@ describe("loadWorkspaces healing", () => {
     await attachExternal(dir);
     await rm(dir, { recursive: true });
     await loadWorkspaces();
-    expect(listWorkspaceRoots()).toEqual([{ root: resolve(dir), kind: "external", available: false }]);
-    expect(availableRoots()).toEqual([]);
-    expect(roots()).toEqual([resolve(dir)]); // still registered: a remount heals at next boot
+    expect(userList()).toEqual([{ root: resolve(dir), kind: "external", available: false }]);
+    expect(writableRoots()).toEqual([]);
+    expect(userRoots()).toEqual([resolve(dir)]); // still registered: a remount heals at next boot
   });
 
   test("a missing managed folder is recreated — Bun made it, Bun may remake it", async () => {
     const root = await createManaged("Scratch");
     await rm(root, { recursive: true });
     await loadWorkspaces();
-    expect(listWorkspaceRoots()).toEqual([{ root, kind: "managed", available: true }]);
+    expect(userList()).toEqual([{ root, kind: "managed", available: true }]);
     expect((await stat(root)).isDirectory()).toBe(true);
   });
 });
@@ -307,13 +319,13 @@ describe("loadWorkspaces healing", () => {
 describe("ensureDefault", () => {
   test("a first launch gets scratch", async () => {
     await ensureDefault();
-    expect(roots()).toEqual([join(resolve(APP_HOME), "scratch")]);
+    expect(userRoots()).toEqual([join(resolve(APP_HOME), "scratch")]);
   });
 
   test("an available root means no-op", async () => {
     const root = await createManaged("Mine");
     await ensureDefault();
-    expect(roots()).toEqual([root]);
+    expect(userRoots()).toEqual([root]);
   });
 
   test("only-unavailable roots still get a fresh default — the view must have somewhere to put a note", async () => {
@@ -322,7 +334,49 @@ describe("ensureDefault", () => {
     await rm(dir, { recursive: true });
     await loadWorkspaces();
     await ensureDefault();
-    expect(availableRoots()).toEqual([join(resolve(APP_HOME), "scratch")]);
+    expect(writableRoots()).toEqual([join(resolve(APP_HOME), "scratch")]);
+  });
+});
+
+describe("the docs root", () => {
+  // The built-in documentation folder: registered IN MEMORY at every load so
+  // the read paths serve doc pages through the ordinary guards, but never a
+  // user root — not persisted, not attachable, not movable, not writable.
+  const docs = resolve(DOCS_ROOT);
+
+  test("every load registers it, kind docs, self-healed like a managed folder", async () => {
+    expect(roots()).toContain(docs);
+    expect(listWorkspaceRoots()).toContainEqual({ root: docs, kind: "docs", available: true });
+    expect((await stat(docs)).isDirectory()).toBe(true);
+    // And the guards agree it is a root: a page path resolves to it.
+    expect(rootContaining(join(docs, "getting-started.md"))).toBe(docs);
+    expect(assertRegisteredRoot(docs)).toBe(docs);
+  });
+
+  test("it never reaches .workspaces.json", async () => {
+    await createManaged("Scratch"); // triggers a save
+    const file = JSON.parse(await readFile(WORKSPACES_PATH, "utf8")) as { roots: string[] };
+    expect(file.roots).not.toContain(docs);
+  });
+
+  test("detach, move, and attach all refuse it", async () => {
+    expect(await detachRoot(docs)).toBe(false);
+    expect(roots()).toContain(docs); // still registered
+    const dest = await externalDir();
+    expect(await moveRoot(docs, dest)).toHaveProperty("error");
+    expect(await attachExternal(docs)).toHaveProperty("error");
+  });
+
+  test("assertWritableRoot is the read-only gate, and writableRoots excludes it", async () => {
+    expect(() => assertWritableRoot(docs)).toThrow(/read-only/);
+    const mine = await createManaged("Mine");
+    expect(assertWritableRoot(mine)).toBe(mine);
+    expect(writableRoots()).toEqual([mine]);
+  });
+
+  test("ensureDefault does not count it — a docs-only registry still gets scratch", async () => {
+    await ensureDefault();
+    expect(userRoots()).toEqual([join(resolve(APP_HOME), "scratch")]);
   });
 });
 

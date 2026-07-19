@@ -175,6 +175,29 @@ describe("folders", () => {
     const saved = JSON.parse(serializeLayout(fresh)) as { workspaces: Array<{ folder: string }> };
     expect(saved.workspaces.map((w) => w.folder)).toEqual([FOLDER2, FOLDER]);
   });
+
+  test("the fresh-start fallback never lands on the docs root", () => {
+    // Bun lists the built-in docs root FIRST (bun/workspaces.ts registers it
+    // at every load), and it is available — but a first launch must boot into
+    // a folder a first note can save to, not the read-only documentation.
+    const docs: WorkspaceRootInfo = { root: "/docs", kind: "docs", available: true };
+    const fresh = restoredState(null, [docs, root(FOLDER)], { [FOLDER]: NOTES, "/docs": [] }, {});
+    expect(fresh.workspaces[0].folder).toBe(FOLDER);
+  });
+
+  test("a docs workspace recorded in the layout restores like any other", () => {
+    // Open docs tabs survive a relaunch: the folder is registered and its
+    // boot noteList vouches for the page paths, so the ordinary restore path
+    // carries it — hiding it from the strip is presentation, not persistence.
+    const page = note("/docs/getting-started.md", "Getting Started");
+    let s = initialState(FOLDER, NOTES);
+    s = reducer(s, { type: "addWorkspace", name: "Documentation", folder: "/docs", note: page });
+    const docs: WorkspaceRootInfo = { root: "/docs", kind: "docs", available: true };
+    const after = restoreLayout(serializeLayout(s), [...ROOTS, docs], { ...NOTES_BY, "/docs": [page] }, {})!;
+    const ws = after.workspaces.find((w) => w.folder === "/docs")!;
+    expect(ws.name).toBe("Documentation");
+    expect(tabPaths(ws.root)).toEqual([page.path]);
+  });
 });
 
 describe("pruning", () => {

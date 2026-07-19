@@ -7,6 +7,7 @@ import { ResizeHandle } from "@/components/ResizeHandle";
 import { useCommands } from "@/commands/CommandProvider";
 import { CommandMenuItem } from "@/commands/CommandMenuItem";
 import { tooltip } from "@/commands/format";
+import { workspaceKind } from "./channel";
 import { useWorkspace } from "./store";
 import { attachEditor, detachEditor, focusEditor } from "./editorPool";
 import { leafIds, type LeafNode, type PaneNode, type SplitNode, type TabState } from "./tree";
@@ -123,13 +124,17 @@ function PaneBody({ leaf, focused }: { leaf: LeafNode; focused: boolean }) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 text-muted-foreground">
         <span className="text-sm">No open notes</span>
-        <button
-          className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs hover:bg-accent"
-          title={tooltip("note.new")}
-          onClick={() => exec("note.new", { kind: "pane", paneId: leaf.id })}
-        >
-          <FilePlus className="size-3.5" /> New Note
-        </button>
+        {/* Not in the docs workspace: nothing creates there, and a button
+            whose command is gated would be a dead affordance. */}
+        {workspaceKind(folder) !== "docs" && (
+          <button
+            className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs hover:bg-accent"
+            title={tooltip("note.new")}
+            onClick={() => exec("note.new", { kind: "pane", paneId: leaf.id })}
+          >
+            <FilePlus className="size-3.5" /> New Note
+          </button>
+        )}
       </div>
     );
   }
@@ -253,13 +258,16 @@ function TabBar({ leaf, focused }: { leaf: LeafNode; focused: boolean }) {
           </Fragment>
         ))}
         {dropIndex === leaf.tabs.length && <DropMarker />}
-        <button
-          className="flex w-7 shrink-0 items-center justify-center text-muted-foreground hover:text-foreground"
-          title={tooltip("note.new")}
-          onClick={() => exec("note.new", { kind: "pane", paneId: leaf.id })}
-        >
-          <Plus className="size-3.5" />
-        </button>
+        {/* The + is New Note; the docs workspace has no such thing. */}
+        {workspaceKind(selected.folder) !== "docs" && (
+          <button
+            className="flex w-7 shrink-0 items-center justify-center text-muted-foreground hover:text-foreground"
+            title={tooltip("note.new")}
+            onClick={() => exec("note.new", { kind: "pane", paneId: leaf.id })}
+          >
+            <Plus className="size-3.5" />
+          </button>
+        )}
       </div>
       <div className="flex shrink-0 items-center gap-0.5 border-l px-1">
         <PaneAction

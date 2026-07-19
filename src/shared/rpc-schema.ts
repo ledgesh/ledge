@@ -113,13 +113,16 @@ export interface TagHit extends NoteMeta {
  * absolute path — the opaque handle the view passes back on every scoped call.
  * `kind` says who created it: "managed" folders live directly in ~/.ledge and
  * Bun may recreate them; "external" folders were picked by the user in the
- * native dialog and Bun never mkdirs them. `available: false` means the folder
- * is registered but missing on disk right now (an unmounted volume): the view
- * keeps its saved layout dormant rather than pruning it.
+ * native dialog and Bun never mkdirs them; "docs" is the ONE built-in
+ * documentation folder Bun syncs at launch — registered for the read paths,
+ * refused by every write seam, and rendered by the view as the hidden
+ * read-only Documentation workspace (never a strip row). `available: false`
+ * means the folder is registered but missing on disk right now (an unmounted
+ * volume): the view keeps its saved layout dormant rather than pruning it.
  */
 export interface WorkspaceRootInfo {
   root: string;
-  kind: "managed" | "external";
+  kind: "managed" | "external" | "docs";
   available: boolean;
 }
 

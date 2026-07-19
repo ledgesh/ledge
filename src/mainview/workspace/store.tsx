@@ -88,7 +88,10 @@ export type Action =
   // A workspace whose folder Bun just created or attached (workspace/actions.ts
   // did the round trip; the reducer stays pure). If some workspace already owns
   // the folder, it is selected instead of duplicated — one workspace per folder.
-  | { type: "addWorkspace"; name: string; folder: string }
+  // `note` seeds the first tab with an existing note instead of a scratch tab:
+  // the docs open lands on Getting Started rather than an editable-looking
+  // untitled tab in a folder that refuses writes.
+  | { type: "addWorkspace"; name: string; folder: string; note?: NoteMeta }
   | { type: "closeWorkspace"; id: string }
   // A workspace's folder moved on disk (Bun renamed it; workspace/actions.ts
   // did the round trip). The workspace keeps its identity — id, name, icon,
@@ -182,7 +185,8 @@ export function reducer(state: AppState, action: Action): AppState {
       // already a workspace) selects the existing one, openNote's move.
       const existing = state.workspaces.find((w) => w.folder === action.folder);
       if (existing) return { ...state, selectedId: existing.id };
-      const ws = makeWorkspace(action.name, action.folder, makeTab("scratch"));
+      const tab = action.note ? makeNoteTab(action.note.path, action.note.title) : makeTab("scratch");
+      const ws = makeWorkspace(action.name, action.folder, tab);
       return {
         ...state,
         workspaces: [...state.workspaces, ws],

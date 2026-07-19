@@ -8,9 +8,11 @@ import {
   attachWorkspaceFolder as attachFolder,
   createWorkspaceFolder,
   detachWorkspaceFolder,
+  docsFolder,
   moveWorkspaceFolder,
+  workspaceKind,
 } from "./channel";
-import type { Action, AppState } from "./store";
+import { notesOf, type Action, type AppState } from "./store";
 
 // New Workspace: ask Bun for a folder first (it slugs the display name and
 // allocates against what exists), then add the workspace over it. The name
@@ -55,6 +57,39 @@ export async function attachWorkspace(
   return null;
 }
 
+// Open the built-in Documentation workspace: select it if it is already open,
+// else add it over the docs folder Bun reported at boot, landing on the
+// Getting Started page (else the first page alphabetically — the browser's
+// order). The page list comes from the store when a restored session already
+// carries it, else one listNotes round trip: the fresh-start boot seeds only
+// the first workspace's lists, and an open that trusted the store alone would
+// land on a scratch tab in a folder that refuses writes. It joins
+// state.workspaces like any workspace — panes, tabs, search, quick-open all
+// just work — and the strip simply declines to show it (Sidebar filters kind
+// "docs").
+export async function openDocs(state: AppState, dispatch: (action: Action) => void): Promise<void> {
+  const folder = docsFolder();
+  if (!folder) return; // Bun never reported one; the command's `when` hides this path
+  const existing = state.workspaces.find((w) => w.folder === folder);
+  if (existing) {
+    dispatch({ type: "selectWorkspace", id: existing.id });
+    return;
+  }
+  let notes = notesOf(state, folder);
+  if (notes.length === 0) {
+    // A failed list costs the landing page, not the open: the workspace still
+    // appears (empty), and the focus refresh re-lists like any folder's.
+    notes = await listNotes(folder).catch(() => []);
+  }
+  const start =
+    notes.find((n) => n.title.toLowerCase() === "getting started") ??
+    [...notes].sort((a, b) => a.title.localeCompare(b.title))[0];
+  dispatch({ type: "addWorkspace", name: "Documentation", folder, note: start });
+  // The browser (and quick-open) need the page list now, not at the next
+  // focus refresh; the reducer seeded the folder empty.
+  dispatch({ type: "notesLoaded", folder, notes });
+}
+
 // Close Workspace, the folder half: the reducer closes the view (refusing the
 // last workspace), and only if the workspace actually went does the folder
 // leave the registry. Detach never touches files — the folder is re-attachable
@@ -68,6 +103,10 @@ export function closeWorkspace(
   const ws = state.workspaces.find((w) => w.id === id);
   if (!ws || state.workspaces.length <= 1) return; // the reducer would refuse too
   dispatch({ type: "closeWorkspace", id });
+  // The docs folder never detaches: its registry line is Bun's own (detachRoot
+  // would refuse anyway), and closing the Documentation workspace is purely a
+  // view arrangement — the docs icon reopens it.
+  if (workspaceKind(ws.folder) === "docs") return;
   detachWorkspaceFolder(ws.folder).catch((err) => {
     // The workspace is gone from the view either way; a failed detach costs a
     // stale registry line that the next attach of the same folder reuses.

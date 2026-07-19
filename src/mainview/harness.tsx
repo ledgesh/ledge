@@ -39,6 +39,11 @@ import App from "./App";
 // the whole attach flow spec-able without the native dialog.
 const SCRATCH = "/harness/scratch";
 const EXTERNAL = "/harness/external";
+// The built-in documentation root, attached at boot like the real one
+// (bun/workspaces.ts registers it at every load): kind "docs", hidden from
+// the strip, and every fake write below refuses it — the same read-only
+// contract the real store enforces (assertWritableRoot).
+const DOCS = "/harness/.ledge-docs";
 
 interface RootData {
   notes: Map<string, { text: string; mtimeMs: number }>;
@@ -106,9 +111,23 @@ class FakeStore {
   workspaceList(): WorkspaceRootInfo[] {
     return this.attached.map((root) => ({
       root,
-      kind: root.startsWith("/harness/") && !root.includes("external") ? "managed" : "external",
+      kind:
+        root === DOCS
+          ? "docs"
+          : root.startsWith("/harness/") && !root.includes("external")
+            ? "managed"
+            : "external",
       available: true,
     }));
+  }
+
+  // The real store's read-only gate (assertWritableRoot), fake edition: every
+  // mutating path below calls this, so a spec that reaches a docs write by
+  // any route gets the same refusal the app would.
+  private assertWritable(rootOrPath: string): void {
+    if (rootOrPath === DOCS || rootOrPath.startsWith(`${DOCS}/`)) {
+      throw new Error("the built-in documentation is read-only");
+    }
   }
 
   createManaged(name: string): string {
@@ -231,6 +250,7 @@ class FakeStore {
   }
 
   lockNote(path: string): NoteMeta {
+    this.assertWritable(path);
     if (this.vault.state !== "unlocked") throw new Error("the vault is locked");
     const { data } = this.rootOf(path);
     const n = data.notes.get(path)!;
@@ -281,6 +301,7 @@ class FakeStore {
   }
 
   create(root: string, text: string): NoteMeta {
+    this.assertWritable(root);
     const data = this.ensureRoot(root);
     const path = `${root}/${this.allocate(text, data.notes.keys())}`;
     data.notes.set(path, { text, mtimeMs: this.tick() });
@@ -293,6 +314,7 @@ class FakeStore {
   // mtime. The fake must carry the semantics or the harness specs would
   // green-light a view that never handles divergence.
   write(path: string, text: string, baseMtimeMs: number | null): { mtimeMs: number; divergedTo: string | null } {
+    this.assertWritable(path);
     const { root, data } = this.rootOf(path);
     const cur = data.notes.get(path);
     // The disk decides the lock marker, never the buffer (the real
@@ -315,6 +337,7 @@ class FakeStore {
   }
 
   retitle(path: string, text: string): NoteMeta {
+    this.assertWritable(path);
     const { root, data } = this.rootOf(path);
     const current = data.notes.get(path)!;
     const others = [...data.notes.keys()].filter((p) => p !== path);
@@ -325,6 +348,7 @@ class FakeStore {
   }
 
   remove(path: string): string | null {
+    this.assertWritable(path);
     const { root, data } = this.rootOf(path);
     const n = data.notes.get(path);
     if (!n) return null;
@@ -494,6 +518,26 @@ store.seed(
   ].join("\n"),
 );
 store.vault = { state: "locked", pass: "letmein" };
+// The built-in docs, attached at boot like the real registry does. Two pages:
+// Getting Started (with a runnable block — the read-only editor must still
+// run it) and a second page so the docs browser is a real list. Seeded LAST
+// so the older specs' per-workspace counts (scratch's rows, quick-open's
+// scoped lists) see exactly what they always saw.
+store.attach(DOCS);
+store.seed(
+  DOCS,
+  [
+    "# Getting Started",
+    "",
+    "Welcome to Ledge. docs needle body.",
+    "",
+    "```sh",
+    "echo hello from the docs",
+    "```",
+    "",
+  ].join("\n"),
+);
+store.seed(DOCS, "# Workspaces Guide\n\nfolders all the way down\n");
 
 configureNotes({
   list: async (folder) => store.list(folder),

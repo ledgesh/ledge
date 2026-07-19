@@ -329,13 +329,34 @@ const theme = EditorView.theme({
 
 // Build a fully-wired editor into `parent`, seeded with `doc`. `sessionId` is the
 // note's docId; it rides in a facet so a block run can target this note's shell.
-export function createEditor(parent: HTMLElement, doc: string, sessionId: string): EditorView {
+// `readOnly` is the docs-workspace editor (workspace/editorPool.ts decides, by
+// the tab's folder kind): the SAME editor — caret, selection, ⌘C, find, live
+// preview, and crucially runnable blocks all still work — with every
+// doc-changing transaction that is not a disk load dropped at the filter.
+// Dropping at the transaction layer rather than EditorView.editable is
+// deliberate twice over: an uneditable DOM would also refuse focus, which
+// would take ⌘↩ (and find, and copy) down with it; and our own programmatic
+// edits (formatting chords, checkbox toggles, frontmatterEdit) do not consult
+// the readOnly facet, so a filter is the only fence they cannot step over.
+// With no edit ever landing, nothing marks the note dirty and nothing
+// autosaves — the Bun-side write refusal (bun/workspaces.ts
+// assertWritableRoot) stays the enforcement of record; this is what makes the
+// refusal unreachable in normal use.
+export function createEditor(parent: HTMLElement, doc: string, sessionId: string, readOnly = false): EditorView {
   return new EditorView({
     parent,
     state: EditorState.create({
       doc,
       extensions: [
         sessionIdFacet.of(sessionId),
+        readOnly
+          ? [
+              EditorState.readOnly.of(true), // standard commands no-op cleanly
+              EditorState.transactionFilter.of((tr) =>
+                tr.docChanged && !tr.annotation(fromDisk) ? [] : tr,
+              ),
+            ]
+          : [],
         history(),
         drawSelection(),
         lineNumbers(),

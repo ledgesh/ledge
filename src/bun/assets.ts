@@ -22,7 +22,7 @@
 import { dirname, join, resolve, extname, sep } from "node:path";
 import { mkdir, readdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { ASSETS_DIRNAME } from "../shared/rpc-schema";
-import { assertRegisteredRoot, isInside, uniqueName } from "./workspaces";
+import { assertRegisteredRoot, assertWritableRoot, isInside, uniqueName } from "./workspaces";
 import { isSealedAsset, openAssetBytes, sealAssetBytes, vaultState } from "./vault";
 
 export function assetsDirOf(root: string): string {
@@ -129,7 +129,10 @@ async function writeAsset(assetsDir: string, path: string, bytes: Uint8Array): P
  * clobber (the same clobber-safety story as note names, architecture.md §3).
  */
 export async function savePastedImage(root: string, bytes: Uint8Array, ext = ".png", seal = false): Promise<string> {
-  const assetsDir = assetsDirOf(assertRegisteredRoot(root));
+  // The docs root takes no pastes: its editor is read-only, so the returned
+  // reference could never be inserted anyway — refuse before writing a file
+  // nothing would ever show (assertWritableRoot, the one read-only gate).
+  const assetsDir = assetsDirOf(assertWritableRoot(assertRegisteredRoot(root)));
   await mkdir(assetsDir, { recursive: true });
   const taken = new Set(await readdir(assetsDir));
   const base = `pasted-${new Date().toISOString().slice(0, 10)}`;

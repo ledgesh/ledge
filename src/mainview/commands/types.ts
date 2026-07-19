@@ -138,8 +138,15 @@ export interface RegistryDeps {
   // return trip). Resolves to an error message to surface, or null.
   moveWorkspace(id: string, state: AppState, dispatch: (a: Action) => void, home?: boolean): Promise<string | null>;
   // The recorded kind of a workspace folder (view-side mirror of Bun's
-  // derived truth) — what gates the Move Home face to external workspaces.
-  workspaceKind(folder: string): "managed" | "external" | null;
+  // derived truth) — what gates the Move Home face to external workspaces
+  // and every read-only verb to the docs workspace.
+  workspaceKind(folder: string): "managed" | "external" | "docs" | null;
+  // The built-in documentation's folder handle (null when Bun reported none —
+  // the docs.open command hides then), and the open itself: select the
+  // Documentation workspace, adding it over that folder first if needed
+  // (workspace/actions.ts openDocs).
+  docsFolder(): string | null;
+  openDocs(state: AppState, dispatch: (a: Action) => void): Promise<void>;
   // Kill a note's shells so the next run respawns them with its current
   // frontmatter params.
   restartSession(docId: string): void;

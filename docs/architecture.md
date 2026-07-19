@@ -116,12 +116,13 @@ Bun therefore validates everything and derives anything derivable:
 - **The workspace registry is a trust artifact.** Notes live in REGISTERED
   WORKSPACE ROOTS (`bun/workspaces.ts`), and every path guard validates
   against that set — so what may join it is itself part of the boundary. A
-  root gets in exactly three ways: Bun's own first-launch default, a managed
+  root gets in exactly four ways: Bun's own first-launch default, a managed
   folder whose name Bun slugged from a display name (`workspaceCreate` — the
-  view names no path, the same move as `noteCreate`), or a directory the user
+  view names no path, the same move as `noteCreate`), a directory the user
   picked in the NATIVE folder dialog (`workspaceAttach`, which takes no
   arguments: the path comes from the OS dialog Bun-side, never from the
-  view). A registered root RELOCATES under the same rule: `workspaceMove`
+  view), or Bun's own in-memory-only docs root (§3b — registered for the
+  read paths, refused by every write). A registered root RELOCATES under the same rule: `workspaceMove`
   carries only the root — the destination parent is the native dialog's
   pick, Bun-side, or Bun's own APP_HOME for the `home: true` return trip —
   and Bun renames the folder and rewrites the registry line in place
@@ -291,6 +292,49 @@ rather than amending them; the two facts worth knowing from here are that
 that `.vault.json` in the app home is machine-written AND Bun-shaped like
 the registry — a convenience artifact, not a precious one, since every
 locked note carries its own salt.
+
+## 3b. The built-in documentation
+
+User docs and tutorials are Markdown notes served through the app's own
+machinery — a page renders, searches, wikilinks, and RUNS its fenced blocks
+exactly like a note — from one special root that can never be written:
+
+- **The docs root** is `APP_HOME/.ledge-docs` (`DOCS_ROOT` in
+  `bun/workspaces.ts`): dotted and `.ledge-`prefixed like every app-owned
+  entry, so it can never collide with a managed workspace slug. It is
+  registered **in memory at every load**, kind `"docs"`, and never written to
+  `.workspaces.json` — it is a fact about the installed app, not a user
+  choice. `attachExternal`, `detachRoot`, and `moveRoot` all refuse it, and
+  `ensureDefault` does not count it (a docs-only registry still creates
+  scratch).
+- **The corpus is compiled into the binary** (`bun/docsContent.ts`, text
+  imports of `docs/user/*.md`) and synced into the docs root at every launch
+  (`bun/docs.ts syncDocs`): byte-matching pages are left untouched, differing
+  ones rewritten temp-plus-rename, and pages the manifest dropped are RETIRED
+  by rename into `.ledge-docs/.retired/` — the sync owns no unlink. The folder
+  is machine-written like `.layout.json`: an external edit to a page is
+  overwritten at the next boot, deliberately, because stale docs describing an
+  older Ledge are worse than a lost annotation in a folder every surface
+  labels read-only.
+- **`assertWritableRoot` (bun/workspaces.ts) is the read-only gate**, applied
+  at every mutating store seam — `writeNote`, `createNote`, `retitleNote`,
+  `deleteNote`, `restoreNote`, `lockNote`/`removeLockNote`, the asset paste —
+  so the app, the MCP tools, and the CLI get one refusal however they arrive.
+  **Anything new that writes, renames, or moves a note (or an asset) calls it
+  on its root** — the write-side sibling of §3's unlink sentence. The
+  "sole workspace" deixis uses `writableRoots()` for the same reason: an
+  agent's default create target must never resolve to a folder that refuses
+  writes. Reads deliberately stay whole: `list_workspaces` reports the docs
+  root (kind and all), scans include its pages, and `read_note` serves them —
+  agents may read the manual.
+- **The view renders it as the hidden Documentation workspace**: opened by
+  `docs.open` (interactions.md), present in `state.workspaces` like any
+  workspace (panes, tabs, search, and persistence just work) but filtered
+  from the strip and ⌘1…9, its mutating verbs gated by `when`s, and its
+  editors created read-only (`editor/setup.ts`: a transaction filter drops
+  every doc change that is not a disk load, which is what lets the editor
+  stay focusable — caret, ⌘C, find, and ⌘↩ block runs all still work). The
+  view's gating is presentation; Bun's guard is the enforcement.
 
 ## 4. Identity keys: path vs docId
 

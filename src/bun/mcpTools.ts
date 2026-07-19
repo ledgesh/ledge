@@ -22,7 +22,7 @@ import { appendToNote, headingsOf, resolveWikiTitle } from "../shared/wikilinks"
 import { normalizeTag } from "../shared/tags";
 import type { McpTool } from "./mcp";
 import { backlinksTo, createNote, listNotes, notesTagged, readNote, searchNotes, tagsIn, writeNote } from "./notes";
-import { assertRegisteredRoot, availableRoots, listWorkspaceRoots, loadWorkspaces, rootContaining, roots } from "./workspaces";
+import { assertRegisteredRoot, availableRoots, listWorkspaceRoots, loadWorkspaces, rootContaining, roots, writableRoots } from "./workspaces";
 import { createFromTemplate, openDaily, resolveConfiguredWorkspace } from "./daily";
 import { loadSettings } from "./settings";
 import type { Settings } from "../shared/settings";
@@ -173,7 +173,9 @@ function targetWorkspace(args: Record<string, unknown>): string {
       );
     }
   }
-  const roots = availableRoots();
+  // Writable roots only: the built-in docs root is registered and readable,
+  // but "the sole workspace" must mean the sole one a note can land in.
+  const roots = writableRoots();
   if (roots.length === 1) return roots[0]!;
   throw new Error(
     roots.length === 0
@@ -216,7 +218,7 @@ export const ledgeTools: McpTool[] = [
   {
     name: "list_workspaces",
     description:
-      "List the workspaces Ledge knows: each is a folder of Markdown notes. Returns the root path (the `workspace` argument other tools take), whether Ledge manages the folder or it is an attached external one, and whether it is on disk right now.",
+      "List the workspaces Ledge knows: each is a folder of Markdown notes. Returns the root path (the `workspace` argument other tools take), the kind (a Ledge-managed folder, an attached external one, or `docs` — Ledge's built-in documentation, readable like any workspace but refusing every write), and whether it is on disk right now.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     handler: async () => {
       await loadWorkspaces();

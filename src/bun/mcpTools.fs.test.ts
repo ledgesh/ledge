@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
-import { APP_HOME, WORKSPACES_PATH, createManaged, loadWorkspaces } from "./workspaces";
+import { APP_HOME, DOCS_ROOT, WORKSPACES_PATH, createManaged, loadWorkspaces } from "./workspaces";
 import { createNote, readNote } from "./notes";
 import { ledgeTools } from "./mcpTools";
 import { SETTINGS_PATH } from "./settings";
@@ -47,9 +47,12 @@ beforeEach(async () => {
 });
 
 describe("list_workspaces", () => {
-  test("reflects the registry, kinds and availability included", async () => {
+  test("reflects the registry, kinds and availability included — the built-in docs root leads", async () => {
     const out = await call("list_workspaces");
     expect(out).toEqual([
+      // Registered at every load, before the user's roots (bun/workspaces.ts):
+      // readable corpus for agents, flagged by its kind; every write refuses.
+      { root: resolve(DOCS_ROOT), kind: "docs", available: true },
       { root: ROOT, kind: "managed", available: true },
       { root: OTHER, kind: "managed", available: true },
     ]);
@@ -61,7 +64,7 @@ describe("list_workspaces", () => {
     const extra = await mkdtemp(join(tmpdir(), "ledge-extra-"));
     await writeFile(WORKSPACES_PATH, JSON.stringify({ version: 1, roots: [ROOT, OTHER, extra] }));
     const out = await call("list_workspaces");
-    expect(out.map((w: { root: string }) => w.root)).toEqual([ROOT, OTHER, resolve(extra)]);
+    expect(out.map((w: { root: string }) => w.root)).toEqual([resolve(DOCS_ROOT), ROOT, OTHER, resolve(extra)]);
     await rm(extra, { recursive: true, force: true });
   });
 });

@@ -63,6 +63,12 @@ export const COMMANDS = {
   // once-in-a-while act, and ⇧⌘J stays reserved for a bigger-scope ⌘J.
   "daily.templateEdit": { title: "Edit Daily Template" },
   "daily.templateNew": { title: "New Daily Template" },
+  // The built-in documentation, opened as a hidden read-only workspace: never
+  // a strip row, absent from ⌘1…9, every mutating verb gated (and refused
+  // Bun-side regardless). Selecting any workspace — a strip row, ⌘1…9 — is
+  // the way back. No chord: docs are a sometimes destination, so the palette
+  // and the header's book button carry it.
+  "docs.open": { title: "Documentation" },
   "palette.notes": { title: "Go to Note…", keys: ["Mod-p"] },
   "palette.commands": { title: "Command Palette…", keys: ["Mod-Shift-p"] },
   // Full-text search across note bodies, in the same overlay (typing "#" first

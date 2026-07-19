@@ -25,6 +25,18 @@ export const APP_HOME = process.env["LEDGE_NOTES_ROOT"] ?? join(homedir(), ".led
 
 export const WORKSPACES_PATH = join(APP_HOME, ".workspaces.json");
 
+// The built-in documentation's folder: Bun syncs the bundled doc pages into it
+// at every launch (bun/docs.ts) and registers it IN MEMORY below, so the read
+// paths — noteList, noteRead, search, wikilinks — serve doc pages through the
+// exact machinery notes already ride. It is never written to .workspaces.json
+// (it is a fact about the installed app, not a user choice, and a registry
+// line would go stale across versions), and every mutating seam refuses it
+// (notes.ts assertWritableRoot): registered-and-readable, unwritable-and-
+// undetachable. Dotted and .ledge-prefixed like every app-owned entry, so it
+// can never collide with a managed workspace slug (slugs cannot start with a
+// dot).
+export const DOCS_ROOT = join(APP_HOME, ".ledge-docs");
+
 export async function ensureAppHome(): Promise<void> {
   await mkdir(APP_HOME, { recursive: true });
 }
@@ -82,13 +94,19 @@ export function workspaceMatches(
 
 // --- the registry ------------------------------------------------------------
 
-// `kind` is a fact about location, not a stored field: a direct child of
-// APP_HOME is managed (Bun created it, mkdir may self-heal it), anything else
-// is external (the user pointed at it, and a missing volume must NOT grow a
-// shadow directory on the boot disk — see rootReady in notes.ts). Deriving it
-// removes the invalid state "managed but elsewhere" instead of validating it.
-export function kindOf(root: string): "managed" | "external" {
-  return dirname(resolve(root)) === resolve(APP_HOME) ? "managed" : "external";
+// `kind` is a fact about location, not a stored field: the docs folder is one
+// exact path, a direct child of APP_HOME is managed (Bun created it, mkdir may
+// self-heal it), anything else is external (the user pointed at it, and a
+// missing volume must NOT grow a shadow directory on the boot disk — see
+// rootReady in notes.ts). Deriving it removes the invalid state "managed but
+// elsewhere" instead of validating it. Deriving "docs" here also closes the
+// attach loophole for free: invalidRootReason's inside-the-app-home check
+// exempts only kind "managed", so the docs folder — dotted, in the app home,
+// not managed — can never be attached as an ordinary (writable) workspace.
+export function kindOf(root: string): "managed" | "external" | "docs" {
+  const r = resolve(root);
+  if (r === resolve(DOCS_ROOT)) return "docs";
+  return dirname(r) === resolve(APP_HOME) ? "managed" : "external";
 }
 
 // Resolved root -> availability, in registration order. Loaded once at launch
@@ -102,6 +120,14 @@ export function roots(): string[] {
 
 export function availableRoots(): string[] {
   return [...entries].filter(([, e]) => e.available).map(([r]) => r);
+}
+
+// The available roots something may CREATE into: everything but the read-only
+// docs root. Read scans keep using availableRoots — doc pages are readable
+// corpus — but "the sole workspace" deixis (mcpTools targetWorkspace) must
+// never resolve to a folder that refuses writes.
+export function writableRoots(): string[] {
+  return availableRoots().filter((r) => kindOf(r) !== "docs");
 }
 
 export function listWorkspaceRoots(): WorkspaceRootInfo[] {
@@ -126,6 +152,20 @@ export function assertRegisteredRoot(root: string): string {
   return r;
 }
 
+// The read-only gate for the built-in documentation (DOCS_ROOT above):
+// registered so every READ path serves doc pages through the ordinary
+// machinery, refused by every path that would change a byte. One guard,
+// enforced Bun-side, so the app, the MCP tools, and the CLI — which all
+// funnel through the note store — get one answer however they arrive; the
+// view's hidden verbs and read-only editor are presentation over this, never
+// the enforcement. **Anything new that writes, renames, or moves a note (or
+// an asset) calls this on its root** — the write-side sibling of the unlink
+// rule's three-list sentence (architecture.md §3).
+export function assertWritableRoot(root: string): string {
+  if (kindOf(root) === "docs") throw new Error("the built-in documentation is read-only");
+  return root;
+}
+
 // --- persistence -------------------------------------------------------------
 
 // On-disk shape, version 1: just the root paths. Same atomic temp-plus-rename
@@ -133,7 +173,10 @@ export function assertRegisteredRoot(root: string): string {
 let tmpCounter = 0;
 async function save(): Promise<void> {
   await ensureAppHome();
-  const text = JSON.stringify({ version: 1, roots: [...entries.keys()] });
+  // The docs root never persists: it is registered in memory at every load,
+  // and a stored line would only rot (or resurrect writable after the guard
+  // that knows it is docs moved).
+  const text = JSON.stringify({ version: 1, roots: [...entries.keys()].filter((r) => kindOf(r) !== "docs") });
   tmpCounter += 1;
   const tmp = join(APP_HOME, `.workspaces.json.tmp-${process.pid}-${tmpCounter}`);
   try {
@@ -178,6 +221,15 @@ function invalidRootReason(p: string): string | null {
 // remount into data loss (the layout referencing it would be pruned).
 export async function loadWorkspaces(): Promise<void> {
   entries.clear();
+  // The docs root, first and unconditionally: in memory only (save() filters
+  // it), self-healed like a managed folder — it is Bun's own artifact, and
+  // bun/docs.ts re-fills it right after load. Registered before the file's
+  // roots so nestingConflict below also shields it from any hand-edited line
+  // that would nest with it.
+  {
+    const available = await mkdir(DOCS_ROOT, { recursive: true }).then(() => true).catch(() => false);
+    entries.set(resolve(DOCS_ROOT), { available });
+  }
   let raw: string | null = null;
   try {
     raw = await readFile(WORKSPACES_PATH, "utf8");
@@ -222,7 +274,9 @@ export async function loadWorkspaces(): Promise<void> {
 // after loadWorkspaces at launch; a first launch (or a registry healed to
 // empty) gets APP_HOME/scratch.
 export async function ensureDefault(): Promise<void> {
-  if (availableRoots().length > 0) return;
+  // The docs root does not count: it is read-only, so a boot with only docs
+  // registered still has nowhere to put a note.
+  if (availableRoots().some((r) => kindOf(r) !== "docs")) return;
   await createManaged("Scratch");
 }
 
@@ -252,6 +306,9 @@ export async function attachExternal(path: string): Promise<{ root: string } | {
   const p = resolve(path);
   const isDir = await stat(p).then((s) => s.isDirectory()).catch(() => false);
   if (!isDir) return { error: `not a directory: ${path}` };
+  // Before the idempotent-attach answer: the docs root IS registered, but
+  // handing it back here would dress it up as an ordinary attachable folder.
+  if (kindOf(p) === "docs") return { error: "that folder is Ledge's built-in documentation (read-only)" };
   if (entries.has(p)) return { root: p };
   const reason = invalidRootReason(p);
   if (reason) return { error: `cannot attach ${path}: ${reason}` };
@@ -268,6 +325,10 @@ export async function attachExternal(path: string): Promise<{ root: string } | {
 // included, via attachExternal's direct-child allowance — is re-attachable
 // with everything still in it.
 export async function detachRoot(root: string): Promise<boolean> {
+  // The docs root is not the user's to deregister: dropping it mid-session
+  // would strand open doc tabs outside every path guard. Closing the docs
+  // WORKSPACE is a view arrangement; the registry line stays.
+  if (kindOf(root) === "docs") return false;
   const removed = entries.delete(resolve(root));
   if (removed) await save();
   return removed;
@@ -289,6 +350,7 @@ export async function detachRoot(root: string): Promise<boolean> {
 // a root managed and moving out makes it external, by construction.
 export async function moveRoot(root: string, destParent: string): Promise<{ root: string } | { error: string }> {
   const r = resolve(root);
+  if (kindOf(r) === "docs") return { error: "the documentation folder is Bun's own and cannot be moved" };
   const entry = entries.get(r);
   if (!entry) return { error: `not a registered workspace root: ${root}` };
   // An unavailable root is an unmounted volume; there is no folder here to move.

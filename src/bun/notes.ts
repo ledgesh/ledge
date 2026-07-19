@@ -22,7 +22,7 @@ import { collectHits, type SearchHit } from "../shared/search";
 import { resolveWikiTitle, wikiRefsOf } from "../shared/wikilinks";
 import { normalizeTag, tagDirectoryOf, tagRefsOf, type TagInfo } from "../shared/tags";
 import { loadIgnore } from "./ignore";
-import { assertRegisteredRoot, isInside, kindOf, rootContaining, uniqueName } from "./workspaces";
+import { assertRegisteredRoot, assertWritableRoot, isInside, kindOf, rootContaining, uniqueName } from "./workspaces";
 import {
   beginPassphraseChange,
   commitPassphraseChange,
@@ -149,6 +149,7 @@ function assertNote(path: string): string {
   if (!/\.md$/i.test(path)) throw new Error(`not a note path: ${path}`);
   return root;
 }
+
 
 // A directory a write may proceed in. Managed roots self-heal (Bun created
 // them; a missing one is recreated), but an EXTERNAL root is never mkdir'd:
@@ -391,7 +392,7 @@ export interface WriteResult {
 // minutes an agent edit sits unnoticed, not at microsecond interleavings.
 let tmpCounter = 0;
 export async function writeNote(path: string, text: string, baseMtimeMs: number | null = null): Promise<WriteResult> {
-  const root = assertNote(path);
+  const root = assertWritableRoot(assertNote(path));
   touchVault();
   await rootReady(root);
   const dir = dirname(path);
@@ -524,6 +525,7 @@ function assetRefsOf(text: string, root: string): string[] {
 // opposite of locked, and the MCP template path must not be reachable into
 // one however the marker arrived.
 export async function lockNote(path: string): Promise<{ meta: NoteMeta; sealedShared: string[] }> {
+  assertWritableRoot(assertNote(path)); // lock/unlock write via writeSealed, not writeNote
   const file = await readNote(path);
   if (file === null) throw new Error(`no note at ${path}`);
   if (file.locked) return { meta: await metaAt(path), sealedShared: [] }; // already locked: the outcome asked for
@@ -563,6 +565,7 @@ export async function lockNote(path: string): Promise<{ meta: NoteMeta; sealedSh
 // one sanctioned decrypt-to-disk, command-only by design (a text edit cannot
 // do this — writeNote above re-stamps).
 export async function removeLockNote(path: string): Promise<NoteMeta> {
+  assertWritableRoot(assertNote(path)); // writeSealed path, like lockNote
   const file = await readNote(path);
   if (file === null) throw new Error(`no note at ${path}`);
   if (!file.locked) return metaAt(path); // already plain
@@ -716,7 +719,9 @@ function reservedIn(dir: string): Set<string> {
 // it has one by then, so a note you title before your first pause never has to be
 // created as untitled.md and renamed a moment later.
 export async function createNote(root: string, text: string): Promise<NoteMeta> {
-  const r = assertRegisteredRoot(root);
+  // Guarded here as well as in writeNote below it, so the refusal names the
+  // act ("create in the docs folder") before any name is allocated.
+  const r = assertWritableRoot(assertRegisteredRoot(root));
   await rootReady(r);
   const reserved = reservedIn(r);
   const taken = new Set(await readdir(r));
@@ -740,7 +745,7 @@ export async function createNote(root: string, text: string): Promise<NoteMeta> 
 // shell all survive, which is the whole reason path and docId are separate keys.
 // This is what makes naming-by-heading safe despite PLAN D15's warning.
 export async function retitleNote(path: string, text: string): Promise<NoteMeta> {
-  assertNote(path);
+  assertWritableRoot(assertNote(path));
   const dir = dirname(path);
   const current = basename(path);
   const reserved = reservedIn(dir);
@@ -777,7 +782,7 @@ export async function retitleNote(path: string, text: string): Promise<NoteMeta>
 // Returns where the note landed, so the caller can offer to undo it, or null if
 // there was nothing to delete.
 export async function deleteNote(path: string): Promise<string | null> {
-  const root = assertNote(path);
+  const root = assertWritableRoot(assertNote(path));
   const trashDir = trashDirOf(root);
   if (isInside(trashDir, path)) return null; // already trashed
   await mkdir(trashDir, { recursive: true });
@@ -860,7 +865,9 @@ function assertTrashed(path: string): string {
 // notes are created anyway. Worth revisiting if nested notes ever become a
 // real thing.
 export async function restoreNote(path: string): Promise<NoteMeta> {
-  const root = assertTrashed(path);
+  // Belt: no delete can put a note in the docs root's trash, but a restore
+  // WRITES into its root, so the guard holds here too.
+  const root = assertWritableRoot(assertTrashed(path));
   await rootReady(root);
   const reserved = reservedIn(root);
   const taken = new Set(await readdir(root));

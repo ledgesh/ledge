@@ -23,6 +23,7 @@ import { CommandMenuItem } from "@/commands/CommandMenuItem";
 import { configureUi } from "@/commands/glue";
 import { tooltip } from "@/commands/format";
 import { targetAttrs } from "@/commands/target";
+import { workspaceKind } from "@/workspace/channel";
 import { docIdsForPath, notesOf, openNotePaths, trashOf, useWorkspace } from "@/workspace/store";
 import { focusedTab } from "@/workspace/tree";
 import { useVaultState } from "@/vault/channel";
@@ -66,6 +67,10 @@ export function NoteBrowser() {
   );
   const open = useMemo(() => openNotePaths(state), [state]);
   const current = focusedTab(selected)?.path ?? null;
+  // The built-in Documentation workspace: no create, no delete, no lock —
+  // the mutating affordances hide here, and Bun refuses them regardless
+  // (bun/workspaces.ts assertWritableRoot).
+  const readOnly = workspaceKind(selected.folder) === "docs";
   // The note the open menu points at: its live locked flag picks which lock
   // face (and which vault verb) the menu carries.
   const menuNote = menu ? notes.find((n) => n.path === menu.path) : undefined;
@@ -126,6 +131,14 @@ export function NoteBrowser() {
           Notes
         </span>
         <span className="text-[10px] text-muted-foreground/70">{notes.length || ""}</span>
+        {readOnly && (
+          <span
+            className="ml-auto rounded border px-1 text-[10px] leading-4 text-muted-foreground/80"
+            title="The built-in documentation cannot be edited or deleted"
+          >
+            read-only
+          </span>
+        )}
       </div>
 
       <div {...nav.containerProps} className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-2">
@@ -173,13 +186,15 @@ export function NoteBrowser() {
         </div>
       )}
 
-      <button
-        className="flex items-center gap-2 border-t px-3.5 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
-        title={tooltip("note.new")}
-        onClick={() => exec("note.new")}
-      >
-        <Plus className="size-4" /> New Note
-      </button>
+      {!readOnly && (
+        <button
+          className="flex items-center gap-2 border-t px-3.5 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+          title={tooltip("note.new")}
+          onClick={() => exec("note.new")}
+        >
+          <Plus className="size-4" /> New Note
+        </button>
+      )}
 
       {menu && (
         <ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)}>
@@ -193,6 +208,11 @@ export function NoteBrowser() {
             target={{ kind: "note", path: menu.path }}
             onClose={() => setMenu(null)}
           />
+          {/* A doc page's menu ends here: the lock faces and Delete are not
+              merely disabled but absent — a verb that can never apply to any
+              row in this workspace is noise, not discoverability. */}
+          {!readOnly && (
+            <>
           {/* The lock faces, two-faces like the palette (docs/locking.md §7):
               a plain row offers Lock This Note… (greyed on templates — the
               marker exclusivity), a locked row offers Remove Lock… plus the
@@ -232,6 +252,8 @@ export function NoteBrowser() {
             onClose={() => setMenu(null)}
             hint="Recoverable from Trash for 30 days"
           />
+            </>
+          )}
         </ContextMenu>
       )}
     </div>

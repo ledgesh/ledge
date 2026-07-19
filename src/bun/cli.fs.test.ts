@@ -291,11 +291,12 @@ describe("tags", () => {
 });
 
 describe("workspaces", () => {
-  test("one row per root, kind included", async () => {
+  test("one row per root, kind included — the built-in docs root leads", async () => {
     const r = await run(["workspaces"]);
     expect(r.code).toBe(0);
-    expect(r.out.length).toBe(2);
-    expect(r.out[0]).toContain("managed");
+    expect(r.out.length).toBe(3);
+    expect(r.out[0]).toContain("docs");
+    expect(r.out[1]).toContain("managed");
   });
 });
 

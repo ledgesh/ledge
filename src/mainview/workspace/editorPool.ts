@@ -25,6 +25,7 @@ import {
   type DocHandlers,
 } from "../notes/store";
 import { onVaultChanged, vaultState } from "../vault/channel";
+import { workspaceKind } from "./channel";
 import { evictAssetCache } from "../lib/assets";
 import { changedSpan } from "../lib/textDiff";
 import { revealHeading, revealSelection } from "./reveal";
@@ -312,7 +313,10 @@ function acquire(tab: TabState, folder: string, handlers: DocHandlers): { entry:
 
   const host = document.createElement("div");
   host.className = "ledge-editor-host";
-  const view = createEditor(host, tab.path ? "" : seedDoc(tab.seed), docId);
+  // A docs-workspace note gets the read-only editor (setup.ts): the folder
+  // was captured at bind and tabs never change workspace, so the choice is
+  // per-editor-lifetime, like every settings read.
+  const view = createEditor(host, tab.path ? "" : seedDoc(tab.seed), docId, workspaceKind(folder) === "docs");
   const offRun = onRunEvent((ev) => applyRunEvent(view, ev));
   // CodeMirror does not watch its container for size changes; a pane resize (a
   // divider drag, the terminal drawer opening) needs an explicit re-measure.

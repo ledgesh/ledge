@@ -308,7 +308,10 @@ export function restoredState(
 ): AppState {
   const restored = restoreLayout(text, roots, notesByFolder, trashByFolder);
   if (restored) return restored;
-  const first = roots.find((r) => r.available);
+  // Never the docs root: a fresh start must land somewhere a first note can
+  // save, and the read-only documentation is not it (ensureDefault guarantees
+  // a real folder exists whenever Bun was reachable at all).
+  const first = roots.find((r) => r.available && r.kind !== "docs");
   const folder = first?.root ?? "";
   return initialState(folder, notesByFolder[folder] ?? [], trashByFolder[folder] ?? []);
 }

@@ -14,6 +14,7 @@ import { MoveWorkspaceDialog } from "@/components/MoveWorkspaceDialog";
 import { tooltip } from "@/commands/format";
 import { targetAttrs } from "@/commands/target";
 import { moveWorkspace } from "./actions";
+import { workspaceKind } from "./channel";
 import { useWorkspace } from "./store";
 import { IconPicker } from "./IconPicker";
 import { iconFor } from "./icons";
@@ -87,10 +88,16 @@ function WorkspaceStrip() {
     });
   }, []);
 
-  // Where an in-flight drop would land, as an index into the workspace list.
+  // Where an in-flight drop would land, as an index into the strip's rows.
   const [dropIndex, setDropIndex] = useState<number | null>(null);
   const nav = useListNav();
   const listRef = nav.containerProps.ref;
+
+  // The rows the strip shows: every workspace except the built-in docs one,
+  // which is deliberately not a row — the header's book button is its whole
+  // presence, and while it is selected no row highlights (the way back is any
+  // row, or ⌘1…9, which index this same filtered list).
+  const strip = state.workspaces.filter((ws) => workspaceKind(ws.folder) !== "docs");
 
   // The picker anchors to a row, and only the DOM knows where the rows are. A
   // workspace with no row on screen has nothing to anchor to, so the open is
@@ -108,11 +115,11 @@ function WorkspaceStrip() {
   }, [pickingId, listRef]);
 
   // The slot the cursor is over: the count of rows whose vertical midpoint sits
-  // above it (0..workspaces.length). Measured off the live DOM so it tracks the
+  // above it (0..strip.length). Measured off the live DOM so it tracks the
   // real rendered heights and scroll offset.
   const slotAt = (clientY: number): number => {
     const list = listRef.current;
-    if (!list) return state.workspaces.length;
+    if (!list) return strip.length;
     const items = list.querySelectorAll<HTMLElement>("[data-ws]");
     let i = 0;
     for (const item of items) {
@@ -121,6 +128,15 @@ function WorkspaceStrip() {
       i += 1;
     }
     return items.length;
+  };
+
+  // A strip slot as an index into the FULL workspace list (which may carry
+  // the hidden docs workspace): the reducer's moveWorkspace counts the full
+  // list, so the drop is anchored to the row it lands before — end-of-strip
+  // appends, which leaves the hidden workspace's array slot irrelevant.
+  const fullIndexOf = (slot: number): number => {
+    const anchor = strip[slot];
+    return anchor ? state.workspaces.findIndex((w) => w.id === anchor.id) : state.workspaces.length;
   };
 
   const onDragOver = (e: React.DragEvent) => {
@@ -133,7 +149,7 @@ function WorkspaceStrip() {
   const onDrop = (e: React.DragEvent) => {
     if (!draggingWs) return;
     e.preventDefault();
-    dispatch({ type: "moveWorkspace", id: draggingWs, toIndex: slotAt(e.clientY) });
+    dispatch({ type: "moveWorkspace", id: draggingWs, toIndex: fullIndexOf(slotAt(e.clientY)) });
     draggingWs = null;
     setDropIndex(null);
   };
@@ -156,14 +172,14 @@ function WorkspaceStrip() {
         onDrop={onDrop}
         onDragLeave={onDragLeave}
       >
-        {state.workspaces.map((ws, i) => (
+        {strip.map((ws, i) => (
           <div key={ws.id}>
             {dropIndex === i && <DropMarker />}
             <WorkspaceRow
               ws={ws}
               selected={ws.id === state.selectedId}
               renaming={renamingId === ws.id}
-              canClose={state.workspaces.length > 1}
+              canClose={strip.length > 1}
               hint={cmdHeld && i < 9 ? i + 1 : null}
               rowProps={nav.rowProps(ws.id, i)}
               onSelect={() => exec("workspace.open", { kind: "workspace", id: ws.id })}
@@ -183,7 +199,7 @@ function WorkspaceStrip() {
             />
           </div>
         ))}
-        {dropIndex === state.workspaces.length && <DropMarker />}
+        {dropIndex === strip.length && <DropMarker />}
       </div>
       {/* A split button: the wide half is New Workspace itself, the chevron
           opens the menu of both ways to add one — the discoverable surface for

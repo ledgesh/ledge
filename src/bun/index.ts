@@ -54,6 +54,7 @@ import {
   roots,
 } from "./workspaces";
 import { createFromTemplatePath, openDaily, resolveConfiguredWorkspace } from "./daily";
+import { syncDocs } from "./docs";
 import { readLayout, writeLayout } from "./layout";
 import { installShim, tildify } from "./cliShim";
 import { OPEN_REQUEST_PATH, takeOpenRequest } from "./openRequest";
@@ -75,9 +76,12 @@ const settings = await loadSettings();
 
 // The workspace registry, loaded before any RPC can be served: every note
 // path guard consults it, and the default guarantees the view always boots
-// with at least one folder to put a note in.
+// with at least one folder to put a note in. The built-in docs sync after the
+// load (which registered their root) and before the view's boot noteList can
+// arrive, so the Documentation workspace never lists a half-synced corpus.
 await loadWorkspaces();
 await ensureDefault();
+await syncDocs();
 
 // The vault (note locking): salt and passphrase-check loaded so vaultState
 // answers "locked" vs "none" from boot; the master key only ever arrives
@@ -368,7 +372,9 @@ const rpc = BrowserView.defineRPC<LedgeRPC>({
         const res = await attachExternal(picked);
         if ("error" in res) return { root: null, kind: null, error: res.error };
         refreshWatchers();
-        return { root: res.root, kind: kindOf(res.root), error: null };
+        // Never "docs": attachExternal refuses the docs folder before the
+        // idempotent-attach answer, so the narrowing is a fact, not a hope.
+        return { root: res.root, kind: kindOf(res.root) as "managed" | "external", error: null };
       },
       workspaceDetach: async ({ root }) => {
         const ok = await detachRoot(root);
@@ -393,7 +399,10 @@ const rpc = BrowserView.defineRPC<LedgeRPC>({
         const res = await moveRoot(from, picked);
         if ("error" in res) return { root: null, kind: null, error: res.error };
         refreshWatchers();
-        return { root: res.root, kind: kindOf(res.root), error: null };
+        // Never "docs": moveRoot refuses the docs root outright, and a move
+        // destination cannot become it (its parent is the app home, which
+        // invalidRootReason already bars).
+        return { root: res.root, kind: kindOf(res.root) as "managed" | "external", error: null };
       },
 
       // --- note store ------------------------------------------------------

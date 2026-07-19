@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Hash, Link2, PanelLeft, TableOfContents, TerminalSquare, X } from "lucide-react";
+import { BookOpen, Hash, Link2, PanelLeft, TableOfContents, TerminalSquare, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ResizeHandle } from "@/components/ResizeHandle";
 import { TerminalDrawer } from "@/terminal/TerminalDrawer";
@@ -16,6 +16,7 @@ import { flushAll, folderOf, paramsOf } from "@/notes/store";
 import { parseWikiTarget, resolveWikiTitle } from "@/editor/wikilinks";
 import { refreshWikilinks } from "@/editor/livePreview";
 import { refreshFolder } from "@/workspace/actions";
+import { docsFolder, workspaceKind } from "@/workspace/channel";
 import { allDocIds, notesOf, useWorkspace, WorkspaceProvider, type AppState } from "@/workspace/store";
 import { flushLayout, scheduleLayoutSave } from "@/workspace/persist";
 import { findTabBy, focusedDocId } from "@/workspace/tree";
@@ -512,6 +513,22 @@ function Shell() {
         >
           <Hash className="size-4" />
         </Button>
+        {/* The built-in documentation: a hidden read-only workspace, and this
+            button (plus the palette entry) is its whole doorway — it never
+            gets a strip row. Lit while it is the selected workspace, since no
+            row can show that. Absent when Bun reported no docs root
+            (docsFolder is boot-static, like the settings snapshot). */}
+        {docsFolder() !== null && (
+          <Button
+            variant={workspaceKind(selected.folder) === "docs" ? "secondary" : "ghost"}
+            size="icon"
+            className="size-7"
+            onClick={() => exec("docs.open")}
+            title={tooltip("docs.open")}
+          >
+            <BookOpen className="size-4" />
+          </Button>
+        )}
       </header>
 
       <div ref={stackRef} className="flex min-h-0 flex-1 flex-col">

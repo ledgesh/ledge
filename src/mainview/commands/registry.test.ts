@@ -35,6 +35,10 @@ function stubDeps(
       return null;
     },
     workspaceKind: () => "external",
+    docsFolder: () => null,
+    openDocs: async () => {
+      calls.push("openDocs");
+    },
     restartSession: record("restartSession"),
     openDailyNote: async (folder) => {
       calls.push(`openDailyNote:${folder}`);
@@ -269,8 +273,10 @@ describe("registry", () => {
     const overlays: string[] = [];
     const ui = { openOverlay: (mode: string, q?: string) => overlays.push(`${mode}:${q ?? ""}`) };
     const parent = find(commands, "note.fromTemplate");
-    // Always visible: discoverability is the point of the empty state.
-    expect(parent.when).toBeUndefined();
+    // Visible in every ordinary workspace, templates or none: discoverability
+    // is the point of the empty state. (The one gate is the read-only docs
+    // workspace, pinned in the docs suite below.)
+    expect(parent.when!(makeCtx(initialState(FOLDER, [])))).toBe(true);
     parent.run({ ...makeCtx(initialState(FOLDER, [marked])), ui });
     parent.run({ ...makeCtx(initialState(FOLDER, [note(`${FOLDER}/a.md`, "A")])), ui });
     expect(overlays).toEqual([
@@ -714,5 +720,87 @@ describe("registry", () => {
     for (const domain of ["page", "editor", "terminal"] as FocusDomain[]) {
       expect(resolveChord(commands, cmdF, { domain, modalOpen: false })).toBeNull();
     }
+  });
+
+  // --- the docs workspace (read-only, hidden from the strip) ----------------
+
+  const DOCS = "/docs/.ledge-docs";
+  function docsDeps(calls: string[] = [], noteHead: string | null = null): RegistryDeps {
+    return {
+      ...stubDeps(calls, noteHead),
+      workspaceKind: (folder) => (folder === DOCS ? "docs" : "external"),
+      docsFolder: () => DOCS,
+    };
+  }
+  // A state with the ordinary first workspace plus the docs one, SELECTED —
+  // addWorkspace selects what it adds, which is exactly what openDocs does.
+  const docsSelectedState = () =>
+    apply(initialState(FOLDER, []), { type: "addWorkspace", name: "Documentation", folder: DOCS });
+
+  test("docs.open shows only when a docs root exists, and routes to the openDocs edge", () => {
+    // The base stub reports no docs root: hidden (a harness or failed boot).
+    expect(find(commands, "docs.open").when!(makeCtx(initialState(FOLDER, [])))).toBe(false);
+    const calls: string[] = [];
+    const cmds = buildCommands(docsDeps(calls));
+    const ctx = makeCtx(initialState(FOLDER, []));
+    expect(find(cmds, "docs.open").when!(ctx)).toBe(true);
+    find(cmds, "docs.open").run(ctx);
+    expect(calls).toEqual(["openDocs"]);
+  });
+
+  test("⌘N indexing skips the docs workspace", () => {
+    const cmds = buildCommands(docsDeps());
+    const ctx = makeCtx(docsSelectedState());
+    // Slot 1 is the real workspace; there is no slot 2 — docs never counts.
+    expect((find(cmds, "workspace.select.1").title as (c: CommandCtx) => string)(ctx)).toBe(
+      `Switch to Workspace: ${ctx.state.workspaces[0]!.name}`,
+    );
+    expect(find(cmds, "workspace.select.2").when!(ctx)).toBe(false);
+  });
+
+  test("create and mutate verbs gate while the docs workspace is selected", () => {
+    const cmds = buildCommands(docsDeps([], "# Getting Started\n"));
+    const page = note(`${DOCS}/getting-started.md`, "Getting Started");
+    const ctx: CommandCtx = {
+      ...makeCtx(apply(docsSelectedState(), { type: "notesLoaded", folder: DOCS, notes: [page] })),
+      target: { kind: "note", path: page.path },
+    };
+    expect(ctx.selected.folder).toBe(DOCS);
+    for (const id of [
+      "note.new",
+      "note.fromTemplate",
+      "template.starter",
+      "note.templateOn",
+      "note.delete",
+      "note.deleteCurrent",
+      "note.lockOn",
+      "frontmatter.edit",
+      "workspace.rename",
+      "workspace.icon",
+      "workspace.move",
+    ]) {
+      expect({ id, when: find(cmds, id).when!(ctx) }).toEqual({ id, when: false });
+    }
+    // Reading stays whole: the page opens like any note row.
+    expect(find(cmds, "note.open").when!(ctx)).toBe(true);
+  });
+
+  test("⌘J in the docs workspace follows the pinned daily workspace, and gates without one", () => {
+    const unpinned = buildCommands(docsDeps());
+    expect(find(unpinned, "daily.open").when!(makeCtx(docsSelectedState()))).toBe(false);
+    const pinned = buildCommands({ ...docsDeps(), dailyRoot: () => FOLDER });
+    expect(find(pinned, "daily.open").when!(makeCtx(docsSelectedState()))).toBe(true);
+  });
+
+  test("closing workspaces around the docs one: docs closes freely, the last real one never", () => {
+    const cmds = buildCommands(docsDeps());
+    const state = docsSelectedState();
+    const docsWs = state.workspaces.find((w) => w.folder === DOCS)!;
+    const realWs = state.workspaces.find((w) => w.folder === FOLDER)!;
+    const on = (id: string): CommandCtx => ({ ...makeCtx(state), target: { kind: "workspace", id } });
+    expect(find(cmds, "workspace.close").when!(on(docsWs.id))).toBe(true);
+    // The real workspace is the last visible one: closing it would strand the
+    // user in a workspace with no strip row.
+    expect(find(cmds, "workspace.close").when!(on(realWs.id))).toBe(false);
   });
 });

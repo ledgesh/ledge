@@ -173,6 +173,23 @@ describe("workspaces", () => {
     expect(trashOf(s, "/ws/extra-2")).toEqual([]);
   });
 
+  test("addWorkspace can seed its first tab with an existing note", () => {
+    // The docs open's move: landing on Getting Started, not an
+    // editable-looking scratch tab in a folder that refuses writes.
+    const s = run({
+      type: "addWorkspace",
+      name: "Documentation",
+      folder: "/docs",
+      note: { path: "/docs/getting-started.md", title: "Getting Started", mtimeMs: 1 },
+    });
+    const ws = s.workspaces.find((w) => w.folder === "/docs")!;
+    expect(ws.root.kind).toBe("leaf");
+    if (ws.root.kind !== "leaf") throw new Error("expected leaf");
+    expect(ws.root.tabs).toHaveLength(1);
+    expect(ws.root.tabs[0].path).toBe("/docs/getting-started.md");
+    expect(ws.root.tabs[0].title).toBe("Getting Started");
+  });
+
   test("addWorkspace on a folder that already has a workspace selects it instead", () => {
     // One workspace per folder: attaching an already-attached folder must not
     // grow a twin (two views of one folder would be two lists disagreeing).

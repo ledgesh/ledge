@@ -43,7 +43,7 @@ function bridge(): WorkspaceHandlers {
   return handlers;
 }
 
-const kinds = new Map<string, "managed" | "external">();
+const kinds = new Map<string, "managed" | "external" | "docs">();
 
 /**
  * Record roots that entered the view outside the wrappers below — the boot
@@ -133,11 +133,21 @@ export function moveWorkspaceFolder(root: string, home = false): Promise<AttachR
 }
 
 // The recorded kind of a root, for the surfaces that show or gate per kind
-// (the Move Home face exists only for external workspaces). Same mirrored
-// Bun-side truth as workspaceDefaultCwd — display and gating, never a guard:
-// Bun re-derives kind on every move.
-export function workspaceKind(folder: string): "managed" | "external" | null {
+// (the Move Home face exists only for external workspaces; every read-only
+// gate keys off "docs"). Same mirrored Bun-side truth as workspaceDefaultCwd —
+// display and gating, never a guard: Bun re-derives kind on every move, and
+// every docs write is refused Bun-side whatever this map says.
+export function workspaceKind(folder: string): "managed" | "external" | "docs" | null {
   return kinds.get(folder) ?? null;
+}
+
+// The one folder whose kind is "docs" — the built-in Documentation
+// workspace's root handle, recorded off the boot workspaceList like the
+// kinds it rides in. Null when Bun never reported one (a harness without
+// docs seeded, or a boot that failed): the Documentation command hides.
+export function docsFolder(): string | null {
+  for (const [folder, kind] of kinds) if (kind === "docs") return folder;
+  return null;
 }
 
 export type { WorkspaceRootInfo };

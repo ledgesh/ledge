@@ -10,6 +10,7 @@ import {
   ArrowLeft,
   ArrowRight,
   Bold,
+  BookOpen,
   Braces,
   CalendarDays,
   Columns2,
@@ -204,21 +205,53 @@ function targetWorkspaceId(ctx: CommandCtx): string {
 }
 
 export function buildCommands(deps: RegistryDeps): Command[] {
+  // The selected workspace is the built-in read-only documentation: every
+  // create/mutate verb gates on this (menus disable, the palette hides, the
+  // dispatcher ignores). Presentation only — Bun refuses every docs write
+  // regardless (bun/workspaces.ts assertWritableRoot).
+  const docsSelected = (ctx: CommandCtx) => deps.workspaceKind(ctx.selected.folder) === "docs";
+  // The workspace a workspace-scoped verb would act on is the docs one — the
+  // palette forms fall back to the selected workspace, which can be it.
+  const docsTargeted = (ctx: CommandCtx) => {
+    const ws = ctx.state.workspaces.find((w) => w.id === targetWorkspaceId(ctx));
+    return ws !== undefined && deps.workspaceKind(ws.folder) === "docs";
+  };
+  // The strip's workspaces: what the sidebar shows and ⌘1…9 index — the docs
+  // workspace deliberately excluded from both (Sidebar filters the same way).
+  const stripWorkspaces = (ctx: CommandCtx) =>
+    ctx.state.workspaces.filter((w) => deps.workspaceKind(w.folder) !== "docs");
+
   const list: Command[] = [
     // --- create / navigate --------------------------------------------------
     cmd("note.new", {
       icon: FilePlus,
+      when: (ctx) => !docsSelected(ctx),
       run: (ctx) =>
         ctx.dispatch({
           type: "newTab",
           paneId: ctx.target?.kind === "pane" ? ctx.target.paneId : undefined,
         }),
     }),
+    // Open (or switch to) the built-in Documentation workspace — hidden from
+    // the strip and ⌘1…9, read-only end to end; the header's book button is
+    // the icon surface. Hidden entirely when Bun reported no docs root (a
+    // failed boot, a harness without one).
+    cmd("docs.open", {
+      icon: BookOpen,
+      when: () => deps.docsFolder() !== null,
+      run: (ctx) => {
+        void deps.openDocs(ctx.state, ctx.dispatch);
+      },
+    }),
     // Create-or-open today's YYYY-MM-DD note and land in it. The open rides
     // the external-open subscriber (the CLI-open path), so glue's dep only
     // resolves to an error to surface — or null, done.
     cmd("daily.open", {
       icon: CalendarDays,
+      // In the docs workspace, ⌘J still works when a daily workspace is
+      // pinned (Bun acts there, not here); unpinned it would fall back to the
+      // selected — read-only — folder, so it gates instead of erroring.
+      when: (ctx) => !docsSelected(ctx) || deps.dailyRoot() !== null,
       run: (ctx) => {
         void deps.openDailyNote(ctx.selected.folder).then((err) => {
           if (err) ctx.ui.showError?.(err);
@@ -232,6 +265,7 @@ export function buildCommands(deps: RegistryDeps): Command[] {
     // a missing menu item.
     cmd("note.fromTemplate", {
       icon: FilePlus,
+      when: (ctx) => !docsSelected(ctx), // instantiates into the selected folder
       run: (ctx) =>
         ctx.ui.openOverlay?.(
           "commands",
@@ -241,6 +275,7 @@ export function buildCommands(deps: RegistryDeps): Command[] {
     // Creates the pre-marked cheatsheet note above and opens it for editing.
     cmd("template.starter", {
       icon: LayoutTemplate,
+      when: (ctx) => !docsSelected(ctx), // creates into the selected folder
       run: (ctx) => {
         void deps.createNote(ctx.selected.folder, STARTER_TEMPLATE).then(
           (note) => ctx.dispatch({ type: "openNote", note }),
@@ -256,7 +291,8 @@ export function buildCommands(deps: RegistryDeps): Command[] {
       icon: LayoutTemplate,
       // The marker exclusivity's UI half (Bun refuses too): a locked note's
       // body exists to stay sealed, a template's to be stamped out.
-      when: (ctx) => currentTemplateFlag(ctx, deps) === false && currentNoteMeta(ctx)?.locked !== true,
+      when: (ctx) =>
+        currentTemplateFlag(ctx, deps) === false && currentNoteMeta(ctx)?.locked !== true && !docsSelected(ctx),
       run: (ctx) => {
         const docId = focusedDocId(ctx.selected);
         if (docId) deps.editor.toggleTemplate(docId);
@@ -286,7 +322,12 @@ export function buildCommands(deps: RegistryDeps): Command[] {
     }),
     cmd("daily.templateNew", {
       icon: CalendarDays,
-      when: (ctx) => !dailyTemplateTarget(ctx, deps).claimant,
+      // Also gated when the workspace it would create INTO is the docs one
+      // (no pinned daily workspace, docs selected): nothing creates there.
+      when: (ctx) => {
+        const { ws, claimant } = dailyTemplateTarget(ctx, deps);
+        return !claimant && deps.workspaceKind(ws.folder) !== "docs";
+      },
       run: (ctx) => {
         const { ws } = dailyTemplateTarget(ctx, deps);
         void deps.createNote(ws.folder, DAILY_STARTER).then(
@@ -400,14 +441,20 @@ export function buildCommands(deps: RegistryDeps): Command[] {
           ctx.dispatch({ type: "selectWorkspace", id: ctx.target.id });
       },
     }),
+    // The docs workspace takes none of the object-scoped workspace verbs
+    // below (rename/icon/move): it has no strip row to anchor them, and its
+    // name, icon, and folder are the app's, not the user's. The palette forms
+    // fall back to the selected workspace, which is how a docs target arrives.
     cmd("workspace.rename", {
       icon: Pencil,
       targetKind: "workspace",
+      when: (ctx) => !docsTargeted(ctx),
       run: (ctx) => ctx.ui.beginRenameWorkspace?.(targetWorkspaceId(ctx)),
     }),
     cmd("workspace.icon", {
       icon: Shapes,
       targetKind: "workspace",
+      when: (ctx) => !docsTargeted(ctx),
       run: (ctx) => ctx.ui.pickWorkspaceIcon?.(targetWorkspaceId(ctx)),
     }),
     // Relocate the workspace's folder on disk (Bun renames; same volume only).
@@ -422,6 +469,7 @@ export function buildCommands(deps: RegistryDeps): Command[] {
     cmd("workspace.move", {
       icon: FolderInput,
       targetKind: "workspace",
+      when: (ctx) => !docsTargeted(ctx),
       run: (ctx) => {
         const id = targetWorkspaceId(ctx);
         const ws = ctx.state.workspaces.find((w) => w.id === id);
@@ -438,7 +486,12 @@ export function buildCommands(deps: RegistryDeps): Command[] {
       icon: Trash2,
       targetKind: "workspace",
       destructive: true,
-      when: (ctx) => ctx.state.workspaces.length > 1,
+      // Closing the docs workspace needs only SOMETHING else to land on;
+      // closing a real one must leave another real one — the docs workspace
+      // does not count as a place to strand the user (no strip row would
+      // show where they are).
+      when: (ctx) =>
+        docsTargeted(ctx) ? ctx.state.workspaces.length > 1 : stripWorkspaces(ctx).length > 1,
       // Closes the view AND detaches the folder from the registry — but never
       // touches the files: the folder stays on disk, re-attachable with
       // everything in it (hence still no confirmation; interactions.md §4).
@@ -511,7 +564,7 @@ export function buildCommands(deps: RegistryDeps): Command[] {
       targetKind: "note",
       when: (ctx) => {
         const note = targetNote(ctx);
-        return note !== null && !note.locked && !note.template;
+        return note !== null && !note.locked && !note.template && !docsSelected(ctx);
       },
       run: (ctx) => {
         const note = targetNote(ctx);
@@ -606,7 +659,10 @@ export function buildCommands(deps: RegistryDeps): Command[] {
       icon: Braces,
       when: (ctx) => {
         const docId = focusedDocId(ctx.selected);
-        return docId !== null && deps.noteHead(docId) !== null;
+        // Not in the docs workspace: the Add face would insert fences the
+        // read-only editor drops on the floor — a chord that visibly does
+        // nothing (the editor's transaction filter is the enforcement).
+        return docId !== null && deps.noteHead(docId) !== null && !docsSelected(ctx);
       },
       run: (ctx) => {
         const docId = focusedDocId(ctx.selected);
@@ -630,7 +686,7 @@ export function buildCommands(deps: RegistryDeps): Command[] {
       targetKind: "note",
       destructive: true,
       palette: false, // the row form; Delete Note (⌘⌫) is the palette form
-      when: (ctx) => ctx.target?.kind === "note" && !!targetNote(ctx),
+      when: (ctx) => ctx.target?.kind === "note" && !!targetNote(ctx) && !docsSelected(ctx),
       run: (ctx) => {
         const note = targetNote(ctx);
         if (note) ctx.ui.deleteNoteWithUndo?.(note);
@@ -644,7 +700,7 @@ export function buildCommands(deps: RegistryDeps): Command[] {
       // focused note row it acts on that row — ⌘⌫ meaning "delete the note I
       // am pointing at" is the same promise either way.
       domains: ["page"],
-      when: (ctx) => (ctx.target?.kind ?? "note") === "note" && !!targetNote(ctx),
+      when: (ctx) => (ctx.target?.kind ?? "note") === "note" && !!targetNote(ctx) && !docsSelected(ctx),
       run: (ctx) => {
         const note = targetNote(ctx);
         if (note) ctx.ui.deleteNoteWithUndo?.(note);
@@ -823,13 +879,16 @@ export function buildCommands(deps: RegistryDeps): Command[] {
   // palette stay plain data. ⌘N switches workspace, ⌃N selects a tab in the
   // focused pane — exactly what the held-modifier badges advertise.
   for (let n = 1; n <= 9; n += 1) {
+    // Indexed over the STRIP's workspaces (docs excluded), so ⌘N matches the
+    // badges on the rows the user can see — and stays the way back out of the
+    // docs workspace, whose own slot would otherwise shift every number.
     list.push({
       id: `workspace.select.${n}`,
-      title: (ctx) => `Switch to Workspace: ${ctx.state.workspaces[n - 1]?.name ?? n}`,
+      title: (ctx) => `Switch to Workspace: ${stripWorkspaces(ctx)[n - 1]?.name ?? n}`,
       keys: [workspaceSelectKey(n)],
-      when: (ctx) => !!ctx.state.workspaces[n - 1],
+      when: (ctx) => !!stripWorkspaces(ctx)[n - 1],
       run: (ctx) => {
-        const ws = ctx.state.workspaces[n - 1];
+        const ws = stripWorkspaces(ctx)[n - 1];
         if (ws) ctx.dispatch({ type: "selectWorkspace", id: ws.id });
       },
     });
