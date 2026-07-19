@@ -11,11 +11,14 @@ import { expect, test } from "@playwright/test";
 test.beforeEach(async ({ page }) => {
   await page.goto("/harness.html");
   await expect(page.locator('[data-target-kind="note"]', { hasText: "Alpha" })).toBeVisible();
-  // Pane 1: a fresh scratch note, which ships with a ```sh block.
+  // Pane 1: a fresh scratch note (header only), given a ```sh block to run.
   await page.keyboard.press("Meta+n");
+  await expect(page.locator(".cm-line").first()).toHaveText("# Untitled");
+  await page.keyboard.press("Meta+a");
+  await page.keyboard.insertText('# Untitled\n\n```sh\necho "ready"\n```\n');
   await expect(page.locator(".cm-line", { hasText: 'echo "ready"' })).toBeVisible();
-  // Pane 2: split right (focused), then replace ITS scratch block with prose,
-  // so exactly one terminal button exists — pane 1's.
+  // Pane 2: split right (focused), then fill it with prose, so exactly one
+  // terminal button exists — pane 1's.
   await page.keyboard.press("Meta+d");
   await expect(page.locator(".ledge-tabstrip")).toHaveCount(2);
   await page.keyboard.press("Meta+a");

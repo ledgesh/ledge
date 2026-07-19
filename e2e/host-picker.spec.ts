@@ -9,9 +9,12 @@ import { expect, test } from "@playwright/test";
 test.beforeEach(async ({ page }) => {
   await page.goto("/harness.html");
   await expect(page.locator('[data-target-kind="note"]', { hasText: "Alpha" })).toBeVisible();
-  // A fresh scratch note ships with a ```sh block; prepend frontmatter above
-  // it (the block must open on the very first line to be one).
+  // A fresh scratch note is header-only; give it a ```sh block to run, then
+  // prepend frontmatter above it (the fence must open on its own line).
   await page.keyboard.press("Meta+n");
+  await expect(page.locator(".cm-line").first()).toHaveText("# Untitled");
+  await page.keyboard.press("Meta+a");
+  await page.keyboard.insertText('# Untitled\n\n```sh\necho "ready"\n```\n');
   await expect(page.locator(".cm-line", { hasText: 'echo "ready"' })).toBeVisible();
 });
 

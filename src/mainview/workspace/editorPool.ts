@@ -53,7 +53,9 @@ const DEMO_DOC = [
   "",
 ].join("\n");
 
-const SCRATCH_DOC = ["# Untitled", "", "```sh", 'echo "ready"', "```", ""].join("\n");
+// Just the H1 — the rename UI and the note's identity, nothing else. A new
+// note is the user's blank page: no sample block to delete first.
+const SCRATCH_DOC = ["# Untitled", "", ""].join("\n");
 
 function seedDoc(seed: "demo" | "scratch"): string {
   return seed === "demo" ? DEMO_DOC : SCRATCH_DOC;

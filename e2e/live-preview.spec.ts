@@ -83,8 +83,11 @@ test("a rendered link opens on plain click; a revealed one is caret territory", 
 });
 
 test("fence marks conceal outside the block; the language and code stay", async ({ page }) => {
-  // The scratch note ships with a ```sh block. The caret starts at the top of
+  // Give the scratch note a ```sh block, then put the caret back at the top of
   // the note, outside it: the fences hide, the info string is the caption.
+  await page.keyboard.press("Meta+a");
+  await page.keyboard.insertText('# Untitled\n\n```sh\necho "ready"\n```\n');
+  await page.keyboard.press("Meta+ArrowUp");
   await expect(page.locator(".cm-line.ledge-code-top")).toHaveText("sh");
   await expect(page.locator(".cm-line.ledge-code-bottom")).toHaveText("");
   await expect(page.locator(".cm-line", { hasText: 'echo "ready"' })).toBeVisible();

@@ -9,10 +9,10 @@ import { expect, test } from "@playwright/test";
 test("a prompt fence gets the run overlay out of the box", async ({ page }) => {
   await page.goto("/harness.html");
   await expect(page.locator('[data-target-kind="note"]', { hasText: "Alpha" })).toBeVisible();
-  // A fresh scratch note ships with one ```sh block; replace it wholesale so
-  // the only fence on screen is the prompt one.
+  // A fresh scratch note is header-only; replace it wholesale so the only
+  // fence on screen is the prompt one.
   await page.keyboard.press("Meta+n");
-  await expect(page.locator(".cm-line", { hasText: 'echo "ready"' })).toBeVisible();
+  await expect(page.locator(".cm-line").first()).toHaveText("# Untitled");
   await page.keyboard.press("Meta+a");
   await page.keyboard.insertText("```prompt\nSummarize this note as a haiku\n```\n");
 
@@ -27,6 +27,9 @@ test("a silent run names its silence instead of showing a bare header", async ({
   await page.goto("/harness.html");
   await expect(page.locator('[data-target-kind="note"]', { hasText: "Alpha" })).toBeVisible();
   await page.keyboard.press("Meta+n");
+  await expect(page.locator(".cm-line").first()).toHaveText("# Untitled");
+  await page.keyboard.press("Meta+a");
+  await page.keyboard.insertText('# Untitled\n\n```sh\necho "ready"\n```\n');
   await expect(page.locator(".cm-line", { hasText: 'echo "ready"' })).toBeVisible();
   await page.locator('[data-act="run"]').dispatchEvent("mousedown", { button: 0 });
   await expect(page.locator(".ledge-term-waiting")).toHaveText("running — no output yet");
