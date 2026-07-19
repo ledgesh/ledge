@@ -368,10 +368,11 @@ export type LedgeRPC = {
       // point. Sent by the "Restart Note Shell" command.
       sessionRestart: { params: { sessionId: string }; response: { ok: boolean } };
       // Read one profile's env file, creating it (seeded, 0600) first if it
-      // does not exist. Unlike settings.json, profiles do NOT open in the OS
-      // editor — macOS binds no application to ".env" (LSApplicationNotFound),
-      // so `open` dead-ends — Ledge's own profile editor is the UI, and this
-      // pair is its load/save. `name` is re-validated Bun-side
+      // does not exist. Ledge's own profile editor is the UI — macOS binds no
+      // application to ".env" (LSApplicationNotFound), so there was never an
+      // OS-editor path — and this pair is its load/save; settingsRead/Write
+      // below are the same shape for the same reason, one config file later.
+      // `name` is re-validated Bun-side
       // (assertProfileName) before it becomes a filename in both calls: the
       // view is the least-trusted end. Fired by the "Edit Note Profile"
       // command with the profile the note's frontmatter names.
@@ -391,9 +392,17 @@ export type LedgeRPC = {
       // ever sees a complete, valid Settings. Applies at launch — there is no
       // settingsChanged message, deliberately (architecture.md, "Settings").
       settingsGet: { params: {}; response: { settings: Settings } };
-      // Open settings.json in the OS default editor (the ⌘, command). The view
-      // cannot name the file — Bun knows where it lives.
-      settingsOpen: { params: {}; response: { ok: boolean } };
+      // The settings editor's load/save (the ⌘, dialog), mirroring
+      // profileRead/profileWrite: the view cannot name the file — Bun knows
+      // where settings.jsonc lives — and it carries raw JSONC text, comments
+      // and all. Read seeds the commented template on a fresh install, so the
+      // first ⌘, opens documented knobs; write is atomic like a note save and
+      // deliberately not gated on parsing (a mid-edit save must not be
+      // refused — launch-time validation already degrades per field, and the
+      // dialog shows problems live). Saved changes still apply at the NEXT
+      // launch, like every setting.
+      settingsRead: { params: {}; response: { text: string } };
+      settingsWrite: { params: { text: string }; response: { ok: boolean } };
       // Write the `ledge` CLI shim onto the PATH (the Install Shell Command
       // palette entry). Bun composes the whole outcome message: it alone
       // knows the shim's landing dir, the PATH answer, and the failure — the

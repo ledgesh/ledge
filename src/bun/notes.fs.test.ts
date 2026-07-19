@@ -109,9 +109,9 @@ describe("createNote / writeNote / readNote", () => {
   });
 
   test("the app home's own files are unreachable: they are outside every root", async () => {
-    // The escalation this blocks: settings.json names the shell executable, so
+    // The escalation this blocks: settings.jsonc names the shell executable, so
     // a noteWrite that reached it would be command execution at next launch.
-    const path = join(APP_HOME, "settings.json");
+    const path = join(APP_HOME, "settings.jsonc");
     await expect(writeNote(path, '{"shell":{"path":"/tmp/evil"}}')).rejects.toThrow(/outside every workspace root/);
     await expect(readNote(path)).rejects.toThrow(/outside every workspace root/);
   });

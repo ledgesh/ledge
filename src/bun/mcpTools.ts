@@ -165,7 +165,7 @@ function dailyWorkspace(args: Record<string, unknown>, settings: Settings): stri
     return targetWorkspace(args);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    throw new Error(`${msg} — or set daily.workspace in settings.json to pin where daily notes live`);
+    throw new Error(`${msg} — or set daily.workspace in settings.jsonc to pin where daily notes live`);
   }
 }
 

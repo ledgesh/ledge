@@ -112,9 +112,56 @@ test("the settings snapshot reaches its consumers: the seeded editor font size a
   expect(size).toBe("18px");
 });
 
-test("⌘, asks Bun to open the settings file", async ({ page }) => {
+test("⌘, opens the settings editor on the commented file; Escape closes without saving", async ({ page }) => {
   await page.keyboard.press("Meta+,");
-  expect(await page.evaluate(() => window.__harness.settingsOpens())).toBe(1);
+  const dialog = page.getByRole("dialog", { name: "Settings" });
+  await expect(dialog).toBeVisible();
+  // A fresh install opens on the seeded template — the comments ARE the
+  // documentation, so their presence is the point.
+  await expect(dialog.locator(".cm-content")).toContainText("Ledge settings");
+  const before = await page.evaluate(() => window.__harness.settingsText());
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  expect(await page.evaluate(() => window.__harness.settingsText())).toBe(before);
+});
+
+test("a settings edit warns live on a bad value and saves byte-for-byte", async ({ page }) => {
+  await page.keyboard.press("Meta+,");
+  const dialog = page.getByRole("dialog", { name: "Settings" });
+  await dialog.locator(".cm-content").click();
+  await page.keyboard.press("Meta+a");
+  await page.keyboard.type('{ "editor": { "fontSize": 200 } }');
+  // The problems strip previews exactly what launch-time validation would say.
+  await expect(dialog.getByText(/must be a number between 6 and 72/)).toBeVisible();
+  await page.keyboard.press("Meta+a");
+  const good = '{ "editor": { "fontSize": 20 } } // mine';
+  await page.keyboard.type(good);
+  await expect(dialog.getByText(/must be a number/)).toHaveCount(0);
+  await dialog.getByRole("button", { name: "Save" }).click();
+  await expect(dialog).toHaveCount(0);
+  // Comments included: the dialog saves the text, not a reserialization.
+  expect(await page.evaluate(() => window.__harness.settingsText())).toBe(good);
+});
+
+test("settings dialog: the caret is drawn, and ⌘C/⌘X/⌘V go through the clipboard bridge", async ({ page }) => {
+  await page.keyboard.press("Meta+,");
+  const dialog = page.getByRole("dialog", { name: "Settings" });
+  await dialog.locator(".cm-content").click();
+  // drawSelection paints the caret (the native one is invisible on the dark
+  // surface); the element existing is what "you can see where you type" means.
+  await expect(dialog.locator(".cm-cursor")).toHaveCount(1);
+
+  const doc = '{ "trash": { "ttlDays": 9 } }';
+  await page.keyboard.press("Meta+a");
+  await page.keyboard.type(doc);
+  await page.keyboard.press("Meta+a");
+  await page.keyboard.press("Meta+c");
+  expect(await page.evaluate(() => window.__harness.clipboard())).toBe(doc);
+  // Cut empties the doc; paste brings it back — the full round trip.
+  await page.keyboard.press("Meta+x");
+  await expect(dialog.locator(".cm-content")).not.toContainText("ttlDays");
+  await page.keyboard.press("Meta+v");
+  await expect(dialog.locator(".cm-content")).toContainText('"ttlDays": 9');
 });
 
 test("an open context menu suppresses the dispatcher; Escape closes only the menu", async ({ page }) => {

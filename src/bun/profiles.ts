@@ -3,9 +3,10 @@
 // This module owns the files: creation, and the read/write pair behind the
 // view's profile editor.
 //
-// Profiles do NOT go through the OS editor the way settings.json does: macOS
-// binds no application to ".env" (`open` fails with LSApplicationNotFound on
-// a stock system), so Ledge's own editor dialog is the UI. The file stays a
+// Ledge's own editor dialog is the profile UI — the OS editor was never an
+// option (macOS binds no application to ".env"; `open` fails with
+// LSApplicationNotFound on a stock system), and settings.jsonc now opens
+// in-app too, so every config file edits inside Ledge. The file stays a
 // plain dotenv on disk — greppable, hand-editable, and the editor's saves
 // preserve comments (shared/dotenv.ts) — so hand edits and dialog edits
 // coexist rather than compete.
@@ -24,7 +25,7 @@ export function assertProfileName(name: string): string {
 }
 
 // Seeded so the very first open documents its own format and its reason for
-// existing, the way the seeded settings.json documents its knobs.
+// existing, the way the seeded settings.jsonc documents its knobs.
 function seedText(name: string): string {
   return [
     `# Ledge profile "${name}": KEY=value per line (# comments, export prefix ok).`,

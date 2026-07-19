@@ -16,7 +16,7 @@
 // Validation degrades per line, parseSettings-style: a bad line costs that
 // line (reported in `problems`, so the UI can surface it), never the rest of
 // the block and never a crash. The note is hand-edited text; a typo has to
-// degrade as gently as one in settings.json does.
+// degrade as gently as one in settings.jsonc does.
 
 /** Parameters a note may declare. null / {} / [] mean "not declared". */
 export interface NoteParams {
@@ -47,7 +47,7 @@ export interface NoteParams {
   // strips this line (shared/template.ts) so instances are not templates too.
   // The value `daily` claims a ROLE on top of that: this template is the one
   // ⌘J / `ledge today` instantiates for each day's note (bun/daily.ts
-  // findDailyTemplate). In the corpus rather than in settings.json
+  // findDailyTemplate). In the corpus rather than in settings.jsonc
   // deliberately: which notes are templates — and which one is the daily —
   // is a fact about the notes, and marking one is editing a note: no
   // registry to keep in sync, no restart to apply it, nothing to go stale

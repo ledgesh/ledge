@@ -96,7 +96,7 @@ describe("attachExternal", () => {
   });
 
   test("the app home itself, and anything containing it, is refused", async () => {
-    // settings.json lives in the app home and names the shell executable;
+    // settings.jsonc lives in the app home and names the shell executable;
     // "every .md in ~/.ledge is a note" was exactly the blast radius the
     // per-workspace split removed. tmpdir() contains the app home here.
     expect(await attachExternal(APP_HOME)).toHaveProperty("error");
@@ -239,7 +239,7 @@ describe("rootContaining / assertRegisteredRoot", () => {
     const root = await createManaged("Scratch");
     expect(rootContaining(join(root, "note.md"))).toBe(root);
     expect(rootContaining(join(root, "deep", "note.md"))).toBe(root);
-    expect(rootContaining(join(APP_HOME, "settings.json"))).toBeNull();
+    expect(rootContaining(join(APP_HOME, "settings.jsonc"))).toBeNull();
     expect(rootContaining(join(root, "..", "escape.md"))).toBeNull();
     expect(rootContaining("/etc/passwd")).toBeNull();
     expect(rootContaining(`${root}-evil/note.md`)).toBeNull(); // prefix sibling

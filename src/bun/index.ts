@@ -53,7 +53,7 @@ import { OPEN_REQUEST_PATH, takeOpenRequest } from "./openRequest";
 import { syncWatchers } from "./watch";
 import { pasteImageAsset, readAsset } from "./assets";
 import { interpretersFor, runnerFor } from "./runner";
-import { loadSettings, openSettingsFile } from "./settings";
+import { loadSettings, readSettingsFile, writeSettingsFile } from "./settings";
 import { openableUrl } from "../shared/links";
 import { resolveSpawn, stampSessionFacts, type SessionFacts, type SpawnDeps } from "./spawnParams";
 import { buildRemoteSpawn } from "./remoteSpawn";
@@ -63,7 +63,7 @@ import { isHostName, LOCAL_HOST, type NoteParams } from "../shared/frontmatter";
 
 // Read once, applied for the life of the process: the shell below, the trash
 // TTL at the bottom, and the view's snapshot via settingsGet. Edits to
-// settings.json take effect at the next launch (architecture.md, "Settings").
+// settings.jsonc take effect at the next launch (architecture.md, "Settings").
 const settings = await loadSettings();
 
 // The workspace registry, loaded before any RPC can be served: every note
@@ -574,8 +574,12 @@ const rpc = BrowserView.defineRPC<LedgeRPC>({
       // self-healing, Bun owns the file and the atomicity (bun/layout.ts).
       layoutGet: async () => ({ text: await readLayout() }),
       layoutSave: async ({ text }) => ({ ok: await writeLayout(text) }),
-      settingsOpen: async () => {
-        await openSettingsFile();
+      // Raw settings.jsonc text for the ⌘, editor dialog; the write is atomic
+      // and ungated (rpc-schema.ts says why). Restart-applies still holds:
+      // the running `settings` snapshot above is not touched by a save.
+      settingsRead: async () => ({ text: await readSettingsFile() }),
+      settingsWrite: async ({ text }) => {
+        await writeSettingsFile(text);
         return { ok: true };
       },
       // The CLI installer, from the app side. The entry is cli.js beside this

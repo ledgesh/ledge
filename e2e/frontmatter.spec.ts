@@ -94,3 +94,35 @@ test("the profile editor round-trips a variable through the palette command", as
   await page.keyboard.press("Escape");
   await expect(reopened).toBeHidden();
 });
+
+test("profile fields copy and paste through the clipboard bridge, mask notwithstanding", async ({ page }) => {
+  await page.keyboard.press("Meta+n");
+  for (const line of ["---", "profile: petstore", "---", "# Petstore calls"]) {
+    await page.keyboard.type(line);
+    await page.keyboard.press("Enter");
+  }
+  await page.keyboard.press("Meta+Shift+P");
+  await page.keyboard.type("edit note profile");
+  await page.keyboard.press("Enter");
+  const dialog = page.getByRole("dialog", { name: "Profile petstore" });
+  const keyField = dialog.getByLabel("Variable name").first();
+  const valueField = dialog.getByLabel("Variable value").first();
+
+  // ⌘C on a selection in the name field lands on the bridge clipboard…
+  await keyField.fill("TOKEN");
+  await keyField.press("Meta+a");
+  await keyField.press("Meta+c");
+  expect(await page.evaluate(() => window.__harness.clipboard())).toBe("TOKEN");
+
+  // …and ⌘V drops it into the (masked) value field: pasting a secret must
+  // not require revealing it first.
+  await valueField.click();
+  await valueField.press("Meta+v");
+  await expect(valueField).toHaveValue("TOKEN");
+
+  // ⌘X cuts: the field empties and the clipboard holds the old value.
+  await valueField.press("Meta+a");
+  await valueField.press("Meta+x");
+  await expect(valueField).toHaveValue("");
+  expect(await page.evaluate(() => window.__harness.clipboard())).toBe("TOKEN");
+});

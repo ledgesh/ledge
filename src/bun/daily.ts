@@ -17,7 +17,7 @@ import { assertRegisteredRoot, availableRoots, workspaceMatches } from "./worksp
 // "use the caller's own fallback" — the selected workspace in the app, cwd
 // deixis at the CLI. Null covers unset ("") and, warned, a value that names
 // nothing or several roots: a stale knob must degrade the way a bad
-// settings.json field does, never strand ⌘J behind an error.
+// settings.jsonc field does, never strand ⌘J behind an error.
 export function resolveConfiguredWorkspace(
   setting: string,
   registered: readonly string[],

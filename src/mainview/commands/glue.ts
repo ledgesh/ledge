@@ -24,7 +24,6 @@ import {
 } from "@/notes/channel";
 import { copyText } from "@/lib/clipboard";
 import { installCli } from "@/lib/cli";
-import { openSettingsFile } from "@/lib/settings";
 import { restartSession } from "@/terminal/channel";
 import { attachWorkspace, closeWorkspace, createWorkspace } from "@/workspace/actions";
 import { dailyWorkspaceRoot } from "@/workspace/channel";
@@ -53,7 +52,6 @@ function withView(docId: string, fn: (view: NonNullable<ReturnType<typeof getEdi
 
 export const registryDeps: RegistryDeps = {
   copyText,
-  openSettings: openSettingsFile,
   installCli,
   createWorkspace,
   attachWorkspace,

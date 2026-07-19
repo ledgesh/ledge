@@ -17,7 +17,6 @@ function stubDeps(
   const record = (name: string) => (arg: string) => calls.push(`${name}:${arg}`);
   return {
     copyText: record("copyText"),
-    openSettings: () => calls.push("openSettings"),
     installCli: async () => {
       calls.push("installCli");
       return { ok: true, message: "installed" };
@@ -215,11 +214,13 @@ describe("registry", () => {
     expect(calls).toEqual([`find:${docId}`, `runInline:${docId}`, `bold:${docId}`]);
   });
 
-  test("run: settings.open routes to the openSettings edge", () => {
-    const calls: string[] = [];
-    const cmds = buildCommands(stubDeps(calls));
-    find(cmds, "settings.open").run(makeCtx(initialState(FOLDER, [])));
-    expect(calls).toEqual(["openSettings"]);
+  test("run: settings.open opens the in-app settings editor dialog", () => {
+    const opens: number[] = [];
+    const ctx = makeCtx(initialState(FOLDER, []));
+    ctx.ui = { openSettingsEditor: () => opens.push(1) };
+    const cmds = buildCommands(stubDeps());
+    find(cmds, "settings.open").run(ctx);
+    expect(opens).toHaveLength(1);
   });
 
   test("run: cli.install routes to the installCli edge and surfaces the outcome", async () => {

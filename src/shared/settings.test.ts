@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { DEFAULT_SETTINGS, parseSettings } from "./settings";
+import { DEFAULT_SETTINGS, parseSettings, SETTINGS_TEMPLATE } from "./settings";
+import { stripJsonc } from "./jsonc";
 
 describe("parseSettings", () => {
   test("an empty object yields the defaults, problem-free", () => {
@@ -170,12 +171,12 @@ describe("parseSettings", () => {
     for (const raw of [null, "settings", [1, 2], 42]) {
       const { settings, problems } = parseSettings(raw);
       expect(settings).toEqual(DEFAULT_SETTINGS);
-      expect(problems).toEqual(["settings.json is not a JSON object"]);
+      expect(problems).toEqual(["settings.jsonc is not a JSON object"]);
     }
   });
 
   test("an absent daily section defaults silently (seed-frozen files)", () => {
-    // Every settings.json seeded before the section existed lacks it — that
+    // Every settings file seeded before the section existed lacks it — that
     // must read as "unset", not as a problem.
     const { settings, problems } = parseSettings({});
     expect(settings.daily).toEqual({ workspace: "" });
@@ -205,5 +206,20 @@ describe("parseSettings", () => {
     // still carrying it gets the migration hint, not a bare unknown-section.
     const { problems } = parseSettings({ templates: { notes: ["Meeting"] } });
     expect(problems).toEqual(['"templates" is retired — mark a note with `template: true` frontmatter instead']);
+  });
+});
+
+// The seeded file and the compiled defaults must be the same settings — a
+// default edited in one place but not the other would ship a first launch
+// that disagrees with itself.
+describe("SETTINGS_TEMPLATE", () => {
+  test("strips to valid JSON that IS the defaults, problem-free", () => {
+    const { settings, problems } = parseSettings(JSON.parse(stripJsonc(SETTINGS_TEMPLATE)));
+    expect(problems).toEqual([]);
+    expect(settings).toEqual(DEFAULT_SETTINGS);
+  });
+
+  test("raw template equals the defaults literally (no field riding on a validator fallback)", () => {
+    expect(JSON.parse(stripJsonc(SETTINGS_TEMPLATE))).toEqual(DEFAULT_SETTINGS);
   });
 });

@@ -26,7 +26,7 @@ import { configureClipboard } from "./lib/clipboard";
 import { configureCli } from "./lib/cli";
 import { configureAssets } from "./lib/assets";
 import { configureSettings } from "./lib/settings";
-import { DEFAULT_SETTINGS } from "../shared/settings";
+import { DEFAULT_SETTINGS, SETTINGS_TEMPLATE } from "../shared/settings";
 import { configureLayout, restoredState } from "./workspace/persist";
 import "./index.css";
 import App from "./App";
@@ -447,8 +447,7 @@ configureAssets({
 });
 
 // A non-default editor font size, so a spec can tell "the setting reached the
-// editor" apart from "the old hardcoded 14px is still there". openFile is
-// recorded, not performed: launching an OS editor is a native seam.
+// editor" apart from "the old hardcoded 14px is still there".
 // No template configuration: templates are notes carrying `template: true`
 // frontmatter, seeded per spec (a boot-time seed would shift every
 // list-count assertion in the older specs).
@@ -456,13 +455,17 @@ const HARNESS_SETTINGS = {
   ...DEFAULT_SETTINGS,
   editor: { ...DEFAULT_SETTINGS.editor, fontSize: 18 },
 };
-let settingsOpens = 0;
+// The settings file as an in-memory string, seeded like a real first launch
+// (the commented template), so the ⌘, dialog is drivable end to end and a
+// spec can assert what a save wrote.
+let settingsText = SETTINGS_TEMPLATE;
 const profiles = new Map<string, string>();
 configureSettings(
   HARNESS_SETTINGS,
   {
-    openFile: () => {
-      settingsOpens += 1;
+    readSettingsFile: async () => settingsText,
+    writeSettingsFile: async (text) => {
+      settingsText = text;
     },
     // An in-memory profile store, seeded on first read like the real one, so
     // specs can drive the profile editor dialog end to end.
@@ -490,7 +493,7 @@ declare global {
   interface Window {
     __harness: {
       clipboard: () => string;
-      settingsOpens: () => number;
+      settingsText: () => string;
       linkOpens: () => string[];
       layout: () => string | null;
       termAttaches: () => { sessionId: string; host: string | null }[];
@@ -509,7 +512,7 @@ declare global {
 }
 window.__harness = {
   clipboard: () => clip,
-  settingsOpens: () => settingsOpens,
+  settingsText: () => settingsText,
   linkOpens: () => [...linkOpens],
   layout: () => layoutText,
   termAttaches: () => termAttaches.map((a) => ({ ...a })),

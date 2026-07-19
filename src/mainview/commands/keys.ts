@@ -100,9 +100,10 @@ export const COMMANDS = {
   "workspace.icon": { title: "Change Icon…", listKeys: ["i"] },
   "workspace.close": { title: "Close Workspace", listKeys: ["Backspace"] },
 
-  // Chrome. ⌘, is the macOS settings convention; it opens settings.json in
-  // the OS editor (there is no settings panel — the file is the UI, and edits
-  // apply at the next launch; docs/architecture.md "Settings").
+  // Chrome. ⌘, is the macOS settings convention; it opens settings.jsonc in
+  // Ledge's own editor dialog (there is no settings panel — the file is the
+  // UI, its comments the documentation, and edits apply at the next launch;
+  // docs/architecture.md "Settings").
   "sidebar.toggle": { title: "Toggle Sidebar", keys: ["Alt-Mod-b"] },
   // The right-hand Backlinks panel: which notes [[link]] to the current one.
   // ⌥⌘L is the sidebar's ⌥-tier move with the letter the sidebar couldn't
@@ -132,8 +133,9 @@ export const COMMANDS = {
   // confirm, because closing a tab already tears shells down unconfirmed and
   // this is the same class of loss (interactions.md §4, arrangement loss).
   // Edit Note Profile opens the CURRENT note's profile in Ledge's own editor
-  // dialog — not the OS editor like settings.json, because macOS binds no
-  // application to ".env" and `open` dead-ends (components/ProfileEditor.tsx).
+  // dialog (components/ProfileEditor.tsx) — the same in-app move as settings,
+  // with masked KEY=value rows instead of raw text because profiles hold
+  // secrets.
   "session.restart": { title: "Restart Note Shell" },
   "profile.open": { title: "Edit Note Profile…" },
 

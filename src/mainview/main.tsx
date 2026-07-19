@@ -179,8 +179,9 @@ async function boot(): Promise<void> {
     },
   });
   configureSettings(settings, {
-    openFile: () => {
-      void electrobun.rpc!.request.settingsOpen({});
+    readSettingsFile: () => electrobun.rpc!.request.settingsRead({}).then((r) => r.text),
+    writeSettingsFile: async (text) => {
+      await electrobun.rpc!.request.settingsWrite({ text });
     },
     readProfile: (name) => electrobun.rpc!.request.profileRead({ name }).then((r) => r.text),
     writeProfile: async (name, text) => {

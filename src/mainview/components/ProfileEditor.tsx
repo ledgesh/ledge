@@ -1,8 +1,9 @@
 // The profile editor: a modal of KEY=value rows over one profile's env file.
 //
-// This dialog exists because "the file is the UI" broke down for profiles:
-// macOS binds no application to ".env", so the settings.json move (⌘, →
-// `open` in the OS editor) dead-ends with LSApplicationNotFound. The file on
+// This dialog exists because macOS binds no application to ".env": handing
+// the file to the OS editor dead-ends with LSApplicationNotFound, so "the
+// file is the UI" needed an in-app editor — the move settings.jsonc later
+// adopted too (components/SettingsEditor.tsx). The file on
 // disk stays a plain dotenv — greppable, hand-editable — and saves go through
 // serializeDotenv, which preserves comments and untouched lines byte-for-byte
 // (shared/dotenv.ts), so hand edits and dialog edits coexist.
@@ -10,13 +11,47 @@
 // Values are masked by default: profiles hold exactly the secrets the
 // frontmatter design keeps OFF the screen, so the editor must not become the
 // place they end up visible anyway. One toggle reveals them deliberately.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Eye, EyeOff, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { pushLayer } from "@/commands/layers";
+import { copyText, readClipboard } from "@/lib/clipboard";
 import { readProfile, writeProfile } from "@/lib/settings";
 import { parseDotenvDoc, serializeDotenv } from "../../shared/dotenv";
 import { isEnvName } from "../../shared/frontmatter";
+
+// ⌘A/C/X/V on the dialog's inputs, handled in JS: without a native Edit menu
+// the webview gets the keydown but none of the standard editing selectors, so
+// select-all does nothing and the clipboard keys go nowhere (lib/clipboard.ts
+// has the whole story) — and a profile value — an API key from a provider
+// dashboard — is exactly the string nobody should have to retype.
+// preventDefault doubles as the no-AppKit-beep move the editor's clipboard
+// keymap makes by returning true. Copy works on a masked value too: the mask
+// governs the screen, not the user's access to their own secret.
+function clipboardKeys(e: KeyboardEvent<HTMLInputElement>, setValue: (v: string) => void): void {
+  if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
+  const key = e.key.toLowerCase();
+  if (key === "a") {
+    e.preventDefault();
+    e.currentTarget.select();
+    return;
+  }
+  if (key !== "c" && key !== "x" && key !== "v") return;
+  e.preventDefault();
+  const value = e.currentTarget.value;
+  const start = e.currentTarget.selectionStart ?? value.length;
+  const end = e.currentTarget.selectionEnd ?? value.length;
+  if (key === "v") {
+    void readClipboard().then((clip) => {
+      if (clip) setValue(value.slice(0, start) + clip + value.slice(end));
+    });
+    return;
+  }
+  const selected = value.slice(start, end);
+  if (!selected) return;
+  copyText(selected);
+  if (key === "x") setValue(value.slice(0, start) + value.slice(end));
+}
 
 interface Row {
   // The file line this row came from; null for rows added in the dialog.
@@ -84,7 +119,7 @@ export function ProfileEditor({ name, onClose }: { name: string; onClose: () => 
         role="dialog"
         aria-modal="true"
         aria-label={`Profile ${name}`}
-        className="w-full max-w-md rounded-lg border bg-background p-4 shadow-xl"
+        className="w-full max-w-2xl rounded-lg border bg-background p-4 shadow-xl"
       >
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold">
@@ -118,6 +153,7 @@ export function ProfileEditor({ name, onClose }: { name: string; onClose: () => 
                   aria-label="Variable name"
                   aria-invalid={badKey(r)}
                   onChange={(e) => set(i, { key: e.target.value })}
+                  onKeyDown={(e) => clipboardKeys(e, (v) => set(i, { key: v }))}
                   className={`h-7 w-40 rounded-md border bg-background px-2 font-mono text-[12px] outline-none focus:border-ring ${
                     badKey(r) ? "border-destructive" : "border-input"
                   }`}
@@ -130,6 +166,7 @@ export function ProfileEditor({ name, onClose }: { name: string; onClose: () => 
                   autoCapitalize="off"
                   aria-label="Variable value"
                   onChange={(e) => set(i, { value: e.target.value })}
+                  onKeyDown={(e) => clipboardKeys(e, (v) => set(i, { value: v }))}
                   className="h-7 min-w-0 flex-1 rounded-md border border-input bg-background px-2 font-mono text-[12px] outline-none focus:border-ring"
                 />
                 <button

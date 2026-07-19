@@ -261,7 +261,7 @@ Bun therefore validates everything and derives anything derivable:
   `assetPaste` reads the pasteboard Bun-side and returns only the
   markdown-relative reference; the view never names the file.
 - **`LEDGE_NOTES_ROOT`** overrides the APP HOME (`~/.ledge` — where
-  `settings.json`, `.layout.json`, `.workspaces.json`, and the managed
+  `settings.jsonc`, `.layout.json`, `.workspaces.json`, and the managed
   workspace folders live; `APP_HOME` in `bun/workspaces.ts`) for tests and
   throwaway runs. The env name predates the per-workspace split and is kept:
   every preload and probe already speaks it. Nothing in the app sets it;
@@ -321,14 +321,22 @@ Five instances exist and new needs should look like them: `configureBridge`
 
 ## 6. Settings
 
-User preferences live in one JSON file, `settings.json`, in the app home —
+User preferences live in one JSONC file, `settings.jsonc`, in the app home —
 GLOBAL, not per workspace: shell path, font sizes, and interpreters are facts
-about the person, not the folder. `shared/settings.ts` owns the shape, the
-defaults, and the validator; `bun/settings.ts` owns the file. Bun reads it
-once at launch, applies its own half (the shell every PTY spawns, the trash
-TTL), and hands the view a validated snapshot over `settingsGet`; view
-consumers (editor and terminal font sizes, the runnable-fence set) read that
-snapshot at construction time through `lib/settings.ts`.
+about the person, not the folder. JSONC because the file is hand-edited with
+its comments AS the documentation (the seeded template, `SETTINGS_TEMPLATE`,
+explains every knob in place); comments and trailing commas are tolerated by
+one shared stripper (`shared/jsonc.ts`) that both ends use, so Bun's launch
+parse and the settings editor's live validation cannot disagree about what
+the text means. An install that predates the format keeps its `settings.json`
+— renamed to `settings.jsonc` on first load (rename, never copy: one file
+stays the user's file, and JSON is valid JSONC so the bytes are already
+right). `shared/settings.ts` owns the shape, the defaults, the template, and
+the validator; `bun/settings.ts` owns the file. Bun reads it once at launch,
+applies its own half (the shell every PTY spawns, the trash TTL), and hands
+the view a validated snapshot over `settingsGet`; view consumers (editor and
+terminal font sizes, the runnable-fence set) read that snapshot at
+construction time through `lib/settings.ts`.
 
 - **What earns a setting.** The same shape of bar as the dependency policy
   (§8): every setting is a behavioral fork the app tests and maintains
@@ -368,7 +376,7 @@ snapshot at construction time through `lib/settings.ts`.
   instantiation. parseSettings still recognizes both retired spellings by
   name and answers with the migration hint rather than "unknown section".
 - **Settings are not session state, and neither is the registry.** Three
-  files in the app home, three ownership shapes. `settings.json` is
+  files in the app home, three ownership shapes. `settings.jsonc` is
   *human-edited preference*. `.layout.json` — which workspaces exist, their
   names and icons, which folder each owns, the pane trees — is
   *machine-written state* whose bytes Bun owns (`bun/layout.ts`:
@@ -388,12 +396,22 @@ snapshot at construction time through `lib/settings.ts`.
   open paths their own folder's boot `noteList` returned (paths stay opaque
   handles, §2; a tab can never cross into another workspace's folder).
   Never mix the files.
-- **The file is the UI.** There is no settings panel; ⌘, (`settings.open`)
-  asks Bun to open the file in the OS editor. First launch seeds it with
-  every default spelled out, so the file documents its own knobs.
+- **The file is the UI — and Ledge is its editor.** There is no settings
+  panel; ⌘, (`settings.open`) opens the file in an in-app dialog
+  (`components/SettingsEditor.tsx`: a modal CodeMirror over the raw JSONC,
+  highlighted in the note editor's own palette), the same move as the
+  profile editor and over the same-shaped RPC pair
+  (`settingsRead`/`settingsWrite` — the view never names the path). First
+  launch (or first ⌘,) seeds the commented template, so what opens
+  documents every knob; a drift test pins the template to
+  `DEFAULT_SETTINGS`. The dialog previews launch-time validation live —
+  same stripper, same `parseSettings` — but only ADVISES: Save writes the
+  text byte-for-byte, ungated, because a mid-edit save must not be refused
+  and launch already degrades gently. Saves still apply at the next launch;
+  the dialog says so instead of pretending otherwise.
 - **Validation degrades per field, and never rewrites.** A bad value costs
-  that field (warned, defaulted — `parseSettings`); unparseable JSON costs the
-  whole file for the run but the bytes on disk are untouched: it is the
+  that field (warned, defaulted — `parseSettings`); unparseable JSONC costs
+  the whole file for the run but the bytes on disk are untouched: it is the
   user's file, possibly mid-edit, and "fixing" it would destroy their work.
 - **Restart-applies, deliberately.** Both sides read once at launch; there is
   no `settingsChanged` message and no live reload. Live-applying would mean
@@ -440,7 +458,7 @@ keyed by docId; **Bun** stores them per session and reads them each time one
 of that session's shells spawns — persistent, overflow, and terminal drawer
 alike, which is what keeps all three telling one story about the note.
 
-- **Settings vs frontmatter.** `settings.json` is app-wide preference;
+- **Settings vs frontmatter.** `settings.jsonc` is app-wide preference;
   frontmatter is a per-note fact that travels with the note — open it
   anywhere, same cwd, same env. A knob belongs in frontmatter only when the
   right value genuinely varies per note (cwd, env); a knob that varies per
@@ -470,9 +488,12 @@ alike, which is what keeps all three telling one story about the note.
 - **Ledge's own dialog is the profile UI** ("Edit Note Profile…", the edit
   button pinned after the profile name, or ⌘-click the name itself — all →
   `components/ProfileEditor.tsx`, over the `profileRead`/`profileWrite`
-  RPCs). Profiles are the one config file that does NOT open in the OS
-  editor: macOS binds no application to `.env`, so the settings.json move
-  (`open` the file) dead-ends with LSApplicationNotFound. The file stays a
+  RPCs). The in-app dialog was forced here first — macOS binds no
+  application to `.env`, so handing the file to the OS editor dead-ends
+  with LSApplicationNotFound — and settings later adopted the same shape
+  (§6). The two dialogs differ where the files do: settings show the raw
+  text because its comments are the documentation; profiles show masked
+  KEY=value rows because their values are secrets. The file stays a
   plain dotenv on disk — greppable, hand-editable — and dialog saves go
   through `serializeDotenv` (`shared/dotenv.ts`), which preserves comments
   and untouched lines byte-for-byte, so hand edits and dialog edits coexist

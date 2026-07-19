@@ -115,7 +115,7 @@ async function headAt(path: string): Promise<string | null> {
 // --- filesystem ------------------------------------------------------------
 
 // A note path from the view must be a .md file inside a registered root. The
-// extension check is load-bearing, not tidiness: even with settings.json now
+// extension check is load-bearing, not tidiness: even with settings.jsonc now
 // outside every root (it lives in the app home), a root can hold config of its
 // own, and a noteWrite that accepted any in-root path would be an arbitrary-
 // file write. Every function taking a view-supplied note path uses this and

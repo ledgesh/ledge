@@ -1,7 +1,7 @@
 // Styles a note's frontmatter block: visible but quiet.
 //
 // The block is real note text and stays editable in place — the file is the
-// UI, same stance as settings.json — but it is machinery, not prose, so it
+// UI, same stance as settings.jsonc — but it is machinery, not prose, so it
 // renders dimmed and at one size. The markdown parser knows nothing about
 // frontmatter (to it the opening fence is a thematic break and `# comment`
 // lines are headings), so the line decorations here also neutralize whatever

@@ -105,7 +105,7 @@ function remoteWrite(contents: string, path: string, run: string): string {
  * section merged over it, in file order, later keys winning. This is where
  * "which python" gets its per-machine answer — the base map is the local one
  * and the default everywhere, and a host whose toolchain lives elsewhere
- * overrides only the languages it names (settings.json documents the shape).
+ * overrides only the languages it names (settings.jsonc documents the shape).
  */
 export function interpretersFor(
   host: string,

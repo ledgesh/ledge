@@ -8,7 +8,7 @@
 // hand the view "any .md anywhere" read/write; this one it cannot even see.
 //
 // This module also owns APP_HOME (formerly the notes root): ~/.ledge is where
-// the app's own files live — settings.json, .layout.json, .workspaces.json —
+// the app's own files live — settings.jsonc, .layout.json, .workspaces.json —
 // and where managed workspace folders are created. Notes never live directly
 // in APP_HOME anymore; they live in the registered roots.
 import { homedir } from "node:os";
@@ -65,7 +65,7 @@ export function uniqueName(base: string, taken: Set<string>, ext = ".md"): strin
 // CLI's --workspace argument (cli.ts resolveWorkspaceArg) and the
 // daily.workspace setting (daily.ts): what a name MEANS must have one
 // definition — a name that reaches workspace X at the shell cannot reach Y
-// from settings.json — while what a miss costs stays with each surface (the
+// from settings.jsonc — while what a miss costs stays with each surface (the
 // CLI throws its own error texts, the setting degrades to deixis). Empty =
 // no match; two or more = an ambiguous basename, for the caller to refuse
 // or degrade as suits it.
@@ -157,7 +157,7 @@ function nestingConflict(p: string): string | null {
 
 // A candidate root must be an absolute path that neither is, contains, nor —
 // unless it is a direct child (a managed folder) — lives inside APP_HOME.
-// APP_HOME itself can never be a root again: settings.json lives there and
+// APP_HOME itself can never be a root again: settings.jsonc lives there and
 // names the shell executable, and "every .md in ~/.ledge" was exactly the
 // blast radius the per-workspace split removes.
 function invalidRootReason(p: string): string | null {
@@ -226,7 +226,7 @@ export async function ensureDefault(): Promise<void> {
 // Create a managed workspace folder from a display name. Bun slugs the name
 // itself (same trust move as noteCreate: slugify emits only [a-z0-9-], so
 // there is no path for the view to smuggle through) and allocates against a
-// readdir snapshot — settings.json, dot-entries, and squatting files all count
+// readdir snapshot — settings.jsonc, dot-entries, and squatting files all count
 // as taken, so the mkdir cannot land on something that exists.
 export async function createManaged(name: string): Promise<string> {
   await ensureAppHome();

@@ -1,4 +1,4 @@
-// User preferences: the shape of settings.json, its defaults, and the
+// User preferences: the shape of settings.jsonc, its defaults, and the
 // validator. Lives in shared/ because both ends need it — Bun parses the file
 // and applies the Bun-side settings (shell, trash TTL); the view receives the
 // validated snapshot over RPC and applies the rest (fonts, runnable fences).
@@ -25,7 +25,7 @@ export interface Settings {
   // Code-fence languages that get a Run button (editor/blocks.ts). Matched
   // case-insensitively against the fence's info string. A user's list
   // REPLACES this one (that is how a language is un-mapped) — and since
-  // bun/settings.ts seeds settings.json with the defaults written out in
+  // bun/settings.ts seeds settings.jsonc with the defaults written out in
   // full, an existing install's file has this list frozen at seed time:
   // adding a language to the default below does NOT reach seeded files, so
   // announce such additions (the user adds the word to their own list).
@@ -127,7 +127,105 @@ export const DEFAULT_SETTINGS: Settings = Object.freeze({
   daily: { workspace: "" },
 });
 
-// Validate a parsed settings.json into a full Settings, field by field: a bad
+// What first launch writes to settings.jsonc: every default spelled out, with
+// the comments AS the documentation — the file is the settings UI
+// (architecture.md §6), so it has to explain itself in user terms. The
+// comments here are the user-facing distillation of the field docs on
+// `Settings` above; keep the two telling the same story. A drift test in
+// settings.test.ts pins the template to DEFAULT_SETTINGS, so a default cannot
+// change without this file changing with it — but remember the seed only
+// reaches NEW installs (an existing file is never rewritten): announce default
+// changes, don't just edit them here.
+export const SETTINGS_TEMPLATE = `// Ledge settings. The file is the settings UI: edit it here (⌘,), relaunch
+// to apply; no setting applies live. This is JSONC: comments (and trailing
+// commas) are fine. A bad value falls back to its default with a warning in
+// the launch log; it never takes the rest of the file down.
+{
+  // The login shell every terminal drawer and inline run spawns.
+  "shell": {
+    "path": "/bin/zsh",
+    "args": ["-i"]
+  },
+
+  "editor": {
+    "fontSize": 14,
+    // Conceal markdown syntax away from the caret (bold shows bold, not
+    // **bold**). Set false to always see exactly the text on disk: the
+    // escape hatch for precise syntax editing.
+    "livePreview": true
+  },
+
+  "terminal": {
+    "fontSize": 12
+  },
+
+  // How many days a deleted note stays recoverable in the trash before the
+  // launch-time purge removes it for good.
+  "trash": {
+    "ttlDays": 30
+  },
+
+  "blocks": {
+    // Code-fence languages that get a Run button, matched case-insensitively
+    // against the fence's info string. This list REPLACES the default set:
+    // removing a word here is how a language is un-mapped, and a new language
+    // needs an entry here AND (unless it should run in the note's shell) in
+    // "interpreters" below.
+    "runnable": [
+      "sh", "bash", "zsh", "shell", "console",
+      "python", "python3", "py",
+      "ruby", "rb",
+      "node", "js", "javascript",
+      "ts", "typescript",
+      "php",
+      "prompt"
+    ],
+
+    // Fence language -> the command that runs its code. Languages NOT named
+    // here are sourced into the note's own shell instead, which is what lets
+    // \`\`\`sh blocks carry cwd and env from block to block. Entries MERGE over
+    // these defaults (a venv python does not cost you node); values are shell
+    // text, so flags are fine ("python3 -u") and paths with spaces need
+    // quotes. "bun" is special-cased to the runtime bundled with the app.
+    //
+    // "prompt" makes \`\`\`prompt fences agent runs: the block body is piped to
+    // Claude Code's print mode on stdin, in the note's own shell, so the
+    // agent inherits the note's cwd and env, and "this note" resolves through
+    // the Ledge MCP tools (pre-authorized by --allowedTools). Point it at any
+    // other stdin-reading CLI to switch agents.
+    "interpreters": {
+      "python": "python3", "python3": "python3", "py": "python3",
+      "ruby": "ruby", "rb": "ruby",
+      "node": "node", "js": "node", "javascript": "node",
+      "ts": "bun", "typescript": "bun",
+      "php": "php",
+      "prompt": "LEDGE_PROMPT_BLOCK=1 claude --allowedTools mcp__ledge -p <"
+    },
+
+    // Per-machine overrides of "interpreters", for runs a note's \`host:\`
+    // frontmatter sends elsewhere ("which python" can differ on prod). Keys
+    // are host patterns matched against the ssh destination: "deploy@prod-01",
+    // "*" wildcards a fleet ("deploy@web-*"), and "local" is this machine.
+    // Every matching section merges over the base in file order, later wins.
+    //
+    //   "hostInterpreters": {
+    //     "deploy@web-*": { "python": "/opt/py311/bin/python" }
+    //   }
+    "hostInterpreters": {}
+  },
+
+  "daily": {
+    // Where daily notes (⌘J) live: a registered workspace's folder name or
+    // absolute path. Empty means "wherever you are" (the selected workspace
+    // in the app, the nearest one at the CLI), which scatters daily notes if
+    // you work in more than one. (WHICH note seeds the day is not a setting:
+    // mark a note \`template: daily\` in its frontmatter.)
+    "workspace": ""
+  }
+}
+`;
+
+// Validate a parsed settings.jsonc into a full Settings, field by field: a bad
 // value costs THAT field (it falls back to its default and is reported in
 // `problems`), never the rest of the file and never a crash. A hand-edited
 // JSON file is the UI here, so a typo has to degrade as gently as a blank
@@ -136,7 +234,7 @@ export function parseSettings(raw: unknown): { settings: Settings; problems: str
   const problems: string[] = [];
   const d = DEFAULT_SETTINGS;
   const root = isRecord(raw) ? raw : {};
-  if (!isRecord(raw)) problems.push("settings.json is not a JSON object");
+  if (!isRecord(raw)) problems.push("settings.jsonc is not a JSON object");
 
   // A misspelled section would otherwise be silently ignored, which reads as
   // "my setting does nothing" — say so instead. "templates" gets its own

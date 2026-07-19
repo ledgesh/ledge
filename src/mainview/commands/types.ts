@@ -74,6 +74,10 @@ export interface UiHooks {
   // profile files; macOS binds no app to ".env", so there is no OS-editor
   // path to reach them by).
   openProfileEditor(name: string): void;
+  // Open the settings editor dialog — settings.jsonc in an in-app CodeMirror
+  // (components/SettingsEditor.tsx). The file is still the UI; Ledge is just
+  // the editor it opens in now.
+  openSettingsEditor(): void;
   // Show an error under the note list (the browser's error strip): where a
   // failed workspace create/attach reports, same surface as a failed delete.
   showError(message: string): void;
@@ -95,8 +99,6 @@ export interface CommandCtx {
 // stays free of editor/RPC imports (and its tests can stub them).
 export interface RegistryDeps {
   copyText(text: string): void;
-  // Open settings.json in the OS editor (an RPC edge, like copyText).
-  openSettings(): void;
   // Write the `ledge` CLI shim onto the PATH. Resolves to the outcome to
   // surface — Bun composes the message; ok picks the strip's tone.
   installCli(): Promise<{ ok: boolean; message: string }>;

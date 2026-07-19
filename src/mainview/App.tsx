@@ -24,6 +24,7 @@ import { listTags, onExternalOpen, onNotesChanged, takeOpenRequest, type Externa
 import type { TagInfo } from "../shared/tags";
 import { CommandProvider, useCommands } from "@/commands/CommandProvider";
 import { ProfileEditor } from "@/components/ProfileEditor";
+import { SettingsEditor } from "@/components/SettingsEditor";
 import { configureUi } from "@/commands/glue";
 import { tooltip } from "@/commands/format";
 import { Overlay, type OverlayMode } from "@/commands/Overlay";
@@ -90,6 +91,8 @@ function Shell() {
   // The profile the editor dialog is open on, or null. Shell owns it like the
   // rest of the chrome: the command reaches it through the ui hook below.
   const [profileEditing, setProfileEditing] = useState<string | null>(null);
+  // The ⌘, settings editor dialog (settings.jsonc in an in-app CodeMirror).
+  const [settingsEditing, setSettingsEditing] = useState(false);
   // The vertical stack (below the header) that holds the editor row and the
   // terminal drawer; its height bounds how tall the terminal can grow.
   const stackRef = useRef<HTMLDivElement>(null);
@@ -232,6 +235,7 @@ function Shell() {
         setOverlay({ mode, query: initialQuery ?? "", seq: overlaySeq.current });
       },
       openProfileEditor: setProfileEditing,
+      openSettingsEditor: () => setSettingsEditing(true),
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -590,6 +594,7 @@ function Shell() {
       {profileEditing && (
         <ProfileEditor name={profileEditing} onClose={() => setProfileEditing(null)} />
       )}
+      {settingsEditing && <SettingsEditor onClose={() => setSettingsEditing(false)} />}
       {hostPick && <HostPicker req={hostPick} onClose={() => setHostPick(null)} />}
     </div>
   );

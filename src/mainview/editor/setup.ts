@@ -36,7 +36,10 @@ import { keyOf } from "../commands/keys";
 // ``` fence marks); the content they mark gets the weight. Ported from the
 // Swift build's MarkdownTheme. Colors come from CSS vars so the editor tracks
 // the OS appearance without a second theme.
-const highlight = HighlightStyle.define([
+// Exported for the one other CodeMirror in the app — the settings editor
+// dialog (components/SettingsEditor.tsx) — so its JSONC reads in the same
+// palette as code in notes.
+export const highlight = HighlightStyle.define([
   { tag: tags.heading1, fontSize: "1.5em", fontWeight: "700" },
   { tag: tags.heading2, fontSize: "1.3em", fontWeight: "700" },
   { tag: tags.heading3, fontSize: "1.15em", fontWeight: "700" },
