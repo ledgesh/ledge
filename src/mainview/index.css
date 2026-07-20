@@ -78,7 +78,6 @@
   --btn-hover: rgba(0, 0, 0, 0.08);
   --ok: #34c759;
   --err: #ff3b30;
-  --busy: #0a84ff;
   /* Code-block syntax palette (light). Consumed by the CodeMirror highlight in
      editor/setup.ts; the code inside fenced blocks is parsed by its language
      (codeLanguages) and these colour its tokens. */
@@ -111,7 +110,6 @@
     --btn-hover: rgba(255, 255, 255, 0.12);
     --ok: #30d158;
     --err: #ff453a;
-    --busy: #0a84ff;
     /* Code-block syntax palette (dark), One-Dark-ish. */
     --code-keyword: #c678dd;
     --code-string: #98c379;
@@ -541,11 +539,24 @@ body {
   border-radius: 50%;
   background: var(--ed-muted);
 }
+/* Running pulses green so motion (not hue) carries "still going"; done settles
+   to the plain foreground dot, which reads black on light and white on dark. */
 .ledge-dot-running {
-  background: var(--busy);
+  background: var(--ok);
+  animation: ledge-dot-pulse 1.2s ease-in-out infinite;
+}
+@keyframes ledge-dot-pulse {
+  50% {
+    opacity: 0.2;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ledge-dot-running {
+    animation: none;
+  }
 }
 .ledge-dot-done {
-  background: var(--ok);
+  background: var(--fg);
 }
 .ledge-dot-error {
   background: var(--err);
@@ -635,4 +646,3 @@ body {
 .ledge-output:not(.ledge-term-clamped) .ledge-term-host .xterm-viewport {
   overflow-y: hidden;
 }
-
