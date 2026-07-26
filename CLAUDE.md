@@ -1,8 +1,9 @@
 # Ledge
 
-A macOS notes app on Electrobun: Bun main process (`src/bun/`, owns the
-filesystem and PTYs) + WKWebView React app (`src/mainview/`), talking over the
-typed RPC in `src/shared/rpc-schema.ts`.
+The macOS notebook for developers and DevOps: it runs code and commands
+straight from your Markdown. Built on Electrobun: Bun main process (`src/bun/`,
+owns the filesystem and PTYs) + WKWebView React app (`src/mainview/`), talking
+over the typed RPC in `src/shared/rpc-schema.ts`.
 
 ## Standards — read the one that governs your change
 

@@ -1,6 +1,6 @@
 # Running Code
 
-Any fenced code block whose language is runnable gets a Run button. This page covers what runs where, and how to bend both.
+This is what Ledge is for. Any fenced code block whose language is runnable gets a Run button, and the shell behind it belongs to the note it sits in. This page covers what runs where, and how to bend both.
 
 ## Two ways to run
 

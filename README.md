@@ -1,8 +1,8 @@
 # Ledge
 
-Runnable Markdown notes for macOS. Write notes with fenced code blocks, then run
-a block in place and see its output stream in beneath it. The shell is a real
-persistent session, so state carries from one block to the next.
+The notebook for developers and DevOps, on macOS. Ledge runs code and commands
+straight from your Markdown: write a note, then run a fenced block in place and
+watch its output stream in beneath it.
 
 Built with [Electrobun](https://electrobun.dev): a Bun main process drives the
 shell over a bun:ffi PTY, and the editor is CodeMirror in a system WebView, wired

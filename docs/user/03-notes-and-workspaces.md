@@ -1,6 +1,6 @@
 # Notes and Workspaces
 
-Everything in Ledge is an ordinary file in an ordinary folder. This page covers where those files live and how to arrange them.
+This page covers where your notes live and how to arrange them: the file a note is, the folder a workspace is, and the tabs and panes you read them in.
 
 ## A note is a Markdown file
 
@@ -12,8 +12,8 @@ Because notes are plain files, anything can work on them: git, grep, scripts, ot
 
 The strip at the top of the sidebar lists your workspaces. Each one is a single folder of notes, and ⌘1 through ⌘9 jump between them. There are two kinds:
 
-- ⇧⌘N creates a managed workspace: Ledge makes a folder for it inside `~/.ledge`.
-- "Attach Folder as Workspace…" (in the command palette, or the + button's menu) turns a folder you already have into a workspace. Its `.md` files become notes, right where they are.
+- "Attach Folder as Workspace…" (in the command palette, or the + button's menu) turns a folder you already have into a workspace, typically a project you work on. Its `.md` files become notes right where they are, and every one of those notes runs its blocks in the project folder without any frontmatter ([[Running Code]]).
+- ⇧⌘N creates a managed workspace: Ledge makes a folder for it inside `~/.ledge`. Its notes default to your home folder, and `cwd:` frontmatter points them somewhere else ([[Frontmatter and Environments]]).
 
 Peek behind the curtain (managed workspace folders live here):
 

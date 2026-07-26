@@ -19,8 +19,8 @@
 // the repo docs next door, shows up as broken lines mid-sentence) — and no
 // em dashes in the prose.
 import gettingStarted from "../../docs/user/01-getting-started.md" with { type: "text" };
-import notesAndWorkspaces from "../../docs/user/02-notes-and-workspaces.md" with { type: "text" };
-import runningCode from "../../docs/user/03-running-code.md" with { type: "text" };
+import runningCode from "../../docs/user/02-running-code.md" with { type: "text" };
+import notesAndWorkspaces from "../../docs/user/03-notes-and-workspaces.md" with { type: "text" };
 import findingThings from "../../docs/user/04-finding-things.md" with { type: "text" };
 import frontmatterEnvs from "../../docs/user/05-frontmatter-and-environments.md" with { type: "text" };
 import profilesSecrets from "../../docs/user/06-profiles-and-secrets.md" with { type: "text" };
@@ -43,8 +43,8 @@ export interface DocPage {
 
 export const DOC_PAGES: DocPage[] = [
   { name: "01-getting-started.md", text: gettingStarted },
-  { name: "02-notes-and-workspaces.md", text: notesAndWorkspaces },
-  { name: "03-running-code.md", text: runningCode },
+  { name: "02-running-code.md", text: runningCode },
+  { name: "03-notes-and-workspaces.md", text: notesAndWorkspaces },
   { name: "04-finding-things.md", text: findingThings },
   { name: "05-frontmatter-and-environments.md", text: frontmatterEnvs },
   { name: "06-profiles-and-secrets.md", text: profilesSecrets },
