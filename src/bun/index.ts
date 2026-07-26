@@ -8,7 +8,14 @@
 // slice block output per block via OSC 133 markers; the terminal-drawer shell is
 // raw, driving xterm.js. Keeping them per note means a `cd` in one note never
 // leaks into another. All of them talk to the view over typed RPC.
-import { BrowserView, BrowserWindow, Updater, Utils } from "electrobun/bun";
+import {
+  ApplicationMenu,
+  BrowserView,
+  BrowserWindow,
+  Updater,
+  Utils,
+  type ApplicationMenuItemConfig,
+} from "electrobun/bun";
 import { watch } from "node:fs";
 import { homedir } from "node:os";
 import { basename, resolve } from "node:path";
@@ -680,6 +687,14 @@ const rpc = BrowserView.defineRPC<LedgeRPC>({
           return { text: "" };
         }
       },
+      // The native menu bar, shaped entirely by the view (commands/menu.ts).
+      // Bun hands it to AppKit and nothing more: the `action` strings are
+      // command ids it never interprets, which is what keeps the registry the
+      // one place a command is defined.
+      menuSet: async ({ items }) => {
+        ApplicationMenu.setApplicationMenu(items as ApplicationMenuItemConfig[]);
+        return { ok: true };
+      },
       // Both guarded inside bun/assets.ts: the root must be registered, the
       // src passes assertions (in-root, image extension, no dot-entries)
       // before it is read, and assetPaste names the file itself — the view
@@ -786,6 +801,44 @@ refreshWatchers();
 // the view cannot tell why the vault locked, only that it did, which is the
 // point: one eviction path.
 configureVault({ onAutoLock: () => rpc.send.vaultChanged({ state: vaultState() }) });
+
+// The menu bar's two edges. The view owns the real menu (commands/menu.ts,
+// pushed through menuSet above) — this side is the fallback that exists
+// before its first push, and the click route back.
+//
+// The fallback is not cosmetic: without an application menu there is no ⌘Q,
+// so a view that fails to load would leave a window with no way out. Quit and
+// the edit roles are the whole of it; the view's push replaces it wholesale.
+ApplicationMenu.setApplicationMenu([
+  {
+    label: "Ledge",
+    submenu: [
+      { role: "hide", label: "Hide Ledge", accelerator: "command+h" },
+      { type: "divider" },
+      { role: "quit", label: "Quit Ledge", accelerator: "command+q" },
+    ],
+  },
+  {
+    label: "Edit",
+    submenu: [
+      { role: "undo", label: "Undo", accelerator: "command+z" },
+      { role: "redo", label: "Redo", accelerator: "command+shift+z" },
+      { type: "divider" },
+      { role: "cut", label: "Cut" },
+      { role: "copy", label: "Copy" },
+      { role: "paste", label: "Paste" },
+      { role: "selectAll", label: "Select All" },
+    ],
+  },
+]);
+
+// A clicked item carries the command id the view put in its `action`; Bun
+// forwards it without knowing what it means. Role items never arrive here —
+// AppKit runs those down the responder chain and the WebView answers.
+ApplicationMenu.on("application-menu-clicked", (event) => {
+  const action = (event as { data?: { action?: unknown } }).data?.action;
+  if (typeof action === "string" && action.length > 0) rpc.send.menuCommand({ action });
+});
 
 // Watch the app home for the CLI's open request (`ledge <title>` with the
 // app already running; bun/openRequest.ts). Non-recursive and its own

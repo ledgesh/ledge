@@ -126,6 +126,30 @@ export interface WorkspaceRootInfo {
   available: boolean;
 }
 
+/**
+ * One item of the native menu bar. The view owns the shape — it derives the
+ * whole menu from the command registry (commands/menu.ts) — and Bun owns the
+ * native call, exactly as it owns the bytes of a layout the view shapes.
+ *
+ * `action` is a command id, opaque to Bun: it comes back verbatim in the
+ * `menuCommand` message and the view execs it through the same dispatcher the
+ * palette uses. `role` is a native AppKit selector (undo, copy, quit) handled
+ * by the responder chain instead, which never reaches the view at all.
+ */
+export type AppMenuItem =
+  | { type: "divider" }
+  | {
+      label: string;
+      action?: string;
+      role?: string;
+      // Electron-style ("command+shift+p"). Claiming one takes the chord from
+      // the WebView: AppKit's key-equivalent pass runs first (interactions.md
+      // §10), which is why most items carry none.
+      accelerator?: string;
+      enabled?: boolean;
+      submenu?: AppMenuItem[];
+    };
+
 export type LedgeRPC = {
   bun: {
     requests: {
@@ -429,6 +453,12 @@ export type LedgeRPC = {
       // of that and behaves like a normal terminal's copy/paste.
       clipboardWrite: { params: { text: string }; response: { ok: boolean } };
       clipboardRead: { params: {}; response: { text: string } };
+      // Install the native menu bar. The view builds it from the command
+      // registry and re-pushes whenever the state a `when` reads changes, so
+      // enablement stays honest without Bun learning what a command means.
+      // Bun sets a minimal fallback menu at boot (Quit and the edit roles),
+      // which this replaces wholesale on the view's first push.
+      menuSet: { params: { items: AppMenuItem[] }; response: { ok: boolean } };
       // The validated settings snapshot (shared/settings.ts), fetched once at
       // boot. Bun owns the file, the parsing, and the fallbacks; the view only
       // ever sees a complete, valid Settings. Applies at launch — there is no
@@ -588,6 +618,10 @@ export type LedgeRPC = {
       // tabs to placeholders, drops their decrypted bodies, and evicts the
       // asset data-URL cache; on "unlocked" it re-reads open locked notes.
       vaultChanged: { state: VaultState };
+      // A menu item carrying an `action` was clicked (role items never arrive
+      // here — AppKit handles those). The payload is the command id the view
+      // put there; it execs it with no target, the palette's invocation.
+      menuCommand: { action: string };
     };
   };
 };

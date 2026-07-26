@@ -340,6 +340,9 @@ secret written to a synced file — because focus never moved.
   chord — it works from anywhere, while the verb needs the row focused.
 - The ⌘N / ⌃N held-modifier badges on workspaces and tabs stay, and their
   semantics are pinned to `keys.ts` by test.
+- The **menu bar** (§10) is the surface a first-time user scans before they
+  know the palette exists. Its structure is a derived view of the registry,
+  not a second list of features.
 
 ## 9. The CLI (`ledge`)
 
@@ -384,3 +387,64 @@ app rather than growing its own dialect.
   shim (bun/cliShim.ts); its outcome always surfaces — success in the
   browser's notice strip, failure in the error strip (§4's surface, neutral
   tone). `ledge install [dir]` is the same act from a terminal.
+
+## 10. The menu bar
+
+macOS gives every app a menu bar whether it fills one or not, and an app that
+leaves it empty has no ⌘Q, no Services, and nothing for a first-time user to
+read. Ledge fills it from the registry: `commands/menu.ts` holds the spec
+(which command sits where), `buildMenu` turns it into the wire shape, and Bun
+hands that to AppKit through `menuSet`. Bun never learns what a command id
+means — a clicked item comes back as its `action` string and the view execs it
+through the same dispatcher the palette uses.
+
+- **Nothing appears in the bar that is not a command**, and nothing appears
+  twice under two names. The one exception is `role` items: native AppKit
+  selectors (undo, cut, quit, minimize) that the responder chain answers
+  without the view ever seeing them. They are how a WKWebView gets real
+  editing behavior, and they are the only items with a label the registry did
+  not write.
+- **Row verbs stay out.** The bar has no focused row to point at, so a verb
+  whose `when` only passes with a target could appear only greyed. Its
+  canonical home is the context menu (R2/R6). `menu.test.ts` enforces this by
+  the flip: a command whose `when` turns true only when handed a target is
+  refused.
+- **An accelerator is a claim, not a label.** AppKit's key-equivalent pass
+  runs *before* the key reaches the WebView, so declaring a chord here takes
+  it from CodeMirror and xterm permanently. That is fine — often an
+  improvement — where the registry's version of the command does the same
+  thing to the focused editor as the editor's own binding would (⌘S, ⌘F,
+  ⌘↩, ⌘B). It is a bug where an inner handler owns the chord for a
+  *different* meaning:
+  - ⌘⌫ is delete-to-line-start in the editor, which is the whole reason
+    `note.deleteCurrent` is page-focus-only. The menu item carries no key.
+  - ⌘A/⌘C/⌘X/⌘V belong to the editor and the terminal, which route the
+    clipboard through the Bun process (the views:// scheme is not a secure
+    context) and additionally embed a pasteboard image on ⌘V. The Edit menu
+    shows Cut/Copy/Paste as roles so they are discoverable and clickable, and
+    claims no key equivalents.
+  - ⌃ chords belong to the shell (§2). A key equivalent fires regardless of
+    focus, which is exactly the window-level Ctrl dispatch the policy forbids,
+    so ⌃` is left to the editor keymap and the xterm handler that already
+    route it.
+
+  ⌘Z is the deliberate counter-example: WebKit turns the native undo selector
+  into a `beforeinput` of type `historyUndo`, which `@codemirror/commands`
+  maps onto its own history, so the menu and the editor mean the same thing by
+  it. The hazard list lives in `menu.ts` as `INNER_OWNED_CHORDS`, and adding
+  to it is how the next author records "something already owns this."
+- **Enablement is a snapshot.** The bar is installed from Bun, so it cannot
+  ask a `when` anything at the moment the user pulls it down; the view
+  re-pushes whenever the document model, the selected workspace, or the vault
+  moves. A `when` that reads the live note text (the template marker's two
+  faces) therefore lags until autosave refreshes the note list — accepted, in
+  exchange for not rebuilding the menu on every keystroke.
+- **Refused stays visible, paired hides.** A disabled command greys, because a
+  bar that drops what it cannot do right now teaches nobody it exists. The
+  exceptions are the two-faces pairs (Lock/Remove Lock, the template marker,
+  the daily template) and the generated workspace slots, which set
+  `hideWhenDisabled`: exactly one face is ever live, and a row of dimmed twins
+  says less than one live item.
+- Bun sets a **minimal fallback menu at boot** (Quit, the edit roles) so a
+  view that fails to load still leaves a way out. The first push replaces it
+  wholesale.

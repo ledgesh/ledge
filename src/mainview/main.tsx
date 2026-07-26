@@ -8,6 +8,7 @@ import { configureNotes, dispatchExternalOpen, dispatchNotesChanged } from "./no
 import { configureVault, recordVaultState, refreshVaultState } from "./vault/channel";
 import { configureWorkspaces, recordDailyRoot, recordWorkspaceKinds } from "./workspace/channel";
 import { configureClipboard } from "./lib/clipboard";
+import { configureMenu, dispatchMenuCommand } from "./lib/menu";
 import { configureCli } from "./lib/cli";
 import { configureAssets } from "./lib/assets";
 import { configureSettings } from "./lib/settings";
@@ -35,6 +36,7 @@ const rpc = Electroview.defineRPC<LedgeRPC>({
       // mirrored state updates and every subscriber (placeholder faces,
       // glyphs, palette faces) re-renders from the one record.
       vaultChanged: ({ state }) => recordVaultState(state),
+      menuCommand: ({ action }) => dispatchMenuCommand(action),
     },
   },
 });
@@ -87,6 +89,14 @@ configureClipboard({
     void electrobun.rpc!.request.clipboardWrite({ text });
   },
   read: () => electrobun.rpc!.request.clipboardRead({}).then((r) => r.text),
+});
+
+// The native menu bar. Fire-and-forget: a push that loses a race with another
+// push is simply the older menu, and the next state change re-pushes.
+configureMenu({
+  set: (items) => {
+    void electrobun.rpc!.request.menuSet({ items });
+  },
 });
 
 // Note images: bytes for `![](.ledge-assets/…)` references, and the pasteboard-image

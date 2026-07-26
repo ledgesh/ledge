@@ -8,10 +8,13 @@
 // layer is open (menu/dialog/palette) it dispatches nothing.
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { useWorkspace } from "@/workspace/store";
+import { useVaultState } from "@/vault/channel";
 import { buildCommands } from "./registry";
 import { eventToChord, resolveChord, type FocusDomain } from "./keymap";
 import { modalOpen } from "./layers";
 import { targetFromElement } from "./target";
+import { buildMenu } from "./menu";
+import { onMenuCommand, setAppMenu } from "@/lib/menu";
 import { registryDeps, uiHooks } from "./glue";
 import type { Command, CommandCtx, CommandTarget } from "./types";
 
@@ -47,6 +50,10 @@ function domainOf(target: EventTarget | null): FocusDomain {
 
 export function CommandProvider({ children }: { children: ReactNode }) {
   const { state, dispatch, selected } = useWorkspace();
+  // Only the menu bar reads this: the vault's `when`s go through registryDeps
+  // like every other, but a transition changes no store field, so the push
+  // effect below needs its own reason to run.
+  const vault = useVaultState();
   const commands = useMemo(() => buildCommands(registryDeps), []);
 
   // The latest ctx rides in a ref so the window listener registers once and is
@@ -101,6 +108,26 @@ export function CommandProvider({ children }: { children: ReactNode }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [commands]);
+
+  // A clicked menu item runs its command with no target — the palette's
+  // invocation, which is the only honest one from the menu bar: the bar has no
+  // row to point at, and the commands that need one are kept out of it
+  // (interactions.md §10).
+  useEffect(() => onMenuCommand((action) => exec(action)), [exec]);
+
+  // The menu bar is installed from Bun, so it cannot ask a `when` anything at
+  // the moment the user pulls it down: it carries whatever enablement was true
+  // at the last push. Re-push whenever the state those predicates read moves —
+  // the document model, the selected workspace, the vault. The one thing not
+  // covered is a `when` that reads the LIVE note text (the template marker's
+  // two faces, profile.open): editing frontmatter changes no store field, so
+  // those items lag until autosave's notesChanged refreshes the note list a
+  // moment later. Watching the doc instead would rebuild the menu on every
+  // keystroke, which is a worse trade for an item nobody is looking at while
+  // they type.
+  useEffect(() => {
+    setAppMenu(buildMenu(commands, ctxRef.current));
+  }, [commands, state, selected, vault]);
 
   const api = useMemo<CommandsApi>(() => ({ exec, commands, ctx }), [exec, commands, ctx]);
   return <CommandsContext.Provider value={api}>{children}</CommandsContext.Provider>;
