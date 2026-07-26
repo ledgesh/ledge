@@ -27,7 +27,8 @@ import { configureClipboard } from "./lib/clipboard";
 import { configureCli } from "./lib/cli";
 import { configureAssets } from "./lib/assets";
 import { configureSettings } from "./lib/settings";
-import { DEFAULT_SETTINGS, SETTINGS_TEMPLATE } from "../shared/settings";
+import { DEFAULT_SETTINGS, SETTINGS_TEMPLATE, THEMES, type Theme } from "../shared/settings";
+import { applyAppearance } from "./lib/theme";
 import { configureLayout, restoredState } from "./workspace/persist";
 import "./index.css";
 import App from "./App";
@@ -721,9 +722,18 @@ configureAssets({
 // No template configuration: templates are notes carrying `template: true`
 // frontmatter, seeded per spec (a boot-time seed would shift every
 // list-count assertion in the older specs).
+//
+// `?theme=light|dark` overrides the appearance setting for one load. Settings
+// apply at launch and there is no UI for this one (the file IS the UI), so a
+// query param is the only way a spec can boot the harness with an override in
+// place — the same seam a relaunch is for the real app.
+const themeParam = new URLSearchParams(window.location.search).get("theme");
 const HARNESS_SETTINGS = {
   ...DEFAULT_SETTINGS,
   editor: { ...DEFAULT_SETTINGS.editor, fontSize: 18 },
+  appearance: {
+    theme: THEMES.includes(themeParam as Theme) ? (themeParam as Theme) : DEFAULT_SETTINGS.appearance.theme,
+  },
 };
 // The settings file as an in-memory string, seeded like a real first launch
 // (the commented template), so the ⌘, dialog is drivable end to end and a
@@ -752,6 +762,8 @@ configureSettings(
     },
   },
 );
+// Stamps the resolved appearance on <html>, like main.tsx does after boot.
+applyAppearance();
 
 // The shim write is a native seam; the harness answers with a canned success
 // so the palette command and its notice strip are drivable end to end.

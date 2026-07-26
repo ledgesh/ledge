@@ -11,6 +11,7 @@ import { configureClipboard } from "./lib/clipboard";
 import { configureCli } from "./lib/cli";
 import { configureAssets } from "./lib/assets";
 import { configureSettings } from "./lib/settings";
+import { applyAppearance } from "./lib/theme";
 import { DEFAULT_SETTINGS, type Settings } from "../shared/settings";
 import { configureLayout, restoredState } from "./workspace/persist";
 import "./index.css";
@@ -208,6 +209,10 @@ async function boot(): Promise<void> {
       await electrobun.rpc!.request.profileWrite({ name, text });
     },
   });
+  // Straight after the snapshot lands and before the first render: the palette
+  // is a settings override away from what index.html stamped, and every editor
+  // and terminal built below reads the resolved answer (lib/theme.ts).
+  applyAppearance();
   configureCli({
     install: () => electrobun.rpc!.request.cliInstall({}),
   });

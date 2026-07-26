@@ -1,8 +1,10 @@
 /** @type {import('tailwindcss').Config} */
 export default {
-  // Follow the OS appearance rather than a toggled class, matching the editor's
-  // own prefers-color-scheme variables (see index.css).
-  darkMode: "media",
+  // `dark:` keys off the same `data-theme` attribute the whole palette does
+  // (index.css, stamped by lib/theme.ts): the OS appearance is the default,
+  // but `appearance.theme` in settings can pin the other side, so asking
+  // prefers-color-scheme directly would disagree with everything else.
+  darkMode: ["selector", '[data-theme="dark"]'],
   content: ["./src/mainview/**/*.{html,js,ts,jsx,tsx}"],
   theme: {
     extend: {

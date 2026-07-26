@@ -15,6 +15,7 @@ import "@xterm/xterm/css/xterm.css";
 import type { RunInfo } from "./blocks";
 import { copyText, readClipboard } from "../lib/clipboard";
 import { settings } from "../lib/settings";
+import { isDarkAppearance, onAppearanceChange } from "../lib/theme";
 
 // The tallest an inline run gets. 24 rows (~the classic terminal height) keeps the
 // panel about as tall as the old <pre> cap; past that the run scrolls.
@@ -64,8 +65,7 @@ export class InlineTerm {
   private readonly term: Terminal;
   private readonly fit: FitAddon;
   private readonly ro: ResizeObserver;
-  private readonly media: MediaQueryList;
-  private readonly onScheme: () => void;
+  private readonly offAppearance: () => void;
   private shown = false;
   private disposed = false;
   /** A full-screen program took the grid; hold it at RUN_ROWS and stop tracking. */
@@ -129,7 +129,6 @@ export class InlineTerm {
     this.body.appendChild(this.host);
     this.wrap.appendChild(this.body);
 
-    this.media = window.matchMedia("(prefers-color-scheme: dark)");
     this.term = new Terminal({
       fontFamily: FONT,
       fontSize: settings().terminal.fontSize,
@@ -137,7 +136,7 @@ export class InlineTerm {
       // liveRows() never shrinks a running grid, so the starting size is the
       // smallest the panel can ever be.
       rows: 1,
-      theme: xtermTheme(this.media.matches),
+      theme: xtermTheme(isDarkAppearance()),
       cursorBlink: false,
       allowProposedApi: true,
       // Extra scrollback so long output stays reachable once the grid shrinks.
@@ -205,8 +204,9 @@ export class InlineTerm {
       this.opts.onHeightChange?.();
     });
 
-    this.onScheme = () => (this.term.options.theme = xtermTheme(this.media.matches));
-    this.media.addEventListener("change", this.onScheme);
+    // A "system" appearance still moves under a frozen panel (lib/theme.ts);
+    // a pinned theme simply never fires this.
+    this.offAppearance = onAppearanceChange((a) => (this.term.options.theme = xtermTheme(a === "dark")));
 
     // The panel width follows the editor content width; re-fit cols when it
     // changes (pane resize, terminal drawer opening, window resize).
@@ -358,7 +358,7 @@ export class InlineTerm {
     this.disposed = true;
     if (held) this.opts.onFocusEditor?.();
     this.ro.disconnect();
-    this.media.removeEventListener("change", this.onScheme);
+    this.offAppearance();
     this.term.dispose();
   }
 

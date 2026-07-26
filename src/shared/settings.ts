@@ -7,6 +7,10 @@
 // the short version: a setting exists only where the hardcoded default
 // demonstrably fails someone, and it applies at launch, never live.
 
+// The appearance knob's values: follow the OS, or pin one side.
+export const THEMES = ["system", "light", "dark"] as const;
+export type Theme = (typeof THEMES)[number];
+
 export interface Settings {
   // The login shell every PTY runs (per-note inline-run shells and terminal
   // drawers alike). Applied Bun-side at spawn.
@@ -19,6 +23,15 @@ export interface Settings {
   // concealed either way — only the fence marks are.
   editor: { fontSize: number; livePreview: boolean };
   terminal: { fontSize: number };
+  // Light or dark. "system" (the default) follows the Mac's appearance, which
+  // is what the app has always done and what almost everyone wants; the two
+  // forced values exist because the OS setting demonstrably fails people whose
+  // appearance is not a preference — a Mac on the automatic day/night schedule
+  // flipping a notebook mid-session, a projector or a bright room where one
+  // side is simply unreadable, a screenshot that has to match the docs. Read
+  // at launch like every setting, but "system" keeps tracking the OS live
+  // afterwards: that is the OS changing, not the setting.
+  appearance: { theme: Theme };
   // How long a deleted note stays recoverable before the launch-time purge
   // evicts it (bun/notes.ts purgeTrash).
   trash: { ttlDays: number };
@@ -103,6 +116,7 @@ export const DEFAULT_SETTINGS: Settings = Object.freeze({
   shell: { path: "/bin/zsh", args: ["-i"] },
   editor: { fontSize: 14, livePreview: true },
   terminal: { fontSize: 12 },
+  appearance: { theme: "system" as Theme },
   trash: { ttlDays: 30 },
   blocks: {
     runnable: [
@@ -157,6 +171,14 @@ export const SETTINGS_TEMPLATE = `// Ledge settings. The file is the settings UI
 
   "terminal": {
     "fontSize": 12
+  },
+
+  "appearance": {
+    // "system" follows your Mac's light/dark appearance, and keeps following
+    // it while Ledge runs. Set "light" or "dark" to pin one side regardless:
+    // for a Mac on the automatic day/night schedule, a room where one side is
+    // unreadable, or screenshots that have to match.
+    "theme": "system"
   },
 
   // How many days a deleted note stays recoverable in the trash before the
@@ -249,6 +271,7 @@ export function parseSettings(raw: unknown): { settings: Settings; problems: str
   const shell = section(root, "shell", problems);
   const editor = section(root, "editor", problems);
   const terminal = section(root, "terminal", problems);
+  const appearance = section(root, "appearance", problems);
   const trash = section(root, "trash", problems);
   const blocks = section(root, "blocks", problems);
   const daily = section(root, "daily", problems);
@@ -271,6 +294,9 @@ export function parseSettings(raw: unknown): { settings: Settings; problems: str
         livePreview: bool(editor, "livePreview", "editor.livePreview", d.editor.livePreview, problems),
       },
       terminal: { fontSize: num(terminal, "fontSize", "terminal.fontSize", d.terminal.fontSize, 6, 72, problems) },
+      appearance: {
+        theme: oneOf(appearance, "theme", "appearance.theme", THEMES, d.appearance.theme, problems),
+      },
       trash: { ttlDays: num(trash, "ttlDays", "trash.ttlDays", d.trash.ttlDays, 1, 36500, problems) },
       blocks: {
         runnable: strings(blocks, "runnable", "blocks.runnable", d.blocks.runnable, problems).map((l) =>
@@ -352,6 +378,24 @@ function optStr(
   if (typeof v === "string") return v;
   problems.push(`"${label}" must be a string`);
   return "";
+}
+
+// A closed set of spellings: anything else is a typo (or a value from a newer
+// Ledge), and the message names every accepted word so the file can be fixed
+// without opening the manual.
+function oneOf<T extends string>(
+  o: Record<string, unknown>,
+  key: string,
+  label: string,
+  allowed: readonly T[],
+  fallback: T,
+  problems: string[],
+): T {
+  const v = o[key];
+  if (v === undefined) return fallback;
+  if (typeof v === "string" && (allowed as readonly string[]).includes(v)) return v as T;
+  problems.push(`"${label}" must be one of ${allowed.map((a) => `"${a}"`).join(", ")}`);
+  return fallback;
 }
 
 function strings(

@@ -4,6 +4,15 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Ledge</title>
+    <!-- The appearance the CSS keys off (index.css), stamped before the first
+         paint so a launch cannot flash the wrong palette. This is the SYSTEM
+         answer only: a settings override cannot be known until boot has the
+         snapshot, at which point lib/theme.ts re-stamps. -->
+    <script>
+      document.documentElement.dataset.theme = window.matchMedia("(prefers-color-scheme: dark)").matches
+        ? "dark"
+        : "light";
+    </script>
   </head>
   <body>
     <div id="root"></div>

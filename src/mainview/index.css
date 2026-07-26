@@ -3,10 +3,15 @@
 @tailwind utilities;
 
 /* --- shadcn/ui design tokens ------------------------------------------------
-   darkMode is "media" (tailwind.config.js), so the dark palette lives under a
-   prefers-color-scheme query and the app tracks the OS appearance. */
+   Every palette below is keyed off `data-theme` on <html>, never off
+   prefers-color-scheme: the OS appearance is only the DEFAULT, and
+   `appearance.theme` in settings.jsonc can pin the other side. lib/theme.ts is
+   what resolves the two into the attribute (and tailwind's `dark:` variant
+   reads the same selector — tailwind.config.js); index.html stamps the system
+   answer before first paint so a launch never flashes. */
 @layer base {
   :root {
+    color-scheme: light;
     --background: 0 0% 100%;
     --foreground: 240 10% 3.9%;
     --card: 0 0% 100%;
@@ -27,26 +32,25 @@
     --radius: 0.5rem;
   }
 
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --background: 240 10% 3.9%;
-      --foreground: 0 0% 98%;
-      --card: 240 10% 3.9%;
-      --card-foreground: 0 0% 98%;
-      --primary: 0 0% 98%;
-      --primary-foreground: 240 5.9% 10%;
-      --secondary: 240 3.7% 15.9%;
-      --secondary-foreground: 0 0% 98%;
-      --muted: 240 3.7% 15.9%;
-      --muted-foreground: 240 5% 64.9%;
-      --accent: 240 3.7% 15.9%;
-      --accent-foreground: 0 0% 98%;
-      --destructive: 0 62.8% 30.6%;
-      --destructive-foreground: 0 0% 98%;
-      --border: 240 3.7% 15.9%;
-      --input: 240 3.7% 15.9%;
-      --ring: 240 4.9% 83.9%;
-    }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --background: 240 10% 3.9%;
+    --foreground: 0 0% 98%;
+    --card: 240 10% 3.9%;
+    --card-foreground: 0 0% 98%;
+    --primary: 0 0% 98%;
+    --primary-foreground: 240 5.9% 10%;
+    --secondary: 240 3.7% 15.9%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 240 3.7% 15.9%;
+    --muted-foreground: 240 5% 64.9%;
+    --accent: 240 3.7% 15.9%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 3.7% 15.9%;
+    --input: 240 3.7% 15.9%;
+    --ring: 240 4.9% 83.9%;
   }
 
   * {
@@ -63,7 +67,6 @@
    below. Kept distinct from the shadcn tokens; the editor's muted color is
    `--ed-muted` because shadcn already owns `--muted`. */
 :root {
-  color-scheme: light dark;
   --fg: #1d1d1f;
   --gutter: #b0b0b5;
   --cursor: #1d1d1f;
@@ -95,36 +98,34 @@
   --code-regexp: #0a3069;
   --code-variable: var(--fg);
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    --fg: #e8e8ea;
-    --gutter: #5a5a60;
-    --cursor: #e8e8ea;
-    --selection: rgba(10, 132, 255, 0.35);
-    --link: #6cb2ff;
-    --ed-muted: rgba(235, 235, 245, 0.55);
-    --panel-bg: rgba(255, 255, 255, 0.04);
-    --panel-border: rgba(255, 255, 255, 0.14);
-    --code-panel-bg: rgba(255, 255, 255, 0.06);
-    --code-panel-border: rgba(255, 255, 255, 0.1);
-    --btn-hover: rgba(255, 255, 255, 0.12);
-    --ok: #30d158;
-    --err: #ff453a;
-    /* Code-block syntax palette (dark), One-Dark-ish. */
-    --code-keyword: #c678dd;
-    --code-string: #98c379;
-    --code-comment: #7d8590;
-    --code-number: #d19a66;
-    --code-atom: #d19a66;
-    --code-function: #61afef;
-    --code-type: #e5c07b;
-    --code-property: #56b6c2;
-    --code-operator: #abb2bf;
-    --code-meta: #56b6c2;
-    --code-punct: #8b949e;
-    --code-regexp: #98c379;
-    --code-variable: var(--fg);
-  }
+:root[data-theme="dark"] {
+  --fg: #e8e8ea;
+  --gutter: #5a5a60;
+  --cursor: #e8e8ea;
+  --selection: rgba(10, 132, 255, 0.35);
+  --link: #6cb2ff;
+  --ed-muted: rgba(235, 235, 245, 0.55);
+  --panel-bg: rgba(255, 255, 255, 0.04);
+  --panel-border: rgba(255, 255, 255, 0.14);
+  --code-panel-bg: rgba(255, 255, 255, 0.06);
+  --code-panel-border: rgba(255, 255, 255, 0.1);
+  --btn-hover: rgba(255, 255, 255, 0.12);
+  --ok: #30d158;
+  --err: #ff453a;
+  /* Code-block syntax palette (dark), One-Dark-ish. */
+  --code-keyword: #c678dd;
+  --code-string: #98c379;
+  --code-comment: #7d8590;
+  --code-number: #d19a66;
+  --code-atom: #d19a66;
+  --code-function: #61afef;
+  --code-type: #e5c07b;
+  --code-property: #56b6c2;
+  --code-operator: #abb2bf;
+  --code-meta: #56b6c2;
+  --code-punct: #8b949e;
+  --code-regexp: #98c379;
+  --code-variable: var(--fg);
 }
 
 html,

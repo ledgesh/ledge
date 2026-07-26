@@ -32,6 +32,7 @@ describe("parseSettings", () => {
         interpreters: { ...DEFAULT_SETTINGS.blocks.interpreters, python: "/venv/bin/python" },
         hostInterpreters: {},
       },
+      appearance: { theme: "system" },
       daily: { workspace: "" },
     });
     expect(problems).toEqual([]);
@@ -68,6 +69,26 @@ describe("parseSettings", () => {
     const { settings, problems } = parseSettings({ editor: { livePreview: "yes" } });
     expect(settings.editor.livePreview).toBe(DEFAULT_SETTINGS.editor.livePreview);
     expect(problems).toEqual(['"editor.livePreview" must be true or false']);
+  });
+
+  test("appearance.theme takes the three spellings and nothing else", () => {
+    for (const theme of ["system", "light", "dark"] as const) {
+      const { settings, problems } = parseSettings({ appearance: { theme } });
+      expect(settings.appearance.theme).toBe(theme);
+      expect(problems).toEqual([]);
+    }
+    // Near-misses are typos, not intent — and the message names the whole set.
+    const { settings, problems } = parseSettings({ appearance: { theme: "Dark" } });
+    expect(settings.appearance.theme).toBe("system");
+    expect(problems).toEqual(['"appearance.theme" must be one of "system", "light", "dark"']);
+  });
+
+  test("an absent appearance section means system, silently (seed-frozen files)", () => {
+    // Every settings file seeded before the section existed lacks it; that is
+    // the OS-following default, not a problem to report.
+    const { settings, problems } = parseSettings({});
+    expect(settings.appearance).toEqual({ theme: "system" });
+    expect(problems).toEqual([]);
   });
 
   test("an empty shell path falls back rather than spawning nothing", () => {

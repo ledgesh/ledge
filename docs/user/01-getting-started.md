@@ -60,6 +60,7 @@ Notes are ordinary `.md` files in ordinary folders, so git, agents, and shell to
 
 - ⌘J opens today's daily note. Mark any note `template: true` in its frontmatter and ⌥⌘N stamps new notes from it. [[Daily Notes and Templates]] has both stories.
 - Agents plug in over MCP: a CLI launched inside a note's terminal can read and write your notes, and a `prompt` code fence pipes its text straight to `claude -p` with ⌘↩ ([[Agents and Ledge]]).
+- Ledge follows your Mac's light or dark appearance. To pin one side instead, set `appearance.theme` to `"light"` or `"dark"` in Settings (⌘,) and relaunch.
 - "Install Shell Command (ledge)" puts `ledge` on your PATH, so `ledge <title>` opens a note from any terminal and `ledge today` lands in the daily note ([[The ledge CLI]]).
 - "Lock This Note…" encrypts a note's body on disk: sync services, search, and agents see nothing until you unlock ([[Note Locking]]).
 

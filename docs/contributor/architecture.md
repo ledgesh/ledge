@@ -406,14 +406,20 @@ right). `shared/settings.ts` owns the shape, the defaults, the template, and
 the validator; `bun/settings.ts` owns the file. Bun reads it once at launch,
 applies its own half (the shell every PTY spawns, the trash TTL), and hands
 the view a validated snapshot over `settingsGet`; view consumers (editor and
-terminal font sizes, the runnable-fence set) read that snapshot at
-construction time through `lib/settings.ts`.
+terminal font sizes, the appearance, the runnable-fence set) read that
+snapshot at construction time through `lib/settings.ts`.
 
 - **What earns a setting.** The same shape of bar as the dependency policy
   (§8): every setting is a behavioral fork the app tests and maintains
   forever, so one exists only where the hardcoded default demonstrably fails
   someone — not because a value *could* vary. The full current set: shell
-  path/args, editor and terminal font size, the live-preview toggle
+  path/args, editor and terminal font size, the appearance
+  (`appearance.theme`: `"system"` follows the Mac and stays the default —
+  the two forced values exist because the OS appearance demonstrably fails
+  people for whom it is not a preference: a Mac on the automatic day/night
+  schedule flipping a notebook mid-session, a room or projector where one
+  side is unreadable, a screenshot that has to match. See "One appearance,
+  one attribute" below), the live-preview toggle
   (`editor.livePreview`: it exists as the escape hatch, not a preference —
   raw markdown is the app's original deliberate stance, and precise syntax
   editing demonstrably needs a way back to text-on-screen-is-text-on-disk),
@@ -484,6 +490,22 @@ construction time through `lib/settings.ts`.
   that field (warned, defaulted — `parseSettings`); unparseable JSONC costs
   the whole file for the run but the bytes on disk are untouched: it is the
   user's file, possibly mid-edit, and "fixing" it would destroy their work.
+- **One appearance, one attribute.** Nothing asks `prefers-color-scheme`
+  directly any more — with an override in play the media query is no longer
+  the truth. `mainview/lib/theme.ts` is the single resolver
+  (`resolveAppearance(theme, systemDark)`, the pure core its spec covers);
+  it stamps the answer as `data-theme` on `<html>`, which is what the whole
+  palette keys off (`index.css`, both the shadcn tokens and the editor
+  variables) and what tailwind's `dark:` variant is pointed at
+  (`darkMode: ["selector", '[data-theme="dark"]']`). Consumers holding
+  COLORS rather than reading variables — the two xterm instances — take
+  `isDarkAppearance()` at construction and `onAppearanceChange` for the
+  rest; new ones must do the same rather than opening their own
+  `matchMedia`. `index.html` stamps the system answer inline before first
+  paint (so a launch never flashes the wrong palette; the override cannot
+  be known until the snapshot lands, when `applyAppearance()` re-stamps),
+  and the media listener stays for the life of the app: under `"system"`
+  the OS can still move, and that is the OS changing, not the setting.
 - **Restart-applies, deliberately.** Both sides read once at launch; there is
   no `settingsChanged` message and no live reload. Live-applying would mean
   every consumer becomes reactive (rebuild CM themes, re-font live xterms,

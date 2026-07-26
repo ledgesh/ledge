@@ -12,6 +12,7 @@ import {
 } from "./channel";
 import { copyText, readClipboard } from "../lib/clipboard";
 import { settings } from "../lib/settings";
+import { isDarkAppearance, onAppearanceChange } from "../lib/theme";
 import { eventToChord, matchesKey } from "../commands/keymap";
 import { keyOf } from "../commands/keys";
 
@@ -55,12 +56,11 @@ export function TerminalDrawer({
     const host = hostRef.current;
     if (!host) return;
 
-    const media = window.matchMedia("(prefers-color-scheme: dark)");
     const term = new Terminal({
       fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
       fontSize: settings().terminal.fontSize,
       cursorBlink: true,
-      theme: xtermTheme(media.matches),
+      theme: xtermTheme(isDarkAppearance()),
       allowProposedApi: true,
     });
     const fit = new FitAddon();
@@ -148,8 +148,9 @@ export function TerminalDrawer({
     });
     ro.observe(host);
 
-    const onScheme = () => (term.options.theme = xtermTheme(media.matches));
-    media.addEventListener("change", onScheme);
+    // The palette can still move under a running terminal: "system" tracks the
+    // OS live (lib/theme.ts). A pinned theme simply never fires.
+    const offAppearance = onAppearanceChange((a) => (term.options.theme = xtermTheme(a === "dark")));
 
     term.focus();
 
@@ -157,7 +158,7 @@ export function TerminalDrawer({
       disposed = true;
       terminalDetach(sessionId);
       ro.disconnect();
-      media.removeEventListener("change", onScheme);
+      offAppearance();
       off();
       dataSub.dispose();
       term.dispose();
