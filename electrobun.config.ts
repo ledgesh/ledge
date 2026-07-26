@@ -21,7 +21,10 @@ export default {
     // output — and off the CLI prebuild's, same reason.
     watchIgnore: ["dist/**", "dist-cli/**"],
     // Use the system WebView (WKWebView on macOS), not bundled Chromium.
-    mac: { bundleCEF: false },
+    // icons: an Icon Composer bundle — actool compiles it to Assets.car (the
+    // adaptive light/dark/tinted icon on macOS 26+) plus a .icns fallback.
+    // Its mark.svg is generated from assets/logo.svg by `bun run icon`.
+    mac: { bundleCEF: false, icons: "assets/Ledge.icon" },
     linux: { bundleCEF: false },
     win: { bundleCEF: false },
   },

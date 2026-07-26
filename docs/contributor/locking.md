@@ -141,6 +141,15 @@ tags: finance
   the designated v2, and changes storage of nothing above — it stores the
   passphrase-equivalent, not a second key hierarchy.
 
+  **Keychain unlock is gated on the signing identity being settled.**
+  Keychain item ACLs bind to the Developer ID that signed the app, so
+  changing Team IDs (the individual-enrollment to organization-enrollment
+  migration, which Apple cannot do in place) invalidates every stored
+  passphrase-equivalent and silently drops users back to typing a
+  passphrase they may have stopped rehearsing. Ship this only once the
+  Team ID we intend to keep is the one signing releases. Nothing else in
+  this document depends on the signing identity; this one feature does.
+
 ## 4. Seam policy
 
 The survey fact this design leans on: every content path funnels through

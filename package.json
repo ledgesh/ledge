@@ -11,6 +11,7 @@
     "hmr": "vite --port 5173",
     "build": "vite build && bun run build:cli && electrobun build",
     "build:cli": "bun build src/bun/cli.ts --target=bun --outdir=dist-cli",
+    "icon": "bun scripts/make-icon.ts",
     "mcp": "bun src/bun/mcp.ts",
     "cli": "bun src/bun/cli.ts",
     "test": "bun test",
