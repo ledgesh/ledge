@@ -566,6 +566,26 @@ body {
   font-weight: 500;
   color: var(--ed-muted);
 }
+/* The panel holds the keyboard: a live run takes focus when it starts talking
+   (inlineTerm.ts claimFocus), so typing goes to the program and not the note.
+   That has to be visible without looking for a cursor, hence a lit border and
+   a header line naming the state and the way out. Both are pure :focus-within,
+   so they cannot drift from where focus actually is. */
+.ledge-output:focus-within {
+  border-color: color-mix(in srgb, var(--link) 60%, var(--panel-border));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--link) 18%, transparent);
+}
+.ledge-focus-hint {
+  display: none;
+  font-size: 10px;
+  color: var(--ed-muted);
+  white-space: nowrap;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.ledge-output:focus-within .ledge-focus-hint {
+  display: inline;
+}
 .ledge-duration {
   font-size: 11px;
   color: var(--ed-muted);

@@ -28,10 +28,15 @@ const CommandsContext = createContext<CommandsApi | null>(null);
 // xterm terminal, on a focused list row, or in the page chrome. The editor and
 // terminal are checked first: they can host rows of their own one day, and a
 // bare key inside them is always typing.
+//
+// The terminal is asked FIRST because one kind of terminal lives inside the
+// editor: an inline run's panel is a block widget inside `.cm-editor`, and a
+// run that has taken the keyboard (inlineTerm.claimFocus) is a shell like any
+// other — it owns Ctrl (§7), the same as the drawer.
 function domainOf(target: EventTarget | null): FocusDomain {
   if (target instanceof Element) {
-    if (target.closest(".cm-editor")) return "editor";
     if (target.closest(".xterm")) return "terminal";
+    if (target.closest(".cm-editor")) return "editor";
     // A text field inside a row (the inline rename) is typing, not a row: `r`
     // there is a letter in the name, not the Rename command firing again.
     if (target.closest("input, textarea, [contenteditable='true']")) return "page";

@@ -28,6 +28,9 @@ import { settings } from "../lib/settings";
 const RUN_ROWS = 24;
 const FONT = "ui-monospace, SFMono-Regular, Menlo, monospace";
 
+// How long after an Escape a second one still reads as "get me out of here".
+const ESC_EXIT_MS = 600;
+
 function xtermTheme(dark: boolean) {
   return dark
     ? { background: "#1a1a1c", foreground: "#e8e8ea", cursor: "#e8e8ea", selectionBackground: "#3a3a40" }
@@ -39,7 +42,7 @@ function xtermTheme(dark: boolean) {
 // `onInput` forwards keystrokes from the running block to the note's inline shell;
 // `onHeightChange` asks CodeMirror to re-measure when the panel's height changes
 // out of band (freeze/shrink); `onFocusEditor` returns focus to the prose editor
-// when the run finishes.
+// when the run ends, is dismissed, or the user asks to leave it.
 export interface InlineTermOptions {
   onResize?: (cols: number, rows: number) => void;
   onInput?: (data: string) => void;
@@ -56,6 +59,7 @@ export class InlineTerm {
   private readonly dot: HTMLSpanElement;
   private readonly status: HTMLSpanElement;
   private readonly hostChip: HTMLSpanElement;
+  private readonly focusHint: HTMLSpanElement;
   private readonly duration: HTMLSpanElement;
   private readonly term: Terminal;
   private readonly fit: FitAddon;
@@ -68,6 +72,10 @@ export class InlineTerm {
   private pinned = false;
   /** True while the command is still running (drives grid size / step-2 input). */
   live = true;
+  /** A run's pending claim on the keyboard; see claimFocus(). */
+  private claim: (() => boolean) | null = null;
+  /** When the last Escape landed, for the leave-the-terminal double tap. */
+  private lastEscape = 0;
 
   constructor(
     private readonly id: string,
@@ -90,11 +98,18 @@ export class InlineTerm {
     this.hostChip.style.display = "none";
     const spacer = document.createElement("span");
     spacer.style.flex = "1";
+    // Shown (by CSS) only while the panel holds focus. Silent focus movement is
+    // the whole hazard being traded here: keystrokes that used to land in the
+    // note now land in a program, so the panel has to say so, and say how to
+    // get back out (the Escape grammar below).
+    this.focusHint = document.createElement("span");
+    this.focusHint.className = "ledge-focus-hint";
+    this.setFocusHint();
     this.duration = document.createElement("span");
     this.duration.className = "ledge-duration";
     const gap = document.createElement("span");
     gap.style.width = "48px";
-    this.header.append(this.dot, this.status, this.hostChip, spacer, this.duration, gap);
+    this.header.append(this.dot, this.status, this.hostChip, spacer, this.focusHint, this.duration, gap);
     this.wrap.appendChild(this.header);
 
     this.body = document.createElement("div");
@@ -147,6 +162,19 @@ export class InlineTerm {
     this.term.attachCustomKeyEventHandler((e) => {
       if (e.type !== "keydown") return true;
       const cmd = e.metaKey && !e.ctrlKey && !e.altKey;
+      // The way back to the prose, for a run that took focus on its own (see
+      // claimFocus). Deliberately never WITHHELD from the program: the bare
+      // form acts on the second Escape, so the first one has already gone
+      // through, and a full-screen program keeps both (⌘Escape is its exit) —
+      // vim's habitual double tap must not eject you from vim.
+      if (e.key === "Escape") {
+        const since = Date.now() - this.lastEscape;
+        this.lastEscape = cmd ? 0 : Date.now();
+        if (!escapeLeaves({ meta: cmd, pinned: this.pinned, sinceLastEscMs: since })) return true;
+        if (cmd) e.preventDefault();
+        this.leave();
+        return !cmd;
+      }
       if (cmd && (e.key === "c" || e.key === "C") && this.term.hasSelection()) {
         e.preventDefault();
         copyText(this.term.getSelection());
@@ -172,6 +200,7 @@ export class InlineTerm {
     this.term.buffer.onBufferChange(() => {
       if (this.disposed || this.term.buffer.active.type !== "alternate") return;
       this.pinned = true;
+      this.setFocusHint();
       this.refit();
       this.opts.onHeightChange?.();
     });
@@ -198,6 +227,47 @@ export class InlineTerm {
     this.duration.textContent = run.durationMs != null ? formatDuration(run.durationMs) : "";
   }
 
+  // A run asks for the keyboard. The claim is not honored until the terminal is
+  // actually on screen (an unrevealed host cannot take focus anyway), which is
+  // also the moment worth stealing focus AT: the first byte is where a
+  // "Password:" or a "[y/N]" appears, and until then there is nothing to answer.
+  //
+  // `stillWanted` is the staleness test, evaluated at that moment rather than
+  // now: a claim from a run whose user has gone back to typing in the note (or
+  // clicked away entirely) lapses instead of yanking focus mid-sentence, which
+  // is the one thing this feature must not do.
+  claimFocus(stillWanted: () => boolean): void {
+    if (this.disposed || !this.live) return;
+    this.claim = stillWanted;
+    if (this.shown) this.honorClaim();
+  }
+
+  private honorClaim(): void {
+    const claim = this.claim;
+    this.claim = null;
+    if (!claim || this.disposed || !this.live) return;
+    if (!this.host.isConnected || !claim()) return;
+    // preventScroll: the panel sits under the block the caret was in, so it is
+    // already in view; without this, focusing scrolls the widget to the top of
+    // the viewport and the note jumps under the user.
+    this.term.textarea?.focus({ preventScroll: true });
+  }
+
+  /** Hand the keyboard back to the prose editor (Escape grammar, dismiss, freeze). */
+  private leave(): void {
+    this.lastEscape = 0;
+    this.term.blur();
+    this.opts.onFocusEditor?.();
+  }
+
+  private hasFocus(): boolean {
+    return this.host.contains(document.activeElement);
+  }
+
+  private setFocusHint(): void {
+    this.focusHint.textContent = this.pinned ? "typing here · ⌘esc to exit" : "typing here · esc esc to exit";
+  }
+
   write(bytes: Uint8Array): void {
     if (this.disposed) return;
     if (!this.shown) {
@@ -206,6 +276,7 @@ export class InlineTerm {
       this.host.style.display = "block";
       this.refit();
       this.opts.onHeightChange?.();
+      this.honorClaim();
     }
     // Grow on the write's callback, not now: xterm parses on its own queue, so the
     // rows this output needs are not known until it has drained.
@@ -233,6 +304,9 @@ export class InlineTerm {
   freeze(): void {
     if (this.disposed) return;
     this.live = false;
+    // A run that is over asks for nothing: a claim that never came due (a
+    // silent command that finished before its first byte) dies with it.
+    this.claim = null;
     // A run that finished without a byte keeps its header ("Done") and drops
     // the placeholder: "no output yet" would be a lie, and "no output" is
     // what a collapsed body already says.
@@ -241,14 +315,12 @@ export class InlineTerm {
     // its screen went with it, so the pin has nothing left to protect. Cleared here
     // or freeze's shrink would be undone by the next re-fit.
     this.pinned = false;
+    this.setFocusHint();
     this.term.options.cursorBlink = false;
     // If the finished terminal held focus (the user was typing into the program),
     // hand focus back to the prose editor so keystrokes do not fall into a now
     // read-only terminal.
-    if (this.host.contains(document.activeElement)) {
-      this.term.blur();
-      this.opts.onFocusEditor?.();
-    }
+    if (this.hasFocus()) this.leave();
     if (!this.shown) return; // no output at all; nothing to render
     // xterm parses writes on its own async queue, so the final output bytes may not
     // be in the buffer yet; the empty write's callback runs once the queue drains,
@@ -279,7 +351,12 @@ export class InlineTerm {
 
   dispose(): void {
     if (this.disposed) return;
+    // Dismissed (or its block deleted) while it held the keyboard: the DOM about
+    // to be torn out is where focus lives, and losing it to <body> would leave
+    // the next keystroke going nowhere. Hand it back first.
+    const held = this.hasFocus();
     this.disposed = true;
+    if (held) this.opts.onFocusEditor?.();
     this.ro.disconnect();
     this.media.removeEventListener("change", this.onScheme);
     this.term.dispose();
@@ -322,6 +399,23 @@ export class InlineTerm {
     }
     return Math.max(1, last);
   }
+}
+
+// --- the leave-the-terminal rule --------------------------------------------
+
+// Whether an Escape keydown in a focused inline terminal means "give the
+// keyboard back to the note" (interactions.md §6).
+//
+// ⌘Escape always does, and is the only form a full-screen program cannot
+// swallow — which is why it, not the bare key, is the exit while one owns the
+// screen (`pinned`): vim users double-tap Escape as a matter of habit, and
+// being ejected from vim for it would be a worse bug than the one this fixes.
+// Everywhere else the bare double tap works, because mashing Escape is what
+// someone stuck in a box actually does.
+export function escapeLeaves(o: { meta: boolean; pinned: boolean; sinceLastEscMs: number }): boolean {
+  if (o.meta) return true;
+  if (o.pinned) return false;
+  return o.sinceLastEscMs <= ESC_EXIT_MS;
 }
 
 // --- row maths --------------------------------------------------------------

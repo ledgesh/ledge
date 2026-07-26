@@ -18,7 +18,7 @@ import { instantiateTemplate, isoDateOf } from "../shared/template";
 import { collectHits, type SearchHit } from "../shared/search";
 import { resolveWikiTitle, wikiRefsOf } from "../shared/wikilinks";
 import { normalizeTag, tagDirectoryOf, tagRefsOf, type TagInfo } from "../shared/tags";
-import { configureBridge } from "./editor/bridge";
+import { configureBridge, dispatchRunEvent } from "./editor/bridge";
 import { configureTerminal } from "./terminal/channel";
 import { configureNotes, dispatchExternalOpen, dispatchNotesChanged, type ExternalOpenInfo, type NoteFile } from "./notes/channel";
 import { configureVault, recordVaultState } from "./vault/channel";
@@ -637,10 +637,10 @@ configureWorkspaces({
 const linkOpens: string[] = [];
 // Runs are inert, but WHICH machine a run names is view-side policy (the
 // host picker's always-ask rule), so the target rides the record for specs.
-const inlineRuns: { sessionId: string; host: string | null }[] = [];
+const inlineRuns: { sessionId: string; id: string; host: string | null }[] = [];
 configureBridge({
-  runInline: (sessionId, _id, _code, _language, host) => {
-    inlineRuns.push({ sessionId, host });
+  runInline: (sessionId, id, _code, _language, host) => {
+    inlineRuns.push({ sessionId, id, host });
   },
   cancelRun: () => {},
   resizeInline: () => {},
@@ -768,7 +768,13 @@ declare global {
       layout: () => string | null;
       termAttaches: () => { sessionId: string; host: string | null }[];
       termPastes: () => { sessionId: string; text: string; host: string | null }[];
-      inlineRuns: () => { sessionId: string; host: string | null }[];
+      inlineRuns: () => { sessionId: string; id: string; host: string | null }[];
+      // Push one output byte-string at a run, the way Bun's runEvent would.
+      // Not the PTY coming back: the inert harness stays inert, and a spec that
+      // wants real run behavior still belongs to the live probe. This drives
+      // the ONE view-side seam a spec cannot otherwise reach — what the panel
+      // does when a run first speaks (it takes the keyboard, blocks.ts).
+      runOutput: (id: string, text: string) => void;
       // Simulate the CLI's openExternal push (a Bun-side watcher event has no
       // visible surface to drive it from).
       externalOpen: (open: ExternalOpenInfo) => void;
@@ -788,6 +794,7 @@ window.__harness = {
   termAttaches: () => termAttaches.map((a) => ({ ...a })),
   termPastes: () => termPastes.map((p) => ({ ...p })),
   inlineRuns: () => inlineRuns.map((r) => ({ ...r })),
+  runOutput: (id, text) => dispatchRunEvent({ id, kind: "output", dataB64: btoa(text) }),
   externalOpen: (open) => dispatchExternalOpen(open),
   notesChanged: (root) => dispatchNotesChanged(root),
   store,

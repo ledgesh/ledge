@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { liveRows, neededRows } from "./inlineTerm";
+import { escapeLeaves, liveRows, neededRows } from "./inlineTerm";
 
 describe("neededRows", () => {
   test("counts the cursor's blank line, so xterm never has to scroll to keep it", () => {
@@ -41,5 +41,32 @@ describe("liveRows", () => {
 
   test("a full-screen program gets the whole grid whatever it has drawn", () => {
     expect(liveRows(2, 1, true)).toBe(24);
+  });
+});
+
+describe("escapeLeaves", () => {
+  test("a lone Escape stays with the program", () => {
+    // Long since the last one: this is the first tap, and it belongs to
+    // whatever is running (a shell's vi mode, an agent's interrupt).
+    expect(escapeLeaves({ meta: false, pinned: false, sinceLastEscMs: 5000 })).toBe(false);
+  });
+
+  test("a second Escape soon after gives the keyboard back", () => {
+    expect(escapeLeaves({ meta: false, pinned: false, sinceLastEscMs: 120 })).toBe(true);
+  });
+
+  test("two Escapes far apart are two lone Escapes", () => {
+    expect(escapeLeaves({ meta: false, pinned: false, sinceLastEscMs: 900 })).toBe(false);
+  });
+
+  test("a full-screen program keeps both taps", () => {
+    // vim's habitual double Escape must not eject the user from vim.
+    expect(escapeLeaves({ meta: false, pinned: true, sinceLastEscMs: 80 })).toBe(false);
+  });
+
+  test("⌘Escape always leaves, full-screen program or not", () => {
+    // The one form no program can claim, so it is the exit that always exists.
+    expect(escapeLeaves({ meta: true, pinned: true, sinceLastEscMs: 5000 })).toBe(true);
+    expect(escapeLeaves({ meta: true, pinned: false, sinceLastEscMs: 5000 })).toBe(true);
   });
 });

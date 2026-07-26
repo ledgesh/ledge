@@ -158,7 +158,7 @@ CodeMirror and never at the window level.
 | Save                  | ⌘S                        | notes autosave; this skips the debounce |
 | Find / Replace        | ⌘F / ⌥⌘F (fallback ⇧⌘F)   | editor only; ⌥⌘F may be swallowed by cmux |
 | Find Next / Previous  | ⌘G / ⇧⌘G (also F3 / ⇧F3)  | editor only |
-| Run Block Inline      | ⌘↩                        | cursor inside a runnable block |
+| Run Block Inline      | ⌘↩                        | cursor inside a runnable block; the run takes the keyboard when it first prints, and gives it back when it ends (§6a) |
 | Run Block in Terminal | ⇧⌘↩                       | |
 | Bold / Italic         | ⌘B / ⌘I                   | editor only (editor/formatting.ts); toggles `**`/`*` around the selection or the word at the caret — a bare caret drops an empty marker pair to type into. Run-based so the chords compose: ⌘I on `**bold**` stacks to `***both***` and ⌘I again peels only its own star |
 | Insert Link           | ⌘K                        | editor only; wraps the selection as `[text](url)` — a selected URL becomes the destination with the caret in the empty label, any other selection (or the word at the caret) becomes the label with the caret in the empty destination |
@@ -265,6 +265,41 @@ topmost layer only:
 While a layer of kind menu/dialog/overlay is open, the window keymap
 dispatcher is fully suppressed. New modals must register with `pushLayer`
 rather than adding their own capture-phase listeners.
+
+**The inline terminal is not a layer** (`editor/inlineTerm.ts`): a focused live
+run pushes nothing and suppresses nothing — it is a place focus can *be*, not
+a surface over the app. Its Escape rule is local, sits below every layer here,
+and lives in §6a.
+
+## 6a. Who owns the keyboard while a block runs
+
+An inline run is answerable: `sudo` asks for a password, an installer asks
+`[y/N]`. Before this the answer went into the *note* — for a password, a
+secret written to a synced file — because focus never moved.
+
+- **A run claims the keyboard when it first prints**, not when it starts: the
+  first byte is where the question appears (and an unrevealed panel cannot
+  hold focus anyway).
+- **The claim lapses if the user moved on** — honored only while that editor
+  still has DOM focus *and* the caret has not moved since ⌘↩ (`blocks.ts`
+  startInlineRun → `claimFocus`). ⌘↩ and carry on writing is an ordinary
+  flow; a build that speaks a minute later must not swallow the sentence.
+- **The panel says so while it holds focus**: lit border, header line naming
+  the state and the way out, both `:focus-within` so they cannot drift from
+  where focus is. Focusing never scrolls (`preventScroll`).
+- **Focus returns by itself** when the run ends (a frozen panel is read-only)
+  and when it is dismissed, and on demand (`escapeLeaves`, unit-tested):
+  - **⌘Escape** always, the one form no program can claim.
+  - **Escape twice** (within 600 ms), *except* while a full-screen program
+    owns the panel (the alternate buffer, the same signal that pins the
+    grid) — vim users double-tap Escape by reflex.
+  - Neither is withheld from the program: the bare exit acts on the second
+    tap, so the first has already gone through. The drawer (§6 layer 5) does
+    take Escape from its shell; the inline panel is where full-screen
+    programs actually get run, so it cannot afford that tradeoff.
+- **A focused run is the `terminal` domain**, not `editor`, though the panel
+  lives inside `.cm-editor`: the shell owns Ctrl here as in the drawer
+  (`domainOf` asks `.xterm` first).
 
 ## 7. Key dispatch contract
 

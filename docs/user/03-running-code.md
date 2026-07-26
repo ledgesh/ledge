@@ -6,7 +6,13 @@ Any fenced code block whose language is runnable gets a Run button. This page co
 
 ⌘↩ runs the block under the caret inline: output streams into a panel right beneath the block and stays until you dismiss it. Hovering a block shows the same Run button plus Copy, a running block's button turns into a stop, and the output panel offers Copy Output and Dismiss.
 
-⇧⌘↩ sends the block to the note's terminal drawer instead (⌃` toggles the drawer). That is the interactive route: the block lands in a real terminal where you can keep typing after it.
+⇧⌘↩ sends the block to the note's terminal drawer instead (⌃` toggles the drawer). The block lands in a real terminal where you can keep typing after it has finished, which the inline panel does not offer: an inline run is over when the command is.
+
+## Answering a run
+
+An inline run can ask you things. When one prints its first output it takes the keyboard, so a `sudo` password prompt or a `[y/N]` is answered by just typing: the panel lights up and its header says "typing here" while your keys are going to the program, and focus returns to the note when the command finishes. If you pressed ⌘↩ and carried on writing, the run leaves you alone, however loud it gets: your caret moved on, so your typing stays in the note.
+
+To step out of a running command yourself, press Escape twice (the first one goes to the program, in case it wanted it) or ⌘Escape. While a full-screen program like `vim` has the panel, every Escape belongs to it and ⌘Escape is the way out.
 
 ## Shell blocks share a shell
 

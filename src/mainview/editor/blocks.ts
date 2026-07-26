@@ -297,6 +297,21 @@ function startInlineRun(
     }),
   });
   toNative({ type: "run", sessionId, id, code: block.code, language: block.lang, destination: "inline", host });
+  // Hand the keyboard to the run when it starts talking, so an inline command
+  // that asks something (a sudo password, a y/N) can be answered by typing —
+  // the old behavior left focus in the prose and typed the answer into the
+  // note, which for a password meant writing a secret to disk.
+  //
+  // The claim lapses unless this editor still has focus and the caret has not
+  // moved when the first byte lands (inlineTerm.claimFocus): pressing ⌘↩ and
+  // going back to writing is a common flow, and a build that prints its first
+  // line thirty seconds later must not swallow the sentence in progress.
+  //
+  // The test is deliberately taken THEN and not now: a run started from the
+  // host picker (or a run button) leaves focus on the popover for a beat, and
+  // the question that matters is where the user is when the answer is wanted.
+  const head = view.state.selection.main.head;
+  getInlineTerm(id)?.claimFocus(() => view.hasFocus && view.state.selection.main.head === head);
   return true;
 }
 
