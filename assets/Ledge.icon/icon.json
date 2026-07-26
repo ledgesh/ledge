@@ -6,6 +6,7 @@
     {
       "layers": [
         {
+          "glass": false,
           "image-name": "mark.svg",
           "name": "Mark"
         }
