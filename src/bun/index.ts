@@ -12,6 +12,7 @@ import {
   ApplicationMenu,
   BrowserView,
   BrowserWindow,
+  Screen,
   Updater,
   Utils,
   type ApplicationMenuItemConfig,
@@ -63,6 +64,7 @@ import {
 import { createFromTemplatePath, openDaily, resolveConfiguredWorkspace } from "./daily";
 import { syncDocs } from "./docs";
 import { readLayout, writeLayout } from "./layout";
+import { fitFrame, readFrame, writeFrame, type Rect } from "./windowFrame";
 import { installShim, tildify } from "./cliShim";
 import { OPEN_REQUEST_PATH, takeOpenRequest } from "./openRequest";
 import { syncWatchers } from "./watch";
@@ -940,14 +942,81 @@ void Promise.all(availableRoots().map((root) => purgeTrash(root, settings.trash.
   })
   .catch((err) => console.error("[notes] trash purge failed", err));
 
+// Primary first: fitFrame falls back to workAreas[0] when a saved frame
+// matches no attached display, and "somewhere in the middle of the main
+// screen" is the only sane place to put a window nobody can locate.
+function workAreas(): Rect[] {
+  try {
+    const displays = Screen.getAllDisplays();
+    return displays
+      .filter((d) => d.workArea.width > 0 && d.workArea.height > 0)
+      .sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary))
+      .map((d) => d.workArea);
+  } catch (err) {
+    // fitFrame reads an empty list as "no evidence" and honors the saved
+    // frame, which is the right answer: the screens have not changed, only
+    // our ability to ask about them.
+    console.warn("[window] could not read the displays:", err);
+    return [];
+  }
+}
+
+const startFrame = fitFrame(readFrame(), workAreas());
+
 const mainWindow = new BrowserWindow({
   title: "Ledge",
   url: await mainViewUrl(),
   rpc,
-  frame: { width: 940, height: 700, x: 200, y: 120 },
+  frame: startFrame,
+});
+
+// Remember where the window was left. Debounced because macOS emits move and
+// resize continuously through a drag, and the file would otherwise be written
+// at frame rate; the timer is started by the FIRST event of a burst, not
+// restarted by each, so a long drag costs one write per interval and the final
+// position still lands one interval after the mouse stops.
+const FRAME_SAVE_MS = 400;
+let frameSave: ReturnType<typeof setTimeout> | null = null;
+let lastFrame = startFrame;
+// Last known "not fullscreen". A fullscreen frame is the SCREEN's geometry,
+// not a choice, and restoring it would open a windowed app at exactly screen
+// size — so those frames are dropped and the previous windowed one stands.
+let windowed = true;
+
+function saveFrameNow(): void {
+  if (frameSave) clearTimeout(frameSave);
+  frameSave = null;
+  windowed = !mainWindow.isFullScreen();
+  if (windowed) writeFrame(lastFrame);
+}
+
+function noteFrame(next: Partial<Rect>): void {
+  lastFrame = { ...lastFrame, ...next };
+  if (!frameSave) frameSave = setTimeout(saveFrameNow, FRAME_SAVE_MS);
+}
+
+// The move/resize payloads, never getFrame(): the events report the CONTENT
+// size — the same thing the `frame:` option above sets — while getFrame()
+// returns the window including its 28px title bar. Saving one and restoring
+// through the other would shrink the window by a title bar on every launch.
+// (Both agree on x/y, and both are top-left-origin in the same global space
+// as Screen's work areas, which is what makes fitFrame's overlap test mean
+// anything. Verified live: a window handed y=0 comes back at y=33, the
+// menu bar's height, which only happens if y counts down from the top.)
+mainWindow.on("move", (event) => {
+  const { x, y } = (event as { data: { x: number; y: number } }).data;
+  noteFrame({ x, y });
+});
+mainWindow.on("resize", (event) => {
+  const { x, y, width, height } = (event as { data: Rect }).data;
+  noteFrame({ x, y, width, height });
 });
 
 process.on("exit", () => {
+  // A resize or drag in the last FRAME_SAVE_MS before ⌘Q would otherwise be
+  // lost. No FFI here — the window may already be gone — so this leans on the
+  // cached fullscreen flag rather than asking again.
+  if (frameSave && windowed) writeFrame(lastFrame);
   inlinePool.closeAll();
   for (const t of terms.values()) t.term.close();
 });
