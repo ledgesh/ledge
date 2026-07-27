@@ -1,30 +1,36 @@
 # Images
 
-Notes show their images. A markdown image reference standing alone on its own line renders as the actual picture, and the fastest way to get one there is to paste it.
+A Markdown image reference alone on its own line renders as the picture. The fastest way to get one there is to paste it.
 
-## Paste to embed
+## Paste an image
 
-Copy an image anywhere (a screenshot, a picture from the web) and press ⌘V in a note. If the pasteboard holds text, the paste is a text paste, unchanged; if it holds only an image, Ledge saves the image into the workspace and inserts the reference for you:
+Copy an image anywhere, a screenshot or a picture from the web, and press ⌘V in a note. Ledge saves the image into the workspace and inserts the reference:
 
 ```
 ![](.ledge-assets/pasted-2026-07-19.png)
 ```
 
-The file lands in `.ledge-assets/` inside the workspace folder, named by paste date, so an attached project folder carries its pasted images with it and the references stay relative. The folder is dot-prefixed on purpose: in a real project folder, Ledge's writes stay unmistakably Ledge's.
+If the pasteboard holds text, ⌘V pastes text as usual. Ledge embeds only when the pasteboard holds an image and no text.
+
+The file lands in `.ledge-assets/` inside the workspace folder, named by paste date. An attached project folder carries its pasted images with it, and the references stay relative. The folder is dot-prefixed so that Ledge's writes are identifiable inside a real project.
 
 ## What renders
 
-Two kinds of source draw as real images:
+Two kinds of source draw as images:
 
-- Web URLs: `![](https://example.com/chart.png)` loads straight from the network.
-- Workspace files: `.ledge-assets/` pastes, and any image already in the workspace folder, referenced relative to it, so a note in an attached project can show the project's own `img/logo.png`.
+- **Web URLs.** `![](https://example.com/chart.png)` loads from the network.
+- **Workspace files.** `.ledge-assets/` pastes, and any image already in the workspace folder referenced relative to it. A note in an attached project can show the project's own `img/logo.png`.
 
-The usual formats work: png, jpeg, gif, webp, avif, svg. Absolute paths and references outside the workspace stay as text, deliberately.
+Supported formats are png, jpeg, gif, webp, avif, and svg. Absolute paths and references outside the workspace stay as text.
 
-An image renders when its reference sits alone on a line and your caret is elsewhere. Click the picture (or move the caret onto its line) and it reverts to the editable markdown; move on and it becomes a picture again, the same reveal-on-touch rule as tables and links (see [[Finding Things]]). A reference inline in a sentence stays compact instead: syntax concealed, alt text styled like a link, no reflow-dodging while you read.
+An image renders when its reference sits alone on a line and your caret is elsewhere. Click the picture, or move the caret onto its line, and it reverts to editable Markdown; move away and it draws again. This is the same reveal-on-touch behavior as tables and links.
 
-## Housekeeping
+A reference inline in a sentence stays compact instead: the syntax is concealed and the alt text is styled like a link, so the line does not reflow while you read.
 
-Deleting a note never deletes its images: `.ledge-assets/` files are left in place, which is the safe side of the trade (a stray unused image is cheap, a deleted image another note referenced is not). The files are ordinary files, greppable by name and syncable with the workspace.
+## Deleting notes and images
 
-One privacy note: an image pasted into a locked note is encrypted on disk from the very first byte, and locking a note seals the images it references. [[Note Locking]] has the full story.
+Deleting a note leaves its images in place. A stray unused image is cheaper than an image another note still references.
+
+The files are ordinary files, so you can grep them by name and sync them with the workspace.
+
+An image pasted into a locked note is encrypted on disk from the first byte, and locking a note seals the images it references. See [[Note Locking]].

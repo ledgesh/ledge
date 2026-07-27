@@ -1,10 +1,10 @@
 # Remote Hosts
 
-A note can run its blocks on another machine. Add a `host:` line to the frontmatter and every run (inline, and the terminal drawer too) happens over ssh on that host, while the note itself stays right here.
+A note can run its blocks on another machine. Add a `host:` line to the frontmatter and every run, inline and in the terminal drawer, happens over ssh on that host. The note itself stays here.
 
-## Declaring hosts
+## Declare hosts
 
-`host:` takes one or more ssh destinations on a single line, separated by spaces or commas. A destination is anything ssh itself accepts: `user@machine`, a bare hostname, or an alias from your `~/.ssh/config`. The reserved word `local` means this machine.
+`host:` takes one or more ssh destinations on a single line, separated by spaces or commas. A destination is anything ssh accepts: `user@machine`, a bare hostname, or an alias from your `~/.ssh/config`. The reserved word `local` means this machine.
 
 ```
 ---
@@ -12,7 +12,7 @@ host: deploy@prod
 ---
 ```
 
-With one host declared, every run simply goes there. With more than one, Ledge asks on every run:
+With one host declared, every run goes there.
 
 ```
 ---
@@ -20,20 +20,30 @@ host: staging, deploy@prod, local
 ---
 ```
 
-A small "Run on" menu appears at the block, with your last pick focused so Enter repeats it and a different machine takes a deliberate arrow first. Asking every time is intentional: with prod sitting next to staging in the same note, no run should ever land on a remembered default you did not look at.
+With more than one, Ledge asks on every run. A "Run on" menu appears at the block with your last pick focused, so Enter repeats it and a different machine takes an arrow key first. Ledge asks every time rather than remembering a default, because prod and staging sit next to each other in the same note.
 
-## Auth is just ssh
+## Authentication
 
-Ledge runs your actual `ssh`, on a real terminal. Keys, agents, and everything in `~/.ssh/config` work as they do in any terminal, and passphrase prompts, host-key confirmations, and 2FA challenges appear in the run's output where you can answer them directly. If connections feel slow to start, `ControlMaster` in your ssh config gives you connection reuse; Ledge does not manage connections itself.
+Ledge runs your own `ssh` on a real terminal. Keys, agents, and everything in `~/.ssh/config` work as they do in any terminal, and passphrase prompts, host-key confirmations, and 2FA challenges appear in the run's output where you answer them directly.
 
-## What travels with a run
+Ledge does not manage connections. If they feel slow to start, use `ControlMaster` in your ssh config for connection reuse.
 
-Deliberately little. The note's `cwd` becomes a `cd` on the far side (where `~` means the remote home folder, and a missing directory degrades to the remote home with a message). The inline `env:` lines are exported over there. That is all.
+## What travels to the host
 
-`profile:` and `envFile:` stay local and are skipped with a warning: profiles are the secrets story, and a secret sent along an ssh command line would sit in the remote machine's process table for anyone to read. If a remote run needs configuration, put it on the remote machine.
+Two things, and no more:
 
-## What runs over there
+- The note's `cwd` becomes a `cd` on the far side. `~` means the remote home folder, and a missing directory falls back to the remote home with a message.
+- The inline `env:` lines are exported there.
 
-Shell blocks from inline runs land in a `bash -l` login shell on the remote host, so bash needs to exist there (it almost always does). The terminal drawer gets your own remote login shell, prompt and rc files intact.
+`profile:` and `envFile:` stay local and are skipped with a warning. A secret sent along an ssh command line would sit in the remote machine's process table for anyone to read ([[Profiles and Secrets]]). If a remote run needs configuration, put it on the remote machine.
 
-Interpreted blocks (`python`, `node`, and friends, per [[Running Code]]) work remotely too: the block's body travels with the run, and the interpreter is resolved from the remote machine's PATH. One difference from local runs: `ts` blocks use the remote machine's own `bun`, not the one bundled with the app, so the remote host needs bun installed for TypeScript. When a machine needs a different interpreter command than your default (say `python3.11` instead of `python3`), the `blocks.hostInterpreters` setting maps overrides per host.
+## What runs on the host
+
+Shell blocks from inline runs land in a `bash -l` login shell, so bash must exist on the host. The terminal drawer gets your own remote login shell, with your prompt and rc files intact.
+
+Interpreted blocks (`python`, `node`, and others, per [[Running Code]]) work remotely too. The block's body travels with the run, and the interpreter is resolved from the remote machine's PATH.
+
+Two differences from local runs:
+
+- `ts` blocks use the remote machine's own `bun`, not the one bundled with the app, so the host needs bun installed for TypeScript.
+- When a machine needs a different interpreter command than your default, such as `python3.11` instead of `python3`, set the override in `blocks.hostInterpreters` in Settings (⌘,).

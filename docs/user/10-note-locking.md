@@ -1,37 +1,58 @@
 # Note Locking
 
-Locking encrypts a note's body on disk behind a passphrase. It exists in this order for three audiences: agents (Ledge deliberately points AI tools at your notes, and a locked body is never available to them, even while you have the note open), sync services (a locked note leaves the machine as ciphertext), and anyone at your screen (locked notes need an unlock to read).
+Locking encrypts a note's body on disk behind a passphrase. It protects the note from three readers, in this order:
 
-## Locking a note
+- **Agents.** Ledge points AI tools at your notes, and a locked body is never available to them, even while you have the note open.
+- **Sync services.** A locked note leaves the machine as ciphertext.
+- **Anyone at your screen.** Reading a locked note requires an unlock.
 
-Run "Lock This Note…" from the command palette. The very first lock sets up the vault: you choose a passphrase, typed twice, and the dialog states the contract in one sentence, because it matters: there is no recovery. A forgotten passphrase is the note's body, gone.
+## Lock a note
 
-Locking an existing note also seals the images it references (a screenshot pasted into a sensitive note is routinely the most sensitive thing in it), and the dialog reminds you of one honest limit: versions of the note that a sync service or backup captured before the lock stay whatever they were. Only a note born locked has a clean history.
+Run "Lock This Note…" from the command palette.
 
-"Remove Lock…" is the way back: it decrypts the note (and its images, unless another locked note still uses them) behind one confirmation, because the consequence is exposure: the next sync or agent scan sees the body.
+The first lock sets up the vault. You choose a passphrase, typed twice, and the dialog states the contract: there is no recovery. A forgotten passphrase means the note's body is gone.
 
-## Locked and unlocked
+Locking a note also seals the images it references, since a screenshot pasted into a sensitive note is often the most sensitive thing in it.
 
-One passphrase covers all locked notes, app-wide. Opening a locked note while the vault is shut asks for it right there; a wrong passphrase shakes and lets you retry, and "Unlock Notes…" in the palette asks proactively. Once unlocked, every locked note reads and edits like a normal note, and saves go back to disk encrypted.
+One limit the dialog repeats: versions of the note that a sync service or backup captured before the lock are still plaintext wherever they were captured. Only a note that was locked from the start has a clean history.
 
-⌘L is the walking-away gesture: Lock Notes relocks the vault immediately. The vault also relocks itself after 15 minutes of inactivity. Locked notes' rows wear a lock glyph in the sidebar and ⌘P, drawn open while the vault is unlocked, so "readable right now" is visible without opening anything.
+## Remove a lock
 
-"Change Vault Passphrase…" rewraps every locked note under the new passphrase (contents untouched) and reports how many it found. And a locked note is self-contained: synced to another machine, it unlocks with the passphrase alone.
+"Remove Lock…" decrypts the note, and its images unless another locked note still uses them, behind one confirmation. After that the next sync or agent scan sees the body.
+
+## Unlock and relock
+
+One passphrase covers every locked note, app-wide.
+
+- Opening a locked note while the vault is shut asks for the passphrase there. A wrong passphrase shakes and lets you retry.
+- "Unlock Notes…" in the palette asks for it up front.
+- ⌘L runs Lock Notes, which relocks the vault immediately. Use it when you walk away.
+- The vault also relocks itself after 15 minutes of inactivity.
+
+Once unlocked, every locked note reads and edits like a normal note, and saves go back to disk encrypted. Locked notes show a lock glyph in the sidebar and in ⌘P, drawn open while the vault is unlocked, so you can see what is readable without opening anything.
+
+"Change Vault Passphrase…" rewraps every locked note under the new passphrase, leaving contents untouched, and reports how many it found.
+
+A locked note is self-contained. Synced to another machine, it unlocks with the passphrase alone.
 
 ## What stays visible
 
-Stated plainly so nothing surprises you later:
+Locking hides the body. It does not hide:
 
-- The title, as the filename and H1, everywhere titles appear: sidebar, ⌘P, wikilinks. That is what keeps navigation and linking working without decryption. If the title itself is the secret, title the note blandly.
-- The frontmatter, including tags: a tag on a locked note still shows in the tags panel.
-- That the file exists, its size, and its modification time.
+- **The title**, as the filename and the H1, everywhere titles appear: the sidebar, ⌘P, and wikilinks. This is what keeps navigation and linking working without decryption. If the title itself is the secret, give the note a bland one.
+- **The frontmatter**, including tags. A tag on a locked note still shows in the tags panel.
+- **The file's existence**, its size, and its modification time.
 
-Full-text search, backlinks, and tags scans skip locked bodies, and the panels say how many notes they skipped, so a partial answer is visibly partial rather than quietly wrong (see [[Finding Things]]).
+Full-text search, backlinks, and tag scans skip locked bodies. The panels report how many notes they skipped, so a partial answer looks partial ([[Finding Things]]).
 
-## Locking and everything else
+## How locking interacts with the rest of Ledge
 
-Agent surfaces ([[Agents and Ledge]]) refuse locked bodies by construction: reading a locked note over MCP or the CLI returns a refusal, listings flag locked notes so agents can plan around them, and `prompt` fences in a locked note render with their run buttons disabled, since their whole job is sending the body to an agent. Other code blocks in a locked note still run: the commands in a locked ops note are your own compute, and running them is the point.
+- **Agents** ([[Agents and Ledge]]) cannot read locked bodies. Reading a locked note over MCP or the CLI returns a refusal, and listings flag locked notes so agents can plan around them.
+- **`prompt` fences** in a locked note have their run buttons disabled, since their job is to send the body to an agent.
+- **Other code blocks** in a locked note still run. The commands in a locked ops note are yours to run.
+- **Templates** cannot be locked. A template's body exists to be stamped into new notes.
+- **The `locked:` frontmatter line** is machine-owned. Deleting it in the editor decrypts nothing; only "Remove Lock…" does.
 
-A locked note cannot be a template (a template's body exists to be stamped into new notes, the opposite of locked), and the `locked:` frontmatter line is machine-owned: deleting it in the editor does not decrypt anything; only "Remove Lock…" does.
+## Limits
 
-And the honest boundary: locking protects notes at rest and from the software Ledge itself invites in. It is not a defense against malware running as you or a stolen machine that is already unlocked. FileVault is the answer for stolen hardware; locking rides on top of it, not instead of it.
+Locking protects notes at rest and from the software Ledge invites in. It does not defend against malware running as you, or against a stolen machine that is already unlocked. Use FileVault for stolen hardware. Locking sits on top of it, not instead of it.

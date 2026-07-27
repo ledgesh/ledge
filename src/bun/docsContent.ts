@@ -14,10 +14,11 @@
 // so the manifest's numbering decides how the manual reads top to bottom —
 // titles stay clean, and renumbering is just a rename the sync absorbs.
 //
-// Authoring rules: one line per paragraph, no hard wrapping (these pages
-// render in the editor, which soft-wraps; an 80-column wrap, the style of
-// the repo docs next door, shows up as broken lines mid-sentence) — and no
-// em dashes in the prose.
+// Authoring rules live in docs/contributor/writing.md (style, headings,
+// voice). The two mechanical ones that bite here: one line per paragraph, no
+// hard wrapping (these pages render in the editor, which soft-wraps; an
+// 80-column wrap, the style of the repo docs next door, shows up as broken
+// lines mid-sentence) — and no em dashes in the prose.
 import gettingStarted from "../../docs/user/01-getting-started.md" with { type: "text" };
 import runningCode from "../../docs/user/02-running-code.md" with { type: "text" };
 import notesAndWorkspaces from "../../docs/user/03-notes-and-workspaces.md" with { type: "text" };

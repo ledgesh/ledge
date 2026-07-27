@@ -235,7 +235,7 @@ of a misfire is asymmetric. The rules:
   every requested host against the note's declared list
   (architecture.md §6a).
 
-## 4b. The run confirmation (blocks that ask first)
+## 4b. The run confirmation (`confirm`)
 
 §4 governs what the *app* destroys. A code block destroys whatever its author
 wrote, which the app cannot classify — `rm -rf ./cache` and `ls` are the same

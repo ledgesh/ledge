@@ -1,14 +1,28 @@
 # The ledge CLI
 
-Your notes are reachable from any terminal. The `ledge` command lists, reads, searches, creates, and appends to notes from a shell prompt, and the running app follows along live, since a CLI write is just an ordinary file change to it.
+The `ledge` command lists, reads, searches, creates, and appends to notes from any terminal. The running app follows along live, because a CLI write is an ordinary file change.
 
 ## Install
 
-Run "Install Shell Command (ledge)" from the command palette, or `ledge install` if you already have it somewhere. It writes a small shim onto your PATH (Homebrew's bin, `/usr/local/bin`, or `~/.local/bin`, whichever works), pointing at this copy of Ledge. If you move the app, run it again.
+Run "Install Shell Command (ledge)" from the command palette, or `ledge install` if you already have the binary somewhere.
+
+It writes a small shim onto your PATH (Homebrew's bin, `/usr/local/bin`, or `~/.local/bin`, whichever works) pointing at this copy of Ledge. If you move the app, run it again.
 
 ## The verbs
 
-`ledge help` prints the full usage. The daily drivers:
+`ledge help` prints the full usage.
+
+| Verb | What it does |
+| --- | --- |
+| `ledge ls` | Lists notes. |
+| `ledge search <query>` | Prints `path:line: match` rows like grep, and exits nonzero on no hits. |
+| `ledge cat <title>` | Prints a note's Markdown. |
+| `ledge tags` | Lists the workspace's tags with counts. `ledge tags <name>` lists the notes bearing one. |
+| `ledge workspaces` | Lists the workspace roots. |
+| `ledge new <title>` | Creates a note, with the body piped on stdin or stamped from `--template`. |
+| `ledge append <title>` | Appends to a note, or to one heading's section with `--heading`. |
+| `ledge today` | Opens today's daily note in the app. |
+| `ledge <title>` | Opens the app at that note. `ledge` alone just opens the app. |
 
 ```sh
 ledge ls
@@ -16,23 +30,27 @@ ledge search "spawn params"
 ledge cat "Shipping Notes"
 ```
 
-`ls` lists notes, `search` prints `path:line: match` rows like grep (and exits nonzero on no hits, so it scripts like grep too), `cat` prints a note's markdown. Notes are addressed by title; an argument ending in `.md` is taken as a path instead. `ledge tags` lists the workspace's tags with counts, `ledge tags <name>` the notes bearing one, and `ledge workspaces` the roots.
-
-Writing:
+Notes are addressed by title. An argument ending in `.md` is treated as a path instead.
 
 ```
 ledge new "Standup" --template "Meeting"
 git log --oneline -5 | ledge append "Release Notes" --heading "Shipped"
 ```
 
-`new` creates a note (body piped on stdin, or stamped from a template with the usual `{{tokens}}`; see [[Daily Notes and Templates]]), and `append` adds to the end of a note, or to the end of one heading's section with `--heading`. Titles never clobber: a duplicate gets a numbered file, same as in the app.
+`--template` stamps the usual `{{tokens}}` (see [[Daily Notes and Templates]]). Titles never clobber: a duplicate gets a numbered file, the same as in the app.
 
-And for jumping into the app: `ledge` alone opens Ledge, `ledge <title>` opens it at that note, and `ledge today` lands in today's daily note.
+## Scope: workspace and note
 
-## The CLI knows where you are
+Run `ledge` from inside a workspace folder and it scopes itself there. `ls` and `search` cover that workspace, and `new` creates in it.
 
-Run `ledge` from inside a workspace folder and it scopes itself there: `ls` and `search` cover that workspace, `new` creates in it. Inside a note's terminal drawer it goes one step further and knows the note itself, so a bare `ledge append -m "TODO: check the logs"` appends to the note the terminal belongs to. An explicit `-w <workspace>` overrides all of that, and `--all` widens `ls` and `search` to every workspace.
+Inside a note's terminal drawer it also knows the note, so a bare `ledge append -m "TODO: check the logs"` appends to the note the terminal belongs to.
 
-## Made for pipes and agents
+Two flags override that: `-w <workspace>` targets a specific workspace, and `--all` widens `ls` and `search` to every workspace.
 
-Results go to stdout, everything conversational to stderr, so pipes stay clean; `--json` switches any verb to machine-readable output. The CLI dispatches through exactly the same handlers as the MCP tools (see [[Agents and Ledge]]), so it obeys the same rules: titles resolve the same way, locked notes refuse their bodies, and there is no delete verb. Which also makes it a fine agent surface in its own right: an agent that can run shell commands can work your notes with `ledge` alone, no MCP setup required.
+## Piping and JSON output
+
+Results go to stdout and everything conversational to stderr, so pipes stay clean. `--json` switches any verb to machine-readable output.
+
+The CLI dispatches through the same handlers as the MCP tools ([[Agents and Ledge]]), so it follows the same rules: titles resolve the same way, locked notes refuse their bodies, and there is no delete verb.
+
+That makes it an agent surface in its own right. An agent that can run shell commands can work your notes with `ledge` alone, with no MCP setup.

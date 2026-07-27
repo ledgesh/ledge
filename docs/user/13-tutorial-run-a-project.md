@@ -1,16 +1,21 @@
 # Tutorial: Run a Project from a Note
 
-This tutorial turns a real project folder into a workspace with one living note that builds, tests, and runs the project. It pulls together [[Notes and Workspaces]], [[Running Code]], and [[Frontmatter and Environments]] into one workflow.
+Turn a project folder into a workspace with one note that builds, tests, and runs the project.
 
-## Attach the project
+This uses [[Notes and Workspaces]], [[Running Code]], and [[Frontmatter and Environments]].
 
-Run "Attach Folder as Workspace…" from the command palette (⇧⌘P) and pick your project's folder. Two things happen at once: every `.md` file already in the project (the README, the docs folder) becomes a note, and every note's shells now start in the project folder by default, no frontmatter needed.
+## 1. Attach the project
 
-Vendor and build directories (`node_modules` and friends) are ignored automatically. If the listing still shows markdown you do not want as notes, drop a `.ledgeignore` file in the folder root with one pattern per line, gitignore-style.
+Run "Attach Folder as Workspace…" from the command palette (⇧⌘P) and pick your project's folder. Two things happen:
 
-## Make a playbook note
+- Every `.md` file already in the project, such as the README and the docs folder, becomes a note.
+- Every note's shells start in the project folder, with no frontmatter needed.
 
-Create a note (⇧⌘N) in the new workspace and give it the commands you actually run, as fenced blocks:
+Vendor and build directories such as `node_modules` are ignored. If the listing still shows Markdown you do not want as notes, add a `.ledgeignore` file in the folder root with one gitignore-style pattern per line.
+
+## 2. Write a playbook note
+
+Create a note with ⇧⌘N and give it the commands you actually run, as fenced blocks:
 
 ````
 # Playbook
@@ -26,11 +31,13 @@ npx vitest run
 ```
 ````
 
-Now the project's routine is documentation and buttons at the same time: ⌘↩ runs a block inline where you can read the output next to the prose, ⇧⌘↩ sends it to the terminal drawer when you want to keep interacting. Because the inline shell is persistent, an exported variable or an activated virtualenv in the Setup block is still there when the Test block runs.
+The project's routine is now documentation and buttons at once. ⌘↩ runs a block inline, with the output next to the prose. ⇧⌘↩ sends it to the terminal drawer when you want to keep interacting.
 
-## Give it an environment
+The inline shell persists, so an exported variable or an activated virtualenv from the Setup block is still there when the Test block runs.
 
-If the project keeps configuration in a dotenv file, one frontmatter line (⌥⌘,) folds it into every shell the note spawns:
+## 3. Give it an environment
+
+If the project keeps configuration in a dotenv file, add one frontmatter line with ⌥⌘,:
 
 ```
 ---
@@ -38,14 +45,14 @@ envFile: .env
 ---
 ```
 
-Real secrets go one step further: `profile: myproject` keeps them in a file outside the notes entirely, so the project folder (and anything syncing it) never carries credentials. See [[Profiles and Secrets]].
+For real secrets, use `profile: myproject` instead. The values live in a file outside the notes, so the project folder and anything syncing it never carry credentials. See [[Profiles and Secrets]].
 
-## Grow into it
+## Where to go next
 
-Some directions this scales, each one line of frontmatter or one new block away:
+Each of these is one line of frontmatter or one new block away:
 
 - A deploy note with `host: deploy@prod` runs its blocks on the server instead of your machine ([[Remote Hosts]]).
-- A `prompt` fence like "Read the test output above and suggest a fix" puts an agent inside the loop ([[Agents and Ledge]]).
-- Wikilinks tie the playbook to design notes and incident notes, and backlinks (⌥⌘L) tie them back ([[Finding Things]]).
+- A `prompt` fence such as "Read the test output above and suggest a fix" puts an agent in the loop ([[Agents and Ledge]]).
+- Wikilinks tie the playbook to design and incident notes, and backlinks (⌥⌘L) tie them back ([[Finding Things]]).
 
-The habit this tutorial is really about: when you catch yourself typing the same commands in a terminal twice, put them in the note where their context lives, and run them from there.
+The habit worth building: when you catch yourself typing the same commands twice, put them in the note where their context lives and run them from there.

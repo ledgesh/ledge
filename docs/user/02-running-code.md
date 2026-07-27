@@ -1,22 +1,24 @@
 # Running Code
 
-This is what Ledge is for. Any fenced code block whose language is runnable gets a Run button, and the shell behind it belongs to the note it sits in. This page covers what runs where, and how to bend both.
+Any fenced code block whose language is runnable gets a Run button, and the shell behind it belongs to the note it sits in. This page covers what runs where, and how to change both.
 
-## Two ways to run
+## Run a block inline or in the terminal
 
-⌘↩ runs the block under the caret inline: output streams into a panel right beneath the block and stays until you dismiss it. Hovering a block shows the same Run button plus Copy, a running block's button turns into a stop, and the output panel offers Copy Output and Dismiss.
+⌘↩ runs the block under the caret inline. Output streams into a panel beneath the block and stays until you dismiss it. Hovering a block shows Run and Copy, a running block's Run button becomes Stop, and the output panel offers Copy Output and Dismiss.
 
-⇧⌘↩ sends the block to the note's terminal drawer instead (⌃` toggles the drawer). The block lands in a real terminal where you can keep typing after it has finished, which the inline panel does not offer: an inline run is over when the command is.
+⇧⌘↩ sends the block to the note's terminal drawer instead (⌃` toggles the drawer). There you can keep typing after the command finishes. An inline run ends when its command does.
 
-## Answering a run
+## Answer a prompt from a running block
 
-An inline run can ask you things. When one prints its first output it takes the keyboard, so a `sudo` password prompt or a `[y/N]` is answered by just typing: the panel lights up and its header says "typing here" while your keys are going to the program, and focus returns to the note when the command finishes. If you pressed ⌘↩ and carried on writing, the run leaves you alone, however loud it gets: your caret moved on, so your typing stays in the note.
+An inline run can ask you things. When it prints its first output it takes the keyboard, so you answer a `sudo` password prompt or a `[y/N]` by typing. The panel header reads "typing here" while your keys go to the program, and focus returns to the note when the command finishes.
 
-To step out of a running command yourself, press Escape twice (the first one goes to the program, in case it wanted it) or ⌘Escape. While a full-screen program like `vim` has the panel, every Escape belongs to it and ⌘Escape is the way out.
+If you pressed ⌘↩ and carried on writing, the run does not take the keyboard. Your caret moved on, so your typing stays in the note.
 
-## Blocks that ask first
+To leave a running command, press Escape twice (the first Escape goes to the program, in case it wanted it) or ⌘Escape. While a full-screen program such as `vim` holds the panel, every Escape belongs to it, and ⌘Escape is the way out.
 
-Some blocks you want to think about twice. Write `confirm` after the language on the fence and Ledge puts a dialog between the chord and the shell:
+## Confirm before running
+
+Add `confirm` after the language on the fence and Ledge asks before running the block:
 
 ````markdown
 ```sh confirm
@@ -24,15 +26,24 @@ rm -rf ./cache
 ```
 ````
 
-Here is a live one, harmless on purpose. Press its Run button, or ⌘↩ with the caret inside it:
+Here is a live one, harmless. Press Run, or ⌘↩ with the caret inside it:
 
 ```sh confirm
 echo "this one asked first"
 ```
 
-The dialog shows the block's own code, says where it is about to run, and opens with Cancel focused, so a stray Return does nothing. Nothing has executed while it is up, and cancelling remembers nothing: the next ⌘↩ asks again. There is no "don't ask again", because a remembered yes is exactly what the marker exists to prevent.
+The dialog shows the block's code, names where it is about to run, and opens with Cancel focused, so a stray Return does nothing. Nothing runs while the dialog is up. Cancelling remembers nothing, and the next ⌘↩ asks again. There is no "don't ask again".
 
-Give it your own question when the code alone does not say enough:
+Four ways to set it:
+
+| Where | What it does |
+| --- | --- |
+| `confirm` on the fence | That block asks. |
+| `confirm="Wipe the production cache?"` on the fence | That block asks, using your wording. |
+| `confirm: true` in the note's frontmatter | Every runnable block in the note asks. |
+| `confirm=no` on the fence | That block never asks, even under `confirm: true`. |
+
+Use the custom message when the code alone does not say enough:
 
 ````markdown
 ```sh confirm="Wipe the production cache?"
@@ -40,15 +51,15 @@ redis-cli -n 0 flushdb
 ```
 ````
 
-On a note that declares several machines ([[Remote Hosts]]) you pick the machine first and the question names it, so the last thing you read before running is which box you are about to do this on.
+On a note that declares several machines ([[Remote Hosts]]) you pick the machine first, and the question names it. The last thing you read before running is which machine you are running on.
 
-If a whole note is like that (a runbook where every block is consequential) put `confirm: true` in its frontmatter and every runnable block in it asks. The fence still has the last word, so the one harmless block opts out with `confirm=no`.
+`confirm` lives in the fence's info string, which other Markdown renderers ignore. The block still highlights as `sh` on GitHub and in any editor, and the marker travels with the block when you copy it into another note.
 
-`confirm` is just a word in the fence's info string, which is free space every Markdown renderer ignores: the block still highlights as `sh` on GitHub and in any editor, and the marker travels with the block when you copy it into another note. It is a speedbump against muscle memory, not a lock. Anyone who can edit the note can delete the word.
+This is a speedbump against muscle memory, not a lock. Anyone who can edit the note can delete the word.
 
-## Shell blocks share a shell
+## Shell blocks share one shell
 
-Shell blocks (`sh`, `bash`, `zsh`) are fed to the note's persistent inline shell: one shell per note, so a `cd`, an exported variable, or an activated virtualenv carries into the next run.
+Shell blocks (`sh`, `bash`, `zsh`) run in the note's persistent inline shell. There is one per note, so a `cd`, an exported variable, or an activated virtualenv carries into the next run.
 
 ```sh
 count=$((${count:-0} + 1))
@@ -57,18 +68,20 @@ echo "run number $count"
 
 Run that twice and the number climbs, because it is the same shell both times.
 
-The terminal drawer is a separate shell from the inline one, but both belong to this note alone, and both start where the note's frontmatter points them (`cwd`, `env` and friends: see [[Frontmatter and Environments]]). Frontmatter changes apply to freshly spawned shells, so after editing it, run "Restart Note Shell" from the palette: it kills the note's shells and lets them respawn clean. The same command is the escape hatch when an experiment leaves the environment weird.
+The terminal drawer is a separate shell from the inline one. Both belong to this note alone, and both start where the note's frontmatter points them (`cwd`, `env`, and the rest: see [[Frontmatter and Environments]]).
+
+Frontmatter applies to newly spawned shells, so after editing it run "Restart Note Shell" from the palette. It kills the note's shells and lets them respawn. Use the same command when an experiment leaves a shell in a strange state.
 
 ## Interpreted languages
 
-Languages with an interpreter mapping (`python`, `node`, `ruby`, `ts`, `php` and friends) run as a file handed to that interpreter, one fresh process per run, so no state carries between their runs.
+Languages with an interpreter mapping (`python`, `node`, `ruby`, `ts`, `php`, and others) run as a file handed to that interpreter, one fresh process per run. No state carries between runs.
 
 ```python
 import platform
 print(f"hello from Python {platform.python_version()}")
 ```
 
-TypeScript is special-cased to the Bun runtime bundled with the app, so `ts` blocks run without anything installed.
+TypeScript uses the Bun runtime bundled with the app, so `ts` blocks run with nothing installed.
 
 ## Redis and Valkey
 
@@ -79,24 +92,35 @@ PING
 INFO server
 ```
 
-With nothing configured it talks to a server on this machine. Set `REDIS_URL` in the note's frontmatter `env`, or in a [[Frontmatter and Environments]] profile when the URL carries a password, and the same block points at staging instead. Because the target is a note-level fact, two notes can hold the same commands aimed at different servers. Valkey speaks the same protocol, so `redis-cli` drives a Valkey server too; if `valkey-cli` is the binary you have installed, name it in settings (below) and the fences keep working.
+With nothing configured it talks to a server on this machine. Set `REDIS_URL` in the note's frontmatter `env`, or in a profile when the URL carries a password ([[Profiles and Secrets]]), and the same block points at staging instead. The target is a note-level fact, so two notes can hold the same commands aimed at different servers.
 
-## Make more languages runnable
+Valkey speaks the same protocol, so `redis-cli` drives a Valkey server too. If `valkey-cli` is the binary you have installed, name it in `blocks.interpreters` (below).
 
-Settings (⌘,) owns both lists: `blocks.runnable` names the fence languages that get a Run button, and `blocks.interpreters` maps a language to the command that runs it. Interpreter values may carry flags (`"python3 -u"`), and `blocks.hostInterpreters` overrides them per machine for runs a note sends over ssh ([[Remote Hosts]]).
+## Add a language
 
-SQL is the example worth walking through, because it is the one most people want next. Add `"sql"` to `runnable` and this to `interpreters`:
+Settings (⌘,) holds both lists:
+
+- `blocks.runnable` names the fence languages that get a Run button.
+- `blocks.interpreters` maps a language to the command that runs it. Values may carry flags, such as `"python3 -u"`.
+- `blocks.hostInterpreters` overrides interpreters per machine, for runs a note sends over ssh ([[Remote Hosts]]).
+
+SQL is the common case. Add `"sql"` to `runnable` and this to `interpreters`:
 
 ```json
 "sql": "psql \"$DATABASE_URL\" -f"
 ```
 
-Relaunch, and `sql` fences run against whatever `DATABASE_URL` the note's frontmatter names, exactly like `REDIS_URL` above.
+Relaunch, and `sql` fences run against whatever `DATABASE_URL` the note's frontmatter names, the same way `REDIS_URL` works above.
 
 ```sql
 select count(*) from orders where created_at > now() - interval '1 day';
 ```
 
-There is deliberately no default for `sql`, because the word does not say which engine you mean: put `mysql`, `sqlite3 mydb.db <`, or `duckdb` there instead to match your engine of choice. Two things to expect from a database fence: Client tools page their output, so a wide result opens the pager inside the block and waits for you to quit it (you can type into a running block). And a query with no `limit` prints every row it gets, so keep the limits you would keep in a terminal.
+There is no default for `sql`, because the word does not say which engine you mean. Use `mysql`, `sqlite3 mydb.db <`, or `duckdb` to match yours.
 
-One more fence worth knowing about: a `prompt` block sends its text to an AI agent (Claude Code by default) with the note's own context attached. [[Agents and Ledge]] has the full story.
+Two things to expect from a database fence:
+
+- Client tools page their output, so a wide result opens the pager inside the block and waits for you to quit it. You can type into a running block.
+- A query with no `limit` prints every row it gets. Keep the limits you would keep in a terminal.
+
+One more fence: a `prompt` block sends its text to an AI agent (Claude Code by default) with the note's context attached. See [[Agents and Ledge]].

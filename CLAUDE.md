@@ -33,6 +33,12 @@ the app as its built-in docs, via `src/bun/docsContent.ts`) lives in
   behavior, live WKWebView probe recipe for the native seams (always against
   a scratch `LEDGE_NOTES_ROOT`). Read before writing tests or calling work
   done.
+- **[writing.md](docs/contributor/writing.md)** — documentation style: headings
+  name the feature keyword-first, lead with the answer, one idea per sentence,
+  mechanism before rationale, no aphorisms or design self-commentary, facts in
+  tables, Diátaxis mode separation, plus the `docs/user/` mechanics (one line
+  per paragraph, no em dashes, H1s are wikilink targets). Read before writing
+  or editing any page in `docs/`.
 
 These are normative: if code and doc disagree, one of them is wrong — fix
 deliberately, not silently.
