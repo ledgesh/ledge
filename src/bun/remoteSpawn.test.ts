@@ -11,6 +11,7 @@ const noParams = (over: Partial<NoteParams> = {}): NoteParams => ({
   hosts: ["web1"],
   tags: [],
   template: false,
+  confirm: false,
   ...over,
 });
 

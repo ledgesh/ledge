@@ -48,15 +48,15 @@ describe("frontmatterEnd", () => {
 describe("parseFrontmatter", () => {
   test("a note with no frontmatter yields empty params and no problems", () => {
     const { params, problems, end } = parseFrontmatter("# Title\nbody");
-    expect(params).toEqual({ cwd: null, profile: null, envFile: null, env: {}, hosts: [], tags: [], template: false, locked: null });
+    expect(params).toEqual({ cwd: null, profile: null, envFile: null, env: {}, hosts: [], tags: [], template: false, confirm: false, locked: null });
     expect(problems).toEqual([]);
     expect(end).toBe(0);
   });
 
-  test("all eight keys parse together", () => {
+  test("all nine keys parse together", () => {
     const { params, problems } = parseFrontmatter(
       fm(
-        "cwd: ~/Projects/ledge\nprofile: petstore\nenvFile: ./.env\nhost: web1 deploy@prod\ntags: work, ledge\ntemplate: true\nlocked: v1.aa.bb.cc\nenv:\n  NODE_ENV: development\n  PORT: 3000\n",
+        "cwd: ~/Projects/ledge\nprofile: petstore\nenvFile: ./.env\nhost: web1 deploy@prod\ntags: work, ledge\ntemplate: true\nconfirm: true\nlocked: v1.aa.bb.cc\nenv:\n  NODE_ENV: development\n  PORT: 3000\n",
       ),
     );
     expect(params).toEqual({
@@ -67,6 +67,7 @@ describe("parseFrontmatter", () => {
       hosts: ["web1", "deploy@prod"],
       tags: ["work", "ledge"],
       template: true,
+      confirm: true,
       locked: "v1.aa.bb.cc",
     });
     expect(problems).toEqual([]);
@@ -92,6 +93,16 @@ describe("parseFrontmatter", () => {
     const { params, problems } = parseFrontmatter(fm("template: yes\n"));
     expect(params.template).toBe(false);
     expect(problems).toEqual([`"template" must be true, false, or daily: "yes"`]);
+  });
+
+  test("confirm takes exactly true or false; anything else costs the line", () => {
+    expect(parseFrontmatter(fm("confirm: true\n")).params.confirm).toBe(true);
+    expect(parseFrontmatter(fm("confirm: false\n")).params.confirm).toBe(false);
+    const { params, problems } = parseFrontmatter(fm("confirm: always\n"));
+    // A typo must not read as "asks first": the key exists so the user KNOWS
+    // which blocks pause, and a silent yes is as wrong as a silent no.
+    expect(params.confirm).toBe(false);
+    expect(problems).toEqual([`"confirm" must be true or false: "always"`]);
   });
 
   test("an env var named template is an env var, not the marker", () => {
@@ -290,7 +301,7 @@ describe("parseFrontmatter", () => {
 
   test("an empty block is valid and empty", () => {
     const { params, problems, end } = parseFrontmatter("---\n---\n# Title\n");
-    expect(params).toEqual({ cwd: null, profile: null, envFile: null, env: {}, hosts: [], tags: [], template: false, locked: null });
+    expect(params).toEqual({ cwd: null, profile: null, envFile: null, env: {}, hosts: [], tags: [], template: false, confirm: false, locked: null });
     expect(problems).toEqual([]);
     expect(end).toBeGreaterThan(0);
   });

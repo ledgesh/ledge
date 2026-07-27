@@ -14,6 +14,38 @@ An inline run can ask you things. When one prints its first output it takes the 
 
 To step out of a running command yourself, press Escape twice (the first one goes to the program, in case it wanted it) or ⌘Escape. While a full-screen program like `vim` has the panel, every Escape belongs to it and ⌘Escape is the way out.
 
+## Blocks that ask first
+
+Some blocks you want to think about twice. Write `confirm` after the language on the fence and Ledge puts a dialog between the chord and the shell:
+
+````markdown
+```sh confirm
+rm -rf ./cache
+```
+````
+
+Here is a live one, harmless on purpose. Press its Run button, or ⌘↩ with the caret inside it:
+
+```sh confirm
+echo "this one asked first"
+```
+
+The dialog shows the block's own code, says where it is about to run, and opens with Cancel focused, so a stray Return does nothing. Nothing has executed while it is up, and cancelling remembers nothing: the next ⌘↩ asks again. There is no "don't ask again", because a remembered yes is exactly what the marker exists to prevent.
+
+Give it your own question when the code alone does not say enough:
+
+````markdown
+```sh confirm="Wipe the production cache?"
+redis-cli -n 0 flushdb
+```
+````
+
+On a note that declares several machines ([[Remote Hosts]]) you pick the machine first and the question names it, so the last thing you read before running is which box you are about to do this on.
+
+If a whole note is like that (a runbook where every block is consequential) put `confirm: true` in its frontmatter and every runnable block in it asks. The fence still has the last word, so the one harmless block opts out with `confirm=no`.
+
+`confirm` is just a word in the fence's info string, which is free space every Markdown renderer ignores: the block still highlights as `sh` on GitHub and in any editor, and the marker travels with the block when you copy it into another note. It is a speedbump against muscle memory, not a lock. Anyone who can edit the note can delete the word.
+
 ## Shell blocks share a shell
 
 Shell blocks (`sh`, `bash`, `zsh`) are fed to the note's persistent inline shell: one shell per note, so a `cd`, an exported variable, or an activated virtualenv carries into the next run.

@@ -19,8 +19,10 @@ import {
   resizeInline,
   inputInline,
   requestHostPick,
+  requestRunConfirm,
   type RunDestination,
 } from "./bridge";
+import { confirmFor, parseFenceInfo, type ConfirmSpec } from "./fenceInfo";
 import { declaredHosts, frontmatterRange, profileChipAnchor } from "./frontmatter";
 import { LOCAL_HOST, parseFrontmatter } from "../../shared/frontmatter";
 import { sessionIdFacet } from "./session";
@@ -52,6 +54,9 @@ interface Block {
   to: number;
   lang: string | null;
   code: string;
+  // The fence's confirm marker resolved against the note's default, or null
+  // when this block runs straight through (editor/fenceInfo.ts).
+  confirm: ConfirmSpec | null;
 }
 
 // --- Run state -------------------------------------------------------------
@@ -130,19 +135,19 @@ function blockAt(state: EditorView["state"], pos: number): Block | null {
   return box.range ? readBlock(state, box.range.from, box.range.to) : null;
 }
 
-// The language on the opening fence line, e.g. "sh" from "```sh". Read from the
-// line text rather than Lezer child nodes, whose names/shape are less stable.
-function langFromFence(state: EditorView["state"], from: number): string | null {
-  const line = state.doc.lineAt(from).text;
-  const match = line.match(/^\s*(?:`{3,}|~{3,})\s*([^\s`~]*)/);
-  return match && match[1] ? match[1].trim() : null;
+// The opening fence line's info string, e.g. `sh confirm` from "```sh confirm".
+// Read from the line text rather than Lezer child nodes, whose names/shape are
+// less stable; the grammar (and what an attribute means) lives in fenceInfo.ts.
+function infoFromFence(state: EditorView["state"], from: number) {
+  return parseFenceInfo(state.doc.lineAt(from).text);
 }
 
 function readBlock(state: EditorView["state"], from: number, to: number): Block {
   const doc = state.doc;
   const openLine = doc.lineAt(from);
   const endLine = doc.lineAt(Math.min(to, doc.length));
-  const lang = langFromFence(state, from);
+  const info = infoFromFence(state, from);
+  const lang = info.lang;
 
   // Body is the lines strictly between the opening fence and the closing fence.
   const firstBody = openLine.number + 1;
@@ -151,14 +156,19 @@ function readBlock(state: EditorView["state"], from: number, to: number): Block 
   if (lastBody >= firstBody) {
     code = doc.sliceString(doc.line(firstBody).from, doc.line(lastBody).to);
   }
-  return { from, to, lang, code };
+  return { from, to, lang, code, confirm: confirmFor(info.attrs, noteConfirms(state)) };
 }
 
-function eachBlock(state: EditorView["state"], cb: (from: number, to: number, lang: string | null) => void): void {
+function eachBlock(
+  state: EditorView["state"],
+  cb: (from: number, to: number, lang: string | null, asks: boolean) => void,
+): void {
+  const noteDefault = noteConfirms(state);
   syntaxTree(state).iterate({
     enter(node) {
       if (node.name !== "FencedCode") return;
-      cb(node.from, node.to, langFromFence(state, node.from));
+      const info = infoFromFence(state, node.from);
+      cb(node.from, node.to, info.lang, confirmFor(info.attrs, noteDefault) !== null);
     },
   });
 }
@@ -204,6 +214,12 @@ function noteLocked(state: EditorState): boolean {
   return parseFrontmatter(state.sliceDoc(0, Math.min(4096, state.doc.length))).params.locked !== null;
 }
 
+// Whether this note declares `confirm: true` — every runnable block asks
+// first, unless its own fence says otherwise. Same cheap head read.
+function noteConfirms(state: EditorState): boolean {
+  return parseFrontmatter(state.sliceDoc(0, Math.min(4096, state.doc.length))).params.confirm;
+}
+
 export function runBlock(view: EditorView, pos: number, destination: RunDestination): boolean {
   const block = blockAt(view.state, pos);
   if (!block || !isRunnable(block.lang)) return false;
@@ -231,7 +247,9 @@ export function runBlock(view: EditorView, pos: number, destination: RunDestinat
     // Output goes to the drawer; no inline panel is created here. The declared
     // list rides along un-picked: the drawer is one shell with one host for
     // its whole life, so whether a picker is even meaningful (only when this
-    // paste is what spawns the shell) is App's call, not per-block ours.
+    // paste is what spawns the shell) is App's call, not per-block ours. The
+    // confirm marker rides along for the same reason — the dialog belongs
+    // after the machine is settled, and App is where that happens.
     toNative({
       type: "run",
       sessionId,
@@ -240,6 +258,7 @@ export function runBlock(view: EditorView, pos: number, destination: RunDestinat
       destination: "terminal",
       hosts,
       anchor: pickerAnchor(view, block.from),
+      confirm: block.confirm,
     });
     return true;
   }
@@ -247,16 +266,41 @@ export function runBlock(view: EditorView, pos: number, destination: RunDestinat
   // More than one declared host: nothing executes until the user names the
   // machine — every run, deliberately (a prod/staging list must never run on
   // a remembered default; the remembered pick is only the preselection).
+  //
+  // The confirm dialog comes AFTER the pick, never before: on a multi-host
+  // note the frightening part of "run this" is WHICH MACHINE, so the question
+  // has to be able to name it. Cancelling the dialog leaves the pick spent
+  // and nothing run, which is the correct shape — the next run asks again.
   if (hosts.length > 1) {
     requestHostPick(sessionId, {
       hosts,
       anchor: pickerAnchor(view, block.from),
-      onPick: (host) => startInlineRun(view, sessionId, block, host),
+      onPick: (host) => confirmThen(block, host, () => startInlineRun(view, sessionId, block, host)),
     });
     return true;
   }
-  startInlineRun(view, sessionId, block, hosts[0] ?? null);
+  const host = hosts[0] ?? null;
+  confirmThen(block, host, () => startInlineRun(view, sessionId, block, host));
   return true;
+}
+
+// Interpose the confirmation when the block asked for one, then run. The one
+// place an INLINE run can be gated, so the chord, the palette, and the run
+// button cannot diverge into an unconfirmed path (interactions.md §4). The
+// terminal destination is gated in App, after its own host question settles.
+function confirmThen(block: Block, host: string | null, proceed: () => void): void {
+  if (!block.confirm) {
+    proceed();
+    return;
+  }
+  requestRunConfirm({
+    message: block.confirm.message,
+    code: block.code,
+    lang: block.lang,
+    host,
+    destination: "inline",
+    onConfirm: proceed,
+  });
 }
 
 // Where the host picker opens: at the block's control corner, which is where
@@ -279,8 +323,9 @@ function startInlineRun(
   block: Block,
   host: string | null,
 ): boolean {
-  // Re-checked when the pick comes back asynchronously: the block's earlier
-  // run may have started (double ⌘↵) while the picker was open.
+  // Re-checked when the answer comes back asynchronously: the block's earlier
+  // run may have started (double ⌘↵) while the picker or the confirmation was
+  // open.
   if (isBlockRunning(view.state, block.from, block.to)) return false;
   const id = nextId();
   view.dispatch({
@@ -397,11 +442,21 @@ const PROMPT_SEALED =
 // there is no second code path to keep in step with the CSS.
 // `hostHint` keeps the target machine visible where no picker will interrupt:
 // a single-host note runs on that host silently, so the tooltip is the one
-// place that says so before the click.
-function setBusy(btn: HTMLButtonElement | null, busy: boolean, id: CommandId, why: string, hostHint: string | null): void {
+// place that says so before the click. `asks` says the click opens the
+// confirmation rather than executing (interactions.md §4b) — the fence's own
+// `confirm` word is the loud disclosure, this is the one on the button.
+function setBusy(
+  btn: HTMLButtonElement | null,
+  busy: boolean,
+  id: CommandId,
+  why: string,
+  hostHint: string | null,
+  asks: boolean,
+): void {
   if (!btn) return;
   btn.disabled = busy;
-  btn.title = busy ? why : hostHint ? `${tooltip(id)}: ${hostHint}` : tooltip(id);
+  const hints = [hostHint, asks ? "asks first" : null].filter(Boolean);
+  btn.title = busy ? why : hints.length ? `${tooltip(id)}: ${hints.join(", ")}` : tooltip(id);
 }
 
 function iconButton(markup: string, title: string, onDown: (e: MouseEvent) => void): HTMLButtonElement {
@@ -452,6 +507,10 @@ interface ControlSpec {
   // live run gates it.
   runBusy: boolean;
   termBusy: boolean;
+  // Whether a click here opens the confirmation first. Said on the button, in
+  // the same breath as the host: where a run will happen and whether it will
+  // stop to ask are the two things worth knowing BEFORE the click.
+  asks: boolean;
 }
 interface CloseSpec {
   id: string;
@@ -625,7 +684,7 @@ const overlayPlugin = ViewPlugin.fromClass(
       const termBusy = isTerminalBusy(view.state.facet(sessionIdFacet));
 
       const controls: ControlSpec[] = [];
-      eachBlock(view.state, (from, to, lang) => {
+      eachBlock(view.state, (from, to, lang, asks) => {
         const openLine = view.state.doc.lineAt(from);
         let c: { top: number } | null = null;
         try {
@@ -647,6 +706,7 @@ const overlayPlugin = ViewPlugin.fromClass(
           caret: head >= from && head <= to,
           runBusy: isBlockRunning(view.state, from, to),
           termBusy,
+          asks,
         });
       });
 
@@ -736,8 +796,8 @@ const overlayPlugin = ViewPlugin.fromClass(
         el.style.right = `${c.right}px`;
         el.classList.toggle("caret", c.caret);
         const sealed = c.lang === "prompt" && sealedNote;
-        setBusy(el.querySelector('[data-act="run"]'), c.runBusy || sealed, "block.runInline", sealed ? PROMPT_SEALED : INLINE_BUSY, m.hostHint);
-        setBusy(el.querySelector('[data-act="term"]'), c.termBusy || sealed, "block.runInTerminal", sealed ? PROMPT_SEALED : TERM_BUSY, m.hostHint);
+        setBusy(el.querySelector('[data-act="run"]'), c.runBusy || sealed, "block.runInline", sealed ? PROMPT_SEALED : INLINE_BUSY, m.hostHint, c.asks);
+        setBusy(el.querySelector('[data-act="term"]'), c.termBusy || sealed, "block.runInTerminal", sealed ? PROMPT_SEALED : TERM_BUSY, m.hostHint, c.asks);
       }
       for (const c of m.closes) {
         const el = this.layer.querySelector<HTMLElement>(`.ledge-close-wrap[data-close="${c.id}"]`);

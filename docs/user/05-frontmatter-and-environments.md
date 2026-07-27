@@ -51,4 +51,5 @@ The block holds a few keys that have nothing to do with shells, because a note h
 - `host:` names the machines the note's blocks run on. See [[Remote Hosts]].
 - `tags:` declares tags, same vocabulary as inline `#hashtags`. See [[Finding Things]].
 - `template: true` puts the note in the New Note from Template picker, and `template: daily` marks it as the template for daily notes. See [[Daily Notes and Templates]].
+- `confirm: true` makes every runnable block in the note ask before it runs, for a runbook where all of them are consequential. Any single block can still opt out with `confirm=no` on its fence. See [[Running Code]].
 - `locked:` is machine-written by "Lock This Note…" and marks an encrypted note. You never type it yourself. See [[Note Locking]].

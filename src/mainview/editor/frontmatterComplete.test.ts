@@ -26,7 +26,7 @@ describe("frontmatterCompletionSource: keys", () => {
   test("typing at the start of a body line offers the params keys, hinted", () => {
     const r = complete("---\ncw\n---\n", 6);
     expect(r?.from).toBe(4);
-    expect(labels(r)).toEqual(["cwd", "profile", "envFile", "env", "host", "tags", "template"]);
+    expect(labels(r)).toEqual(["cwd", "profile", "envFile", "env", "host", "tags", "template", "confirm"]);
     // Every key carries its one-line hint — the popup is the documentation.
     expect(r?.options.every((o) => typeof o.detail === "string" && o.detail.length > 0)).toBe(true);
     // Accepting a key writes the colon too, so the caret lands at the value.
@@ -42,7 +42,7 @@ describe("frontmatterCompletionSource: keys", () => {
 
   test("an empty line pops only on an explicit ask", () => {
     expect(complete("---\n\n---\n", 4)).toBeNull();
-    expect(labels(complete("---\n\n---\n", 4, true))).toHaveLength(7);
+    expect(labels(complete("---\n\n---\n", 4, true))).toHaveLength(8);
   });
 
   test("silent on the fences, outside the block, and without a block", () => {
@@ -61,6 +61,13 @@ describe("frontmatterCompletionSource: values", () => {
     const r = complete("---\ntemplate: d\n---\n", 15);
     expect(r?.from).toBe(14);
     expect(labels(r)).toEqual(["true", "daily", "false"]);
+  });
+
+  test("confirm: offers exactly true and false, each explained", () => {
+    const r = complete("---\nconfirm: t\n---\n", 14);
+    expect(r?.from).toBe(13);
+    expect(labels(r)).toEqual(["true", "false"]);
+    expect(r?.options.every((o) => typeof o.detail === "string" && o.detail.length > 0)).toBe(true);
   });
 
   test("tags: offers the workspace's tags with counts, like the # picker", () => {

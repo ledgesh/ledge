@@ -3,7 +3,7 @@ import { CircleHelp, Hash, Link2, PanelLeft, TableOfContents, TerminalSquare, X 
 import { Button } from "@/components/ui/button";
 import { ResizeHandle } from "@/components/ResizeHandle";
 import { TerminalDrawer } from "@/terminal/TerminalDrawer";
-import { configureBridge, requestHostPick, type HostPickRequest } from "@/editor/bridge";
+import { configureBridge, requestHostPick, type HostPickRequest, type RunConfirmRequest } from "@/editor/bridge";
 import { sendTerminalPaste, closeSession, onTerminalExit, terminalStatus } from "@/terminal/channel";
 import { Sidebar } from "@/workspace/Sidebar";
 import { BacklinksPanel } from "@/workspace/BacklinksPanel";
@@ -132,6 +132,10 @@ function Shell() {
   );
   // The open host-picker request, if any (multi-host note about to run/spawn).
   const [hostPick, setHostPick] = useState<HostPickRequest | null>(null);
+  // The open run confirmation, if any: a block marked `confirm` on its fence
+  // (or in a `confirm: true` note) that has not been answered yet. Nothing has
+  // executed while this is up — the dialog IS the run's first step.
+  const [runConfirm, setRunConfirm] = useState<RunConfirmRequest | null>(null);
   // The machine the drawer's shell is on (attach response), for the badge.
   const [termHost, setTermHost] = useState<string | null>(null);
   // The host picked for the NEXT drawer spawn. A ref, not state: it is consumed
@@ -156,7 +160,14 @@ function Shell() {
   };
 
   const runInTerminal = useCallback(
-    (sessionId: string, code: string, language: string | null, hosts: string[], anchor?: { x: number; y: number }) => {
+    (
+      sessionId: string,
+      code: string,
+      language: string | null,
+      hosts: string[],
+      anchor?: { x: number; y: number },
+      confirm?: { message: string | null } | null,
+    ) => {
       const proceed = (host: string | null) => {
         // Bun wraps this as a bracketed paste and gates it on the shell being ready,
         // so it is safe to fire even the instant a lazily-spawned shell starts.
@@ -177,12 +188,40 @@ function Shell() {
         spawnHost.current = host;
         setTermOpen(true);
       };
+      // The confirmation, when the block asked for one, sits between the
+      // settled machine and the paste (interactions.md §4b) — after the
+      // picker, so the question can name the machine. `named` is the host the
+      // dialog may claim: null past a LIVE shell, which runs wherever it
+      // already is (the drawer's badge is what says where), so the dialog says
+      // "this note's terminal" rather than guessing the list's first entry.
+      const gate = (named: string | null, run: () => void) => {
+        if (!confirm) {
+          run();
+          return;
+        }
+        setRunConfirm({
+          message: confirm.message,
+          code,
+          lang: language,
+          host: named,
+          destination: "terminal",
+          onConfirm: run,
+        });
+      };
       // Only a spawn-to-be warrants the picker: a live drawer shell has one
       // host for its whole life, and the paste can only go there (the badge
       // says where that is). Restart Note Shell is the way to move it.
       void terminalStatus(sessionId).then(({ live }) => {
-        if (live || hosts.length <= 1) proceed(hosts[0] ?? null);
-        else requestHostPick(sessionId, { hosts, anchor: anchor ?? headerPickAnchor(), onPick: proceed });
+        const first = hosts[0] ?? null;
+        if (live) gate(null, () => proceed(first));
+        else if (hosts.length <= 1) gate(first, () => proceed(first));
+        else {
+          requestHostPick(sessionId, {
+            hosts,
+            anchor: anchor ?? headerPickAnchor(),
+            onPick: (host) => gate(host, () => proceed(host)),
+          });
+        }
       });
     },
     [termOpen, activeDocId, selected.root, dispatch],
@@ -266,6 +305,9 @@ function Shell() {
       // The host picker is Shell-rendered chrome like every dialog; the editor
       // reaches it through the bridge (blocks.ts requestHostPick).
       pickHost: setHostPick,
+      // Same stance for the run confirmation: Shell renders every dialog, the
+      // editor asks for one.
+      confirmRun: setRunConfirm,
       // The ⌘-clicked frontmatter profile name lands on the same dialog as
       // the "Edit Note Profile…" command.
       openProfileEditor: setProfileEditing,
@@ -670,7 +712,38 @@ function Shell() {
           onCancel={() => setRemoveLockConfirm(null)}
         />
       )}
+      {runConfirm && (
+        <ConfirmDialog
+          title={runConfirm.message ?? runConfirmTitle(runConfirm.lang)}
+          body={runConfirmBody(runConfirm)}
+          detail={runConfirm.code}
+          confirmLabel="Run"
+          onConfirm={() => {
+            const req = runConfirm;
+            setRunConfirm(null);
+            req.onConfirm();
+          }}
+          // Cancelling runs nothing and remembers nothing: the next ⌘↩ on this
+          // block asks again. A "don't ask again" would recreate exactly the
+          // state the marker exists to prevent.
+          onCancel={() => setRunConfirm(null)}
+        />
+      )}
       {hostPick && <HostPicker req={hostPick} onClose={() => setHostPick(null)} />}
     </div>
   );
+}
+
+// The run confirmation's default question, when the fence gave none. Names the
+// language because that is the block's whole identity at a glance.
+function runConfirmTitle(lang: string | null): string {
+  return lang ? `Run this ${lang} block?` : "Run this block?";
+}
+
+// Where it will run. The last sentence is the one that matters after a
+// mis-aimed ⌘↩: this dialog is the run's first step, not a report on one.
+function runConfirmBody(req: RunConfirmRequest): string {
+  const where = req.destination === "terminal" ? "this note's terminal" : "this note's inline shell";
+  const on = req.host && req.host !== LOCAL_HOST ? ` on ${req.host}` : "";
+  return `It will run in ${where}${on}. Nothing has run yet.`;
 }

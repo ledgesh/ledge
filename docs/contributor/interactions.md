@@ -222,8 +222,10 @@ of a misfire is asymmetric. The rules:
   *different* machine takes a deliberate arrow first. Dismissal runs
   nothing. (e2e/host-picker.spec.ts states each of these executably.)
 - **One declared host asks nothing** — it runs there silently, and the run
-  buttons' tooltips carry "— on <host>" so the target is visible before the
-  click. Zero hosts is exactly the pre-host behavior.
+  buttons' tooltips carry ": on <host>" so the target is visible before the
+  click (joined with ", asks first" when §4b applies: where a run lands and
+  whether it will stop to ask are the two things worth knowing *before* the
+  click). Zero hosts is exactly the pre-host behavior.
 - **The terminal drawer asks only at spawn.** The drawer is one shell with
   one host for its whole life, so opening it (or sending a block to it) on a
   multi-host note asks only when the shell is not already alive; afterward
@@ -232,6 +234,50 @@ of a misfire is asymmetric. The rules:
 - The picker is the allowlist's UI, not its enforcement — Bun re-validates
   every requested host against the note's declared list
   (architecture.md §6a).
+
+## 4b. The run confirmation (blocks that ask first)
+
+§4 governs what the *app* destroys. A code block destroys whatever its author
+wrote, which the app cannot classify — `rm -rf ./cache` and `ls` are the same
+shape to us. So the judgement is the note author's, declared **on the fence**:
+
+````markdown
+```sh confirm
+rm -rf ./cache
+```
+
+```sh confirm="Wipe the production cache?"
+redis-cli -n 0 flushdb
+```
+````
+
+- **The grammar is the fence's info string** (`editor/fenceInfo.ts`), because
+  CommonMark leaves everything past the language word free and every other
+  renderer keeps highlighting off that first word alone: a marked block is
+  still a highlighted `sh` block on GitHub, and the marker travels with the
+  block when it is copied. Attribute names we do not know are **ignored, never
+  reported** — mdBook's `no_run`, Docusaurus's `title=`, and line-range
+  `{1,3}` all live in this slot, and a note carried in from one of them must
+  not stop running. `confirm=no` is the off switch; any other value is the
+  question to ask.
+- **A note-wide stance is frontmatter** (`confirm: true`), for a runbook whose
+  blocks are all consequential; the per-block attribute wins in both
+  directions, so one harmless block opts out with `confirm=no`.
+- **The confirmation is the run's first step**, §4's rule: `runBlock` opens the
+  dialog instead of executing, so the chord, the palette, and the run button
+  cannot diverge into an unconfirmed path. Focus lands on Cancel.
+- **After the host picker, never before.** On a multi-host note the frightening
+  part of "run this" is *which machine*, so the question has to be able to name
+  it. Past a live drawer shell the dialog claims no host at all — the badge is
+  what says where that shell is.
+- **Always-ask, no "don't ask again."** §4a's reasoning exactly: a remembered
+  yes is the state the marker exists to prevent. Cancelling remembers nothing.
+- **The dialog shows the block's code.** A custom `confirm="…"` is a headline,
+  not a substitute for reading what runs.
+- **It is a speedbump, not a boundary.** Whoever can edit the note can delete
+  the word; nothing Bun-side enforces it. It guards against muscle memory,
+  which is the failure it was built for. (e2e/run-confirm.spec.ts states the
+  policy executably.)
 
 ## 5. Tooltips
 

@@ -54,6 +54,14 @@ export interface NoteParams {
   // when the note retitles. Like tags, it never feeds a spawn; it lives here
   // because the block has one parser.
   template: boolean | "daily";
+  // Whether every runnable block in this note asks before it executes
+  // (interactions.md §4b): the whole-note stance for a runbook where the
+  // blocks are all consequential. A per-block `confirm` attribute on the fence
+  // wins over it in both directions, so one harmless block in such a note can
+  // still opt out with `confirm=no`. Never feeds a spawn: it lives here
+  // because the block has one parser, and because "does this note's code ask
+  // first" is a fact about the note, not a setting about the app.
+  confirm: boolean;
   // The note-locking crypto header (locking.md §2): non-null means the
   // note's body on disk is ciphertext. The VALUE's structure is Bun's
   // (bun/vault.ts parseLockedHeader); here it is one opaque string, parsed
@@ -174,7 +182,7 @@ export function frontmatterEnd(text: string): number {
 /** Parse a note's frontmatter into spawn params (see the header for grammar). */
 export function parseFrontmatter(text: string): Frontmatter {
   const end = frontmatterEnd(text);
-  const params: NoteParams = { cwd: null, profile: null, envFile: null, env: {}, hosts: [], tags: [], template: false, locked: null };
+  const params: NoteParams = { cwd: null, profile: null, envFile: null, env: {}, hosts: [], tags: [], template: false, confirm: false, locked: null };
   const problems: string[] = [];
   if (end === 0) return { params, problems, end };
 
@@ -277,6 +285,14 @@ export function parseFrontmatter(text: string): Frontmatter {
         else if (value === "false") params.template = false;
         else if (value === "daily") params.template = "daily";
         else problems.push(`"template" must be true, false, or daily: "${value}"`);
+        break;
+      case "confirm":
+        // Exactly true or false. A typo defaulting to "asks first" would be
+        // the harmless direction, but it would also be a silent one: the
+        // whole point of the key is that the user knows which blocks pause.
+        if (value === "true") params.confirm = true;
+        else if (value === "false") params.confirm = false;
+        else problems.push(`"confirm" must be true or false: "${value}"`);
         break;
       case "locked":
         // Opaque here; bun/vault.ts owns the structure. A non-empty value

@@ -1,7 +1,7 @@
 // Completion inside the frontmatter block: the block teaches its own grammar
 // at the moment of typing, the `[[` / `#` picker stance. Three vocabularies,
 // all closed sets the view already holds:
-// - key position (line start): the seven params keys, each with a one-line
+// - key position (line start): the params keys, each with a one-line
 //   hint — the popup is the documentation, so nobody greps for the grammar;
 // - `template:` value: true / daily / false, with what each means;
 // - `tags:` value: the workspace's own tags (the `#` picker's vocabulary via
@@ -28,6 +28,13 @@ const KEY_OPTIONS: readonly Completion[] = [
   { label: "host", apply: "host: ", detail: "machines blocks run on (ssh targets, or local)" },
   { label: "tags", apply: "tags: ", detail: "this note's tags (also spelled inline as #tag)" },
   { label: "template", apply: "template: ", detail: "true joins the ⌥⌘N picker; daily seeds ⌘J" },
+  { label: "confirm", apply: "confirm: ", detail: "true makes every block here ask before it runs" },
+];
+
+// true / false, and nothing else: the parser reports anything third as a typo.
+const CONFIRM_VALUES: readonly Completion[] = [
+  { label: "true", detail: "every runnable block asks first (a block may opt out with confirm=no)" },
+  { label: "false", detail: "only blocks marked confirm on their fence ask" },
 ];
 
 // Exactly the three values the parser accepts — anything else is a reported
@@ -80,12 +87,13 @@ export function frontmatterCompletionSource(context: CompletionContext): Complet
     return { from: line.from, options, validFor: /^[A-Za-z]*$/ };
   }
 
-  const value = /^(template|tags|host)[ \t]*:([^]*)$/.exec(before);
+  const value = /^(template|confirm|tags|host)[ \t]*:([^]*)$/.exec(before);
   if (!value) return null;
   const token = /[^,\s]*$/.exec(value[2]!)![0];
 
-  if (value[1] === "template") {
-    return { from: pos - token.length, options: TEMPLATE_VALUES, validFor: /^[A-Za-z]*$/ };
+  if (value[1] === "template" || value[1] === "confirm") {
+    const options = value[1] === "template" ? TEMPLATE_VALUES : CONFIRM_VALUES;
+    return { from: pos - token.length, options, validFor: /^[A-Za-z]*$/ };
   }
 
   if (value[1] === "host") {

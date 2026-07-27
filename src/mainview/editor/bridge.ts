@@ -6,6 +6,7 @@
 // wires the two ends once the Electroview RPC exists.
 import type { NoteMeta, RunEvent } from "../../shared/rpc-schema";
 import type { TagInfo } from "../../shared/tags";
+import type { ConfirmSpec } from "./fenceInfo";
 
 /** Where a block's output goes when it runs. */
 export type RunDestination = "inline" | "terminal";
@@ -18,6 +19,34 @@ export interface HostPickRequest {
   preferred: string | null;
   anchor: { x: number; y: number };
   onPick: (host: string) => void;
+}
+
+/**
+ * One request to confirm a run before it happens: the block carried `confirm`
+ * on its fence, or its note declared `confirm: true` (interactions.md §4b).
+ * Always-ask, like the host picker and for the same reason — a remembered yes
+ * is exactly the state the marker exists to prevent — so nothing here is
+ * cached and there is no "don't ask again".
+ */
+export interface RunConfirmRequest {
+  // The question from `confirm="…"`, or null for the default one.
+  message: string | null;
+  // What is about to run and where, so the dialog can show the code and name
+  // the machine. `host` null means this machine (or, for the drawer's live
+  // shell, wherever it already is: the badge says).
+  code: string;
+  lang: string | null;
+  host: string | null;
+  destination: RunDestination;
+  onConfirm: () => void;
+}
+
+/**
+ * Ask before running. Fails CLOSED: with no handler wired (an editor outside
+ * the app), a marked block does not run. App always wires it.
+ */
+export function requestRunConfirm(req: RunConfirmRequest): void {
+  handlers.confirmRun?.(req);
 }
 
 // The last host picked per session, view-side only and never persisted: it is
@@ -62,6 +91,11 @@ type NativeMessage =
       // the click instead of across the window.
       hosts?: string[];
       anchor?: { x: number; y: number };
+      // The block's confirm marker, for the TERMINAL destination only: the
+      // machine is chosen where the drawer lives (App), and the dialog must
+      // come AFTER that choice so it can name the machine. Inline runs resolve
+      // their host in blocks.ts and open the dialog there.
+      confirm?: ConfirmSpec | null;
     };
 
 // Handlers are set from two places: main.tsx wires runInline (needs the RPC),
@@ -76,7 +110,11 @@ interface BridgeHandlers {
     language: string | null,
     hosts: string[],
     anchor?: { x: number; y: number },
+    confirm?: ConfirmSpec | null,
   ) => void;
+  // Open the run confirmation dialog (App renders it). `onConfirm` fires on
+  // the confirm button; cancelling and dismissing fire nothing.
+  confirmRun: (req: RunConfirmRequest) => void;
   // Open the anchored host-picker popover (App renders it): the note declares
   // more than one host, so the user chooses before anything executes.
   // `onPick` fires with the chosen host; dismissal fires nothing.
@@ -190,7 +228,7 @@ export function toNative(message: unknown): void {
   }
   if (m.type !== "run") return;
   if (m.destination === "terminal") {
-    handlers.runInTerminal?.(m.sessionId, m.code, m.language, m.hosts ?? [], m.anchor);
+    handlers.runInTerminal?.(m.sessionId, m.code, m.language, m.hosts ?? [], m.anchor, m.confirm ?? null);
     return;
   }
   if (m.id) handlers.runInline?.(m.sessionId, m.id, m.code, m.language, m.host ?? null);
