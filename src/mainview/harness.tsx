@@ -639,12 +639,19 @@ const linkOpens: string[] = [];
 // Runs are inert, but WHICH machine a run names is view-side policy (the
 // host picker's always-ask rule), so the target rides the record for specs.
 const inlineRuns: { sessionId: string; id: string; host: string | null }[] = [];
+// Grids reported to the run's shell. Recorded because WHEN the first one goes
+// out is view-side behavior with a real consequence on the other side: a shell
+// that has not been told the panel's width runs the block believing the pty's
+// default, and anything laying out to COLUMNS gets it wrong for that run.
+const inlineResizes: { id: string; cols: number; rows: number }[] = [];
 configureBridge({
   runInline: (sessionId, id, _code, _language, host) => {
     inlineRuns.push({ sessionId, id, host });
   },
   cancelRun: () => {},
-  resizeInline: () => {},
+  resizeInline: (_sessionId, id, cols, rows) => {
+    inlineResizes.push({ id, cols, rows });
+  },
   inputInline: () => {},
   openLink: (url) => {
     linkOpens.push(url);
@@ -781,6 +788,8 @@ declare global {
       termAttaches: () => { sessionId: string; host: string | null }[];
       termPastes: () => { sessionId: string; text: string; host: string | null }[];
       inlineRuns: () => { sessionId: string; id: string; host: string | null }[];
+      // Every grid reported to a run's shell, in order.
+      inlineResizes: () => { id: string; cols: number; rows: number }[];
       // Push one output byte-string at a run, the way Bun's runEvent would.
       // Not the PTY coming back: the inert harness stays inert, and a spec that
       // wants real run behavior still belongs to the live probe. This drives
@@ -806,6 +815,7 @@ window.__harness = {
   termAttaches: () => termAttaches.map((a) => ({ ...a })),
   termPastes: () => termPastes.map((p) => ({ ...p })),
   inlineRuns: () => inlineRuns.map((r) => ({ ...r })),
+  inlineResizes: () => inlineResizes.map((r) => ({ ...r })),
   runOutput: (id, text) => dispatchRunEvent({ id, kind: "output", dataB64: btoa(text) }),
   externalOpen: (open) => dispatchExternalOpen(open),
   notesChanged: (root) => dispatchNotesChanged(root),

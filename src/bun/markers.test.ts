@@ -74,6 +74,21 @@ describe("markerCommand / markerInit", () => {
     expect(init).toContain('PROMPT_COMMAND="__ledge_precmd${PROMPT_COMMAND:+;$PROMPT_COMMAND}"');
     expect(init).not.toContain("[[");
   });
+
+  test("zsh's partial-line mark is off, and only inside the zsh branch", () => {
+    // PROMPT_SP prints a reverse-video `%` (plus padding and a CR) before every
+    // prompt. It is emitted before precmd, so it lands INSIDE the C..D window the
+    // parser keeps, and its self-erase is sized to the pty's winsize — mismatch
+    // the panel's grid and the `%` survives as a stray line under the output.
+    // Nobody reads this shell's prompt, so the option only ever costs.
+    const init = markerInit(NONCE);
+    expect(init).toContain("unsetopt PROMPT_SP");
+    // `unsetopt` is a zsh builtin: reaching a remote bash it would be a
+    // command-not-found on the init line, which is the line that also installs
+    // the end-marker hook.
+    const zshBranch = init.slice(init.indexOf('if [ -n "$ZSH_VERSION" ]'), init.indexOf("else "));
+    expect(zshBranch).toContain("unsetopt PROMPT_SP");
+  });
 });
 
 describe("MarkerParser", () => {

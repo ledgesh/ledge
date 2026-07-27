@@ -41,12 +41,24 @@ export type MarkerEvent =
  * PROMPT_COMMAND (prepended — both run before every prompt). Anything else
  * (fish, ash) never receives this line, because the pool only ever spawns
  * zsh (local, settings.shell) or bash (remote).
+ *
+ * PROMPT_SP goes with it, on the zsh side. That option makes zsh emit its
+ * PROMPT_EOL_MARK (a reverse-video `%`) padded with spaces and a carriage
+ * return before every prompt, so a human can see when output ended mid-line.
+ * Two reasons it has no business here: nobody ever sees this shell's prompt
+ * (the pool keeps only the bytes between the C and D markers, and the mark is
+ * emitted BEFORE precmd, so it lands inside that window), and the erase half
+ * of the trick is sized to the pty's winsize — when that disagrees with the
+ * grid the panel actually renders, the padding wraps, the carriage return
+ * lands on the wrong row, and the `%` survives as a stray line under every
+ * block's output. The drawer's shell is a different shell and keeps the
+ * option: there the prompt IS the point.
  */
 export function markerInit(nonce: string): string {
   return (
     `__ledge_precmd() { local rc=$?; [ -n "$__ledge_id" ] || return; ` +
     `printf '\\033]133;D;%d;ledge=${nonce}:%s\\a' "$rc" "$__ledge_id"; __ledge_id=; }; ` +
-    `if [ -n "$ZSH_VERSION" ]; then precmd_functions+=(__ledge_precmd); ` +
+    `if [ -n "$ZSH_VERSION" ]; then unsetopt PROMPT_SP; precmd_functions+=(__ledge_precmd); ` +
     `else PROMPT_COMMAND="__ledge_precmd\${PROMPT_COMMAND:+;\$PROMPT_COMMAND}"; fi\n`
   );
 }

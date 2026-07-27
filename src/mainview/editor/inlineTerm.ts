@@ -129,8 +129,14 @@ export class InlineTerm {
     this.waiting.textContent = "running, no output yet";
     this.body.appendChild(this.waiting);
     this.host = document.createElement("div");
-    this.host.className = "ledge-term-host";
-    this.host.style.display = "none"; // revealed on first output
+    // Present but not shown until the first byte. Not `display: none`, which is
+    // what this was: an unlaid-out element has no width, so the fit below bailed
+    // and no winsize ever reached the shell before the command ran — it executed
+    // believing the pty's default width, and anything that lays out to COLUMNS
+    // (zsh's own prompt padding included) got it wrong. Zero-height and clipped
+    // keeps the width measurable while still not opening an empty terminal row
+    // under the placeholder.
+    this.host.className = "ledge-term-host ledge-term-unshown";
     this.body.appendChild(this.host);
     this.wrap.appendChild(this.body);
 
@@ -278,7 +284,7 @@ export class InlineTerm {
     if (!this.shown) {
       this.shown = true;
       this.waiting.remove();
-      this.host.style.display = "block";
+      this.host.classList.remove("ledge-term-unshown");
       this.refit();
       this.opts.onHeightChange?.();
       this.honorClaim();

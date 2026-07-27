@@ -671,6 +671,14 @@ body {
 .ledge-term-host {
   width: 100%;
 }
+/* Before the first byte: laid out (so the panel's ResizeObserver fires and the
+   run's shell learns the real column count BEFORE its command runs) but taking
+   no height, so what shows is the placeholder above and not an empty terminal
+   row. See the constructor in editor/inlineTerm.ts. */
+.ledge-term-host.ledge-term-unshown {
+  height: 0;
+  overflow: hidden;
+}
 /* xterm draws its own scrollbar; keep it from forcing the card wider. */
 .ledge-term-host .xterm {
   padding: 0;
