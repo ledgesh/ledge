@@ -271,8 +271,8 @@ Bun therefore validates everything and derives anything derivable:
   `assetPaste` reads the pasteboard Bun-side and returns only the
   markdown-relative reference; the view never names the file.
 - **`LEDGE_NOTES_ROOT`** overrides the APP HOME (`~/.ledge` — where
-  `settings.jsonc`, `.layout.json`, `.workspaces.json`, and the managed
-  workspace folders live; `APP_HOME` in `bun/workspaces.ts`) for tests and
+  `settings.jsonc`, `.layout.json`, `.workspaces.json`, `.window.json`, and
+  the managed workspace folders live; `APP_HOME` in `bun/workspaces.ts`) for tests and
   throwaway runs. The env name predates the per-workspace split and is kept:
   every preload and probe already speaks it. Nothing in the app sets it;
   every `bun test` run gets a scratch one via preload, and anything that
@@ -452,8 +452,8 @@ snapshot at construction time through `lib/settings.ts`.
   (`NoteMeta.template`), travels through renames, and is stripped at
   instantiation. parseSettings still recognizes both retired spellings by
   name and answers with the migration hint rather than "unknown section".
-- **Settings are not session state, and neither is the registry.** Three
-  files in the app home, three ownership shapes. `settings.jsonc` is
+- **Settings are not session state, and neither is the registry.** Four
+  files in the app home, four ownership shapes. `settings.jsonc` is
   *human-edited preference*. `.layout.json` — which workspaces exist, their
   names and icons, which folder each owns, the pane trees — is
   *machine-written state* whose bytes Bun owns (`bun/layout.ts`:
@@ -462,11 +462,20 @@ snapshot at construction time through `lib/settings.ts`.
   SHAPE the **view** owns (`workspace/persist.ts`: serialize debounced on
   every layout change, restore at boot). `.workspaces.json` — the set of
   registered roots — is machine-written AND Bun-shaped, because it is a
-  trust artifact (§2): the view never sees its bytes at all. Failure modes
+  trust artifact (§2): the view never sees its bytes at all. `.window.json`
+  — where the window was last left — is machine-written and Bun-shaped for a
+  duller reason (`bun/windowFrame.ts`): the window is not a thing the view
+  has an opinion about, so no RPC entry exists for it and it never crosses
+  the boundary. Its one rule is that a saved frame is *evidence, not
+  coordinates* — `fitFrame` re-checks it against the displays attached right
+  now, keeping the size but re-centering a window stranded by an unplugged
+  monitor, because a window restored where no pointer can reach it is worse
+  than not persisting at all. Failure modes
   differ accordingly: a corrupt settings file is left for its author; a
   corrupt layout costs itself, degrading per piece down to a fresh
   `initialState`; a corrupt registry is renamed aside (bytes kept for
-  forensics) and rebuilt from `ensureDefault`. The view's restore path
+  forensics) and rebuilt from `ensureDefault`; a corrupt window frame is
+  simply the default frame. The view's restore path
   self-heals per workspace: an unregistered folder costs its workspace, an
   UNAVAILABLE one (unmounted volume) is held dormant — dropped from the
   session, carried verbatim through saves — and restored tabs only ever

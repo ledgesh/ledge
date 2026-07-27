@@ -63,6 +63,7 @@ Notes are ordinary `.md` files in ordinary folders, so git, agents, and shell to
 
 ## What else Ledge does
 
+- **Panes.** ⌘D splits the view right and ⇧⌘D splits it down, so several notes, each with its own shell, sit on screen at once. See [[Panes and Tabs]].
 - **Daily notes and templates.** ⌘J opens today's note. Mark any note `template: true` in its frontmatter and ⌥⌘N stamps new notes from it. See [[Daily Notes and Templates]].
 - **Agents.** A CLI launched inside a note's terminal can read and write your notes over MCP, and a `prompt` code fence pipes its text to `claude -p` with ⌘↩. See [[Agents and Ledge]].
 - **Locking.** "Lock This Note…" encrypts a note's body on disk. Sync services, search, and agents see nothing until you unlock. See [[Note Locking]].

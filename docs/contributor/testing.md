@@ -142,6 +142,19 @@ is an alertdialog, not a dialog); and edit `main.tsx` with proper edit tools,
 not ad-hoc string splicing — a text-index splice once matched `boot()`'s
 `catch` instead of the intended one and duplicated the file.
 
+**The Bun-side variant** — for the seams that never reach the view at all (the
+PTY trampolines, the window frame): the clipboard detour is unnecessary,
+because a dev build forwards the main process's stdout. Run the built binary
+directly, `build/dev-macos-arm64/Ledge-dev.app/Contents/MacOS/launcher` (the
+launcher, not the app name), with the scratch `LEDGE_NOTES_ROOT` and the probe
+behind an env var, and read `PROBE key=value` lines out of its output.
+`bun run build` and `bun run dev` both produce that bundle, so the same binary
+answers "does this work" and "is this what ships". Anything driven by the OS
+rather than by the user — a window macOS re-positions, a shell the kernel
+signals — needs the SAME probe run twice against one scratch home: the second
+launch is what proves the state it wrote back is stable rather than creeping a
+title bar per restart.
+
 ## 7. The green bar
 
 Before any work is called done, all of:

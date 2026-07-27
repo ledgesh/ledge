@@ -37,8 +37,6 @@ Nothing is lost when the strip fades. The Trash section at the bottom of the sid
 
 ## Tabs and panes
 
-Notes open in tabs.
+Notes open in tabs, and ⌘D splits the view so two notes sit side by side. Each workspace keeps its own arrangement.
 
-- ⌘W closes a tab, ⌃Tab cycles, ⌃1 through ⌃9 jump directly.
-- ⌘D splits the view right, ⇧⌘D splits it down, so two notes sit side by side.
-- ⌥⌘B hides the sidebar.
+See [[Panes and Tabs]] for splitting, moving tabs between panes, and what Ledge restores at launch.
