@@ -46,8 +46,14 @@ export interface Settings {
   // `interpreters` maps a fence language to the command that runs its temp
   // file (bun/runner.ts). A language with no entry is sourced into the note's
   // shell — that is what makes ```sh blocks carry cwd/env across runs, and it
-  // is also the extension point: add `"lua": "lua"` here (and to `runnable`)
-  // and lua fences run. Values are inserted verbatim into a shell command
+  // is also the extension point: add `"sql": "psql -f"` here (and to
+  // `runnable`) and sql fences run, against whatever connection the note's own
+  // env names (frontmatter `env:`/`envFile:`/`profile:`), because the value is
+  // shell text expanded in the note's shell: `"psql \"$DATABASE_URL\" -f"` is
+  // one entry that means a different database per note. Which engine `sql`
+  // means is exactly why it is not a default: unlike "which python", there is
+  // no answer that works for most people, and a wrong guess would source
+  // `DELETE FROM ...` into zsh. Values are inserted verbatim into a shell
   // line, so they may carry flags ("python3 -u") and must be quoted by the
   // user if the path has spaces. The literal value "bun" is special-cased to
   // the bun runtime bundled with the app, so TypeScript runs without a bun on
@@ -75,6 +81,19 @@ export interface Settings {
   // the marker and say "act, don't ask" — bun/mcp.ts). Expect silence until
   // the run finishes: print mode buffers its answer. Point the entry at
   // another stdin-reading CLI to switch agents.
+  //
+  // A ```redis fence is a list of redis-cli commands, fed on stdin by the same
+  // trailing `<`. It earns a default where `sql` does not, on both counts:
+  // the fence word names one canonical client (a Valkey server speaks the
+  // same protocol, so `redis-cli` drives it — point the entry at `valkey-cli`
+  // if that is the binary you have), and the default target is honest with no
+  // configuration at all, because `${REDIS_URL:-...}` falls back to localhost,
+  // which is the machine a dev's redis is actually on. Set REDIS_URL in a
+  // note's frontmatter env (or a profile, for a URL with a password in it) and
+  // the same fence points at staging. The default spelling is
+  // `-u "${REDIS_URL:-...}"` rather than a bare `${REDIS_URL:+-u "$REDIS_URL"}`
+  // because zsh does not word-split an unquoted expansion: the conditional form
+  // would hand redis-cli `-u redis://host` as ONE argument.
   //
   // `hostInterpreters` overrides `interpreters` per target machine, for runs
   // a note's `host:` frontmatter sends elsewhere: the base map runs verbatim
@@ -126,6 +145,7 @@ export const DEFAULT_SETTINGS: Settings = Object.freeze({
       "node", "js", "javascript",
       "ts", "typescript",
       "php",
+      "redis",
       "prompt",
     ],
     interpreters: {
@@ -134,6 +154,7 @@ export const DEFAULT_SETTINGS: Settings = Object.freeze({
       node: "node", js: "node", javascript: "node",
       ts: "bun", typescript: "bun",
       php: "php",
+      redis: 'redis-cli -u "${REDIS_URL:-redis://127.0.0.1:6379}" <',
       prompt: "LEDGE_PROMPT_BLOCK=1 claude --allowedTools mcp__ledge -p <",
     },
     hostInterpreters: {},
@@ -200,6 +221,7 @@ export const SETTINGS_TEMPLATE = `// Ledge settings. The file is the settings UI
       "node", "js", "javascript",
       "ts", "typescript",
       "php",
+      "redis",
       "prompt"
     ],
 
@@ -209,6 +231,20 @@ export const SETTINGS_TEMPLATE = `// Ledge settings. The file is the settings UI
     // these defaults (a venv python does not cost you node); values are shell
     // text, so flags are fine ("python3 -u") and paths with spaces need
     // quotes. "bun" is special-cased to the runtime bundled with the app.
+    //
+    // Because the value is shell text expanded in the note's own shell, it can
+    // read the note's env: that is how one entry serves many targets. Adding
+    //
+    //   "sql": "psql \\"$DATABASE_URL\\" -f"
+    //
+    // here and "sql" to "runnable" above makes \`\`\`sql fences run against
+    // whichever database the note's frontmatter (env:, envFile:, profile:)
+    // names. There is no default for "sql" because the word does not say which
+    // engine you mean: swap psql for mysql, sqlite3, or duckdb to suit.
+    //
+    // "redis" pipes the block's commands to redis-cli, at $REDIS_URL or your
+    // local server. A Valkey server speaks the same protocol; if valkey-cli is
+    // the binary you have, name it here instead.
     //
     // "prompt" makes \`\`\`prompt fences agent runs: the block body is piped to
     // Claude Code's print mode on stdin, in the note's own shell, so the
@@ -221,6 +257,7 @@ export const SETTINGS_TEMPLATE = `// Ledge settings. The file is the settings UI
       "node": "node", "js": "node", "javascript": "node",
       "ts": "bun", "typescript": "bun",
       "php": "php",
+      "redis": "redis-cli -u \\"\${REDIS_URL:-redis://127.0.0.1:6379}\\" <",
       "prompt": "LEDGE_PROMPT_BLOCK=1 claude --allowedTools mcp__ledge -p <"
     },
 

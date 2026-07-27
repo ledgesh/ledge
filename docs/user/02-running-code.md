@@ -38,8 +38,33 @@ print(f"hello from Python {platform.python_version()}")
 
 TypeScript is special-cased to the Bun runtime bundled with the app, so `ts` blocks run without anything installed.
 
+## Redis and Valkey
+
+A `redis` block is a list of commands, fed to `redis-cli` one line at a time.
+
+```redis
+PING
+INFO server
+```
+
+With nothing configured it talks to a server on this machine. Set `REDIS_URL` in the note's frontmatter `env`, or in a [[Frontmatter and Environments]] profile when the URL carries a password, and the same block points at staging instead. Because the target is a note-level fact, two notes can hold the same commands aimed at different servers. Valkey speaks the same protocol, so `redis-cli` drives a Valkey server too; if `valkey-cli` is the binary you have installed, name it in settings (below) and the fences keep working.
+
 ## Make more languages runnable
 
-Settings (⌘,) owns both lists: `blocks.runnable` names the fence languages that get a Run button, and `blocks.interpreters` maps a language to the command that runs it. Add `"lua"` to the first and `"lua": "lua"` to the second, relaunch, and lua fences run. Interpreter values may carry flags (`"python3 -u"`), and `blocks.hostInterpreters` overrides them per machine for runs a note sends over ssh ([[Remote Hosts]]).
+Settings (⌘,) owns both lists: `blocks.runnable` names the fence languages that get a Run button, and `blocks.interpreters` maps a language to the command that runs it. Interpreter values may carry flags (`"python3 -u"`), and `blocks.hostInterpreters` overrides them per machine for runs a note sends over ssh ([[Remote Hosts]]).
+
+SQL is the example worth walking through, because it is the one most people want next. Add `"sql"` to `runnable` and this to `interpreters`:
+
+```json
+"sql": "psql \"$DATABASE_URL\" -f"
+```
+
+Relaunch, and `sql` fences run against whatever `DATABASE_URL` the note's frontmatter names, exactly like `REDIS_URL` above.
+
+```sql
+select count(*) from orders where created_at > now() - interval '1 day';
+```
+
+There is deliberately no default for `sql`, because the word does not say which engine you mean: put `mysql`, `sqlite3 mydb.db <`, or `duckdb` there instead to match your engine of choice. Two things to expect from a database fence: Client tools page their output, so a wide result opens the pager inside the block and waits for you to quit it (you can type into a running block). And a query with no `limit` prints every row it gets, so keep the limits you would keep in a terminal.
 
 One more fence worth knowing about: a `prompt` block sends its text to an AI agent (Claude Code by default) with the note's own context attached. [[Agents and Ledge]] has the full story.

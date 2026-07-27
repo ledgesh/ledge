@@ -66,6 +66,21 @@ describe("runnerFor", () => {
     expect(spec.command).toBe("lua /tmp/ledge-run-b9.lua");
   });
 
+  test("redis fences feed their commands to redis-cli, targeted by the note's env", () => {
+    // Same trailing-`<` composition as prompt, and the value keeps its
+    // "$REDIS_URL" UNEXPANDED: the note's own shell expands it at run time,
+    // so one global entry points at whatever host the note's frontmatter env
+    // names, and falls back to a local server when it names none. The
+    // fallback lives inside the quotes because `redis-cli -u ""` is an error,
+    // not a default.
+    const spec = runnerFor("b12", "redis", "GET session:42", INTERP, BUN);
+    expect(spec.kind).toBe("interpreter");
+    expect(spec.path).toBe("/tmp/ledge-run-b12.redis");
+    expect(spec.command).toBe(
+      'redis-cli -u "${REDIS_URL:-redis://127.0.0.1:6379}" < /tmp/ledge-run-b12.redis',
+    );
+  });
+
   test("prompt fences feed the block body to the agent CLI on stdin, ledge tools pre-allowed", () => {
     // The interpreter value ends with `<`: verbatim insertion makes it a
     // redirect, because `claude -p /tmp/file` would read the PATH as the
