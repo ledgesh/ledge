@@ -8,9 +8,10 @@
 // mis-marshal under bun:ffi on arm64, so we never change the fd's flags and
 // instead gate every read on poll() with a zero timeout.
 import { dlopen, ptr, CString, cc } from "bun:ffi";
-import { writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { NATIVE_C, NATIVE_LIB, NATIVE_SYMBOLS } from "./ptyNative";
 
 const libc = dlopen("libSystem.B.dylib", {
   openpty: { args: ["ptr", "ptr", "ptr", "ptr", "ptr"], returns: "i32" },
@@ -39,55 +40,6 @@ const SIGINT = 2;
 const SIGTERM = 15;
 const SIGKILL = 9;
 
-// Resizing a live pty means ioctl(fd, TIOCSWINSZ, &winsize), but ioctl is
-// variadic and bun:ffi mis-marshals variadic calls on arm64 (see the header
-// comment). So we compile a fixed-arity C trampoline with Bun's bundled TinyCC
-// (bun:ffi `cc`) and call that instead. The source is written to a temp file at
-// runtime rather than shipped as a .c, so it works the same in dev and in the
-// bundled app. ioctl(TIOCSWINSZ) also raises SIGWINCH on the child, so zsh and
-// any running program re-read the new size.
-const WINSIZE_C = `#include <sys/ioctl.h>
-#include <termios.h>
-int ledge_set_winsize(int fd, unsigned short cols, unsigned short rows) {
-  struct winsize ws;
-  ws.ws_row = rows;
-  ws.ws_col = cols;
-  ws.ws_xpixel = 0;
-  ws.ws_ypixel = 0;
-  return ioctl(fd, TIOCSWINSZ, &ws);
-}
-`;
-
-// Spawning the shell so that Ctrl-C works.
-//
-// A tty only turns ^C into SIGINT for its foreground process group, and it only
-// has one if some process has claimed it as its CONTROLLING terminal. On macOS
-// that claim is an explicit ioctl(TIOCSCTTY) - the "first tty a session leader
-// opens becomes its ctty" rule is System V/Linux, not BSD - and posix_spawn has no
-// file action for an ioctl. So POSIX_SPAWN_SETSID gave us a session leader with no
-// controlling terminal: `stty` reported isig on, and ^C still did nothing, because
-// the line discipline had nobody to signal.
-//
-// login_tty() is exactly that missing step (setsid + TIOCSCTTY + dup onto 0/1/2),
-// but it has to run in the child, between fork and exec. Hence this trampoline.
-// The header's warning about fork() under Bun holds for forking into JS; here the
-// child touches nothing but syscalls before execve replaces the image, which is
-// the same contract posix_spawn keeps inside libc.
-const SPAWN_C = `#include <util.h>
-#include <unistd.h>
-int ledge_spawn_tty(int slave_fd, int master_fd, const char *cwd,
-                    const char *path, char *const argv[], char *const envp[]) {
-  pid_t pid = fork();
-  if (pid != 0) return (int)pid;
-  close(master_fd);
-  if (login_tty(slave_fd) < 0) _exit(126);
-  if (cwd && cwd[0] && chdir(cwd) != 0) _exit(125);
-  execve(path, argv, envp);
-  _exit(127);
-  return 0;
-}
-`;
-
 type SpawnFn = (
   slaveFD: number,
   masterFD: number,
@@ -97,48 +49,78 @@ type SpawnFn = (
   envp: ReturnType<typeof ptr>,
 ) => number;
 
-// Same lazy-compile-and-cache deal as the resize trampoline. null means we fall
-// back to posix_spawn below: the shell still runs, but with no controlling
-// terminal, so ^C is inert. Losing Ctrl-C beats losing the terminal entirely.
-let spawnTty: SpawnFn | null | undefined;
-function spawnFn(): SpawnFn | null {
-  if (spawnTty !== undefined) return spawnTty;
-  try {
-    const src = join(tmpdir(), "ledge-spawntty.c");
-    writeFileSync(src, SPAWN_C);
-    const { symbols } = cc({
-      source: src,
-      symbols: {
-        ledge_spawn_tty: { args: ["int", "int", "ptr", "ptr", "ptr", "ptr"], returns: "int" },
-      },
-    });
-    spawnTty = (slaveFD, masterFD, cwd, path, argv, envp) =>
-      symbols.ledge_spawn_tty(slaveFD, masterFD, cwd, path, argv, envp) as number;
-  } catch (err) {
-    console.warn("[pty] login_tty spawn unavailable, Ctrl-C will not work:", (err as Error).message);
-    spawnTty = null;
-  }
-  return spawnTty;
+interface Native {
+  spawnTty: SpawnFn;
+  setWinsize: (fd: number, cols: number, rows: number) => number;
 }
 
-// Compiled lazily and cached: null means the trampoline could not be built (very
-// old Bun, no TinyCC), in which case resize is a silent no-op.
-let setWinsize: ((fd: number, cols: number, rows: number) => number) | null | undefined;
-function winsizeFn(): ((fd: number, cols: number, rows: number) => number) | null {
-  if (setWinsize !== undefined) return setWinsize;
-  try {
-    const src = join(tmpdir(), "ledge-winsize.c");
-    writeFileSync(src, WINSIZE_C);
-    const { symbols } = cc({
-      source: src,
-      symbols: { ledge_set_winsize: { args: ["int", "u16", "u16"], returns: "int" } },
-    });
-    setWinsize = (fd, cols, rows) => symbols.ledge_set_winsize(fd, cols, rows) as number;
-  } catch (err) {
-    console.warn("[pty] resize trampoline unavailable:", (err as Error).message);
-    setWinsize = null;
+type NativeSymbols = ReturnType<typeof dlopen<typeof NATIVE_SYMBOLS>>["symbols"];
+
+// Where a prebuilt libledge_pty.dylib may sit. Both entries are the SAME file
+// at two moments in its life: `scripts/build-native.ts` writes it to
+// dist-native/ in the checkout, and the bundle's copy map lands it beside this
+// module in Resources/app/bun (the cli.js placement, for the cli.js reason —
+// import.meta.dir is the one path that reads the same in both layouts).
+// Checked in that order so a checkout run exercises the artifact the app will
+// actually ship rather than the fallback.
+function libCandidates(): string[] {
+  return [
+    join(import.meta.dir, NATIVE_LIB),
+    join(import.meta.dir, "..", "..", "dist-native", NATIVE_LIB),
+  ];
+}
+
+// The trampolines, loaded once. Two paths to the same symbols:
+//
+//   1. dlopen the dylib we compiled at build time. This is the path that runs
+//      on a user's machine, and the only one that works without the macOS SDK
+//      installed (ptyNative.ts's header).
+//   2. Compile the same source in-process with bun:ffi's TinyCC. Covers a
+//      checkout with no `bun run build:native` yet — a dev machine, where the
+//      SDK headers this needs are present by construction.
+//
+// null means neither worked: the shell still runs, spawned by plain
+// posix_spawn with no controlling terminal, so ^C is inert and resize is a
+// no-op. Losing Ctrl-C beats losing the terminal entirely, and the warning
+// says which of the two failure shapes it is, because "Ctrl-C does nothing" is
+// otherwise unattributable from the outside.
+let native: Native | null | undefined;
+function loadNative(): Native | null {
+  if (native !== undefined) return native;
+
+  // dlopen and cc hand back the same symbol table (one FFIType vocabulary, one
+  // NATIVE_SYMBOLS), so both load paths converge here.
+  const wrap = (symbols: NativeSymbols): Native => ({
+    spawnTty: (slaveFD, masterFD, cwd, path, argv, envp) =>
+      symbols.ledge_spawn_tty(slaveFD, masterFD, cwd, path, argv, envp) as number,
+    setWinsize: (fd, cols, rows) => symbols.ledge_set_winsize(fd, cols, rows) as number,
+  });
+
+  for (const lib of libCandidates()) {
+    if (!existsSync(lib)) continue;
+    try {
+      // The handle stays reachable through the closures in `native`; a closed
+      // or collected library would leave the symbols dangling.
+      native = wrap(dlopen(lib, NATIVE_SYMBOLS).symbols);
+      return native;
+    } catch (err) {
+      console.warn(`[pty] ${lib} did not load:`, (err as Error).message);
+    }
   }
-  return setWinsize;
+
+  try {
+    const src = join(tmpdir(), "ledge-pty.c");
+    writeFileSync(src, NATIVE_C);
+    native = wrap(cc({ source: src, symbols: NATIVE_SYMBOLS }).symbols);
+  } catch (err) {
+    console.warn(
+      "[pty] no native trampolines (no prebuilt dylib, and compiling in-process failed:",
+      (err as Error).message,
+      "). Ctrl-C and terminal resize are unavailable.",
+    );
+    native = null;
+  }
+  return native;
 }
 
 // pollfd { int fd; short events; short revents; } -> 8 bytes
@@ -201,7 +183,7 @@ export class PtyProcess {
     const argv = cArr([opts.executable, ...opts.args]);
     const envp = cArr(Object.entries(opts.env).map(([k, v]) => `${k}=${v}`));
 
-    const spawn = spawnFn();
+    const spawn = loadNative()?.spawnTty;
     if (spawn) {
       const pid = spawn(
         slaveFD,
@@ -225,7 +207,7 @@ export class PtyProcess {
     }
 
     // Fallback: no controlling terminal, so no job control and no Ctrl-C. See
-    // spawnFn above for why this is the lesser evil rather than the design.
+    // loadNative above for why this is the lesser evil rather than the design.
     const actions = new BigUint64Array(1);
     s.posix_spawn_file_actions_init(ptr(actions));
     s.posix_spawn_file_actions_addopen(ptr(actions), 0, ptr(cstr(slavePath)), O_RDWR, 0);
@@ -306,7 +288,7 @@ export class PtyProcess {
   /** Tell the pty its new dimensions (raises SIGWINCH on the child). */
   resize(cols: number, rows: number): void {
     if (this.closed || cols <= 0 || rows <= 0) return;
-    winsizeFn()?.(this.masterFD, cols, rows);
+    loadNative()?.setWinsize(this.masterFD, cols, rows);
   }
 
   /**

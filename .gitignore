@@ -3,9 +3,11 @@
 # Dependencies
 node_modules/
 
-# Build output (Vite view build + Electrobun app bundle + bundled CLI)
+# Build output (Vite view build + Electrobun app bundle + bundled CLI +
+# the compiled PTY trampolines)
 dist/
 dist-cli/
+dist-native/
 build/
 
 # Logs

@@ -25,8 +25,10 @@ bun run dev:hmr    # same, with a Vite dev server for hot module reload
 bun run build      # production build
 ```
 
-Requires [Bun](https://bun.sh). The first `electrobun dev` downloads the
-Electrobun core (~27 MB) and assembles a real `.app` under `build/`.
+Requires [Bun](https://bun.sh) and Xcode: every build compiles the PTY
+trampolines against the macOS SDK (`scripts/build-native.ts`) and the app icon
+with `actool`. The first `electrobun dev` downloads the Electrobun core
+(~27 MB) and assembles a real `.app` under `build/`.
 
 ## Contributing
 

@@ -677,6 +677,32 @@ clears it.
 Bun-side: prefer `bun:ffi` and POSIX over native modules — node-pty is out for
 exactly this reason; the PTY is posix_spawn + poll.
 
+**The one compiled artifact: `libledge_pty.dylib`.** Two things the PTY cannot
+do through `bun:ffi` alone are C trampolines — `login_tty` between fork and
+exec (a controlling terminal, hence Ctrl-C) and a fixed-arity
+`ioctl(TIOCSWINSZ)` (resize, since bun:ffi mis-marshals variadics on arm64).
+Their source and signatures live in `bun/ptyNative.ts`, one declaration for
+two consumers: `scripts/build-native.ts` compiles them to a universal dylib
+that the copy map ships beside `index.js`, and `pty.ts` dlopens that file,
+falling back to compiling the same text in-process with bun:ffi's TinyCC.
+
+The build-time compile is the point, not an optimization. TinyCC needs the
+macOS SDK's headers, and a Mac with no Xcode and no Command Line Tools has
+none — an ordinary state for a machine that downloads an app rather than
+building one. There, the in-process compile fails, and it fails quietly in the
+worst possible place: Ctrl-C stops working in every terminal and resize
+becomes a no-op. Compiling on the build machine, which has the SDK by
+construction, moves that dependency off the user's. The dylib is signed by the
+same script (electrobun signs the bundle without `--deep` and only sweeps
+`*.node`, so nothing else in the pipeline would sign it, and an unsigned
+Mach-O in the bundle fails notarization), and it declares
+`-mmacosx-version-min` because clang otherwise stamps the build machine's
+macOS as the floor.
+
+A third native module needs the same bar as any dependency. Two exist because
+the alternative was a broken terminal, not because compiled code is on the
+table generally.
+
 ## 9. Comments
 
 Comments in this repo state *why* — the constraint, the rejected alternative,
