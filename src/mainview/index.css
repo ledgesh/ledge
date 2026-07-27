@@ -430,6 +430,15 @@ body {
   border-bottom-right-radius: 8px;
   padding-bottom: 8px;
 }
+/* The closing fence of a block that has an output panel under it (emitted by
+   blocks.ts instead of `-bottom`): the card stays open and the panel closes it,
+   so the two are one card rather than a terminal parked underneath. The padding
+   stays — the fence line is real editable text sitting directly on a
+   contenteditable=false widget, and without the cushion clicking the caret back
+   onto it gets fiddly. */
+.cm-line.ledge-code-attached {
+  padding-bottom: 8px;
+}
 
 /* --- Block chrome overlay ---------------------------------------------------
    Interactive block controls (run/terminal/copy per block, dismiss per output)
@@ -528,7 +537,9 @@ body {
   align-items: center;
   gap: 6px;
   height: 24px;
-  padding: 0 4px 0 8px;
+  /* 12px in, matching `.ledge-code`'s own inset, so the status line starts in
+     the same column as the code above it. */
+  padding: 0 4px 0 12px;
   border-bottom: 1px solid var(--panel-border);
   cursor: default;
   user-select: none;
@@ -630,7 +641,10 @@ body {
    to the run grid, shrunk to content on finish); the body just gives it a little
    inset and its own background so it reads as a terminal within the card. */
 .ledge-term-body {
-  padding: 6px 8px;
+  /* Same 12px inset as `.ledge-code`, so the terminal's first column lands
+     under the code's first column — the strongest single cue that the output
+     belongs to the block rather than sitting beneath it. */
+  padding: 6px 12px;
 }
 /* Before the first byte: name the silence instead of showing a bare header
    over an empty body. Invisible for the first beat (the animation's delay),
@@ -666,4 +680,41 @@ body {
    `.ledge-term-clamped` and stays scrollable. */
 .ledge-output:not(.ledge-term-clamped) .ledge-term-host .xterm-viewport {
   overflow-y: hidden;
+}
+
+/* --- The fused card ---------------------------------------------------------
+   A panel whose block is directly above it (that block's closing fence carries
+   `.ledge-code-attached`; see blocks.ts) is not a panel at all — it is the lower
+   half of the code block's card. It gives up its own top border, its radius, and
+   its side margins so its edges continue the card's, and the gap between them
+   becomes a hairline seam: the header's top border.
+
+   The sibling combinator IS the pairing test, evaluated by the browser, so it
+   can never disagree with the decoration that emitted the class. A panel whose
+   block was deleted out from under it has no `.ledge-code-attached` before it
+   and keeps the free-standing styling above, which is the shape that reads
+   correctly when there is nothing to fuse to. */
+.ledge-code-attached + .ledge-output {
+  margin: 0 0 4px;
+  border-color: var(--code-panel-border);
+  border-top: none;
+  border-radius: 0 0 8px 8px;
+  background: var(--code-panel-bg);
+}
+.ledge-code-attached + .ledge-output .ledge-output-header {
+  border-top: 1px solid var(--code-panel-border);
+  border-bottom: none;
+}
+/* Focus, fused. The free-standing panel lights its border and casts a halo; a
+   halo here would spill 2px past the card's sides and over the code above,
+   which is the "half-lit box" the fusing is meant to avoid. The terminal zone
+   is already a closed rectangle — seam on top, panel border on the other three
+   sides — so lighting those four edges names the focused zone exactly, without
+   claiming the code above is taking keystrokes too. */
+.ledge-code-attached + .ledge-output:focus-within {
+  border-color: color-mix(in srgb, var(--link) 60%, var(--code-panel-border));
+  box-shadow: none;
+}
+.ledge-code-attached + .ledge-output:focus-within .ledge-output-header {
+  border-top-color: color-mix(in srgb, var(--link) 60%, var(--code-panel-border));
 }

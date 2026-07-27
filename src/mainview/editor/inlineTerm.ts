@@ -32,10 +32,15 @@ const FONT = "ui-monospace, SFMono-Regular, Menlo, monospace";
 // How long after an Escape a second one still reads as "get me out of here".
 const ESC_EXIT_MS = 600;
 
+// xterm paints its own opaque background, so these are the one place the card's
+// lower half cannot use `--code-panel-bg`: they are that variable pre-composited
+// over the note background (0.06 white over #0a0a0b; 0.045 black over white), so
+// the terminal zone sits flush with the code above it in the fused card instead
+// of reading as a lighter box dropped inside one.
 function xtermTheme(dark: boolean) {
   return dark
     ? { background: "#1a1a1c", foreground: "#e8e8ea", cursor: "#e8e8ea", selectionBackground: "#3a3a40" }
-    : { background: "#fbfbfd", foreground: "#1d1d1f", cursor: "#1d1d1f", selectionBackground: "#cfe0ff" };
+    : { background: "#f3f3f3", foreground: "#1d1d1f", cursor: "#1d1d1f", selectionBackground: "#cfe0ff" };
 }
 
 // Callbacks the widget wires so the terminal can reach the note's shell and the

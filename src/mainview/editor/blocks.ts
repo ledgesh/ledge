@@ -722,7 +722,13 @@ const overlayPlugin = ViewPlugin.fromClass(
         closes.push({
           id: run.id,
           top: r.top - base.top + 3, // 3px into the 24px header
-          right: base.right - r.right + 6, // 6px in from the panel's right edge
+          // Column-aligned with the block's own controls above. Those sit at
+          // `cardInset + 10` inside a group with 2px padding and a 1px border,
+          // so their glyphs land 13px in from the card edge; this wrapper has
+          // neither, and the panel is now flush to the card, so 13 puts the two
+          // clusters on one line — which is the point of fusing them into one
+          // card in the first place.
+          right: cardInset + 13,
         });
       }
 
@@ -914,13 +920,29 @@ const overlayPlugin = ViewPlugin.fromClass(
 // Every line of the block gets a background (via a line decoration); the opening
 // and closing fence lines additionally round the top/bottom corners. Emitted
 // first, in document order, so the combined set stays sorted by position.
+//
+// A block with a run attached closes differently: its output panel is fused to
+// the card (index.css, `.ledge-code-attached + .ledge-output`) so the two read as
+// one object rather than a micro-terminal parked underneath, which means the
+// closing fence must leave the card OPEN — no bottom border, no bottom radius.
+// The seam is the panel header's top border. The CSS pairing is the sibling
+// combinator, so it cannot drift from this class: a panel orphaned by having its
+// block deleted out from under it finds no `.ledge-code-attached` before it and
+// keeps the free-standing styling.
 function fencePanelDecorations(state: EditorView["state"], out: Range<Decoration>[]): void {
+  const runs = state.field(runsField);
   eachBlock(state, (from, to) => {
     const first = state.doc.lineAt(from).number;
-    const last = state.doc.lineAt(Math.min(to, state.doc.length)).number;
+    const lastLine = state.doc.lineAt(Math.min(to, state.doc.length));
+    const last = lastLine.number;
+    // Same containment test as isBlockRunning, but state-blind: a finished run
+    // still has a panel, and the card has to stay open under it.
+    const attached = runs.some((r) => r.pos >= from && r.pos <= lastLine.to);
     for (let n = first; n <= last; n += 1) {
       const cls =
-        "ledge-code" + (n === first ? " ledge-code-top" : "") + (n === last ? " ledge-code-bottom" : "");
+        "ledge-code" +
+        (n === first ? " ledge-code-top" : "") +
+        (n === last ? (attached ? " ledge-code-attached" : " ledge-code-bottom") : "");
       out.push(Decoration.line({ class: cls }).range(state.doc.line(n).from));
     }
   });

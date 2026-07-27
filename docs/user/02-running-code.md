@@ -4,7 +4,7 @@ Any fenced code block whose language is runnable gets a Run button, and the shel
 
 ## Run a block inline or in the terminal
 
-⌘↩ runs the block under the caret inline. Output streams into a panel beneath the block and stays until you dismiss it. Hovering a block shows Run and Copy, a running block's Run button becomes Stop, and the output panel offers Copy Output and Dismiss.
+⌘↩ runs the block under the caret inline. Output streams into the lower half of the block's own card, below a divider, and stays until you dismiss it. Hovering a block shows Run and Copy, a running block's Run button becomes Stop, and the output half offers Copy Output and Dismiss.
 
 ⇧⌘↩ sends the block to the note's terminal drawer instead (⌃` toggles the drawer). There you can keep typing after the command finishes. An inline run ends when its command does.
 
