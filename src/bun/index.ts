@@ -19,7 +19,7 @@ import {
 } from "electrobun/bun";
 import { watch } from "node:fs";
 import { homedir } from "node:os";
-import { basename, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { PtyProcess } from "./pty";
 import { InlinePool, type InlineEvent } from "./inlinePool";
 import { takePaste } from "./paste";
@@ -68,6 +68,7 @@ import { readLayout, writeLayout } from "./layout";
 import { fitFrame, readFrame, writeFrame, type Rect } from "./windowFrame";
 import { revealLog, startLogging, write as writeLog } from "./log";
 import { installShim, tildify } from "./cliShim";
+import { EXTRACTION_DIRNAME, pruneExtractionDir } from "./updateCache";
 import { OPEN_REQUEST_PATH, takeOpenRequest } from "./openRequest";
 import { syncWatchers } from "./watch";
 import { pasteImageAsset, readAsset } from "./assets";
@@ -92,6 +93,18 @@ const local = await Updater.getLocalInfo().catch(() => null);
 console.log(
   `[bun] Ledge ${local?.version ?? "?"} (${local?.channel ?? "?"}, ${local?.hash?.slice(0, 8) ?? "?"}) on ${process.platform} ${process.arch}; bun ${Bun.version}`,
 );
+
+// The previous versions' extraction tars, at 80MB each (bun/updateCache.ts
+// for what is kept and why). Not awaited and never fatal: this is disk, not
+// correctness, and boot has nothing to learn from it. The two Electrobun
+// facts are supplied here so updateCache.ts stays importable without booting
+// the Electrobun runtime.
+void (async () => {
+  if (typeof local?.hash !== "string") return;
+  const dir = join(await Updater.appDataFolder(), EXTRACTION_DIRNAME);
+  const removed = await pruneExtractionDir(dir, local.hash);
+  if (removed.length > 0) console.log(`[bun] pruned ${removed.length} stale update file(s): ${removed.join(", ")}`);
+})().catch(() => {});
 
 // The view's failures land in the same file, by its own choice of what is
 // worth sending (mainview/lib/log.ts) — a blank pane after a render error is

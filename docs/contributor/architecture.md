@@ -196,10 +196,15 @@ Bun therefore validates everything and derives anything derivable:
   unlink a *note* — `deleteTrashed`, `emptyTrash`, `purgeTrash` — all in
   `bun/notes.ts`, all gated by `assertTrashed`, and the first two sit behind
   a confirmation (interactions.md §4). **Anything new that unlinks a file
-  joins all three lists: the guard, the confirm, and this sentence.** (The
-  one other `unlink` in the repo is `writeNote` discarding its own temp file
-  after a failed save — a dotted file it created moments earlier that no
-  listing ever shows.)
+  joins all three lists: the guard, the confirm, and this sentence.** (Two
+  `unlink`s in the repo are outside the notes tree and so outside that rule.
+  `writeNote` discards its own temp file after a failed save — a dotted file
+  it created moments earlier that no listing ever shows. `updateCache.ts`
+  prunes Electrobun's `self-extraction` folder in Application Support, where
+  each installed version leaves an 80MB tar; it keeps the running version's,
+  because the updater bsdiffs from it, and deletes nothing at all when it
+  cannot tell which that is. Both act on files the app wrote, named by the
+  app, that no user chose and no listing shows.)
 - **Bun never mkdirs an external root.** A managed folder (a direct child of
   the app home) is Bun's to recreate; an external root that is missing is
   what an unmounted volume looks like, and mkdir-ing it would grow a shadow

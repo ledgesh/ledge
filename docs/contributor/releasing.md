@@ -113,6 +113,24 @@ exercising the packaging path itself, and the app it produces runs on the
 machine that built it and nowhere else: Gatekeeper refuses an unsigned bundle
 everywhere else, which is the entire point of the exercise.
 
+**Whatever runs the build needs Removable Volumes access.** `hdiutil create`
+mounts a staging volume at `/Volumes/Ledge` and copies the app onto it, and
+macOS treats that as a removable volume. Without the grant the build gets
+through signing and both notarization round trips, then dies at the very last
+step:
+
+```
+hdiutil: create failed - Operation not permitted
+could not access /Volumes/Ledge/Ledge.app - Operation not permitted
+```
+
+The matching denial is in the unified log as
+`System Policy: copy-helper(…) deny(1) file-write-create /Volumes/Ledge/…`.
+Grant it under System Settings > Privacy & Security > Files and Folders, to the
+terminal or editor the build is launched from, and note that the grant belongs
+to that app rather than to the release script: running the same command from a
+different terminal asks the question again.
+
 ## 5. Verifying before publishing
 
 Static checks on the DMG, all of which must pass:
@@ -128,7 +146,11 @@ Then the live checks, on a **copy that has been through the DMG** rather than on
 every item below is a place where a signed build can differ from the dev build
 that all other testing uses:
 
-- The app launches from `/Applications` with no Gatekeeper dialog.
+- The app launches from `/Applications`. One "Ledge is an app downloaded from
+  the Internet. Are you sure you want to open it?" prompt is correct and
+  expected on first launch, and it does not appear again. The failure to watch
+  for is the other dialog, the one that says the developer cannot be verified
+  and offers no Open button: that is Gatekeeper refusing the signature.
 - A shell block runs, and Ctrl-C stops it. This is `dlopen` of the PTY dylib
   under library validation.
 - ⌘V of a screenshot embeds an image. This is `osascript` as a child process,
@@ -142,6 +164,30 @@ that all other testing uses:
 
 A signed build that fails one of these is not a release; it is a bug in the
 entitlements (`build.mac.entitlements` in `electrobun.config.ts`).
+
+### App Translocation, and why the install path is part of the test
+
+A quarantined copy of the app that Finder did not move runs from a read-only
+randomized mount under `/private/var/folders/…/AppTranslocation/`. The
+self-extractor then unpacks the tarball into Application Support, cannot
+replace itself at its own path because that path is read-only, and quits
+without launching anything. Nothing appears on screen, and a second
+double-click does the same thing.
+
+| How the app got there | Translocated | Result |
+| --- | --- | --- |
+| Dragged from the DMG to `/Applications` in Finder | no | works |
+| Double-clicked inside the mounted DMG | yes | extracts, then quits |
+| Copied with `cp` or `ditto`, then launched | yes | extracts, then quits |
+
+Moving an app in Finder is what clears translocation, which is why only the
+first row survives. The extractor is a prebuilt binary inside electrobun, so
+this is not fixable here; it is an instruction instead. Anywhere the DMG is
+offered has to say to drag Ledge to Applications and open it from there.
+
+Verifying a release therefore means installing it the way the instructions
+say, in Finder. An install done with `ditto` from a terminal reproduces the
+failure rather than the release.
 
 ## 6. What is not automated
 
