@@ -493,13 +493,18 @@ export function stampLockedLine(text: string, headerValue: string): string {
   return [b.lines[0]!, ...stamped, ...b.lines.slice(b.close)].join("\n") + text.slice(b.end);
 }
 
-/** Remove every top-level `locked:` line; a block left holding nothing but
- * blank lines goes entirely (Remove Lock should leave no husk — but a block
- * with comments or other keys is the user's, and stays). */
+/** Remove every top-level `locked:` line; a block EMPTIED by that removal goes
+ * entirely (Remove Lock should leave no husk — but a block with comments or
+ * other keys is the user's, and stays). A block this found nothing to remove
+ * from is returned untouched, blank or not: the frontmatter editor opens a
+ * note's first block as `---\n\n---\n` and the autosave that lands before the
+ * user types a key must not delete what they just opened. */
 export function stripLockedLine(text: string): string {
   const b = blockLines(text);
   if (b === null) return text;
-  const content = b.lines.slice(1, b.close).filter((l) => !LOCKED_LINE.test(l));
+  const body = b.lines.slice(1, b.close);
+  const content = body.filter((l) => !LOCKED_LINE.test(l));
+  if (content.length === body.length) return text;
   if (content.every((l) => l.trim() === "")) return text.slice(b.end);
   return [b.lines[0]!, ...content, ...b.lines.slice(b.close)].join("\n") + text.slice(b.end);
 }

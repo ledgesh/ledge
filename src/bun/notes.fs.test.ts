@@ -626,6 +626,12 @@ describe("note locking", () => {
     expect(await isNoteLocked(note.path)).toBe(false);
   });
 
+  test("a save keeps the empty block the frontmatter editor just opened", async () => {
+    const note = await createNote(ROOT, "# Plain\n\nbody\n");
+    await writeNote(note.path, "---\n\n---\n# Plain\n\nbody\n");
+    expect(await readRaw(note.path, "utf8")).toBe("---\n\n---\n# Plain\n\nbody\n");
+  });
+
   test("vault locked: the body is held, the save refused, the title still labels", async () => {
     const note = await createNote(ROOT, `# Secrets\n\n${NEEDLE}\n`);
     await lockNote(note.path);

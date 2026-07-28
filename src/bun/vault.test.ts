@@ -75,6 +75,13 @@ describe("locked: line surgery", () => {
     expect(stripLockedLine("---\nlocked: v\n---\n# T\n\nbody\n")).toBe("# T\n\nbody\n");
     expect(stripLockedLine("# T\n\nbody\n")).toBe("# T\n\nbody\n");
   });
+  test("strip leaves a block it removed nothing from, even an empty one", () => {
+    // What the frontmatter editor inserts on a note with no block: an
+    // autosave landing before the user types must not delete it.
+    expect(stripLockedLine("---\n\n---\n# T\n")).toBe("---\n\n---\n# T\n");
+    expect(stripLockedLine("---\n---\n# T\n")).toBe("---\n---\n# T\n");
+    expect(stripLockedLine("---\ncwd: /x\n---\n# T\n")).toBe("---\ncwd: /x\n---\n# T\n");
+  });
 });
 
 describe("vault lifecycle and the envelope", () => {
