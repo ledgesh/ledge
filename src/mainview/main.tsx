@@ -10,6 +10,7 @@ import { configureWorkspaces, recordDailyRoot, recordWorkspaceKinds } from "./wo
 import { configureClipboard } from "./lib/clipboard";
 import { configureMenu, dispatchMenuCommand } from "./lib/menu";
 import { configureCli } from "./lib/cli";
+import { captureFailures, configureLog } from "./lib/log";
 import { configureAssets } from "./lib/assets";
 import { configureSettings } from "./lib/settings";
 import { applyAppearance } from "./lib/theme";
@@ -42,6 +43,19 @@ const rpc = Electroview.defineRPC<LedgeRPC>({
 });
 
 const electrobun = new Electrobun.Electroview({ rpc });
+
+// First, and outside boot(): a failure while the rest of this file is still
+// wiring itself up is exactly the one worth having in the log, and boot()'s
+// own catch cannot report a throw that happened before it ran.
+configureLog({
+  append: (level, text) => {
+    void electrobun.rpc!.request.logAppend({ level, text });
+  },
+  reveal: () => {
+    void electrobun.rpc!.request.logReveal({});
+  },
+});
+captureFailures();
 
 configureBridge({
   runInline: (sessionId, id, code, language, host) => {

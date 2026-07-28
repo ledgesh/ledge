@@ -270,8 +270,27 @@ Bun therefore validates everything and derives anything derivable:
   `img/photo.png` renders as-is. On paste the bytes never cross the RPC —
   `assetPaste` reads the pasteboard Bun-side and returns only the
   markdown-relative reference; the view never names the file.
+- **The session log** (`logs/ledge.log`, `bun/log.ts`) is the app's only
+  account of itself on a machine that is not this one: Electrobun's launcher
+  forwards the main process's stdout on the DEV channel only, so in a shipped
+  build every console line goes to /dev/null and "it just closed" is the
+  whole bug report. `startLogging()` runs first in `bun/index.ts` and **tees
+  the console** — a global mutation, chosen over a logger module every call
+  site imports because it also catches Electrobun's own output, including the
+  `uncaughtException` handler it installs, which logs and then force-exits.
+  Appends are synchronous for exactly that reason: the last line has to be on
+  disk before the exit. Rotation is per LAUNCH, not per day (`ledge.log` →
+  `ledge.previous.log`), because relaunching is the first thing anyone does
+  after a crash and the dead session has to survive it; a 4 MB cap rotates
+  early rather than truncating, so what survives is the recent end. The
+  **view** forwards its own failures over `logAppend` (`mainview/lib/log.ts`:
+  `window.onerror`, unhandled rejections, `console.error`, capped per
+  session) — WKWebView's console reaches only the Web Inspector, so a render
+  error is otherwise a blank pane and nothing else. It is in the app home,
+  not `~/Library/Logs`, so `LEDGE_NOTES_ROOT` isolates it from every probe.
 - **`LEDGE_NOTES_ROOT`** overrides the APP HOME (`~/.ledge` — where
-  `settings.jsonc`, `.layout.json`, `.workspaces.json`, `.window.json`, and
+  `settings.jsonc`, `.layout.json`, `.workspaces.json`, `.window.json`,
+  `logs/`, and
   the managed workspace folders live; `APP_HOME` in `bun/workspaces.ts`) for tests and
   throwaway runs. The env name predates the per-workspace split and is kept:
   every preload and probe already speaks it. Nothing in the app sets it;

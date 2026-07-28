@@ -70,4 +70,14 @@ Notes are ordinary `.md` files in ordinary folders, so git, agents, and shell to
 - **The CLI.** "Install Shell Command (ledge)" puts `ledge` on your PATH, so `ledge <title>` opens a note from any terminal and `ledge today` lands in the daily note. See [[The ledge CLI]].
 - **Appearance.** Ledge follows your Mac's light or dark setting. To pin one instead, set `appearance.theme` to `"light"` or `"dark"` in Settings (⌘,) and relaunch.
 
+## When something goes wrong
+
+Ledge writes a log of each session, and Help > Reveal Log in Finder opens the folder it is in.
+
+Two files sit there.
+`ledge.log` is the session running now.
+`ledge.previous.log` is the one before it, which is the file you want after a crash: relaunching Ledge starts a new log, and this is where the old one went.
+
+Both are plain text. Attach them to a bug report.
+
 The manual ends with four tutorials that combine these into working routines: [[Tutorial: Run a Project from a Note]], [[Tutorial: A Daily Workflow]], [[Tutorial: Pair with an Agent]], and [[Tutorial: Keep Notes Synced]].

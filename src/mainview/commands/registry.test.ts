@@ -21,6 +21,7 @@ function stubDeps(
       calls.push("installCli");
       return { ok: true, message: "installed" };
     },
+    revealLog: () => calls.push("revealLog"),
     createWorkspace: async () => {
       calls.push("createWorkspace");
       return null;

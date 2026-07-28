@@ -126,6 +126,9 @@ export interface RegistryDeps {
   // Write the `ledge` CLI shim onto the PATH. Resolves to the outcome to
   // surface — Bun composes the message; ok picks the strip's tone.
   installCli(): Promise<{ ok: boolean; message: string }>;
+  // Show the session log in Finder. Fire-and-forget: the outcome is a Finder
+  // window, which is its own feedback.
+  revealLog(): void;
   // Workspace lifecycle (workspace/actions.ts): each needs a Bun round trip
   // (create a folder / open the native picker / detach the registry entry),
   // so the reducer cannot do it alone. Each resolves to an error message to

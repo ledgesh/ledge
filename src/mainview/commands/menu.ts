@@ -207,7 +207,7 @@ export const MENU: readonly MenuSection[] = [
   },
   {
     label: "Help",
-    items: [{ command: "docs.open" }],
+    items: [{ command: "docs.open" }, "---", { command: "log.reveal" }],
   },
 ];
 

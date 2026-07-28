@@ -138,6 +138,11 @@ export const COMMANDS = {
   // Palette-only (a once-per-machine act earns no chord): writes the `ledge`
   // shim so the notes are reachable from any terminal (bun/cliShim.ts).
   "cli.install": { title: "Install Shell Command (ledge)" },
+  // Opens the log FOLDER, so the previous session's copy is visible next to
+  // the current one — after a crash that is the one worth sending. Titled
+  // "Reveal" because it lands in Finder, not in Ledge: the log is not a note
+  // and opening it in the editor would suggest it is.
+  "log.reveal": { title: "Reveal Log in Finder" },
 
   // Per-note params (frontmatter). Both palette/menu-only: neither is frequent
   // enough to spend a chord on. Restart is the escape hatch for restart-applies

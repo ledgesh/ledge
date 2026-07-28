@@ -39,6 +39,7 @@ import {
   RotateCcw,
   Rows2,
   Save,
+  ScrollText,
   Search,
   Settings as SettingsIcon,
   Shapes,
@@ -625,6 +626,13 @@ export function buildCommands(deps: RegistryDeps): Command[] {
           else ctx.ui.showError?.(r.message);
         });
       },
+    }),
+    // The answer to "it crashed, what do I send you". No notice strip on
+    // success: a Finder window opening IS the confirmation, and a toast on
+    // top of it would be the second one.
+    cmd("log.reveal", {
+      icon: ScrollText,
+      run: () => deps.revealLog(),
     }),
 
     // --- per-note params (frontmatter) ----------------------------------------

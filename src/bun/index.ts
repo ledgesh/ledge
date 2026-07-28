@@ -65,6 +65,7 @@ import { createFromTemplatePath, openDaily, resolveConfiguredWorkspace } from ".
 import { syncDocs } from "./docs";
 import { readLayout, writeLayout } from "./layout";
 import { fitFrame, readFrame, writeFrame, type Rect } from "./windowFrame";
+import { revealLog, startLogging, write as writeLog } from "./log";
 import { installShim, tildify } from "./cliShim";
 import { OPEN_REQUEST_PATH, takeOpenRequest } from "./openRequest";
 import { syncWatchers } from "./watch";
@@ -77,6 +78,24 @@ import { buildRemoteSpawn } from "./remoteSpawn";
 import { readFileSync, statSync } from "node:fs";
 import type { LedgeRPC } from "../shared/rpc-schema";
 import { isHostName, LOCAL_HOST, type NoteParams } from "../shared/frontmatter";
+
+// Before anything that can fail: from here every console line in this process
+// is also on disk. Nothing else in bun/ knows this happened — call sites keep
+// using console — and it deliberately covers Electrobun's own output too,
+// including the `uncaughtException` and `unhandledRejection` handlers it
+// installs, which console.error and then force-exit. Those two lines are the
+// entire crash report a shipped build can produce, and they land because the
+// appends are synchronous.
+startLogging();
+const local = await Updater.getLocalInfo().catch(() => null);
+console.log(
+  `[bun] Ledge ${local?.version ?? "?"} (${local?.channel ?? "?"}, ${local?.hash?.slice(0, 8) ?? "?"}) on ${process.platform} ${process.arch}; bun ${Bun.version}`,
+);
+
+// The view's failures land in the same file, by its own choice of what is
+// worth sending (mainview/lib/log.ts) — a blank pane after a render error is
+// the one crash a Bun-side log cannot see.
+const LOG_TEXT_CAP = 8000;
 
 // Read once, applied for the life of the process: the shell below, the trash
 // TTL at the bottom, and the view's snapshot via settingsGet. Edits to
@@ -772,6 +791,13 @@ const rpc = BrowserView.defineRPC<LedgeRPC>({
       // the allowlisted schemes may pass. Re-checked on this side because the
       // view's check is styling and this one is the boundary — the same move
       // as assertProfileName above (architecture.md §2).
+      // Bun stamps the source and level and caps the length; the view's text
+      // is the only part it contributes (rpc-schema.ts logAppend).
+      logAppend: async ({ level, text }) => {
+        writeLog("view", level, [text.slice(0, LOG_TEXT_CAP)]);
+        return { ok: true };
+      },
+      logReveal: async () => ({ ok: revealLog() }),
       linkOpen: async ({ url }) => {
         const target = openableUrl(url);
         if (!target) return { ok: false };

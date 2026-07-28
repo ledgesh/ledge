@@ -481,6 +481,25 @@ export type LedgeRPC = {
       // view only surfaces the text (notice strip on ok, error strip
       // otherwise). Never throws across the RPC; failure is data here.
       cliInstall: { params: {}; response: { ok: boolean; message: string } };
+      // Put a view-side failure in the session log (bun/log.ts). The webview
+      // has no console anyone can read in a shipped build — WKWebView's goes
+      // to the inspector, which a user does not have — so an uncaught render
+      // error would otherwise leave nothing behind but a blank pane. Only
+      // failures ride this: `window.onerror`, unhandled rejections, and
+      // console.error, never ordinary logging, and the view caps how many it
+      // will send in a session (lib/log.ts) so an erroring render loop cannot
+      // turn the log into a disk-filler.
+      //
+      // Bun stamps the `[view/…]` prefix itself and truncates the text, which
+      // is the whole guard: this is a fixed-name append of arbitrary view
+      // bytes, and the only thing that keeps it from being byte storage in
+      // the app home is that it is bounded and lands in a file the app treats
+      // as disposable.
+      logAppend: { params: { level: "warn" | "error"; text: string }; response: { ok: boolean } };
+      // Open the log folder in Finder (the Help menu's "Reveal Log"). Takes
+      // no path — Bun alone knows where the log lives, so the view cannot
+      // aim `open` at anything.
+      logReveal: { params: {}; response: { ok: boolean } };
       // Read one local image referenced by a note (`![](.ledge-assets/x.png)`) for the
       // editor's rendered preview. The webview cannot touch the filesystem, so
       // the bytes ride the RPC base64-encoded. `src` is the markdown-relative
