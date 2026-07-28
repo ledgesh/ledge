@@ -64,6 +64,12 @@ Plus: live-verified in the real webview when the change touches the native
 seams (see docs/contributor/testing.md §6). Tests land in the same change as
 the feature. A feature whose logic is pure but untested is not done.
 
+CI runs the same bar on every pull request, on a macOS runner
+([.github/workflows/ci.yml](.github/workflows/ci.yml)), and builds the whole
+`.app` rather than only the view. It cannot do the live-webview check: no one
+is there to watch a window open. That one is yours, and saying you did it
+belongs in the PR description.
+
 ## Sending a change
 
 1. Open an issue first for anything larger than a bug fix, so the design can

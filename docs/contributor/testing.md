@@ -168,3 +168,20 @@ bun run test:e2e     # when the change touches UI behavior
 
 plus §6 when the change touches the native seams. Report results as they
 are: a red test is a finding, not an obstacle to phrase around.
+
+CI (`.github/workflows/ci.yml`) runs that bar on every pull request and every
+push to `main`, on a macOS runner — the only platform where it means anything,
+since the dylib needs the SDK, the bundle needs `actool`, and the e2e suite
+needs WebKit. Two deliberate differences from the list above. It builds the
+whole app (`bun run build`), not just the view: a copy map in
+`electrobun.config.ts` pointing at a path that no longer exists yields a bundle
+that is broken only once launched. And it runs the e2e suite every time, because
+"did this change UI behavior" is not a judgment a workflow can make. On the
+runner the suite also gets `forbidOnly` (a committed `test.only` shrinks the
+suite to one test and still goes green) and one retry — a test that passes only
+on the retry is reported as flaky, which is a finding, not a green.
+
+What CI cannot do is §6. The live probe's whole subject is the real app on a
+real Mac, and a runner has nobody watching. A green run on a change that
+touches the native seams is three of these four layers, not four; the fourth is
+done by hand, before the pull request, and said so in it.

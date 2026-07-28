@@ -1,0 +1,94 @@
+# The green bar (docs/contributor/testing.md §7), run on a machine that is not
+# the author's: a clean checkout, no build/ left over from last time, and no
+# Xcode-shaped local setup that the next contributor would not have. The four
+# steps here are the same four CONTRIBUTING.md asks for by hand, in the same
+# order, so a red run names a step a human already knows how to reproduce.
+name: CI
+
+on:
+  # Branch pushes are covered by their pull request. Pushing a branch without
+  # one is usually a work-in-progress save, and a macOS runner is not the
+  # right thing to spend on it.
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A second push to the same branch makes the first run's answer worthless
+# before it finishes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  green-bar:
+    # macOS only, and not for lack of ambition. The PTY dylib needs clang and
+    # the macOS SDK, the bundle needs actool, and the e2e suite needs WebKit,
+    # which is the engine the app ships inside. A cheap Linux job could run
+    # tsc and bun test, but it would be a green bar for a platform nobody runs
+    # this app on, and the divergence it hid would surface on a user's Mac.
+    runs-on: macos-latest
+    # A hung run bills until something kills it, and macOS minutes bill at ten
+    # times the rate of Linux ones. The whole suite is about five minutes.
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pinned, not `latest`: a Bun release should break this repo in a commit
+      # that says it upgraded Bun, not in the next unrelated pull request.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Cache the Bun install cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      # --frozen-lockfile, so a lockfile that disagrees with package.json is a
+      # failure here rather than a silently different dependency tree than the
+      # one anyone tested against.
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # Cheapest first: typecheck and unit tests answer in seconds, and there
+      # is no reason to download WebKit to discover a syntax error.
+      - name: Typecheck
+        run: bunx tsc --noEmit
+
+      - name: Unit and filesystem tests
+        run: bun test
+
+      # `bun run build` is the view build, the CLI bundle, the PTY dylib, and
+      # the .app assembled from them. Building the bundle rather than just the
+      # view is what covers electrobun.config.ts: a copy map pointing at a path
+      # that no longer exists produces an app that is broken only once it is
+      # launched, which is a thing to learn here and not from a user.
+      - name: Build the app
+        run: bun run build
+
+      - name: Cache the Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+
+      - name: Install WebKit
+        run: bunx playwright install webkit
+
+      - name: UI tests (headless WebKit)
+        run: bun run test:e2e
+
+      # A failure on a machine you cannot open is only debuggable through what
+      # it leaves behind: the report carries the retry's trace (see
+      # playwright.config.ts).
+      - name: Keep the report of a failed UI run
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7

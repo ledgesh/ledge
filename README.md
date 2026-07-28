@@ -1,5 +1,7 @@
 # Ledge
 
+[![CI](https://github.com/danhstevens/ledge/actions/workflows/ci.yml/badge.svg)](https://github.com/danhstevens/ledge/actions/workflows/ci.yml)
+
 The notebook for developers and DevOps, on macOS. Ledge runs code and commands
 straight from your Markdown: write a note, then run a fenced block in place and
 watch its output stream in beneath it.
