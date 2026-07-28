@@ -33,7 +33,7 @@ jobs:
     timeout-minutes: 20
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Pinned, not `latest`: a Bun release should break this repo in a commit
       # that says it upgraded Bun, not in the next unrelated pull request.
@@ -42,7 +42,7 @@ jobs:
           bun-version: 1.3.14
 
       - name: Cache the Bun install cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.bun/install/cache
           key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
@@ -71,7 +71,7 @@ jobs:
         run: bun run build
 
       - name: Cache the Playwright browsers
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/Library/Caches/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('bun.lock') }}
@@ -87,7 +87,7 @@ jobs:
       # playwright.config.ts).
       - name: Keep the report of a failed UI run
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-report
           path: playwright-report/
