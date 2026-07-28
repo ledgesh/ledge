@@ -24,7 +24,9 @@ With more than one, Ledge asks on every run. A "Run on" menu appears at the bloc
 
 ## Authentication
 
-Ledge runs your own `ssh` on a real terminal. Keys, agents, and everything in `~/.ssh/config` work as they do in any terminal, and passphrase prompts, host-key confirmations, and 2FA challenges appear in the run's output where you answer them directly.
+Ledge runs your own `ssh` on a real terminal. Keys, agents, and everything in `~/.ssh/config` work as they do in any terminal, and passphrase prompts, host-key confirmations, and 2FA challenges appear where you answer them directly.
+
+In the terminal drawer they appear as they come. Inline runs hold them for a few seconds first, because a healthy connection has started the block by then and its own output is what you want to see. So the first run against a new machine pauses, then shows you ssh asking whether to trust the host key. Answer it in the output panel and the block carries on.
 
 Ledge does not manage connections. If they feel slow to start, use `ControlMaster` in your ssh config for connection reuse.
 

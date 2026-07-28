@@ -4,9 +4,13 @@
 // Why FFI and not node-pty: node-pty's native read stream never delivers data
 // under Bun. Why posix_spawn and not fork(): forking from Bun's multithreaded
 // runtime segfaults, but posix_spawn's fork+exec happens inside libc and is
-// safe. Why poll() instead of setting O_NONBLOCK: fcntl/ioctl are variadic and
-// mis-marshal under bun:ffi on arm64, so we never change the fd's flags and
-// instead gate every read on poll() with a zero timeout.
+// safe. Why poll() on reads: it is cheaper than a syscall that answers EAGAIN,
+// and it distinguishes "nothing yet" from the hangup that means the child is
+// gone. Writes cannot use poll — on a pty master it reports writable and then
+// the write blocks anyway — so the master fd is O_NONBLOCK (through the
+// ledge_set_nonblock trampoline, because fcntl is variadic and bun:ffi
+// mis-marshals variadic calls on arm64) and write() queues what the tty
+// refuses.
 import { dlopen, ptr, CString, cc } from "bun:ffi";
 import { existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -37,6 +41,8 @@ const O_RDWR = 0x0002;
 const POSIX_SPAWN_SETSID = 0x0400;
 const POLLIN = 0x0001;
 const SIGINT = 2;
+// ETX: what the tty turns back into SIGINT at the far end of a connection.
+const INTR = "\x03";
 const SIGTERM = 15;
 const SIGKILL = 9;
 
@@ -52,6 +58,7 @@ type SpawnFn = (
 interface Native {
   spawnTty: SpawnFn;
   setWinsize: (fd: number, cols: number, rows: number) => number;
+  setNonblock: (fd: number) => number;
 }
 
 type NativeSymbols = ReturnType<typeof dlopen<typeof NATIVE_SYMBOLS>>["symbols"];
@@ -94,6 +101,7 @@ function loadNative(): Native | null {
     spawnTty: (slaveFD, masterFD, cwd, path, argv, envp) =>
       symbols.ledge_spawn_tty(slaveFD, masterFD, cwd, path, argv, envp) as number,
     setWinsize: (fd, cols, rows) => symbols.ledge_set_winsize(fd, cols, rows) as number,
+    setNonblock: (fd) => symbols.ledge_set_nonblock(fd) as number,
   });
 
   for (const lib of libCandidates()) {
@@ -116,7 +124,8 @@ function loadNative(): Native | null {
     console.warn(
       "[pty] no native trampolines (no prebuilt dylib, and compiling in-process failed:",
       (err as Error).message,
-      "). Ctrl-C and terminal resize are unavailable.",
+      "). Ctrl-C and terminal resize are unavailable, and writes to a shell that "
+        + "is not reading can stall the process.",
     );
     native = null;
   }
@@ -138,6 +147,18 @@ export interface PtyOptions {
   cwd?: string;
   columns?: number;
   rows?: number;
+  /**
+   * Deliver an interrupt as the ^C character rather than as a signal, for a
+   * child that is a transport rather than the shell itself.
+   *
+   * Set this when the child is ssh. The foreground process group on THIS tty is
+   * then ssh, and a SIGINT to it ends the connection: the block stops, but so
+   * does the shell behind it, and the note's remote cwd and exports go with it.
+   * The character instead travels down the connection to the remote tty, whose
+   * own line discipline raises SIGINT for whatever is running over there, which
+   * is what the user meant by "stop this block".
+   */
+  interruptViaChar?: boolean;
 }
 
 export class PtyProcess {
@@ -148,8 +169,13 @@ export class PtyProcess {
   private pollBuf: Uint8Array;
   private readBuf = new Uint8Array(65536);
   private readBufPtr: ReturnType<typeof ptr>;
+  // Input the tty has not taken yet, and how far into it we got. See write().
+  private outBuf: Uint8Array | null = null;
+  private outOff = 0;
+  private readonly interruptViaChar: boolean;
 
   constructor(opts: PtyOptions) {
+    this.interruptViaChar = opts.interruptViaChar ?? false;
     // Keep C buffers alive for the duration of the spawn call.
     const keep: Uint8Array[] = [];
     const cstr = (str: string): Uint8Array => {
@@ -179,6 +205,11 @@ export class PtyProcess {
     const namePtr = s.ttyname(slaveFD);
     if (!namePtr) throw new Error("ttyname failed");
     const slavePath = new CString(namePtr).toString();
+
+    // Before the child exists, so no write can ever find a blocking fd. The
+    // flag rides on the open file description, and the child is handed the
+    // SLAVE — a different one — so this is the parent's business only.
+    loadNative()?.setNonblock(masterFD);
 
     const argv = cArr([opts.executable, ...opts.args]);
     const envp = cArr(Object.entries(opts.env).map(([k, v]) => `${k}=${v}`));
@@ -257,6 +288,8 @@ export class PtyProcess {
   /** Drain everything currently readable. Never blocks (poll gates the read). */
   drain(): Uint8Array | null {
     if (this.closed) return null;
+    // The other half of the tick: input the tty had no room for last time.
+    this.flush();
     const chunks: Uint8Array[] = [];
     while (s.poll(ptr(this.pollBuf), 1n, 0) > 0) {
       const n = Number(s.read(this.masterFD, this.readBufPtr, BigInt(this.readBuf.length)));
@@ -279,10 +312,61 @@ export class PtyProcess {
     return out;
   }
 
+  /**
+   * Send `data` to the child. Takes the whole of it, but does not promise the
+   * tty has it yet: what the fd refuses now waits in `outBuf` and goes out on
+   * the next drain tick.
+   *
+   * The queue is not an optimisation. With O_NONBLOCK the fd answers EAGAIN
+   * rather than sleeping, and something has to hold the remainder — and there
+   * is always a remainder to hold, because a tty in canonical mode takes only
+   * one line's worth of bytes and every shell starts out that way. The first
+   * thing written to a new shell (the marker hook) and the first thing written
+   * to a remote one (a block's whole body, base64, on one line) both land in
+   * that window. Before this queue existed, that write slept in the kernel
+   * forever and took the main process with it.
+   *
+   * Unbounded on purpose: every queued byte is something someone asked to type,
+   * and dropping the tail of a command is worse than holding it. A stopped
+   * child bounds it in practice, since nothing is written to a shell that is
+   * not being watched.
+   */
   write(data: string | Uint8Array): void {
     if (this.closed) return;
     const bytes = typeof data === "string" ? new TextEncoder().encode(data) : data;
-    s.write(this.masterFD, ptr(bytes), BigInt(bytes.length));
+    if (this.outBuf) {
+      const rest = this.outBuf.subarray(this.outOff);
+      const merged = new Uint8Array(rest.length + bytes.length);
+      merged.set(rest, 0);
+      merged.set(bytes, rest.length);
+      this.outBuf = merged;
+      this.outOff = 0;
+    } else {
+      this.outBuf = bytes;
+      this.outOff = 0;
+    }
+    this.flush();
+  }
+
+  /**
+   * Push as much of the queue as the tty will take right now. A short write is
+   * the normal case, not an error: canonical mode accepts a line and no more,
+   * so the loop stops on the first write that moves nothing (EAGAIN comes back
+   * as -1) and the rest waits for room. Room arrives when the child reads,
+   * which is also when it switches the tty to raw mode and the line limit stops
+   * applying — so a stalled queue unblocks itself as the shell comes up.
+   */
+  private flush(): void {
+    while (this.outBuf && !this.closed) {
+      const len = this.outBuf.length - this.outOff;
+      const n = Number(s.write(this.masterFD, ptr(this.outBuf, this.outOff), BigInt(len)));
+      if (n <= 0) return;
+      this.outOff += n;
+      if (this.outOff >= this.outBuf.length) {
+        this.outBuf = null;
+        this.outOff = 0;
+      }
+    }
   }
 
   /** Tell the pty its new dimensions (raises SIGWINCH on the child). */
@@ -308,6 +392,10 @@ export class PtyProcess {
 
   /** SIGINT whatever is running in the foreground, as ^C would. */
   interrupt(): void {
+    if (this.interruptViaChar) {
+      this.write(INTR);
+      return;
+    }
     const fg = this.fgPgrp();
     s.killpg(fg > 0 ? fg : this.pid, SIGINT);
   }

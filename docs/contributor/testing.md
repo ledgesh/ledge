@@ -142,6 +142,27 @@ is an alertdialog, not a dialog); and edit `main.tsx` with proper edit tools,
 not ad-hoc string splicing — a text-index splice once matched `boot()`'s
 `catch` instead of the intended one and duplicated the file.
 
+**The ssh transport** needs a machine to connect to, and "I have a server"
+is not a test setup anyone else can repeat. Run one: a container with
+`openssh-server`, published on `127.0.0.1:22` so a bare `host: 127.0.0.1` is a
+valid destination (Ledge builds `ssh -t <host>` with no room for a port), and
+an `ssh-agent` of its own on a scratch socket, with a throwaway key in the
+container's `authorized_keys`. Pass that socket as `SSH_AUTH_SOCK` and the
+app's shells inherit it, so nothing touches the real agent or `~/.ssh/config`.
+Give the container more than one user — a second for the `user@host` form, one
+whose login shell is fish, one with `enable-bracketed-paste off` in its
+`.inputrc` — because those are the differences between servers that the code
+actually has to survive, and the container is where you get to choose them.
+Two things worth doing deliberately: run it once with the host key *not* in
+`known_hosts` (the first connection to a new host is a state every user meets
+exactly once, and it is the one where ssh needs an answer before a shell
+exists), and remove the entry afterwards with `ssh-keygen -R`.
+
+The transport is also where writing the probe against the real modules pays:
+`buildRemoteSpawn` → `PtyProcess` → `InlinePool` is everything under the RPC,
+so a script that drives those three answers most questions in seconds, and
+only the last pass has to be the whole app.
+
 **The Bun-side variant** — for the seams that never reach the view at all (the
 PTY trampolines, the window frame): the clipboard detour is unnecessary,
 because a dev build forwards the main process's stdout. Run the built binary

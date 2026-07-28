@@ -55,6 +55,71 @@ interface Slot {
   // lags it (the C marker has to echo back through the pty), and that gap is
   // exactly when a second run must NOT pick this shell.
   activeRun: string | null;
+  // Whether activeRun's start marker has arrived. Everything the shell says
+  // before it is the shell itself talking, not the block.
+  began: boolean;
+  // What it said, held in case it turns out to matter (see SILENT_MS).
+  preamble: Uint8Array[];
+  preambleLen: number;
+  // What we typed into it since, which the tty echoes straight back. Dropped
+  // from the front of the preamble so a surfaced shell shows what IT said.
+  echo: string;
+  // When activeRun was written, and whether its preamble has been surfaced.
+  startedAt: number;
+  spoke: boolean;
+  // Cancel arrived for a run that never began: close it out and discard the
+  // shell (see cancel).
+  abandoned: boolean;
+}
+
+/**
+ * How long a run may produce no start marker before the shell's own output is
+ * shown in its place.
+ *
+ * Normally nothing outside a C..D pair belongs to any block: it is the prompt,
+ * and the tty's echo of what we typed, and the panel is better without it. But
+ * a shell that never reaches the block has usually said exactly why, and only
+ * there. A remote shell is ssh, and ssh talks before the shell exists: an
+ * unknown host key, a passphrase, a 2FA challenge, `Permission denied`. Held
+ * back, those turn the first run against a new host into a block that runs
+ * forever with an empty panel.
+ *
+ * Long enough that no healthy connection reaches it, so the noise stays out of
+ * the ordinary case; short enough to answer a prompt that is waiting on you.
+ * Past it the shell streams straight to the panel, which already takes
+ * keystrokes, so a question can be answered where it is asked.
+ */
+const SILENT_MS = 4000;
+
+/** How much of a silent shell's output is worth keeping. A banner is small; a
+ * shell stuck in a loop is not, and only its tail says anything. */
+const PREAMBLE_CAP = 16 * 1024;
+
+/**
+ * Drop the tty's echo of `typed` from the front of `data`, so what a surfaced
+ * shell shows is what the SHELL said and not the marker hook being installed.
+ *
+ * Only an exact, complete match is dropped: half a match means the echo is
+ * still arriving or came back mangled, and guessing there would eat the first
+ * line of the real message. Carriage returns are skipped on the way, since the
+ * tty inserts them at the wrap column and after every newline, and neither is
+ * anything we typed.
+ */
+export function stripEcho(data: Uint8Array, typed: string): Uint8Array {
+  let i = 0;
+  let j = 0;
+  while (i < data.length && j < typed.length) {
+    if (data[i] === 0x0d) {
+      i++;
+      continue;
+    }
+    if (data[i] !== typed.charCodeAt(j)) break;
+    i++;
+    j++;
+  }
+  if (j < typed.length) return data;
+  while (i < data.length && (data[i] === 0x0d || data[i] === 0x0a)) i++;
+  return data.subarray(i);
 }
 
 interface Session {
@@ -77,9 +142,12 @@ export class InlinePool {
   // note's params (cwd/env from its frontmatter) on the machine the run named:
   // the pool decides WHEN a shell spawns, but whose note it belongs to and
   // where it lives is information only the caller's spawn can act on.
+  // `now` is injectable so the silence rule is testable without waiting on a
+  // clock; nothing else in here has a sense of time.
   constructor(
     private readonly spawn: (sessionId: string, host: string) => InlineShellIO,
     private readonly nonce: string,
+    private readonly now: () => number = Date.now,
   ) {}
 
   /** Start `runner` for run `id`, on the note's shell for `host` or a fresh overflow one. */
@@ -99,17 +167,38 @@ export class InlinePool {
       session.overflow.set(id, slot);
     }
     slot.activeRun = id;
+    slot.began = false;
+    slot.spoke = false;
+    slot.preamble = [];
+    slot.preambleLen = 0;
+    slot.startedAt = this.now();
+    slot.abandoned = false;
     const size = this.pendingResize.get(id);
     if (size) {
       this.pendingResize.delete(id);
       slot.shell.resize(size.cols, size.rows);
     }
-    slot.shell.write(markerCommand(runner, this.nonce, id));
+    const line = markerCommand(runner, this.nonce, id);
+    slot.echo += line;
+    slot.shell.write(line);
   }
 
-  /** SIGINT whatever run `id`'s shell is running, as ^C would. */
+  /**
+   * SIGINT whatever run `id`'s shell is running, as ^C would.
+   *
+   * A run that never began is a different thing to stop. Its command line went
+   * into a shell that was not listening for one — ssh reading it as the answer
+   * to a host-key question is how that happens — so there is no job to signal,
+   * no marker will ever close the run, and the block would sit on "Running"
+   * with a dead button forever. Stop ends it and discards the shell, whose
+   * state nobody can now describe; the next run spawns a fresh one, which by
+   * then is a connection to a host ssh has been told to trust.
+   */
   cancel(sessionId: string, id: string): void {
-    this.slotFor(sessionId, id)?.shell.interrupt();
+    const slot = this.slotFor(sessionId, id);
+    if (!slot) return;
+    slot.shell.interrupt();
+    if (!slot.began) slot.abandoned = true;
   }
 
   /** Keystrokes / pasted text for the program run `id` is executing. */
@@ -136,15 +225,46 @@ export class InlinePool {
       for (const slot of this.slots(session)) {
         const data = slot.shell.drain();
         if (data) {
+          // Anything arriving before the run's start marker: kept, or shown, by
+          // the rules in SILENT_MS. The parser would drop it, and it is the
+          // only account a stuck shell ever gives of itself.
+          if (slot.activeRun !== null && !slot.began) this.holdOrShow(slot, data, emit);
           for (const ev of slot.parser.feed(data)) {
+            if (ev.type === "began" && ev.blockId === slot.activeRun) {
+              // The block is running: its own output starts here, and the
+              // prologue was what it always is, the echo of what we typed.
+              slot.began = true;
+              slot.preamble = [];
+              slot.preambleLen = 0;
+              slot.echo = "";
+            }
             emit(ev);
             if (ev.type === "ended") this.runEnded(session, slot, ev.blockId);
           }
+        }
+        // Silent too long: hand over what the shell has said, and keep handing
+        // it over, so a question waiting for an answer can be answered.
+        if (slot.activeRun !== null && !slot.began && !slot.spoke && this.now() - slot.startedAt >= SILENT_MS) {
+          slot.spoke = true;
+          this.flushPreamble(slot, emit);
+        }
+        // Stopped before it ever started (see cancel): the shell cannot close
+        // this run and nothing else will, so the pool does, and the shell goes
+        // with it rather than serving the next block from an unknown state.
+        if (slot.abandoned && !slot.began && slot.activeRun !== null) {
+          this.flushPreamble(slot, emit);
+          emit({ type: "ended", blockId: slot.activeRun, exitCode: null });
+          this.dropSlot(session, slot);
+          continue;
         }
         if (slot.shell.exited) {
           // activeRun as the fallback: the shell can die after the command was
           // written but before its C marker echoed back.
           const open = slot.parser.openBlockId ?? slot.activeRun;
+          // A shell that died before its block began took the reason with it
+          // ("Host key verification failed", "Permission denied"), so say it
+          // even if the silence rule has not fired yet.
+          if (open && !slot.began) this.flushPreamble(slot, emit);
           if (open) emit({ type: "ended", blockId: open, exitCode: null });
           this.dropSlot(session, slot);
         }
@@ -196,12 +316,55 @@ export class InlinePool {
     this.pendingResize.clear();
   }
 
+  // Pre-marker bytes: straight to the panel once the slot has started
+  // reporting, held (up to a cap) while it might still be ordinary noise. The
+  // cap is a bound on a shell that chatters forever without ever starting the
+  // block; what matters in that stream is the last thing said, so the oldest
+  // chunk goes first.
+  private holdOrShow(slot: Slot, data: Uint8Array, emit: (ev: InlineEvent) => void): void {
+    if (slot.spoke) {
+      emit({ type: "output", blockId: slot.activeRun!, data });
+      return;
+    }
+    slot.preamble.push(data);
+    slot.preambleLen += data.length;
+    while (slot.preambleLen > PREAMBLE_CAP && slot.preamble.length > 1) {
+      slot.preambleLen -= slot.preamble.shift()!.length;
+    }
+  }
+
+  private flushPreamble(slot: Slot, emit: (ev: InlineEvent) => void): void {
+    if (slot.activeRun === null || slot.preambleLen === 0) return;
+    const joined = new Uint8Array(slot.preambleLen);
+    let off = 0;
+    for (const c of slot.preamble) {
+      joined.set(c, off);
+      off += c.length;
+    }
+    slot.preamble = [];
+    slot.preambleLen = 0;
+    const out = stripEcho(joined, slot.echo);
+    if (out.length > 0) emit({ type: "output", blockId: slot.activeRun, data: out });
+  }
+
   private newSlot(sessionId: string, host: string): Slot {
     const shell = this.spawn(sessionId, host);
     // Install the end-marker hook before any block can run. Its own echo lands
     // outside every C..D pair, so the parser drops it and no block ever sees it.
-    shell.write(markerInit(this.nonce));
-    return { shell, parser: new MarkerParser(this.nonce), activeRun: null };
+    const init = markerInit(this.nonce);
+    shell.write(init);
+    return {
+      shell,
+      parser: new MarkerParser(this.nonce),
+      activeRun: null,
+      began: false,
+      preamble: [],
+      preambleLen: 0,
+      echo: init,
+      startedAt: 0,
+      spoke: false,
+      abandoned: false,
+    };
   }
 
   private slots(session: Session): Slot[] {

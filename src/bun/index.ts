@@ -22,6 +22,7 @@ import { homedir } from "node:os";
 import { basename, resolve } from "node:path";
 import { PtyProcess } from "./pty";
 import { InlinePool, type InlineEvent } from "./inlinePool";
+import { takePaste } from "./paste";
 import { readProfile, writeProfile } from "./profiles";
 import {
   backlinksTo,
@@ -217,7 +218,14 @@ function spawnShell(sessionId: string, host: string, kind: "inline" | "terminal"
     const remote = buildRemoteSpawn(host, kind, sessionParams.get(sessionId), (msg) =>
       console.warn("[session]", msg),
     );
-    return new PtyProcess({ executable: remote.executable, args: remote.args, env: shellEnv, cwd: homedir() });
+    return new PtyProcess({
+      executable: remote.executable,
+      args: remote.args,
+      env: shellEnv,
+      cwd: homedir(),
+      // The pty's child is ssh, not the shell whose block is running (pty.ts).
+      interruptViaChar: true,
+    });
   }
   const { cwd, env } = resolveSpawn(sessionParams.get(sessionId), shellEnv, spawnDeps);
   // Local spawns only: on a remote host the note's local path names nothing.
@@ -276,6 +284,10 @@ interface Term {
   promptReady: boolean;
   pasteQueue: string[];
   scanTail: string;
+  // When the shell last said anything, and 0 while it has said nothing at all.
+  // The fallback prompt signal for shells with no bracketed-paste mode; see
+  // flushPasteQuiet.
+  lastOut: number;
   // `promptReady` is false for two very different reasons: a job is running, or the
   // shell has not printed its first prompt yet. Only the first means busy, so the
   // drawer's button is not dead for the ~ms a cold shell takes to come up.
@@ -308,6 +320,7 @@ function termFor(sessionId: string, requestedHost?: string | null): Term {
       promptReady: false,
       pasteQueue: [],
       scanTail: "",
+      lastOut: 0,
       everReady: false,
       sentBusy: false,
     };
@@ -316,20 +329,11 @@ function termFor(sessionId: string, requestedHost?: string | null): Term {
   return t;
 }
 
-// Wrap a block as a bracketed paste + trailing Enter, exactly what a terminal
-// emulator sends on paste. Trailing newlines are trimmed so they do not add blank
-// buffer lines.
-function bracketedPaste(text: string): string {
-  return `\x1b[200~${text.replace(/\n+$/, "")}\x1b[201~\r`;
-}
-// Release the next queued paste if the shell is idle at a prompt. Sending it
-// submits the command (the trailing \r), which drops the shell out of prompt
-// mode, so we optimistically clear `promptReady`: the remaining queue then waits
-// for the shell's next BP_ENABLE, giving exactly one command per prompt.
-function flushPaste(t: Term): void {
-  if (!t.promptReady || t.pasteQueue.length === 0) return;
-  t.term.write(t.pasteQueue.shift()!);
-  t.promptReady = false;
+// Write whatever the paste policy says may go now (bun/paste.ts owns which of
+// the two formats, and when).
+function flushPaste(t: Term, now = Date.now()): void {
+  const out = takePaste(t, now);
+  if (out !== null) t.term.write(out);
 }
 function sbPush(t: Term, d: Uint8Array): void {
   t.chunks.push(d);
@@ -621,7 +625,9 @@ const rpc = BrowserView.defineRPC<LedgeRPC>({
         // Always queue, then try to release immediately. If the shell is idle at a
         // prompt the paste goes out now; if it is cold or mid-command it waits for
         // the next prompt, so pastes never echo raw or run out of order.
-        t.pasteQueue.push(bracketedPaste(paste));
+        // Queued raw: whether it goes out bracketed depends on what the shell
+        // has told us about itself, and that can still change after the queue.
+        t.pasteQueue.push(paste);
         flushPaste(t);
         return { ok: true };
       },
@@ -916,9 +922,11 @@ function sendRunEvent(ev: InlineEvent): void {
 setInterval(() => {
   inlinePool.drain(sendRunEvent);
 
+  const now = Date.now();
   for (const [sessionId, t] of terms) {
     const termData = t.term.drain();
     if (termData) {
+      t.lastOut = now;
       sbPush(t, termData);
       if (t.attached) rpc.send.terminalOutput({ sessionId, dataB64: toB64(termData) });
       // Track the shell's bracketed-paste mode from its enable/disable sequences
@@ -932,10 +940,13 @@ setInterval(() => {
       if (iEnable !== -1 || iDisable !== -1) {
         t.promptReady = iEnable > iDisable;
         if (t.promptReady) t.everReady = true;
-        flushPaste(t);
       }
       t.scanTail = scan.slice(-(BP_ENABLE.length - 1));
     }
+    // After the scan, and every tick rather than only on output: the prompt a
+    // paste is waiting for arrives as bytes, but a shell with no
+    // bracketed-paste mode is released by the ABSENCE of them instead.
+    flushPaste(t, now);
     // Push busy on every tick, not just when bytes arrive: queueing a paste changes
     // it with no output at all, and the button has to gray out the moment it does.
     const busy = isBusy(t);

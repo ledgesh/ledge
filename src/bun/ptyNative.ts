@@ -40,7 +40,17 @@ export const NATIVE_LIB = "libledge_pty.dylib";
 // so ledge_set_winsize is a fixed-arity wrapper around it. ioctl(TIOCSWINSZ)
 // also raises SIGWINCH on the child, so zsh and any running program re-read the
 // new size.
-export const NATIVE_C = `#include <sys/ioctl.h>
+//
+// ledge_set_nonblock is there for the same variadic reason, and pty.ts's write
+// path is why: a blocking write to a pty master can wait forever. A tty in
+// canonical mode holds input a line at a time, so a line longer than its buffer
+// can never be completed and never be read, and the writer sleeps in the kernel
+// with the whole main process behind it. Every shell switches to raw mode where
+// no such limit exists, but a spawn writes before the child has done that, and
+// a remote block's body rides in on one long line. O_NONBLOCK turns that wait
+// into EAGAIN, which pty.ts can queue and retry.
+export const NATIVE_C = `#include <fcntl.h>
+#include <sys/ioctl.h>
 #include <termios.h>
 #include <util.h>
 #include <unistd.h>
@@ -65,6 +75,12 @@ int ledge_set_winsize(int fd, unsigned short cols, unsigned short rows) {
   ws.ws_ypixel = 0;
   return ioctl(fd, TIOCSWINSZ, &ws);
 }
+
+int ledge_set_nonblock(int fd) {
+  int flags = fcntl(fd, F_GETFL, 0);
+  if (flags < 0) return -1;
+  return fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+}
 `;
 
 // One descriptor set for both load paths: dlopen and cc take the same FFIType
@@ -76,6 +92,7 @@ export const NATIVE_SYMBOLS = {
     returns: "int",
   },
   ledge_set_winsize: { args: ["int", "u16", "u16"], returns: "int" },
+  ledge_set_nonblock: { args: ["int"], returns: "int" },
 } satisfies Record<string, FFIFunction>;
 
 /** The function names the C source defines, in source order. The invariant

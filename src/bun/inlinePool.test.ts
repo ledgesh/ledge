@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { InlinePool, type InlineEvent, type InlineShellIO } from "./inlinePool";
-import { markerInit } from "./markers";
+import { markerCommand, markerInit } from "./markers";
 
 const NONCE = "testnonce";
 
@@ -40,18 +40,29 @@ class FakeShell implements InlineShellIO {
 
 function makePool() {
   const shells: FakeShell[] = [];
-  const pool = new InlinePool(() => {
-    const s = new FakeShell();
-    shells.push(s);
-    return s;
-  }, NONCE);
+  const clock = { t: 1_000_000 };
+  const pool = new InlinePool(
+    () => {
+      const s = new FakeShell();
+      shells.push(s);
+      return s;
+    },
+    NONCE,
+    () => clock.t,
+  );
   const drained = (): InlineEvent[] => {
     const events: InlineEvent[] = [];
     pool.drain((ev) => events.push(ev));
     return events;
   };
-  return { pool, shells, drained };
+  return { pool, shells, drained, clock };
 }
+
+const textOf = (events: InlineEvent[]): string =>
+  events
+    .filter((e) => e.type === "output")
+    .map((e) => new TextDecoder().decode((e as { data: Uint8Array }).data))
+    .join("");
 
 describe("restartSession", () => {
   test("kills the shells and the next run gets a fresh one", () => {
@@ -398,5 +409,131 @@ describe("per-host persistent shells", () => {
     drained();
     pool.restartSession("note", () => {});
     expect(shells.every((s) => s.closed)).toBe(true);
+  });
+});
+
+// A shell that cannot reach the block has usually said why, and the marker
+// parser drops every one of those bytes: they fall outside a C..D pair. This is
+// how they get to the panel anyway. It matters most for remote runs, where the
+// pty's child is ssh and ssh talks before the shell exists (an unknown host
+// key, a passphrase, "Permission denied"). Before this, the first run against a
+// new host was a block that ran forever with an empty panel.
+describe("a shell that never starts the block", () => {
+  test("says nothing extra while it is merely starting up", () => {
+    const { pool, shells, drained, clock } = makePool();
+    pool.run("note", "a", "cmd");
+    shells[0].emit("some prompt noise\r\n");
+    expect(textOf(drained())).toBe("");
+    clock.t += 1000; // still well inside the grace period
+    shells[0].emit(began("a") + "real output" + ended("a"));
+    // The prologue is dropped once the block begins: what the panel shows is
+    // the block's own output and nothing else.
+    expect(textOf(drained())).toBe("real output");
+  });
+
+  test("hands over what it said once it has been silent too long", () => {
+    const { pool, shells, drained, clock } = makePool();
+    pool.run("note", "a", "cmd");
+    shells[0].emit("The authenticity of host 'prod' can't be established.\r\n");
+    drained();
+    clock.t += 5000;
+    expect(textOf(drained())).toContain("The authenticity of host");
+  });
+
+  test("keeps streaming after that, so a question can be answered", () => {
+    // The panel takes keystrokes (pool.input), so a prompt surfaced there is
+    // answerable — but only if what follows the answer is shown too.
+    const { pool, shells, drained, clock } = makePool();
+    pool.run("note", "a", "cmd");
+    shells[0].emit("Are you sure you want to continue connecting? ");
+    drained();
+    clock.t += 5000;
+    drained();
+    pool.input("note", "a", new TextEncoder().encode("yes\r"));
+    shells[0].emit("Warning: Permanently added 'prod'.\r\n");
+    expect(textOf(drained())).toContain("Permanently added");
+  });
+
+  test("a shell that dies first reports its reason without waiting", () => {
+    const { pool, shells, drained } = makePool();
+    pool.run("note", "a", "cmd");
+    shells[0].emit("prod: Permission denied (publickey).\r\n");
+    shells[0].exited = true;
+    const events = drained();
+    expect(textOf(events)).toContain("Permission denied");
+    // And the run still closes out, or the panel sits on Running forever.
+    expect(events.at(-1)).toEqual({ type: "ended", blockId: "a", exitCode: null });
+  });
+
+  test("the held output is per run, not carried into the next one", () => {
+    const { pool, shells, drained, clock } = makePool();
+    pool.run("note", "a", "cmd-a");
+    shells[0].emit(began("a") + "a-out" + ended("a"));
+    drained();
+    shells[0].emit("prompt noise between blocks\r\n");
+    drained();
+    pool.run("note", "b", "cmd-b");
+    clock.t += 5000;
+    // The noise belonged to no run and was never held; block b's silence has
+    // nothing to hand over.
+    expect(textOf(drained())).toBe("");
+  });
+});
+
+describe("the shell's echo of what we typed", () => {
+  test("is dropped from what a surfaced shell shows", () => {
+    const { pool, shells, drained, clock } = makePool();
+    pool.run("note", "a", "source /tmp/a.sh");
+    // A tty echoes every byte written to it, with a CR before each LF, and the
+    // pool wrote two lines before the shell ever spoke.
+    const echo = (markerInit(NONCE) + markerCommand("source /tmp/a.sh", NONCE, "a")).replace(/\n/g, "\r\n");
+    shells[0].emit(echo + "Permission denied (publickey).\r\n");
+    drained();
+    clock.t += 5000;
+    // What surfaces is the shell's own message, not the marker hook.
+    expect(textOf(drained())).toBe("Permission denied (publickey).\r\n");
+  });
+
+  test("a partial or mangled echo is shown rather than guessed at", () => {
+    // Half a match means the rest is still arriving or came back wrapped;
+    // stripping there would eat the first line of the real message.
+    const { pool, shells, drained, clock } = makePool();
+    pool.run("note", "a", "source /tmp/a.sh");
+    shells[0].emit(markerInit(NONCE).slice(0, 40) + "\r\nsomething went wrong\r\n");
+    drained();
+    clock.t += 5000;
+    expect(textOf(drained())).toContain("something went wrong");
+  });
+});
+
+describe("stopping a run that never began", () => {
+  test("ends the run and discards the shell it could not start on", () => {
+    // ssh reading the block's command line as the answer to a host-key
+    // question leaves a live shell that will never produce a marker. Nothing
+    // else can close the run, so the block's button would stay dead.
+    const { pool, shells, drained } = makePool();
+    pool.run("note", "a", "source /tmp/a.sh");
+    drained();
+    pool.cancel("note", "a");
+    const events = drained();
+    expect(events).toEqual([{ type: "ended", blockId: "a", exitCode: null }]);
+    expect(shells[0].closed).toBe(true);
+    // The next run gets a clean shell rather than that one.
+    pool.run("note", "b", "source /tmp/b.sh");
+    expect(shells.length).toBe(2);
+  });
+
+  test("a running block is only interrupted, and keeps its shell", () => {
+    const { pool, shells, drained } = makePool();
+    pool.run("note", "a", "source /tmp/a.sh");
+    shells[0].emit(began("a"));
+    drained();
+    pool.cancel("note", "a");
+    expect(shells[0].interrupts).toBe(1);
+    expect(drained()).toEqual([]);
+    expect(shells[0].closed).toBe(false);
+    // The shell reports the interrupt itself, as 130.
+    shells[0].emit(ended("a", 130));
+    expect(drained()).toEqual([{ type: "ended", blockId: "a", exitCode: 130 }]);
   });
 });

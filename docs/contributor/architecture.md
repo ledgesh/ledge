@@ -650,6 +650,23 @@ alike, which is what keeps all three telling one story about the note.
   shown as a badge. Known limits, accepted: a non-POSIX remote *login*
   shell (fish, csh) works only for notes with no cwd/env preamble, and
   inline runs need bash on the remote.
+- **The pty's child is ssh, and three rules follow from that.** They are
+  easy to get wrong because each looks right until a real connection is on
+  the other end (all three were live-tested into existence; testing.md §6).
+  *Writes never block:* the master fd is `O_NONBLOCK` and `pty.ts` queues
+  what the tty refuses, because a remote block's body arrives as one long
+  line and a tty in canonical mode — which every shell is until it says
+  otherwise — will take a line and then wait forever for a reader that
+  cannot read a partial one. A blocking write there stops the whole main
+  process. *Interrupt travels as the ^C character, not a signal*
+  (`interruptViaChar`): the foreground process group on the local tty is
+  ssh, so signalling it ends the connection and the note's remote cwd with
+  it, while the character reaches the remote tty and stops the block.
+  *A shell that never starts its block gets to speak* (`SILENT_MS` in
+  `bun/inlinePool.ts`): everything outside a C..D marker pair is normally
+  dropped as echo, but ssh talks before the shell exists, so a run silent
+  past the grace period streams the shell's own bytes to its panel — which
+  already takes keystrokes, so a host-key question can be answered there.
 - **Restart-applies, like settings.** Params are read at shell *spawn*; a
   live shell keeps the cwd/env it was born with, and an edited frontmatter
   takes effect on the session's next shell. The "Restart Note Shell" command
