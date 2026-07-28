@@ -199,6 +199,22 @@ describe("folders", () => {
     expect(tabPaths(ws.root)).toEqual([page.path]);
   });
 
+  test("an empty pane in the docs workspace restores empty, not reseeded", () => {
+    // Reseeding it would put back exactly what splitPane refuses to create
+    // there: a read-only "Untitled" that can never be typed in or saved.
+    const page = note("/docs/getting-started.md", "Getting Started");
+    let s = initialState(FOLDER, NOTES);
+    s = reducer(s, { type: "addWorkspace", name: "Documentation", folder: "/docs", note: page });
+    s = reducer(s, { type: "splitPane", dir: "row", empty: true });
+    const docs: WorkspaceRootInfo = { root: "/docs", kind: "docs", available: true };
+    const after = restoreLayout(serializeLayout(s), [...ROOTS, docs], { ...NOTES_BY, "/docs": [page] }, {})!;
+    const ws = after.workspaces.find((w) => w.folder === "/docs")!;
+    const empty = (ws.root as SplitNode).children[1] as LeafNode;
+    expect(empty.tabs).toEqual([]);
+    // The split itself is arrangement and survives, as it does everywhere else.
+    expect(tabPaths(ws.root)).toEqual([page.path]);
+  });
+
   test("a docs workspace with no surviving page is dropped, even when it was selected", () => {
     // The real-user bug behind this rule: quit inside the docs workspace with
     // its pages closed (or with paths a corpus upgrade retired), and restore

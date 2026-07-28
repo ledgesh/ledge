@@ -77,8 +77,11 @@ export function makeNoteTab(path: string, title: string): TabState {
   return { id: uid("tab"), title, docId: uid("doc"), path, seed: "scratch" };
 }
 
-export function makeLeaf(tab: TabState): LeafNode {
-  return { kind: "leaf", id: uid("pane"), tabs: [tab], activeTabId: tab.id };
+// A pane holding one tab, or — with no argument — none at all. A tabless leaf
+// is the same shape a pane reaches by closing its last tab: LeafView renders
+// the "No open notes" empty state over it.
+export function makeLeaf(tab?: TabState): LeafNode {
+  return { kind: "leaf", id: uid("pane"), tabs: tab ? [tab] : [], activeTabId: tab ? tab.id : "" };
 }
 
 // --- queries ---------------------------------------------------------------

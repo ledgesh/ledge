@@ -108,7 +108,9 @@ export type Action =
   | { type: "closeTab"; paneId: string; tabId: string }
   | { type: "selectTab"; paneId: string; tabId: string }
   | { type: "moveTab"; fromPaneId: string; tabId: string; toPaneId: string; toIndex: number }
-  | { type: "splitPane"; dir: SplitDir; paneId?: string }
+  // `empty` splits without seeding the new pane a scratch tab: the read-only
+  // docs workspace has no such thing as a new note (registry.ts sets it).
+  | { type: "splitPane"; dir: SplitDir; paneId?: string; empty?: boolean }
   | { type: "closePane"; paneId?: string }
   | { type: "setRatio"; splitId: string; ratio: number }
   // A note's first save allocated it a file in `folder` (the tab's workspace).
@@ -335,7 +337,10 @@ export function reducer(state: AppState, action: Action): AppState {
         if (!findLeaf(ws.root, paneId)) return ws;
         // A fresh split gets its own scratch tab; an empty pane is a dead grey
         // rectangle, so every new pane is seeded (matches the Swift build).
-        const newLeaf = makeLeaf(makeTab("scratch"));
+        // Except where a new note is not a thing the workspace has: seeding the
+        // read-only docs workspace would hand you an untypable, unsavable
+        // "Untitled", so its splits open onto the empty state instead.
+        const newLeaf = makeLeaf(action.empty ? undefined : makeTab("scratch"));
         const root = splitLeaf(ws.root, paneId, action.dir, newLeaf);
         return { ...ws, root, focusedPaneId: newLeaf.id };
       });

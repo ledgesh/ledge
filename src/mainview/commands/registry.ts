@@ -395,13 +395,20 @@ export function buildCommands(deps: RegistryDeps): Command[] {
     }),
 
     // --- panes ---------------------------------------------------------------
+    // Splitting stays available in the docs workspace — two pages side by side
+    // is what a second pane is FOR when reading — but the new pane opens empty
+    // there: a seeded scratch tab would be a read-only "Untitled" that can
+    // never be typed in or saved. The empty pane is the existing "No open
+    // notes" state (docs-aware already), and it takes the next page opened.
     cmd("pane.splitRight", {
       icon: Columns2,
-      run: (ctx) => ctx.dispatch({ type: "splitPane", dir: "row", paneId: paneTarget(ctx) }),
+      run: (ctx) =>
+        ctx.dispatch({ type: "splitPane", dir: "row", paneId: paneTarget(ctx), empty: docsSelected(ctx) }),
     }),
     cmd("pane.splitDown", {
       icon: Rows2,
-      run: (ctx) => ctx.dispatch({ type: "splitPane", dir: "col", paneId: paneTarget(ctx) }),
+      run: (ctx) =>
+        ctx.dispatch({ type: "splitPane", dir: "col", paneId: paneTarget(ctx), empty: docsSelected(ctx) }),
     }),
     cmd("pane.close", {
       icon: SquareX,

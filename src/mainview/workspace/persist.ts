@@ -146,18 +146,21 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 // workspace: a note open twice would be two docIds racing autosaves over one
 // file — the invariant openNote enforces live, enforced here against a file
 // that could have been duplicated by hand.
+// `docs` marks the read-only documentation workspace, where a pane left with
+// no page is NOT reseeded (splitPane's rule, held across a restart).
 function restoreNode(
   raw: unknown,
   byPath: Map<string, NoteMeta>,
   opened: Set<string>,
   focus: { paneId: string | null },
+  docs: boolean,
 ): PaneNode | null {
   if (!isRecord(raw)) return null;
 
   if (raw.kind === "split") {
     const children = Array.isArray(raw.children) ? raw.children : [];
-    const a = restoreNode(children[0], byPath, opened, focus);
-    const b = restoreNode(children[1], byPath, opened, focus);
+    const a = restoreNode(children[0], byPath, opened, focus, docs);
+    const b = restoreNode(children[1], byPath, opened, focus, docs);
     if (!a || !b) return a ?? b;
     return {
       kind: "split",
@@ -195,11 +198,21 @@ function restoreNode(
   // A pane whose every tab was pruned survives as arrangement, reseeded like
   // any fresh pane: an empty pane is a dead grey rectangle (store.tsx), and a
   // note going missing is not a reason to collapse the user's layout — the
-  // same stance removeTabsBy takes on delete.
+  // same stance removeTabsBy takes on delete. In the docs workspace it stays
+  // empty instead: the seed there is a note that can never save.
   const tabs: TabState[] =
-    survivors.length > 0 ? survivors.map((s) => makeNoteTab(s.meta.path, s.meta.title)) : [makeTab("scratch")];
+    survivors.length > 0
+      ? survivors.map((s) => makeNoteTab(s.meta.path, s.meta.title))
+      : docs
+        ? []
+        : [makeTab("scratch")];
 
-  const leaf: LeafNode = { kind: "leaf", id: uid("pane"), tabs, activeTabId: tabs[Math.min(active, tabs.length - 1)].id };
+  const leaf: LeafNode = {
+    kind: "leaf",
+    id: uid("pane"),
+    tabs,
+    activeTabId: tabs.length > 0 ? tabs[Math.min(active, tabs.length - 1)].id : "",
+  };
   if (raw.focused === true && focus.paneId === null) focus.paneId = leaf.id;
   return leaf;
 }
@@ -210,10 +223,11 @@ function restoreWorkspace(
   byPath: Map<string, NoteMeta>,
   opened: Set<string>,
   n: number,
+  docs: boolean,
 ): Workspace | null {
   if (!isRecord(raw)) return null;
   const focus: { paneId: string | null } = { paneId: null };
-  const root = restoreNode(raw.root, byPath, opened, focus);
+  const root = restoreNode(raw.root, byPath, opened, focus, docs);
   if (!root) return null;
   const name = typeof raw.name === "string" && raw.name.trim() ? raw.name.trim() : `Workspace ${n}`;
   const symbol = typeof raw.symbol === "string" && isIconKey(raw.symbol) ? raw.symbol : DEFAULT_ICON;
@@ -279,6 +293,7 @@ export function restoreLayout(
       byPathByFolder.get(raw.folder) ?? new Map(),
       opened,
       workspaces.length + 1,
+      info.kind === "docs",
     );
     if (!ws) continue;
     // A docs workspace that restored with no page open is dropped rather than

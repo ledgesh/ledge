@@ -10,6 +10,8 @@ Panes put notes side by side. Each note keeps its own shell ([[Running Code]]), 
 
 The new pane opens with a fresh Untitled note and takes focus. Either side can split again, along either axis, as many times as you like. The layout is a tree, not a fixed two-column or three-column arrangement.
 
+In the read-only Documentation workspace the new pane opens empty instead, because there is no new note to make there. It still takes focus, so the next page you open lands in it and the two sit side by side.
+
 A tab's context menu carries Split Right and Split Down too, and those act on the tab's own pane rather than the focused one.
 
 ## Focus a pane

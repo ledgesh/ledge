@@ -130,6 +130,16 @@ describe("splits", () => {
     expect(ws.focusedPaneId).not.toBe(firstLeaf(ws.root).id); // the new (second) pane
   });
 
+  test("an empty splitPane seeds no tab: the docs workspace has no new note", () => {
+    const s = run({ type: "splitPane", dir: "row", empty: true });
+    const ws = selected(s);
+    const pane = findLeaf(ws.root, ws.focusedPaneId)!;
+    expect(pane.tabs).toEqual([]);
+    expect(pane.activeTabId).toBe("");
+    // The pane still exists and holds focus, so the next note opened lands in it.
+    expect(leafIds(ws.root)).toHaveLength(2);
+  });
+
   test("closePane collapses back to the sibling and refocuses", () => {
     const s1 = run({ type: "splitPane", dir: "row" });
     const s2 = reducer(s1, { type: "closePane", paneId: selected(s1).focusedPaneId });

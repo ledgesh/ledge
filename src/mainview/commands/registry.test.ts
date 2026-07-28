@@ -792,6 +792,23 @@ describe("registry", () => {
     expect(find(pinned, "daily.open").when!(makeCtx(docsSelectedState()))).toBe(true);
   });
 
+  test("splitting in the docs workspace opens an empty pane, not an unsavable scratch tab", () => {
+    const cmds = buildCommands(docsDeps());
+    // Splitting stays enabled there — reading two pages side by side is the
+    // point of a second pane.
+    for (const id of ["pane.splitRight", "pane.splitDown"]) {
+      const docs: Action[] = [];
+      find(cmds, id).run(makeCtx(docsSelectedState(), docs));
+      expect(docs).toEqual([
+        { type: "splitPane", dir: id === "pane.splitRight" ? "row" : "col", paneId: undefined, empty: true },
+      ]);
+      // A writable workspace still seeds: `empty` is the docs exception only.
+      const real: Action[] = [];
+      find(cmds, id).run(makeCtx(initialState(FOLDER, []), real));
+      expect(real[0]).toMatchObject({ type: "splitPane", empty: false });
+    }
+  });
+
   test("closing workspaces around the docs one: docs closes freely, the last real one never", () => {
     const cmds = buildCommands(docsDeps());
     const state = docsSelectedState();

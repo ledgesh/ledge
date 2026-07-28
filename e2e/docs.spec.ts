@@ -101,6 +101,23 @@ test("reopening after closing every docs tab lands back on Getting Started", asy
   await expect(page.locator(".cm-line").first()).toHaveText("# Getting Started");
 });
 
+test("splitting opens an empty pane, and the next page opened fills it", async ({ page }) => {
+  // Splitting is a READING move here (two pages side by side), so it stays
+  // enabled — but the seeded scratch tab every other workspace gets would be
+  // an Untitled that the read-only editor never lets you type in or save.
+  await openDocs(page);
+  await page.keyboard.press("Meta+d");
+  await expect(page.locator("[data-tab]", { hasText: "Untitled" })).toHaveCount(0);
+  // The new pane shows the empty state, and even there nothing offers to create.
+  await expect(page.getByText("No open notes")).toBeVisible();
+  await expect(page.getByRole("button", { name: "New Note" })).toHaveCount(0);
+  // It holds focus, so the next page opened lands in it: two pages, one each.
+  await noteRow(page, "Workspaces Guide").click();
+  await expect(page.locator("[data-tab]", { hasText: "Workspaces Guide" })).toHaveCount(1);
+  await expect(page.locator("[data-tab]", { hasText: "Getting Started" })).toHaveCount(1);
+  await expect(page.getByText("No open notes")).toHaveCount(0);
+});
+
 test("pages list in manifest order (numbered paths), not alphabetically by title", async ({ page }) => {
   await openDocs(page);
   // About Panes sorts FIRST by title but its filename (03-) sorts last: the
