@@ -62,7 +62,7 @@ export const NATIVE_COMPONENTS: readonly NativeComponent[] = [
   {
     name: "Ledge PTY trampolines",
     license: "Apache-2.0",
-    url: "https://github.com/danhstevens/ledge",
+    url: "https://github.com/ledgesh/ledge",
     note:
       "`Contents/Resources/app/bun/libledge_pty.dylib`, which is not third-party. It is this project's own C, compiled from `src/bun/ptyNative.ts` by `scripts/build-native.ts`, and the LICENSE at the repository root covers it. Listed here so the bundle's binaries are accounted for without a gap a reader has to resolve.",
   },
