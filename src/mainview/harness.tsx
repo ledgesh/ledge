@@ -527,11 +527,12 @@ store.seed(
   ].join("\n"),
 );
 store.vault = { state: "locked", pass: "letmein" };
-// The built-in docs, attached at boot like the real registry does. Three
+// The built-in docs, attached at boot like the real registry does. Four
 // pages: Getting Started (with a runnable block — the read-only editor must
-// still run it), a second page so the docs browser is a real list, and a
+// still run it), a second page so the docs browser is a real list, a
 // third whose TITLE sorts before the others while its numbered filename
-// sorts last, so a spec can tell path order from title order. Filenames are
+// sorts last, so a spec can tell path order from title order, and the
+// licenses page the Help command lands on by name. Filenames are
 // numbered like the real manifest's (bun/docsContent.ts): the browser sorts
 // the docs workspace by path. Seeded LAST so the older specs' per-workspace
 // counts (scratch's rows, quick-open's scoped lists) see exactly what they
@@ -553,6 +554,10 @@ store.seedAt(
 );
 store.seedAt(DOCS, "02-workspaces-guide.md", "# Workspaces Guide\n\nfolders all the way down\n");
 store.seedAt(DOCS, "03-about-panes.md", "# About Panes\n\nsplits and tabs\n");
+// The generated notices page, last in the manifest as in the real one. Its
+// title is what docs.licenses lands on (registry.ts), so the spec for that
+// command needs a page wearing exactly this H1.
+store.seedAt(DOCS, "04-third-party-licenses.md", "# Third-Party Licenses\n\nMIT, and company\n");
 
 configureNotes({
   list: async (folder) => store.list(folder),

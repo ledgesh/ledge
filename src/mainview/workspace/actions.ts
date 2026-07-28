@@ -76,11 +76,20 @@ export async function attachWorkspace(
 // save), and since the strip never shows the workspace, "selected, showing
 // nothing" is indistinguishable from a dead button — the click has to make
 // the landing page appear, not merely select.
-export async function openDocs(state: AppState, dispatch: (action: Action) => void): Promise<void> {
+//
+// `page` names a page to land on by title, for the menu items that mean one
+// page rather than the manual (Help > Third-Party Licenses). Asking for a page
+// also gives up the shortcut below: "open the manual again" should leave you
+// where you were, while "show me the licenses" has to actually show them.
+export async function openDocs(
+  state: AppState,
+  dispatch: (action: Action) => void,
+  page?: string,
+): Promise<void> {
   const folder = docsFolder();
   if (!folder) return; // Bun never reported one; the command's `when` hides this path
   const existing = state.workspaces.find((w) => w.folder === folder);
-  if (existing && tabPaths(existing.root).length > 0) {
+  if (!page && existing && tabPaths(existing.root).length > 0) {
     dispatch({ type: "selectWorkspace", id: existing.id });
     return;
   }
@@ -92,8 +101,11 @@ export async function openDocs(state: AppState, dispatch: (action: Action) => vo
     notes = await listNotes(folder).catch(() => []);
     fetched = true;
   }
+  // A page that has gone missing (a corpus that changed under a stale docs
+  // root) falls back to the first page rather than opening nothing.
+  const wanted = (page ?? "getting started").toLowerCase();
   const start =
-    notes.find((n) => n.title.toLowerCase() === "getting started") ??
+    notes.find((n) => n.title.toLowerCase() === wanted) ??
     [...notes].sort((a, b) => a.path.localeCompare(b.path))[0];
   if (existing) {
     dispatch({ type: "selectWorkspace", id: existing.id });

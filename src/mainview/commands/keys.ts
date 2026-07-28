@@ -69,6 +69,7 @@ export const COMMANDS = {
   // the way back. No chord: docs are a sometimes destination, so the palette
   // and the header's help button carry it.
   "docs.open": { title: "Documentation" },
+  "docs.licenses": { title: "Third-Party Licenses" },
   "palette.notes": { title: "Go to Note…", keys: ["Mod-p"] },
   "palette.commands": { title: "Command Palette…", keys: ["Mod-Shift-p"] },
   // Full-text search across note bodies, in the same overlay (typing "#" first

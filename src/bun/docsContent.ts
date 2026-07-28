@@ -36,6 +36,14 @@ import tutorialProject from "../../docs/user/14-tutorial-run-a-project.md" with 
 import tutorialDaily from "../../docs/user/15-tutorial-a-daily-workflow.md" with { type: "text" };
 import tutorialAgent from "../../docs/user/16-tutorial-pair-with-an-agent.md" with { type: "text" };
 import tutorialSync from "../../docs/user/17-tutorial-keep-notes-synced.md" with { type: "text" };
+// The one page not authored in docs/user/, and not authored at all: `bun run
+// licenses` generates it (src/bun/licenses.ts) and writes it to the repository
+// root, where GitHub, a packager, and anyone auditing the release all expect
+// to find it. It is a page of the manual regardless of where its source sits,
+// because the licenses it reproduces ask to travel with the app rather than
+// stay behind in a repository. Editing it by hand is pointless: the next
+// regeneration overwrites it, and licenses.test.ts fails in the meantime.
+import thirdParty from "../../THIRD-PARTY-NOTICES.md" with { type: "text" };
 
 export interface DocPage {
   /** The .md filename inside the docs root. */
@@ -61,4 +69,5 @@ export const DOC_PAGES: DocPage[] = [
   { name: "15-tutorial-a-daily-workflow.md", text: tutorialDaily },
   { name: "16-tutorial-pair-with-an-agent.md", text: tutorialAgent },
   { name: "17-tutorial-keep-notes-synced.md", text: tutorialSync },
+  { name: "18-third-party-licenses.md", text: thirdParty },
 ];

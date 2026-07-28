@@ -39,6 +39,7 @@ import {
   RotateCcw,
   Rows2,
   Save,
+  Scale,
   ScrollText,
   Search,
   Settings as SettingsIcon,
@@ -244,6 +245,19 @@ export function buildCommands(deps: RegistryDeps): Command[] {
       when: () => deps.docsFolder() !== null,
       run: (ctx) => {
         void deps.openDocs(ctx.state, ctx.dispatch);
+      },
+    }),
+    // The bundled licenses, as the manual's last page. It is a page and not a
+    // file the Finder reveals because the app already knows how to show a
+    // Markdown document, and because a notice reproduced somewhere the user
+    // cannot reach is the same as one that did not ship.
+    cmd("docs.licenses", {
+      icon: Scale,
+      when: () => deps.docsFolder() !== null,
+      run: (ctx) => {
+        // By title: the corpus renumbers pages as it grows, and the H1 is what
+        // survives that (bun/docsContent.ts).
+        void deps.openDocs(ctx.state, ctx.dispatch, "Third-Party Licenses");
       },
     }),
     // Create-or-open today's YYYY-MM-DD note and land in it. The open rides

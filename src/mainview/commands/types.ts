@@ -149,7 +149,9 @@ export interface RegistryDeps {
   // Documentation workspace, adding it over that folder first if needed
   // (workspace/actions.ts openDocs).
   docsFolder(): string | null;
-  openDocs(state: AppState, dispatch: (a: Action) => void): Promise<void>;
+  // `page` lands on one page by title instead of the manual's front (Help >
+  // Third-Party Licenses).
+  openDocs(state: AppState, dispatch: (a: Action) => void, page?: string): Promise<void>;
   // Kill a note's shells so the next run respawns them with its current
   // frontmatter params.
   restartSession(docId: string): void;

@@ -97,6 +97,16 @@ New dependencies are a deliberate decision, not a convenience. Read the
 dependency policy in [architecture.md](docs/contributor/architecture.md)
 before adding one, and justify it in the PR.
 
+Adding one to `dependencies` also means regenerating the notices:
+
+```sh
+bun run licenses     # rewrites THIRD-PARTY-NOTICES.md
+```
+
+Commit the result with the change. The app ships that file as the manual's
+last page, and `src/bun/licenses.test.ts` fails while it is stale, so this is
+not a step you can leave for later.
+
 ## Licensing
 
 Ledge is licensed under the [Apache License 2.0](LICENSE). By contributing,

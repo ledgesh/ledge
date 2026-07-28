@@ -731,6 +731,22 @@ A third native module needs the same bar as any dependency. Two exist because
 the alternative was a broken terminal, not because compiled code is on the
 table generally.
 
+**Every dependency is also an attribution.** MIT, BSD, and ISC all ask that
+their notice travel with the binary, so adding one to `dependencies` means
+regenerating `THIRD-PARTY-NOTICES.md` (`bun run licenses`) and committing it in
+the same change. The file is the app's, not the repository's: `docsContent.ts`
+compiles it in as the manual's last page and `docs.licenses` opens it, because
+a notice the user's copy does not carry is a notice that did not ship.
+
+Two rules the generator (`bun/licenses.ts`) follows and a reader should know.
+It walks the **production closure** rather than the bundler's output: which
+modules survive tree-shaking is a property of one build and can change without
+any dependency changing, so it over-attributes on purpose. And it never
+fabricates a text — a package that publishes no license file gets its declared
+id and a pointer, not the standard wording under a guessed copyright holder.
+`licenses.test.ts` re-renders and compares, so a stale file fails the suite
+instead of shipping.
+
 ## 9. Comments
 
 Comments in this repo state *why* — the constraint, the rejected alternative,

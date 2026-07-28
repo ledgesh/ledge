@@ -37,8 +37,8 @@ function stubDeps(
     },
     workspaceKind: () => "external",
     docsFolder: () => null,
-    openDocs: async () => {
-      calls.push("openDocs");
+    openDocs: async (_state, _dispatch, page) => {
+      calls.push(page ? `openDocs:${page}` : "openDocs");
     },
     restartSession: record("restartSession"),
     openDailyNote: async (folder) => {
@@ -747,6 +747,20 @@ describe("registry", () => {
     expect(find(cmds, "docs.open").when!(ctx)).toBe(true);
     find(cmds, "docs.open").run(ctx);
     expect(calls).toEqual(["openDocs"]);
+  });
+
+  // The licenses have to be reachable in the shipped app, not only in the
+  // repository: the title it asks for is the H1 of the generated page
+  // (bun/licenses.ts), and a rename on either side breaks the landing.
+  test("docs.licenses opens the manual on the notices page", () => {
+    const calls: string[] = [];
+    const cmds = buildCommands(docsDeps(calls));
+    const ctx = makeCtx(initialState(FOLDER, []));
+    expect(find(cmds, "docs.licenses").when!(ctx)).toBe(true);
+    find(cmds, "docs.licenses").run(ctx);
+    expect(calls).toEqual(["openDocs:Third-Party Licenses"]);
+    // Hidden with no docs root, same as docs.open: there is nothing to open.
+    expect(find(commands, "docs.licenses").when!(makeCtx(initialState(FOLDER, [])))).toBe(false);
   });
 
   test("⌘N indexing skips the docs workspace", () => {

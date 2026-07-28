@@ -123,7 +123,27 @@ test("pages list in manifest order (numbered paths), not alphabetically by title
   // About Panes sorts FIRST by title but its filename (03-) sorts last: the
   // browser must show the manifest's reading order, Getting Started on top.
   const titles = page.locator('[data-target-kind="note"]');
-  await expect(titles).toHaveText([/Getting Started/, /Workspaces Guide/, /About Panes/]);
+  await expect(titles).toHaveText([
+    /Getting Started/,
+    /Workspaces Guide/,
+    /About Panes/,
+    /Third-Party Licenses/,
+  ]);
+});
+
+// Help > Third-Party Licenses, which the palette runs as the same command.
+// The notices ship inside the app because their licenses ask to travel with
+// the binary, so the one thing this must do is land on that page — including
+// from another docs page, where "the docs are already open" would otherwise
+// be answered by leaving you where you are.
+test("Third-Party Licenses lands on the notices page, even from another docs page", async ({ page }) => {
+  await openDocs(page);
+  await expect(page.locator(".cm-line").first()).toHaveText("# Getting Started");
+  await page.keyboard.press("Meta+Shift+P");
+  await page.getByPlaceholder("Run a command").fill("Third-Party");
+  await page.keyboard.press("Enter");
+  await expect(page.locator("[data-tab]", { hasText: "Third-Party Licenses" })).toBeVisible();
+  await expect(page.locator(".cm-line").first()).toHaveText("# Third-Party Licenses");
 });
 
 test("⌘P and ⌥⌘P are scoped to the docs while it is selected", async ({ page }) => {
