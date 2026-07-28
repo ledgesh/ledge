@@ -1,6 +1,6 @@
 {
   "name": "ledge",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "private": true,
   "license": "Apache-2.0",
   "type": "module",
@@ -10,6 +10,7 @@
     "dev:hmr": "bun run build:cli && concurrently -k \"bun run hmr\" \"electrobun dev\"",
     "hmr": "vite --port 5173",
     "build": "vite build && bun run build:cli && electrobun build",
+    "release": "bun scripts/release-preflight.ts && vite build && bun run build:cli && electrobun build --env=stable",
     "build:cli": "bun build src/bun/cli.ts --target=bun --outdir=dist-cli",
     "build:native": "bun scripts/build-native.ts",
     "icon": "bun scripts/make-icon.ts",

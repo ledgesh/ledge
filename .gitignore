@@ -10,6 +10,10 @@ dist-cli/
 dist-native/
 build/
 
+# Release artifacts (the DMG, the update tarball, update.json). Tens of
+# megabytes per build, and the copies that matter are the ones published.
+artifacts/
+
 # Logs
 *.log
 

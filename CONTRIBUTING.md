@@ -39,6 +39,11 @@ heads. Before you write code, read the one that covers what you are touching:
   is no happy-dom in this repo and none should be added), the headless-WebKit
   e2e harness, and the live WKWebView probe for native seams.
 
+Alongside them, [releasing.md](docs/contributor/releasing.md) is the release
+runbook rather than a standard: the two version numbers, the signing and
+notarization credentials, and what to verify on a signed build. Read it before
+changing anything under `build:` or `scripts:` in `electrobun.config.ts`.
+
 The end-user manual lives in [docs/user/](docs/user). Those pages are compiled
 into the app as its built-in documentation workspace, so editing one changes
 what ships: `src/bun/docsContent.ts` imports each page explicitly and lists it

@@ -43,6 +43,12 @@ the app as its built-in docs, via `src/bun/docsContent.ts`) lives in
 These are normative: if code and doc disagree, one of them is wrong — fix
 deliberately, not silently.
 
+- **[releasing.md](docs/contributor/releasing.md)** — the release runbook, not a
+  standard: what a release consists of, the two version numbers, the signing and
+  notarization credentials, and what to verify on a signed build before
+  publishing. Read before cutting a release or touching `electrobun.config.ts`'s
+  build/signing keys.
+
 ## Commands
 
 ```
@@ -51,6 +57,7 @@ bun run test:e2e     # UI behavior in headless WebKit (Playwright harness)
 bunx tsc --noEmit    # typecheck
 bunx vite build      # build the view
 bun run dev          # launch (bunx electrobun dev; bare `electrobun` is not on PATH)
+bun run release      # the signed, notarized DMG (releasing.md)
 bun run cli <verb>   # the `ledge` CLI from the checkout (src/bun/cli.ts; interactions.md §9)
 ```
 

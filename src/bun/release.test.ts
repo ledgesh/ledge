@@ -1,0 +1,67 @@
+import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
+import config from "../../electrobun.config";
+
+const ROOT = resolve(import.meta.dir, "..", "..");
+
+// The build config decides what a released app IS, and it is exercised about
+// once per release. These are the parts of it that fail silently: a wrong
+// version reaches users as a wrong About box, and a build that skips signing
+// reaches them as an app that will not open.
+describe("the release build config", () => {
+  const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as {
+    version: string;
+    scripts: Record<string, string>;
+  };
+
+  // Two files carry the version. electrobun.config.ts is the one that becomes
+  // CFBundleVersion and CFBundleShortVersionString; package.json is the one a
+  // reader looks at first. A release where they disagree has no version.
+  test("both files name the same version", () => {
+    expect(config.app.version).toBe(pkg.version);
+  });
+
+  // CFBundleShortVersionString has a defined grammar: one to three
+  // dot-separated integers. Apple's tools accept `v0.1.0` or `0.1.0-beta` into
+  // the plist and then sort them wrongly forever.
+  test("the version is a plain release number", () => {
+    expect(config.app.version).toMatch(/^\d+(\.\d+){0,2}$/);
+  });
+
+  test("the release script builds the stable channel", () => {
+    expect(pkg.scripts["release"]).toContain("--env=stable");
+    // The preflight is the only thing standing between a mistyped identity and
+    // a three-minute build that fails at the end of it.
+    expect(pkg.scripts["release"]).toContain("release-preflight.ts");
+  });
+});
+
+// The escape hatch is a switch that turns signing OFF, so the interesting
+// question is which way it points when nobody touches it. Read from a fresh
+// process because the config decides this at import time.
+describe("signing", () => {
+  function macConfigWith(env: Record<string, string | undefined>): { codesign: boolean; notarize: boolean } {
+    const p = Bun.spawnSync(
+      [process.execPath, "-e", "import c from './electrobun.config'; console.log(JSON.stringify(c.build.mac))"],
+      { cwd: ROOT, env: { ...process.env, ...env }, stdout: "pipe", stderr: "pipe" },
+    );
+    if (p.exitCode !== 0) throw new Error(p.stderr.toString());
+    return JSON.parse(p.stdout.toString()) as { codesign: boolean; notarize: boolean };
+  }
+
+  test("is on unless it is deliberately turned off", () => {
+    const mac = macConfigWith({ LEDGE_UNSIGNED: undefined });
+    expect(mac.codesign).toBe(true);
+    expect(mac.notarize).toBe(true);
+  });
+
+  test("LEDGE_UNSIGNED=1 turns off both halves, not one", () => {
+    // Signing without notarizing produces an app Gatekeeper still refuses, so
+    // a dry run that dropped only one of them would waste the round trip and
+    // prove nothing.
+    const mac = macConfigWith({ LEDGE_UNSIGNED: "1" });
+    expect(mac.codesign).toBe(false);
+    expect(mac.notarize).toBe(false);
+  });
+});
