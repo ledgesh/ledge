@@ -334,11 +334,19 @@ body {
 /* A task's [ ]/[x] marker, rendered as a real checkbox while concealed
    (livePreview.ts TaskWidget). Sized to the text it sits in; accent follows
    the link color so checked boxes read as "the app did this". Explicit
-   pointer, like .ledge-mdlink-live — the box acts on plain click. */
+   pointer, like .ledge-mdlink-live — the box acts on plain click.
+
+   The margin is arithmetic, not taste: it pins the box's ADVANCE to exactly
+   1ch. The widget stands in for `- [ ]` (the bullet hides with the marker),
+   and the space after it is still drawn as text — so a 1ch box puts a task's
+   label at column 2, which is where `- ` puts a plain bullet's, where a
+   mixed list needs both to line up, and what the continuation indent aims
+   for (editor/lists.ts). Sizing the gap in ch against an em-sized box is
+   what keeps all three agreeing at any font size. */
 .ledge-task {
   width: 0.95em;
   height: 0.95em;
-  margin: 0 0.1em;
+  margin: 0 calc((1ch - 0.95em) / 2);
   vertical-align: -0.1em;
   accent-color: var(--link);
   cursor: pointer;
@@ -348,6 +356,27 @@ body {
 .ledge-task-done span {
   color: var(--ed-muted);
   text-decoration: line-through;
+}
+/* Strong emphasis. Lives here rather than in setup.ts's HighlightStyle so the
+   pending-Setext rule below can name it — see that comment. */
+.ledge-strong {
+  font-weight: 700;
+}
+/* The two lines of a Setext heading whose underline is still just the `-` of
+   a list item being typed (editor/setext.ts): drawn as the prose they are
+   about to go back to being. `inherit` rather than a size, so each span
+   resolves to whatever the line itself is; the descendant selector is what
+   outranks the single-class rules HighlightStyle generates. Only size and
+   weight are touched — italics, strikes, and colors are not the heading's
+   doing — and real bold is exempted, since CodeMirror emits a span that is
+   both heading and strong as ONE class list, not as nested spans. */
+.ledge-setext-pending,
+.ledge-setext-pending span {
+  font-size: inherit;
+  font-weight: 400;
+}
+.ledge-setext-pending span.ledge-strong {
+  font-weight: 700;
 }
 /* A `---` thematic break while concealed (livePreview.ts RuleWidget): the
    line it means, not the dashes it is. */

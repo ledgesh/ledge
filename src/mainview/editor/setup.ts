@@ -1,6 +1,7 @@
 import { EditorState, Prec } from "@codemirror/state";
 import { EditorView, keymap, lineNumbers, drawSelection } from "@codemirror/view";
-import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
+import { defaultKeymap, history, historyKeymap, indentLess, indentMore } from "@codemirror/commands";
+import { acceptCompletion } from "@codemirror/autocomplete";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { languages } from "@codemirror/language-data";
 import { syntaxHighlighting, HighlightStyle } from "@codemirror/language";
@@ -14,6 +15,8 @@ import { tableRendering } from "./tables";
 import { imagePasteInsert, imageRendering } from "./images";
 import { fenceClose } from "./fences";
 import { quoteExit } from "./quotes";
+import { listContinuation, tightLists } from "./lists";
+import { nascentBullet } from "./setext";
 import { appCompletion, wikiLinkExtension } from "./wikilinks";
 import { hashtagExtension } from "./tags";
 import { wrapping } from "./wrap";
@@ -48,7 +51,12 @@ export const highlight = HighlightStyle.define([
   { tag: tags.heading5, fontWeight: "600" },
   { tag: tags.heading6, fontWeight: "600", color: "var(--ed-muted)" },
   { tag: tags.heading, fontWeight: "700" }, // Setext and any unlevelled heading.
-  { tag: tags.strong, fontWeight: "700" },
+  // The one entry styled from index.css instead of here, because it is the one
+  // another rule has to be able to name: editor/setext.ts cancels heading
+  // weight on a paragraph whose `-` underline is a list marker mid-birth, and
+  // CodeMirror emits heading-and-strong as ONE flat span, so without a stable
+  // class that cancellation takes real bold down with it.
+  { tag: tags.strong, class: "ledge-strong" },
   { tag: tags.emphasis, fontStyle: "italic" },
   // Load-bearing under live preview: with the ~~ marks concealed, the strike
   // itself is the only thing left saying the text is struck.
@@ -187,6 +195,28 @@ const clipboardKeymap = Prec.highest(
     },
   ]),
 );
+
+// Tab indents, ⇧Tab outdents — the line the caret is on, or every line the
+// selection touches. On a list item that is what nests it (the marker moves
+// with the line); in prose it is the ordinary indent. Ledge binds it because
+// the alternative is what WKWebView does with an unclaimed Tab: move focus out
+// of the editor, which in a notebook you type Markdown into is never what the
+// key meant.
+//
+// The cost is the standard one — Tab no longer walks focus out of the editor.
+// It is affordable here because nothing in Ledge depends on Tab to move
+// focus: every destination is a chord (⌥⌘B sidebar, ⌃` terminal, ⌘1…9,
+// ⌃Tab tabs), which is also why the ⌃Tab tab-cycle above is untouched (§2:
+// ⌃ is the intra-pane domain).
+//
+// acceptCompletion runs first so Tab keeps its other universal meaning while
+// the `[[` / `#` / frontmatter picker is open: take the highlighted row. It
+// returns false with no popup open, so indent is the fallthrough, not a
+// special case.
+const indentKeymap = keymap.of([
+  { key: "Tab", run: acceptCompletion },
+  { key: "Tab", run: indentMore, shift: indentLess },
+]);
 
 const theme = EditorView.theme({
   // The base font size is a setting, applied per editor in createEditor below
@@ -361,9 +391,15 @@ export function createEditor(parent: HTMLElement, doc: string, sessionId: string
         drawSelection(),
         lineNumbers(),
         wrapping(),
+        // A lone `-` under a paragraph is a Setext underline, and also the
+        // first keystroke of a bullet list — this withholds the heading
+        // styling while the caret is still on it (editor/setext.ts). Not gated
+        // by livePreview: raw markdown styles its headings too.
+        nascentBullet(),
         findReplace(),
         appKeymap,
         clipboardKeymap,
+        indentKeymap,
         // ⌘B/⌘I/⌘K (editor/formatting.ts). Editing behavior like quoteExit:
         // not gated by livePreview — raw markdown toggles the same markers.
         formatting(),
@@ -381,10 +417,18 @@ export function createEditor(parent: HTMLElement, doc: string, sessionId: string
         // see an empty quote line first (editor/quotes.ts). Not gated by
         // livePreview — it is editing behavior, not rendering.
         quoteExit(),
+        // Shift+Enter continues a list item under its text, and Enter clears
+        // the indent-only line that leaves behind (editor/lists.ts). Same
+        // Prec.high band as quoteExit, disjoint from it by line shape.
+        listContinuation(),
         // Enter on an unterminated `---` (line 1) or ``` opener inserts the
         // closing fence (editor/fences.ts). Editing behavior like quoteExit,
         // so not gated by livePreview either.
         fenceClose(),
+        // Behind fenceClose deliberately (a fence opener inside a list item is
+        // the fence's Enter, not the list's), still ahead of markdown() whose
+        // Enter binding this displaces: same command, loose-list branch off.
+        tightLists(),
         // The `[[` note picker and the `#` tag picker (editor/wikilinks.ts +
         // editor/tags.ts, one autocompletion). Editing behavior like
         // quoteExit, so not gated by livePreview: a raw-markdown editor still

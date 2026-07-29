@@ -28,9 +28,14 @@ export function hangingIndentCols(lineText: string): number {
 }
 
 // A line decoration per visible line that hangs its wrapped rows under the
-// content column: `padding-left` shifts the whole line right by N columns, and a
+// content column: `margin-left` shifts the whole line right by N columns, and a
 // matching negative `text-indent` pulls the first row back to 0, so only the
 // wrapped continuation rows keep the indent.
+//
+// MARGIN, not padding: CodeMirror's base theme already gives .cm-line a small
+// padding-left, and an inline padding REPLACES it — so every list line lost
+// those pixels and its marker sat left of the column plain prose starts at.
+// Margin composes with the base padding instead of standing in for it.
 function buildDecorations(view: EditorView): DecorationSet {
   const builder = new RangeSetBuilder<Decoration>();
   for (const { from, to } of view.visibleRanges) {
@@ -41,7 +46,7 @@ function buildDecorations(view: EditorView): DecorationSet {
         builder.add(
           line.from,
           line.from,
-          Decoration.line({ attributes: { style: `text-indent:-${n}ch;padding-left:${n}ch` } }),
+          Decoration.line({ attributes: { style: `text-indent:-${n}ch;margin-left:${n}ch` } }),
         );
       }
       pos = line.to + 1;
