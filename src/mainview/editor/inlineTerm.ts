@@ -341,10 +341,13 @@ export class InlineTerm {
       const needed = this.neededRows();
       const rows = Math.min(needed, RUN_ROWS);
       if (rows !== this.term.rows) this.term.resize(this.term.cols, rows);
-      // Belt and braces: output that fits now sizes the grid to hold the cursor too,
-      // so there is nothing to scroll to. Only a run taller than the grid clamps,
-      // and that one keeps its scrollbar.
-      this.term.scrollToTop();
+      // Stay where the output left off. A run that fits sizes its grid to hold
+      // everything, so this is a no-op for it; a run taller than the grid clamps
+      // and keeps its scrollbar, and the end is the half of that output worth
+      // landing on — the last thing a build said, the error that stopped it.
+      // Rewinding to the top instead makes every long run open on `Line 1` and
+      // reads as though it never got past the beginning.
+      this.term.scrollToBottom();
       this.wrap.classList.toggle("ledge-term-clamped", needed > RUN_ROWS);
       this.opts.onHeightChange?.();
     });

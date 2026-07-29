@@ -137,10 +137,25 @@ the clipboard):
 6. **Tear down**: revert the probe (its diff should be the whole diff to
    `main.tsx`), kill the app processes, delete the scratch root.
 
-Two hard-won warnings: query dialogs by `[role="alertdialog"]` (ConfirmDialog
-is an alertdialog, not a dialog); and edit `main.tsx` with proper edit tools,
-not ad-hoc string splicing — a text-index splice once matched `boot()`'s
-`catch` instead of the intended one and duplicated the file.
+Four hard-won warnings. Query dialogs by `[role="alertdialog"]` (ConfirmDialog
+is an alertdialog, not a dialog). Edit `main.tsx` with proper edit tools, not
+ad-hoc string splicing — a text-index splice once matched `boot()`'s `catch`
+instead of the intended one and duplicated the file. A synthetic `.click()`
+on a `.cm-line` does NOT move the caret: CodeMirror sets the selection from a
+mouse event's coordinates, and a programmatic click carries none, so a probe
+that then presses ⌘↩ runs nothing at all and looks like a broken chord. Reach
+the live editor instead — `EditorView.findFromDOM(document.querySelector(
+".cm-editor"))` — and `dispatch({selection})` to the position you want, then
+send the key on `view.contentDOM`. And seed notes into a WORKSPACE folder
+under the scratch root (`<root>/scratch/`), not the root itself: the root is
+the app home, and a `.md` sitting in it belongs to no workspace and is listed
+nowhere.
+
+`bun run dev` prefers a Vite dev server by asking whether anything answers on
+`localhost:5173` (`bun/index.ts`, `mainViewUrl`). Any other project's Vite
+holding that port is what the app will load — a foreign app in the window, or
+a blank one — and the probe's own code never runs. Check the port before
+concluding the probe is broken.
 
 **The ssh transport** needs a machine to connect to, and "I have a server"
 is not a test setup anyone else can repeat. Run one: a container with

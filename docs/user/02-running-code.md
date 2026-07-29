@@ -8,6 +8,8 @@ Any fenced code block whose language is runnable gets a Run button, and the shel
 
 ⇧⌘↩ sends the block to the note's terminal drawer instead (⌃` toggles the drawer). There you can keep typing after the command finishes. An inline run ends when its command does.
 
+A block offers to run only once its fence is closed. While the closing ``` is still missing there is no Run button, because what the block contains is not settled: the next closing fence you type anywhere below it becomes this block's end. The third backtick writes the closing line for you, so a block is closed before you have typed a word of it, and a block written above another one never swallows it. Pressing Enter at the end of a fence opener does the same for an opener that arrived some other way, such as a paste.
+
 ## Answer a prompt from a running block
 
 An inline run can ask you things. When it prints its first output it takes the keyboard, so you answer a `sudo` password prompt or a `[y/N]` by typing. The panel header reads "typing here" while your keys go to the program, and focus returns to the note when the command finishes.

@@ -87,10 +87,20 @@ test("a list started under an earlier one does not inherit double spacing", asyn
   expect(await raw(page)).toBe("- [ ] Security questionnaire\n\n- test\n- test");
 });
 
-test("a fence opener inside a list item is still the fence's Enter", async ({ page }) => {
+test("a fence typed inside a list item closes at the item's indent", async ({ page }) => {
   await page.keyboard.type("- item");
   await page.keyboard.press("Shift+Enter");
   await page.keyboard.type("```sh");
+  expect(await raw(page)).toBe("- item\n  ```sh\n  ```");
+});
+
+test("a fence opener inside a list item is still the fence's Enter", async ({ page }) => {
+  await page.keyboard.type("- item");
+  await page.keyboard.press("Shift+Enter");
+  // Written, not typed: an opener that arrived by paste is the one Enter has
+  // left to answer, and inside an item that Enter must be the fence's, not the
+  // list's (the extension order in editor/setup.ts).
+  await page.keyboard.insertText("```sh");
   await page.keyboard.press("Enter");
   expect(await raw(page)).toBe("- item\n  ```sh\n\n  ```");
 });

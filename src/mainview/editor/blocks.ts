@@ -23,6 +23,7 @@ import {
   type RunDestination,
 } from "./bridge";
 import { confirmFor, parseFenceInfo, type ConfirmSpec } from "./fenceInfo";
+import { fenceCloser, fenceOpener } from "./fences";
 import { declaredHosts, frontmatterRange, profileChipAnchor } from "./frontmatter";
 import { LOCAL_HOST, parseFrontmatter } from "../../shared/frontmatter";
 import { sessionIdFacet } from "./session";
@@ -54,6 +55,9 @@ interface Block {
   to: number;
   lang: string | null;
   code: string;
+  // Whether a closing fence ends the block (see fenceClosed). Everything that
+  // offers to RUN hangs off this.
+  closed: boolean;
   // The fence's confirm marker resolved against the note's default, or null
   // when this block runs straight through (editor/fenceInfo.ts).
   confirm: ConfirmSpec | null;
@@ -142,33 +146,67 @@ function infoFromFence(state: EditorView["state"], from: number) {
   return parseFenceInfo(state.doc.lineAt(from).text);
 }
 
+/**
+ * Whether the block's last line is a closing fence.
+ *
+ * Lezer gives an unterminated block a FencedCode node too — it simply ends on
+ * the last BODY line — so the node's shape alone cannot tell "```sh / pwd /
+ * ```" from a note that stops mid-block. Nothing downstream can recover the
+ * difference either, which is why it is read once, here, off the two fence
+ * lines the block claims to have.
+ */
+function fenceClosed(state: EditorView["state"], from: number, to: number): boolean {
+  const openLine = state.doc.lineAt(from);
+  const endLine = state.doc.lineAt(Math.min(to, state.doc.length));
+  // A one-line node is the opener alone: it cannot be its own closer.
+  if (endLine.number <= openLine.number) return false;
+  const f = fenceOpener(openLine.text);
+  return !!f && fenceCloser(endLine.text, f.marker);
+}
+
 function readBlock(state: EditorView["state"], from: number, to: number): Block {
   const doc = state.doc;
   const openLine = doc.lineAt(from);
   const endLine = doc.lineAt(Math.min(to, doc.length));
   const info = infoFromFence(state, from);
   const lang = info.lang;
+  const closed = fenceClosed(state, from, to);
 
-  // Body is the lines strictly between the opening fence and the closing fence.
+  // Body is the lines strictly between the opening fence and the closing one —
+  // or, in an unterminated block, everything after the opener: there the node
+  // ends on the last body line, so discounting it would silently eat that line
+  // (and, in a one-line block, the entire body). Nothing may RUN from here
+  // while `closed` is false (runBlock), but the copy button reads this same
+  // body, and copying all-but-the-last-line is its own quiet lie.
   const firstBody = openLine.number + 1;
-  const lastBody = endLine.number - 1;
+  const lastBody = closed ? endLine.number - 1 : endLine.number;
   let code = "";
   if (lastBody >= firstBody) {
     code = doc.sliceString(doc.line(firstBody).from, doc.line(lastBody).to);
   }
-  return { from, to, lang, code, confirm: confirmFor(info.attrs, noteConfirms(state)) };
+  return { from, to, lang, code, closed, confirm: confirmFor(info.attrs, noteConfirms(state)) };
 }
 
+// Every fenced block in the document, as the facts its chrome is built from.
+// An object rather than positional arguments: `asks` and `closed` are both
+// booleans, and a transposition there would be invisible at the call site and
+// loud on screen.
 function eachBlock(
   state: EditorView["state"],
-  cb: (from: number, to: number, lang: string | null, asks: boolean) => void,
+  cb: (b: { from: number; to: number; lang: string | null; asks: boolean; closed: boolean }) => void,
 ): void {
   const noteDefault = noteConfirms(state);
   syntaxTree(state).iterate({
     enter(node) {
       if (node.name !== "FencedCode") return;
       const info = infoFromFence(state, node.from);
-      cb(node.from, node.to, info.lang, confirmFor(info.attrs, noteDefault) !== null);
+      cb({
+        from: node.from,
+        to: node.to,
+        lang: info.lang,
+        asks: confirmFor(info.attrs, noteDefault) !== null,
+        closed: fenceClosed(state, node.from, node.to),
+      });
     },
   });
 }
@@ -223,6 +261,19 @@ function noteConfirms(state: EditorState): boolean {
 export function runBlock(view: EditorView, pos: number, destination: RunDestination): boolean {
   const block = blockAt(view.state, pos);
   if (!block || !isRunnable(block.lang)) return false;
+  // An unterminated fence has no agreed end, so there is nothing honest to
+  // run: what the block "contains" is decided by whatever closer turns up
+  // below it, and until one does, Lezer ends the node on the last body line.
+  // Sending that guess to a shell is how an empty body reaches `source` and
+  // reports a cheerful exit 0 having run nothing at all.
+  //
+  // The buttons are simply absent for this (rebuild), so this is the chord's
+  // and the palette's half — and it answers rather than returning false,
+  // because a key that does nothing reads as a broken key.
+  if (!block.closed) {
+    notifyUser(BLOCK_UNCLOSED);
+    return true;
+  }
   // A ```prompt fence's contract is "pipe this body to the agent CLI" — in a
   // locked note it does not run, either destination (locking.md §8: the
   // send-direction half of the no-agents invariant; Bun re-validates, this is
@@ -436,6 +487,9 @@ const TERM_BUSY = "This note's terminal is busy";
 // tooltip AND the chord's notice (bridge notifyUser), so they cannot drift.
 const PROMPT_SEALED =
   "Prompt blocks can't be run in locked notes. AI agents aren't allowed to read locked notes.";
+// The chord's answer for a fence with no closing line. Only the chord and the
+// palette can reach it: an unclosed block never draws the buttons.
+const BLOCK_UNCLOSED = "This code block has no closing fence, so there is nothing to run yet.";
 
 // Gray out a run button while its shell cannot take a block. The native `disabled`
 // does the work: it stops the mousedown, so the click cannot queue anything, and
@@ -507,6 +561,10 @@ interface ControlSpec {
   // live run gates it.
   runBusy: boolean;
   termBusy: boolean;
+  // Whether the fence is terminated. An unclosed one gets no run pair at all
+  // (rebuild), so this rides in the signature below: the buttons have to
+  // appear the moment the closing fence is typed.
+  closed: boolean;
   // Whether a click here opens the confirmation first. Said on the button, in
   // the same breath as the host: where a run will happen and whether it will
   // stop to ask are the two things worth knowing BEFORE the click.
@@ -684,7 +742,7 @@ const overlayPlugin = ViewPlugin.fromClass(
       const termBusy = isTerminalBusy(view.state.facet(sessionIdFacet));
 
       const controls: ControlSpec[] = [];
-      eachBlock(view.state, (from, to, lang, asks) => {
+      eachBlock(view.state, ({ from, to, lang, asks, closed }) => {
         const openLine = view.state.doc.lineAt(from);
         let c: { top: number } | null = null;
         try {
@@ -707,6 +765,7 @@ const overlayPlugin = ViewPlugin.fromClass(
           runBusy: isBlockRunning(view.state, from, to),
           termBusy,
           asks,
+          closed,
         });
       });
 
@@ -765,7 +824,7 @@ const overlayPlugin = ViewPlugin.fromClass(
             : null;
 
       const sig =
-        controls.map((c) => `${c.from}:${c.lang}`).join("|") +
+        controls.map((c) => `${c.from}:${c.lang}:${c.closed ? "closed" : "open"}`).join("|") +
         "#" +
         closes.map((c) => c.id).join("|") +
         "#fm:" +
@@ -831,7 +890,14 @@ const overlayPlugin = ViewPlugin.fromClass(
         // note included: the update pass right after this rebuild disables
         // its pair with the sealed reason as tooltip (see the comment there),
         // so the buttons are born gray, never live.
-        if (isRunnable(c.lang)) {
+        //
+        // An UNCLOSED fence is the one case that gets no pair at all, rather
+        // than a disabled one with a reason. The usual argument for the gray
+        // button (a missing control is a mystery) does not apply: this block
+        // has no end yet because it is still being typed, and a run pair that
+        // blinks into existence on the fence line the user is halfway through
+        // writing is noise, not an affordance. It appears when the block does.
+        if (isRunnable(c.lang) && c.closed) {
           const runBtn = iconButton(PLAY_ICON, tooltip("block.runInline"), (e) => {
             e.preventDefault();
             runBlock(this.view, c.from, "inline");
@@ -931,7 +997,7 @@ const overlayPlugin = ViewPlugin.fromClass(
 // keeps the free-standing styling.
 function fencePanelDecorations(state: EditorView["state"], out: Range<Decoration>[]): void {
   const runs = state.field(runsField);
-  eachBlock(state, (from, to) => {
+  eachBlock(state, ({ from, to }) => {
     const first = state.doc.lineAt(from).number;
     const lastLine = state.doc.lineAt(Math.min(to, state.doc.length));
     const last = lastLine.number;

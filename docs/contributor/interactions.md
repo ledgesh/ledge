@@ -152,7 +152,7 @@ CodeMirror and never at the window level.
 | List continuation     | ⇧↩ (typed, not a command) | Shift+Enter inside a list item opens a line indented to the item's CONTENT column — past the bullet or number, but NOT past a `[ ]`: the checkbox is the item's content, not its marker, and the rendered box is pinned to the same 1ch advance as the `- ` it stands in for (index.css `.ledge-task`), so column 2 is where a bullet's text, a task's label, and both their continuations all line up (editor/lists.ts). CodeMirror's own soft newline reindents to the line's indentation, which for `- foo` is column 0: the new line falls outside the item, so the list stops continuing on the next Enter and an ordered item's continuation is deleted outright. Outside a list item, in a fenced block, and in a quote or table nested inside an item, ⇧↩ stays the ordinary soft newline. Enter is bound on the item's continuation lines only — its first line stays upstream's, since that Enter means "next item" and owes you the marker. On an indent-only line it clears the line and stays on it, the one-press exit editor/quotes.ts gives an empty `> ` line (upstream would push the whitespace below the caret instead); on a continuation line with text it adds another at the same indent, which upstream gets right for every item EXCEPT a task, where it measures emptiness from past the `[ ]` and so deletes the item's text |
 | Tight lists           | ↩ (typed, not a command)  | Enter never inserts a blank line between items — `tightLists()` rebinds upstream's own Enter with both of its looseness rules off (editor/lists.ts). One is config (`nonTightLists: false`): Enter on an empty `- ` always LEAVES the list, where upstream instead pushes the marker down to make a two-item tight list loose — the shape the end of a note gives you, which is why that stray blank line appeared only there. The other has no config, so the command's own output is trimmed: given an already-loose list it prefixes each new item with a blank line, so one blank line (how you leave a list and start a new one) makes every list written under an earlier one double-spaced forever. The insertion is always `\n` + blank line + `\n` + marker, so keeping it from its LAST break drops the blank and leaves marker choice, nesting indent, and ordered renumbering upstream's. Costs nothing that renders: looseness is a property of the whole list, so the HTML is unchanged either way and live preview draws neither differently. Sits behind `fenceClose()` in the extension order and ahead of `markdown()`: a ``` opener inside a list item is the fence's Enter, and this command would otherwise answer it first |
 | Pending Setext        | — (typed, not a command)  | A lone `-` under a paragraph is a real Setext underline, so CommonMark reads the pair as an H2 — and opening a bullet list under prose restyles that prose as a big bold heading until enough of the item is typed to stop looking like one. While the caret is ON that dash, the heading styling is withheld from both lines (editor/setext.ts): the document is untouched, nothing is hidden, and moving the caret off lets the heading draw, because at that point an H2 is what the file says (live preview's reveal-under-caret honesty). Narrow on purpose — `--`, `---`, and `=` are underlines nobody reaches by accident on the way to a list. Not gated by the livePreview setting: raw markdown styles its headings too and lurches identically. The cancelling CSS is why `tags.strong` is the one HighlightStyle entry carrying a fixed `class` (setup.ts): CodeMirror emits heading-and-strong as ONE flat span, so without a name to exempt, cancelling heading weight would take real bold with it |
-| Fence auto-close      | — (typed, not a command)  | Enter at the end of an unterminated fence opener inserts the closer with the caret on the empty line between (editor/fences.ts): `---` on line 1 when no closing fence answers it (the block otherwise renders as an hr mid-gesture), and a ```/~~~ code-fence opener no later line closes (everything below would restyle as code until the closer exists). Enter on the opener of an already-closed block, mid-line, or on a closing fence is an ordinary newline |
+| Fence auto-close      | — (typed, not a command)  | A fence closes itself as it is written (editor/fences.ts), in two halves. ON THE THIRD MARK: the backtick or tilde that completes a bare opener plants the matching closer on the next line and leaves the caret where it was, so the info string is still typed normally — bracket-autoclose semantics, and what makes the unterminated state unreachable by typing at all. A fourth or later mark grows the planted closer with it, since a closer shorter than its opener stops closing it. ON ENTER: the same insertion, caret on the empty line between, for the openers typing never sees — a paste, a note opened mid-block, a closer deleted — plus line 1's `---`, which typing must not answer (three dashes are a thematic break or a Setext rule everywhere else, so only the Enter that commits the line can read them as frontmatter). Whether a closer below already answers the opener is read from the FIRST fence-shaped line below, never from any closer anywhere in the note: a block further down owns a closer of its own, and pairing with that one is not "already closed", it is swallowing the block in between — which is exactly what a fence written ABOVE an existing block used to do, since that block's closer made the new opener look answered. A line that opens but cannot close (it carries an info string, or the other mark character) is another block beginning, so this fence still needs its own closer; a bare fence line is both shapes at once and is read as the closer, as CommonMark reads it too. Inside a still-open fence neither half fires: there the mark and the Enter belong to the block being closed. On the opener of an already-closed block, mid-line, or on a closing fence, Enter is an ordinary newline |
 | Edit Note Profile…    | — (palette; edit button on the block, hover/caret-revealed like block controls; ⌘-click the name as accelerator) | opens the profile the note's frontmatter names in Ledge's key/value dialog (macOS binds no app to .env), created seeded if new; hidden when it names none. The button is primary — it lives in the overlay layer where the pointer cursor works; ⌘-click (not click: a plain click is a caret move on editable text) goes solid-underline while ⌘ is held |
 | Lock Notes            | ⌘L (also a locked row's menu while the vault is unlocked) | relocks the vault now (locking.md §3: the view flushes dirty locked buffers first, then Bun drops the keys; open locked tabs swap to placeholder faces and every decrypted copy — text, undo history, image cache — is evicted). No-op while nothing is unlocked |
 | Unlock Notes…         | — (palette; the locked placeholder's button; a locked row's menu while the vault is shut; interposed on opening a locked note) | the passphrase dialog (unlock face, or first-time setup with the no-recovery sentence when no vault exists). Wrong passphrase shakes and stays; the field clears either way |
@@ -162,7 +162,7 @@ CodeMirror and never at the window level.
 | Save                  | ⌘S                        | notes autosave; this skips the debounce |
 | Find / Replace        | ⌘F / ⌥⌘F (fallback ⇧⌘F)   | editor only; ⌥⌘F may be swallowed by cmux |
 | Find Next / Previous  | ⌘G / ⇧⌘G (also F3 / ⇧F3)  | editor only |
-| Run Block Inline      | ⌘↩                        | cursor inside a runnable block; the run takes the keyboard when it first prints, and gives it back when it ends (§6a) |
+| Run Block Inline      | ⌘↩                        | cursor inside a runnable block whose fence is CLOSED (§4c: an unterminated one has no agreed body, draws no run pair, and answers the chord with a notice); the run takes the keyboard when it first prints, and gives it back when it ends (§6a) |
 | Run Block in Terminal | ⇧⌘↩                       | |
 | Bold / Italic         | ⌘B / ⌘I                   | editor only (editor/formatting.ts); toggles `**`/`*` around the selection or the word at the caret — a bare caret drops an empty marker pair to type into. Run-based so the chords compose: ⌘I on `**bold**` stacks to `***both***` and ⌘I again peels only its own star |
 | Insert Link           | ⌘K                        | editor only; wraps the selection as `[text](url)` — a selected URL becomes the destination with the caret in the empty label, any other selection (or the word at the caret) becomes the label with the caret in the empty destination |
@@ -282,6 +282,36 @@ redis-cli -n 0 flushdb
   the word; nothing Bun-side enforces it. It guards against muscle memory,
   which is the failure it was built for. (e2e/run-confirm.spec.ts states the
   policy executably.)
+
+## 4c. Unterminated fences do not run
+
+A code block whose fence has no closing line offers no way to run it: no run
+pair on the card, and the chords answer with a notice instead of executing
+(`editor/blocks.ts`, `fenceClosed`). Only the copy button remains.
+
+- **There is no body to run.** Lezer gives an unclosed block a `FencedCode`
+  node like any other, ending on the last BODY line rather than on a closer,
+  so the body read from it was one line short — and for a one-line block, that
+  is the whole thing. What reached the shell was an empty temp file, which
+  `source`d cleanly and reported a 724 ms exit 0 having run nothing at all.
+  Silence and success are the two worst things a run can report together.
+- **What the block contains is not yet decided.** The next closer typed
+  anywhere below it will pair with this opener, and everything up to that line
+  becomes its content. A run button on a block with no agreed end is offering
+  to execute a guess.
+- **Absent, not disabled** — the one case that departs from §5's grey-button
+  grammar. A missing control is normally a mystery worth avoiding, but a block
+  reaches this state only part-written, and a run pair blinking onto a fence
+  line mid-keystroke is noise. It appears when the block does.
+- **The chord still answers.** ⌘↩ and ⇧⌘↩ surface the reason rather than
+  returning false: a key that does nothing reads as a broken key (the same
+  move as the sealed prompt fence). Bun re-validates nothing here — this one
+  is the view's, since only the view has the syntax tree.
+- **Autoclose is the other half.** The mark that completes an opener plants its
+  closer, and Enter does the same for an opener that arrived some other way, so
+  writing a block never reaches this state (§3's Fence auto-close row). What is
+  left for this section is what typing cannot catch: a paste, an agent's edit,
+  a closer deleted. (e2e/fences.spec.ts states both halves executably.)
 
 ## 5. Tooltips
 
