@@ -8,15 +8,24 @@
 // native bridge is absent. Shared by the inline output panel (editor/blocks.ts)
 // and the terminal drawer (terminal/TerminalDrawer.tsx).
 
+/** Both pasteboard flavors: `html` is "" unless it carries formatted text. */
+export interface RichClipboard {
+  text: string;
+  html: string;
+}
+
 let nativeWrite: ((text: string) => void) | null = null;
 let nativeRead: (() => Promise<string>) | null = null;
+let nativeReadRich: (() => Promise<RichClipboard>) | null = null;
 
 export function configureClipboard(fns: {
   write: (text: string) => void;
   read: () => Promise<string>;
+  readRich?: () => Promise<RichClipboard>;
 }): void {
   nativeWrite = fns.write;
   nativeRead = fns.read;
+  nativeReadRich = fns.readRich ?? null;
 }
 
 export function copyText(text: string): void {
@@ -43,6 +52,17 @@ export async function readClipboard(): Promise<string> {
     }
   }
   return "";
+}
+
+/**
+ * The pasteboard with its HTML flavor, for the editor's ⌘V (editor/htmlPaste.ts
+ * translates it). Without the native bridge — the view in a plain browser, or a
+ * harness that stubs text only — there is no second flavor to have, so this
+ * degrades to the text and an empty `html`, which is exactly "paste the text".
+ */
+export async function readRichClipboard(): Promise<RichClipboard> {
+  if (nativeReadRich) return nativeReadRich();
+  return { text: await readClipboard(), html: "" };
 }
 
 // execCommand("copy") copies the current selection, so we stage the text in an

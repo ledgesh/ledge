@@ -103,6 +103,7 @@ configureClipboard({
     void electrobun.rpc!.request.clipboardWrite({ text });
   },
   read: () => electrobun.rpc!.request.clipboardRead({}).then((r) => r.text),
+  readRich: () => electrobun.rpc!.request.clipboardReadRich({}),
 });
 
 // The native menu bar. Fire-and-forget: a push that loses a race with another

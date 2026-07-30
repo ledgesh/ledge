@@ -219,7 +219,11 @@ export const MENU: readonly MenuSection[] = [
 //        page-focus-only to begin with (registry.ts).
 //   ⌘A ⌘C ⌘X ⌘V  the editor's and terminal's own selection and clipboard
 //        handling, which has to go through the Bun process in this non-secure
-//        context, and which additionally embeds a pasteboard image on ⌘V.
+//        context, and which on ⌘V additionally translates a pasteboard's
+//        formatted HTML to Markdown and embeds a pasteboard image.
+//   ⇧⌘V  the same paste with the translation left out (editor/htmlPaste.ts).
+//        AppKit binds no role to it, and a key equivalent would fire in the
+//        terminal too, where the shell owns the paste.
 //
 // ⌘Z is deliberately NOT here: WebKit turns the native undo selector into a
 // beforeinput of type historyUndo, which @codemirror/commands maps onto its
@@ -234,6 +238,7 @@ export const INNER_OWNED_CHORDS: readonly string[] = [
   "Mod-c",
   "Mod-x",
   "Mod-v",
+  "Mod-Shift-v",
 ];
 
 // True for a chord the terminal's shell should keep: ⌃ without ⌘.

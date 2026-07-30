@@ -24,7 +24,8 @@ import { formatting } from "./formatting";
 import { findReplace } from "./find";
 import { fromDisk, sessionIdFacet } from "./session";
 import { folderOf, noteChanged, pathOf, saveNow } from "../notes/store";
-import { copyText, readClipboard } from "../lib/clipboard";
+import { copyText, readClipboard, readRichClipboard } from "../lib/clipboard";
+import { blockPasteInsert, parsePasteHtml, richPasteMarkdown, verbatimPaste } from "./htmlPaste";
 import { pasteImageAsset } from "../lib/assets";
 import { settings } from "../lib/settings";
 import { keyOf } from "../commands/keys";
@@ -137,6 +138,28 @@ function selectedText(view: EditorView): string {
   return view.state.selection.ranges.map((r) => view.state.sliceDoc(r.from, r.to)).join("\n");
 }
 
+/**
+ * Paste the pasteboard's text, as Markdown when it also carried formatted HTML
+ * that says more than the text does — editor/htmlPaste.ts owns that whole
+ * decision, including declining it, so what lands here is either the
+ * translation or the text exactly as it arrived.
+ */
+function pasteText(view: EditorView, text: string, html: string): void {
+  const sel = view.state.selection.main;
+  const md = verbatimPaste(view.state, sel.from)
+    ? null
+    : richPasteMarkdown(text, parsePasteHtml(html));
+  if (md === null) {
+    view.dispatch(view.state.replaceSelection(text));
+    return;
+  }
+  const before = view.state.sliceDoc(view.state.doc.lineAt(sel.from).from, sel.from);
+  view.dispatch({
+    ...view.state.replaceSelection(blockPasteInsert(before, md)),
+    userEvent: "input.paste",
+  });
+}
+
 const clipboardKeymap = Prec.highest(
   keymap.of([
     {
@@ -162,14 +185,14 @@ const clipboardKeymap = Prec.highest(
       key: "Mod-v",
       run: (view) => {
         // Text first, image as the fallback: a pasteboard carrying text is a
-        // text paste (unchanged behavior), and a pasteboard with an image but
-        // no text — a screenshot, a copied picture — embeds the image: Bun
-        // saves it under .ledge-assets/ and hands back the reference to insert. The
-        // insert parks the caret on the line below the markdown, so the image
-        // renders the moment it lands (editor/images.ts).
-        void readClipboard().then(async (text) => {
+        // text paste, and a pasteboard with an image but no text — a screenshot,
+        // a copied picture — embeds the image: Bun saves it under
+        // .ledge-assets/ and hands back the reference to insert. The insert
+        // parks the caret on the line below the markdown, so the image renders
+        // the moment it lands (editor/images.ts).
+        void readRichClipboard().then(async ({ text, html }) => {
           if (text) {
-            view.dispatch(view.state.replaceSelection(text));
+            pasteText(view, text, html);
             return;
           }
           // The pasted image belongs to this note's workspace: its reference
@@ -189,6 +212,20 @@ const clipboardKeymap = Prec.highest(
             selection: { anchor: sel.from + cursor },
             userEvent: "input.paste",
           });
+        });
+        return true;
+      },
+    },
+    {
+      // Paste without the translation. Formatted text converts by default (that
+      // is what a Markdown editor is for), so the escape hatch is the shifted
+      // chord — the same key macOS gives "Paste and Match Style" and Obsidian
+      // gives "paste as plain text", for the same act. This reads the text
+      // flavor alone, which is also the cheaper of the two calls.
+      key: "Mod-Shift-v",
+      run: (view) => {
+        void readClipboard().then((text) => {
+          if (text) view.dispatch(view.state.replaceSelection(text));
         });
         return true;
       },

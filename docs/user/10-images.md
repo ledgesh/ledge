@@ -10,7 +10,7 @@ Copy an image anywhere, a screenshot or a picture from the web, and press ⌘V i
 ![](.ledge-assets/pasted-2026-07-19.png)
 ```
 
-If the pasteboard holds text, ⌘V pastes text as usual. Ledge embeds only when the pasteboard holds an image and no text.
+Ledge embeds only when the pasteboard holds an image and no text. A pasteboard holding text pastes as text, converted from formatting where there is any ([[Notes and Workspaces]]).
 
 The file lands in `.ledge-assets/` inside the workspace folder, named by paste date. An attached project folder carries its pasted images with it, and the references stay relative. The folder is dot-prefixed so that Ledge's writes are identifiable inside a real project.
 

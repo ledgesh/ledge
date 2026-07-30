@@ -453,6 +453,13 @@ export type LedgeRPC = {
       // of that and behaves like a normal terminal's copy/paste.
       clipboardWrite: { params: { text: string }; response: { ok: boolean } };
       clipboardRead: { params: {}; response: { text: string } };
+      // Both flavors at once, for the editor's ⌘V: `html` is the pasteboard's
+      // `public.html` ("" when it carries none), which the editor translates to
+      // Markdown so formatted text keeps its structure
+      // (editor/htmlPaste.ts). Its own call because reading that flavor costs an
+      // osascript spawn (bun/clipboard.ts) — the terminal and the settings
+      // dialog want text and stay on clipboardRead, which is a pbpaste.
+      clipboardReadRich: { params: {}; response: { text: string; html: string } };
       // Install the native menu bar. The view builds it from the command
       // registry and re-pushes whenever the state a `when` reads changes, so
       // enablement stays honest without Bun learning what a command means.

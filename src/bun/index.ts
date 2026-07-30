@@ -23,6 +23,7 @@ import { basename, join, resolve } from "node:path";
 import { PtyProcess } from "./pty";
 import { InlinePool, type InlineEvent } from "./inlinePool";
 import { takePaste } from "./paste";
+import { readClipboardHtml, readClipboardText, writeClipboard } from "./clipboard";
 import { readProfile, writeProfile } from "./profiles";
 import {
   backlinksTo,
@@ -703,29 +704,36 @@ const rpc = BrowserView.defineRPC<LedgeRPC>({
         await writeProfile(name, text);
         return { ok: true };
       },
-      // System clipboard via macOS pbcopy/pbpaste. The webview cannot reach the
+      // System clipboard (bun/clipboard.ts). The webview cannot reach the
       // clipboard itself (non-secure views:// context), so the terminal and the
       // inline output panel proxy copy/paste through here.
       clipboardWrite: async ({ text }) => {
-        try {
-          const p = Bun.spawn(["pbcopy"], { stdin: "pipe" });
-          p.stdin.write(text);
-          await p.stdin.end();
-          await p.exited;
-        } catch {
-          // No pbcopy (non-macOS or PATH issue); drop silently.
-        }
+        await writeClipboard(text);
         return { ok: true };
       },
-      clipboardRead: async () => {
+      clipboardRead: async () => ({ text: await readClipboardText() }),
+      // Text and the HTML flavor together, for the editor's ⌘V. The two reads
+      // run concurrently because the HTML one is an osascript spawn: ~100ms
+      // serialized onto every paste is a keystroke that feels stuck.
+      //
+      // AppKit is asked first whether there is any HTML to read, which skips
+      // that spawn for every copy made inside Ledge (pbcopy writes text alone)
+      // and for a terminal selection. Fail open: an empty or unavailable format
+      // list asks the pasteboard anyway, so a wrong answer here costs latency,
+      // never the feature.
+      clipboardReadRich: async () => {
+        let rich = true;
         try {
-          const p = Bun.spawn(["pbpaste"], { stdout: "pipe" });
-          const text = await new Response(p.stdout).text();
-          await p.exited;
-          return { text };
+          const formats = Utils.clipboardAvailableFormats();
+          rich = formats.length === 0 || formats.includes("html");
         } catch {
-          return { text: "" };
+          // No format list on this platform; the read below is the fallback.
         }
+        const [text, html] = await Promise.all([
+          readClipboardText(),
+          rich ? readClipboardHtml() : Promise.resolve(""),
+        ]);
+        return { text, html };
       },
       // The native menu bar, shaped entirely by the view (commands/menu.ts).
       // Bun hands it to AppKit and nothing more: the `action` strings are

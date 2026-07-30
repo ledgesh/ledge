@@ -694,13 +694,19 @@ configureLayout({
   },
 });
 
-// In-memory clipboard, readable by specs via window.__harness.
+// In-memory clipboard, readable by specs via window.__harness. The HTML flavor
+// has no in-app writer — only another application puts one on the pasteboard —
+// so specs seed it through setClipboardHtml, and a copy made in the app clears
+// it, exactly as pbcopy does.
 let clip = "";
+let clipHtml = "";
 configureClipboard({
   write: (text) => {
     clip = text;
+    clipHtml = "";
   },
   read: async () => clip,
+  readRich: async () => ({ text: clip, html: clipHtml }),
 });
 
 // In-memory image assets, mirroring bun/assets.ts semantics: read serves a
@@ -787,6 +793,9 @@ declare global {
   interface Window {
     __harness: {
       clipboard: () => string;
+      // Put both pasteboard flavors up, the way another app's copy does: the
+      // rich-paste path has no in-app writer to drive it from.
+      setClipboard: (text: string, html: string) => void;
       settingsText: () => string;
       linkOpens: () => string[];
       layout: () => string | null;
@@ -814,6 +823,10 @@ declare global {
 }
 window.__harness = {
   clipboard: () => clip,
+  setClipboard: (text, html) => {
+    clip = text;
+    clipHtml = html;
+  },
   settingsText: () => settingsText,
   linkOpens: () => [...linkOpens],
   layout: () => layoutText,

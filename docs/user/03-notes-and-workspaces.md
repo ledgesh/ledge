@@ -29,6 +29,28 @@ With a workspace row focused, or from its right-click menu:
 - "Move Workspace Folder…" relocates the folder on disk.
 - ⌫ closes it, which only detaches it. No files are touched, and attaching the same folder later brings everything back.
 
+## Pasting formatted text
+
+⌘V converts formatted text to Markdown. Copy a section of a web page, an email, a Slack thread, or a Google Doc, and the structure survives the paste:
+
+| Copied | Pasted |
+| --- | --- |
+| Heading | `## Heading` |
+| Bold, italic, strikethrough | `**bold**`, `*italic*`, `~~struck~~` |
+| Bulleted and numbered lists | `- item`, `1. item`, nested and indented |
+| Checkboxes | `- [x] done` |
+| Link | `[label](https://example.com)` |
+| Table | A GFM pipe table, alignment included |
+| Code block | A fence, labelled with the language when the page named one |
+| Quote | `> quoted` |
+| Image on the web | `![alt](https://example.com/x.png)` |
+
+⇧⌘V pastes the text as it is, with no conversion. Use it when you want the words and none of the markup.
+
+Ledge converts only what carries formatting. Copying from a terminal, an editor, or the browser's developer tools puts styled but unstructured HTML on the pasteboard, and pasting that gives you your lines exactly as they were. A paste inside a fenced block, a code span, or a frontmatter block is never converted: the text there has to be exact.
+
+An image on the pasteboard is embedded as a file instead. See [[Images]].
+
 ## Deleting a note
 
 `d` or ⌫ on a note's row, or ⌘⌫ from the editor, moves the note to the workspace's trash and shows an Undo strip for a few seconds.
