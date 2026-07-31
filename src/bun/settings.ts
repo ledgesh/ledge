@@ -98,6 +98,37 @@ export async function readSettingsFile(): Promise<string> {
   }
 }
 
+// What an agent may learn about settings (the MCP `settings` tool): the file's
+// raw text, its path, and the problems launch would report. Comments included
+// on purpose — SETTINGS_TEMPLATE's comments ARE the knob documentation, so on
+// an unmodified install this one read returns both what the user configured
+// and what every knob means. Same seeding and legacy-migration path as the ⌘,
+// editor, deliberately: one definition of "the settings file's text", and a
+// first read that materializes the documented template is exactly what the
+// next launch would have written anyway.
+//
+// Read-only, and there is no writing sibling. The prompt-fence default
+// pre-authorizes this server's whole tool namespace (`--allowedTools
+// mcp__ledge`, shared/settings.ts), and settings name the shell every future
+// block spawns and the interpreter every fence runs — an unreviewed write
+// here would change what the user's NEXT run executes. Agents advise; the
+// user edits with ⌘,, or an agent's own file tools do it where the diff is
+// visible. (The file is the user's own config, readable by any shell the
+// agent already has, but a value can still carry a connection string someone
+// inlined instead of using a profile: it is their config, not a secret store.)
+export async function inspectSettings(): Promise<{ path: string; text: string; problems: string[] }> {
+  const text = await readSettingsFile();
+  let json: unknown;
+  try {
+    json = JSON.parse(stripJsonc(text));
+  } catch (err) {
+    // The launch-time answer, reported rather than repaired: the whole file
+    // is skipped for the run and the bytes stay the user's.
+    return { path: SETTINGS_PATH, text, problems: [`not valid JSONC (${err}); Ledge would run entirely on defaults`] };
+  }
+  return { path: SETTINGS_PATH, text, problems: parseSettings(json).problems };
+}
+
 // The save half (settingsWrite): the dialog sends the full new text, written
 // atomically like a note save (temp in the same dir, then rename) so a crash
 // mid-save leaves the old file or the new one, never a truncated half. The

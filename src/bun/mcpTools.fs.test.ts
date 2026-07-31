@@ -611,6 +611,28 @@ describe("tags", () => {
   });
 });
 
+// The one tool that names no note. Its contract is bun/settings.ts's
+// inspectSettings (covered there); what matters here is that the tool exists,
+// takes no arguments, and stays read-only — the tool set is what a prompt
+// fence pre-authorizes, so a writing sibling appearing later should fail a
+// test, not slip in.
+describe("settings", () => {
+  test("returns the user's settings text and its path, no arguments needed", async () => {
+    await writeFile(SETTINGS_PATH, '{\n  // theirs\n  "terminal": { "fontSize": 15 }\n}\n');
+    const out = await call("settings");
+    expect(out.path).toBe(SETTINGS_PATH);
+    expect(out.text).toContain('"fontSize": 15');
+    expect(out.text).toContain("// theirs");
+    expect(out.problems).toEqual([]);
+  });
+
+  test("no tool writes settings", () => {
+    const names = ledgeTools.map((t) => t.name);
+    expect(names).toContain("settings");
+    expect(names.filter((n) => n.includes("setting"))).toEqual(["settings"]);
+  });
+});
+
 // --- locked notes: the agent surface (locking.md §8) --------------------
 // The invariant under test: no tool returns a locked body, EVER — including
 // while the app-side vault is unlocked, which is exactly the state these

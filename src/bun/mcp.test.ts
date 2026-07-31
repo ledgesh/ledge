@@ -106,6 +106,22 @@ describe("instructions", () => {
     expect(text).toContain("`tags` tool");
   });
 
+  test("they point at the built-in manual and the settings tool, whatever the launch context", async () => {
+    // Ledge's own manual is a workspace the read tools already reach, but an
+    // agent that never learns it exists answers Ledge questions from training
+    // data. Same lever as the deixis facts: stated, not left to inference.
+    delete process.env["LEDGE_NOTE"];
+    delete process.env["LEDGE_WORKSPACE"];
+    const text = await initInstructions();
+    expect(text).toContain('`kind: "docs"`');
+    expect(text).toContain("search_notes");
+    expect(text).toContain("`settings` tool");
+    // The two facts an agent must pass on rather than act on: nothing here
+    // writes settings, and a change lands at the next launch.
+    expect(text).toContain("Nothing here writes it");
+    expect(text).toContain("next launch");
+  });
+
   test("launched anywhere else, they say notes must be named", async () => {
     delete process.env["LEDGE_NOTE"];
     delete process.env["LEDGE_WORKSPACE"];

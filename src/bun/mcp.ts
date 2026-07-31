@@ -61,6 +61,14 @@ function instructions(): string {
     "Ledge is the user's local Markdown notes app; these tools read and write their notes. " +
     "Notes are addressed by TITLE (their H1, case-insensitive) — titles survive file renames, paths may not. " +
     "Notes may carry tags — inline #hashtags in the body, or a frontmatter `tags:` line; the `tags` tool lists a workspace's tags, or the notes bearing one. " +
+    // Ledge's own manual is a workspace of notes, so the read tools already
+    // reach it — but an agent that never learns it exists answers questions
+    // about Ledge from its training data instead, which is where wrong
+    // keystrokes and invented settings come from. Same lever as the deixis
+    // facts above: state it, do not hope the model infers it from
+    // list_workspaces' `kind`.
+    'Ledge\'s own manual is a read-only workspace of notes (`kind: "docs"` from list_workspaces) and search_notes covers it: answer questions about Ledge itself — a feature, a keystroke, a setting — from those pages rather than from memory. ' +
+    "The `settings` tool reads the user's settings file, comments included, when the answer depends on how they have Ledge configured. Nothing here writes it: say what to change, and that Ledge applies settings at the next launch. " +
     here +
     oneShot
   );

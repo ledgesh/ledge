@@ -53,7 +53,7 @@ test("a full client session: initialize, list, call — one JSON line per reply"
   expect((init["serverInfo"] as Record<string, unknown>)["name"]).toBe("ledge");
 
   const tools = (replies[1]!["result"] as { tools: Array<{ name: string }> }).tools.map((t) => t.name);
-  expect(tools).toEqual(["list_workspaces", "list_notes", "read_note", "search_notes", "backlinks", "tags", "create_note", "daily_note", "append_note", "edit_note"]);
+  expect(tools).toEqual(["list_workspaces", "list_notes", "read_note", "search_notes", "backlinks", "tags", "settings", "create_note", "daily_note", "append_note", "edit_note"]);
 
   const call = replies[2]!["result"] as { content: Array<{ text: string }>; isError?: boolean };
   expect(call.isError).toBeUndefined();

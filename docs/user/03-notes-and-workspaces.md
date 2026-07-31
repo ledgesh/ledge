@@ -29,6 +29,14 @@ With a workspace row focused, or from its right-click menu:
 - "Move Workspace Folder…" relocates the folder on disk.
 - ⌫ closes it, which only detaches it. No files are touched, and attaching the same folder later brings everything back.
 
+## Live preview
+
+Ledge hides Markdown syntax away from the cursor. `**bold**` shows as bold and the asterisks come back when you move the cursor into it, a link shows its label, a checkbox is clickable, and tables and images render in place.
+
+Set `editor.livePreview` to `false` in Settings (⌘,) and relaunch to see every character all the time. Tables and images stay as text in that mode too. Use it when you are editing syntax precisely and want the text on screen to match the text on disk.
+
+Everything else is unaffected: ⌘B, the `[[` picker, and fence completion work the same either way.
+
 ## Pasting formatted text
 
 ⌘V converts formatted text to Markdown. Copy a section of a web page, an email, a Slack thread, or a Google Doc, and the structure survives the paste:

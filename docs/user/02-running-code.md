@@ -74,6 +74,21 @@ The terminal drawer is a separate shell from the inline one. Both belong to this
 
 Frontmatter applies to newly spawned shells, so after editing it run "Restart Note Shell" from the palette. It kills the note's shells and lets them respawn. Use the same command when an experiment leaves a shell in a strange state.
 
+## Change the shell
+
+Ledge spawns `/bin/zsh -i` for every inline shell and every terminal drawer. Set `shell.path` and `shell.args` in Settings (⌘,) to use a different one:
+
+```json
+"shell": {
+  "path": "/opt/homebrew/bin/fish",
+  "args": ["-i"]
+}
+```
+
+Relaunch to apply. Keep an interactive flag in `args`, usually `-i`, so your rc files run and blocks get the aliases and PATH you expect.
+
+This setting is about shells on this Mac. A note with a `host:` line runs its blocks in the host's own shell instead ([[Remote Hosts]]).
+
 ## Interpreted languages
 
 Languages with an interpreter mapping (`python`, `node`, `ruby`, `ts`, `php`, and others) run as a file handed to that interpreter, one fresh process per run. No state carries between runs.

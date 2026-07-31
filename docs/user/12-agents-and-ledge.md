@@ -10,11 +10,11 @@ Ledge ships an MCP server. `ledge mcp` serves it on stdio, so install the `ledge
 claude mcp add ledge -- ledge mcp
 ```
 
-The server exposes ten tools:
+The server exposes eleven tools:
 
 | Read | Write |
 | --- | --- |
-| `list_workspaces`, `list_notes`, `read_note`, `search_notes`, `backlinks`, `tags` | `create_note`, `daily_note`, `append_note`, `edit_note` |
+| `list_workspaces`, `list_notes`, `read_note`, `search_notes`, `backlinks`, `tags`, `settings` | `create_note`, `daily_note`, `append_note`, `edit_note` |
 
 Notes are addressed by title, which survives renames, so an agent's references do not go stale. Every tool goes through the same store and the same path guards as the app.
 
@@ -55,5 +55,7 @@ A daily template carrying a prompt fence such as `Summarize [[{{yesterday}}]]` g
 Agents see the titles, bodies, tags, and links of ordinary notes. They can read this manual too, so "check the Ledge docs" is a fair instruction.
 
 They never see the body of a locked note. Reads refuse with an explanation, searches skip locked notes and report how many they skipped, and listings flag them so an agent can plan around it.
+
+Settings are readable but not writable. The `settings` tool shows an agent your `settings.jsonc` with its comments, so it can answer "which python is that block using" from your actual configuration and name the line to change. Making the change is yours, in the app (⌘,), and it applies at the next launch.
 
 Deletion is yours alone, in the app, where the trash and Undo live.

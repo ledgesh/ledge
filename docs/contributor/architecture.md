@@ -59,7 +59,20 @@ the store, so an agent's write gets H1-slug naming via `uniqueName` (agents
 never choose filenames) and rides `writeNote`'s `baseMtimeMs` divergence
 guard, and the running app perceives it as an ordinary external edit through
 its watcher (the external-edit safety work is what made these tiers
-acceptable at all). Title-addressed reads reuse
+acceptable at all). One tool names no note: `settings` returns
+`settings.jsonc`'s raw text, its path, and the problems launch would report
+(`bun/settings.ts inspectSettings`, reusing the ⌘, editor's read so there is
+one definition of the file's text). It exists because an agent can otherwise
+see everything about the corpus and nothing about the configuration that
+decides how it RUNS — "which python does that block use" was unanswerable —
+and it carries the comments deliberately: `SETTINGS_TEMPLATE`'s comments are
+the knob documentation, so one read returns both the user's values and their
+meaning. It has no writing sibling, and should not grow one: the prompt-fence
+default pre-authorizes this server's whole namespace (`--allowedTools
+mcp__ledge`), while settings name the shell every future block spawns and the
+interpreter every fence runs, so a write here would change what the user's
+NEXT run executes with nobody reviewing the diff. Agents advise; ⌘, and an
+agent's own reviewable file tools edit. Title-addressed reads reuse
 `shared/wikilinks.ts` — the same resolution the editor uses, hoisted to
 shared/ for exactly this second consumer. Called with no target at all,
 `read_note`/`backlinks` fall back to `$LEDGE_NOTE` — the note whose terminal
@@ -71,7 +84,11 @@ resolves there first, before the global newest-first pass — the same scoping
 the current note's own wikilinks get. The server's initialize `instructions`
 state both facts outright (this note is X, this workspace is Y), because
 that context is what actually steers an agent; tool-description hints alone
-proved not to. The last agent seam is in-note: a ` ```prompt ` fence is
+proved not to. They state two more for the same reason: the built-in manual
+is a workspace `search_notes` already covers (so Ledge questions are answered
+from the docs corpus, not from training data), and settings are read-only
+here (so the answer to "change this for me" is the line to edit plus the
+restart-applies fact, §6). The last agent seam is in-note: a ` ```prompt ` fence is
 runnable by default (`blocks.runnable`), mapped in `blocks.interpreters` to
 `claude -p <` — the trailing redirect feeds the block body to the agent CLI
 on stdin from the note's own shell, so the run inherits the note's cwd, env,
@@ -474,7 +491,12 @@ snapshot at construction time through `lib/settings.ts`.
   relaunch, and went stale against the notes it described, while the
   marker is edited where the note is, read live off the note lists
   (`NoteMeta.template`), travels through renames, and is stripped at
-  instantiation. parseSettings still recognizes both retired spellings by
+  instantiation. **A new setting is also documented in `docs/user/`, on the
+  page its feature lives on** — not only in the template comment. The
+  template is visible only to someone already inside the file; the manual is
+  what full-text search, and every agent, can reach. Four knobs (`shell.*`,
+  both `fontSize`s, `editor.livePreview`) sat undocumented there for exactly
+  this reason. parseSettings still recognizes both retired spellings by
   name and answers with the migration hint rather than "unknown section".
 - **Settings are not session state, and neither is the registry.** Four
   files in the app home, four ownership shapes. `settings.jsonc` is
@@ -518,7 +540,9 @@ snapshot at construction time through `lib/settings.ts`.
   same stripper, same `parseSettings` — but only ADVISES: Save writes the
   text byte-for-byte, ungated, because a mid-edit save must not be refused
   and launch already degrades gently. Saves still apply at the next launch;
-  the dialog says so instead of pretending otherwise.
+  the dialog says so instead of pretending otherwise. Agents get the same
+  text through the MCP `settings` tool and no way to write it (§2's entry
+  points): the file's one editor is still Ledge.
 - **Validation degrades per field, and never rewrites.** A bad value costs
   that field (warned, defaulted — `parseSettings`); unparseable JSONC costs
   the whole file for the run but the bytes on disk are untouched: it is the

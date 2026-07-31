@@ -9,6 +9,11 @@
 // of them as an ordinary external edit through its watcher — the same
 // survivability story the agent's own shell already had.
 //
+// One tool is not about notes at all: `settings` reads the user's
+// settings.jsonc so an agent can answer "why is my python block using the
+// wrong python" from their actual configuration instead of guessing. It reads
+// and never writes, for the reason bun/settings.ts states at inspectSettings.
+//
 // Notes are addressed by TITLE first — the same rename-proof choice wikilinks
 // made (shared/wikilinks.ts): filenames follow the H1, so a path an agent
 // remembered last session may have rotted, while the title still resolves.
@@ -24,7 +29,7 @@ import type { McpTool } from "./mcp";
 import { backlinksTo, createNote, listNotes, notesTagged, readNote, searchNotes, tagsIn, writeNote } from "./notes";
 import { assertRegisteredRoot, availableRoots, listWorkspaceRoots, loadWorkspaces, rootContaining, roots, writableRoots } from "./workspaces";
 import { createFromTemplate, openDaily, resolveConfiguredWorkspace } from "./daily";
-import { loadSettings } from "./settings";
+import { inspectSettings, loadSettings } from "./settings";
 import type { Settings } from "../shared/settings";
 
 // Agents read timestamps, not epoch millis.
@@ -410,6 +415,16 @@ export const ledgeTools: McpTool[] = [
         ...(lockedSkipped > 0 ? { lockedNoteBodiesSkipped: lockedSkipped } : {}),
       };
     },
+  },
+  {
+    name: "settings",
+    description:
+      "Read the user's Ledge settings: the raw text of their settings.jsonc, comments and all. The file IS Ledge's settings UI (they edit it in the app with ⌘,), and its comments document every knob, so one call gives both what they have configured and what the knobs mean. `problems` lists values Ledge would reject at the next launch, empty when the file is clean. This tool is READ-ONLY and has no writing sibling: to change a setting, tell the user the exact line to add or edit, and that Ledge applies settings at the next launch, not live. For how a feature works rather than how it is configured, search the built-in manual (the `docs` workspace from list_workspaces).",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    // No workspace argument and no registry lookup: settings are GLOBAL, one
+    // file in the app home (architecture.md §6). The only tool here that does
+    // not name a note.
+    handler: async () => inspectSettings(),
   },
   {
     name: "create_note",

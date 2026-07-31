@@ -9,7 +9,14 @@ import { tmpdir } from "node:os";
 import { resolve, sep } from "node:path";
 import { DEFAULT_SETTINGS, SETTINGS_TEMPLATE } from "../shared/settings";
 import { APP_HOME } from "./workspaces";
-import { LEGACY_SETTINGS_PATH, loadSettings, readSettingsFile, SETTINGS_PATH, writeSettingsFile } from "./settings";
+import {
+  inspectSettings,
+  LEGACY_SETTINGS_PATH,
+  loadSettings,
+  readSettingsFile,
+  SETTINGS_PATH,
+  writeSettingsFile,
+} from "./settings";
 
 if (!resolve(APP_HOME).startsWith(resolve(tmpdir()) + sep)) {
   throw new Error(`refusing to run filesystem tests against ${APP_HOME} — is the preload configured?`);
@@ -106,5 +113,50 @@ describe("readSettingsFile / writeSettingsFile", () => {
     await writeFile(LEGACY_SETTINGS_PATH, text);
     expect(await readSettingsFile()).toBe(text);
     expect(await exists(LEGACY_SETTINGS_PATH)).toBe(false);
+  });
+});
+
+// What the MCP `settings` tool hands an agent. The point of the shape is that
+// one call answers both halves of a settings question: what the user has set
+// (their text), and what the knobs are (the template's comments, which the
+// text still carries on an unmodified install).
+describe("inspectSettings", () => {
+  test("returns the raw text with its comments intact, plus the path", async () => {
+    const text = '{\n  // my venv\n  "blocks": { "interpreters": { "python": "~/.venvs/app/bin/python" } }\n}\n';
+    await writeFile(SETTINGS_PATH, text);
+    const seen = await inspectSettings();
+    expect(seen.text).toBe(text);
+    expect(seen.path).toBe(SETTINGS_PATH);
+    // Comments survive: an agent advising on a knob has to see the
+    // documentation that lives in them.
+    expect(seen.text).toContain("// my venv");
+    expect(seen.problems).toEqual([]);
+  });
+
+  test("a fresh install reads as the documented template", async () => {
+    // The seeded template is the whole reference: an agent asked about a knob
+    // on an install nobody has customized still gets every knob's comment.
+    expect((await inspectSettings()).text).toBe(SETTINGS_TEMPLATE);
+  });
+
+  test("a bad value is reported, not corrected", async () => {
+    const text = JSON.stringify({ editor: { fontSize: "big" } });
+    await writeFile(SETTINGS_PATH, text);
+    const seen = await inspectSettings();
+    expect(seen.problems.length).toBe(1);
+    expect(seen.problems[0]).toContain("fontSize");
+    expect(await readFile(SETTINGS_PATH, "utf8")).toBe(text);
+  });
+
+  test("unparseable JSONC is one problem naming the launch consequence, bytes untouched", async () => {
+    const broken = '{ "editor": { "fontSize": } }';
+    await writeFile(SETTINGS_PATH, broken);
+    const seen = await inspectSettings();
+    expect(seen.problems.length).toBe(1);
+    expect(seen.problems[0]).toContain("entirely on defaults");
+    // The agent still gets the text: reading a file the user is mid-edit on
+    // is how it can tell them which line broke.
+    expect(seen.text).toBe(broken);
+    expect(await readFile(SETTINGS_PATH, "utf8")).toBe(broken);
   });
 });
