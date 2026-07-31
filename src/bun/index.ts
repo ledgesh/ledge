@@ -76,7 +76,7 @@ import { pasteImageAsset, readAsset } from "./assets";
 import { interpretersFor, runnerFor } from "./runner";
 import { loadSettings, readSettingsFile, writeSettingsFile } from "./settings";
 import { openableUrl } from "../shared/links";
-import { resolveSpawn, stampSessionFacts, type SessionFacts, type SpawnDeps } from "./spawnParams";
+import { resolveShellArgs, resolveSpawn, stampSessionFacts, type SessionFacts, type SpawnDeps } from "./spawnParams";
 import { buildRemoteSpawn } from "./remoteSpawn";
 import { readFileSync, statSync } from "node:fs";
 import type { LedgeRPC } from "../shared/rpc-schema";
@@ -246,7 +246,10 @@ function spawnShell(sessionId: string, host: string, kind: "inline" | "terminal"
   stampSessionFacts(env, sessionFacts.get(sessionId) ?? null);
   return new PtyProcess({
     executable: settings.shell.path,
-    args: settings.shell.args,
+    // Not the configured args verbatim: a zsh spawns with comments enabled so
+    // a block's `#` lines mean the same thing pasted into the drawer as they
+    // do sourced inline (spawnParams.ts).
+    args: resolveShellArgs(settings.shell.path, settings.shell.args),
     env,
     cwd,
   });

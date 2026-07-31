@@ -72,6 +72,8 @@ Run that twice and the number climbs, because it is the same shell both times.
 
 The terminal drawer is a separate shell from the inline one. Both belong to this note alone, and both start where the note's frontmatter points them (`cwd`, `env`, and the rest: see [[Frontmatter and Environments]]).
 
+Comments mean the same thing on both chords. A `#` line inside a shell block is a comment whether you run the block inline or send it to the drawer, so you can annotate a block without breaking it.
+
 Frontmatter applies to newly spawned shells, so after editing it run "Restart Note Shell" from the palette. It kills the note's shells and lets them respawn. Use the same command when an experiment leaves a shell in a strange state.
 
 ## Change the shell
@@ -86,6 +88,8 @@ Ledge spawns `/bin/zsh -i` for every inline shell and every terminal drawer. Set
 ```
 
 Relaunch to apply. Keep an interactive flag in `args`, usually `-i`, so your rc files run and blocks get the aliases and PATH you expect.
+
+When the shell is zsh, Ledge spawns it with `-o interactive_comments` on top of your `args`. That is what makes a `#` line a comment in the terminal drawer, where the block is typed into the shell rather than sourced from a file. zsh leaves the option off by default, so without it the drawer answers a comment line with `command not found: #`. Put `+o interactive_comments` in `args` to keep zsh's own behavior.
 
 This setting is about shells on this Mac. A note with a `host:` line runs its blocks in the host's own shell instead ([[Remote Hosts]]).
 

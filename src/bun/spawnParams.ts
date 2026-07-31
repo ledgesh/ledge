@@ -16,7 +16,7 @@
 // unit-testable without touching disk, same move as InlinePool's injected
 // spawn; index.ts passes the real fs.
 import { homedir } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
+import { basename, isAbsolute, join, resolve } from "node:path";
 import { isEnvName, isProfileName, type NoteParams } from "../shared/frontmatter";
 import { parseDotenv } from "../shared/dotenv";
 
@@ -107,6 +107,36 @@ export function resolveSpawn(
   // Pinned last, whatever any layer said (see the header).
   if (baseEnv["TERM"]) env["TERM"] = baseEnv["TERM"];
   return { cwd, env };
+}
+
+/**
+ * The argv a local shell actually spawns with: `settings.shell.args`, plus
+ * `-o interactive_comments` when that shell is zsh.
+ *
+ * Ledge adds a flag the user did not write because without it a ```sh block
+ * means two different things depending on which chord ran it. An inline run
+ * sources the body as a file (bun/runner.ts), where `#` starts a comment; the
+ * drawer pastes the same body into the line editor, and zsh leaves
+ * interactive_comments OFF, so `# step one` is a command named `#` and the
+ * block opens with "command not found". bash already enables the same option
+ * for interactive shells, which is why the surprise is zsh-shaped. One fence,
+ * one meaning, on both chords.
+ *
+ * An argv flag rather than a `setopt` line written into the pty: the drawer
+ * shows every byte its shell receives, so an injected command would print
+ * above the first prompt and sit in the user's history forever after.
+ *
+ * zsh only, by binary name: `-o interactive_comments` is a shopt in bash, not
+ * a set option, so bash rejects it and never reaches a prompt. Args that
+ * already name the option are passed through untouched, which makes
+ * `+o interactive_comments` the way to keep zsh's own default.
+ */
+export function resolveShellArgs(path: string, args: string[]): string[] {
+  if (basename(path) !== "zsh") return args;
+  // zsh option names ignore case and underscores, so the user's spelling of
+  // the same option must count as naming it.
+  if (args.some((a) => a.toLowerCase().replace(/_/g, "") === "interactivecomments")) return args;
+  return [...args, "-o", "interactive_comments"];
 }
 
 /** Where a session's note lives, as validated facts: the note's own file and

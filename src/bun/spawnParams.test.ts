@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { resolveSpawn, stampSessionFacts, type SpawnDeps } from "./spawnParams";
+import { resolveShellArgs, resolveSpawn, stampSessionFacts, type SpawnDeps } from "./spawnParams";
 import type { NoteParams } from "../shared/frontmatter";
 
 const HOME = "/home/u";
@@ -210,6 +210,40 @@ describe("resolveSpawn degrades, never throws", () => {
     const r = resolveSpawn(params({ profile: "p" }), BASE, deps, HOME, PROFILES);
     expect(r.env["GOOD"]).toBe("1");
     expect(warns.length).toBe(1);
+  });
+});
+
+describe("resolveShellArgs", () => {
+  test("a zsh gets comments enabled, after whatever the user configured", () => {
+    expect(resolveShellArgs("/bin/zsh", ["-i"])).toEqual(["-i", "-o", "interactive_comments"]);
+  });
+
+  test("any other shell is spawned with exactly its configured args", () => {
+    // bash's interactive shells enable comments themselves, and `-o
+    // interactive_comments` is not even a bash set option: passing it would
+    // stop the shell from starting at all.
+    expect(resolveShellArgs("/bin/bash", ["-i"])).toEqual(["-i"]);
+    expect(resolveShellArgs("/opt/homebrew/bin/fish", ["-i"])).toEqual(["-i"]);
+  });
+
+  test("args that already name the option win, so zsh's default stays reachable", () => {
+    expect(resolveShellArgs("/bin/zsh", ["-i", "+o", "interactive_comments"])).toEqual([
+      "-i",
+      "+o",
+      "interactive_comments",
+    ]);
+    // zsh option names ignore case and underscores; so does the check.
+    expect(resolveShellArgs("/bin/zsh", ["-i", "-o", "INTERACTIVECOMMENTS"])).toEqual([
+      "-i",
+      "-o",
+      "INTERACTIVECOMMENTS",
+    ]);
+  });
+
+  test("the configured args are not mutated", () => {
+    const args = ["-i"];
+    resolveShellArgs("/bin/zsh", args);
+    expect(args).toEqual(["-i"]);
   });
 });
 
