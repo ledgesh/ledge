@@ -1,13 +1,12 @@
-// Ledge main process.
+// Ledge on macOS: the native shell around the server.
 //
-// One native window loads the editor webview. Shells are per note: each tab
-// (keyed by its stable docId, `sessionId` on the wire) gets its own shells, run
-// in this Bun process via the bun:ffi PTY (a port of the Swift SessionKit core)
-// and spawned lazily on first use. Inline-run shells (a persistent one per note,
-// plus ephemeral overflow shells so blocks can run concurrently; inlinePool.ts)
-// slice block output per block via OSC 133 markers; the terminal-drawer shell is
-// raw, driving xterm.js. Keeping them per note means a `cd` in one note never
-// leaks into another. All of them talk to the view over typed RPC.
+// One native window loads the editor webview, and every request it makes is
+// served by bun/server.ts in this same process. This file owns only what is
+// AppKit's: the window and its geometry, the application menu, the updater,
+// the native folder dialog, and the pasteboard's flavor list. The server owns
+// the notes, the shells, and the watchers, and imports none of it (remote.md
+// §1) — which is what lets the same handlers be served over a socket to
+// another machine without a second implementation.
 import {
   ApplicationMenu,
   BrowserView,
@@ -17,70 +16,14 @@ import {
   Utils,
   type ApplicationMenuItemConfig,
 } from "electrobun/bun";
-import { watch } from "node:fs";
 import { homedir } from "node:os";
-import { basename, join, resolve } from "node:path";
-import { PtyProcess } from "./pty";
-import { InlinePool, type InlineEvent } from "./inlinePool";
-import { takePaste } from "./paste";
-import { readClipboardHtml, readClipboardText, writeClipboard } from "./clipboard";
-import { readProfile, writeProfile } from "./profiles";
-import {
-  backlinksTo,
-  changeVaultPassphrase,
-  createNote,
-  deleteNote,
-  deleteTrashed,
-  emptyTrash,
-  firstLockedHeader,
-  isNoteLocked,
-  listNotes,
-  listTrash,
-  lockNote,
-  notesTagged,
-  purgeTrash,
-  readNote,
-  removeLockNote,
-  restoreNote,
-  retitleNote,
-  searchNotes,
-  tagsIn,
-  writeNote,
-} from "./notes";
-import { configureVault, createVault, loadVault, lockVault, unlockVault, vaultState } from "./vault";
-import {
-  APP_HOME,
-  assertRegisteredRoot,
-  attachExternal,
-  availableRoots,
-  createManaged,
-  detachRoot,
-  ensureDefault,
-  kindOf,
-  listWorkspaceRoots,
-  loadWorkspaces,
-  moveRoot,
-  rootContaining,
-  roots,
-} from "./workspaces";
-import { createFromTemplatePath, openDaily, resolveConfiguredWorkspace } from "./daily";
-import { syncDocs } from "./docs";
-import { readLayout, writeLayout } from "./layout";
+import { join } from "node:path";
 import { fitFrame, readFrame, writeFrame, type Rect } from "./windowFrame";
-import { revealLog, startLogging, write as writeLog } from "./log";
-import { installShim, tildify } from "./cliShim";
+import { startLogging } from "./log";
 import { EXTRACTION_DIRNAME, pruneExtractionDir } from "./updateCache";
-import { OPEN_REQUEST_PATH, takeOpenRequest } from "./openRequest";
-import { syncWatchers } from "./watch";
-import { pasteImageAsset, readAsset } from "./assets";
-import { interpretersFor, runnerFor } from "./runner";
-import { loadSettings, readSettingsFile, writeSettingsFile } from "./settings";
-import { openableUrl } from "../shared/links";
-import { resolveShellArgs, resolveSpawn, stampSessionFacts, type SessionFacts, type SpawnDeps } from "./spawnParams";
-import { buildRemoteSpawn } from "./remoteSpawn";
-import { readFileSync, statSync } from "node:fs";
+import { APP_HOME } from "./workspaces";
+import { createServer, type NativeDeps, type RequestHandlers, type ServerPush } from "./server";
 import type { LedgeRPC } from "../shared/rpc-schema";
-import { isHostName, LOCAL_HOST, type NoteParams } from "../shared/frontmatter";
 
 // Before anything that can fail: from here every console line in this process
 // is also on disk. Nothing else in bun/ knows this happened — call sites keep
@@ -107,31 +50,6 @@ void (async () => {
   if (removed.length > 0) console.log(`[bun] pruned ${removed.length} stale update file(s): ${removed.join(", ")}`);
 })().catch(() => {});
 
-// The view's failures land in the same file, by its own choice of what is
-// worth sending (mainview/lib/log.ts) — a blank pane after a render error is
-// the one crash a Bun-side log cannot see.
-const LOG_TEXT_CAP = 8000;
-
-// Read once, applied for the life of the process: the shell below, the trash
-// TTL at the bottom, and the view's snapshot via settingsGet. Edits to
-// settings.jsonc take effect at the next launch (architecture.md, "Settings").
-const settings = await loadSettings();
-
-// The workspace registry, loaded before any RPC can be served: every note
-// path guard consults it, and the default guarantees the view always boots
-// with at least one folder to put a note in. The built-in docs sync after the
-// load (which registered their root) and before the view's boot noteList can
-// arrive, so the Documentation workspace never lists a half-synced corpus.
-await loadWorkspaces();
-await ensureDefault();
-await syncDocs();
-
-// The vault (note locking): salt and passphrase-check loaded so vaultState
-// answers "locked" vs "none" from boot; the master key only ever arrives
-// through vaultUnlock. (The auto-relock push is wired after the RPC exists,
-// below.)
-await loadVault();
-
 // In the dev channel, prefer a running Vite dev server (bun run dev:hmr) so the
 // React view hot-reloads; otherwise load the built view copied into the bundle.
 const VITE_URL = "http://localhost:5173";
@@ -148,721 +66,69 @@ async function mainViewUrl(): Promise<string> {
   return "views://mainview/index.html";
 }
 
-// Fresh per session, never written into a note, so a block cannot forge its own
-// end marker (see markers.ts).
-const NONCE = Math.random().toString(36).slice(2) + Date.now().toString(36);
-
-const shellEnv = { ...process.env, TERM: "xterm-256color" } as Record<string, string>;
-
-// Per-session spawn parameters, as the view parsed them from each note's
-// frontmatter (sessionConfigure). Read at shell SPAWN, never applied to a
-// running shell: a shell keeps the cwd/env it was born with, and an edited
-// frontmatter takes effect on the session's next shell (restart-applies —
-// same policy as settings, and the rpc-schema comment is the contract).
-// Cleared with the session in closeSession: the params describe a live tab,
-// not a note file, so they share its lifetime exactly.
-const sessionParams = new Map<string, NoteParams>();
-
-// The session's validated location facts (spawnParams.ts stampSessionFacts).
-// Kept beside sessionParams, not inside it: params are what the NOTE said,
-// this is what LEDGE knows — sessionConfigure's notePath is only admitted
-// here once it proves to be a real .md inside a registered root, the same
-// re-validation move as the profile name and for the same reason (the view's
-// path was honest when it sent it; this check is what makes it a fact).
-const sessionFacts = new Map<string, SessionFacts>();
-
-// The real filesystem behind resolveSpawn (its tests inject a fake one).
-const spawnDeps: SpawnDeps = {
-  readFile: (path) => {
+// The native seams the server cannot have (remote.md §5): a headless one has
+// no dialog, no pasteboard, and no menu bar, and a remote one's are on the
+// wrong machine.
+const native: NativeDeps = {
+  // openFileDialog splits its FFI result on "," — a path containing a comma
+  // comes back shredded, so re-join and let the caller's stat-validation
+  // refuse what does not exist; a comma path that still does not stat is
+  // refused, never guessed at.
+  pickFolder: async (startingFolder) => {
+    const picked = (
+      await Utils.openFileDialog({
+        startingFolder,
+        canChooseFiles: false,
+        canChooseDirectory: true,
+        allowsMultipleSelection: false,
+      })
+    ).join(",");
+    return picked || null;
+  },
+  clipboardFormats: () => {
     try {
-      return readFileSync(path, "utf8");
+      return Utils.clipboardAvailableFormats();
     } catch {
+      // No format list on this platform; null makes clipboardReadRich ask the
+      // pasteboard anyway.
       return null;
     }
   },
-  isDir: (path) => {
-    try {
-      return statSync(path).isDirectory();
-    } catch {
-      return false;
-    }
-  },
-  warn: (msg) => console.warn("[session]", msg),
+  setMenu: (items) => ApplicationMenu.setApplicationMenu(items as ApplicationMenuItemConfig[]),
 };
 
-const toB64 = (bytes: Uint8Array) => Buffer.from(bytes).toString("base64");
-const fromB64 = (b64: string) => new Uint8Array(Buffer.from(b64, "base64"));
-
-// The machine a spawn or run actually gets, from what the view asked for and
-// what the note's frontmatter DECLARED. The declared list is the allowlist
-// (architecture.md §2: the view is the least-trusted end, and the picker is
-// only its UI): an undeclared or malformed request falls back to the note's
-// own first host — never silently to some other machine — with a warning.
-// No request at all means the frontmatter decides: the single declared host,
-// or local for the note that declares none, so a note saying `host: prod`
-// targets prod through every path whether or not the view says so.
-function resolveHost(sessionId: string, requested: string | null | undefined): string {
-  const declared = sessionParams.get(sessionId)?.hosts ?? [];
-  const fallback = declared[0] ?? LOCAL_HOST;
-  if (requested == null) return fallback;
-  const allowed =
-    requested === LOCAL_HOST
-      ? declared.length === 0 || declared.includes(LOCAL_HOST)
-      : isHostName(requested) && declared.includes(requested);
-  if (!allowed) {
-    console.warn(`[session] host "${requested}" is not declared by this note; using "${fallback}"`);
-    return fallback;
-  }
-  return requested;
-}
-
-// Every shell a session gets — persistent inline, overflow, terminal drawer —
-// spawns through here, so all of them read the note's params the same way.
-// The lookup happens AT spawn: an overflow shell spawned after a frontmatter
-// edit gets the new params while the persistent shell keeps its old ones,
-// which is just the restart-applies contract seen from another angle.
+// The push side, forwarded to the RPC once it exists. `rpc` is assigned in the
+// same synchronous run as the await below returns, so no timer or fs event can
+// observe the null; the optional call is the belt.
 //
-// `host` (already through resolveHost) forks the spawn, not the pty: a remote
-// shell is ssh as the pty's child (bun/remoteSpawn.ts), spawned with the BASE
-// env in $HOME — the note's cwd/env travel inside the ssh command to the
-// machine they are about, and the local resolution (profile files, cwd stat)
-// deliberately does not run.
-function spawnShell(sessionId: string, host: string, kind: "inline" | "terminal"): PtyProcess {
-  if (host !== LOCAL_HOST) {
-    const remote = buildRemoteSpawn(host, kind, sessionParams.get(sessionId), (msg) =>
-      console.warn("[session]", msg),
-    );
-    return new PtyProcess({
-      executable: remote.executable,
-      args: remote.args,
-      env: shellEnv,
-      cwd: homedir(),
-      // The pty's child is ssh, not the shell whose block is running (pty.ts).
-      interruptViaChar: true,
-    });
-  }
-  const { cwd, env } = resolveSpawn(sessionParams.get(sessionId), shellEnv, spawnDeps);
-  // Local spawns only: on a remote host the note's local path names nothing.
-  stampSessionFacts(env, sessionFacts.get(sessionId) ?? null);
-  return new PtyProcess({
-    executable: settings.shell.path,
-    // Not the configured args verbatim: a zsh spawns with comments enabled so
-    // a block's `#` lines mean the same thing pasted into the drawer as they
-    // do sourced inline (spawnParams.ts).
-    args: resolveShellArgs(settings.shell.path, settings.shell.args),
-    env,
-    cwd,
+// Enumerated rather than proxied on purpose: a message added to the schema
+// fails to compile here until it is wired, which is the check worth having.
+function defineLedgeRPC(requests: RequestHandlers) {
+  return BrowserView.defineRPC<LedgeRPC>({
+    maxRequestTime: 10_000,
+    handlers: { requests, messages: {} },
   });
 }
 
-// --- per-note inline-run shells --------------------------------------------
-// Block bodies are sourced into shells with OSC 133 markers so output can be
-// sliced per block. The pool owns the whole policy — a persistent shell per note
-// (spawned on its first runBlock) so cwd/env carry across blocks, plus an
-// ephemeral overflow shell per additional concurrent run; see inlinePool.ts.
-const inlinePool = new InlinePool((sessionId, host) => spawnShell(sessionId, host, "inline"), NONCE);
+let rpc: ReturnType<typeof defineLedgeRPC> | null = null;
+const push: ServerPush = {
+  runEvent: (p) => rpc?.send.runEvent(p),
+  terminalOutput: (p) => rpc?.send.terminalOutput(p),
+  terminalBusy: (p) => rpc?.send.terminalBusy(p),
+  terminalExit: (p) => rpc?.send.terminalExit(p),
+  notesChanged: (p) => rpc?.send.notesChanged(p),
+  openExternal: (p) => rpc?.send.openExternal(p),
+  vaultChanged: (p) => rpc?.send.vaultChanged(p),
+  menuCommand: (p) => rpc?.send.menuCommand(p),
+};
 
-// --- per-note terminal-drawer shells ---------------------------------------
-// A separate, plain interactive session per note with no marker protocol. Its raw
-// byte stream drives xterm.js in the view; the view's keystrokes and resizes come
-// back over the RPC below. Spawned on the note's first terminalAttach.
-//
-// Scrollback: a note's terminal keeps printing (its prompt, background output)
-// while the drawer is closed or showing another note, so each keeps a capped
-// rolling buffer of its raw output that terminalAttach replays. `attached` gates
-// live streaming: bytes still accumulate while detached, so re-attaching replays
-// the full history.
-const SB_CAP = 256 * 1024;
-// zsh toggles bracketed-paste mode around every prompt cycle: it emits BP_ENABLE
-// (CSI ? 2004 h) when its line editor is ready for input, and BP_DISABLE (2004 l)
-// the moment a foreground command starts running. A bracketed paste is only
-// interpreted while it is enabled; sent at any other time (cold shell, or mid
-// command) the markers echo raw (the `^[[200~` noise) and the text runs out of
-// order. So terminalPaste queues pastes and the drain loop releases them one per
-// prompt, tracking this live `promptReady` state from the two sequences.
-const BP_ENABLE = "\x1b[?2004h";
-const BP_DISABLE = "\x1b[?2004l";
-interface Term {
-  term: PtyProcess;
-  // The machine this shell lives on (LOCAL_HOST or an ssh destination), fixed
-  // at spawn: pastes build their runner lines for it, and the drawer's badge
-  // shows it. Moving means a restart — same contract as every other spawn
-  // param.
-  host: string;
-  attached: boolean;
-  chunks: Uint8Array[];
-  len: number;
-  // Bracketed-paste sequencing: `promptReady` mirrors the shell's current mode
-  // (true only at an idle prompt). Pastes wait in `pasteQueue` and are released
-  // one at a time, each on a fresh prompt, so multiple queued commands never
-  // stack up inside one command's run. `scanTail` carries the last few output
-  // bytes across drain ticks so a toggle sequence split across a read boundary is
-  // still matched.
-  promptReady: boolean;
-  pasteQueue: string[];
-  scanTail: string;
-  // When the shell last said anything, and 0 while it has said nothing at all.
-  // The fallback prompt signal for shells with no bracketed-paste mode; see
-  // flushPasteQuiet.
-  lastOut: number;
-  // `promptReady` is false for two very different reasons: a job is running, or the
-  // shell has not printed its first prompt yet. Only the first means busy, so the
-  // drawer's button is not dead for the ~ms a cold shell takes to come up.
-  everReady: boolean;
-  // Last busy state pushed to the view, so the drain loop only sends on a change.
-  sentBusy: boolean;
-}
+const server = await createServer({ push, native });
 
-// A shell is busy when it cannot take a block right now: something is running, or
-// pastes are already waiting on the prompt behind it.
-function isBusy(t: Term): boolean {
-  return t.everReady && (!t.promptReady || t.pasteQueue.length > 0);
-}
-const terms = new Map<string, Term>();
-// Names the temp files behind interpreted blocks pasted to the terminal
-// (inline runs use the view's block id instead; see runBlock).
-let nextTermRunId = 1;
-// `requestedHost` matters only when this call is the one that spawns; a live
-// shell's host is fixed at its birth.
-function termFor(sessionId: string, requestedHost?: string | null): Term {
-  let t = terms.get(sessionId);
-  if (!t) {
-    const host = resolveHost(sessionId, requestedHost);
-    t = {
-      term: spawnShell(sessionId, host, "terminal"),
-      host,
-      attached: false,
-      chunks: [],
-      len: 0,
-      promptReady: false,
-      pasteQueue: [],
-      scanTail: "",
-      lastOut: 0,
-      everReady: false,
-      sentBusy: false,
-    };
-    terms.set(sessionId, t);
-  }
-  return t;
-}
-
-// Write whatever the paste policy says may go now (bun/paste.ts owns which of
-// the two formats, and when).
-function flushPaste(t: Term, now = Date.now()): void {
-  const out = takePaste(t, now);
-  if (out !== null) t.term.write(out);
-}
-function sbPush(t: Term, d: Uint8Array): void {
-  t.chunks.push(d);
-  t.len += d.length;
-  while (t.len > SB_CAP && t.chunks.length > 1) t.len -= t.chunks.shift()!.length;
-}
-function sbSnapshot(t: Term): Uint8Array {
-  const out = new Uint8Array(t.len);
-  let o = 0;
-  for (const c of t.chunks) {
-    out.set(c, o);
-    o += c.length;
-  }
-  return out;
-}
-
-// Whether the note this session sits in is locked, per the DISK (the head
-// read is live, so a lock landing mid-session refuses the very next run).
-// No admitted note fact means no lock to enforce: a session that is not a
-// note's cannot be a locked note's.
-async function sessionNoteLocked(sessionId: string): Promise<boolean> {
-  const fact = sessionFacts.get(sessionId);
-  if (!fact) return false;
-  try {
-    return await isNoteLocked(fact.note);
-  } catch {
-    return false; // the note moved/vanished: nothing locked to protect
-  }
-}
-
-// Tear down all of a note's shells when its tab closes.
-function closeSession(sessionId: string): void {
-  inlinePool.closeSession(sessionId);
-  terms.get(sessionId)?.term.close();
-  terms.delete(sessionId);
-  sessionParams.delete(sessionId);
-  sessionFacts.delete(sessionId);
-}
-
-const rpc = BrowserView.defineRPC<LedgeRPC>({
-  maxRequestTime: 10_000,
-  handlers: {
-    requests: {
-      // --- workspaces ------------------------------------------------------
-      // The registry lives Bun-side (workspaces.ts): the view only ever passes
-      // back roots it was handed, and the one way an arbitrary folder gets in
-      // is the native dialog below — never a view-supplied path.
-      workspaceList: () => ({
-        workspaces: listWorkspaceRoots(),
-        dailyRoot: resolveConfiguredWorkspace(settings.daily.workspace, roots()),
-      }),
-      workspaceCreate: async ({ name }) => {
-        const root = await createManaged(name);
-        refreshWatchers();
-        return { root };
-      },
-      workspaceAttach: async () => {
-        // openFileDialog splits its FFI result on "," — a path containing a
-        // comma comes back shredded, so re-join and stat-validate; a comma
-        // path that still does not stat is refused, never guessed at.
-        const picked = (await Utils.openFileDialog({
-          startingFolder: homedir(),
-          canChooseFiles: false,
-          canChooseDirectory: true,
-          allowsMultipleSelection: false,
-        })).join(",");
-        if (!picked) return { root: null, kind: null, error: null }; // cancelled
-        const res = await attachExternal(picked);
-        if ("error" in res) return { root: null, kind: null, error: res.error };
-        refreshWatchers();
-        // Never "docs": attachExternal refuses the docs folder before the
-        // idempotent-attach answer, so the narrowing is a fact, not a hope.
-        return { root: res.root, kind: kindOf(res.root) as "managed" | "external", error: null };
-      },
-      workspaceDetach: async ({ root }) => {
-        const ok = await detachRoot(root);
-        refreshWatchers();
-        return { ok };
-      },
-      workspaceMove: async ({ root, home }) => {
-        const from = assertRegisteredRoot(root);
-        // home: the destination is APP_HOME, no dialog (the schema comment
-        // says why). Otherwise the same dialog (and same comma-shred caveat)
-        // as workspaceAttach above; the pick is the destination PARENT the
-        // folder moves into.
-        const picked = home
-          ? APP_HOME
-          : (await Utils.openFileDialog({
-              startingFolder: homedir(),
-              canChooseFiles: false,
-              canChooseDirectory: true,
-              allowsMultipleSelection: false,
-            })).join(",");
-        if (!picked) return { root: null, kind: null, error: null }; // cancelled
-        const res = await moveRoot(from, picked);
-        if ("error" in res) return { root: null, kind: null, error: res.error };
-        refreshWatchers();
-        // Never "docs": moveRoot refuses the docs root outright, and a move
-        // destination cannot become it (its parent is the app home, which
-        // invalidRootReason already bars).
-        return { root: res.root, kind: kindOf(res.root) as "managed" | "external", error: null };
-      },
-
-      // --- note store ------------------------------------------------------
-      // Every path these take is checked against the registered workspace
-      // roots inside notes.ts, so a compromised or buggy view cannot read or
-      // write outside the folders the user chose.
-      noteList: async ({ root }) => ({ notes: await listNotes(root) }),
-      noteRead: async ({ path }) => ({ note: await readNote(path) }),
-      // The guard and the divergence-to-trash live in writeNote (notes.ts);
-      // this only reports. divergedTo non-null is worth a log line Bun-side
-      // too: the view's console is invisible in the shipped app.
-      noteWrite: async ({ path, text, baseMtimeMs }) => {
-        const res = await writeNote(path, text, baseMtimeMs);
-        if (res.divergedTo) console.warn("[notes] external edit preserved in trash:", res.divergedTo, "(save to", path, "won)");
-        return res;
-      },
-      noteCreate: async ({ root, text }) => ({ note: await createNote(root, text) }),
-      noteRetitle: async ({ path, text }) => ({ note: await retitleNote(path, text) }),
-      // The daily.workspace setting outranks the view's selected workspace
-      // (that is the knob's whole job: pin where daily notes live); the
-      // selected one is the deixis fallback. The response is shaped as an
-      // external open so the view's one workspace-select-then-open path
-      // handles it (see the schema comment).
-      dailyOpen: async ({ root }) => {
-        const target = resolveConfiguredWorkspace(settings.daily.workspace, roots()) ?? assertRegisteredRoot(root);
-        const { meta, created } = await openDaily(target);
-        return { open: { ...meta, root: target }, created };
-      },
-      noteFromTemplate: async ({ root, templatePath, title }) => ({
-        note: await createFromTemplatePath(root, templatePath, title),
-      }),
-      noteDelete: async ({ path }) => ({ trashed: await deleteNote(path) }),
-      // The scans return their lockedSkipped counts themselves (notes.ts
-      // decides the skip; locking.md §4) — these are passthroughs.
-      noteSearch: async ({ root, query }) => searchNotes(root, query),
-      // backlinksTo derives and guards the root itself (assertNote), the
-      // per-note-call stance: the view sends only the path.
-      noteBacklinks: async ({ path }) => backlinksTo(path),
-      tagList: async ({ root }) => tagsIn(root),
-      tagNotes: async ({ root, tag }) => notesTagged(root, tag),
-
-      // --- the vault (note locking) ---------------------------------------
-      vaultState: () => ({ state: vaultState() }),
-      vaultCreate: async ({ passphrase }) => {
-        try {
-          await createVault(passphrase);
-        } catch (err) {
-          console.warn("[vault] create refused:", err);
-          return { ok: false };
-        }
-        rpc.send.vaultChanged({ state: vaultState() });
-        return { ok: true };
-      },
-      vaultUnlock: async ({ passphrase }) => {
-        // With no vault file but locked notes on disk (synced from another
-        // machine), a locked note's own self-contained header is the check.
-        const probe = vaultState() === "none" ? await firstLockedHeader(availableRoots()) : undefined;
-        const ok = await unlockVault(passphrase, probe);
-        if (ok) rpc.send.vaultChanged({ state: vaultState() });
-        return { ok };
-      },
-      vaultLock: () => {
-        // The view flushed dirty locked buffers before asking (⌘L's
-        // contract); all Bun drops here is keys.
-        lockVault();
-        rpc.send.vaultChanged({ state: vaultState() });
-        return { ok: true };
-      },
-      noteLock: async ({ path }) => {
-        const res = await lockNote(path);
-        return { note: res.meta, sealedShared: res.sealedShared };
-      },
-      noteRemoveLock: async ({ path }) => ({ note: await removeLockNote(path) }),
-      vaultChangePassphrase: async ({ passphrase }) => {
-        try {
-          const rewrapped = await changeVaultPassphrase(passphrase, availableRoots());
-          return { ok: true, rewrapped };
-        } catch (err) {
-          console.warn("[vault] passphrase change refused:", err);
-          return { ok: false, rewrapped: 0 };
-        }
-      },
-      trashList: async ({ root }) => ({ items: await listTrash(root) }),
-      trashRestore: async ({ path }) => ({ note: await restoreNote(path) }),
-      trashDelete: async ({ path }) => ({ removed: await deleteTrashed(path) }),
-      trashEmpty: async ({ root }) => ({ removed: await emptyTrash(root) }),
-
-      runBlock: async ({ sessionId, id, code, language, host }) => {
-        // A ```prompt fence's whole contract is "pipe this body to the agent
-        // CLI", so in a locked note it does not run — the send-direction half
-        // of the no-agents invariant (locking.md §8). Re-validated here
-        // whatever the view asked (the two-ended move: its hidden buttons are
-        // the UI, this is the guard). Scoped to the `prompt` language: other
-        // fences are the user's own compute.
-        if (language === "prompt" && (await sessionNoteLocked(sessionId))) {
-          console.warn("[vault] refused a prompt-fence run in a locked note (session", sessionId + ")");
-          return { accepted: false };
-        }
-        // The block body goes to a file, rather than being inlined into the
-        // command line. That sidesteps quoting, heredocs, and line continuations.
-        // What runs the file is the language's business (runner.ts): shell blocks
-        // are sourced so cwd/env changes carry across blocks within the note (its
-        // persistent shell is reused; a run started while it is busy gets an
-        // overflow shell whose state dies with the run — inlinePool.ts), other
-        // languages exec their interpreter on it. process.execPath is the app's
-        // bundled bun, backing the "bun" interpreter for TypeScript.
-        //
-        // A remote run writes no local file: the file belongs on the target
-        // machine, and the runner's command carries the body there in-band.
-        const target = resolveHost(sessionId, host);
-        // interpretersFor, not the bare map: the target machine may override
-        // per-language commands (blocks.hostInterpreters).
-        const spec = runnerFor(
-          id,
-          language,
-          code,
-          interpretersFor(target, settings.blocks),
-          process.execPath,
-          target !== LOCAL_HOST,
-        );
-        if (!spec.remote) await Bun.write(spec.path, spec.contents);
-        inlinePool.run(sessionId, id, spec.command, target);
-        return { accepted: true };
-      },
-      cancelRun: ({ sessionId, id }) => {
-        // SIGINT whatever the run's shell is executing, from outside the tty.
-        // A signal rather than a 0x03 byte: 0x03 only becomes SIGINT if the tty is
-        // in canonical mode, so a program that put it in raw mode (a REPL, vim,
-        // claude) would just read the byte as input and keep going. This path is
-        // used to force-cancel exactly those.
-        //
-        // The signal goes to the tty's foreground process group, which the shell's
-        // job control gives the running job (see PtyProcess.interrupt). zsh is not
-        // in that group and ignores SIGINT anyway, so a persistent shell survives
-        // with its cwd/env intact for the note's next block, and the run ends on
-        // the D marker its precmd hook prints when the prompt comes back.
-        inlinePool.cancel(sessionId, id);
-        return { ok: true };
-      },
-      inlineResize: ({ sessionId, id, cols, rows }) => {
-        // Resize the run's shell so block output renders at the grid the view
-        // shows. The pool stashes a resize that beats its runBlock across the RPC
-        // (the panel fits itself the moment it renders) and applies it when the
-        // run picks its shell.
-        inlinePool.resize(sessionId, id, cols, rows);
-        return { ok: true };
-      },
-      inlineInput: ({ sessionId, id, dataB64 }) => {
-        // Feed keystrokes to the run's shell (only sent while the block's program
-        // is the running foreground process).
-        inlinePool.input(sessionId, id, fromB64(dataB64));
-        return { ok: true };
-      },
-      terminalInput: ({ sessionId, dataB64 }) => {
-        termFor(sessionId).term.write(fromB64(dataB64));
-        return { ok: true };
-      },
-      terminalPaste: async ({ sessionId, text, language, host }) => {
-        // The prompt-fence refusal, terminal direction (see runBlock): a
-        // prompt block sent to the drawer is the same locked body reaching
-        // the same agent CLI, one shell over.
-        if (language === "prompt" && (await sessionNoteLocked(sessionId))) {
-          console.warn("[vault] refused a prompt-fence paste in a locked note (session", sessionId + ")");
-          return { ok: false };
-        }
-        const t = termFor(sessionId, host);
-        // A fenced block in an interpreted language cannot be pasted as-is —
-        // zsh would run it as shell. Its runner line is pasted instead (same
-        // runner as inline; the temp file is written here). Shell blocks keep
-        // pasting their literal code: visible, editable, in shell history.
-        // Built for the host the drawer's shell is ON (not the request's):
-        // a remote drawer must never be pasted a local temp path.
-        let paste = text;
-        if (language != null) {
-          const spec = runnerFor(
-            `term-${nextTermRunId++}`,
-            language,
-            text,
-            interpretersFor(t.host, settings.blocks),
-            process.execPath,
-            t.host !== LOCAL_HOST,
-          );
-          if (spec.kind === "interpreter") {
-            if (!spec.remote) await Bun.write(spec.path, spec.contents);
-            paste = spec.command;
-          }
-        }
-        // Always queue, then try to release immediately. If the shell is idle at a
-        // prompt the paste goes out now; if it is cold or mid-command it waits for
-        // the next prompt, so pastes never echo raw or run out of order.
-        // Queued raw: whether it goes out bracketed depends on what the shell
-        // has told us about itself, and that can still change after the queue.
-        t.pasteQueue.push(paste);
-        flushPaste(t);
-        return { ok: true };
-      },
-      terminalResize: ({ sessionId, cols, rows }) => {
-        termFor(sessionId).term.resize(cols, rows);
-        return { ok: true };
-      },
-      // Synchronous so no drain tick can interleave between the snapshot and
-      // enabling live streaming: the snapshot is everything up to now, live is
-      // everything after, with no gap or overlap. Lazily spawns the note's
-      // terminal shell on first attach.
-      terminalAttach: ({ sessionId, host }) => {
-        const t = termFor(sessionId, host);
-        t.attached = true;
-        return { dataB64: toB64(sbSnapshot(t)), host: t.host };
-      },
-      terminalDetach: ({ sessionId }) => {
-        const t = terms.get(sessionId);
-        if (t) t.attached = false;
-        return { ok: true };
-      },
-      terminalStatus: ({ sessionId }) => {
-        const t = terms.get(sessionId);
-        return { live: !!t, host: t?.host ?? null };
-      },
-      closeSession: ({ sessionId }) => {
-        closeSession(sessionId);
-        return { ok: true };
-      },
-      sessionConfigure: ({ sessionId, params, notePath }) => {
-        // Stored, not applied: spawnShell reads this when the session's next
-        // shell starts. Values go nowhere but that spawn (see rpc-schema).
-        sessionParams.set(sessionId, params);
-        const root = notePath !== null && /\.md$/i.test(notePath) ? rootContaining(notePath) : null;
-        if (root) sessionFacts.set(sessionId, { note: resolve(notePath!), workspace: root });
-        else sessionFacts.delete(sessionId);
-        return { ok: true };
-      },
-      sessionRestart: ({ sessionId }) => {
-        // The restart-applies escape hatch (see rpc-schema): kill the shells,
-        // keep the params, and lazy respawn does the rest. The pool closes out
-        // open runs through the same event path the drain loop uses.
-        inlinePool.restartSession(sessionId, sendRunEvent);
-        const t = terms.get(sessionId);
-        if (t) {
-          // Mirror the shell-exited teardown below: the drawer closes, and a
-          // busy flag the view still holds is cleared — a dead shell runs
-          // nothing.
-          if (t.attached) rpc.send.terminalExit({ sessionId });
-          if (t.sentBusy) rpc.send.terminalBusy({ sessionId, busy: false });
-          t.term.close();
-          terms.delete(sessionId);
-        }
-        return { ok: true };
-      },
-      // Both assert the profile name inside — anything that is not a plain
-      // name throws before it can become a path (architecture.md §2).
-      profileRead: async ({ name }) => ({ text: await readProfile(name) }),
-      profileWrite: async ({ name, text }) => {
-        await writeProfile(name, text);
-        return { ok: true };
-      },
-      // System clipboard (bun/clipboard.ts). The webview cannot reach the
-      // clipboard itself (non-secure views:// context), so the terminal and the
-      // inline output panel proxy copy/paste through here.
-      clipboardWrite: async ({ text }) => {
-        await writeClipboard(text);
-        return { ok: true };
-      },
-      clipboardRead: async () => ({ text: await readClipboardText() }),
-      // Text and the HTML flavor together, for the editor's ⌘V. The two reads
-      // run concurrently because the HTML one is an osascript spawn: ~100ms
-      // serialized onto every paste is a keystroke that feels stuck.
-      //
-      // AppKit is asked first whether there is any HTML to read, which skips
-      // that spawn for every copy made inside Ledge (pbcopy writes text alone)
-      // and for a terminal selection. Fail open: an empty or unavailable format
-      // list asks the pasteboard anyway, so a wrong answer here costs latency,
-      // never the feature.
-      clipboardReadRich: async () => {
-        let rich = true;
-        try {
-          const formats = Utils.clipboardAvailableFormats();
-          rich = formats.length === 0 || formats.includes("html");
-        } catch {
-          // No format list on this platform; the read below is the fallback.
-        }
-        const [text, html] = await Promise.all([
-          readClipboardText(),
-          rich ? readClipboardHtml() : Promise.resolve(""),
-        ]);
-        return { text, html };
-      },
-      // The native menu bar, shaped entirely by the view (commands/menu.ts).
-      // Bun hands it to AppKit and nothing more: the `action` strings are
-      // command ids it never interprets, which is what keeps the registry the
-      // one place a command is defined.
-      menuSet: async ({ items }) => {
-        ApplicationMenu.setApplicationMenu(items as ApplicationMenuItemConfig[]);
-        return { ok: true };
-      },
-      // Both guarded inside bun/assets.ts: the root must be registered, the
-      // src passes assertions (in-root, image extension, no dot-entries)
-      // before it is read, and assetPaste names the file itself — the view
-      // supplies nothing but handles it was given.
-      assetRead: async ({ root, src }) => {
-        const res = await readAsset(root, src);
-        if (res !== null && "sealed" in res) return { image: null, sealed: true };
-        return { image: res };
-      },
-      // Whether the paste is sealed at birth comes from the NOTE, not the
-      // view: the view names the file, Bun asks the disk if it is locked
-      // (the same two-ended stance as every guard). A notePath outside the
-      // pasting root is a view bug and pastes unsealed into nothing — the
-      // guard below throws before any write.
-      assetPaste: async ({ root, notePath }) => {
-        const seal =
-          typeof notePath === "string" && notePath !== "" && rootContaining(notePath) === assertRegisteredRoot(root)
-            ? await isNoteLocked(notePath)
-            : false;
-        return { src: await pasteImageAsset(root, seal) };
-      },
-      settingsGet: () => ({ settings }),
-      // Session layout: raw bytes both ways; the view owns the shape and the
-      // self-healing, Bun owns the file and the atomicity (bun/layout.ts).
-      layoutGet: async () => ({ text: await readLayout() }),
-      layoutSave: async ({ text }) => ({ ok: await writeLayout(text) }),
-      // Raw settings.jsonc text for the ⌘, editor dialog; the write is atomic
-      // and ungated (rpc-schema.ts says why). Restart-applies still holds:
-      // the running `settings` snapshot above is not touched by a save.
-      settingsRead: async () => ({ text: await readSettingsFile() }),
-      settingsWrite: async ({ text }) => {
-        await writeSettingsFile(text);
-        return { ok: true };
-      },
-      // The CLI installer, from the app side. The entry is cli.js beside this
-      // module in the bundle (build.copy in electrobun.config.ts put it
-      // there), and execPath is the bundle's own bun — the exact pair the
-      // shim will exec (bun/cliShim.ts). The message is composed here, not
-      // in the view: the landing dir, the PATH verdict, and any failure are
-      // Bun-side facts.
-      cliInstall: async () => {
-        try {
-          const res = await installShim({
-            execPath: process.execPath,
-            entryPath: resolve(import.meta.dir, "cli.js"),
-            pathVar: process.env["PATH"] ?? "",
-          });
-          return {
-            ok: true,
-            message: res.onPath
-              ? `ledge installed: ${tildify(res.path)}`
-              : `ledge installed: ${tildify(res.path)} — its folder is not on your PATH yet`,
-          };
-        } catch (err) {
-          return { ok: false, message: `Install failed: ${err instanceof Error ? err.message : String(err)}` };
-        }
-      },
-      // The cold-start half of `ledge <title>`: the view pulls once at boot,
-      // after its subscriber wiring is up. Consume-and-validate lives in
-      // bun/openRequest.ts, shared with the app-home watcher. The watcher
-      // starts only AFTER this first pull (startOpenRequestWatcher below):
-      // Bun's watcher is alive seconds before the webview can hear a push,
-      // and in that window it would consume a request whose push then lands
-      // on nobody — the live probe caught exactly that. Deferring the
-      // watcher leaves a mid-boot request in the file for this pull to find.
-      openRequestTake: async () => {
-        const open = await takeOpenRequest();
-        startOpenRequestWatcher();
-        return { open };
-      },
-      // openableUrl is the guard here, not a convenience: `open` treats a
-      // non-URL argument as a file path (and launches .app bundles), so only
-      // the allowlisted schemes may pass. Re-checked on this side because the
-      // view's check is styling and this one is the boundary — the same move
-      // as assertProfileName above (architecture.md §2).
-      // Bun stamps the source and level and caps the length; the view's text
-      // is the only part it contributes (rpc-schema.ts logAppend).
-      logAppend: async ({ level, text }) => {
-        writeLog("view", level, [text.slice(0, LOG_TEXT_CAP)]);
-        return { ok: true };
-      },
-      logReveal: async () => ({ ok: revealLog() }),
-      linkOpen: async ({ url }) => {
-        const target = openableUrl(url);
-        if (!target) return { ok: false };
-        try {
-          Bun.spawn(["open", target]);
-        } catch (err) {
-          console.warn("[links] could not open", target, err);
-          return { ok: false };
-        }
-        return { ok: true };
-      },
-    },
-    messages: {},
-  },
-});
-
-// Watch every available root for changes made behind the app's back (agents in
-// the drawer, git, plain shell edits) and push notesChanged so the view can
-// re-read lists and reload clean open buffers. Trails the registry: the
-// workspace handlers above re-sync on every attach/create/detach, and an
-// unavailable root simply is not watched until a sync finds it back
-// (bun/watch.ts owns the skip-and-warn).
-function refreshWatchers(): void {
-  syncWatchers(availableRoots(), (root) => rpc.send.notesChanged({ root }));
-}
-refreshWatchers();
-
-// Auto-relock (idle) pushes the same vaultChanged the explicit paths do —
-// the view cannot tell why the vault locked, only that it did, which is the
-// point: one eviction path.
-configureVault({ onAutoLock: () => rpc.send.vaultChanged({ state: vaultState() }) });
+rpc = defineLedgeRPC(server.requests);
 
 // The menu bar's two edges. The view owns the real menu (commands/menu.ts,
-// pushed through menuSet above) — this side is the fallback that exists
-// before its first push, and the click route back.
+// pushed through menuSet) — this side is the fallback that exists before its
+// first push, and the click route back.
 //
 // The fallback is not cosmetic: without an application menu there is no ⌘Q,
 // so a view that fails to load would leave a window with no way out. Quit and
@@ -890,118 +156,13 @@ ApplicationMenu.setApplicationMenu([
   },
 ]);
 
-// A clicked item carries the command id the view put in its `action`; Bun
-// forwards it without knowing what it means. Role items never arrive here —
-// AppKit runs those down the responder chain and the WebView answers.
+// A clicked item carries the command id the view put in its `action`; the
+// shell forwards it without knowing what it means. Role items never arrive
+// here — AppKit runs those down the responder chain and the WebView answers.
 ApplicationMenu.on("application-menu-clicked", (event) => {
   const action = (event as { data?: { action?: unknown } }).data?.action;
-  if (typeof action === "string" && action.length > 0) rpc.send.menuCommand({ action });
+  if (typeof action === "string" && action.length > 0) push.menuCommand({ action });
 });
-
-// Watch the app home for the CLI's open request (`ledge <title>` with the
-// app already running; bun/openRequest.ts). Non-recursive and its own
-// watcher, not one of syncWatchers': roots and the app home have different
-// lifecycles, and this one filters to a single filename. takeOpenRequest
-// consumes the file and re-validates the path, so the watcher itself decides
-// nothing; a null take (invalid, stale, or our own unlink echoing) is silent.
-// NOT started at launch: the view's first openRequestTake starts it (see the
-// handler above for the boot race this closes). Best-effort like every
-// watcher: on failure that boot pull still serves the app-was-closed flow.
-let openRequestWatcherStarted = false;
-function startOpenRequestWatcher(): void {
-  if (openRequestWatcherStarted) return;
-  openRequestWatcherStarted = true;
-  try {
-    const requestName = basename(OPEN_REQUEST_PATH);
-    watch(APP_HOME, (_event, filename) => {
-      if (filename !== requestName) return;
-      void takeOpenRequest().then((open) => {
-        if (open !== null) rpc.send.openExternal(open);
-      });
-    });
-  } catch (err) {
-    console.warn("[cli] could not watch the app home for open requests:", err);
-  }
-}
-
-// Drain every live shell on a short interval. (poll()-gated reads never block;
-// see pty.ts.) Inline shells are sliced into per-block events (block ids are
-// globally unique, so the view routes each event to the editor that owns it with
-// no per-note bookkeeping here); terminal shells stream raw to whichever drawer
-// is attached to that note. Inline lifecycle — overflow teardown on a run's end,
-// closing out the run of a shell that died mid-block — lives in the pool.
-// One pool event -> one runEvent message. Shared by the drain loop and
-// sessionRestart, which closes out open runs through the same path so the
-// view cannot tell a restart-killed run from a shell that died on its own.
-function sendRunEvent(ev: InlineEvent): void {
-  if (ev.type === "began") {
-    rpc.send.runEvent({ id: ev.blockId, kind: "began" });
-  } else if (ev.type === "output") {
-    rpc.send.runEvent({ id: ev.blockId, kind: "output", dataB64: toB64(ev.data) });
-  } else {
-    rpc.send.runEvent({ id: ev.blockId, kind: "ended", exitCode: ev.exitCode });
-  }
-}
-
-setInterval(() => {
-  inlinePool.drain(sendRunEvent);
-
-  const now = Date.now();
-  for (const [sessionId, t] of terms) {
-    const termData = t.term.drain();
-    if (termData) {
-      t.lastOut = now;
-      sbPush(t, termData);
-      if (t.attached) rpc.send.terminalOutput({ sessionId, dataB64: toB64(termData) });
-      // Track the shell's bracketed-paste mode from its enable/disable sequences
-      // and release a queued paste whenever a fresh prompt appears. The last
-      // occurrence in the chunk wins (a chunk can carry a full prompt cycle). Carry
-      // one char less than a full sequence so a completed toggle at the boundary is
-      // not re-matched next tick, while a genuinely split sequence still is.
-      const scan = t.scanTail + Buffer.from(termData).toString("latin1");
-      const iEnable = scan.lastIndexOf(BP_ENABLE);
-      const iDisable = scan.lastIndexOf(BP_DISABLE);
-      if (iEnable !== -1 || iDisable !== -1) {
-        t.promptReady = iEnable > iDisable;
-        if (t.promptReady) t.everReady = true;
-      }
-      t.scanTail = scan.slice(-(BP_ENABLE.length - 1));
-    }
-    // After the scan, and every tick rather than only on output: the prompt a
-    // paste is waiting for arrives as bytes, but a shell with no
-    // bracketed-paste mode is released by the ABSENCE of them instead.
-    flushPaste(t, now);
-    // Push busy on every tick, not just when bytes arrive: queueing a paste changes
-    // it with no output at all, and the button has to gray out the moment it does.
-    const busy = isBusy(t);
-    if (busy !== t.sentBusy) {
-      t.sentBusy = busy;
-      rpc.send.terminalBusy({ sessionId, busy });
-    }
-    // The user typed `exit`: tear the shell down and tell the drawer to close.
-    if (t.term.exited) {
-      if (t.attached) rpc.send.terminalExit({ sessionId });
-      // The shell is gone, so nothing is running on it. Without this the note's
-      // terminal button would stay grayed out forever on a shell that died mid-job.
-      if (busy) rpc.send.terminalBusy({ sessionId, busy: false });
-      t.term.close();
-      terms.delete(sessionId);
-    }
-  }
-}, 8);
-
-// Age old deletions out of every available workspace's trash, once per launch.
-// Deliberately not awaited: it is housekeeping, and the window should not wait
-// on folder scans to open. Doing it here rather than on a timer means a
-// trashed note never disappears out from under a Trash section the user is
-// looking at. Unavailable roots are skipped, not failed: an unmounted volume's
-// trash just keeps its notes until it is back.
-void Promise.all(availableRoots().map((root) => purgeTrash(root, settings.trash.ttlDays * 24 * 60 * 60 * 1000)))
-  .then((ns) => {
-    const n = ns.reduce((a, b) => a + b, 0);
-    if (n > 0) console.log(`[notes] purged ${n} trashed note(s) past the ${settings.trash.ttlDays}-day limit`);
-  })
-  .catch((err) => console.error("[notes] trash purge failed", err));
 
 // Primary first: fitFrame falls back to workAreas[0] when a saved frame
 // matches no attached display, and "somewhere in the middle of the main
@@ -1078,10 +239,8 @@ process.on("exit", () => {
   // lost. No FFI here — the window may already be gone — so this leans on the
   // cached fullscreen flag rather than asking again.
   if (frameSave && windowed) writeFrame(lastFrame);
-  inlinePool.closeAll();
-  for (const t of terms.values()) t.term.close();
+  server.shutdown();
 });
 
 console.log("[bun] Ledge started (per-note shells, spawned on first use); app home:", APP_HOME);
 void mainWindow;
-
