@@ -4,14 +4,16 @@
 // and block widget is created after boot, so a plain getter is enough and no
 // reactivity is needed. Settings apply at launch, never live (architecture.md,
 // "Settings"), which is why there is no subscription here on purpose.
-import { DEFAULT_SETTINGS, type Settings } from "../../shared/settings";
+import { DEFAULT_SETTINGS, type Settings, type SettingsHome } from "../../shared/settings";
 
 interface SettingsHandlers {
   // The settings editor dialog's load/save: raw settings.jsonc text, comments
-  // and all (Bun knows where the file lives and seeds the commented template
-  // on first read). Saves apply at the next launch, like every setting.
-  readSettingsFile: () => Promise<string>;
-  writeSettingsFile: (text: string) => Promise<void>;
+  // and all (Bun knows where each file lives and seeds the commented template
+  // on first read). `home` picks which of the two — the machine holding the
+  // notes, or this app on this screen (remote.md §5). Saves apply at the next
+  // launch, like every setting.
+  readSettingsFile: (home: SettingsHome) => Promise<string>;
+  writeSettingsFile: (home: SettingsHome, text: string) => Promise<void>;
   // The profile editor's load/save — the same in-app-dialog shape (macOS
   // binds no app to ".env", so there never was an OS-editor path). Bun
   // validates the name.
@@ -33,14 +35,14 @@ export function settings(): Settings {
   return current;
 }
 
-export function readSettingsFile(): Promise<string> {
+export function readSettingsFile(home: SettingsHome): Promise<string> {
   if (!handlers) throw new Error("settings bridge not configured");
-  return handlers.readSettingsFile();
+  return handlers.readSettingsFile(home);
 }
 
-export function writeSettingsFile(text: string): Promise<void> {
+export function writeSettingsFile(home: SettingsHome, text: string): Promise<void> {
   if (!handlers) throw new Error("settings bridge not configured");
-  return handlers.writeSettingsFile(text);
+  return handlers.writeSettingsFile(home, text);
 }
 
 export function readProfile(name: string): Promise<string> {

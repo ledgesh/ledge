@@ -30,6 +30,7 @@ import type { TagInfo } from "../shared/tags";
 import { CommandProvider, useCommands } from "@/commands/CommandProvider";
 import { ProfileEditor } from "@/components/ProfileEditor";
 import { SettingsEditor } from "@/components/SettingsEditor";
+import { ConnectionPicker } from "@/components/ConnectionPicker";
 import { configureUi, uiHooks } from "@/commands/glue";
 import { tooltip } from "@/commands/format";
 import { Overlay, type OverlayMode } from "@/commands/Overlay";
@@ -98,6 +99,7 @@ function Shell() {
   const [profileEditing, setProfileEditing] = useState<string | null>(null);
   // The ⌘, settings editor dialog (settings.jsonc in an in-app CodeMirror).
   const [settingsEditing, setSettingsEditing] = useState(false);
+  const [pickingConnection, setPickingConnection] = useState(false);
   // The vault passphrase dialog, carrying the act that was waiting on it
   // (lock this note, remove that lock) — App performs the follow-up on
   // success, so the user's intent completes instead of dead-ending at the
@@ -289,6 +291,7 @@ function Shell() {
       },
       openProfileEditor: setProfileEditing,
       openSettingsEditor: () => setSettingsEditing(true),
+      openConnectionPicker: () => setPickingConnection(true),
       openVaultDialog: (then) => setVaultDialog({ then }),
       confirmRemoveLock: setRemoveLockConfirm,
     });
@@ -676,6 +679,7 @@ function Shell() {
         <ProfileEditor name={profileEditing} onClose={() => setProfileEditing(null)} />
       )}
       {settingsEditing && <SettingsEditor onClose={() => setSettingsEditing(false)} />}
+      {pickingConnection && <ConnectionPicker onClose={() => setPickingConnection(false)} />}
       {vaultDialog && (
         <VaultDialog
           mode={vaultDialog.then?.changePassphrase ? "change" : "auto"}

@@ -68,8 +68,8 @@ Notes are ordinary `.md` files in ordinary folders, so git, agents, and shell to
 - **Agents.** A CLI launched inside a note's terminal can read and write your notes over MCP, and a `prompt` code fence pipes its text to `claude -p` with ⌘↩. See [[Agents and Ledge]].
 - **Locking.** "Lock This Note…" encrypts a note's body on disk. Sync services, search, and agents see nothing until you unlock. See [[Note Locking]].
 - **The CLI.** "Install Shell Command (ledge)" puts `ledge` on your PATH, so `ledge <title>` opens a note from any terminal and `ledge today` lands in the daily note. See [[The ledge CLI]].
-- **Appearance.** Ledge follows your Mac's light or dark setting. To pin one instead, set `appearance.theme` to `"light"` or `"dark"` in Settings (⌘,) and relaunch.
-- **Fonts.** `editor.fontSize` sizes note text and `terminal.fontSize` sizes the terminal, both in Settings (⌘,). Relaunch to apply.
+- **Appearance.** Ledge follows your Mac's light or dark setting. To pin one instead, set `appearance.theme` to `"light"` or `"dark"` under This app in Settings (⌘,) and relaunch.
+- **Fonts.** `editor.fontSize` sizes note text and `terminal.fontSize` sizes the terminal, both under This app in Settings (⌘,). Relaunch to apply.
 
 ## When something goes wrong
 

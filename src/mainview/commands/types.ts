@@ -94,6 +94,11 @@ export interface UiHooks {
   // (components/SettingsEditor.tsx). The file is still the UI; Ledge is just
   // the editor it opens in now.
   openSettingsEditor(): void;
+  // Open the connection chooser — which machine holds the notes
+  // (components/ConnectionPicker.tsx, remote.md §8). A dialog rather than an
+  // anchored menu: switching rebuilds the whole session, and adding a server
+  // means reading a host-key fingerprint before anything is pinned.
+  openConnectionPicker(): void;
   // Open the vault passphrase dialog (components/VaultDialog.tsx): the
   // unlock face when a vault exists, the create-with-no-recovery-sentence
   // face when none does. `then` carries the act that was waiting on it.

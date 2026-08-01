@@ -618,10 +618,13 @@ describe("tags", () => {
 // test, not slip in.
 describe("settings", () => {
   test("returns the user's settings text and its path, no arguments needed", async () => {
-    await writeFile(SETTINGS_PATH, '{\n  // theirs\n  "terminal": { "fontSize": 15 }\n}\n');
+    // A server-owned section (remote.md §5): this tool reads the settings of
+    // the machine the agent is running on, which is the server, and a font
+    // size is not that machine's fact.
+    await writeFile(SETTINGS_PATH, '{\n  // theirs\n  "trash": { "ttlDays": 15 }\n}\n');
     const out = await call("settings");
     expect(out.path).toBe(SETTINGS_PATH);
-    expect(out.text).toContain('"fontSize": 15');
+    expect(out.text).toContain('"ttlDays": 15');
     expect(out.text).toContain("// theirs");
     expect(out.problems).toEqual([]);
   });

@@ -25,7 +25,7 @@ import type { LedgeRPC } from "./rpc-schema";
 
 /** Bumped when the framing or the message set changes shape. A peer speaking
  * a different one is refused, never partially understood. */
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 
 export const FRAME_HEADER_BYTES = 5;
 
@@ -58,6 +58,16 @@ export interface Hello {
   protocol: number;
   schema: string;
   build: string;
+  // Who is connecting. The server files this client's saved layout under it
+  // (remote.md §5), so a phone does not inherit a desktop's three-pane
+  // arrangement and the same Mac gets its own back. Identity belongs to the
+  // CONNECTION rather than to each request: a client cannot forget to send it,
+  // and no handler needs a parameter it would only ever fill in one way.
+  //
+  // Empty from a server, and empty is allowed from a client too — one that has
+  // no layout to keep simply has no id, and the server files it under a shared
+  // key rather than refusing the connection over a preference.
+  client: string;
 }
 
 /**
@@ -140,6 +150,11 @@ export const REQUEST_METHODS = [
   "logReveal",
   "assetRead",
   "assetPaste",
+  "connectionList",
+  "connectionSelect",
+  "connectionAdd",
+  "connectionRemove",
+  "connectionProbe",
   "layoutGet",
   "layoutSave",
   "openRequestTake",
@@ -202,8 +217,8 @@ export const SCHEMA_VERSION = fingerprint([
   ...PUSH_MESSAGES.map((m) => `push:${m}`),
 ]);
 
-export function hello(role: "client" | "server", build: string): Hello {
-  return { t: "hello", role, protocol: PROTOCOL_VERSION, schema: SCHEMA_VERSION, build };
+export function hello(role: "client" | "server", build: string, client = ""): Hello {
+  return { t: "hello", role, protocol: PROTOCOL_VERSION, schema: SCHEMA_VERSION, build, client };
 }
 
 /**
@@ -284,7 +299,19 @@ export function parseControl(text: string): WireMessage {
       if (m["role"] !== "client" && m["role"] !== "server") return bad("a hello with no role");
       if (typeof m["protocol"] !== "number") return bad("a hello with no protocol version");
       if (typeof m["schema"] !== "string" || typeof m["build"] !== "string") return bad("a hello with no versions");
-      return { t: "hello", role: m["role"], protocol: m["protocol"], schema: m["schema"], build: m["build"] };
+      // A peer that predates the field is not refused here: checkHello owns
+      // compatibility, and it will refuse this one on the protocol version
+      // with both numbers named, which is a far better message than "a hello
+      // with no client".
+      if (m["client"] !== undefined && typeof m["client"] !== "string") return bad("a hello with a non-string client");
+      return {
+        t: "hello",
+        role: m["role"],
+        protocol: m["protocol"],
+        schema: m["schema"],
+        build: m["build"],
+        client: typeof m["client"] === "string" ? m["client"] : "",
+      };
     case "req":
       if (!isId(m["id"]) || typeof m["m"] !== "string") return bad("a request with no id or method");
       return { t: "req", id: m["id"], m: m["m"], p: m["p"] };

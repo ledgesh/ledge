@@ -46,15 +46,15 @@ describe("loadSettings", () => {
     await writeFile(
       SETTINGS_PATH,
       `{
-        // bigger type
-        "editor": { "fontSize": 18 }, /* and a fast trash */
+        // my shell
+        "shell": { "path": "/bin/bash" }, /* and a fast trash */
         "trash": { "ttlDays": 7, },
       }`,
     );
     const s = await loadSettings();
-    expect(s.editor.fontSize).toBe(18);
+    expect(s.shell.path).toBe("/bin/bash");
     expect(s.trash.ttlDays).toBe(7);
-    expect(s.shell).toEqual(DEFAULT_SETTINGS.shell); // unmentioned → default
+    expect(s.blocks).toEqual(DEFAULT_SETTINGS.blocks); // unmentioned → default
   });
 
   test("unparseable JSONC runs on defaults and leaves the file untouched", async () => {
@@ -66,29 +66,43 @@ describe("loadSettings", () => {
   });
 
   test("a bad value falls back alone, and the file is not rewritten", async () => {
-    const text = JSON.stringify({ editor: { fontSize: "big" }, terminal: { fontSize: 13 } });
+    const text = JSON.stringify({ trash: { ttlDays: "soon" }, shell: { path: "/bin/bash" } });
     await writeFile(SETTINGS_PATH, text);
     const s = await loadSettings();
-    expect(s.editor.fontSize).toBe(DEFAULT_SETTINGS.editor.fontSize);
-    expect(s.terminal.fontSize).toBe(13);
+    expect(s.trash.ttlDays).toBe(DEFAULT_SETTINGS.trash.ttlDays);
+    expect(s.shell.path).toBe("/bin/bash");
     expect(await readFile(SETTINGS_PATH, "utf8")).toBe(text);
   });
 
+  // The other half of the split (remote.md §5), from the server's side: an
+  // install written before the boundary existed still carries the client's
+  // sections, and this file has to ignore them and say so rather than apply a
+  // font size nobody can see.
+  test("a client section left behind by the split is reported, not applied", async () => {
+    await writeFile(SETTINGS_PATH, JSON.stringify({ editor: { fontSize: 18 }, trash: { ttlDays: 7 } }));
+    const s = await loadSettings();
+    expect(s.editor.fontSize).toBe(DEFAULT_SETTINGS.editor.fontSize);
+    expect(s.trash.ttlDays).toBe(7);
+    expect((await inspectSettings()).problems).toEqual([
+      '"editor" describes this screen, so it moved to this app\'s own settings; the copy here does nothing',
+    ]);
+  });
+
   test("a legacy settings.json is renamed to settings.jsonc, bytes intact", async () => {
-    const text = JSON.stringify({ terminal: { fontSize: 13 } });
+    const text = JSON.stringify({ trash: { ttlDays: 13 } });
     await writeFile(LEGACY_SETTINGS_PATH, text);
     const s = await loadSettings();
-    expect(s.terminal.fontSize).toBe(13);
+    expect(s.trash.ttlDays).toBe(13);
     // Rename, not copy: one file remains, at the new name, byte-for-byte.
     expect(await readFile(SETTINGS_PATH, "utf8")).toBe(text);
     expect(await exists(LEGACY_SETTINGS_PATH)).toBe(false);
   });
 
   test("an existing settings.jsonc wins over a lingering settings.json", async () => {
-    await writeFile(SETTINGS_PATH, '{ "terminal": { "fontSize": 13 } }');
-    await writeFile(LEGACY_SETTINGS_PATH, '{ "terminal": { "fontSize": 9 } }');
+    await writeFile(SETTINGS_PATH, '{ "trash": { "ttlDays": 13 } }');
+    await writeFile(LEGACY_SETTINGS_PATH, '{ "trash": { "ttlDays": 9 } }');
     const s = await loadSettings();
-    expect(s.terminal.fontSize).toBe(13);
+    expect(s.trash.ttlDays).toBe(13);
     // The legacy file is left alone — never merged, never deleted.
     expect(await exists(LEGACY_SETTINGS_PATH)).toBe(true);
   });
@@ -101,11 +115,11 @@ describe("readSettingsFile / writeSettingsFile", () => {
   });
 
   test("write persists exactly the given text; the next read returns it", async () => {
-    const text = '{\n  // mine\n  "editor": { "fontSize": 17 }\n}\n';
+    const text = '{\n  // mine\n  "trash": { "ttlDays": 17 }\n}\n';
     await writeSettingsFile(text);
     expect(await readFile(SETTINGS_PATH, "utf8")).toBe(text);
     expect(await readSettingsFile()).toBe(text);
-    expect((await loadSettings()).editor.fontSize).toBe(17);
+    expect((await loadSettings()).trash.ttlDays).toBe(17);
   });
 
   test("read migrates a legacy file just like loadSettings does", async () => {
@@ -140,11 +154,11 @@ describe("inspectSettings", () => {
   });
 
   test("a bad value is reported, not corrected", async () => {
-    const text = JSON.stringify({ editor: { fontSize: "big" } });
+    const text = JSON.stringify({ trash: { ttlDays: "big" } });
     await writeFile(SETTINGS_PATH, text);
     const seen = await inspectSettings();
     expect(seen.problems.length).toBe(1);
-    expect(seen.problems[0]).toContain("fontSize");
+    expect(seen.problems[0]).toContain("ttlDays");
     expect(await readFile(SETTINGS_PATH, "utf8")).toBe(text);
   });
 

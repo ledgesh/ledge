@@ -1,0 +1,124 @@
+// The view's window onto which machine it is talking to (remote.md §8).
+//
+// Mirrors lib/clipboard.ts: main.tsx configures it with the real RPC,
+// harness.tsx with a fake, and everything above reads through these functions.
+// Unlike settings, this one is subscribable — the status changes when a
+// connection is added, removed, or switched to, and the indicator in the
+// chrome has to follow. It is a small mirror rather than store state because
+// nothing about the notes depends on it: it is the frame around them.
+import type { ConnectionInfo } from "../../shared/rpc-schema";
+
+export interface ConnectionStatus {
+  connections: ConnectionInfo[];
+  /** The connection actually being served. */
+  active: string;
+  /** What the user last chose. Differs from `active` only when that could not
+   * be opened, in which case `error` says why. */
+  wanted: string;
+  error: string;
+  build: string;
+}
+
+interface ConnectionHandlers {
+  list: () => Promise<ConnectionStatus>;
+  select: (id: string) => Promise<{ ok: boolean; error: string }>;
+  add: (fields: { name: string; destination: string; keyPath: string; hostKey: string }) => Promise<{ id: string; error: string }>;
+  remove: (id: string) => Promise<{ ok: boolean; error: string }>;
+  probe: (destination: string) => Promise<{ hostKey: string; fingerprint: string; keyType: string; error: string }>;
+}
+
+// Until configured: one connection, this machine, no trouble. A boot that
+// failed to reach Bun still renders chrome that says something true — the app
+// it is drawing is running on this Mac either way.
+const ALONE: ConnectionStatus = {
+  connections: [{ id: "local", name: "This Mac", destination: "", keyPath: "", pinned: false, lastReached: 0 }],
+  active: "local",
+  wanted: "local",
+  error: "",
+  build: "",
+};
+
+let status: ConnectionStatus = ALONE;
+let handlers: ConnectionHandlers | null = null;
+const subscribers = new Set<() => void>();
+
+export function configureConnections(initial: ConnectionStatus, h: ConnectionHandlers): void {
+  status = initial;
+  handlers = h;
+  emit();
+}
+
+export function connectionStatus(): ConnectionStatus {
+  return status;
+}
+
+/** The connection being served, for the indicator. Never null: the local
+ * server is always in the list, so there is always something to name. */
+export function activeConnection(): ConnectionInfo {
+  return status.connections.find((c) => c.id === status.active) ?? ALONE.connections[0]!;
+}
+
+export function subscribeConnections(fn: () => void): () => void {
+  subscribers.add(fn);
+  return () => subscribers.delete(fn);
+}
+
+function emit(): void {
+  for (const fn of subscribers) fn();
+}
+
+export async function refreshConnections(): Promise<ConnectionStatus> {
+  if (!handlers) return status;
+  status = await handlers.list();
+  emit();
+  return status;
+}
+
+/**
+ * Switch, and rebuild everything if it worked.
+ *
+ * Everything workspace-scoped is scoped to a server (remote.md §8), and this
+ * view's boot is what builds all of it: the registry, the note lists, the
+ * tags, the layout. So the rebuild IS a reload — pending saves are flushed
+ * first, and then the page starts over against the new machine. Tearing the
+ * same state down in place would mean a second, less-tested teardown path for
+ * every module that holds a configureX singleton.
+ *
+ * Returns the refusal when the connection would not open, in which case
+ * nothing was torn down and the session carries on where it was.
+ */
+export async function selectConnection(id: string, flush: () => Promise<void>): Promise<string | null> {
+  if (!handlers) return "Not connected to Ledge's own process.";
+  const res = await handlers.select(id);
+  if (!res.ok) return res.error || "That connection could not be opened.";
+  await flush().catch(() => {});
+  window.location.reload();
+  return null;
+}
+
+export async function addConnection(fields: {
+  name: string;
+  destination: string;
+  keyPath: string;
+  hostKey: string;
+}): Promise<{ id: string; error: string }> {
+  if (!handlers) return { id: "", error: "Not connected to Ledge's own process." };
+  const res = await handlers.add(fields);
+  if (!res.error) await refreshConnections();
+  return res;
+}
+
+export async function removeConnection(id: string): Promise<string | null> {
+  if (!handlers) return "Not connected to Ledge's own process.";
+  const res = await handlers.remove(id);
+  if (!res.ok) return res.error || "That connection could not be removed.";
+  await refreshConnections();
+  return null;
+}
+
+export function probeConnection(
+  destination: string,
+): Promise<{ hostKey: string; fingerprint: string; keyType: string; error: string }> {
+  if (!handlers) return Promise.resolve({ hostKey: "", fingerprint: "", keyType: "", error: "Not connected." });
+  return handlers.probe(destination);
+}

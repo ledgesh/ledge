@@ -136,6 +136,12 @@ export const COMMANDS = {
   "terminal.toggle": { title: "Toggle Terminal", keys: ["Ctrl-`"] },
   "terminal.close": { title: "Close Terminal" },
   "settings.open": { title: "Settings…", keys: ["Mod-,"] },
+  // Which machine holds the notes (remote.md §8). No chord: switching servers
+  // tears the whole session down and rebuilds it, which is a deliberate act,
+  // not a toggle — and the persistent indicator above the workspace strip is
+  // the everyday surface, with this as the palette's and the menu's way in.
+  // Ellipsis because it opens a chooser rather than switching to anything.
+  "connection.switch": { title: "Notes On…" },
   // Palette-only (a once-per-machine act earns no chord): writes the `ledge`
   // shim so the notes are reachable from any terminal (bun/cliShim.ts).
   "cli.install": { title: "Install Shell Command (ledge)" },

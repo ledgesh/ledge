@@ -23,6 +23,10 @@ import { startLogging } from "./log";
 import { EXTRACTION_DIRNAME, pruneExtractionDir } from "./updateCache";
 import { APP_HOME } from "./workspaces";
 import { createServer, type NativeDeps, type RequestHandlers, type ServerPush } from "./server";
+import { clientOverlay, type ClientNative } from "./clientSeams";
+import { clientId } from "./clientHome";
+import { createConnectionManager, type Attached } from "./connectionManager";
+import { KNOWN_HOSTS_PATH, sshCommand, userKnownHosts, type Connection } from "./connections";
 import { clientConnection, spawnDuplex } from "./transport";
 import { BUILD_VERSION } from "../shared/version";
 import type { LedgeRPC } from "../shared/rpc-schema";
@@ -68,9 +72,8 @@ async function mainViewUrl(): Promise<string> {
   return "views://mainview/index.html";
 }
 
-// The native seams the server cannot have (remote.md §5): a headless one has
-// no dialog, no pasteboard, and no menu bar, and a remote one's are on the
-// wrong machine.
+// The folder dialog, the one native seam a local server still needs from us
+// (remote.md §5). A server across a connection has no dialog and says so.
 const native: NativeDeps = {
   // openFileDialog splits its FFI result on "," — a path containing a comma
   // comes back shredded, so re-join and let the caller's stat-validation
@@ -87,6 +90,12 @@ const native: NativeDeps = {
     ).join(",");
     return picked || null;
   },
+};
+
+// The seams that stay on this side of every connection (remote.md §10): the
+// pasteboard, the browser, and the menu bar are this Mac's, local server or
+// remote. AppKit supplies the two native halves.
+const clientNative: ClientNative = {
   clipboardFormats: () => {
     try {
       return Utils.clipboardAvailableFormats();
@@ -124,51 +133,50 @@ const push: ServerPush = {
   menuCommand: (p) => rpc?.send.menuCommand(p),
 };
 
-// LEDGE_CONNECT: talk to a server instead of being one (remote.md §1). Its
-// value is the command that starts one, which for another machine is
-// `ssh <target> ledge-server serve` and for this one is a local
-// `ledge-server serve`: the same protocol either way, over a different length
-// of wire. Split on whitespace and run with no shell, so there is nothing for
-// a quoting mistake to expand.
-//
-// Unset, the app creates the server in this process, which is what ships.
-// Phase 3 replaces this env var with real connection configuration (a display
-// name, a destination, a pinned host key); until then, host-key pinning is
-// ssh's own known_hosts, and a connected app has the gaps remote.md §5 and
-// §10 name — no folder dialog, and a clipboard on the wrong machine.
-const CONNECT = process.env["LEDGE_CONNECT"]?.trim();
+// The same id whether the server is in this process or across a connection:
+// the arrangement this Mac left behind is this Mac's either way (remote.md §5).
+const me = await clientId();
 
-async function attachServer(): Promise<{ requests: RequestHandlers; shutdown: () => void }> {
-  if (!CONNECT) {
-    const server = await createServer({ push, native });
-    return { requests: server.requests, shutdown: () => server.shutdown() };
+/**
+ * Open one connection. The manager decides WHICH and when; this decides how,
+ * because how is the only part that needs Electrobun's version string and a
+ * child process.
+ *
+ * The client overlay goes on last in both branches, so the local case and the
+ * remote case are the same code path with a different server underneath
+ * (remote.md §1): the pasteboard is read here whether the notes are on this
+ * disk or on a VPS, and nothing about it is exercised only when connected.
+ */
+async function attach(conn: Connection): Promise<Attached> {
+  const build = local?.version ?? BUILD_VERSION;
+  if (conn.destination === "") {
+    const server = await createServer({ push, native, client: () => me });
+    return {
+      requests: await clientOverlay(server.requests, clientNative),
+      build,
+      shutdown: () => server.shutdown(),
+    };
   }
-  const conn = clientConnection(spawnDuplex(CONNECT.split(/\s+/)), {
-    push,
-    build: local?.version ?? BUILD_VERSION,
-  });
+  const argv = sshCommand(conn, KNOWN_HOSTS_PATH, userKnownHosts());
+  const wire = clientConnection(spawnDuplex(argv), { push, build, client: me });
   // Throws when the two ends disagree about the protocol, with both versions
-  // named. Fatal on purpose: a window onto a server we cannot speak to is
-  // worse than not opening one.
-  const peer = await conn.ready;
-  console.log(`[bun] connected to ledge-server ${peer.build} via \`${CONNECT}\``);
+  // named, and when the ssh child dies before saying anything (a refused key,
+  // an unknown host, no route). Either way the manager keeps the connection
+  // that is already working and reports this one, so the throw is the whole
+  // error handling: nothing here has to decide what to do about it.
+  const peer = await wire.ready.catch((err: unknown) => {
+    wire.close();
+    throw err;
+  });
+  console.log(`[connect] ${conn.name} (${conn.destination}): ledge-server ${peer.build}`);
   return {
-    // menuSet never crosses the wire (remote.md §10). The menu bar is this
-    // Mac's, and a headless server would swallow the view's whole menu — ⌘Q
-    // with it. The remaining client-side seams (clipboard, link opening) still
-    // travel until phase 3 moves them for real.
-    requests: {
-      ...conn.requests,
-      menuSet: async ({ items }) => {
-        native.setMenu?.(items);
-        return { ok: true };
-      },
-    },
-    shutdown: () => conn.close(),
+    requests: await clientOverlay(wire.requests, clientNative),
+    build: peer.build,
+    shutdown: () => wire.close(),
   };
 }
 
-const { requests, shutdown } = await attachServer();
+const { requests, shutdown } = await createConnectionManager({ attach });
 
 rpc = defineLedgeRPC(requests);
 

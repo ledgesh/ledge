@@ -1,19 +1,21 @@
 # Ledge remote servers
 
-**Partly implemented: §14 phases 1 and 2 are code, §§3-6 have working
-transports behind them, and everything about connections, resilience, Linux,
-and iOS is still design.** When the rest lands this becomes the fifth sibling
-standard, beside `architecture.md` (whose process topology, trust boundary,
-and state-ownership rules it revises), `interactions.md` (which gains the
-connection grammar in §8), `locking.md` (whose vault moves one hop away), and
-`testing.md` (whose categories §13 instantiates). Until then it is the
-agreed shape, and code that disagrees with it is either ahead of the doc or
-wrong.
+**Partly implemented: §14 phases 1 to 3 are code, and everything about
+resilience, Linux, and iOS is still design.** The connection grammar §8
+called for now lives in `interactions.md` §4-1, and the state ownership §5
+describes is the code's. What remains design is reconnect, `opId` dedupe,
+output coalescing, binary frames, the Linux PTY port, and the iOS client.
+This is a sibling standard beside `architecture.md` (whose process topology,
+trust boundary, and state-ownership rules it revises), `interactions.md`,
+`locking.md` (whose vault moves one hop away), and `testing.md` (whose
+categories §13 instantiates). Code that disagrees with it is either ahead of
+the doc or wrong.
 
-It records two amendments to `architecture.md` in advance, both in §5:
-pasted asset bytes now cross the wire (§3's "the bytes never cross the RPC"
-holds only for a local server), and `.window.json` leaves the server for the
-client.
+It records two amendments to `architecture.md`, both in §5: `.window.json`
+has left the server for the client (done), and pasted asset bytes will cross
+the wire (§3's "the bytes never cross the RPC" holds only for a local
+server; it lands with the binary frames in phase 4, and until then the
+pasteboard image is the one `osascript` call site left on the server).
 
 ## 1. What a server is
 
@@ -150,6 +152,25 @@ when the connection is first configured and refuses a changed one with the
 fingerprint shown. There is no blind accept and no "continue anyway" that
 remembers.
 
+The enforcement is ssh's own, which is the point of being ssh's client rather
+than its replacement (§3). Pairing runs `ssh-keyscan`, describes the key with
+`ssh-keygen -lf`, and stores the `known_hosts` line only after a person has
+compared the fingerprint; every connection then runs with
+`StrictHostKeyChecking=yes`, `GlobalKnownHostsFile=/dev/null`, and Ledge's own
+`known_hosts` followed by the user's. Ledge parses no key material and computes
+no hash of its own. The user's file is included because their entry for a host
+IS a pin, and demanding they re-pin what they already trust is how you teach
+someone to click through pinning; what Ledge pinned stays in a file of its own
+so it can be read and revoked separately, and it is a projection of the
+connection records, so removing a connection removes its pin in the same
+breath.
+
+`BatchMode=yes` belongs to the same list, for a different reason: this ssh has
+no terminal, its stdout IS the protocol, and a passphrase prompt would either
+hang the connection forever or write a question mark into a frame header. So
+would a pty — there is no `-t`, because newline translation on a
+length-prefixed protocol corrupts rather than breaks.
+
 **Enabling Remote Login exposes sshd to everything that can reach the
 machine.** For a VPS that is the public internet, on a box whose purpose is
 to execute code from notes. The documented posture is binding sshd to the
@@ -171,7 +192,7 @@ splits again, by machine:
 | The watcher | server | pushes `notesChanged` as today |
 | Behavior settings (shell, interpreters, trash TTL, daily workspace) | server | facts about that machine |
 | Appearance settings (theme, font sizes, `editor.livePreview`) | **client** | facts about that screen |
-| Window frame (`.window.json`) | **client** | amends `architecture.md` §6 |
+| Window frame (`window.json`) | **client** | amends `architecture.md` §6 |
 | Clipboard, rich paste, link opening | **client** | §10 |
 | Pane and tab layout (`.layout.json`) | server, keyed by client | see below |
 
@@ -183,10 +204,26 @@ server can know. `shared/settings.ts` keeps one shape with two homes; the
 migration reads the existing single file and splits it on first launch.
 
 **Layout is stored server-side and keyed by a client id.** The client mints
-an id once and keeps it. A phone must not inherit a three-pane desktop
-layout, and reconnecting from the same Mac must not lose one. Keying on the
-client satisfies both without a second storage location. `bun/layout.ts`
-keeps owning the bytes and `workspace/persist.ts` keeps owning the shape.
+an id once and keeps it (`bun/clientHome.ts`, in the client home beside the
+connections). A phone must not inherit a three-pane desktop layout, and
+reconnecting from the same Mac must not lose one. Keying on the client
+satisfies both without a second storage location. The ownership line moves by
+exactly one step: `bun/layout.ts` now owns the MAP (which client, and the
+atomic write) and `workspace/persist.ts` still owns each value's shape.
+
+**The id rides the handshake, not the call.** Identity is a property of the
+connection: a client cannot forget to send it, no handler needs a parameter it
+would only ever fill one way, and the view never learns it is one of several
+possible screens. That is what `Hello.client` is for, and it is why the
+protocol version is 2.
+
+**The client home is `.client` inside the app home**, not a second top-level
+directory: on every machine Ledge ships to, the client and its local server are
+the same user on the same disk, so one `~/.ledge` to back up beats two. It
+holds the id, the connection list, Ledge's own `known_hosts`, the client's
+`settings.jsonc`, and `window.json`. Deriving it from `APP_HOME` also means
+`LEDGE_NOTES_ROOT` moves the client's files too, which is what lets a scratch
+probe run without touching the real ones.
 
 **Pasted asset bytes now cross the wire, amending `architecture.md` §3.**
 `assetPaste` reads the pasteboard Bun-side today and returns only the
@@ -254,8 +291,18 @@ rebuilds it.
 
 **Connections are client-side configuration**: a display name, an ssh
 destination, a key reference, the pinned host key, and when it was last
-reached. Nothing about a connection is stored on a server, so a server has no
-opinion about who connects to it.
+reached (`bun/connections.ts`, stored in the client home). Nothing about a
+connection is stored on a server, so a server has no opinion about who connects
+to it. The local server is a connection too, and not a stored one: always
+present, uneditable, unremovable, which is what stops "no connection
+configured" from being a state anything has to render.
+
+**A connection that will not open never costs the one that works.** The new
+server is reached before the old one is torn down, and at boot a failure falls
+back to the local server with the reason kept, so the app opens onto this
+machine and says what happened. An app that refuses to open teaches nothing;
+one that opens on the wrong machine and says so can be fixed from inside
+itself.
 
 **Everything workspace-scoped becomes server-scoped**, one level up: the
 registry, search, tags, backlinks, wikilink resolution, daily notes, trash,
@@ -272,8 +319,14 @@ and `git` are for, and the plain-files ethos is what makes that true.
 The failure mode is running a command on the wrong box, so the connection
 indicator is persistent chrome, not a menu item, and it is distinct from the
 `host:` badge a drawer already wears. The switching verb lives in the command
-registry like everything else (`interactions.md` §1); its full grammar,
-hotkey, and confirm behavior are that document's to allocate when this lands.
+registry like everything else (`interactions.md` §1); its full grammar is
+`interactions.md` §4-1.
+
+**Switching is a reload.** The view's boot builds every server-scoped thing
+there is — the registry, the note lists, the tags, the layout — so a switch
+flushes pending saves and starts the page over against the new machine. The
+alternative, tearing the same state down in place, would mean a second and
+less-tested teardown path for every module holding a `configureX` singleton.
 
 **`ledge <title>` on a server reaches the connected client.** The open-request
 file (`bun/openRequest.ts`) stays exactly as it is for the local case. When a
@@ -316,10 +369,20 @@ timer already measures.
 - **Locked plaintext to an agent surface**, per §9.
 - **A path the client constructed.** Per §2.
 
-Three RPC entries move to the client entirely and leave the server with no
-`osascript` call sites at all: `clipboardWrite`, `clipboardRead`,
-`clipboardReadRich`, and `linkOpen`. Opening a URL happens on the device the
-user is holding, not on the VPS.
+**Five RPC entries are the client's outright** and never become frames
+(`bun/clientSeams.ts`, whose `CLIENT_METHODS` is the list both ends read):
+`clipboardWrite`, `clipboardRead`, `clipboardReadRich`, `linkOpen`, and
+`menuSet`. Opening a URL happens on the device the user is holding, not on the
+VPS, and a headless server handed the view's menu would swallow ⌘Q with it.
+The five connection entries (§8) join them for a different reason: a server
+has no business knowing which servers this client can reach.
+
+The server implements all ten as REFUSALS rather than omitting them, because
+the handler map is total by construction; reaching one means a client forgot
+its overlay, and `{text: ""}` back from a clipboard read would look exactly
+like an empty clipboard until somebody went looking. One `osascript` call site
+remains on the server, `assetPaste`'s pasteboard image, and it leaves with the
+binary frames in §14 phase 4.
 
 ## 11. Deployment and portability
 
@@ -412,12 +475,23 @@ Each phase leaves the app shippable.
    `ledge-server serve` entry point. `LEDGE_CONNECT` points the Mac app at one
    instead of building its own. What is still owed here is the Mac-to-Mac pass
    with a forced-command key, which needs a second machine (§13).
-3. **Connections**: the connection manager, server-scoped state, the settings
-   split, the client-side moves in §10, the switching grammar in
-   `interactions.md`.
+3. **Done.** Connections (`bun/connections.ts` for the records and the ssh
+   argv, `bun/connectionManager.ts` for which one is live), the settings split
+   (`shared/settings.ts` SETTINGS_HOMES, `bun/clientSettings.ts`), the
+   client home and the client id (`bun/clientHome.ts`), layout keyed by
+   client, the §10 moves (`bun/clientSeams.ts`), and the switching grammar in
+   `interactions.md` §4-1. Server-scoped state needed no scoping rule, as
+   predicted: switching reloads the view, and the view's boot is the rebuild.
+   What is still owed, with phase 2's Mac-to-Mac pass: nothing here has run
+   against a real sshd, so the argv in `sshCommand` is proved by assertion and
+   not by connecting. The `docs/user/` page waits on that too — the connection
+   chrome is in the app, and documenting "connect to your other Mac" before
+   anyone has is publishing a claim the suite does not back.
 4. **Resilience**: reconnect, `opId` dedupe, output coalescing, binary frames
-   for assets and terminal output, the unix socket for a server that outlives
-   the app, and the §12 round-trip audit against a real remote.
+   for assets and terminal output (which is what moves `assetPaste` to the
+   client and leaves the server with no `osascript` at all), the unix socket
+   for a server that outlives the app, and the §12 round-trip audit against a
+   real remote.
 5. **Linux**: the PTY port, the second dylib, the Docker image, the VPS
    posture in `docs/user/`.
 6. **The iOS client**, which is its own document and depends on nothing above

@@ -42,6 +42,7 @@ import {
   Scale,
   ScrollText,
   Search,
+  Server as ServerIcon,
   Settings as SettingsIcon,
   Shapes,
   SquareCheck,
@@ -627,6 +628,13 @@ export function buildCommands(deps: RegistryDeps): Command[] {
     cmd("settings.open", {
       icon: SettingsIcon,
       run: (ctx) => ctx.ui.openSettingsEditor?.(),
+    }),
+    // Which machine the notes are on. Everything workspace-scoped is scoped
+    // to a server one level up (remote.md §8), so this is the widest-scope
+    // switch in the app — and the only one that closes every tab.
+    cmd("connection.switch", {
+      icon: ServerIcon,
+      run: (ctx) => ctx.ui.openConnectionPicker?.(),
     }),
     // Put `ledge` on the PATH. The outcome always surfaces — an install whose
     // result you have to go hunting for in a bin dir did not finish its job:

@@ -1,4 +1,4 @@
-// Where the window was last left: `.window.json` in the app home, one frame.
+// Where the window was last left: `window.json` in the client home, one frame.
 // A fourth ownership shape alongside the three in architecture.md §6 —
 // machine-written AND Bun-shaped like the registry, but not a trust artifact:
 // the view never has an opinion about the window it lives in, so this file
@@ -8,15 +8,23 @@
 // SHAPE is the view's; Bun only moves its bytes. Folding a Bun-authored key
 // into it would put both ends in the same object with no owner.
 //
+// CLIENT-side, not server-side (remote.md §5): a window's position is a fact
+// about the screen it is on, and a Mac connected to a VPS must not restore
+// that VPS's idea of where windows go — which is also why the app home's older
+// `.window.json` is migrated across on first read rather than read in place.
+//
 // A saved frame is not trusted as coordinates. Displays come and go, and a
 // window restored onto a monitor that is no longer attached is a window the
 // user cannot reach — strictly worse than not persisting at all. `fitFrame`
 // is the gate, and it is pure so the geometry can be tested without a screen.
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { APP_HOME } from "./workspaces";
+import { CLIENT_HOME, ensureClientHomeSync } from "./clientHome";
 
-export const WINDOW_PATH = join(APP_HOME, ".window.json");
+export const WINDOW_PATH = join(CLIENT_HOME, "window.json");
+// Where it lived before the client home existed. Read once, moved, forgotten.
+export const LEGACY_WINDOW_PATH = join(APP_HOME, ".window.json");
 
 export type Rect = { x: number; y: number; width: number; height: number };
 
@@ -125,7 +133,17 @@ export function readFrame(): Rect | null {
   try {
     return parseFrame(readFileSync(WINDOW_PATH, "utf8"));
   } catch {
-    return null;
+    // Nothing there: an install that predates the client home may still have
+    // the old file. Move it rather than copy it, so there is only ever one
+    // file being this window's position, and never fail over it — a lost
+    // frame costs one launch its geometry.
+    try {
+      ensureClientHomeSync();
+      renameSync(LEGACY_WINDOW_PATH, WINDOW_PATH);
+      return parseFrame(readFileSync(WINDOW_PATH, "utf8"));
+    } catch {
+      return null;
+    }
   }
 }
 
@@ -139,7 +157,7 @@ export function writeFrame(frame: Rect): void {
   const text = JSON.stringify(roundFrame(frame));
   if (text === lastWritten) return;
   try {
-    mkdirSync(APP_HOME, { recursive: true });
+    ensureClientHomeSync();
     const tmp = `${WINDOW_PATH}.tmp-${process.pid}`;
     writeFileSync(tmp, text, "utf8");
     renameSync(tmp, WINDOW_PATH);

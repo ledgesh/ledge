@@ -42,6 +42,11 @@ export interface Duplex {
 export interface ServerConnection {
   push: ServerPush;
   serve(handlers: RequestHandlers): void;
+  /** The connected client's id, from its hello (remote.md §5), and "" until
+   * one has arrived. A getter rather than a promise because it is always
+   * correct at the only time anyone asks: no request is dispatched before the
+   * handshake, so any handler reading this already has the answer. */
+  client(): string;
   closed: Promise<void>;
   close(why?: string): void;
 }
@@ -64,6 +69,7 @@ export function serverConnection(duplex: Duplex, build: string): ServerConnectio
   const decoder = new FrameDecoder();
   let handlers: RequestHandlers | null = null;
   let greeted = false;
+  let peerClient = "";
   let open = true;
   // Requests that beat createServer to the door. A server sends its hello
   // immediately (it is a constant, and waiting would make a slow boot look
@@ -126,6 +132,7 @@ export function serverConnection(duplex: Duplex, build: string): ServerConnectio
         return close(refusal);
       }
       greeted = true;
+      peerClient = msg.client;
       return;
     }
     switch (msg.t) {
@@ -178,6 +185,7 @@ export function serverConnection(duplex: Duplex, build: string): ServerConnectio
       handlers = next;
       for (const { id, m, p } of waiting.splice(0)) void dispatch(id, m, p);
     },
+    client: () => peerClient,
     closed,
     close,
   };
@@ -185,7 +193,10 @@ export function serverConnection(duplex: Duplex, build: string): ServerConnectio
 
 // --- the client's end --------------------------------------------------------
 
-export function clientConnection(duplex: Duplex, opts: { push: ServerPush; build: string }): ClientConnection {
+export function clientConnection(
+  duplex: Duplex,
+  opts: { push: ServerPush; build: string; client?: string },
+): ClientConnection {
   const decoder = new FrameDecoder();
   const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
   let nextId = 1;
@@ -303,7 +314,7 @@ export function clientConnection(duplex: Duplex, opts: { push: ServerPush; build
     REQUEST_METHODS.map((m) => [m, (p: unknown) => call(m, p)]),
   ) as unknown as RequestHandlers;
 
-  send(hello("client", opts.build));
+  send(hello("client", opts.build, opts.client ?? ""));
 
   return {
     requests,

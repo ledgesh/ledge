@@ -1,10 +1,14 @@
-// The Bun end of settings: settings.jsonc lives in the app home (~/.ledge),
+// The SERVER end of settings: settings.jsonc lives in the app home (~/.ledge),
 // beside the workspace registry and the managed workspace folders, and this
-// module is the only thing that reads or writes it. Settings stay GLOBAL in
-// the per-workspace world: shell path, font sizes, and interpreters are facts
-// about the person, not the folder. Read once at launch (index.ts); changes
-// apply at the next launch, never live — restart-applies is the policy
-// (architecture.md, "Settings"), not a limitation to fix.
+// module is the only thing that reads or writes it. Its sections are the ones
+// that describe this machine — the shell to spawn, how long the trash keeps
+// things, what a code fence runs, where daily notes go. Font sizes and the
+// theme are the client's and live in bun/clientSettings.ts (remote.md §5).
+//
+// Settings stay GLOBAL in the per-workspace world: a shell path and an
+// interpreter map are facts about a machine, not about a folder. Read once at
+// launch; changes apply at the next launch, never live — restart-applies is
+// the policy (architecture.md, "Settings"), not a limitation to fix.
 //
 // The file is JSONC — comments are its documentation (SETTINGS_TEMPLATE) and
 // the ⌘, editor in Ledge is its UI (settingsRead/settingsWrite carry the raw
@@ -41,7 +45,7 @@ export async function loadSettings(): Promise<Settings> {
     console.warn(`[settings] ${SETTINGS_PATH} is not valid JSONC (${err}); running on defaults`);
     return DEFAULT_SETTINGS;
   }
-  const { settings, problems } = parseSettings(json);
+  const { settings, problems } = parseSettings(json, "server");
   for (const p of problems) console.warn(`[settings] ${p}; using the default`);
   return settings;
 }
@@ -126,7 +130,7 @@ export async function inspectSettings(): Promise<{ path: string; text: string; p
     // is skipped for the run and the bytes stay the user's.
     return { path: SETTINGS_PATH, text, problems: [`not valid JSONC (${err}); Ledge would run entirely on defaults`] };
   }
-  return { path: SETTINGS_PATH, text, problems: parseSettings(json).problems };
+  return { path: SETTINGS_PATH, text, problems: parseSettings(json, "server").problems };
 }
 
 // The save half (settingsWrite): the dialog sends the full new text, written

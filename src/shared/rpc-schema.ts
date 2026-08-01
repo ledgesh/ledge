@@ -2,7 +2,7 @@
 // This replaces the hand-rolled window.webkit.messageHandlers bridge from the
 // Swift build: the webview requests a block run, Bun streams run events back.
 
-import type { Settings } from "./settings";
+import type { Settings, SettingsHome } from "./settings";
 import type { NoteParams } from "./frontmatter";
 import type { SearchHit } from "./search";
 import type { TagInfo } from "./tags";
@@ -124,6 +124,23 @@ export interface WorkspaceRootInfo {
   root: string;
   kind: "managed" | "external" | "docs";
   available: boolean;
+}
+
+/**
+ * One configured server (remote.md §8), as the view sees it. The stored record
+ * carries more (bun/connections.ts): the pinned known_hosts line is a hundred
+ * characters of base64 that only ssh reads, so what travels is whether there
+ * IS one. `destination` is "" for the server in this process, which is the one
+ * connection that always exists and cannot be removed.
+ */
+export interface ConnectionInfo {
+  id: string;
+  name: string;
+  destination: string;
+  keyPath: string;
+  pinned: boolean;
+  /** ms epoch, 0 for never reached. */
+  lastReached: number;
 }
 
 /**
@@ -467,21 +484,29 @@ export type LedgeRPC = {
       // which this replaces wholesale on the view's first push.
       menuSet: { params: { items: AppMenuItem[] }; response: { ok: boolean } };
       // The validated settings snapshot (shared/settings.ts), fetched once at
-      // boot. Bun owns the file, the parsing, and the fallbacks; the view only
-      // ever sees a complete, valid Settings. Applies at launch — there is no
+      // boot. Bun owns the files, the parsing, and the fallbacks; the view only
+      // ever sees a complete, valid Settings and never learns there were two of
+      // them — the client shell merges its own half in on the way past
+      // (bun/clientSeams.ts, remote.md §5). Applies at launch — there is no
       // settingsChanged message, deliberately (architecture.md, "Settings").
       settingsGet: { params: {}; response: { settings: Settings } };
       // The settings editor's load/save (the ⌘, dialog), mirroring
       // profileRead/profileWrite: the view cannot name the file — Bun knows
-      // where settings.jsonc lives — and it carries raw JSONC text, comments
-      // and all. Read seeds the commented template on a fresh install, so the
-      // first ⌘, opens documented knobs; write is atomic like a note save and
-      // deliberately not gated on parsing (a mid-edit save must not be
-      // refused — launch-time validation already degrades per field, and the
-      // dialog shows problems live). Saved changes still apply at the NEXT
-      // launch, like every setting.
-      settingsRead: { params: {}; response: { text: string } };
-      settingsWrite: { params: { text: string }; response: { ok: boolean } };
+      // where each settings.jsonc lives — and it carries raw JSONC text,
+      // comments and all. Read seeds the commented template on a fresh
+      // install, so the first ⌘, opens documented knobs; write is atomic like
+      // a note save and deliberately not gated on parsing (a mid-edit save
+      // must not be refused — launch-time validation already degrades per
+      // field, and the dialog shows problems live). Saved changes still apply
+      // at the NEXT launch, like every setting.
+      //
+      // `home` picks which of the two files (SETTINGS_HOMES): "server" is the
+      // machine holding the notes, "client" is this app on this screen, and
+      // the client shell answers the second one itself rather than forwarding
+      // it. The dialog shows one tab per home; a client is a thing with a
+      // screen, so both always exist.
+      settingsRead: { params: { home: SettingsHome }; response: { text: string } };
+      settingsWrite: { params: { home: SettingsHome; text: string }; response: { ok: boolean } };
       // Write the `ledge` CLI shim onto the PATH (the Install Shell Command
       // palette entry). Bun composes the whole outcome message: it alone
       // knows the shim's landing dir, the PATH answer, and the failure — the
@@ -535,6 +560,50 @@ export type LedgeRPC = {
       // from the note itself — never from a view flag — whether the paste
       // must be sealed at birth (the note is locked, locking.md §5).
       assetPaste: { params: { root: string; notePath?: string | null }; response: { src: string | null } };
+      // Which server this client talks to (remote.md §8). All five are
+      // answered by the client shell and never forwarded: a connection is
+      // client-side configuration, and a server has no opinion about who
+      // connects to it.
+      //
+      // `active` is the connection being served right now and `wanted` is the
+      // one the user last chose. They differ only when a connection could not
+      // be opened at boot, in which case `error` says why and the local server
+      // is serving instead — an app that opens on the wrong machine and says
+      // so beats an app that does not open.
+      connectionList: {
+        params: {};
+        response: {
+          connections: ConnectionInfo[];
+          active: string;
+          wanted: string;
+          error: string;
+          build: string;
+        };
+      };
+      // Switch. Tears the session down and rebuilds it, so the caller reloads
+      // itself on ok (remote.md §8) — everything workspace-scoped is scoped to
+      // a server, and the view's boot is the rebuild. A connection that will
+      // not open leaves the current one untouched and answers with the reason:
+      // losing a working session to a typo would be the worse failure.
+      connectionSelect: { params: { id: string }; response: { ok: boolean; error: string } };
+      // Add one. `hostKey` is the known_hosts line the user was shown the
+      // fingerprint of and accepted (connectionProbe below) — the client pins
+      // only what a person confirmed, never what a host happened to answer.
+      connectionAdd: {
+        params: { name: string; destination: string; keyPath: string; hostKey: string };
+        response: { id: string; error: string };
+      };
+      // Remove one, and its pin with it. The local server and the connection
+      // currently being served both refuse.
+      connectionRemove: { params: { id: string }; response: { ok: boolean; error: string } };
+      // Pairing: ask a host for its key and describe it, so the fingerprint
+      // can be compared against what the server said before anything is
+      // pinned. Failure is data — an unreachable host is the most ordinary
+      // outcome of typing an address.
+      connectionProbe: {
+        params: { destination: string };
+        response: { hostKey: string; fingerprint: string; keyType: string; error: string };
+      };
       // The persisted session layout (.layout.json in the app home): which
       // workspaces exist, which folder each owns, their pane trees, and which
       // notes are open where. One global file — the workspace list itself is
@@ -542,7 +611,8 @@ export type LedgeRPC = {
       // §6): Bun owns the file's bytes and atomicity, the VIEW owns the shape —
       // it serializes on layout changes and parses/self-heals at boot
       // (workspace/persist.ts), so the payload rides as raw text. null when no
-      // layout has ever been saved.
+      // layout has ever been saved. Which CLIENT's layout comes from the
+      // connection's handshake, never from the call (remote.md §5).
       layoutGet: { params: {}; response: { text: string | null } };
       // Persist the serialized layout. Bun writes it to the fixed dotted file —
       // the view names nothing — atomically like a note save, and refuses text

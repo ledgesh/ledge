@@ -27,7 +27,15 @@ import { configureClipboard } from "./lib/clipboard";
 import { configureCli } from "./lib/cli";
 import { configureAssets } from "./lib/assets";
 import { configureSettings } from "./lib/settings";
-import { DEFAULT_SETTINGS, SETTINGS_TEMPLATE, THEMES, type Theme } from "../shared/settings";
+import { configureConnections } from "./lib/connections";
+import {
+  clientSettingsTemplate,
+  DEFAULT_SETTINGS,
+  SETTINGS_TEMPLATE,
+  THEMES,
+  type SettingsHome,
+  type Theme,
+} from "../shared/settings";
 import { applyAppearance } from "./lib/theme";
 import { configureLayout, restoredState } from "./workspace/persist";
 import "./index.css";
@@ -756,14 +764,20 @@ const HARNESS_SETTINGS = {
 // The settings file as an in-memory string, seeded like a real first launch
 // (the commented template), so the ⌘, dialog is drivable end to end and a
 // spec can assert what a save wrote.
-let settingsText = SETTINGS_TEMPLATE;
+// Two of them, because settings have two homes (remote.md §5) and the dialog
+// has a tab per home: a spec that edited one and asserted on the other would
+// pass on a bridge that ignored the argument entirely.
+const settingsFiles: Record<SettingsHome, string> = {
+  server: SETTINGS_TEMPLATE,
+  client: clientSettingsTemplate(HARNESS_SETTINGS),
+};
 const profiles = new Map<string, string>();
 configureSettings(
   HARNESS_SETTINGS,
   {
-    readSettingsFile: async () => settingsText,
-    writeSettingsFile: async (text) => {
-      settingsText = text;
+    readSettingsFile: async (home) => settingsFiles[home],
+    writeSettingsFile: async (home, text) => {
+      settingsFiles[home] = text;
     },
     // An in-memory profile store, seeded on first read like the real one, so
     // specs can drive the profile editor dialog end to end.
@@ -780,6 +794,46 @@ configureSettings(
     },
   },
 );
+// The connection list, in memory. Two entries so the picker has something to
+// switch BETWEEN, and one of them refuses to open: falling back to this Mac
+// with the reason showing is a state the chrome has to render, and a fake with
+// only a happy path would never reach it.
+let connections = [
+  { id: "local", name: "This Mac", destination: "", keyPath: "", pinned: false, lastReached: 0 },
+  { id: "vps-1", name: "VPS", destination: "ledge@vps", keyPath: "", pinned: true, lastReached: 1_700_000_000_000 },
+];
+let activeConn = "local";
+// Destinations the fake server refuses, so a spec can drive the refusal path.
+const unreachable = new Set(["ledge@vps"]);
+configureConnections(
+  { connections, active: activeConn, wanted: activeConn, error: "", build: "0.1.0-harness" },
+  {
+    list: async () => ({ connections, active: activeConn, wanted: activeConn, error: "", build: "0.1.0-harness" }),
+    select: async (id) => {
+      const conn = connections.find((c) => c.id === id);
+      if (!conn) return { ok: false, error: "There is no such connection." };
+      if (unreachable.has(conn.destination)) return { ok: false, error: `Could not reach ${conn.name}: host is down` };
+      activeConn = id;
+      return { ok: true, error: "" };
+    },
+    add: async ({ name, destination, hostKey }) => {
+      const id = `conn-${connections.length}`;
+      connections = [...connections, { id, name, destination, keyPath: "", pinned: hostKey !== "", lastReached: 0 }];
+      return { id, error: "" };
+    },
+    remove: async (id) => {
+      if (id === "local") return { ok: false, error: "This Mac is always here; it cannot be removed." };
+      if (id === activeConn) return { ok: false, error: "Switch somewhere else before removing this connection." };
+      connections = connections.filter((c) => c.id !== id);
+      return { ok: true, error: "" };
+    },
+    probe: async (destination) =>
+      destination.includes("nowhere")
+        ? { hostKey: "", fingerprint: "", keyType: "", error: `No answer from ${destination}.` }
+        : { hostKey: `${destination} ssh-ed25519 AAAA`, fingerprint: "SHA256:harness+fake+key", keyType: "ED25519", error: "" },
+  },
+);
+
 // Stamps the resolved appearance on <html>, like main.tsx does after boot.
 applyAppearance();
 
@@ -796,7 +850,8 @@ declare global {
       // Put both pasteboard flavors up, the way another app's copy does: the
       // rich-paste path has no in-app writer to drive it from.
       setClipboard: (text: string, html: string) => void;
-      settingsText: () => string;
+      // Keyed by home: the dialog has a tab per settings file.
+      settingsText: (home: SettingsHome) => string;
       linkOpens: () => string[];
       layout: () => string | null;
       termAttaches: () => { sessionId: string; host: string | null }[];
@@ -827,7 +882,7 @@ window.__harness = {
     clip = text;
     clipHtml = html;
   },
-  settingsText: () => settingsText,
+  settingsText: (home) => settingsFiles[home],
   linkOpens: () => [...linkOpens],
   layout: () => layoutText,
   termAttaches: () => termAttaches.map((a) => ({ ...a })),

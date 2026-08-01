@@ -7,6 +7,7 @@ import { ResizeHandle } from "@/components/ResizeHandle";
 import { ContextMenu } from "@/components/ContextMenu";
 import { RenameField } from "@/components/RenameField";
 import { NoteBrowser } from "@/notes/NoteBrowser";
+import { ConnectionBar } from "./ConnectionBar";
 import { useCommands } from "@/commands/CommandProvider";
 import { CommandMenuItem } from "@/commands/CommandMenuItem";
 import { configureUi, uiHooks } from "@/commands/glue";
@@ -42,6 +43,10 @@ export function Sidebar() {
 
   return (
     <aside ref={ref} className="flex h-full w-full min-w-0 flex-col bg-muted/20">
+      {/* Above the strip because it scopes it: the workspaces below, their
+          notes, and their shells all belong to the machine named here
+          (remote.md §8). */}
+      <ConnectionBar />
       <div style={{ height: stripHeight }} className="flex min-h-0 shrink-0 flex-col">
         <WorkspaceStrip />
       </div>

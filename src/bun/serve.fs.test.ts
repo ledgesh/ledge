@@ -88,6 +88,19 @@ test("a headless server refuses to attach a folder, with a reason", async () => 
   expect(res.error).toContain("headless server");
 });
 
+// The other half of remote.md §10, and the reason the refusals are throws: a
+// server that answered `{text: ""}` here would look exactly like an empty
+// clipboard, and the bug would live in whatever the user pasted next. The real
+// client never gets this far — bun/index.ts overlays clientSeams over every
+// connection — so this is the assertion that the overlay is load-bearing.
+test("the clipboard and the browser are not the server's to answer", async () => {
+  await expect(client.requests.clipboardRead({})).rejects.toThrow("remote.md §10");
+  await expect(client.requests.clipboardReadRich({})).rejects.toThrow("remote.md §10");
+  await expect(client.requests.clipboardWrite({ text: "x" })).rejects.toThrow("remote.md §10");
+  await expect(client.requests.linkOpen({ url: "https://example.com" })).rejects.toThrow("remote.md §10");
+  await expect(client.requests.menuSet({ items: [] })).rejects.toThrow("remote.md §10");
+});
+
 // A separate process on purpose, and its own home: this one's stdout is
 // captured raw rather than decoded by a connection, so a stray log line has
 // somewhere to show up. One byte of one would desynchronize every session

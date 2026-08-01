@@ -27,7 +27,7 @@ export async function serve(): Promise<void> {
   // it has finished booting. Requests that arrive during the boot wait in the
   // connection rather than being answered by a half-built server.
   const conn = serverConnection(stdioDuplex(), BUILD_VERSION);
-  const server = await createServer({ push: conn.push, native: HEADLESS });
+  const server = await createServer({ push: conn.push, native: HEADLESS, client: () => conn.client() });
   conn.serve(server.requests);
   console.error(`[serve] ledge-server ${BUILD_VERSION} on stdio; app home: ${APP_HOME}`);
   // The client hanging up is the shutdown signal, as it is for the MCP server.

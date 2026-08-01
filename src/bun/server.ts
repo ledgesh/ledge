@@ -19,8 +19,8 @@ import { basename, resolve } from "node:path";
 import { PtyProcess } from "./pty";
 import { InlinePool, type InlineEvent } from "./inlinePool";
 import { takePaste } from "./paste";
-import { readClipboardHtml, readClipboardText, writeClipboard } from "./clipboard";
 import { readProfile, writeProfile } from "./profiles";
+import type { ClientMethod } from "./clientSeams";
 import {
   backlinksTo,
   changeVaultPassphrase,
@@ -69,7 +69,6 @@ import { syncWatchers } from "./watch";
 import { pasteImageAsset, readAsset } from "./assets";
 import { interpretersFor, runnerFor } from "./runner";
 import { loadSettings, readSettingsFile, writeSettingsFile } from "./settings";
-import { openableUrl } from "../shared/links";
 import { resolveShellArgs, resolveSpawn, stampSessionFacts, type SessionFacts, type SpawnDeps } from "./spawnParams";
 import { buildRemoteSpawn } from "./remoteSpawn";
 import { readFileSync, statSync } from "node:fs";
@@ -94,25 +93,19 @@ export type RequestHandlers = {
   ) => LedgeRPC["bun"]["requests"][K]["response"] | Promise<LedgeRPC["bun"]["requests"][K]["response"]>;
 };
 
-// The seams that are genuinely the client's machine, not the server's, which
-// is why they arrive as dependencies instead of imports: a headless server has
-// no folder dialog, no pasteboard, and no menu bar. remote.md §5 and §10 move
-// all three to the client outright; injecting them now is what lets this
-// module compile and run with no window attached.
+// The one native seam the server still has. The pasteboard and the menu bar
+// left with remote.md §10 (bun/clientSeams.ts); the folder dialog could not
+// follow them, because the folder it picks has to exist on the machine that
+// will hold the notes — a picker on the client would return a path from the
+// wrong filesystem.
 //
-// Every one is OPTIONAL, and absent is a different thing from failed: a server
-// with no dialog says so (see NO_DIALOG below), rather than returning the
-// answer a cancelled dialog gives and leaving a button that quietly does
-// nothing.
+// OPTIONAL, and absent is a different thing from failed: a server with no
+// dialog says so (see NO_DIALOG below), rather than returning the answer a
+// cancelled dialog gives and leaving a button that quietly does nothing.
 export interface NativeDeps {
   // The native folder picker, behind workspaceAttach/workspaceMove. Returns
   // null when the user cancelled.
   pickFolder?(startingFolder: string): Promise<string | null>;
-  // The pasteboard's available flavors, or null where they cannot be read.
-  // Null means "ask the pasteboard anyway" (clipboardReadRich fails open).
-  clipboardFormats?(): string[] | null;
-  // Hand the view's menu description to the platform. A no-op off macOS.
-  setMenu?(items: unknown[]): void;
 }
 
 // What workspaceAttach and workspaceMove answer with when there is no dialog
@@ -120,6 +113,28 @@ export interface NativeDeps {
 // string precisely so a refusal can reach the user as a sentence.
 const NO_DIALOG =
   "A headless server cannot open a folder dialog. Attaching a folder needs the app running on the machine that holds the notes.";
+
+// The other half of bun/clientSeams.ts: the same names, refusing. Typed as the
+// full Pick, so adding a name there without adding it here does not compile —
+// the two lists cannot drift into a hole where a call reaches a server that
+// has no implementation and no refusal either.
+function clientSeamRefusals(): Pick<RequestHandlers, ClientMethod> {
+  const refuse = (name: ClientMethod) => (): never => {
+    throw new Error(`${name} is the client's, not the server's (remote.md §10)`);
+  };
+  return {
+    clipboardRead: refuse("clipboardRead"),
+    clipboardWrite: refuse("clipboardWrite"),
+    clipboardReadRich: refuse("clipboardReadRich"),
+    linkOpen: refuse("linkOpen"),
+    menuSet: refuse("menuSet"),
+    connectionList: refuse("connectionList"),
+    connectionSelect: refuse("connectionSelect"),
+    connectionAdd: refuse("connectionAdd"),
+    connectionRemove: refuse("connectionRemove"),
+    connectionProbe: refuse("connectionProbe"),
+  };
+}
 
 export interface LedgeServer {
   requests: RequestHandlers;
@@ -207,7 +222,15 @@ const fromB64 = (b64: string) => new Uint8Array(Buffer.from(b64, "base64"));
  * before the first noteList can arrive, and the vault's salt lands so
  * vaultState answers "locked" vs "none" from the first call.
  */
-export async function createServer(deps: { push: ServerPush; native: NativeDeps }): Promise<LedgeServer> {
+export async function createServer(deps: {
+  push: ServerPush;
+  native: NativeDeps;
+  // Who is on the other end (remote.md §5). A function rather than a value
+  // because a server outlives a connection: the transport learns the id from
+  // the handshake, and this is read at the moment a layout call arrives, by
+  // which time there is always an answer.
+  client(): string;
+}): Promise<LedgeServer> {
   const { push, native } = deps;
 
   // Read once, applied for the life of the process: the shell below, the trash
@@ -754,40 +777,6 @@ export async function createServer(deps: { push: ServerPush; native: NativeDeps 
       await writeProfile(name, text);
       return { ok: true };
     },
-    // System clipboard (bun/clipboard.ts). The webview cannot reach the
-    // clipboard itself (non-secure views:// context), so the terminal and the
-    // inline output panel proxy copy/paste through here.
-    clipboardWrite: async ({ text }) => {
-      await writeClipboard(text);
-      return { ok: true };
-    },
-    clipboardRead: async () => ({ text: await readClipboardText() }),
-    // Text and the HTML flavor together, for the editor's ⌘V. The two reads
-    // run concurrently because the HTML one is an osascript spawn: ~100ms
-    // serialized onto every paste is a keystroke that feels stuck.
-    //
-    // AppKit is asked first whether there is any HTML to read, which skips
-    // that spawn for every copy made inside Ledge (pbcopy writes text alone)
-    // and for a terminal selection. Fail open: an empty or unavailable format
-    // list asks the pasteboard anyway, so a wrong answer here costs latency,
-    // never the feature.
-    clipboardReadRich: async () => {
-      const formats = native.clipboardFormats?.() ?? null;
-      const rich = formats === null || formats.length === 0 || formats.includes("html");
-      const [text, html] = await Promise.all([
-        readClipboardText(),
-        rich ? readClipboardHtml() : Promise.resolve(""),
-      ]);
-      return { text, html };
-    },
-    // The native menu bar, shaped entirely by the view (commands/menu.ts).
-    // The server hands it to the platform and nothing more: the `action`
-    // strings are command ids it never interprets, which is what keeps the
-    // registry the one place a command is defined.
-    menuSet: async ({ items }) => {
-      native.setMenu?.(items);
-      return { ok: true };
-    },
     // Both guarded inside bun/assets.ts: the root must be registered, the
     // src passes assertions (in-root, image extension, no dot-entries)
     // before it is read, and assetPaste names the file itself — the view
@@ -809,16 +798,32 @@ export async function createServer(deps: { push: ServerPush; native: NativeDeps 
           : false;
       return { src: await pasteImageAsset(root, seal) };
     },
+    // This machine's half of the snapshot. A connected client merges its own
+    // half over the top before the view sees it (remote.md §5); a server has
+    // no screen and so has nothing to say about font sizes, which is why the
+    // sections it does not own are simply the defaults here.
     settingsGet: () => ({ settings }),
     // Session layout: raw bytes both ways; the view owns the shape and the
-    // self-healing, the server owns the file and the atomicity (bun/layout.ts).
-    layoutGet: async () => ({ text: await readLayout() }),
-    layoutSave: async ({ text }) => ({ ok: await writeLayout(text) }),
+    // self-healing, the server owns the file, the atomicity, and which client's
+    // arrangement this is (bun/layout.ts). The id comes from the connection,
+    // never from the call: the view has no idea it is one of several possible
+    // screens, and should not have to.
+    layoutGet: async () => ({ text: await readLayout(deps.client()) }),
+    layoutSave: async ({ text }) => ({ ok: await writeLayout(deps.client(), text) }),
     // Raw settings.jsonc text for the ⌘, editor dialog; the write is atomic
     // and ungated (rpc-schema.ts says why). Restart-applies still holds:
     // the running `settings` snapshot above is not touched by a save.
-    settingsRead: async () => ({ text: await readSettingsFile() }),
-    settingsWrite: async ({ text }) => {
+    //
+    // Only this machine's file. `home: "client"` is answered by the client
+    // shell and never arrives here; a server that reached its own client home
+    // would be editing the wrong screen's font size — and on a headless one,
+    // a file no user has ever seen.
+    settingsRead: async ({ home }) => {
+      if (home !== "server") throw new Error(`the ${home} settings file is not this server's (remote.md §5)`);
+      return { text: await readSettingsFile() };
+    },
+    settingsWrite: async ({ home, text }) => {
+      if (home !== "server") throw new Error(`the ${home} settings file is not this server's (remote.md §5)`);
       await writeSettingsFile(text);
       return { ok: true };
     },
@@ -865,22 +870,19 @@ export async function createServer(deps: { push: ServerPush; native: NativeDeps 
       return { ok: true };
     },
     logReveal: async () => ({ ok: revealLog() }),
-    // openableUrl is the guard here, not a convenience: `open` treats a
-    // non-URL argument as a file path (and launches .app bundles), so only
-    // the allowlisted schemes may pass. Re-checked on this side because the
-    // view's check is styling and this one is the boundary — the same move
-    // as assertProfileName above (architecture.md §2).
-    linkOpen: async ({ url }) => {
-      const target = openableUrl(url);
-      if (!target) return { ok: false };
-      try {
-        Bun.spawn(["open", target]);
-      } catch (err) {
-        console.warn("[links] could not open", target, err);
-        return { ok: false };
-      }
-      return { ok: true };
-    },
+    // The pasteboard, the browser, the menu bar, and the list of servers this
+    // app knows about all belong to whoever is looking at the screen, so the
+    // client shell serves them itself and they never reach a server
+    // (bun/clientSeams.ts, remote.md §8 and §10). These
+    // entries exist because the handler map is total, and they throw rather
+    // than answer: reaching one means a client forgot its overlay, and an
+    // empty string back from a clipboard read would look like an empty
+    // clipboard for as long as it took anyone to find it.
+    //
+    // Last in the object deliberately. A spread wins over the keys above it,
+    // so a handler re-added up there surfaces as a refusal someone has to come
+    // and delete, rather than as a server that quietly answers.
+    ...clientSeamRefusals(),
   };
 
   refreshWatchers();

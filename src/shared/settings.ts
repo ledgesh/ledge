@@ -1,11 +1,24 @@
-// User preferences: the shape of settings.jsonc, its defaults, and the
-// validator. Lives in shared/ because both ends need it — Bun parses the file
-// and applies the Bun-side settings (shell, trash TTL); the view receives the
+// User preferences: the shape of settings, the defaults, and the validator.
+// Lives in shared/ because both ends need it — Bun parses the files and
+// applies the Bun-side settings (shell, trash TTL); the view receives the
 // validated snapshot over RPC and applies the rest (fonts, runnable fences).
 //
 // The policy for what belongs in here is architecture.md ("Settings");
 // the short version: a setting exists only where the hardcoded default
 // demonstrably fails someone, and it applies at launch, never live.
+//
+// ONE SHAPE, TWO HOMES (remote.md §5). `Settings` is a single interface, but
+// each of its sections is a fact about one of two things: the machine holding
+// the notes (which shell to spawn, how long the trash keeps things, what a
+// ```python fence runs) or the screen in front of you (font sizes, the theme,
+// whether markdown syntax is concealed). The first kind lives in the SERVER's
+// settings.jsonc, the second in the CLIENT's, and SETTINGS_HOMES below is the
+// only place that mapping is written down. A phone's font size is not a VPS's
+// font size, and no server can know whether this Mac is in dark mode.
+//
+// The split is by section, not by field, which is not a simplification: it is
+// the reason `parseSettings` can say "this whole section is read from the
+// other file" in one sentence a user can act on.
 
 // The appearance knob's values: follow the OS, or pin one side.
 export const THEMES = ["system", "light", "dark"] as const;
@@ -131,6 +144,43 @@ export interface Settings {
   // would go stale against renames; the marker needs none of that.
 }
 
+// Which file each section is read from. The `satisfies` is the point: a
+// section added to `Settings` without an entry here does not compile, so
+// nobody can add a knob without deciding whose fact it is.
+export type SettingsHome = "server" | "client";
+
+export const SETTINGS_HOMES = {
+  shell: "server",
+  editor: "client",
+  terminal: "client",
+  appearance: "client",
+  trash: "server",
+  blocks: "server",
+  daily: "server",
+} as const satisfies Record<keyof Settings, SettingsHome>;
+
+export function homeOf(section: keyof Settings): SettingsHome {
+  return SETTINGS_HOMES[section];
+}
+
+/**
+ * The snapshot the view runs on: each section taken from the file that owns
+ * it. Both arguments are full `Settings` because each file parses into one
+ * (the sections it does not own hold defaults), which keeps every consumer
+ * reading one whole object and unaware there were ever two files.
+ */
+export function mergeSettings(server: Settings, client: Settings): Settings {
+  return {
+    shell: server.shell,
+    editor: client.editor,
+    terminal: client.terminal,
+    appearance: client.appearance,
+    trash: server.trash,
+    blocks: server.blocks,
+    daily: server.daily,
+  };
+}
+
 export const DEFAULT_SETTINGS: Settings = Object.freeze({
   shell: { path: "/bin/zsh", args: ["-i"] },
   editor: { fontSize: 14, livePreview: true },
@@ -171,35 +221,21 @@ export const DEFAULT_SETTINGS: Settings = Object.freeze({
 // change without this file changing with it — but remember the seed only
 // reaches NEW installs (an existing file is never rewritten): announce default
 // changes, don't just edit them here.
-export const SETTINGS_TEMPLATE = `// Ledge settings. The file is the settings UI: edit it here (⌘,), relaunch
-// to apply; no setting applies live. This is JSONC: comments (and trailing
-// commas) are fine. A bad value falls back to its default with a warning in
-// the launch log; it never takes the rest of the file down.
+export const SETTINGS_TEMPLATE = `// Ledge settings, for the machine holding the notes. The file is the settings
+// UI: edit it here (⌘,), relaunch to apply; no setting applies live. This is
+// JSONC: comments (and trailing commas) are fine. A bad value falls back to
+// its default with a warning in the launch log; it never takes the rest of
+// the file down.
+//
+// Font sizes, the theme, and live preview are NOT here. Those describe the
+// screen you are reading this on rather than the machine the notes are
+// stored on, so they live in this app's own settings file — the other tab
+// in the ⌘, dialog.
 {
   // The login shell every terminal drawer and inline run spawns.
   "shell": {
     "path": "/bin/zsh",
     "args": ["-i"]
-  },
-
-  "editor": {
-    "fontSize": 14,
-    // Conceal markdown syntax away from the caret (bold shows bold, not
-    // **bold**). Set false to always see exactly the text on disk: the
-    // escape hatch for precise syntax editing.
-    "livePreview": true
-  },
-
-  "terminal": {
-    "fontSize": 12
-  },
-
-  "appearance": {
-    // "system" follows your Mac's light/dark appearance, and keeps following
-    // it while Ledge runs. Set "light" or "dark" to pin one side regardless:
-    // for a Mac on the automatic day/night schedule, a room where one side is
-    // unreadable, or screenshots that have to match.
-    "theme": "system"
   },
 
   // How many days a deleted note stays recoverable in the trash before the
@@ -284,16 +320,66 @@ export const SETTINGS_TEMPLATE = `// Ledge settings. The file is the settings UI
 }
 `;
 
-// Validate a parsed settings.jsonc into a full Settings, field by field: a bad
-// value costs THAT field (it falls back to its default and is reported in
+// The client's half of the file, and the only template that is generated
+// rather than a constant. It has two jobs the server's has one of: seeding a
+// fresh install with the defaults, AND carrying an existing install's values
+// across when the split happens (bun/clientSettings.ts). Substituting the
+// values keeps one set of comments doing both, where a constant template plus
+// a patcher would mean either losing the comments or editing JSONC text.
+//
+// A drift test round-trips this through parseSettings, so a knob added to a
+// client section without a line here fails.
+export function clientSettingsTemplate(s: Settings): string {
+  return `// Ledge settings for this app, on this screen. Edit here (⌘,), relaunch to
+// apply; no setting applies live. This is JSONC: comments (and trailing
+// commas) are fine. A bad value falls back to its default with a warning in
+// the launch log; it never takes the rest of the file down.
+//
+// Everything here is a fact about the display in front of you, which is why
+// it stays with the app rather than with the notes: connect to another
+// machine's notes and these come with you. The shell, the trash lifetime, and
+// what a code fence runs are that machine's business and live in its own
+// settings file — the other tab in this dialog.
+{
+  "editor": {
+    "fontSize": ${s.editor.fontSize},
+    // Conceal markdown syntax away from the caret (bold shows bold, not
+    // **bold**). Set false to always see exactly the text on disk: the
+    // escape hatch for precise syntax editing.
+    "livePreview": ${s.editor.livePreview}
+  },
+
+  "terminal": {
+    "fontSize": ${s.terminal.fontSize}
+  },
+
+  "appearance": {
+    // "system" follows your Mac's light/dark appearance, and keeps following
+    // it while Ledge runs. Set "light" or "dark" to pin one side regardless:
+    // for a Mac on the automatic day/night schedule, a room where one side is
+    // unreadable, or screenshots that have to match.
+    "theme": ${JSON.stringify(s.appearance.theme)}
+  }
+}
+`;
+}
+
+// Validate one parsed settings file into a full Settings, field by field: a
+// bad value costs THAT field (it falls back to its default and is reported in
 // `problems`), never the rest of the file and never a crash. A hand-edited
 // JSON file is the UI here, so a typo has to degrade as gently as a blank
 // field in a form would.
-export function parseSettings(raw: unknown): { settings: Settings; problems: string[] } {
+//
+// `home` says WHICH file this is (see SETTINGS_HOMES). Sections belonging to
+// the other one are not read — they take their defaults and are reported, so
+// a value left behind by the split reads as "this is ignored, and here is
+// where it went" rather than as a setting that silently does nothing. The
+// result is still a full Settings; mergeSettings puts the two halves together.
+export function parseSettings(raw: unknown, home: SettingsHome): { settings: Settings; problems: string[] } {
   const problems: string[] = [];
   const d = DEFAULT_SETTINGS;
   const root = isRecord(raw) ? raw : {};
-  if (!isRecord(raw)) problems.push("settings.jsonc is not a JSON object");
+  if (!isRecord(raw)) problems.push("the settings file is not a JSON object");
 
   // A misspelled section would otherwise be silently ignored, which reads as
   // "my setting does nothing" — say so instead. "templates" gets its own
@@ -303,15 +389,20 @@ export function parseSettings(raw: unknown): { settings: Settings; problems: str
     if (key === "templates") {
       problems.push(`"templates" is retired — mark a note with \`template: true\` frontmatter instead`);
     } else if (!(key in d)) problems.push(`unknown section "${key}"`);
+    else if (SETTINGS_HOMES[key as keyof Settings] !== home) problems.push(elsewhere(key as keyof Settings));
   }
 
-  const shell = section(root, "shell", problems);
-  const editor = section(root, "editor", problems);
-  const terminal = section(root, "terminal", problems);
-  const appearance = section(root, "appearance", problems);
-  const trash = section(root, "trash", problems);
-  const blocks = section(root, "blocks", problems);
-  const daily = section(root, "daily", problems);
+  // Only this file's own sections are read; the rest resolve to `{}` and every
+  // field below falls back to its default, which is exactly what the merge
+  // discards in favor of the other file's answer.
+  const mine = (key: keyof Settings) => (SETTINGS_HOMES[key] === home ? section(root, key, problems) : {});
+  const shell = mine("shell");
+  const editor = mine("editor");
+  const terminal = mine("terminal");
+  const appearance = mine("appearance");
+  const trash = mine("trash");
+  const blocks = mine("blocks");
+  const daily = mine("daily");
   // Like the retired "templates" section: the field existed briefly (a note
   // title), and a file still carrying it deserves the pointer, not silence.
   if ("template" in daily) {
@@ -373,6 +464,17 @@ function hostMaps(blocks: Record<string, unknown>, problems: string[]): Record<s
     out[host] = stringMap(v, host, `blocks.hostInterpreters.${host}`, problems);
   }
   return out;
+}
+
+// The message for a section that is in the wrong file. Said in terms of what
+// the section IS rather than of a path, because shared/ knows neither file's
+// location and the two ends may not even be the same machine. The values are
+// carried across once, at the split (bun/clientSettings.ts), so this is a
+// leftover to delete rather than a setting to move by hand.
+function elsewhere(section: keyof Settings): string {
+  return SETTINGS_HOMES[section] === "client"
+    ? `"${section}" describes this screen, so it moved to this app's own settings; the copy here does nothing`
+    : `"${section}" describes the machine holding the notes, so it lives in that server's settings; the copy here does nothing`;
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {

@@ -119,10 +119,10 @@ test("⌘, opens the settings editor on the commented file; Escape closes withou
   // A fresh install opens on the seeded template — the comments ARE the
   // documentation, so their presence is the point.
   await expect(dialog.locator(".cm-content")).toContainText("Ledge settings");
-  const before = await page.evaluate(() => window.__harness.settingsText());
+  const before = await page.evaluate(() => window.__harness.settingsText("server"));
   await page.keyboard.press("Escape");
   await expect(dialog).toHaveCount(0);
-  expect(await page.evaluate(() => window.__harness.settingsText())).toBe(before);
+  expect(await page.evaluate(() => window.__harness.settingsText("server"))).toBe(before);
 });
 
 test("a settings edit warns live on a bad value and saves byte-for-byte", async ({ page }) => {
@@ -130,17 +130,70 @@ test("a settings edit warns live on a bad value and saves byte-for-byte", async 
   const dialog = page.getByRole("dialog", { name: "Settings" });
   await dialog.locator(".cm-content").click();
   await page.keyboard.press("Meta+a");
-  await page.keyboard.type('{ "editor": { "fontSize": 200 } }');
+  await page.keyboard.type('{ "trash": { "ttlDays": 0 } }');
   // The problems strip previews exactly what launch-time validation would say.
-  await expect(dialog.getByText(/must be a number between 6 and 72/)).toBeVisible();
+  await expect(dialog.getByText(/must be a number between 1 and 36500/)).toBeVisible();
   await page.keyboard.press("Meta+a");
-  const good = '{ "editor": { "fontSize": 20 } } // mine';
+  const good = '{ "trash": { "ttlDays": 20 } } // mine';
   await page.keyboard.type(good);
   await expect(dialog.getByText(/must be a number/)).toHaveCount(0);
   await dialog.getByRole("button", { name: "Save" }).click();
   await expect(dialog).toHaveCount(0);
   // Comments included: the dialog saves the text, not a reserialization.
-  expect(await page.evaluate(() => window.__harness.settingsText())).toBe(good);
+  expect(await page.evaluate(() => window.__harness.settingsText("server"))).toBe(good);
+});
+
+// Settings have two homes (remote.md §5) and the dialog has a tab per home.
+// Three things have to hold at once, and each has its own way of going wrong:
+// the tabs address different files, an untouched file is not rewritten just
+// for being looked at, and switching tabs does not throw away typing.
+test("the settings dialog edits both files, and switching tabs keeps what was typed", async ({ page }) => {
+  await page.keyboard.press("Meta+,");
+  const dialog = page.getByRole("dialog", { name: "Settings" });
+  const serverBefore = await page.evaluate(() => window.__harness.settingsText("server"));
+
+  // The server tab is the one that opens; the knobs there are the machine's.
+  await expect(dialog.locator(".cm-content")).toContainText('"shell"');
+  await dialog.locator(".cm-content").click();
+  await page.keyboard.press("Meta+a");
+  await page.keyboard.type('{ "trash": { "ttlDays": 5 } }');
+
+  await dialog.getByRole("tab", { name: "This app" }).click();
+  // A different file, with the knobs that describe a screen.
+  await expect(dialog.locator(".cm-content")).toContainText('"fontSize"');
+  await expect(dialog.locator(".cm-content")).not.toContainText('"shell"');
+  await page.keyboard.press("Meta+a");
+  await page.keyboard.type('{ "appearance": { "theme": "dark" } }');
+
+  // Back, and the unsaved edit is still there: a tab is a view onto a file,
+  // not a reload of it.
+  await dialog.getByRole("tab", { name: "Notes machine" }).click();
+  await expect(dialog.locator(".cm-content")).toContainText('"ttlDays": 5');
+
+  await dialog.getByRole("button", { name: "Save" }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(await page.evaluate(() => window.__harness.settingsText("server"))).toBe('{ "trash": { "ttlDays": 5 } }');
+  expect(await page.evaluate(() => window.__harness.settingsText("client"))).toBe(
+    '{ "appearance": { "theme": "dark" } }',
+  );
+  expect(serverBefore).not.toBe('{ "trash": { "ttlDays": 5 } }');
+});
+
+test("a tab that was only looked at is not rewritten", async ({ page }) => {
+  await page.keyboard.press("Meta+,");
+  const dialog = page.getByRole("dialog", { name: "Settings" });
+  const clientBefore = await page.evaluate(() => window.__harness.settingsText("client"));
+  await dialog.getByRole("tab", { name: "This app" }).click();
+  await expect(dialog.locator(".cm-content")).toContainText('"fontSize"');
+  await dialog.getByRole("tab", { name: "Notes machine" }).click();
+  await dialog.locator(".cm-content").click();
+  await page.keyboard.press("Meta+a");
+  await page.keyboard.type('{ "trash": { "ttlDays": 8 } }');
+  await dialog.getByRole("button", { name: "Save" }).click();
+  await expect(dialog).toHaveCount(0);
+  // Byte-for-byte, comments and all: an install that deleted the template's
+  // comments must not have them written back by a visit to the tab.
+  expect(await page.evaluate(() => window.__harness.settingsText("client"))).toBe(clientBefore);
 });
 
 test("settings dialog: the caret is drawn, and ⌘C/⌘X/⌘V go through the clipboard bridge", async ({ page }) => {

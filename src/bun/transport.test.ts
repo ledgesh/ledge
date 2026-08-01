@@ -174,6 +174,29 @@ describe("a client and a server over one connection", () => {
     expect((await client.ready).build).toBe("9.9.9");
   });
 
+  // Identity comes from the connection, not from each call (remote.md §5), so
+  // the server can key a saved layout by who is asking without the view ever
+  // holding an id. Read after the handshake, which is the only time any
+  // handler runs.
+  test("the server learns which client connected", async () => {
+    const pipe = pipePair();
+    const server = serverConnection(pipe.a, "0.1.0");
+    server.serve(handlers());
+    const client = clientConnection(pipe.b, { push: recordingPush().push, build: "0.1.0", client: "mac-1" });
+    await client.ready;
+    expect(server.client()).toBe("mac-1");
+  });
+
+  test("a client that names nobody is still a client", async () => {
+    const pipe = pipePair();
+    const server = serverConnection(pipe.a, "0.1.0");
+    server.serve(handlers());
+    const client = clientConnection(pipe.b, { push: recordingPush().push, build: "0.1.0" });
+    await client.ready;
+    expect(server.client()).toBe("");
+    expect(await client.requests.vaultState({})).toEqual({ state: "locked" });
+  });
+
   // The whole reason a guard stays server-side (remote.md §2): it refuses over
   // the wire exactly as it refuses in-process, and its own words are what the
   // caller sees.

@@ -229,6 +229,37 @@ describe("the handshake", () => {
   test("a differing build alone is not a refusal", () => {
     expect(checkHello(hello("server", "0.2.0"), "server")).toBeNull();
   });
+
+  // Identity rides the handshake rather than each request (remote.md §5): the
+  // server files this client's layout under it, and a client cannot forget to
+  // send something the connection carries for it.
+  test("a client names itself, and a server names nobody", () => {
+    expect(hello("client", "0.1.0", "abc-123").client).toBe("abc-123");
+    expect(hello("server", "0.1.0").client).toBe("");
+  });
+
+  test("the id survives the round trip", () => {
+    const sent = hello("client", "0.1.0", "abc-123");
+    expect(parseControl(JSON.stringify(sent))).toEqual(sent);
+  });
+
+  // Not a refusal on its own: a peer old enough to omit the field fails on the
+  // protocol version instead, which names both numbers and is the message
+  // worth showing. An id of the wrong TYPE is still garbage and is refused.
+  test("a hello with no client reads as no id; a non-string one is refused", () => {
+    expect(parseControl('{"t":"hello","role":"client","protocol":2,"schema":"a","build":"b"}')).toMatchObject({
+      client: "",
+    });
+    expect(() => parseControl('{"t":"hello","role":"client","protocol":2,"schema":"a","build":"b","client":7}')).toThrow(
+      WireError,
+    );
+  });
+
+  // A client that keeps no id is a client with no layout of its own, not a
+  // client that cannot connect.
+  test("an empty id is accepted", () => {
+    expect(checkHello(hello("client", "0.1.0", ""), "client")).toBeNull();
+  });
 });
 
 describe("the schema fingerprint", () => {

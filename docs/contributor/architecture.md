@@ -311,7 +311,7 @@ Bun therefore validates everything and derives anything derivable:
   error is otherwise a blank pane and nothing else. It is in the app home,
   not `~/Library/Logs`, so `LEDGE_NOTES_ROOT` isolates it from every probe.
 - **`LEDGE_NOTES_ROOT`** overrides the APP HOME (`~/.ledge` — where
-  `settings.jsonc`, `.layout.json`, `.workspaces.json`, `.window.json`,
+  `settings.jsonc`, `.layout.json`, `.workspaces.json`, `.client/`,
   `logs/`, and
   the managed workspace folders live; `APP_HOME` in `bun/workspaces.ts`) for tests and
   throwaway runs. The env name predates the per-workspace split and is kept:
@@ -433,9 +433,20 @@ Five instances exist and new needs should look like them: `configureBridge`
 
 ## 6. Settings
 
-User preferences live in one JSONC file, `settings.jsonc`, in the app home —
-GLOBAL, not per workspace: shell path, font sizes, and interpreters are facts
-about the person, not the folder. JSONC because the file is hand-edited with
+User preferences live in JSONC files — GLOBAL, not per workspace: shell path,
+font sizes, and interpreters are facts about the person, not the folder.
+
+There are TWO of them, split by machine rather than by lifetime (remote.md
+§5). `settings.jsonc` in the app home is the SERVER's: the shell every PTY
+spawns, the trash TTL, what a code fence runs, where daily notes live — facts
+about the machine holding the notes. `.client/settings.jsonc` is the CLIENT's:
+font sizes, the theme, live preview — facts about the screen in front of you,
+which follow the app to whichever machine's notes it is showing.
+`SETTINGS_HOMES` in `shared/settings.ts` is the only place that mapping is
+written down, and it is `satisfies Record<keyof Settings, SettingsHome>`, so a
+section added without a home does not compile. Everything below applies to
+both files; where "the settings file" is singular, it means whichever one
+owns the knob. JSONC because the file is hand-edited with
 its comments AS the documentation (the seeded template, `SETTINGS_TEMPLATE`,
 explains every knob in place); comments and trailing commas are tolerated by
 one shared stripper (`shared/jsonc.ts`) that both ends use, so Bun's launch
@@ -443,10 +454,13 @@ parse and the settings editor's live validation cannot disagree about what
 the text means. An install that predates the format keeps its `settings.json`
 — renamed to `settings.jsonc` on first load (rename, never copy: one file
 stays the user's file, and JSON is valid JSONC so the bytes are already
-right). `shared/settings.ts` owns the shape, the defaults, the template, and
-the validator; `bun/settings.ts` owns the file. Bun reads it once at launch,
-applies its own half (the shell every PTY spawns, the trash TTL), and hands
-the view a validated snapshot over `settingsGet`; view consumers (editor and
+right). `shared/settings.ts` owns the shape, the defaults, the templates, and
+the validator; `bun/settings.ts` and `bun/clientSettings.ts` own a file each.
+Bun reads them once at launch, applies its own half (the shell every PTY
+spawns, the trash TTL), and hands the view ONE validated snapshot over
+`settingsGet` — the client shell merges its half in on the way past
+(`mergeSettings`), so nothing above the RPC learns there were two files; view
+consumers (editor and
 terminal font sizes, the appearance, the runnable-fence set) read that
 snapshot at construction time through `lib/settings.ts`.
 
@@ -499,20 +513,26 @@ snapshot at construction time through `lib/settings.ts`.
   this reason. parseSettings still recognizes both retired spellings by
   name and answers with the migration hint rather than "unknown section".
 - **Settings are not session state, and neither is the registry.** Four
-  files in the app home, four ownership shapes. `settings.jsonc` is
+  ownership shapes in the app home. `settings.jsonc` is
   *human-edited preference*. `.layout.json` — which workspaces exist, their
   names and icons, which folder each owns, the pane trees — is
   *machine-written state* whose bytes Bun owns (`bun/layout.ts`:
   temp-plus-rename like a note save, and a JSON-parse gate so the view
   cannot use the fixed-name write as arbitrary byte storage) but whose
   SHAPE the **view** owns (`workspace/persist.ts`: serialize debounced on
-  every layout change, restore at boot). `.workspaces.json` — the set of
+  every layout change, restore at boot) — and which CLIENT's arrangement it
+  is comes from the connection's handshake, never from the call, so the file
+  is a map of client id to layout and a phone cannot inherit a desktop's
+  three-pane split. `.workspaces.json` — the set of
   registered roots — is machine-written AND Bun-shaped, because it is a
-  trust artifact (§2): the view never sees its bytes at all. `.window.json`
-  — where the window was last left — is machine-written and Bun-shaped for a
-  duller reason (`bun/windowFrame.ts`): the window is not a thing the view
-  has an opinion about, so no RPC entry exists for it and it never crosses
-  the boundary. Its one rule is that a saved frame is *evidence, not
+  trust artifact (§2): the view never sees its bytes at all.
+  `.client/window.json` — where the window was last left — is machine-written
+  and Bun-shaped for a duller reason (`bun/windowFrame.ts`): the window is not
+  a thing the view has an opinion about, so no RPC entry exists for it and it
+  never crosses the boundary. It sits in the CLIENT home rather than the app
+  home (remote.md §5): a window's position is a fact about the screen it is
+  on, and a Mac showing a VPS's notes must not restore that VPS's idea of
+  where windows go. Its one rule is that a saved frame is *evidence, not
   coordinates* — `fitFrame` re-checks it against the displays attached right
   now, keeping the size but re-centering a window stranded by an unplugged
   monitor, because a window restored where no pointer can reach it is worse
@@ -721,7 +741,11 @@ The recipe, in order, using `trashDelete` as the worked example:
 3. **`src/bun/notes.ts`** (or the owning bun module) — implement it. Validate
    the path first (`assertInRoot` / `assertTrashed`); decide the failure
    semantics deliberately (already-gone is usually success, not an error).
-4. **`src/bun/server.ts`** — bind the handler to the schema entry.
+4. **`src/bun/server.ts`** — bind the handler to the schema entry. If the
+   answer is on the CLIENT's machine rather than the server's (a pasteboard,
+   a browser, the list of servers this app knows about), the entry here is a
+   refusal instead, the name joins `CLIENT_METHODS` in `bun/clientSeams.ts`,
+   and the client shell serves it — `remote.md` §10 is the test of which.
 5. **View channel shim** (`notes/channel.ts` etc.) — add the handler to the
    `Handlers` interface and export a typed wrapper. This step is what keeps
    view logic testable: tests stub the handler, never the RPC.

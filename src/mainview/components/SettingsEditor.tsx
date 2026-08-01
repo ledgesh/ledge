@@ -26,7 +26,7 @@ import { copyText, readClipboard } from "@/lib/clipboard";
 import { readSettingsFile, settings, writeSettingsFile } from "@/lib/settings";
 import { highlight } from "@/editor/setup";
 import { stripJsonc } from "../../shared/jsonc";
-import { parseSettings } from "../../shared/settings";
+import { parseSettings, type SettingsHome } from "../../shared/settings";
 
 // Clipboard, routed through the native bridge like the note editor's
 // (editor/setup.ts says why: the views:// webview's clipboard events are
@@ -70,46 +70,76 @@ const clipboardKeymap = Prec.highest(
 );
 
 // The launch-time verdict on this text, previewed live: the exact problems
-// loadSettings would warn about (same stripper, same validator), or the one
-// whole-file message when it does not parse at all. Advisory only — Save
-// never gates on it.
-function problemsOf(text: string): string[] {
+// loadSettings would warn about (same stripper, same validator, same home), or
+// the one whole-file message when it does not parse at all. Advisory only —
+// Save never gates on it.
+function problemsOf(text: string, home: SettingsHome): string[] {
   let parsed: unknown;
   try {
     parsed = JSON.parse(stripJsonc(text));
   } catch (err) {
     return [`Not valid JSONC (the app would run on defaults): ${err instanceof Error ? err.message : String(err)}`];
   }
-  return parseSettings(parsed).problems;
+  return parseSettings(parsed, home).problems;
 }
 
+// The two tabs, and what each one is for in the user's terms. "This app" and
+// not "this Mac": the point of the split is that these settings follow the app
+// to whichever machine's notes it is showing (remote.md §5).
+const TABS: Array<{ home: SettingsHome; label: string; hint: string }> = [
+  { home: "server", label: "Notes machine", hint: "The shell, the trash, and what a code fence runs." },
+  { home: "client", label: "This app", hint: "Font sizes, theme, and live preview." },
+];
+
 export function SettingsEditor({ onClose }: { onClose: () => void }) {
-  // null while the file loads; the dialog frame shows immediately so the
-  // command feels instant even if the RPC round trip does not.
-  const [text, setText] = useState<string | null>(null);
+  const [home, setHome] = useState<SettingsHome>("server");
+  // Both files' text, fetched lazily and then held: switching tabs must not
+  // throw away typing, and Save writes every tab that was actually edited.
+  // `disk` is what was read, so an untouched tab is not rewritten just for
+  // having been looked at — the file is the user's, comments and all.
+  const [docs, setDocs] = useState<Partial<Record<SettingsHome, string>>>({});
+  const [disk, setDisk] = useState<Partial<Record<SettingsHome, string>>>({});
   const [problems, setProblems] = useState<string[]>([]);
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
+  const text = docs[home];
 
   useEffect(() => {
+    if (text !== undefined) return;
     let alive = true;
-    void readSettingsFile().then((t) => {
+    void readSettingsFile(home).then((t) => {
       if (!alive) return;
-      setText(t);
-      setProblems(problemsOf(t));
+      setDocs((d) => ({ ...d, [home]: t }));
+      setDisk((d) => ({ ...d, [home]: t }));
+      setProblems(problemsOf(t, home));
     });
     return () => {
       alive = false;
     };
-  }, []);
+  }, [home, text !== undefined]);
 
   // Escape via the shared layer stack, like every modal (interactions.md §6).
   useEffect(() => pushLayer("dialog", onClose), [onClose]);
 
-  const save = async () => {
+  // The live editor holds the current tab's text; everything else is in state.
+  // Called before anything that reads `docs` as a whole.
+  const stash = (): Partial<Record<SettingsHome, string>> => {
     const view = viewRef.current;
-    if (!view) return;
-    await writeSettingsFile(view.state.doc.toString());
+    const next = view ? { ...docs, [home]: view.state.doc.toString() } : docs;
+    setDocs(next);
+    return next;
+  };
+
+  const save = async () => {
+    const next = stash();
+    // Both files, in one Save, and only the ones that changed. Writing an
+    // untouched file would be harmless but not free: it would rewrite the
+    // template's comments over an install that had deliberately deleted them.
+    await Promise.all(
+      TABS.map(({ home: h }) =>
+        next[h] !== undefined && next[h] !== disk[h] ? writeSettingsFile(h, next[h]!) : Promise.resolve(),
+      ),
+    );
     onClose();
   };
   // The CM keymap closure is built once; reach the current save through a ref.
@@ -117,7 +147,7 @@ export function SettingsEditor({ onClose }: { onClose: () => void }) {
   saveRef.current = save;
 
   useEffect(() => {
-    if (text === null || !hostRef.current) return;
+    if (text === undefined || !hostRef.current) return;
     const view = new EditorView({
       state: EditorState.create({
         doc: text,
@@ -150,7 +180,7 @@ export function SettingsEditor({ onClose }: { onClose: () => void }) {
           syntaxHighlighting(highlight),
           EditorView.lineWrapping,
           EditorView.updateListener.of((u) => {
-            if (u.docChanged) setProblems(problemsOf(u.state.doc.toString()));
+            if (u.docChanged) setProblems(problemsOf(u.state.doc.toString(), home));
           }),
           EditorView.theme({
             "&": { fontSize: `${settings().editor.fontSize}px`, height: "100%" },
@@ -174,7 +204,11 @@ export function SettingsEditor({ onClose }: { onClose: () => void }) {
       view.destroy();
       viewRef.current = null;
     };
-  }, [text]);
+    // Rebuilt when the tab changes, never on a keystroke: `text` is the
+    // loaded-or-stashed text for this home, and stashing happens only on a
+    // switch or a save. The doc a live editor holds is the authority in
+    // between.
+  }, [home, text !== undefined]);
 
   return (
     <div
@@ -196,8 +230,35 @@ export function SettingsEditor({ onClose }: { onClose: () => void }) {
           <span className="font-mono text-[11px] text-muted-foreground">settings.jsonc</span>
         </div>
 
-        <div className="mt-3 min-h-0 flex-1 overflow-hidden rounded-md border border-input">
-          {text === null ? (
+        {/* Two files, one dialog. Tabs rather than two commands: which of them
+            a knob is in is an implementation fact, and someone looking for
+            "font size" should find it by looking, not by knowing. */}
+        <div role="tablist" aria-label="Settings file" className="mt-3 flex gap-1">
+          {TABS.map((tab) => (
+            <button
+              key={tab.home}
+              role="tab"
+              type="button"
+              aria-selected={home === tab.home}
+              title={tab.hint}
+              className={`rounded-md px-2.5 py-1 text-[12px] ${
+                home === tab.home
+                  ? "bg-accent text-accent-foreground"
+                  : "text-muted-foreground hover:bg-accent/50"
+              }`}
+              onClick={() => {
+                if (tab.home === home) return;
+                stash();
+                setHome(tab.home);
+              }}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="mt-2 min-h-0 flex-1 overflow-hidden rounded-md border border-input">
+          {text === undefined ? (
             <p className="p-3 text-[12px] text-muted-foreground">Loading…</p>
           ) : (
             <div ref={hostRef} className="h-[55vh] overflow-y-auto [&_.cm-editor]:h-full" />
@@ -218,7 +279,7 @@ export function SettingsEditor({ onClose }: { onClose: () => void }) {
             <Button size="sm" variant="ghost" onClick={onClose}>
               Cancel
             </Button>
-            <Button size="sm" disabled={text === null} onClick={() => void save()}>
+            <Button size="sm" disabled={text === undefined} onClick={() => void save()}>
               Save
             </Button>
           </div>

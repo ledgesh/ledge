@@ -13,6 +13,7 @@ import { configureCli } from "./lib/cli";
 import { captureFailures, configureLog } from "./lib/log";
 import { configureAssets } from "./lib/assets";
 import { configureSettings } from "./lib/settings";
+import { configureConnections, type ConnectionStatus } from "./lib/connections";
 import { applyAppearance } from "./lib/theme";
 import { DEFAULT_SETTINGS, type Settings } from "../shared/settings";
 import { configureLayout, restoredState } from "./workspace/persist";
@@ -181,6 +182,11 @@ async function boot(): Promise<void> {
   const trashByFolder: Record<string, TrashMeta[]> = {};
   let settings: Settings = DEFAULT_SETTINGS;
   let layout: string | null = null;
+  // Which machine everything below belongs to (remote.md §8). Fetched before
+  // the first paint like settings and the layout: the indicator is chrome, and
+  // chrome that names the wrong machine for one frame is the one frame where
+  // somebody types a command into it.
+  let connections: ConnectionStatus | null = null;
   try {
     // The registry first — it names the folders everything else is scoped to —
     // then one round trip per folder plus settings and layout, in parallel:
@@ -199,9 +205,10 @@ async function boot(): Promise<void> {
     recordWorkspaceKinds(roots);
     recordDailyRoot(registry.dailyRoot);
     const available = roots.filter((w) => w.available).map((w) => w.root);
-    [settings, layout] = await Promise.all([
+    [settings, layout, connections] = await Promise.all([
       electrobun.rpc!.request.settingsGet({}).then((r) => r.settings),
       electrobun.rpc!.request.layoutGet({}).then((r) => r.text),
+      electrobun.rpc!.request.connectionList({}),
       ...available.map(async (folder) => {
         const [notes, trash] = await Promise.all([
           electrobun.rpc!.request.noteList({ root: folder }).then((r) => r.notes),
@@ -224,10 +231,21 @@ async function boot(): Promise<void> {
       void electrobun.rpc!.request.layoutSave({ text });
     },
   });
+  // Before the first render, for the same reason settings are: the connection
+  // bar is drawn in the first paint.
+  if (connections) {
+    configureConnections(connections, {
+      list: () => electrobun.rpc!.request.connectionList({}),
+      select: (id) => electrobun.rpc!.request.connectionSelect({ id }),
+      add: (fields) => electrobun.rpc!.request.connectionAdd(fields),
+      remove: (id) => electrobun.rpc!.request.connectionRemove({ id }),
+      probe: (destination) => electrobun.rpc!.request.connectionProbe({ destination }),
+    });
+  }
   configureSettings(settings, {
-    readSettingsFile: () => electrobun.rpc!.request.settingsRead({}).then((r) => r.text),
-    writeSettingsFile: async (text) => {
-      await electrobun.rpc!.request.settingsWrite({ text });
+    readSettingsFile: (home) => electrobun.rpc!.request.settingsRead({ home }).then((r) => r.text),
+    writeSettingsFile: async (home, text) => {
+      await electrobun.rpc!.request.settingsWrite({ home, text });
     },
     readProfile: (name) => electrobun.rpc!.request.profileRead({ name }).then((r) => r.text),
     writeProfile: async (name, text) => {

@@ -89,6 +89,7 @@ export const MENU: readonly MenuSection[] = [
       "---",
       { command: "workspace.new" },
       { command: "workspace.attach" },
+      { command: "connection.switch" },
       "---",
       { command: "daily.open" },
       { command: "palette.notes" },

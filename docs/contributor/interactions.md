@@ -214,6 +214,44 @@ Row verbs, by row kind. Each fires only while a row of that kind has focus
   adjacent to their non-destructive sibling without a separator or ordering
   gap.
 
+## 4-1. Switching connections (which machine holds the notes)
+
+A connection is the widest scope in the app: the workspace registry, the notes,
+the trash, the tags, the shells and the vault all belong to one server
+(remote.md §8), and there is exactly one at a time. The verb is
+**`connection.switch`, titled "Notes On…"**, and its whole grammar follows from
+the failure it prevents, which is running a command on the wrong box.
+
+- **The indicator is persistent chrome, not a menu item.** `ConnectionBar`
+  sits above the workspace strip — above what it scopes — and names the
+  machine at all times. A fact you have to go looking for prevents nothing. It
+  is deliberately distinct from the drawer's `host:` badge (§4a): that says
+  where a *block* will run, this says where the *note lives*.
+- **No chord.** Switching is a rare, deliberate act that closes every tab, so
+  it earns no key: the bar is the everyday surface, and the palette and the
+  File menu carry it. This is §2's "a chord is for what you do many times a
+  day" applied to the least frequent verb there is.
+- **The chooser opens on the connection in use**, like the host picker: Enter
+  means stay, and moving somewhere else costs a deliberate arrow. `⌫` on a row
+  removes that connection, the same row verb the workspace strip uses.
+- **No confirmation, by §4's arrangement-loss rule.** Nothing is destroyed:
+  the tabs are on the other machine and come back when you switch back. What
+  the dialog does instead is *say so* before the click ("Switching closes every
+  tab and reopens this machine's").
+- **Adding a server is two steps, and the second one is not a confirmation.**
+  Ledge fetches the host key, shows its fingerprint, and pins only after
+  someone says it is the key they expected (remote.md §4). There is
+  deliberately no "connect anyway": that button is the thing pinning exists to
+  prevent, and an app that offers it has taught the click-through §4 warns
+  about.
+- **Two refusals keep the app somewhere it can work from**: the local server
+  cannot be removed, and neither can the connection currently being served.
+- **A connection that will not open costs nothing.** The new server is reached
+  *before* the old one is torn down, so a typo or a sleeping laptop leaves the
+  session exactly where it was, with the reason in the dialog. At boot the
+  same failure falls back to the local server and the indicator says
+  "not reachable" rather than silently naming the wrong machine.
+
 ## 4a. The host picker (multi-host notes)
 
 A note whose frontmatter declares more than one `host:` must never execute a
