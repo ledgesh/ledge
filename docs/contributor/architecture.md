@@ -714,21 +714,25 @@ The recipe, in order, using `trashDelete` as the worked example:
 
 1. **`src/shared/rpc-schema.ts`** — add the entry with a comment saying what
    it does and when it fires.
-2. **`src/bun/notes.ts`** (or the owning bun module) — implement it. Validate
+2. **`src/shared/wire.ts`** — add the name to `REQUEST_METHODS` (or
+   `PUSH_MESSAGES`). The build fails until you do, naming the method it is
+   missing: the list is what a remote client is built from and what the two
+   ends fingerprint at the handshake (`remote.md` §11).
+3. **`src/bun/notes.ts`** (or the owning bun module) — implement it. Validate
    the path first (`assertInRoot` / `assertTrashed`); decide the failure
    semantics deliberately (already-gone is usually success, not an error).
-3. **`src/bun/index.ts`** — bind the handler to the schema entry.
-4. **View channel shim** (`notes/channel.ts` etc.) — add the handler to the
+4. **`src/bun/server.ts`** — bind the handler to the schema entry.
+5. **View channel shim** (`notes/channel.ts` etc.) — add the handler to the
    `Handlers` interface and export a typed wrapper. This step is what keeps
    view logic testable: tests stub the handler, never the RPC.
-5. **`src/mainview/main.tsx`** — bind the shim to the live RPC.
-6. **The action layer** (`notes/actions.ts`) — the async orchestration that
+6. **`src/mainview/main.tsx`** — bind the shim to the live RPC.
+7. **The action layer** (`notes/actions.ts`) — the async orchestration that
    calls the shim and dispatches store actions.
-7. **Tests** — the bun-side guard (a `rejects` test needs no filesystem) and
+8. **Tests** — the bun-side guard (a `rejects` test needs no filesystem) and
    the stub added to any test that implements the full `Handlers` interface
    (`notes/store.test.ts` will tell you by failing to typecheck).
 
-The compiler walks you through 3–7 once 1 and 4 are written; that is the
+The compiler walks you through 2–8 once 1 and 5 are written; that is the
 point of the typed schema.
 
 ## 8. Dependency policy

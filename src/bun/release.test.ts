@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import config from "../../electrobun.config";
+import { BUILD_VERSION } from "../shared/version";
 
 const ROOT = resolve(import.meta.dir, "..", "..");
 
@@ -20,6 +21,13 @@ describe("the release build config", () => {
   // reader looks at first. A release where they disagree has no version.
   test("both files name the same version", () => {
     expect(config.app.version).toBe(pkg.version);
+  });
+
+  // A third, for the server: it has no Electrobun runtime to ask
+  // (shared/version.ts), and the number it reports is what a client compares
+  // builds against across an ssh connection.
+  test("the server reports that version too", () => {
+    expect(BUILD_VERSION).toBe(pkg.version);
   });
 
   // CFBundleShortVersionString has a defined grammar: one to three

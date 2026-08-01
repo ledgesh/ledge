@@ -99,17 +99,27 @@ export type RequestHandlers = {
 // no folder dialog, no pasteboard, and no menu bar. remote.md §5 and §10 move
 // all three to the client outright; injecting them now is what lets this
 // module compile and run with no window attached.
+//
+// Every one is OPTIONAL, and absent is a different thing from failed: a server
+// with no dialog says so (see NO_DIALOG below), rather than returning the
+// answer a cancelled dialog gives and leaving a button that quietly does
+// nothing.
 export interface NativeDeps {
   // The native folder picker, behind workspaceAttach/workspaceMove. Returns
-  // null when the user cancelled, and refuses (returns null) where there is no
-  // dialog to show.
-  pickFolder(startingFolder: string): Promise<string | null>;
+  // null when the user cancelled.
+  pickFolder?(startingFolder: string): Promise<string | null>;
   // The pasteboard's available flavors, or null where they cannot be read.
   // Null means "ask the pasteboard anyway" (clipboardReadRich fails open).
-  clipboardFormats(): string[] | null;
+  clipboardFormats?(): string[] | null;
   // Hand the view's menu description to the platform. A no-op off macOS.
-  setMenu(items: unknown[]): void;
+  setMenu?(items: unknown[]): void;
 }
+
+// What workspaceAttach and workspaceMove answer with when there is no dialog
+// to show. Data, not an exception: the schema gives both calls an `error`
+// string precisely so a refusal can reach the user as a sentence.
+const NO_DIALOG =
+  "A headless server cannot open a folder dialog. Attaching a folder needs the app running on the machine that holds the notes.";
 
 export interface LedgeServer {
   requests: RequestHandlers;
@@ -457,6 +467,7 @@ export async function createServer(deps: { push: ServerPush; native: NativeDeps 
       return { root };
     },
     workspaceAttach: async () => {
+      if (!native.pickFolder) return { root: null, kind: null, error: NO_DIALOG };
       const picked = await native.pickFolder(homedir());
       if (!picked) return { root: null, kind: null, error: null }; // cancelled
       const res = await attachExternal(picked);
@@ -476,7 +487,10 @@ export async function createServer(deps: { push: ServerPush; native: NativeDeps 
       // home: the destination is APP_HOME, no dialog (the schema comment
       // says why). Otherwise the same dialog as workspaceAttach above; the
       // pick is the destination PARENT the folder moves into.
-      const picked = home ? APP_HOME : await native.pickFolder(homedir());
+      let picked: string | null;
+      if (home) picked = APP_HOME;
+      else if (native.pickFolder) picked = await native.pickFolder(homedir());
+      else return { root: null, kind: null, error: NO_DIALOG };
       if (!picked) return { root: null, kind: null, error: null }; // cancelled
       const res = await moveRoot(from, picked);
       if ("error" in res) return { root: null, kind: null, error: res.error };
@@ -758,7 +772,7 @@ export async function createServer(deps: { push: ServerPush; native: NativeDeps 
     // list asks the pasteboard anyway, so a wrong answer here costs latency,
     // never the feature.
     clipboardReadRich: async () => {
-      const formats = native.clipboardFormats();
+      const formats = native.clipboardFormats?.() ?? null;
       const rich = formats === null || formats.length === 0 || formats.includes("html");
       const [text, html] = await Promise.all([
         readClipboardText(),
@@ -771,7 +785,7 @@ export async function createServer(deps: { push: ServerPush; native: NativeDeps 
     // strings are command ids it never interprets, which is what keeps the
     // registry the one place a command is defined.
     menuSet: async ({ items }) => {
-      native.setMenu(items);
+      native.setMenu?.(items);
       return { ok: true };
     },
     // Both guarded inside bun/assets.ts: the root must be registered, the

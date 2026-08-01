@@ -23,6 +23,8 @@ import { startLogging } from "./log";
 import { EXTRACTION_DIRNAME, pruneExtractionDir } from "./updateCache";
 import { APP_HOME } from "./workspaces";
 import { createServer, type NativeDeps, type RequestHandlers, type ServerPush } from "./server";
+import { clientConnection, spawnDuplex } from "./transport";
+import { BUILD_VERSION } from "../shared/version";
 import type { LedgeRPC } from "../shared/rpc-schema";
 
 // Before anything that can fail: from here every console line in this process
@@ -122,9 +124,53 @@ const push: ServerPush = {
   menuCommand: (p) => rpc?.send.menuCommand(p),
 };
 
-const server = await createServer({ push, native });
+// LEDGE_CONNECT: talk to a server instead of being one (remote.md §1). Its
+// value is the command that starts one, which for another machine is
+// `ssh <target> ledge-server serve` and for this one is a local
+// `ledge-server serve`: the same protocol either way, over a different length
+// of wire. Split on whitespace and run with no shell, so there is nothing for
+// a quoting mistake to expand.
+//
+// Unset, the app creates the server in this process, which is what ships.
+// Phase 3 replaces this env var with real connection configuration (a display
+// name, a destination, a pinned host key); until then, host-key pinning is
+// ssh's own known_hosts, and a connected app has the gaps remote.md §5 and
+// §10 name — no folder dialog, and a clipboard on the wrong machine.
+const CONNECT = process.env["LEDGE_CONNECT"]?.trim();
 
-rpc = defineLedgeRPC(server.requests);
+async function attachServer(): Promise<{ requests: RequestHandlers; shutdown: () => void }> {
+  if (!CONNECT) {
+    const server = await createServer({ push, native });
+    return { requests: server.requests, shutdown: () => server.shutdown() };
+  }
+  const conn = clientConnection(spawnDuplex(CONNECT.split(/\s+/)), {
+    push,
+    build: local?.version ?? BUILD_VERSION,
+  });
+  // Throws when the two ends disagree about the protocol, with both versions
+  // named. Fatal on purpose: a window onto a server we cannot speak to is
+  // worse than not opening one.
+  const peer = await conn.ready;
+  console.log(`[bun] connected to ledge-server ${peer.build} via \`${CONNECT}\``);
+  return {
+    // menuSet never crosses the wire (remote.md §10). The menu bar is this
+    // Mac's, and a headless server would swallow the view's whole menu — ⌘Q
+    // with it. The remaining client-side seams (clipboard, link opening) still
+    // travel until phase 3 moves them for real.
+    requests: {
+      ...conn.requests,
+      menuSet: async ({ items }) => {
+        native.setMenu?.(items);
+        return { ok: true };
+      },
+    },
+    shutdown: () => conn.close(),
+  };
+}
+
+const { requests, shutdown } = await attachServer();
+
+rpc = defineLedgeRPC(requests);
 
 // The menu bar's two edges. The view owns the real menu (commands/menu.ts,
 // pushed through menuSet) — this side is the fallback that exists before its
@@ -239,7 +285,7 @@ process.on("exit", () => {
   // lost. No FFI here — the window may already be gone — so this leans on the
   // cached fullscreen flag rather than asking again.
   if (frameSave && windowed) writeFrame(lastFrame);
-  server.shutdown();
+  shutdown();
 });
 
 console.log("[bun] Ledge started (per-note shells, spawned on first use); app home:", APP_HOME);

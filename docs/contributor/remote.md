@@ -1,10 +1,12 @@
 # Ledge remote servers
 
-**Design, not yet implemented.** When it lands this becomes the fifth sibling
+**Partly implemented: §14 phases 1 and 2 are code, §§3-6 have working
+transports behind them, and everything about connections, resilience, Linux,
+and iOS is still design.** When the rest lands this becomes the fifth sibling
 standard, beside `architecture.md` (whose process topology, trust boundary,
 and state-ownership rules it revises), `interactions.md` (which gains the
 connection grammar in §8), `locking.md` (whose vault moves one hop away), and
-`testing.md` (whose categories §12 instantiates). Until then it is the
+`testing.md` (whose categories §13 instantiates). Until then it is the
 agreed shape, and code that disagrees with it is either ahead of the doc or
 wrong.
 
@@ -29,7 +31,7 @@ process boundary allowed to be a network:
 
 | Case | Transport |
 | ---- | --------- |
-| Mac app, local notes | unix socket to a server on the same machine |
+| Mac app, local notes | the server in this process, or a child on pipes |
 | Mac app, remote notes | `ssh <target> ledge-server serve` |
 | iOS app, your Mac | `ssh <target> ledge-server serve` |
 | iOS app, your VPS | `ssh <target> ledge-server serve` |
@@ -38,6 +40,14 @@ The Mac app connecting to its own local server is not a special case. It is
 the same client, the same protocol, and the same server binary, over a
 cheaper transport. Keeping it that way is what stops the remote path from
 becoming a second, less-tested code path.
+
+**The local transport is a child process's pipes, not a unix socket.** The
+protocol rides stdin and stdout either way (§3), so a socket would add a
+filesystem artifact, a stale-socket sweep, and a permissions question, and
+buy nothing until the server has to outlive the client. That day is §7's
+"sessions outlive connections" taken one step further, to sessions surviving
+an app restart; the socket lands with the reconnect work in §14 phase 4, and
+until then a quit takes the server down exactly as it does today.
 
 **The desktop app is therefore split, not extended.** `bun/index.ts` becomes
 two entry points: `serve` (RPC handlers, sessions, watcher, no UI) and the
@@ -92,6 +102,15 @@ Type 0 is a JSON control frame (requests, responses, and the schema's push
 messages). Type 1 is a binary payload tagged with the id of the control
 frame it belongs to. Assets and terminal output ride type 1: base64 was free
 in-process and costs 33% on a cell connection.
+
+The codec is `shared/wire.ts` and the two ends of a connection are
+`bun/transport.ts`, which is where the symmetry lives: a server dispatches
+`req` frames into the handler map `createServer` returned, and a client
+presents the answers as that same map, so `bun/index.ts` binds either one to
+the webview's RPC without knowing which it got. Type-1 frames are defined and
+decoded but nothing sends one yet; moving the base64 payloads onto them is
+§14 phase 4's, and defining the type now is what keeps that from being a
+protocol break.
 
 **Multiplexing is required, not optional.** The schema is already
 bidirectional: `terminalOutput`, `runEvent`, `terminalExit`, `notesChanged`,
@@ -385,15 +404,20 @@ Per `testing.md`'s categories:
 
 Each phase leaves the app shippable.
 
-1. **Split `bun/index.ts`** into `serve` and the Mac shell, with a unix-socket
-   transport. No user-visible change, and the whole existing suite is the
-   regression test.
-2. **The framed protocol, the handshake, and the ssh transport.** Prove it
-   Mac to Mac, with the forced-command key.
+1. **Done.** `bun/server.ts` is the headless core and `bun/index.ts` is the Mac
+   shell around it. No user-visible change, and the whole existing suite was
+   the regression test.
+2. **Done.** The framed protocol (`shared/wire.ts`), the handshake, and both
+   ends of a connection (`bun/transport.ts`), with `bun/serve.ts` as the
+   `ledge-server serve` entry point. `LEDGE_CONNECT` points the Mac app at one
+   instead of building its own. What is still owed here is the Mac-to-Mac pass
+   with a forced-command key, which needs a second machine (§13).
 3. **Connections**: the connection manager, server-scoped state, the settings
-   split, the switching grammar in `interactions.md`.
-4. **Resilience**: reconnect, `opId` dedupe, output coalescing, and the §12
-   round-trip audit against a real remote.
+   split, the client-side moves in §10, the switching grammar in
+   `interactions.md`.
+4. **Resilience**: reconnect, `opId` dedupe, output coalescing, binary frames
+   for assets and terminal output, the unix socket for a server that outlives
+   the app, and the §12 round-trip audit against a real remote.
 5. **Linux**: the PTY port, the second dylib, the Docker image, the VPS
    posture in `docs/user/`.
 6. **The iOS client**, which is its own document and depends on nothing above
