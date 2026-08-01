@@ -71,10 +71,22 @@ function sizeOf(path: string): number {
   }
 }
 
+// Which file this PROCESS logs to. The app and a server daemon can be running
+// at once on one machine (remote.md §1), and two processes appending to one
+// file interleave their lines and race each other's rotation — so each names
+// its own, and `logs/` holds both side by side.
+let logPath = LOG_PATH;
+let prevPath = PREV_LOG_PATH;
+
+export function logToFile(basename: string): void {
+  logPath = join(LOG_DIR, `${basename}.log`);
+  prevPath = join(LOG_DIR, `${basename}.previous.log`);
+}
+
 export function rotate(): void {
   try {
     mkdirSync(LOG_DIR, { recursive: true });
-    if (sizeOf(LOG_PATH) > 0) renameSync(LOG_PATH, PREV_LOG_PATH);
+    if (sizeOf(logPath) > 0) renameSync(logPath, prevPath);
   } catch {
     // A log we cannot rotate is a log we append to. Still better than none.
   }
@@ -88,7 +100,7 @@ export function append(text: string): void {
     written = 0;
   }
   try {
-    appendFileSync(LOG_PATH, text);
+    appendFileSync(logPath, text);
   } catch {
     // The folder can vanish under a running app — someone tidying ~/.ledge,
     // a scratch home wiped between tests — and a log that gives up for the
@@ -99,7 +111,7 @@ export function append(text: string): void {
     // function.
     try {
       mkdirSync(LOG_DIR, { recursive: true });
-      appendFileSync(LOG_PATH, text);
+      appendFileSync(logPath, text);
     } catch {
       return;
     }
@@ -121,9 +133,10 @@ export function write(source: LogSource, level: LogLevel, args: unknown[]): void
 // the shell or the window rather than about Ledge's own code.
 let patched = false;
 
-export function startLogging(): void {
+export function startLogging(basename?: string): void {
   if (patched) return;
   patched = true;
+  if (basename) logToFile(basename);
   rotate();
   const levels: Array<["log" | "info" | "warn" | "error", LogLevel]> = [
     ["log", "info"],

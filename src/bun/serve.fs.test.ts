@@ -1,16 +1,20 @@
 // The spawned-process seam: the actual `bun src/bun/serve.ts` an ssh session
 // would launch, spoken to over its real stdin and stdout by the real client
 // end. transport.test.ts proves the conversation and wire.test.ts the codec;
-// what only this can prove is the assembly — createServer boots with no window
-// attached, the handlers answer through the frame codec, NOTHING but frames
-// reaches stdout, and the §2 guards refuse a request that arrived over a pipe
-// exactly as they refuse one that arrived in-process (remote.md §13).
+// what only this can prove is the assembly — `serve` finds or starts this
+// machine's daemon, the daemon boots createServer with no window attached, the
+// handlers answer through the frame codec across two process boundaries,
+// NOTHING but frames reaches stdout, and the §2 guards refuse a request that
+// arrived over a pipe exactly as they refuse one that arrived in-process
+// (remote.md §13).
 //
 // The child gets its own scratch home, built by hand: it is a separate
 // process, so the preload's root does not reach it, and writing the registry
 // file directly is what "the app ran here earlier" looks like to a server.
+// The daemon it starts lives in that home too, which is what makes killing it
+// afterwards safe — nothing here can reach the real one.
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CONTROL_FRAME, encodeControl, FRAME_HEADER_BYTES, FrameDecoder, hello, parseControl } from "../shared/wire";
@@ -28,6 +32,18 @@ const push = new Proxy({}, { get: (_t, m: string) => (p: unknown) => pushes.push
 
 let client: ClientConnection;
 
+/** The daemon outlives the `serve` that started it — that is the whole point
+ * (remote.md §7) — so a test that starts one has to stop it, or it sits on a
+ * deleted scratch home until its idle timer fires a minute later. */
+async function stopDaemon(home: string): Promise<void> {
+  try {
+    const pid = Number((await readFile(join(home, ".server.pid"), "utf8")).trim());
+    if (Number.isInteger(pid) && pid > 1) process.kill(pid, "SIGTERM");
+  } catch {
+    // Already gone, or never started.
+  }
+}
+
 beforeAll(async () => {
   await mkdir(WS, { recursive: true });
   await writeFile(join(HOME, ".workspaces.json"), JSON.stringify({ version: 1, roots: [WS] }));
@@ -40,6 +56,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   client?.close();
+  await stopDaemon(HOME);
   await rm(HOME, { recursive: true, force: true });
 });
 
@@ -165,8 +182,50 @@ test("stdout carries frames and nothing else; the server's own logging is on std
 
   expect(err).toContain("[serve] ledge-server");
   // console.log rerouted rather than dropped: a server nobody can hear is its
-  // own kind of bug.
-  expect(err).toContain("[settings] migrated");
+  // own kind of bug. It lands in the DAEMON's log now, not on this process's
+  // stderr — `serve` is a byte pump and the boot happened one process over
+  // (remote.md §1).
+  expect(await readFile(join(home, "logs", "ledge-server.log"), "utf8")).toContain("[settings] migrated");
 
+  await stopDaemon(home);
+  await rm(home, { recursive: true, force: true });
+});
+
+// The socket, the pid file, and the promise that a run outlives its client
+// (remote.md §7). Everything above talks THROUGH a connection; this is about
+// what is still there when one goes away.
+test("the daemon outlives the connection that started it, and says where it is", async () => {
+  const home = await mkdtemp(join(tmpdir(), "ledge-daemon-"));
+  await mkdir(join(home, "ws"), { recursive: true });
+  await writeFile(join(home, ".workspaces.json"), JSON.stringify({ version: 1, roots: [join(home, "ws")] }));
+
+  const first = clientConnection(spawnDuplex([process.execPath, SERVE, "serve"], { env: { LEDGE_NOTES_ROOT: home } }), {
+    push,
+    build: BUILD_VERSION,
+    client: "probe-1",
+  });
+  await first.ready;
+  const pid = Number((await readFile(join(home, ".server.pid"), "utf8")).trim());
+  expect(Number.isInteger(pid)).toBe(true);
+  // Alive: signal 0 asks without sending anything.
+  expect(() => process.kill(pid, 0)).not.toThrow();
+
+  // Something only a surviving server could remember.
+  await first.requests.layoutSave({ text: '{"kept":true}' });
+  first.close();
+
+  const second = clientConnection(spawnDuplex([process.execPath, SERVE, "serve"], { env: { LEDGE_NOTES_ROOT: home } }), {
+    push,
+    build: BUILD_VERSION,
+    client: "probe-1",
+  });
+  await second.ready;
+  expect(await second.requests.layoutGet({})).toEqual({ text: '{"kept":true}' });
+  // The same process, not a fresh one: a second `serve` attaches, it does not
+  // start a rival.
+  expect(Number((await readFile(join(home, ".server.pid"), "utf8")).trim())).toBe(pid);
+  second.close();
+
+  await stopDaemon(home);
   await rm(home, { recursive: true, force: true });
 });

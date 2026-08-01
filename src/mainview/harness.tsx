@@ -27,7 +27,7 @@ import { configureClipboard } from "./lib/clipboard";
 import { configureCli } from "./lib/cli";
 import { configureAssets } from "./lib/assets";
 import { configureSettings } from "./lib/settings";
-import { configureConnections } from "./lib/connections";
+import { configureConnections, recordLinkState } from "./lib/connections";
 import {
   clientSettingsTemplate,
   DEFAULT_SETTINGS,
@@ -872,6 +872,10 @@ declare global {
       // makes a store.seed visible to the app's lists — the same refresh a
       // real external write triggers.
       notesChanged: (root: string) => void;
+      // The wire dropping (remote.md §7). Pushed by this app's own Bun side in
+      // the real thing, so there is no user action a spec could take to cause
+      // it — the same reason externalOpen is here.
+      linkState: (state: "live" | "reconnecting" | "lost", detail: string) => void;
       store: FakeStore;
     };
   }
@@ -892,6 +896,7 @@ window.__harness = {
   runOutput: (id, text) => dispatchRunEvent({ id, kind: "output", dataB64: btoa(text) }),
   externalOpen: (open) => dispatchExternalOpen(open),
   notesChanged: (root) => dispatchNotesChanged(root),
+  linkState: (state, detail) => recordLinkState(state, detail),
   store,
 };
 

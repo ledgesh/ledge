@@ -17,7 +17,7 @@
 //
 // This module imports no Electrobun. The two genuinely native bits arrive as
 // optional dependencies, exactly as bun/server.ts takes its folder dialog.
-import { readClipboardHtml, readClipboardText, writeClipboard } from "./clipboard";
+import { readClipboardHtml, readClipboardImage, readClipboardText, writeClipboard } from "./clipboard";
 import { loadClientSettings, readClientSettingsFile, writeClientSettingsFile } from "./clientSettings";
 import { mergeSettings, type Settings } from "../shared/settings";
 import { openableUrl } from "../shared/links";
@@ -30,14 +30,21 @@ export interface ClientNative {
   clipboardFormats?(): string[] | null;
   // Hand the view's menu description to the platform. A no-op off macOS.
   setMenu?(items: unknown[]): void;
+  // The pasteboard's image, as PNG bytes. Defaults to the osascript route
+  // (bun/clipboard.ts). Injectable for two reasons that point the same way: a
+  // client that is not a Mac reads its pasteboard some other way, and a test
+  // suite must never read the developer's own — which is why the paste seam
+  // is the one that takes a dependency and the text ones do not.
+  readImage?(): Promise<Uint8Array | null>;
 }
 
-// The native five: the pasteboard, the browser, and the menu bar. Implemented
+// The native six: the pasteboard, the browser, and the menu bar. Implemented
 // by clientSeams below.
 export const NATIVE_METHODS = [
   "clipboardRead",
   "clipboardWrite",
   "clipboardReadRich",
+  "assetPaste",
   "linkOpen",
   "menuSet",
 ] as const satisfies readonly (keyof RequestHandlers)[];
@@ -87,7 +94,7 @@ export async function clientOverlay(base: RequestHandlers, native: ClientNative)
   const mine: Settings = await loadClientSettings();
   return {
     ...base,
-    ...clientSeams(native),
+    ...clientSeams(native, base),
     settingsGet: async () => {
       const { settings } = await base.settingsGet({});
       return { settings: mergeSettings(settings, mine) };
@@ -104,7 +111,15 @@ export async function clientOverlay(base: RequestHandlers, native: ClientNative)
   };
 }
 
-export function clientSeams(native: ClientNative): Pick<RequestHandlers, NativeMethod> {
+/**
+ * The six themselves. `server` is where the one of them that produces a FILE
+ * sends its bytes: reading a pasteboard and naming a file in a workspace are
+ * different machines' jobs, and this is the seam between them.
+ */
+export function clientSeams(
+  native: ClientNative,
+  server: Pick<RequestHandlers, "assetWrite"> = { assetWrite: async () => ({ src: null }) },
+): Pick<RequestHandlers, NativeMethod> {
   return {
     // The webview cannot reach the pasteboard itself (a views:// page is not a
     // secure context, so navigator.clipboard is absent), which is why copy and
@@ -126,6 +141,20 @@ export function clientSeams(native: ClientNative): Pick<RequestHandlers, NativeM
         wantsHtml(native.clipboardFormats?.() ?? null) ? readClipboardHtml() : Promise.resolve(""),
       ]);
       return { text, html };
+    },
+    // ⌘V of an image. The pasteboard is this device's (a VPS has none), the
+    // file is the server's: the bytes go over as base64 the schema declares
+    // and the wire sends as a binary frame, and the NAME comes back. The view
+    // still never names a file, and neither does this — the authority the
+    // move cost is exactly none (remote.md §5).
+    //
+    // No image on the pasteboard answers null without troubling the server,
+    // which is the common case: ⌘V with text on the pasteboard reaches here
+    // only after the editor has already declined to paste it as text.
+    assetPaste: async ({ root, notePath }) => {
+      const bytes = await (native.readImage ?? readClipboardImage)();
+      if (!bytes || bytes.length === 0) return { src: null };
+      return server.assetWrite({ root, notePath, dataB64: Buffer.from(bytes).toString("base64") });
     },
     // The native menu bar, shaped entirely by the view (commands/menu.ts). The
     // shell hands it to the platform and nothing more: the `action` strings are

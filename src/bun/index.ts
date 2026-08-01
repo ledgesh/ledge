@@ -27,7 +27,7 @@ import { clientOverlay, type ClientNative } from "./clientSeams";
 import { clientId } from "./clientHome";
 import { createConnectionManager, type Attached } from "./connectionManager";
 import { KNOWN_HOSTS_PATH, sshCommand, userKnownHosts, type Connection } from "./connections";
-import { clientConnection, spawnDuplex } from "./transport";
+import { reconnectingClient, spawnDuplex } from "./transport";
 import { BUILD_VERSION } from "../shared/version";
 import type { LedgeRPC } from "../shared/rpc-schema";
 
@@ -133,6 +133,11 @@ const push: ServerPush = {
   menuCommand: (p) => rpc?.send.menuCommand(p),
 };
 
+// This side's own push, not a server's (wire.ts CLIENT_PUSHES). Whether the
+// wire is up is a fact the end holding it reports; the far end is by
+// definition unreachable at the moment it matters.
+const sayConnectionState = (p: { state: "live" | "reconnecting" | "lost"; detail: string }) => rpc?.send.connectionState(p);
+
 // The same id whether the server is in this process or across a connection:
 // the arrangement this Mac left behind is this Mac's either way (remote.md §5).
 const me = await clientId();
@@ -158,16 +163,27 @@ async function attach(conn: Connection): Promise<Attached> {
     };
   }
   const argv = sshCommand(conn, KNOWN_HOSTS_PATH, userKnownHosts());
-  const wire = clientConnection(spawnDuplex(argv), { push, build, client: me });
+  // Reconnecting, because an ssh over a real network dies for reasons that
+  // have nothing to do with either end: a laptop lid, a changed network, an
+  // idle timeout on a middlebox. The dial is re-run each attempt, so a fresh
+  // ssh is spawned every time rather than a dead one being poked.
+  //
   // Throws when the two ends disagree about the protocol, with both versions
   // named, and when the ssh child dies before saying anything (a refused key,
   // an unknown host, no route). Either way the manager keeps the connection
   // that is already working and reports this one, so the throw is the whole
   // error handling: nothing here has to decide what to do about it.
-  const peer = await wire.ready.catch((err: unknown) => {
-    wire.close();
-    throw err;
+  const wire = await reconnectingClient({
+    dial: () => spawnDuplex(argv),
+    push,
+    build,
+    client: me,
+    onState: (state, detail) => {
+      if (state !== "live") console.warn(`[connect] ${conn.name}: ${detail}`);
+      sayConnectionState({ state, detail });
+    },
   });
+  const peer = await wire.ready;
   console.log(`[connect] ${conn.name} (${conn.destination}): ledge-server ${peer.build}`);
   return {
     requests: await clientOverlay(wire.requests, clientNative),

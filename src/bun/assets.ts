@@ -161,49 +161,16 @@ export async function rawAssetBytes(root: string, src: string): Promise<Buffer |
   }
 }
 
-// Read the pasteboard's image as PNG bytes, or null when it holds none.
-// pbpaste is text-only, so this goes through osascript: AppKit promises a PNG
-// rendition of whatever image flavor is on the pasteboard (a screenshot IS
-// PNG; a browser-copied image is TIFF and converts), and «class PNGf» asks
-// for exactly that. The AppleScript writes to a Bun-chosen temp file rather
-// than printing hex to stdout — same bytes, none of the doubling and parsing.
-export async function pasteboardImage(root: string): Promise<Uint8Array | null> {
-  const assetsDir = assetsDirOf(assertRegisteredRoot(root));
-  await mkdir(assetsDir, { recursive: true });
-  tmpCounter += 1;
-  const tmp = join(assetsDir, `.paste.tmp-${process.pid}-${tmpCounter}`);
-  const script = [
-    "try",
-    "  set d to the clipboard as «class PNGf»",
-    "on error",
-    '  return "none"',
-    "end try",
-    `set f to open for access POSIX file ${JSON.stringify(tmp)} with write permission`,
-    "write d to f",
-    "close access f",
-    'return "ok"',
-  ].join("\n");
-  try {
-    const p = Bun.spawn(["osascript", "-e", script], { stdout: "pipe", stderr: "ignore" });
-    const out = (await new Response(p.stdout).text()).trim();
-    await p.exited;
-    if (out !== "ok") return null;
-    const bytes = await readFile(tmp);
-    return new Uint8Array(bytes);
-  } catch {
-    return null; // no osascript (non-macOS), or the write failed: no image
-  } finally {
-    await unlink(tmp).catch(() => {}); // discard our own temp, like writeNote
-  }
-}
-
-/** The whole paste flow: pasteboard → <root>/.ledge-assets, or null when
- * there is no image. `seal` when the pasting note is locked (the caller —
- * bun/index.ts — derives that from the note itself, never from the view's
- * say-so). The osascript temp is transient plaintext either way, unlinked
- * immediately: the documented caveat (locking.md §5). */
-export async function pasteImageAsset(root: string, seal = false): Promise<string | null> {
-  const bytes = await pasteboardImage(root);
-  if (!bytes || bytes.length === 0) return null;
+/** The server's half of a paste: bytes in, reference out, or null when the
+ * pasteboard held no image and the client sent none. `seal` when the pasting
+ * note is locked, which the caller reads off the note itself and never off a
+ * view flag (locking.md §5).
+ *
+ * The pasteboard half is the CLIENT's (bun/clipboard.ts, remote.md §10): a
+ * server across a connection has no pasteboard, and this file has no business
+ * spawning osascript to find one. What stayed here is everything that decides
+ * the file. */
+export async function writePastedImage(root: string, bytes: Uint8Array, seal = false): Promise<string | null> {
+  if (bytes.length === 0) return null;
   return savePastedImage(root, bytes, ".png", seal);
 }

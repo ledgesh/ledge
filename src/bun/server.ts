@@ -21,6 +21,7 @@ import { InlinePool, type InlineEvent } from "./inlinePool";
 import { takePaste } from "./paste";
 import { readProfile, writeProfile } from "./profiles";
 import type { ClientMethod } from "./clientSeams";
+import type { ClientPush } from "../shared/wire";
 import {
   backlinksTo,
   changeVaultPassphrase,
@@ -66,7 +67,7 @@ import { revealLog, write as writeLog } from "./log";
 import { installShim, tildify } from "./cliShim";
 import { OPEN_REQUEST_PATH, takeOpenRequest } from "./openRequest";
 import { syncWatchers } from "./watch";
-import { pasteImageAsset, readAsset } from "./assets";
+import { readAsset, writePastedImage } from "./assets";
 import { interpretersFor, runnerFor } from "./runner";
 import { loadSettings, readSettingsFile, writeSettingsFile } from "./settings";
 import { resolveShellArgs, resolveSpawn, stampSessionFacts, type SessionFacts, type SpawnDeps } from "./spawnParams";
@@ -79,9 +80,16 @@ import { isHostName, LOCAL_HOST, type NoteParams } from "../shared/frontmatter";
 // method per message. The shell implements it over the Electrobun RPC; a
 // socket transport implements it by writing frames. The server itself sends
 // all of them but `menuCommand`, which an AppKit click originates.
-export type ServerPush = {
+//
+// CLIENT_PUSHES are subtracted rather than stubbed. `connectionState` is a
+// fact about the wire, and the end on the far side of a dropped one cannot
+// report it (remote.md §7); leaving it in this type would hand every server a
+// method whose only correct implementation is not to call it.
+export type ViewPush = {
   [K in keyof LedgeRPC["webview"]["messages"]]: (payload: LedgeRPC["webview"]["messages"][K]) => void;
 };
+
+export type ServerPush = Omit<ViewPush, ClientPush>;
 
 // The request half, derived from the schema rather than from Electrobun's
 // generics, so this object is a plain map any transport can call. Binding it
@@ -126,6 +134,7 @@ function clientSeamRefusals(): Pick<RequestHandlers, ClientMethod> {
     clipboardRead: refuse("clipboardRead"),
     clipboardWrite: refuse("clipboardWrite"),
     clipboardReadRich: refuse("clipboardReadRich"),
+    assetPaste: refuse("assetPaste"),
     linkOpen: refuse("linkOpen"),
     menuSet: refuse("menuSet"),
     connectionList: refuse("connectionList"),
@@ -138,6 +147,10 @@ function clientSeamRefusals(): Pick<RequestHandlers, ClientMethod> {
 
 export interface LedgeServer {
   requests: RequestHandlers;
+  /** Whether anything is mid-job: a block running, or a drawer's shell inside
+   * a command. Asked by the daemon when its last client goes away (remote.md
+   * §7) — a run keeps going, an idle prompt is not worth a process. */
+  running(): boolean;
   // Tear down every shell. The caller owns the process-exit hook, because it
   // usually has its own last-moment work (the shell saves the window frame).
   shutdown(): void;
@@ -779,24 +792,25 @@ export async function createServer(deps: {
     },
     // Both guarded inside bun/assets.ts: the root must be registered, the
     // src passes assertions (in-root, image extension, no dot-entries)
-    // before it is read, and assetPaste names the file itself — the view
-    // supplies nothing but handles it was given.
+    // before it is read, and assetWrite names the file itself — the client
+    // supplies nothing but bytes and handles it was given.
     assetRead: async ({ root, src }) => {
       const res = await readAsset(root, src);
       if (res !== null && "sealed" in res) return { image: null, sealed: true };
       return { image: res };
     },
-    // Whether the paste is sealed at birth comes from the NOTE, not the
-    // view: the view names the file, the server asks the disk if it is
-    // locked (the same two-ended stance as every guard). A notePath outside
-    // the pasting root is a client bug and pastes unsealed into nothing —
-    // the guard below throws before any write.
-    assetPaste: async ({ root, notePath }) => {
+    // The bytes arrive from whichever machine the pasteboard is on
+    // (remote.md §10); everything that decides the FILE is here. Whether the
+    // paste is sealed at birth comes from the NOTE, not from the sender: the
+    // server asks the disk if it is locked, the same two-ended stance as
+    // every guard. A notePath outside the pasting root is a client bug and
+    // pastes unsealed into nothing — the guard below throws before any write.
+    assetWrite: async ({ root, notePath, dataB64 }) => {
       const seal =
         typeof notePath === "string" && notePath !== "" && rootContaining(notePath) === assertRegisteredRoot(root)
           ? await isNoteLocked(notePath)
           : false;
-      return { src: await pasteImageAsset(root, seal) };
+      return { src: await writePastedImage(root, fromB64(dataB64), seal) };
     },
     // This machine's half of the snapshot. A connected client merges its own
     // half over the top before the view sees it (remote.md §5); a server has
@@ -960,6 +974,10 @@ export async function createServer(deps: {
 
   return {
     requests,
+    // isBusy, not "a shell exists": a note's terminal drawer keeps its zsh
+    // sitting at a prompt for as long as the tab is open, and that is not work
+    // in progress.
+    running: () => inlinePool.running() || [...terms.values()].some(isBusy),
     shutdown() {
       clearInterval(drain);
       inlinePool.closeAll();

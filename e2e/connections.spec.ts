@@ -106,3 +106,28 @@ test("⌫ removes a configured server, and refuses on the one in use", async ({ 
   await expect(options).toHaveCount(1);
   await expect(options.first()).toHaveText(/This Mac/);
 });
+
+// A wire that dropped (remote.md §7). The name in the bar is still the right
+// machine; what changed is whether it can be reached, and an app that keeps
+// taking keystrokes for a server it cannot reach looks like it is working.
+test("a dropped connection says so, and says so again when it comes back", async ({ page }) => {
+  await expect(bar(page)).toHaveAttribute("data-link", "live");
+  await expect(bar(page)).not.toHaveText(/reconnecting/);
+
+  await page.evaluate(() => window.__harness.linkState("reconnecting", "The connection dropped. Reconnecting…"));
+  await expect(bar(page)).toHaveAttribute("data-link", "reconnecting");
+  await expect(bar(page)).toHaveText(/reconnecting/);
+  // Still the machine it always was: a drop is not a switch.
+  await expect(bar(page)).toHaveText(/This Mac/);
+
+  await page.evaluate(() => window.__harness.linkState("live", ""));
+  await expect(bar(page)).toHaveAttribute("data-link", "live");
+  await expect(bar(page)).not.toHaveText(/reconnecting/);
+});
+
+test("a connection that will not come back is disconnected, not reconnecting", async ({ page }) => {
+  await page.evaluate(() => window.__harness.linkState("lost", "Lost the connection: host is down."));
+  await expect(bar(page)).toHaveAttribute("data-link", "lost");
+  await expect(bar(page)).toHaveText(/disconnected/);
+  await expect(bar(page)).toHaveAttribute("title", /host is down/);
+});

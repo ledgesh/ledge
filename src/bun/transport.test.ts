@@ -18,7 +18,8 @@ import {
   PUSH_MESSAGES,
   type WireMessage,
 } from "../shared/wire";
-import { clientConnection, serverConnection, type Duplex } from "./transport";
+import { clientConnection, reconnectingClient, serverConnection, type Duplex, type ServerConnection } from "./transport";
+import { createOpLog } from "./opLog";
 import type { RequestHandlers, ServerPush } from "./server";
 
 // --- a pipe -------------------------------------------------------------------
@@ -153,7 +154,7 @@ function rawClient(end: Duplex) {
 describe("a client and a server over one connection", () => {
   function connect(over?: Record<string, (p: never) => unknown>) {
     const pipe = pipePair();
-    const server = serverConnection(pipe.a, "0.1.0");
+    const server = serverConnection(pipe.a, { build: "0.1.0" });
     server.serve(handlers(over));
     const { push, seen } = recordingPush();
     const client = clientConnection(pipe.b, { push, build: "0.1.0" });
@@ -169,7 +170,7 @@ describe("a client and a server over one connection", () => {
 
   test("the handshake identifies the peer's build", async () => {
     const pipe = pipePair();
-    serverConnection(pipe.a, "9.9.9").serve(handlers());
+    serverConnection(pipe.a, { build: "9.9.9" }).serve(handlers());
     const client = clientConnection(pipe.b, { push: recordingPush().push, build: "0.1.0" });
     expect((await client.ready).build).toBe("9.9.9");
   });
@@ -180,7 +181,7 @@ describe("a client and a server over one connection", () => {
   // handler runs.
   test("the server learns which client connected", async () => {
     const pipe = pipePair();
-    const server = serverConnection(pipe.a, "0.1.0");
+    const server = serverConnection(pipe.a, { build: "0.1.0" });
     server.serve(handlers());
     const client = clientConnection(pipe.b, { push: recordingPush().push, build: "0.1.0", client: "mac-1" });
     await client.ready;
@@ -189,7 +190,7 @@ describe("a client and a server over one connection", () => {
 
   test("a client that names nobody is still a client", async () => {
     const pipe = pipePair();
-    const server = serverConnection(pipe.a, "0.1.0");
+    const server = serverConnection(pipe.a, { build: "0.1.0" });
     server.serve(handlers());
     const client = clientConnection(pipe.b, { push: recordingPush().push, build: "0.1.0" });
     await client.ready;
@@ -255,7 +256,7 @@ describe("a client and a server over one connection", () => {
 describe("a server facing a misbehaving client", () => {
   function listen(handlerMap: RequestHandlers | null = handlers()) {
     const pipe = pipePair();
-    const server = serverConnection(pipe.a, "0.1.0");
+    const server = serverConnection(pipe.a, { build: "0.1.0" });
     if (handlerMap) server.serve(handlerMap);
     return { server, client: rawClient(pipe.b) };
   }
@@ -333,13 +334,52 @@ describe("a server facing a misbehaving client", () => {
     });
   });
 
-  test("a binary frame ends the connection, because nothing routes one yet", async () => {
+  // A binary frame is claimed by the control frame right behind it (wire.ts).
+  // These are the three ways a peer can break that rule, and all three are
+  // fatal for the same reason a bad length is: there is no resynchronizing a
+  // stream whose framing is in doubt.
+  test("bytes that no control frame claims end the connection", async () => {
     await quiet(async () => {
       const { client } = listen();
       client.send(hello("client", "0.1.0"));
       client.raw(encodeBinary(1, new Uint8Array([1, 2, 3])));
+      client.send({ t: "req", id: 1, m: "vaultState", p: {} });
       await settle();
-      expect(client.last()).toMatchObject({ t: "bye", why: "binary frames are not routed yet" });
+      expect(client.last()).toMatchObject({ t: "bye", why: expect.stringContaining("no control frame claimed") });
+    });
+  });
+
+  test("two binary frames with nothing between them end the connection", async () => {
+    await quiet(async () => {
+      const { client } = listen();
+      client.send(hello("client", "0.1.0"));
+      client.raw(encodeBinary(1, new Uint8Array([1])));
+      client.raw(encodeBinary(2, new Uint8Array([2])));
+      await settle();
+      expect(client.last()).toMatchObject({ t: "bye", why: expect.stringContaining("two binary frames") });
+    });
+  });
+
+  test("claiming bytes that never arrived ends the connection", async () => {
+    await quiet(async () => {
+      const { client } = listen();
+      client.send(hello("client", "0.1.0"));
+      client.send({ t: "req", id: 1, m: "assetWrite", p: { root: "/w", dataB64: "" }, bin: 7 });
+      await settle();
+      expect(client.last()).toMatchObject({ t: "bye", why: expect.stringContaining("did not arrive") });
+    });
+  });
+
+  // A method with no binary field has nowhere to put bytes, so accepting them
+  // would mean silently dropping what a peer sent.
+  test("bytes attached to a method that carries none end the connection", async () => {
+    await quiet(async () => {
+      const { client } = listen();
+      client.send(hello("client", "0.1.0"));
+      client.raw(encodeBinary(3, new Uint8Array([1])));
+      client.send({ t: "req", id: 1, m: "vaultState", p: {}, bin: 3 });
+      await settle();
+      expect(client.last()).toMatchObject({ t: "bye", why: expect.stringContaining("carries none") });
     });
   });
 
@@ -386,5 +426,358 @@ describe("a client facing a server that will not talk", () => {
     // The client's own hello and nothing after it: a request never went out
     // over a connection whose protocol was already in doubt.
     expect(seen.length).toBe(1);
+  });
+});
+
+// --- what phase 4 added -------------------------------------------------------
+
+describe("bytes ride binary frames rather than base64 (remote.md §3)", () => {
+  // The saving is on the WIRE only: the schema still says base64 and the view
+  // still receives it, because Electrobun's bridge is JSON either way. So the
+  // assertion is in two halves — the payload arrives intact, and the bytes did
+  // not travel inflated.
+  test("a pasted image's bytes cross as bytes and arrive as the same base64", async () => {
+    const pipe = pipePair();
+    const seen: unknown[] = [];
+    const server = serverConnection(pipe.a, { build: "0.1.0" });
+    server.serve(
+      handlers({
+        assetWrite: (p: never) => {
+          seen.push(p);
+          return { src: ".ledge-assets/pasted-2026-08-01.png" };
+        },
+      }),
+    );
+    const client = clientConnection(pipe.b, { push: recordingPush().push, build: "0.1.0" });
+    // A PNG header plus a byte that is not valid UTF-8 on its own, which is
+    // the whole reason these payloads are base64 in the schema.
+    const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0xff, 0xfe, 0x00, 0x01]);
+    const dataB64 = Buffer.from(bytes).toString("base64");
+    expect(await client.requests.assetWrite({ root: "/w", notePath: null, dataB64 })).toEqual({
+      src: ".ledge-assets/pasted-2026-08-01.png",
+    });
+    expect(seen).toEqual([{ root: "/w", notePath: null, dataB64 }]);
+  });
+
+  test("terminal output leaves as a binary frame, and its base64 is rebuilt on arrival", async () => {
+    const pipe = pipePair();
+    const server = serverConnection(pipe.a, { build: "0.1.0", coalesce: { ms: 0 } });
+    server.serve(handlers());
+    const { push, seen } = recordingPush();
+    const client = clientConnection(pipe.b, { push, build: "0.1.0" });
+    await client.ready;
+    // Bytes that are not valid UTF-8: a payload that survived the trip as
+    // bytes rather than as text is the assertion.
+    const bytes = new Uint8Array(3000).fill(0xab);
+    server.push.terminalOutput({ sessionId: "s1", dataB64: Buffer.from(bytes).toString("base64") });
+    await settle();
+    expect(seen).toEqual([["terminalOutput", { sessionId: "s1", dataB64: Buffer.from(bytes).toString("base64") }]]);
+  });
+
+  test("the bytes on the wire are the payload's size, not a third more", async () => {
+    const pipe = pipePair();
+    const server = serverConnection(pipe.a, { build: "0.1.0", coalesce: { ms: 0 } });
+    server.serve(handlers());
+    let bytesOut = 0;
+    const decoder = new FrameDecoder();
+    let sawBinary = false;
+    pipe.b.onData = (chunk) => {
+      bytesOut += chunk.length;
+      for (const frame of decoder.push(chunk)) if (frame.type !== CONTROL_FRAME) sawBinary = true;
+    };
+    await settle();
+    const before = bytesOut;
+    const payload = new Uint8Array(30_000).fill(7);
+    server.push.terminalOutput({ sessionId: "s1", dataB64: Buffer.from(payload).toString("base64") });
+    await settle();
+    expect(sawBinary).toBe(true);
+    // Base64 would have cost 40_000. The slack is the two frame headers and
+    // the JSON around them.
+    expect(bytesOut - before).toBeLessThan(payload.length + 200);
+  });
+});
+
+describe("terminal output is coalesced (remote.md §3)", () => {
+  // Reassembles what the wire took apart: terminal output leaves as a binary
+  // frame followed by a control frame with the field blanked, so a tap that
+  // only read control frames would see every payload as empty.
+  function tap(pipe: { a: Endpoint; b: Endpoint }) {
+    const decoder = new FrameDecoder();
+    const control: WireMessage[] = [];
+    let held: Uint8Array | null = null;
+    pipe.b.onData = (chunk) => {
+      for (const frame of decoder.push(chunk)) {
+        if (frame.type !== CONTROL_FRAME) {
+          held = frame.bytes;
+          continue;
+        }
+        const msg = parseControl(frame.text);
+        if (msg.t === "push" && msg.bin !== undefined && held) {
+          (msg.p as { dataB64: string }).dataB64 = Buffer.from(held).toString("base64");
+          held = null;
+        }
+        control.push(msg);
+      }
+    };
+    return control;
+  }
+
+  const outputs = (msgs: WireMessage[]) => msgs.filter((m) => m.t === "push" && m.m === "terminalOutput");
+
+  // Nagle's shape, not a fixed delay: an echoed keystroke must not wait, so
+  // the first chunk after a quiet moment goes out at once and only a shell
+  // that is producing CONTINUOUSLY is batched.
+  test("the first chunk after a quiet moment is not held", async () => {
+    const pipe = pipePair();
+    const server = serverConnection(pipe.a, { build: "0.1.0", coalesce: { ms: 40 } });
+    const control = tap(pipe);
+    server.push.terminalOutput({ sessionId: "s", dataB64: Buffer.from("a").toString("base64") });
+    await settle();
+    expect(outputs(control).length).toBe(1);
+  });
+
+  test("chunks behind it are batched into one frame, in order", async () => {
+    const pipe = pipePair();
+    const server = serverConnection(pipe.a, { build: "0.1.0", coalesce: { ms: 30 } });
+    const control = tap(pipe);
+    const say = (t: string) => server.push.terminalOutput({ sessionId: "s", dataB64: Buffer.from(t).toString("base64") });
+    say("one");
+    say("two");
+    say("three");
+    await new Promise((r) => setTimeout(r, 60));
+    const sent = outputs(control);
+    // The first went straight out; the two behind it arrived as one.
+    expect(sent.length).toBe(2);
+    const joined = sent.map((m) => Buffer.from((m as { p: { dataB64: string } }).p.dataB64, "base64").toString()).join("");
+    expect(joined).toBe("onetwothree");
+  });
+
+  test("two sessions are two streams", async () => {
+    const pipe = pipePair();
+    const server = serverConnection(pipe.a, { build: "0.1.0", coalesce: { ms: 30 } });
+    const control = tap(pipe);
+    server.push.terminalOutput({ sessionId: "a", dataB64: Buffer.from("x").toString("base64") });
+    await new Promise((r) => setTimeout(r, 40));
+    server.push.terminalOutput({ sessionId: "a", dataB64: Buffer.from("1").toString("base64") });
+    server.push.terminalOutput({ sessionId: "b", dataB64: Buffer.from("2").toString("base64") });
+    server.push.terminalOutput({ sessionId: "a", dataB64: Buffer.from("3").toString("base64") });
+    await new Promise((r) => setTimeout(r, 60));
+    const byId = new Map<string, string>();
+    for (const m of outputs(control)) {
+      const p = (m as { p: { sessionId: string; dataB64: string } }).p;
+      byId.set(p.sessionId, (byId.get(p.sessionId) ?? "") + Buffer.from(p.dataB64, "base64").toString());
+    }
+    expect(byId.get("a")).toBe("x13");
+    expect(byId.get("b")).toBe("2");
+  });
+
+  // The ordering rule, and the reason it is not optional: terminalAttach's
+  // answer IS the scrollback up to that instant. Output held back from before
+  // it would be painted on top of a snapshot that already contains it.
+  test("held output is flushed before anything else is sent", async () => {
+    const pipe = pipePair();
+    const server = serverConnection(pipe.a, { build: "0.1.0", coalesce: { ms: 200 } });
+    server.serve(handlers({ terminalAttach: () => ({ dataB64: "", host: "local" }) }));
+    const control = tap(pipe);
+    const say = (t: string) => server.push.terminalOutput({ sessionId: "s", dataB64: Buffer.from(t).toString("base64") });
+    say("first");
+    say("held");
+    server.push.terminalExit({ sessionId: "s" });
+    await settle();
+    const order = control.filter((m) => m.t === "push").map((m) => (m as { m: string }).m);
+    expect(order).toEqual(["terminalOutput", "terminalOutput", "terminalExit"]);
+  });
+});
+
+describe("a replayed request applies once (remote.md §7)", () => {
+  // The op log belongs to the SERVER and is handed to each connection, because
+  // the whole point is that it survives the connection that filled it.
+  function twoConnections(handlerMap: RequestHandlers) {
+    const ops = createOpLog();
+    const open = () => {
+      const pipe = pipePair();
+      const server = serverConnection(pipe.a, { build: "0.1.0", ops, instance: "one-server" });
+      server.serve(handlerMap);
+      const client = clientConnection(pipe.b, { push: recordingPush().push, build: "0.1.0", client: "mac-1" });
+      return { server, client, pipe };
+    };
+    return { open };
+  }
+
+  test("the same op on a second connection is answered from the record, not run again", async () => {
+    let writes = 0;
+    const { open } = twoConnections(handlers({ noteWrite: () => ({ mtimeMs: ++writes, divergedTo: null }) }));
+    const first = open();
+    expect(await first.client.call("noteWrite", { path: "/a.md" }, "n1:1")).toEqual({ mtimeMs: 1, divergedTo: null });
+    first.client.close();
+
+    const second = open();
+    expect(await second.client.call("noteWrite", { path: "/a.md" }, "n1:1")).toEqual({ mtimeMs: 1, divergedTo: null });
+    expect(writes).toBe(1);
+  });
+
+  test("a request with no op is run every time, because a read is its own answer", async () => {
+    let reads = 0;
+    const { open } = twoConnections(handlers({ noteList: () => ({ notes: [], n: ++reads }) }));
+    const c = open();
+    await c.client.call("noteList", { root: "/w" });
+    await c.client.call("noteList", { root: "/w" });
+    expect(reads).toBe(2);
+  });
+
+  // Different clients count from 1 independently, so the window has to be
+  // scoped by who is asking or two apps on one machine would answer each
+  // other's writes.
+  test("two clients' op ids do not collide", async () => {
+    let writes = 0;
+    const ops = createOpLog();
+    const handlerMap = handlers({ noteWrite: () => ({ mtimeMs: ++writes, divergedTo: null }) });
+    const open = (who: string) => {
+      const pipe = pipePair();
+      serverConnection(pipe.a, { build: "0.1.0", ops }).serve(handlerMap);
+      return clientConnection(pipe.b, { push: recordingPush().push, build: "0.1.0", client: who });
+    };
+    await open("mac").call("noteWrite", { path: "/a.md" }, "n:1");
+    await open("phone").call("noteWrite", { path: "/a.md" }, "n:1");
+    expect(writes).toBe(2);
+  });
+});
+
+describe("a client that reconnects", () => {
+  /** A server behind a dial() that can be cut and rebuilt, which is what a
+   * dropped ssh looks like from this side. */
+  function reconnectable(handlerMap: RequestHandlers, opts: { instance?: () => string } = {}) {
+    const ops = createOpLog();
+    let current: { server: ServerConnection; pipe: ReturnType<typeof pipePair> } | null = null;
+    let dials = 0;
+    const dial = (): Duplex => {
+      dials += 1;
+      const pipe = pipePair();
+      const server = serverConnection(pipe.a, {
+        build: "0.1.0",
+        ops,
+        instance: opts.instance ? opts.instance() : "one-server",
+      });
+      server.serve(handlerMap);
+      current = { server, pipe };
+      return pipe.b;
+    };
+    return { dial, cut: () => current?.pipe.a.close(), dials: () => dials };
+  }
+
+  const instant = { delaysMs: [0, 0, 0], sleep: () => Promise.resolve() };
+
+  test("a request in flight when the wire drops is finished by the next connection", async () => {
+    let writes = 0;
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    let first = true;
+    const wire = reconnectable(
+      handlers({
+        noteWrite: async () => {
+          if (first) {
+            first = false;
+            await held; // the answer this connection never gets to send
+          }
+          return { mtimeMs: ++writes, divergedTo: null };
+        },
+      }),
+    );
+    const client = await reconnectingClient({ dial: wire.dial, push: recordingPush().push, build: "0.1.0", ...instant });
+    const pending = client.requests.noteWrite({ path: "/a.md", text: "x", baseMtimeMs: null });
+    await settle();
+    wire.cut();
+    release();
+    // The first connection ran it; the replay is answered from the record, so
+    // the caller gets an answer and the file was written once.
+    expect(await pending).toEqual({ mtimeMs: 1, divergedTo: null });
+    expect(writes).toBe(1);
+    expect(wire.dials()).toBe(2);
+  });
+
+  test("a request made mid-reconnect waits instead of failing", async () => {
+    const wire = reconnectable(handlers());
+    const client = await reconnectingClient({ dial: wire.dial, push: recordingPush().push, build: "0.1.0", ...instant });
+    wire.cut();
+    // No settle in between: this is issued while the ladder is still climbing.
+    expect(await client.requests.vaultState({})).toEqual({ state: "locked" });
+  });
+
+  test("the indicator is told, in order", async () => {
+    const states: string[] = [];
+    const wire = reconnectable(handlers());
+    const client = await reconnectingClient({
+      dial: wire.dial,
+      push: recordingPush().push,
+      build: "0.1.0",
+      onState: (s) => states.push(s),
+      ...instant,
+    });
+    wire.cut();
+    await client.requests.vaultState({});
+    expect(states).toEqual(["reconnecting", "live"]);
+  });
+
+  // A handler saying no is an ANSWER, and answers are final. Only a transport
+  // failure is worth replaying, or every refusal would be retried against a
+  // server that already refused it.
+  test("a refusal is reported, not replayed", async () => {
+    const wire = reconnectable(handlers());
+    const client = await reconnectingClient({ dial: wire.dial, push: recordingPush().push, build: "0.1.0", ...instant });
+    await expect(client.requests.noteRead({ path: "../../.ssh/id_rsa" })).rejects.toThrow("outside the workspace roots");
+    expect(wire.dials()).toBe(1);
+  });
+
+  // The one case where replaying would apply a write twice: a fresh server has
+  // an empty op log, so it cannot tell a replay from a first attempt.
+  test("a DIFFERENT server answering fails what was in flight rather than replaying it", async () => {
+    let n = 0;
+    const wire = reconnectable(handlers({ noteWrite: () => new Promise(() => {}) }), { instance: () => `run-${++n}` });
+    const states: string[] = [];
+    const client = await reconnectingClient({
+      dial: wire.dial,
+      push: recordingPush().push,
+      build: "0.1.0",
+      onState: (s, d) => states.push(`${s}:${d}`),
+      ...instant,
+    });
+    const pending = client.requests.noteWrite({ path: "/a.md", text: "x", baseMtimeMs: null });
+    await settle();
+    wire.cut();
+    await expect(pending).rejects.toThrow("the server restarted");
+    expect(states.at(-1)).toContain("lost:");
+  });
+
+  test("a ladder that runs out gives up, says the last reason, and stops pretending", async () => {
+    let alive = true;
+    let cut!: () => void;
+    const dial = (): Duplex => {
+      if (!alive) throw new Error("host is down");
+      const pipe = pipePair();
+      serverConnection(pipe.a, { build: "0.1.0", instance: "one-server" }).serve(
+        handlers({ noteWrite: () => new Promise(() => {}) }),
+      );
+      cut = () => pipe.a.close();
+      return pipe.b;
+    };
+    const states: string[] = [];
+    const client = await reconnectingClient({
+      dial,
+      push: recordingPush().push,
+      build: "0.1.0",
+      onState: (s, d) => states.push(`${s}:${d}`),
+      ...instant,
+    });
+    const pending = client.requests.noteWrite({ path: "/a.md", text: "x", baseMtimeMs: null });
+    await settle();
+    alive = false;
+    cut();
+    // What was in flight is failed with the reason, rather than waiting on a
+    // wire that is not coming back.
+    await expect(pending).rejects.toThrow("host is down");
+    expect(states.at(-1)).toContain("lost:");
+    // And nothing new is accepted: an app that keeps taking requests for a
+    // server it cannot reach looks like it is working.
+    await expect(client.requests.vaultState({})).rejects.toThrow("There is no connection to the server.");
   });
 });

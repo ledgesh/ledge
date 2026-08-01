@@ -1,53 +1,88 @@
-// `ledge-server serve`: the Ledge server on stdin and stdout (remote.md §3).
+// `ledge-server`: this machine's notes, reachable over ssh (remote.md §3).
 //
-// The same createServer() the Mac app runs in-process, with a frame codec
-// where the Electrobun RPC would be. A remote client reaches it as
-// `ssh <target> ledge-server serve`; a local one spawns it as a child. The two
-// are the same command over a different length of wire, which is the whole
-// reason the remote path does not get its own, less-tested implementation.
+// Two verbs, and the split is the phase 4 change. `serve` is what a client
+// runs — `ssh <target> ledge-server serve`, and what an `authorized_keys`
+// forced command names (§4) — and it is a byte pump between stdio and the
+// daemon's socket. `daemon` is the server itself: it holds the notes, the
+// shells, and the watchers, and it outlives every connection to it (§7), which
+// is what makes a run survive the wire dropping and what lets a reconnecting
+// client replay safely.
+//
+// A pump rather than a server is also why `serve` needs no protocol knowledge
+// at all. It never parses a frame, so an ssh session cannot desynchronize one:
+// it moves bytes and reports when they stop.
 //
 // stdout belongs to the protocol. Every console line is rerouted to stderr
 // before anything can log (bun/mcp.ts has the same rule for the same reason):
 // one stray byte in a length-prefixed stream desynchronizes it with no way
 // back, and the session log keeps a copy either way.
-import { createServer, type NativeDeps } from "./server";
-import { serverConnection, stdioDuplex } from "./transport";
+import { connectToDaemon, DAEMON_LOG, startDaemon, SOCKET_PATH } from "./daemon";
+import { stdioDuplex } from "./transport";
 import { startLogging } from "./log";
 import { APP_HOME } from "./workspaces";
 import { BUILD_VERSION } from "../shared/version";
 
-// A server has no window: no folder dialog, no pasteboard, no menu bar
-// (remote.md §5). The seams are absent rather than stubbed, so the two
-// handlers that need one refuse with a reason instead of silently doing
-// nothing; remote.md §10 moves them to the client outright.
-const HEADLESS: NativeDeps = {};
-
+/**
+ * Pump stdio to the daemon and back. Resolves when either end hangs up.
+ *
+ * Both directions are closed together: half a pipe is a client waiting on a
+ * server that is gone, and the client's own reconnect (bun/transport.ts) is
+ * what turns a clean hangup into a new attempt.
+ */
 export async function serve(): Promise<void> {
-  // The connection first, because createServer needs somewhere to push before
-  // it has finished booting. Requests that arrive during the boot wait in the
-  // connection rather than being answered by a half-built server.
-  const conn = serverConnection(stdioDuplex(), BUILD_VERSION);
-  const server = await createServer({ push: conn.push, native: HEADLESS, client: () => conn.client() });
-  conn.serve(server.requests);
-  console.error(`[serve] ledge-server ${BUILD_VERSION} on stdio; app home: ${APP_HOME}`);
-  // The client hanging up is the shutdown signal, as it is for the MCP server.
-  await conn.closed;
-  server.shutdown();
+  const upstream = await connectToDaemon();
+  const mine = stdioDuplex();
+
+  let over!: () => void;
+  const done = new Promise<void>((resolve) => (over = resolve));
+  let ended = false;
+  const end = () => {
+    if (ended) return;
+    ended = true;
+    try {
+      upstream.close();
+    } catch {
+      // Already gone.
+    }
+    over();
+  };
+
+  upstream.onData = (chunk) => mine.write(chunk);
+  upstream.onClose = end;
+  mine.onData = (chunk) => upstream.write(chunk);
+  mine.onClose = end;
+
+  console.error(`[serve] ledge-server ${BUILD_VERSION} attached to ${SOCKET_PATH}`);
+  await done;
+}
+
+export async function daemon(): Promise<void> {
+  const d = await startDaemon();
+  console.error(`[daemon] ledge-server ${BUILD_VERSION} on ${SOCKET_PATH}; app home: ${APP_HOME}`);
+  // A signal is how a supervisor stops this — and how the probe does.
+  for (const sig of ["SIGTERM", "SIGINT"] as const) process.on(sig, () => d.stop());
+  await d.done;
 }
 
 if (import.meta.main) {
   console.log = console.error;
   console.info = console.error;
   console.debug = console.error;
-  startLogging();
 
-  const verb = process.argv[2];
-  if (verb !== undefined && verb !== "serve") {
-    console.error("usage: ledge-server [serve]");
-    console.error("The protocol rides stdin and stdout; there is nothing else to run.");
+  const verb = process.argv[2] ?? "serve";
+  if (verb !== "serve" && verb !== "daemon") {
+    console.error("usage: ledge-server [serve|daemon]");
+    console.error("  serve   the protocol on stdin and stdout, attached to this machine's daemon");
+    console.error("  daemon  BE this machine's server; started on demand by serve");
     process.exit(2);
   }
 
-  await serve();
+  // Separate files. Both can be running at once on one machine, and two
+  // processes appending to one log interleave their lines and race each
+  // other's rotation.
+  startLogging(verb === "daemon" ? DAEMON_LOG : "ledge-serve");
+
+  if (verb === "daemon") await daemon();
+  else await serve();
   process.exit(0);
 }

@@ -67,6 +67,29 @@ function emit(): void {
   for (const fn of subscribers) fn();
 }
 
+/**
+ * Whether the wire is up (remote.md §7), pushed by this app's own Bun side
+ * rather than by a server: the end on the far side of a dropped connection is
+ * in no position to mention it.
+ *
+ * Kept beside the connection status rather than in the store because it is the
+ * same fact at a finer grain — which machine, and whether we can currently
+ * reach it — and the indicator that renders one renders the other.
+ */
+export type LinkState = "live" | "reconnecting" | "lost";
+
+let link: { state: LinkState; detail: string } = { state: "live", detail: "" };
+
+export function linkState(): { state: LinkState; detail: string } {
+  return link;
+}
+
+export function recordLinkState(state: LinkState, detail: string): void {
+  if (link.state === state && link.detail === detail) return;
+  link = { state, detail };
+  emit();
+}
+
 export async function refreshConnections(): Promise<ConnectionStatus> {
   if (!handlers) return status;
   status = await handlers.list();

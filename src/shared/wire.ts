@@ -9,11 +9,13 @@
 // A frame is a 4-byte big-endian length, a 1-byte type, then that many bytes
 // of payload. Type 0 is a JSON control frame: requests, responses, and the
 // schema's push messages. Type 1 is a binary payload whose first 4 bytes are
-// the id of the control frame it belongs to. Nothing sends a type-1 frame yet
-// (assets and terminal output still ride base64 inside JSON, which was free
-// in-process and costs 33% on a cell connection, remote.md §12); it is defined
-// now because a header is the part of a wire format you cannot change later,
-// and moving those payloads onto it should not be a protocol break.
+// the id of the control frame it belongs to.
+//
+// A binary frame is sent IMMEDIATELY BEFORE the control frame that claims it,
+// and a receiver holds at most one. Ordering on a stream is guaranteed, so
+// that rule turns "which payload is this" into "the one that just arrived" —
+// no correlation table, no partial state a peer can grow, and a second binary
+// frame with no control frame between them is a desync rather than a queue.
 //
 // The frame parser is the entire new attack surface a forced-command key
 // exposes (remote.md §4), so it does as little as it can: a fixed header, a
@@ -25,7 +27,7 @@ import type { LedgeRPC } from "./rpc-schema";
 
 /** Bumped when the framing or the message set changes shape. A peer speaking
  * a different one is refused, never partially understood. */
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 
 export const FRAME_HEADER_BYTES = 5;
 
@@ -68,6 +70,13 @@ export interface Hello {
   // no layout to keep simply has no id, and the server files it under a shared
   // key rather than refusing the connection over a preference.
   client: string;
+  // Which RUN of the server this is: a nonce minted once per daemon process,
+  // empty from a client. A reconnecting client replays what was in flight
+  // under the same op ids, and the op log that makes that safe lives in the
+  // server's memory (bun/opLog.ts) — so a DIFFERENT instance answering is the
+  // one case where replaying would apply a write twice. Comparing this is how
+  // a client tells "the wire came back" from "the server came back".
+  instance: string;
 }
 
 /**
@@ -78,13 +87,17 @@ export interface Hello {
 export type WireMessage =
   | Hello
   // A client asking the server to run one of the schema's request handlers.
-  | { t: "req"; id: number; m: string; p: unknown }
-  | { t: "res"; id: number; r: unknown }
+  // `op` is the dedupe key (remote.md §7): present on everything a replay
+  // could apply twice, absent on the reads where running it again IS running
+  // it once. `bin` says a binary frame just arrived carrying one of this
+  // payload's fields.
+  | { t: "req"; id: number; m: string; p: unknown; op?: string; bin?: number }
+  | { t: "res"; id: number; r: unknown; bin?: number }
   // A handler that threw. Only the message travels: a stack trace names the
   // server's own paths, and the view has never had one.
   | { t: "err"; id: number; e: string }
   // One of the schema's webview messages, server to client, unsolicited.
-  | { t: "push"; m: string; p: unknown }
+  | { t: "push"; m: string; p: unknown; bin?: number }
   // The last frame before a deliberate hangup, carrying why. A refused
   // handshake has no request to answer, so without this the client would see
   // only a closed pipe and could not say what was wrong.
@@ -150,6 +163,7 @@ export const REQUEST_METHODS = [
   "logReveal",
   "assetRead",
   "assetPaste",
+  "assetWrite",
   "connectionList",
   "connectionSelect",
   "connectionAdd",
@@ -180,16 +194,138 @@ export const PUSH_MESSAGES = [
   "menuCommand",
 ] as const satisfies readonly PushMessage[];
 
+/**
+ * Pushes the client shell raises itself, which no server may send. The mirror
+ * of CLIENT_METHODS (bun/clientSeams.ts) on the other direction of the wire:
+ * the state of a connection is a fact about the wire, and the end holding the
+ * far side of a dropped one is in no position to report it.
+ */
+export const CLIENT_PUSHES = ["connectionState"] as const satisfies readonly PushMessage[];
+
+export type ClientPush = (typeof CLIENT_PUSHES)[number];
+
 // Exhaustiveness, in the direction `satisfies` cannot see. It refuses a name
 // the schema does not have; these refuse a schema name the lists do not have,
 // and the compiler's error is the missing method's own name. Between them,
 // adding to rpc-schema.ts without adding here does not build.
 type MissingRequest = Exclude<RequestMethod, (typeof REQUEST_METHODS)[number]>;
-type MissingPush = Exclude<PushMessage, (typeof PUSH_MESSAGES)[number]>;
+type MissingPush = Exclude<PushMessage, (typeof PUSH_MESSAGES)[number] | ClientPush>;
 const everyRequestListed: MissingRequest extends never ? true : MissingRequest = true;
 const everyPushListed: MissingPush extends never ? true : MissingPush = true;
 void everyRequestListed;
 void everyPushListed;
+
+// --- what a replay may repeat ------------------------------------------------
+
+/**
+ * The requests a reconnecting client may simply send again, because running
+ * one twice is indistinguishable from running it once. Everything else carries
+ * an `op` and the server dedupes on it (remote.md §7).
+ *
+ * Stated as the READS rather than as the writes on purpose. A method nobody
+ * classified then defaults to being deduped, which costs an entry in a bounded
+ * window; the other default costs a note saved twice, its own divergence guard
+ * tripping on its own bytes, and a trash copy of the user's work.
+ */
+export const READ_ONLY_METHODS = [
+  "workspaceList",
+  "noteList",
+  "noteRead",
+  "noteSearch",
+  "noteBacklinks",
+  "tagList",
+  "tagNotes",
+  "trashList",
+  "terminalStatus",
+  "profileRead",
+  "settingsGet",
+  "settingsRead",
+  "assetRead",
+  "layoutGet",
+  "vaultState",
+] as const satisfies readonly RequestMethod[];
+
+const READ_ONLY = new Set<string>(READ_ONLY_METHODS);
+
+/** Whether a request must carry an `op`. Unknown names answer true: this is
+ * asked about a method the caller is ABOUT to send, and defaulting an
+ * unrecognized one to "dedupe it" is the harmless direction. */
+export function needsOp(method: string): boolean {
+  return !READ_ONLY.has(method);
+}
+
+// --- what rides a binary frame -----------------------------------------------
+
+/**
+ * The base64 fields that travel as bytes instead, by message kind and method.
+ * Keyed `<kind>:<method>`; the value is the path to the field inside the
+ * payload, so a nested one (assetRead's image, which may be null) is reachable
+ * without a rule per shape.
+ *
+ * The SCHEMA still says base64 everywhere, and the view still receives base64:
+ * Electrobun's bridge is JSON either way, so this is an optimization for the
+ * hop that has a network in it and a no-op for the one that does not. What it
+ * buys is the 33% base64 costs, on exactly the two payloads big enough to care
+ * — a screenshot and a scrollback replay.
+ */
+export const BINARY_FIELDS: Readonly<Record<string, readonly string[]>> = {
+  "req:assetWrite": ["dataB64"],
+  "res:assetRead": ["image", "dataB64"],
+  "res:terminalAttach": ["dataB64"],
+  "push:terminalOutput": ["dataB64"],
+};
+
+export function binaryPath(kind: "req" | "res" | "push", method: string): readonly string[] | null {
+  return BINARY_FIELDS[`${kind}:${method}`] ?? null;
+}
+
+/**
+ * Pull the base64 out of a payload and return it as bytes, with the field
+ * blanked in a shallow copy. null when the field is absent or empty — a
+ * missing image is a `null` in the payload and not an empty frame, and an
+ * empty string costs a frame to say nothing.
+ *
+ * Copies only the objects along the path, so the caller's payload is untouched
+ * and the rest of it is shared rather than cloned.
+ */
+export function hoistBinary(payload: unknown, path: readonly string[]): { payload: unknown; bytes: Uint8Array } | null {
+  const at = walk(payload, path);
+  if (at === null || typeof at.value !== "string" || at.value === "") return null;
+  return { payload: replace(payload, path, ""), bytes: fromBase64(at.value) };
+}
+
+/** The inverse: put the bytes back where the sender took them from. */
+export function restoreBinary(payload: unknown, path: readonly string[], bytes: Uint8Array): unknown {
+  return replace(payload, path, toBase64(bytes));
+}
+
+function walk(payload: unknown, path: readonly string[]): { value: unknown } | null {
+  let at: unknown = payload;
+  for (const key of path) {
+    if (typeof at !== "object" || at === null) return null;
+    at = (at as Record<string, unknown>)[key];
+  }
+  return { value: at };
+}
+
+function replace(payload: unknown, path: readonly string[], value: string): unknown {
+  if (typeof payload !== "object" || payload === null) return payload;
+  const [head, ...rest] = path;
+  if (head === undefined) return payload;
+  const copy = { ...(payload as Record<string, unknown>) };
+  copy[head] = rest.length === 0 ? value : replace(copy[head], rest, value);
+  return copy;
+}
+
+// Buffer, not atob: this runs in Bun on both ends of a connection, and the two
+// conversions are on the path of every keystroke's echo.
+function toBase64(bytes: Uint8Array): string {
+  return Buffer.from(bytes).toString("base64");
+}
+
+function fromBase64(text: string): Uint8Array {
+  return new Uint8Array(Buffer.from(text, "base64"));
+}
 
 /**
  * FNV-1a over the sorted names. Not a hash for security: it is a fingerprint
@@ -217,8 +353,8 @@ export const SCHEMA_VERSION = fingerprint([
   ...PUSH_MESSAGES.map((m) => `push:${m}`),
 ]);
 
-export function hello(role: "client" | "server", build: string, client = ""): Hello {
-  return { t: "hello", role, protocol: PROTOCOL_VERSION, schema: SCHEMA_VERSION, build, client };
+export function hello(role: "client" | "server", build: string, client = "", instance = ""): Hello {
+  return { t: "hello", role, protocol: PROTOCOL_VERSION, schema: SCHEMA_VERSION, build, client, instance };
 }
 
 /**
@@ -304,6 +440,7 @@ export function parseControl(text: string): WireMessage {
       // with both numbers named, which is a far better message than "a hello
       // with no client".
       if (m["client"] !== undefined && typeof m["client"] !== "string") return bad("a hello with a non-string client");
+      if (m["instance"] !== undefined && typeof m["instance"] !== "string") return bad("a hello with a non-string instance");
       return {
         t: "hello",
         role: m["role"],
@@ -311,19 +448,26 @@ export function parseControl(text: string): WireMessage {
         schema: m["schema"],
         build: m["build"],
         client: typeof m["client"] === "string" ? m["client"] : "",
+        instance: typeof m["instance"] === "string" ? m["instance"] : "",
       };
-    case "req":
+    case "req": {
       if (!isId(m["id"]) || typeof m["m"] !== "string") return bad("a request with no id or method");
-      return { t: "req", id: m["id"], m: m["m"], p: m["p"] };
+      // Capped, because it becomes a key in a map the server keeps: a peer
+      // that can choose the key can choose how much memory the entry costs.
+      if (m["op"] !== undefined && (typeof m["op"] !== "string" || m["op"].length > MAX_OP_CHARS)) {
+        return bad("a request with an unusable op id");
+      }
+      return { t: "req", id: m["id"], m: m["m"], p: m["p"], ...opt("op", m["op"]), ...bin(m["bin"]) };
+    }
     case "res":
       if (!isId(m["id"])) return bad("a response with no id");
-      return { t: "res", id: m["id"], r: m["r"] };
+      return { t: "res", id: m["id"], r: m["r"], ...bin(m["bin"]) };
     case "err":
       if (!isId(m["id"]) || typeof m["e"] !== "string") return bad("an error with no id or message");
       return { t: "err", id: m["id"], e: m["e"] };
     case "push":
       if (typeof m["m"] !== "string") return bad("a push with no message name");
-      return { t: "push", m: m["m"], p: m["p"] };
+      return { t: "push", m: m["m"], p: m["p"], ...bin(m["bin"]) };
     case "bye":
       return { t: "bye", why: typeof m["why"] === "string" ? m["why"] : "no reason given" };
     default:
@@ -337,6 +481,21 @@ function bad(what: string): never {
 
 function isId(v: unknown): v is number {
   return typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
+}
+
+/** Long enough for a nonce and a counter, short enough that a million of them
+ * is still a rounding error. The window that holds them is bounded by count
+ * too; this bounds each entry. */
+const MAX_OP_CHARS = 128;
+
+// Absent stays absent. Spreading `{op: undefined}` would put the key in the
+// object, and the encoder would put `"op":null` on the wire for every read.
+function opt(key: string, v: unknown): Record<string, string> {
+  return typeof v === "string" ? { [key]: v } : {};
+}
+
+function bin(v: unknown): { bin?: number } {
+  return isId(v) ? { bin: v } : {};
 }
 
 /**

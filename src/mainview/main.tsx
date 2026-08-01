@@ -13,7 +13,7 @@ import { configureCli } from "./lib/cli";
 import { captureFailures, configureLog } from "./lib/log";
 import { configureAssets } from "./lib/assets";
 import { configureSettings } from "./lib/settings";
-import { configureConnections, type ConnectionStatus } from "./lib/connections";
+import { configureConnections, recordLinkState, type ConnectionStatus } from "./lib/connections";
 import { applyAppearance } from "./lib/theme";
 import { DEFAULT_SETTINGS, type Settings } from "../shared/settings";
 import { configureLayout, restoredState } from "./workspace/persist";
@@ -39,6 +39,8 @@ const rpc = Electroview.defineRPC<LedgeRPC>({
       // glyphs, palette faces) re-renders from the one record.
       vaultChanged: ({ state }) => recordVaultState(state),
       menuCommand: ({ action }) => dispatchMenuCommand(action),
+      // From this app's own Bun side, never from a server (remote.md §7).
+      connectionState: ({ state, detail }) => recordLinkState(state, detail),
     },
   },
 });

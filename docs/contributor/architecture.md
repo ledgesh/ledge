@@ -8,7 +8,9 @@ disagrees with it is wrong, or the rule is — change one deliberately.
 
 ## 1. Process topology
 
-Two processes, one contract:
+Two processes, one contract. (A connection to another machine adds a third
+across the network, and changes nothing here: the boundary is the same one,
+allowed to be a wire. `remote.md` is where that lives.)
 
 - **Bun main process** (`src/bun/`) owns everything with side effects on the
   machine: the filesystem (`notes.ts`), the PTYs (`pty.ts` via bun:ffi), and
@@ -122,6 +124,15 @@ the bundle's own bun against `Resources/app/bun/cli.js` (prebuilt by
 checkout — and refuses to overwrite anything that is not recognizably its
 own output. Verb conventions, deixis, and output discipline are
 interactions.md §9's.
+
+The third is **`ledge-server`** (`src/bun/serve.ts`, `src/bun/daemon.ts`), the
+same handler map with a frame codec where the Electrobun RPC would be. It is
+what a remote client reaches over ssh, and it has two verbs: `daemon`, which
+holds the notes and the shells behind a unix socket in the app home and
+outlives every connection to it, and `serve`, which pumps bytes between stdio
+and that socket. The Mac app does not use it — its own server is in this
+process, which is the whole point of the split (`remote.md` §1) — but every
+rule above applies to it unchanged, because it IS `bun/server.ts`.
 
 ## 2. The trust boundary
 
@@ -289,9 +300,12 @@ Bun therefore validates everything and derives anything derivable:
   first segment (the shared `ASSETS_DIRNAME` constant — the view's
   classifier carves the same exception, from the same constant). Any
   non-dotted in-root image works too: an attached folder's own
-  `img/photo.png` renders as-is. On paste the bytes never cross the RPC —
-  `assetPaste` reads the pasteboard Bun-side and returns only the
-  markdown-relative reference; the view never names the file.
+  `img/photo.png` renders as-is. On paste the bytes DO cross the RPC, and
+  that is remote.md §5's amendment to this rule: the pasteboard belongs to
+  the machine in front of the user, so `assetPaste` is the client's
+  (`bun/clientSeams.ts`) and hands the bytes to `assetWrite`, which names the
+  file. Between the two, the naming, the seal and the guard above all stay
+  server-side; the view still never names a file.
 - **The session log** (`logs/ledge.log`, `bun/log.ts`) is the app's only
   account of itself on a machine that is not this one: Electrobun's launcher
   forwards the main process's stdout on the DEV channel only, so in a shipped
@@ -310,6 +324,11 @@ Bun therefore validates everything and derives anything derivable:
   session) — WKWebView's console reaches only the Web Inspector, so a render
   error is otherwise a blank pane and nothing else. It is in the app home,
   not `~/Library/Logs`, so `LEDGE_NOTES_ROOT` isolates it from every probe.
+  **One file per process**, not per machine: a server daemon and the app can
+  be running at once (remote.md §1), and two processes appending to one file
+  interleave their lines and race each other's rotation. `startLogging(name)`
+  is how a process claims its own — `ledge-server.log` for the daemon,
+  `ledge-serve.log` for the pump.
 - **`LEDGE_NOTES_ROOT`** overrides the APP HOME (`~/.ledge` — where
   `settings.jsonc`, `.layout.json`, `.workspaces.json`, `.client/`,
   `logs/`, and
@@ -735,9 +754,16 @@ The recipe, in order, using `trashDelete` as the worked example:
 1. **`src/shared/rpc-schema.ts`** — add the entry with a comment saying what
    it does and when it fires.
 2. **`src/shared/wire.ts`** — add the name to `REQUEST_METHODS` (or
-   `PUSH_MESSAGES`). The build fails until you do, naming the method it is
+   `PUSH_MESSAGES`, or `CLIENT_PUSHES` for a message the client shell raises
+   about itself). The build fails until you do, naming the method it is
    missing: the list is what a remote client is built from and what the two
-   ends fingerprint at the handshake (`remote.md` §11).
+   ends fingerprint at the handshake (`remote.md` §11). Then decide two things
+   about it, both in this file. Is it a READ? If so it goes in
+   `READ_ONLY_METHODS`, and a reconnecting client may simply send it again;
+   everything else is deduped by `op` (`remote.md` §7), which is the safe
+   default and the reason the list names the reads. Does it carry a base64
+   payload big enough to care about? Then add it to `BINARY_FIELDS` and the
+   bytes ride their own frame instead of costing a third more.
 3. **`src/bun/notes.ts`** (or the owning bun module) — implement it. Validate
    the path first (`assertInRoot` / `assertTrashed`); decide the failure
    semantics deliberately (already-gone is usually success, not an error).

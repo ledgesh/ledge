@@ -553,13 +553,31 @@ export type LedgeRPC = {
       // as a PNG and return the markdown-relative reference to embed
       // (`.ledge-assets/pasted-….png`), or null when the pasteboard holds no image.
       // Sent by the editor's ⌘V when the pasteboard has no text; `root` is the
-      // pasting note's workspace. The image bytes never cross the RPC: Bun
-      // reads the pasteboard (osascript; pbpaste is text-only) and names the
-      // file itself via uniqueName — the view never names a file.
-      // `notePath` is the PASTING note's file, when it has one: Bun derives
-      // from the note itself — never from a view flag — whether the paste
-      // must be sealed at birth (the note is locked, locking.md §5).
+      // pasting note's workspace.
+      //
+      // Answered by the CLIENT (remote.md §10): the pasteboard belongs to the
+      // device the user is holding, and a VPS has none. It reads the image and
+      // hands the bytes to assetWrite below, which is the half that names the
+      // file — the view still never names one.
+      // `notePath` is the PASTING note's file, when it has one: the server
+      // derives from the note itself — never from a view flag — whether the
+      // paste must be sealed at birth (the note is locked, locking.md §5).
       assetPaste: { params: { root: string; notePath?: string | null }; response: { src: string | null } };
+      // Image bytes in, markdown reference out. The client's half of a paste
+      // calls this; nothing in the view does. `dataB64` rides a binary frame
+      // over a connection (shared/wire.ts) and is the base64 the schema says
+      // it is everywhere else, so a screenshot costs its own size and not a
+      // third more.
+      //
+      // Everything that decides the file stays here: uniqueName against a
+      // readdir snapshot, the .ledge-assets guard, the read-only-root refusal,
+      // and the seal, which is read off the note on disk. The client supplies
+      // bytes and handles it was given, which is exactly the authority §2
+      // allows it.
+      assetWrite: {
+        params: { root: string; notePath?: string | null; dataB64: string };
+        response: { src: string | null };
+      };
       // Which server this client talks to (remote.md §8). All five are
       // answered by the client shell and never forwarded: a connection is
       // client-side configuration, and a server has no opinion about who
@@ -718,6 +736,16 @@ export type LedgeRPC = {
       // here — AppKit handles those). The payload is the command id the view
       // put there; it execs it with no target, the palette's invocation.
       menuCommand: { action: string };
+      // Whether the connection to the server is up (remote.md §7). Pushed by
+      // the CLIENT shell, never by a server — a server saying "reconnecting"
+      // would be describing a wire it is on the far side of — so it is in
+      // CLIENT_PUSHES and never becomes a frame.
+      //
+      // "reconnecting" is a link that dropped and is being re-dialed, with
+      // requests held rather than failed; "lost" is the point where re-dialing
+      // stopped and what was held has been refused. `detail` is the sentence to
+      // show. The local server never leaves "live": there is no wire to drop.
+      connectionState: { state: "live" | "reconnecting" | "lost"; detail: string };
     };
   };
 };

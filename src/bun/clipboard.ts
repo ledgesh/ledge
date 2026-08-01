@@ -15,6 +15,10 @@
 // is why this one does not bother with the temp file `pasteboardImage` uses to
 // avoid exactly that doubling for megabyte-sized PNGs.
 
+import { readFile, unlink } from "node:fs/promises";
+import { join } from "node:path";
+import { CLIENT_HOME, ensureClientHome } from "./clientHome";
+
 const HTML_SCRIPT = [
   "try",
   "  set d to the clipboard as «class HTML»",
@@ -96,5 +100,49 @@ export async function readClipboardHtml(): Promise<string> {
     return htmlFromScriptOutput(out);
   } catch {
     return ""; // no osascript (non-macOS): plain text is the whole pasteboard
+  }
+}
+
+// Read the pasteboard's image as PNG bytes, or null when it holds none.
+// pbpaste is text-only, so this goes through osascript: AppKit promises a PNG
+// rendition of whatever image flavor is on the pasteboard (a screenshot IS
+// PNG; a browser-copied image is TIFF and converts), and «class PNGf» asks
+// for exactly that. The AppleScript writes to a temp file rather than printing
+// hex to stdout — same bytes, none of the doubling and parsing this file's
+// HTML flavor puts up with for being small.
+//
+// The temp lands in the CLIENT home, not in the workspace's assets folder: on
+// a connection the notes are on another machine, and this is the one seam that
+// has to run on the machine holding the pasteboard (remote.md §10). It is
+// transient plaintext for a paste into a locked note either way, unlinked
+// immediately — the caveat locking.md §5 already documents, now one directory
+// over.
+let tmpCounter = 0;
+
+export async function readClipboardImage(): Promise<Uint8Array | null> {
+  await ensureClientHome();
+  tmpCounter += 1;
+  const tmp = join(CLIENT_HOME, `.paste.tmp-${process.pid}-${tmpCounter}`);
+  const script = [
+    "try",
+    "  set d to the clipboard as «class PNGf»",
+    "on error",
+    '  return "none"',
+    "end try",
+    `set f to open for access POSIX file ${JSON.stringify(tmp)} with write permission`,
+    "write d to f",
+    "close access f",
+    'return "ok"',
+  ].join("\n");
+  try {
+    const p = Bun.spawn(["osascript", "-e", script], { stdout: "pipe", stderr: "ignore" });
+    const out = (await new Response(p.stdout).text()).trim();
+    await p.exited;
+    if (out !== "ok") return null;
+    return new Uint8Array(await readFile(tmp));
+  } catch {
+    return null; // no osascript (non-macOS), or the write failed: no image
+  } finally {
+    await unlink(tmp).catch(() => {}); // discard our own temp, like writeNote
   }
 }

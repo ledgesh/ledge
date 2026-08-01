@@ -307,6 +307,19 @@ export class InlinePool {
     }
   }
 
+  /** Whether any block is mid-run. What the daemon asks before deciding a
+   * client that went away can be allowed to take the server with it: an idle
+   * shell is worth nothing once nobody is watching it, and a running one is
+   * the whole reason a server outlives its connection (remote.md §7). */
+  running(): boolean {
+    for (const session of this.sessions.values()) {
+      for (const slot of this.slots(session)) {
+        if (slot.activeRun !== null || slot.parser.openBlockId !== null) return true;
+      }
+    }
+    return false;
+  }
+
   /** Process exit: close every shell of every note. */
   closeAll(): void {
     for (const session of this.sessions.values()) {

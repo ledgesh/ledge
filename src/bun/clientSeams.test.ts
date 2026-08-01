@@ -13,7 +13,7 @@ describe("the client's methods", () => {
   // server refuses, which is that plus the connection list
   // (bun/connectionManager.ts implements those). A name in one and not the
   // other is a method served by nobody or refused by everybody.
-  test("the native list and its implementations name the same five", () => {
+  test("the native list and its implementations name the same six", () => {
     expect(Object.keys(clientSeams({})).sort()).toEqual([...NATIVE_METHODS].sort());
   });
 
@@ -77,5 +77,50 @@ describe("the native halves", () => {
     const items = [{ label: "Ledge", submenu: [{ label: "Quit", action: "app.quit" }] }];
     await clientSeams({ setMenu: (i) => seen.push(i) }).menuSet({ items });
     expect(seen).toEqual([items]);
+  });
+});
+
+// remote.md §10's last move: the pasteboard's image is read on the machine
+// holding the pasteboard, and the file is named on the machine holding the
+// notes. The osascript half cannot run in a test suite (it would read the
+// developer's own clipboard), so what is asserted here is the seam between the
+// two halves — including the case that must NOT trouble the server at all.
+describe("a pasted image is two machines' work", () => {
+  test("no image on the pasteboard answers null without asking the server", async () => {
+    let asked = 0;
+    const seams = clientSeams(
+      { readImage: async () => null },
+      {
+        assetWrite: async () => {
+          asked += 1;
+          return { src: "never" };
+        },
+      },
+    );
+    expect(await seams.assetPaste({ root: "/w", notePath: "/w/a.md" })).toEqual({ src: null });
+    expect(asked).toBe(0);
+  });
+
+  test("bytes go over as base64 and the NAME comes back", async () => {
+    const seen: unknown[] = [];
+    const seams = clientSeams(
+      { readImage: async () => new Uint8Array([0x89, 0x50, 0x4e, 0x47]) },
+      {
+        assetWrite: async (p) => {
+          seen.push(p);
+          return { src: ".ledge-assets/pasted-2026-08-01.png" };
+        },
+      },
+    );
+    expect(await seams.assetPaste({ root: "/w", notePath: "/w/a.md" })).toEqual({
+      src: ".ledge-assets/pasted-2026-08-01.png",
+    });
+    // The client sends bytes and handles it was given, and names nothing.
+    expect(seen).toEqual([{ root: "/w", notePath: "/w/a.md", dataB64: "iVBORw==" }]);
+  });
+
+  test("an empty pasteboard image is the same as none", async () => {
+    const seams = clientSeams({ readImage: async () => new Uint8Array(0) }, { assetWrite: async () => ({ src: "never" }) });
+    expect(await seams.assetPaste({ root: "/w", notePath: null })).toEqual({ src: null });
   });
 });

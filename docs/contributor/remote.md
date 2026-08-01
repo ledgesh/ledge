@@ -1,10 +1,11 @@
 # Ledge remote servers
 
-**Partly implemented: §14 phases 1 to 3 are code, and everything about
-resilience, Linux, and iOS is still design.** The connection grammar §8
-called for now lives in `interactions.md` §4-1, and the state ownership §5
-describes is the code's. What remains design is reconnect, `opId` dedupe,
-output coalescing, binary frames, the Linux PTY port, and the iOS client.
+**Partly implemented: §14 phases 1 to 4 are code, and Linux and iOS are still
+design.** The connection grammar §8 called for now lives in `interactions.md`
+§4-1, the state ownership §5 describes is the code's, and the resilience §7
+promises is real: the server is a process behind a unix socket, a dropped wire
+reconnects and replays, and terminal output rides binary frames. What remains
+design is the Linux PTY port and the iOS client.
 This is a sibling standard beside `architecture.md` (whose process topology,
 trust boundary, and state-ownership rules it revises), `interactions.md`,
 `locking.md` (whose vault moves one hop away), and `testing.md` (whose
@@ -12,10 +13,9 @@ categories §13 instantiates). Code that disagrees with it is either ahead of
 the doc or wrong.
 
 It records two amendments to `architecture.md`, both in §5: `.window.json`
-has left the server for the client (done), and pasted asset bytes will cross
-the wire (§3's "the bytes never cross the RPC" holds only for a local
-server; it lands with the binary frames in phase 4, and until then the
-pasteboard image is the one `osascript` call site left on the server).
+has left the server for the client, and pasted asset bytes now cross the wire
+(§3's "the bytes never cross the RPC" held only for a local server). Both are
+done, and `bun/server.ts` has no `osascript` call site left.
 
 ## 1. What a server is
 
@@ -33,23 +33,49 @@ process boundary allowed to be a network:
 
 | Case | Transport |
 | ---- | --------- |
-| Mac app, local notes | the server in this process, or a child on pipes |
+| Mac app, local notes | the server in this process |
 | Mac app, remote notes | `ssh <target> ledge-server serve` |
 | iOS app, your Mac | `ssh <target> ledge-server serve` |
 | iOS app, your VPS | `ssh <target> ledge-server serve` |
+| `serve` to the machine's own daemon | a unix socket in the app home |
 
 The Mac app connecting to its own local server is not a special case. It is
 the same client, the same protocol, and the same server binary, over a
 cheaper transport. Keeping it that way is what stops the remote path from
 becoming a second, less-tested code path.
 
-**The local transport is a child process's pipes, not a unix socket.** The
-protocol rides stdin and stdout either way (§3), so a socket would add a
-filesystem artifact, a stale-socket sweep, and a permissions question, and
-buy nothing until the server has to outlive the client. That day is §7's
-"sessions outlive connections" taken one step further, to sessions surviving
-an app restart; the socket lands with the reconnect work in §14 phase 4, and
-until then a quit takes the server down exactly as it does today.
+**A server is a daemon behind a unix socket, and `serve` is a pump to it.**
+`ledge-server serve` — what a client runs and what a forced command names (§4)
+— connects to `.server.sock` in the app home, starting `ledge-server daemon` if
+nothing answers, and then moves bytes between stdio and that socket. It parses
+no frames, so an ssh session cannot desynchronize one.
+
+That indirection is what makes §7 true rather than aspirational. Before it, an
+ssh WAS the server: the wire dropping took the shells with it, which is exactly
+the case §7 was written for. Now a run keeps going, the scrollback ring keeps
+filling, and the op log that makes a replay safe is still there when the client
+comes back.
+
+Two rules fall out of it, and both are the honest version of something that
+would otherwise be vague:
+
+- **One client at a time, and a new connection displaces the old.** `attached`
+  and the ring are per SESSION, not per client, so two clients on one drawer
+  would be one stream with two readers and no rule for who gets what. Displacing
+  is also what lets a reconnect take over from a half-open connection nobody has
+  noticed is dead. Per-client attachment is where multi-client would have to
+  start, and nothing here promises it.
+- **An idle daemon exits after a minute**, unless something is running. A
+  process per machine, started by an ssh nobody remembers making, is not a
+  feature; a build that survives you closing the laptop is. `.server.pid` sits
+  beside the socket so the answer to "how do I stop it" is a command and not a
+  hunt.
+
+**The Mac app's own local server stays in this process.** It is the one case
+where the socket buys nothing: the same user, the same disk, and a quit that
+takes the window with it anyway. Making it a child would put a second binary in
+the app bundle and §11's upgrade question in front of every launch, which is
+shipping work and belongs with phase 5.
 
 **The desktop app is therefore split, not extended.** `bun/index.ts` becomes
 two entry points: `serve` (RPC handlers, sessions, watcher, no UI) and the
@@ -105,14 +131,23 @@ messages). Type 1 is a binary payload tagged with the id of the control
 frame it belongs to. Assets and terminal output ride type 1: base64 was free
 in-process and costs 33% on a cell connection.
 
+A binary frame is sent IMMEDIATELY BEFORE the control frame that claims it,
+and a receiver holds at most one. Ordering on a stream is guaranteed, so that
+rule turns "which payload is this" into "the one that just arrived": no
+correlation table, and no partial state a peer can grow by sending bytes it
+never claims. Two in a row, bytes nothing claims, and a claim on bytes that
+never came are all fatal, for the same reason a bad length is.
+
+Which fields ride it is a table in `shared/wire.ts` (`BINARY_FIELDS`), not a
+rule per call site. The SCHEMA still says base64 everywhere and the view still
+receives base64, because Electrobun's bridge is JSON either way — so this is an
+optimization for the hop with a network in it and a no-op for the one without.
+
 The codec is `shared/wire.ts` and the two ends of a connection are
 `bun/transport.ts`, which is where the symmetry lives: a server dispatches
 `req` frames into the handler map `createServer` returned, and a client
 presents the answers as that same map, so `bun/index.ts` binds either one to
-the webview's RPC without knowing which it got. Type-1 frames are defined and
-decoded but nothing sends one yet; moving the base64 payloads onto them is
-§14 phase 4's, and defining the type now is what keeps that from being a
-protocol break.
+the webview's RPC without knowing which it got.
 
 **Multiplexing is required, not optional.** The schema is already
 bidirectional: `terminalOutput`, `runEvent`, `terminalExit`, `notesChanged`,
@@ -120,10 +155,19 @@ bidirectional: `terminalOutput`, `runEvent`, `terminalExit`, `notesChanged`,
 request id and are interleaved freely; nothing in the protocol is
 request-response ordered.
 
-**Terminal output coalesces.** `index.ts` pushes `terminalOutput` per chunk
-today, which is free locally and a frame storm at 60ms of latency. The
-server buffers on a frame budget and flushes on a deadline. The scrollback
-ring (§7) is the authority for anything a client missed.
+**Terminal output coalesces, on Nagle's shape rather than a fixed delay.** The
+drain loop pushes whatever a shell produced every 8ms, which is free in-process
+and 125 frames a second down a wire. So the first chunk after a quiet moment
+goes out at once — an echoed keystroke is never delayed — and only a shell that
+is producing CONTINUOUSLY is batched, at one frame per 30ms or per 128 KB.
+
+It lives in the transport, not in the server: the cost it exists to avoid is a
+wire's, and the in-process case should not pay a millisecond for a problem it
+does not have. Anything else the server sends flushes what is held first, which
+is not a nicety — `terminalAttach`'s answer IS the scrollback up to that
+instant, and output held back from before it would be painted on top of a
+snapshot that already contains it. The ring (§7) remains the authority for
+anything a client missed.
 
 ## 4. Authentication is ssh keys, and the notes key is not a shell
 
@@ -188,12 +232,14 @@ splits again, by machine:
 | Workspace registry (`.workspaces.json`) | server | the trust artifact for that machine |
 | Vault and locked notes (`.vault.json`) | server | §9 |
 | Profiles (`~/.config/ledge/profiles/`) | server | never transmitted, §10 |
-| PTYs, sessions, scrollback | server | §7 |
+| PTYs, sessions, scrollback | server | §7, and they outlive a connection |
+| The dedupe window for replayed writes | server | §7, spans reconnects |
 | The watcher | server | pushes `notesChanged` as today |
 | Behavior settings (shell, interpreters, trash TTL, daily workspace) | server | facts about that machine |
 | Appearance settings (theme, font sizes, `editor.livePreview`) | **client** | facts about that screen |
 | Window frame (`window.json`) | **client** | amends `architecture.md` §6 |
-| Clipboard, rich paste, link opening | **client** | §10 |
+| Clipboard, rich paste, pasted image bytes, link opening | **client** | §10 |
+| Whether the connection is up | **client** | §7, `CLIENT_PUSHES` |
 | Pane and tab layout (`.layout.json`) | server, keyed by client | see below |
 
 **Settings split along the machine boundary.** `settings.jsonc` stays one
@@ -214,8 +260,10 @@ atomic write) and `workspace/persist.ts` still owns each value's shape.
 **The id rides the handshake, not the call.** Identity is a property of the
 connection: a client cannot forget to send it, no handler needs a parameter it
 would only ever fill one way, and the view never learns it is one of several
-possible screens. That is what `Hello.client` is for, and it is why the
-protocol version is 2.
+possible screens. That is what `Hello.client` is for. The handshake carries the
+server's identity too — `Hello.instance`, which names the RUN rather than the
+machine, and which §7 uses to decide whether a replay is safe. The protocol
+version is 3.
 
 **The client home is `.client` inside the app home**, not a second top-level
 directory: on every machine Ledge ships to, the client and its local server are
@@ -226,12 +274,18 @@ holds the id, the connection list, Ledge's own `known_hosts`, the client's
 probe run without touching the real ones.
 
 **Pasted asset bytes now cross the wire, amending `architecture.md` §3.**
-`assetPaste` reads the pasteboard Bun-side today and returns only the
-markdown reference. A remote server has no pasteboard. The client reads its
-own, sends the bytes as a type-1 frame, and the server writes, seals, and
-names the file. What the client still does not do is name it: `uniqueName`
-and the `.ledge-assets` guard stay server-side, so the amendment costs one
-byte path and no authority.
+`assetPaste` used to read the pasteboard Bun-side and return only the markdown
+reference. A remote server has no pasteboard. So the client reads its own and
+calls `assetWrite`, whose bytes ride a type-1 frame, and the server writes,
+seals, and names the file. What the client still does not do is name it:
+`uniqueName`, the read-only-root refusal, and the `.ledge-assets` guard stay
+server-side, and whether the paste is sealed is read off the NOTE rather than
+taken from the sender. The amendment costs one byte path and no authority.
+
+The pasteboard's own temp file moved with it, from the workspace's assets
+folder to the client home. It is transient plaintext for a paste into a locked
+note either way, unlinked immediately: the caveat `locking.md` §5 already
+documents, now one directory over.
 
 ## 6. Servers and execution hosts are different things
 
@@ -261,7 +315,8 @@ the note moves.
 Shells belong to the server and survive a client going away. This is already
 how `bun/index.ts` works: each session keeps a 256 KB rolling scrollback,
 `attached` gates whether output is pushed, and `terminalAttach` replays the
-buffer. Nothing about that design needs changing; it needs relying on.
+buffer. Nothing about that design needed changing; what it needed was a server
+that outlives a connection, which is §1's socket.
 
 Three consequences to hold onto:
 
@@ -275,14 +330,41 @@ Three consequences to hold onto:
   reconnect exactly as it is on pane switch. A client that needs more asks
   for a longer ring, not for a replay log.
 
-**Mutating calls carry an `opId` and the server dedupes them.** A client that
+**A client that loses the wire re-dials rather than failing.** The ladder is
+250ms doubling to 8s, about 24 seconds in total, and that number is not
+arbitrary: it has to finish comfortably inside the daemon's idle timeout, or
+giving up would mean reconnecting to a process that had already decided nobody
+was coming. Requests made while it climbs are HELD, not failed. When it runs
+out, the state is `lost`, what was held is refused with the last reason, and
+nothing new is accepted — an app that keeps taking requests for a server it
+cannot reach looks like it is working. Recovery from there is choosing the
+connection again (`interactions.md` §4-1), which rebuilds everything from boot.
+
+**Mutating calls carry an `op` and the server dedupes them.** A client that
 retries a write after a reconnect must not apply it twice: the second attempt
 would find its own bytes on disk, fail the `baseMtimeMs` divergence guard,
-and trash-copy the user's own save. Each mutating request carries a
-per-connection monotonic id; the server keeps a short window of completed
-ids and returns the recorded result instead of re-executing. The divergence
-guard then means what it has always meant, which is that somebody else wrote
-the file.
+and trash-copy the user's own save. Each such request carries a per-client id;
+the server keeps a short window of completed ones (`bun/opLog.ts`) and returns
+the recorded outcome — including a recorded REFUSAL — instead of re-executing.
+The divergence guard then means what it has always meant, which is that
+somebody else wrote the file.
+
+Three details decide whether that is safe rather than merely plausible:
+
+- **The list is stated as the READS** (`READ_ONLY_METHODS`), so a method nobody
+  classified defaults to being deduped. That costs an entry in a bounded window;
+  the other default costs a note saved twice.
+- **The window belongs to the server, not to a connection.** One scoped to a
+  connection would be forgotten at the exact moment a replay needs it.
+- **The handshake names the server's RUN** (`Hello.instance`). A different
+  instance answering means the op log is empty and a replay cannot be told from
+  a first attempt, so what was in flight is failed instead. That case needs the
+  daemon to have died and restarted between two dials, and it is the one case
+  where guessing is a corrupted note.
+
+**Only a transport failure is replayed.** A handler saying no is an ANSWER and
+it is final; the difference is carried by a type (`ConnectionLost`) rather than
+by matching on the wording of a message.
 
 ## 8. One connection at a time
 
@@ -369,20 +451,26 @@ timer already measures.
 - **Locked plaintext to an agent surface**, per §9.
 - **A path the client constructed.** Per §2.
 
-**Five RPC entries are the client's outright** and never become frames
+**Six RPC entries are the client's outright** and never become frames
 (`bun/clientSeams.ts`, whose `CLIENT_METHODS` is the list both ends read):
-`clipboardWrite`, `clipboardRead`, `clipboardReadRich`, `linkOpen`, and
-`menuSet`. Opening a URL happens on the device the user is holding, not on the
-VPS, and a headless server handed the view's menu would swallow ⌘Q with it.
-The five connection entries (§8) join them for a different reason: a server
-has no business knowing which servers this client can reach.
+`clipboardWrite`, `clipboardRead`, `clipboardReadRich`, `assetPaste`,
+`linkOpen`, and `menuSet`. Opening a URL happens on the device the user is
+holding, not on the VPS, and a headless server handed the view's menu would
+swallow ⌘Q with it. The five connection entries (§8) join them for a different
+reason: a server has no business knowing which servers this client can reach.
 
-The server implements all ten as REFUSALS rather than omitting them, because
+The server implements all eleven as REFUSALS rather than omitting them, because
 the handler map is total by construction; reaching one means a client forgot
 its overlay, and `{text: ""}` back from a clipboard read would look exactly
-like an empty clipboard until somebody went looking. One `osascript` call site
-remains on the server, `assetPaste`'s pasteboard image, and it leaves with the
-binary frames in §14 phase 4.
+like an empty clipboard until somebody went looking. `bun/server.ts` now has no
+`osascript` call site at all.
+
+**One push is the client's too**, for the mirror-image reason: `connectionState`
+says whether the wire is up, and the end on the far side of a dropped one is in
+no position to report it. `CLIENT_PUSHES` in `shared/wire.ts` is that list, and
+it is subtracted from the `ServerPush` type rather than stubbed — a server
+handed a method whose only correct implementation is not to call it is a
+mistake waiting to be made.
 
 ## 11. Deployment and portability
 
@@ -419,6 +507,11 @@ in-process today and costs 40ms or more against a VPS, so this is the rule
 that decides whether the whole design feels like software or like a remote
 desktop.
 
+A round trip is a WAIT, not a request. Requests issued concurrently are one
+round trip however many there are, because frames interleave (§3); requests
+awaited one after another are as many round trips as there are requests. That
+distinction is the whole rule, and it is what the points below are about.
+
 What it means in practice:
 
 - **The server pushes; the client does not poll.** `notesChanged` already
@@ -427,9 +520,10 @@ What it means in practice:
   watcher pushes rather than re-fetched per keystroke. Wikilink resolution
   already resolves view-side against the store's metas and is the model to
   copy, not an exception to it.
-- **Batch instead of iterating.** A restore that opens six tabs sends one
-  request, not six. Anything that loops an RPC call over a list is a bug at
-  this boundary.
+- **Batch instead of iterating.** Anything that AWAITS an RPC call inside a
+  loop is a bug at this boundary. Reading a list of things concurrently and
+  applying the answers afterwards is not — and it is usually the smaller
+  change, because the per-item guards stay exactly where they were.
 - **Assets cache by content.** `assetRead` per image per render is a round
   trip per image; the data-URL cache `locking.md` §3 already evicts on relock
   is where the answer lives.
@@ -438,7 +532,20 @@ What it means in practice:
   disagreement, as it does now.
 
 An interactive path that cannot meet the budget gets a stated exception in
-this section, not a quiet extra round trip.
+this section, not a quiet extra round trip. There is one:
+
+**`terminalStatus` before a run reaches the drawer costs a second round trip**,
+because the answer decides whether the host picker interposes (`interactions.md`
+§4a) and therefore WHICH MACHINE the command runs on. The obvious fix is the
+one above — cache it in the view, invalidated by `terminalExit` — and it is
+wrong here: a cache that wrongly says "live" skips the picker and runs the
+block on the first host in the list without asking. Trading the one failure
+this whole design exists to prevent for 40ms is not a trade. It stays two round
+trips, on a path that ends in a modal the user has to answer anyway.
+
+The audit that produced this section found one genuine violation, since fixed:
+`reloadOpenNotes` awaited one `noteRead` per open tab, serially, on every window
+focus and every watcher push — Ledge's own saves included.
 
 ## 13. Testing
 
@@ -446,13 +553,19 @@ Per `testing.md`'s categories:
 
 - **Unit (colocated `bun test`)**: the frame codec (length, type, partial
   reads, oversized frames); handshake version negotiation and refusal; the
-  `opId` dedupe window; terminal-output coalescing; the settings split and
-  its migration.
+  `op` dedupe window; terminal-output coalescing; the settings split and
+  its migration; the binary-companion rule and its three ways of being broken.
 - **Invariant tests, scratch root**: every §2 guard still refuses when the
   call arrives over the transport rather than in-process, which is the test
   that keeps "the client is the least-trusted end" honest;
   `"../../.ssh/id_rsa"` throws over the wire exactly as it throws today; a
   forced-command key cannot obtain a shell; a replayed write applies once.
+- **Filesystem, over a real socket** (`daemon.fs.test.ts`, `serve.fs.test.ts`):
+  a second connection displaces the first and is told why; an idle daemon
+  exits and a busy one does not; a push with no client attached is dropped
+  rather than thrown, which is a bug this suite caught rather than prevented;
+  and a whole `serve` process killed and restarted, with the server's state
+  still there.
 - **e2e (headless WebKit)**: the harness gains a real server over an
   in-process transport beside `FakeStore`, so the same specs run against both
   and disagreements surface as failures rather than as drift; connection
@@ -462,6 +575,12 @@ Per `testing.md`'s categories:
   `ssh localhost ledge-server serve` round trip, since ssh, the forced
   command, and host-key pinning are native seams the harness cannot fake.
   Then the same probe against a Linux box, for the PTY port.
+
+The gap worth naming: everything above happens over pipes and a unix socket.
+Those are real process boundaries and real bytes, and they are not a network.
+Latency, a wire that drops mid-frame, and a middlebox that idles a connection
+out are what the reconnect ladder was written for, and none of them are
+exercised until the Mac-to-Mac pass.
 
 ## 14. Phasing
 
@@ -487,11 +606,20 @@ Each phase leaves the app shippable.
    not by connecting. The `docs/user/` page waits on that too — the connection
    chrome is in the app, and documenting "connect to your other Mac" before
    anyone has is publishing a claim the suite does not back.
-4. **Resilience**: reconnect, `opId` dedupe, output coalescing, binary frames
-   for assets and terminal output (which is what moves `assetPaste` to the
-   client and leaves the server with no `osascript` at all), the unix socket
-   for a server that outlives the app, and the §12 round-trip audit against a
-   real remote.
+4. **Done.** Resilience. The unix socket and the daemon behind it
+   (`bun/daemon.ts`), which is the piece the rest hang off: reconnect with
+   replay (`reconnectingClient`), the `op` dedupe window (`bun/opLog.ts`) and
+   the `instance` in the handshake that says when a replay is safe, output
+   coalescing, binary frames for the base64 payloads, and `assetPaste` moving
+   to the client, which leaves `bun/server.ts` with no `osascript` at all. The
+   §12 audit found and fixed one serial-read loop and recorded one stated
+   exception.
+   What is still owed, with phases 2 and 3's Mac-to-Mac pass: none of it has
+   run over a real ssh, so the daemon, the reconnect, and the dedupe are proved
+   over pipes and a unix socket rather than over a network that actually drops.
+   The socket is the honest half of that — it is a real second process, and
+   `serve.fs.test.ts` kills the client and watches the server keep the session
+   — but a wire with latency and a middlebox on it is a different test.
 5. **Linux**: the PTY port, the second dylib, the Docker image, the VPS
    posture in `docs/user/`.
 6. **The iOS client**, which is its own document and depends on nothing above

@@ -6,18 +6,24 @@
 import { describe, expect, test } from "bun:test";
 import {
   BINARY_FRAME,
+  binaryPath,
   checkHello,
+  CLIENT_PUSHES,
   CONTROL_FRAME,
   encodeBinary,
   encodeControl,
   fingerprint,
   FrameDecoder,
   hello,
+  hoistBinary,
   MAX_FRAME_BYTES,
+  needsOp,
   parseControl,
   PROTOCOL_VERSION,
   PUSH_MESSAGES,
+  READ_ONLY_METHODS,
   REQUEST_METHODS,
+  restoreBinary,
   SCHEMA_VERSION,
   WireError,
   type Frame,
@@ -289,5 +295,76 @@ describe("the schema fingerprint", () => {
   test("the method lists have no duplicates", () => {
     expect(new Set(REQUEST_METHODS).size).toBe(REQUEST_METHODS.length);
     expect(new Set(PUSH_MESSAGES).size).toBe(PUSH_MESSAGES.length);
+  });
+});
+
+describe("which requests carry an op (remote.md §7)", () => {
+  test("a read does not, because running it again is running it once", () => {
+    expect(needsOp("noteRead")).toBe(false);
+    expect(needsOp("noteSearch")).toBe(false);
+    expect(needsOp("layoutGet")).toBe(false);
+  });
+
+  test("anything that changes something does", () => {
+    expect(needsOp("noteWrite")).toBe(true);
+    expect(needsOp("noteDelete")).toBe(true);
+    expect(needsOp("terminalInput")).toBe(true);
+    expect(needsOp("openRequestTake")).toBe(true);
+  });
+
+  // The list is stated as the READS so that the default is to dedupe. A method
+  // nobody classified costs an entry in a bounded window; the other default
+  // costs a note written twice.
+  test("a name nobody has classified is deduped rather than replayed blind", () => {
+    expect(needsOp("somethingAddedNextYear")).toBe(true);
+  });
+
+  test("every read-only name is a real method", () => {
+    for (const m of READ_ONLY_METHODS) expect(REQUEST_METHODS).toContain(m);
+  });
+});
+
+describe("payloads that ride binary frames", () => {
+  const bytes = new Uint8Array([0x89, 0x50, 0xff, 0x00, 0x01]);
+
+  test("a field is lifted out and put back exactly", () => {
+    const path = binaryPath("push", "terminalOutput")!;
+    expect(path).toEqual(["dataB64"]);
+    const b64 = Buffer.from(bytes).toString("base64");
+    const lifted = hoistBinary({ sessionId: "s", dataB64: b64 }, path)!;
+    expect(lifted.payload).toEqual({ sessionId: "s", dataB64: "" });
+    expect(lifted.bytes).toEqual(bytes);
+    expect(restoreBinary(lifted.payload, path, lifted.bytes)).toEqual({ sessionId: "s", dataB64: b64 });
+  });
+
+  // assetRead answers `{image: null}` for a file that is not there, so the
+  // path has to tolerate the object it points into being absent.
+  test("a nested field that is not there lifts nothing", () => {
+    const path = binaryPath("res", "assetRead")!;
+    expect(hoistBinary({ image: null }, path)).toBeNull();
+    expect(hoistBinary({ image: { dataB64: "", mime: "image/png" } }, path)).toBeNull();
+    const lifted = hoistBinary({ image: { dataB64: "iVBOR", mime: "image/png" } }, path)!;
+    expect(lifted.payload).toEqual({ image: { dataB64: "", mime: "image/png" } });
+  });
+
+  test("the caller's payload is not mutated", () => {
+    const original = { sessionId: "s", dataB64: "AAEC" };
+    hoistBinary(original, ["dataB64"]);
+    expect(original.dataB64).toBe("AAEC");
+  });
+
+  test("a method with no bulky field has no path", () => {
+    expect(binaryPath("req", "noteWrite")).toBeNull();
+    expect(binaryPath("push", "notesChanged")).toBeNull();
+  });
+});
+
+describe("client-only pushes", () => {
+  // The mirror of CLIENT_METHODS: a server has no business reporting the state
+  // of a wire it is on the far side of, so the name is simply not in the list
+  // the transport routes.
+  test("connectionState never crosses the wire", () => {
+    expect(CLIENT_PUSHES).toContain("connectionState");
+    expect(PUSH_MESSAGES as readonly string[]).not.toContain("connectionState");
   });
 });

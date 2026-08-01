@@ -257,8 +257,18 @@ async function loadNote(docId: string, path: string): Promise<void> {
 // delete flow's job (and the note list refresh already dropped the row); a
 // next edit here recreates the file, which is the kinder failure.
 export async function reloadOpenNotes(): Promise<void> {
-  for (const cand of reloadCandidates()) {
-    const file = await readNote(cand.path);
+  // Every read at once, then apply. Serially it was one round trip PER OPEN
+  // TAB — free in-process and a third of a second of stalled focus against a
+  // server on the other side of a network (remote.md §12), on a path that
+  // fires on every window focus and every watcher push, Ledge's own saves
+  // included. The apply loop stays sequential because it touches CodeMirror,
+  // and it re-validates each note anyway: reseedDoc refuses a doc that was
+  // dirtied while the read was out, which is the same guard the serial version
+  // relied on and for the same reason.
+  const candidates = reloadCandidates();
+  const files = await Promise.all(candidates.map((c) => readNote(c.path)));
+  for (const [i, cand] of candidates.entries()) {
+    const file = files[i]!;
     if (file === null || file.mtimeMs === cand.mtimeMs) continue;
     const entry = pool.get(cand.docId);
     if (!entry) continue; // tab closed while the read was in flight
