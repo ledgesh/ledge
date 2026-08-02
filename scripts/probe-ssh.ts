@@ -15,6 +15,13 @@
 //
 // Run it: `bun run probe:ssh`. It builds two images, holds 127.0.0.1:22 for a
 // few seconds, and removes everything it made.
+//
+// `bun run probe:ssh -- --serve` is the same fixture with the assertions left
+// off and the container left up, for the one client that cannot reach loopback:
+// a real phone (ios.md §13). It publishes on every interface rather than
+// 127.0.0.1, prints the address to type on the pairing screen and the host key
+// to confirm there, and appends whatever `authorized_keys` line is pasted into
+// it. Ctrl-C takes it all down again.
 import { mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -37,6 +44,9 @@ const REPO = join(import.meta.dir, "..");
 const IMAGE = "ledge-server:probe";
 const FIXTURE = "ledge-sshd:probe";
 const NAME = "ledge-ssh-probe";
+
+// Stand the fixture up for a phone instead of asserting against it.
+const SERVE = Bun.argv.includes("--serve");
 
 let failures = 0;
 const ok = (claim: string, detail = "") => console.log(`  ok    ${claim}${detail && `  (${detail})`}`);
@@ -63,9 +73,12 @@ async function teardown() {
 try {
   // Port 22 and not a high one: sshCommand takes a DESTINATION, and an ssh
   // destination has no port in it (the same constraint testing.md §6 records
-  // for `host:` shells). Loopback only, and gone at teardown.
-  const held = run(["sh", "-c", "lsof -nP -iTCP@127.0.0.1:22 -sTCP:LISTEN 2>/dev/null | tail -n +2"], { quiet: true });
-  if (held.out) throw new Error(`something already listens on 127.0.0.1:22:\n${held.out}\nStop it, or run this elsewhere.`);
+  // for `host:` shells). Loopback only, and gone at teardown — except under
+  // --serve, where the whole point is a client that is not on this machine, so
+  // the check widens to every interface along with the binding.
+  const where = SERVE ? "" : "@127.0.0.1";
+  const held = run(["sh", "-c", `lsof -nP -iTCP${where}:22 -sTCP:LISTEN 2>/dev/null | tail -n +2`], { quiet: true });
+  if (held.out) throw new Error(`something already listens on port 22:\n${held.out}\nStop it, or run this elsewhere.`);
 
   step("[build] the shipped image, then the fixture that adds an sshd to it");
   run(["docker", "build", "-t", IMAGE, REPO]);
@@ -76,7 +89,7 @@ try {
   const keyPath = join(SCRATCH, "id_ed25519");
   run(["ssh-keygen", "-t", "ed25519", "-N", "", "-C", "ledge-probe", "-f", keyPath]);
   const pub = (await readFile(`${keyPath}.pub`, "utf8")).trim();
-  run(["docker", "run", "-d", "--name", NAME, "-p", "127.0.0.1:22:22", "-e", `LEDGE_PUBKEY=${pub}`, FIXTURE]);
+  run(["docker", "run", "-d", "--name", NAME, "-p", SERVE ? "22:22" : "127.0.0.1:22:22", "-e", `LEDGE_PUBKEY=${pub}`, FIXTURE]);
   console.log(`  authorized_keys: restrict,command="ledge-server serve" ${pub.slice(0, 32)}…`);
 
   step("[pair] scan the host key and pin it, the way the app's pairing does");
@@ -89,6 +102,74 @@ try {
   if (!hostKey) throw new Error("the fixture's sshd never answered ssh-keyscan");
   const fingerprint = run(["sh", "-c", `printf '%s\\n' ${JSON.stringify(hostKey)} | ssh-keygen -lf -`]).out;
   ok("the host key was scanned and pinned", fingerprint.split(" ").slice(0, 2).join(" "));
+
+  if (SERVE) {
+    // The address this Mac answers on, from the interface that carries traffic
+    // off it. Asked rather than assumed to be en0: a Mac on ethernet, or with a
+    // second adapter, answers somewhere else, and a printed address that is not
+    // the right one is worse than none.
+    const iface = run(["sh", "-c", "route -n get default 2>/dev/null | awk '/interface:/{print $2}'"], {
+      quiet: true,
+    }).out;
+    const lan = iface ? run(["ipconfig", "getifaddr", iface], { quiet: true }).out : "";
+    if (!lan) throw new Error("this Mac has no address on a default route; connect it to the network the phone is on");
+
+    console.log(`
+  Pair the phone with    ledge@${lan}
+  Confirm this host key  ${fingerprint.split(" ").slice(0, 2).join(" ")}
+
+  This sshd answers on every interface for as long as this runs, on ${iface}
+  and any other. It takes public keys only and pins each one to a single
+  command, which is the same posture remote.md §4 asks of a real server.
+
+  Copy the line the phone's pairing screen shows, paste it here, press Enter.
+  Ctrl-C takes the fixture down and removes it.
+`);
+
+    // `$1` rather than interpolation: the line is pasted from another device
+    // and goes to a shell, and there is no reason for it to be able to reach
+    // one.
+    const authorize = (line: string) =>
+      run(
+        [
+          ...["docker", "exec", NAME, "sh", "-c"],
+          'printf "%s\\n" "$1" >> /home/ledge/.ssh/authorized_keys',
+          "sh",
+          line,
+        ],
+        { quiet: true },
+      );
+
+    const stopped = new Promise<void>((resolve) => process.on("SIGINT", () => resolve()));
+    void (async () => {
+      for await (const raw of console) {
+        const text = raw.trim();
+        if (!text) continue;
+        // A bare public key is the easy mistake and the difference matters: a
+        // line with no restriction on it is a key that can open a shell. Wrap
+        // it rather than refuse it, because the phone's own line already has
+        // the restriction and this only catches someone who copied the key box
+        // above it.
+        const bare = /^(ssh-ed25519|ssh-rsa|ecdsa-sha2-\S+)\s+\S+/.test(text);
+        if (!bare && !text.includes('command="ledge-server serve"')) {
+          console.log("  that is not an authorized_keys line; copy the whole line the pairing screen shows");
+          continue;
+        }
+        authorize(bare ? `restrict,command="ledge-server serve" ${text}` : text);
+        const count = run(["docker", "exec", NAME, "sh", "-c", "grep -c . /home/ledge/.ssh/authorized_keys"], {
+          quiet: true,
+        }).out;
+        console.log(`  authorized${bare ? " (wrapped in the forced command)" : ""}: ${count} key(s) on the server`);
+      }
+    })();
+
+    await stopped;
+    console.log("");
+    // Explicitly, because process.exit skips the finally below.
+    await teardown();
+    console.log(`[-] container removed, scratch home removed (${SCRATCH})`);
+    process.exit(0);
+  }
 
   const conn: Connection = {
     id: "probe",

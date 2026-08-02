@@ -767,6 +767,55 @@ which announced itself as a launch failure with no obvious cause:
 | An ad hoc signature | The keychain answers `errSecMissingEntitlement` to a process with no application identity, and the device key is a keychain item (§4) |
 | Entitlements as a Mach-O section, not in the signature | The Simulator's rule, and not the device's. A signature carrying them is refused at launch with a POSIX 153 |
 
+**A device build is that same directory with seven things different**, and
+`bun run ios -- --phone` is all seven. The Simulator checks almost none of
+them; a phone checks every one, and the shared symptom of getting one wrong is
+an install that succeeds and a launch that does not.
+
+| What | Simulator | Device |
+| --- | --- | --- |
+| SDK and triple | `iphonesimulator`, `arm64-apple-ios17.0-simulator` | `iphoneos`, `arm64-apple-ios17.0`. The suffix selects an ABI, not a name |
+| Back-deployment shims | the toolchain's `iphonesimulator` copies | its `iphoneos` copies. A simulator dylib in a device bundle is the same dyld abort by another route |
+| Signature | ad hoc | the certificate the profile names |
+| Entitlements | `__TEXT,__entitlements` at link time | in the signature, and `--generate-entitlement-der` with them: iOS 15 and later read the DER copy and kill a process whose signature has only the plist |
+| Identifier | `dev.ledge.ios`, no team prefix | `<TEAMID>.dev.ledge.ios`, and it is the profile that decides |
+| The profile | none | `embedded.mobileprovision` in the bundle root |
+| Info.plist | as committed | plus `CFBundleSupportedPlatforms` and the `DT` keys Xcode writes. installd refuses a bundle that does not claim the platform, and says the bundle is invalid rather than which key is missing |
+| Install and launch | `simctl` | `devicectl`, whose `--console` is `--console-pty` |
+
+**Everything specific to this Mac is read out of the profile rather than
+written down.** The entitlements are generated from what it grants, so there is
+no second checked-in plist to disagree with it; the signing identity is its
+certificate, matched into the keychain by SHA-1, so a Mac holding several Apple
+Development certificates signs with the one this profile will accept. Three
+claims go in and deliberately not a fourth: `keychain-access-groups` is absent
+because `DeviceKey.swift` never names an access group, so its items land in the
+app's default one, which `application-identifier` grants on its own. Claiming
+the group as well would put Keychain Sharing on the App ID for nothing.
+
+**The profile itself lives outside the checkout**, at
+`~/.config/ledge/ios-dev.mobileprovision` unless `--profile` or
+`LEDGE_IOS_PROFILE` says otherwise, on releasing.md §3's rule. It is not a
+secret, but it belongs to one Apple team and one phone and it expires in a
+year.
+
+**What is one-time and human**, and cannot be automated away because it is an
+Apple account rather than a build:
+
+1. An **Apple Development** certificate, minted from Xcode > Settings >
+   Accounts > Manage Certificates so that its private key is on this Mac. A
+   Developer ID certificate is a macOS one and cannot sign this.
+2. The phone's UDID registered, an App ID for `dev.ledge.ios` with **no**
+   capabilities, and an iOS App Development profile over the two.
+3. **Developer Mode on the phone**, under Settings > Privacy & Security, which
+   needs a restart. The entry does not appear until something has tried to
+   install, so the first attempt always fails and cannot be prevented.
+
+The script checks what it can before building anything: that the profile
+exists, has not expired, is for this bundle id, lists devices at all, names the
+phone being installed to, and was issued to a certificate this keychain holds.
+Each of those is otherwise an install failure with a number in it.
+
 **The Swift closure is a second set of attributions.** architecture.md §8 says
 every dependency travels with the binary it ships in; the Mac app's notices are
 generated from npm and committed, and the iOS app's are generated from the
@@ -810,11 +859,18 @@ Per `testing.md`'s categories:
   same proof the Bun client got, against the same server, which is worth more
   than a second fixture written to be easy for Swift. testing.md §6 has the
   recipe, including how a probe pairs a build without a human.
-- **What no harness can reach**: the accessory bar, a finger, and a real
-  network. Those are a live probe with a device rather than a Mac. The enclave,
-  NIOSSH and the suspension lifecycle turned out to be reachable from a
+- **A real device, against that same fixture on the network**:
+  `bun run probe:ssh -- --serve` publishes it on every interface instead of
+  loopback, prints the destination and the host key fingerprint for the pairing
+  screen, and appends whatever `authorized_keys` line is pasted into it. A
+  Simulator shares this Mac's network stack and can dial `127.0.0.1`; a phone
+  cannot, and that is the only reason the fixture has a second mode.
+- **What no harness can reach**: a finger, a radio, the phone's own enclave,
+  and a suspension that really suspends. Those are a live probe with a device
+  rather than a Mac. NIOSSH and the lifecycle turned out to be reachable from a
   Simulator on Apple silicon (§4), which is the difference between "unproven"
-  and "unprovable".
+  and "unprovable" — but the enclave a Simulator reaches is the host Mac's SEP,
+  so the trap below stays untested until a phone runs this.
 
 One trap to write down before it is stepped in: **the Simulator's Secure
 Enclave is not the device's.** A key-generation path that quietly falls back
@@ -981,6 +1037,26 @@ inside the Mac app.
 
    Not done here, and still the only thing between this and a shippable v1: a
    real device. Everything above is a Simulator against a container.
+7. **In flight. A real device.** The three phases above each end with the same
+   sentence, and this is that sentence. `bun run ios -- --phone` builds, signs
+   and installs for hardware (§12); `bun run probe:ssh -- --serve` puts the
+   fixture somewhere a phone can dial (§13).
+
+   What is proven is the build. `vtool` reads `IOS` rather than `IOSSIMULATOR`,
+   the signature is an Apple Development identity carrying the team, the
+   entitlements in it are the three the profile grants and no more, and the
+   profile is in the bundle. What is not proven is anything that runs: the
+   first install onto a phone that has never had one fails on Developer Mode,
+   and the entry for it does not appear in Settings until that failure has
+   happened, so it cannot be turned on in advance.
+
+   Four things wait on this and can be got no other way. The phone's own Secure
+   Enclave, and with it §13's trap about a software key that quietly ships.
+   §5's lifecycle across a suspension that really suspends. The accessory bar
+   under a finger rather than under Playwright's pointer events. And the
+   geometry of a 14 Pro Max against a keyboard fix built on a 16. The first
+   Local Network prompt belongs here too: a Simulator shares this Mac's network
+   stack and is never asked.
 
 Live command execution is not in this list. It is the phase after v1, and §5
 says what it has to answer first: a client that can ask a server to hold its

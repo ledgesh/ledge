@@ -2,6 +2,7 @@
 //
 //   bun run ios                       build, install, launch, stream its log
 //   bun run ios -- --build            build only
+//   bun run ios -- --phone            the same, on a real device
 //   bun run ios -- --server ledge@10.0.0.4
 //   bun run ios -- --device "iPhone 16 Pro"
 //
@@ -20,10 +21,17 @@
 // wins, which is why the output lands in a directory named for macOS and is an
 // iOS Simulator binary (`vtool -show-build` says `IOSSIMULATOR`).
 //
-// Simulator only, and by construction: no signing identity is used and none is
-// needed. A build for a device is the phase that needs a provisioning profile
-// (ios.md §12).
+// Two destinations, and `--phone` is the whole difference. The Simulator build
+// needs no signing identity, because the Simulator checks none; a device checks
+// everything, so the same bundle assembled seven ways differently is a
+// different SDK, a different triple, different back-deployment shims, a real
+// identity instead of an ad hoc one, entitlements in the signature instead of a
+// Mach-O section, a provisioning profile inside the bundle, and `devicectl`
+// instead of `simctl`. Every one of them is a `phone ?` below and each is
+// commented where it sits, because each announced itself as a launch failure
+// with no obvious cause (ios.md §12).
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
 const REPO = join(import.meta.dir, "..");
@@ -43,6 +51,23 @@ const buildOnly = argv.includes("--build");
 const device = flag("device") ?? "iPhone 16";
 const server = flag("server");
 
+// `--phone`, optionally naming one: `--phone <name-or-udid>`, as `xcrun
+// devicectl list devices` prints it. The name is optional because most Macs
+// have exactly one device paired, and `simctl`'s word for a simulator is
+// already "device", so this flag is spelled for the hardware instead.
+const phoneArg = flag("phone");
+const phone = phoneArg !== null;
+const phoneName = phoneArg && !phoneArg.startsWith("--") ? phoneArg : null;
+
+// Outside the checkout, like the release credentials (releasing.md §3). It is
+// not a secret — public certificates and a device UDID — but it belongs to one
+// Apple team and one phone and it expires in a year, so it is this Mac's and
+// not the repository's.
+const PROFILE =
+  flag("profile") ??
+  process.env.LEDGE_IOS_PROFILE ??
+  join(homedir(), ".config", "ledge", "ios-dev.mobileprovision");
+
 async function run(cmd: string[], opts: { cwd?: string; quiet?: boolean } = {}): Promise<string> {
   const proc = Bun.spawn({
     cmd,
@@ -61,6 +86,94 @@ async function run(cmd: string[], opts: { cwd?: string; quiet?: boolean } = {}):
 
 const version = (await Bun.file(join(REPO, "package.json")).json()).version as string;
 
+// --- the provisioning profile -------------------------------------------------
+//
+// Read first, before anything is built, because every way it can be wrong is a
+// way the app installs and then dies: a profile for another bundle id, one that
+// does not name this phone, one whose certificate is not in this keychain, one
+// that expired. Each of those is a sentence here rather than an alert on the
+// phone with a number in it.
+//
+// It also decides two things this script would otherwise have to be told. The
+// entitlements are generated from what the profile grants, rather than kept in
+// a second checked-in plist that could disagree with it; and the identity is
+// the certificate the profile itself names, matched into the keychain by SHA-1,
+// so a Mac holding several Apple Development certificates signs with the one
+// this profile will accept instead of the first one listed.
+
+interface Profile {
+  entitlements: Record<string, unknown>;
+  devices: string[];
+  /** A certificate SHA-1, which `codesign -s` takes and no two identities share. */
+  identity: string;
+  name: string;
+}
+
+async function readProfile(path: string): Promise<Profile> {
+  if (!existsSync(path)) {
+    throw new Error(
+      `no provisioning profile at ${path}\n` +
+        `Register an iOS App Development profile for ${BUNDLE_ID} at developer.apple.com, download it there, ` +
+        `or name another with --profile or LEDGE_IOS_PROFILE (ios.md §12).`,
+    );
+  }
+  mkdirSync(OUT, { recursive: true });
+  const plist = join(OUT, "profile.plist");
+  // A .mobileprovision is a CMS envelope around a plist and `security cms -D`
+  // unwraps it. Nothing here checks the signature on it: the phone does, and a
+  // profile this script accepted and the device refused is not a failure worth
+  // catching twice.
+  await run(["security", "cms", "-D", "-i", path, "-o", plist], { quiet: true });
+  // Key at a time, because `plutil -convert json` refuses the whole thing: the
+  // profile holds dates and JSON has no date, so the conversion fails on a file
+  // that is otherwise perfectly readable.
+  const at = async (key: string, format: "json" | "raw"): Promise<string> =>
+    (await run(["plutil", "-extract", key, format, "-o", "-", plist], { quiet: true })).trim();
+
+  const entitlements = JSON.parse(await at("Entitlements", "json")) as Record<string, unknown>;
+  const name = await at("Name", "raw");
+  const expires = await at("ExpirationDate", "raw");
+  if (Date.parse(expires) < Date.now()) {
+    throw new Error(`the profile "${name}" expired on ${expires}; download a new one`);
+  }
+
+  // A distribution profile has no device list at all, which is the loudest way
+  // to have brought the wrong file.
+  const devices = readFileSync(plist, "utf8").includes("<key>ProvisionedDevices</key>")
+    ? (JSON.parse(await at("ProvisionedDevices", "json")) as string[])
+    : [];
+  if (devices.length === 0) {
+    throw new Error(`the profile "${name}" provisions no devices; a device build needs a DEVELOPMENT profile`);
+  }
+
+  const team = String(entitlements["com.apple.developer.team-identifier"] ?? "");
+  const appId = String(entitlements["application-identifier"] ?? "");
+  const wanted = `${team}.${BUNDLE_ID}`;
+  const matches = appId === wanted || (appId.endsWith(".*") && wanted.startsWith(appId.slice(0, -1)));
+  if (!matches) {
+    throw new Error(`the profile "${name}" is for ${appId}, and this app is ${wanted}`);
+  }
+
+  const der = join(OUT, "profile-cert.der");
+  await Bun.write(der, Buffer.from(await at("DeveloperCertificates.0", "raw"), "base64"));
+  const printed = await run(["openssl", "x509", "-inform", "DER", "-in", der, "-noout", "-fingerprint", "-sha1"], {
+    quiet: true,
+  });
+  const identity = (printed.trim().split("=")[1] ?? "").replaceAll(":", "");
+  const installed = await run(["security", "find-identity", "-v", "-p", "codesigning"], { quiet: true });
+  if (!identity || !installed.includes(identity)) {
+    throw new Error(
+      `the certificate "${name}" was issued to is not in this keychain (SHA-1 ${identity || "unreadable"})\n` +
+        `Xcode > Settings > Accounts > Manage Certificates mints one together with its private key. ` +
+        `A certificate downloaded from developer.apple.com without the key that requested it cannot sign anything.`,
+    );
+  }
+  return { entitlements, devices, identity, name };
+}
+
+const profile = phone ? await readProfile(PROFILE) : null;
+if (profile) console.log(`[ios] profile "${profile.name}", ${profile.devices.length} device(s)`);
+
 // --- the view ----------------------------------------------------------------
 
 console.log("[ios] building the view");
@@ -74,11 +187,17 @@ if (!existsSync(join(REPO, "dist-ios", "ios.html"))) {
 rmSync(APP, { recursive: true, force: true });
 mkdirSync(APP, { recursive: true });
 
-console.log("[ios] compiling the shell");
-const sdk = (await run(["xcrun", "--sdk", "iphonesimulator", "--show-sdk-path"], { quiet: true })).trim();
+console.log(`[ios] compiling the shell for ${phone ? "a device" : "the Simulator"}`);
+// The platform name is most of the difference between the two builds, and it
+// comes back below for the back-deployment shims, which have to be taken out of
+// the same one: a simulator dylib on a phone is a dyld abort at launch.
+const PLATFORM = phone ? "iphoneos" : "iphonesimulator";
+const sdk = (await run(["xcrun", "--sdk", PLATFORM, "--show-sdk-path"], { quiet: true })).trim();
 // arm64 only, like the Mac app (releasing.md). An Intel Mac's Simulator would
-// need x86_64, and nothing else here is universal either.
-const TRIPLE = `arm64-apple-ios${DEPLOYMENT}-simulator`;
+// need x86_64, and nothing else here is universal either. The `-simulator`
+// suffix is not decoration: it selects a different ABI, and dropping it is the
+// whole of what makes the same source a device binary.
+const TRIPLE = `arm64-apple-ios${DEPLOYMENT}${phone ? "" : "-simulator"}`;
 const swiftpm = [
   "swift",
   "build",
@@ -122,20 +241,27 @@ const swiftpm = [
   "-rpath",
   "-Xlinker",
   "@executable_path/Frameworks",
-  // Entitlements, at LINK time and as a Mach-O section. This is the part of
-  // simulator code signing that is not like the device's: simulated processes
-  // get their entitlements from `__TEXT,__entitlements` in the binary, and a
-  // signature that carries them instead is rejected at launch with a POSIX 153
-  // and no explanation. A device build puts the same plist in the signature.
-  "-Xlinker",
-  "-sectcreate",
-  "-Xlinker",
-  "__TEXT",
-  "-Xlinker",
-  "__entitlements",
-  "-Xlinker",
-  join(REPO, "ios", "Resources", "Ledge.entitlements"),
 ];
+// Entitlements at LINK time and as a Mach-O section, and only for the
+// Simulator. This is the part of simulator code signing that is not like the
+// device's: simulated processes read their entitlements from
+// `__TEXT,__entitlements` in the binary, and a signature carrying them instead
+// is rejected at launch with a POSIX 153 and no explanation. A device reads the
+// signature and nothing else, so the device build puts them there (below) and
+// omits the section rather than shipping a second, stale copy of the same
+// claims under an identifier with no team prefix.
+if (!phone) {
+  swiftpm.push(
+    "-Xlinker",
+    "-sectcreate",
+    "-Xlinker",
+    "__TEXT",
+    "-Xlinker",
+    "__entitlements",
+    "-Xlinker",
+    join(REPO, "ios", "Resources", "Ledge.entitlements"),
+  );
+}
 await run(swiftpm);
 // Asked rather than assumed: the directory is named for the HOST triple even
 // though the bytes in it are the simulator's, which is a thing to read out of
@@ -152,7 +278,8 @@ await run(["cp", join(binDir, "Ledge"), join(APP, "Ledge")]);
 //
 // Which ones are needed is read out of the binary rather than listed here: the
 // list belongs to the toolchain and changes with it. The copies come from the
-// SIMULATOR directory, because the link picked them up from the host's.
+// DESTINATION's directory, because the link picked them up from the host's, and
+// a simulator dylib inside a device bundle is the same abort by another route.
 const needed = (await run(["otool", "-L", join(APP, "Ledge")], { quiet: true }))
   .split("\n")
   .map((line) => line.trim().split(" ")[0] ?? "")
@@ -162,17 +289,41 @@ if (needed.length > 0) {
   const toolchain = dirname(dirname((await run(["xcrun", "--find", "swiftc"], { quiet: true })).trim()));
   mkdirSync(join(APP, "Frameworks"), { recursive: true });
   for (const dylib of needed) {
-    const found = [...new Bun.Glob(`lib/swift-*/iphonesimulator/${dylib}`).scanSync({ cwd: toolchain, absolute: true })];
-    if (found.length === 0) throw new Error(`the binary needs ${dylib}, and this toolchain ships no simulator copy of it`);
+    const found = [...new Bun.Glob(`lib/swift-*/${PLATFORM}/${dylib}`).scanSync({ cwd: toolchain, absolute: true })];
+    if (found.length === 0) throw new Error(`the binary needs ${dylib}, and this toolchain ships no ${PLATFORM} copy of it`);
     await run(["cp", found[0]!, join(APP, "Frameworks", dylib)]);
   }
   console.log(`[ios] bundled ${needed.join(", ")}`);
 }
 
-await Bun.write(join(APP, "Info.plist"), Bun.file(join(REPO, "ios", "Resources", "Info.plist")));
-await run(["plutil", "-replace", "CFBundleShortVersionString", "-string", version, join(APP, "Info.plist")]);
+const plistPath = join(APP, "Info.plist");
+await Bun.write(plistPath, Bun.file(join(REPO, "ios", "Resources", "Info.plist")));
+await run(["plutil", "-replace", "CFBundleShortVersionString", "-string", version, plistPath]);
 if (server !== null) {
-  await run(["plutil", "-replace", "LedgeServer", "-string", server, join(APP, "Info.plist")]);
+  await run(["plutil", "-replace", "LedgeServer", "-string", server, plistPath]);
+}
+
+// Five keys Xcode writes that a hand-assembled bundle has to write itself, and
+// only a device wants them. `CFBundleSupportedPlatforms` is the load-bearing
+// one: installd refuses a bundle that does not claim the platform it is being
+// installed on, and what it says back is that the bundle is invalid rather than
+// which key is missing. The DT keys describe what built it, and they are asked
+// of `xcrun` rather than written down, because a hardcoded SDK version is a
+// lie one Xcode update later.
+if (phone) {
+  const sdkVersion = (await run(["xcrun", "--sdk", PLATFORM, "--show-sdk-version"], { quiet: true })).trim();
+  const sdkBuild = (await run(["xcrun", "--sdk", PLATFORM, "--show-sdk-build-version"], { quiet: true })).trim();
+  await run(["plutil", "-replace", "CFBundleSupportedPlatforms", "-json", '["iPhoneOS"]', plistPath]);
+  await run(["plutil", "-replace", "DTPlatformName", "-string", PLATFORM, plistPath]);
+  await run(["plutil", "-replace", "DTPlatformVersion", "-string", sdkVersion, plistPath]);
+  await run(["plutil", "-replace", "DTSDKName", "-string", `${PLATFORM}${sdkVersion}`, plistPath]);
+  await run(["plutil", "-replace", "DTSDKBuild", "-string", sdkBuild, plistPath]);
+
+  // The profile, under the one name the installer looks for. It is not
+  // configuration and nothing here reads it again: the phone reads it, checks
+  // its own UDID is in the list, and checks that what the signature claims is
+  // a subset of what it grants.
+  await Bun.write(join(APP, "embedded.mobileprovision"), Bun.file(PROFILE));
 }
 
 // The view as a bundle resource, under the one directory BundleScheme.swift
@@ -218,26 +369,145 @@ await Bun.write(join(APP, "THIRD-PARTY-NOTICES.md"), `${notices.join("\n")}\n`);
 
 // --- the signature ------------------------------------------------------------
 //
-// Ad hoc, and not for the reason signing usually exists. The Simulator does not
-// check who signed this; the keychain checks that the process has an
-// application identity at all, and answers errSecMissingEntitlement (-34018) to
-// one that does not. The device key is a keychain item, so an unsigned bundle
-// is an app that cannot mint a key and cannot pair.
+// On the Simulator, ad hoc, and not for the reason signing usually exists. The
+// Simulator does not check who signed this; the keychain checks that the
+// process has an application identity at all, and answers
+// errSecMissingEntitlement (-34018) to one that does not. The device key is a
+// keychain item, so an unsigned bundle is an app that cannot mint a key and
+// cannot pair. Its entitlements are already in the binary as a section (above),
+// so that signature carries none.
 //
-// The entitlements are already in the binary as a section (above), so this
-// signature carries none: passing them here is what makes the Simulator refuse
-// to launch it at all.
+// On a device, a real identity and the entitlements in the signature: the same
+// fact inverted. What goes in them is generated from the profile rather than
+// read from ios/Resources/Ledge.entitlements, because it is the profile that
+// decides what the identifier really is (ios.md §4), and a checked-in copy of a
+// team-prefixed identifier is a copy that can disagree with it.
 //
-// Inside out: a bundle's signature covers what is nested in it, so the shim has
-// to be signed before the app that contains it.
-for (const dylib of needed) {
-  await run(["codesign", "--force", "--sign", "-", join(APP, "Frameworks", dylib)]);
+// Three claims, and deliberately not a fourth. `keychain-access-groups` is
+// absent: DeviceKey.swift never names an access group, so its items land in the
+// app's default one, which `application-identifier` grants on its own. Claiming
+// the group as well would put Keychain Sharing on the App ID for nothing.
+const signature: string[] = [];
+let identity = "-";
+if (phone && profile) {
+  identity = profile.identity;
+  // The CONCRETE identifier, assembled from the team rather than copied out of
+  // the profile, because a wildcard profile says `TEAM.*` and a signature may
+  // not: what is claimed here has to be an app, and what the profile grants has
+  // to be a superset of it.
+  const team = String(profile.entitlements["com.apple.developer.team-identifier"] ?? "");
+  const ent = join(OUT, "Ledge.device.entitlements");
+  await Bun.write(
+    ent,
+    JSON.stringify({
+      "application-identifier": `${team}.${BUNDLE_ID}`,
+      "com.apple.developer.team-identifier": team,
+      // Whatever the profile allows: a development profile says true, and it is
+      // what lets `devicectl` attach to the process and stream its output.
+      "get-task-allow": profile.entitlements["get-task-allow"] === true,
+    }),
+  );
+  await run(["plutil", "-convert", "xml1", ent]);
+  // iOS 15 and later read entitlements out of a DER blob rather than the plist,
+  // and a signature carrying only the plist is accepted at install and killed
+  // at launch.
+  signature.push("--entitlements", ent, "--generate-entitlement-der");
 }
-await run(["codesign", "--force", "--sign", "-", APP]);
+
+// Inside out: a bundle's signature covers what is nested in it, so the shim has
+// to be signed before the app that contains it. The shims carry no entitlements
+// of their own, and on a device they still take the same identity: one bundle
+// signed by two hands is a bundle the device refuses.
+for (const dylib of needed) {
+  await run(["codesign", "--force", "--sign", identity, join(APP, "Frameworks", dylib)]);
+}
+await run(["codesign", "--force", "--sign", identity, ...signature, APP]);
 
 const size = (await run(["du", "-sh", APP], { quiet: true })).split("\t")[0];
 console.log(`[ios] ${APP} (${size?.trim()}), version ${version}`);
 if (buildOnly) process.exit(0);
+
+// --- the phone ----------------------------------------------------------------
+//
+// `devicectl` where the Simulator has `simctl`, and the three steps line up one
+// for one: list, install, launch with the console attached. What it has no need
+// of is a boot step, because a phone is either there or it is not.
+//
+// Every devicectl command on some Macs prints "Failed to load provisioning
+// paramter list" (Apple's typo) to stderr and then works. It is about a
+// subsystem none of this uses, and the exit code is zero.
+if (phone && profile) {
+  interface CoreDevice {
+    deviceProperties: { name: string };
+    hardwareProperties: { udid: string; marketingName: string };
+    connectionProperties: { tunnelState: string };
+  }
+  const listing = join(OUT, "devices.json");
+  await run(["xcrun", "devicectl", "list", "devices", "--json-output", listing], { quiet: true });
+  const paired = (JSON.parse(readFileSync(listing, "utf8")) as { result: { devices: CoreDevice[] } }).result.devices;
+
+  if (paired.length === 0) {
+    throw new Error("no devices are paired with this Mac; connect the phone, unlock it, and trust this computer");
+  }
+  if (!phoneName && paired.length > 1) {
+    const names = paired.map((d) => d.deviceProperties.name).join(", ");
+    throw new Error(`${paired.length} devices are paired (${names}); name one with --phone <name>`);
+  }
+  const target = phoneName
+    ? paired.find((d) => d.deviceProperties.name === phoneName || d.hardwareProperties.udid === phoneName)
+    : paired[0];
+  if (!target) throw new Error(`no paired device called ${phoneName}; xcrun devicectl list devices`);
+
+  const udid = target.hardwareProperties.udid;
+  const name = target.deviceProperties.name;
+  // Asked here rather than left to the installer, because a phone that is not
+  // in the profile fails at install with a code and a sentence about the
+  // application being invalid, which is true and points nowhere.
+  if (!profile.devices.includes(udid)) {
+    throw new Error(
+      `${name} (${udid}) is not one of the ${profile.devices.length} device(s) in the profile "${profile.name}"\n` +
+        `Register it at developer.apple.com under Devices, add it to the profile, and download the profile again.`,
+    );
+  }
+  if (target.connectionProperties.tunnelState !== "connected") {
+    console.log(`[ios] ${name} is ${target.connectionProperties.tunnelState}; unlock it, and plug it in if this hangs`);
+  }
+
+  console.log(`[ios] installing on ${name} (${target.hardwareProperties.marketingName})`);
+  try {
+    await run(["xcrun", "devicectl", "device", "install", "app", "--device", udid, APP], { quiet: true });
+  } catch (failed) {
+    // The first install onto a phone that has never had one always fails this
+    // way, and the toggle it names does not appear in Settings until something
+    // has tried, so it cannot be turned on in advance.
+    console.error(
+      "\n[ios] if that says Developer Mode is disabled: on the phone, Settings > Privacy & Security >\n" +
+        "      Developer Mode, turn it on, restart the phone, and run this again.\n",
+    );
+    throw failed;
+  }
+
+  // `--console` is the device's `--console-pty`: the shell's print() lines and
+  // every boot number the view reports come out here, and Ctrl-C detaches and
+  // leaves the app running. The trailing arguments reach the app's argv, which
+  // is where UserDefaults finds `-LedgeServer` (ShellConfig.swift).
+  console.log(`[ios] launching; Ctrl-C detaches\n`);
+  const launch = [
+    "xcrun",
+    "devicectl",
+    "device",
+    "process",
+    "launch",
+    "--device",
+    udid,
+    "--console",
+    "--terminate-existing",
+    BUNDLE_ID,
+  ];
+  if (server !== null) launch.push("-LedgeServer", server);
+  await run(launch);
+  process.exit(0);
+}
 
 // --- the Simulator -----------------------------------------------------------
 

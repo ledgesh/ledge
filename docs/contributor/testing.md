@@ -248,6 +248,43 @@ can set those, the pin is still compared on every connection, and the values
 live in the argument domain, so they vanish at the next launch and shadow
 anything the app stores.
 
+**The device variant** — for the four things a Simulator cannot be (`ios.md`
+§13): the phone's own enclave, a suspension that really suspends, a finger, and
+a screen the layout was not built on. Two commands, and `ios.md` §12 has the
+one-time Apple account work behind the second.
+
+```
+bun run probe:ssh -- --serve                  # the fixture on the LAN, not on loopback
+bun run ios -- --phone                        # build, sign, install, stream the console
+```
+
+**The fixture has to leave loopback.** A Simulator shares this Mac's network
+stack, so `127.0.0.1` is the server; a phone is a different machine and there
+is nothing there. `--serve` publishes the same container on every interface,
+prints the `user@host` to type and the fingerprint to check the pairing screen
+against, and appends the `authorized_keys` line pasted into it. Ctrl-C removes
+the container and the scratch home.
+
+**Pair by hand here, not with launch arguments.** `-LedgeHostKey` exists so a
+Simulator probe can consider itself paired without a human; on a phone it skips
+one of the things worth watching. The phone also mints its own key regardless,
+so the Simulator's line in `authorized_keys` will never authenticate it: copy
+the line off the pairing screen, which has a button for it, and paste it into
+the terminal `--serve` is running in.
+
+**The first install always fails, and it cannot be prevented.** It fails on
+Developer Mode, under Settings > Privacy & Security on the phone, and that
+entry does not appear until an install has been attempted. Turn it on, restart
+the phone, run the same command again.
+
+**Whether the key is really the enclave's is a printed line, not an
+inspection.** `[pair] key in the Secure Enclave` comes out of
+`devicectl --console` at first launch, and `key in software` is the thing that
+must never appear there. The software case is compiled out of a device build
+(`#if targetEnvironment(simulator)` in `DeviceKey.swift`), so a phone with no
+usable enclave throws instead of quietly minting a weaker key: the line
+confirms the build, and the structure is what makes it true.
+
 The probe reports with the bridge's `@log`, which is why this variant needs no
 clipboard detour: the line comes straight out of `--console-pty` while the app
 is running. `xcrun simctl io <device> screenshot` is the other half, and it
