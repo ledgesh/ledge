@@ -46,15 +46,17 @@
   <array>
     <string>arm64</string>
   </array>
-  <!-- A phase-3 build talks to scripts/lan-bridge.ts over plain TCP, which on a
-       real device is a local network connection and needs a reason the user can
-       read. The Simulator shares this Mac's network stack and never asks. -->
+  <!-- A server on the same network is a local network connection, and iOS asks
+       the user before the first one with this sentence in the prompt. The
+       Simulator shares this Mac's network stack and never asks. -->
   <key>NSLocalNetworkUsageDescription</key>
-  <string>Ledge connects to the Ledge server on your own machine.</string>
-  <!-- Where to find it. Overridden per launch by `simctl launch … -LedgeServer
-       host:port`, which is how a probe points a build at a scratch server
-       without rebuilding it (ios/Sources/ShellConfig.swift). -->
+  <string>Ledge connects over SSH to the Ledge server on your own machine.</string>
+  <!-- What the pairing screen starts with, and only that: a destination is not
+       a pin, and the host key still has to be confirmed on the phone. Overridden
+       per launch by `simctl launch … -LedgeServer user@host`, which is how a
+       probe points a build at a scratch server without rebuilding it
+       (ios/Sources/ShellConfig.swift). -->
   <key>LedgeServer</key>
-  <string>127.0.0.1:8787</string>
+  <string></string>
 </dict>
 </plist>

@@ -208,13 +208,14 @@ export function nativeOverlay(
   requests: RequestClient,
   shell: Pick<Shell, "call" | "destination">,
   build: string,
+  again: () => void,
 ): RequestClient {
-  return { ...requests, ...clientSeams(requests, shell, build) };
+  return { ...requests, ...clientSeams(requests, shell, build, again) };
 }
 
 /** One server, chosen by the shell, and no way to change it from in here. */
 const ONE_SERVER = "This build talks to one server.";
-const LAN_ID = "shell";
+const SHELL_ID = "shell";
 
 /**
  * The eleven a client shell answers itself (wire.ts CLIENT_METHODS), for iOS.
@@ -229,6 +230,7 @@ function clientSeams(
   requests: RequestClient,
   shell: Pick<Shell, "call" | "destination">,
   build: string,
+  again: () => void,
 ): Pick<RequestClient, ClientMethod> {
   return {
     clipboardWrite: async ({ text }) => {
@@ -252,28 +254,45 @@ function clientSeams(
     // this is where it stops.
     menuSet: async () => ({ ok: true }),
 
-    // Phase 3 has exactly one server: the one the shell was pointed at. The
-    // list is a single truthful row rather than an empty one, because the
-    // indicator's job is to name the machine, and the four verbs that would
-    // change it refuse in a sentence. Real connection records arrive with the
-    // ssh that needs them (ios.md §14 phase 4).
+    // A phone has exactly one server: the one it was paired with. The list is a
+    // single truthful row rather than an empty one, because the indicator's job
+    // is to name the machine, and the four verbs that would change it refuse in
+    // a sentence — the screen that adds and pins a server is native (§4), for
+    // the same reason it has to exist before any of this can run.
+    //
+    // `pinned` is true and `keyPath` is empty, and both are facts rather than
+    // placeholders: the connection has a pinned host key, and its client key
+    // has no path because it is in the Secure Enclave and cannot be read out of
+    // it at all.
     connectionList: async () => ({
       connections: [
         {
-          id: LAN_ID,
+          id: SHELL_ID,
           name: shell.destination(),
           destination: shell.destination(),
           keyPath: "",
-          pinned: false,
+          pinned: true,
           lastReached: 0,
         },
       ],
-      active: LAN_ID,
-      wanted: LAN_ID,
+      active: SHELL_ID,
+      wanted: SHELL_ID,
       error: "",
       build,
     }),
-    connectionSelect: async ({ id }) => (id === LAN_ID ? { ok: true, error: "" } : { ok: false, error: ONE_SERVER }),
+    // Choosing the one server again is how a phone recovers, and it is the
+    // Mac's answer too: `connectionManager.ts` re-attaches when the connection
+    // it is asked for is the active one AND that one is in error, because
+    // nothing below can re-establish a session's state by itself
+    // (shared/transport.ts). The reconnect ladder stops for good when the
+    // server restarts under it — a new instance cannot honour a replay — and
+    // this is the row the chrome offers after that. On a phone, rebuilding
+    // from boot is reloading the page, which is §5's sentence again.
+    connectionSelect: async ({ id }) => {
+      if (id !== SHELL_ID) return { ok: false, error: ONE_SERVER };
+      again();
+      return { ok: true, error: "" };
+    },
     connectionAdd: async () => ({ id: "", error: ONE_SERVER }),
     connectionRemove: async () => ({ ok: false, error: ONE_SERVER }),
     connectionProbe: async () => ({ hostKey: "", fingerprint: "", keyType: "", error: ONE_SERVER }),
@@ -282,7 +301,7 @@ function clientSeams(
 
 /** What the overlay answers, for the test that holds it to CLIENT_METHODS. */
 export const iosClientMethods = (): string[] =>
-  Object.keys(clientSeams({} as RequestClient, { call: async () => null, destination: () => "" }, ""));
+  Object.keys(clientSeams({} as RequestClient, { call: async () => null, destination: () => "" }, "", () => {}));
 
 declare global {
   interface Window {

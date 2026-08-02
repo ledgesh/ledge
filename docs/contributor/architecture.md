@@ -851,10 +851,23 @@ A third native module needs the same bar as any dependency. Two exist because
 the alternative was a broken terminal, not because compiled code is on the
 table generally.
 
+**There is a second dependency closure, and it has one member.** The iOS client
+(`ios.md` §3) links SwiftNIO SSH, because iOS runs no subprocesses and there is
+no `ssh` to spawn; `ios/Package.swift` is its manifest and `ios/Package.resolved`
+pins what it resolved to. It clears the bar above the same way `@playwright/test`
+does: nothing in the approved set can speak SSH, and the alternative to linking
+an implementation is not having a client. It is also the whole of that closure —
+the window, the web view, the pasteboard and the key are system frameworks —
+which is a property worth keeping rather than a coincidence.
+
 **Every dependency is also an attribution.** MIT, BSD, and ISC all ask that
 their notice travel with the binary, so adding one to `dependencies` means
 regenerating `THIRD-PARTY-NOTICES.md` (`bun run licenses`) and committing it in
-the same change. The file is the app's, not the repository's: `docsContent.ts`
+the same change. The Swift closure is Apache-2.0, which asks for the NOTICE
+file too, and its notices are generated into the app bundle at build time from
+the resolved checkouts rather than committed — nothing that is regenerated on
+every build can go stale, which is the failure the committed file needs a test
+to catch. The file is the app's, not the repository's: `docsContent.ts`
 compiles it in as the manual's last page and `docs.licenses` opens it, because
 a notice the user's copy does not carry is a notice that did not ship.
 

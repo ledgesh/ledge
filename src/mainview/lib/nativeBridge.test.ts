@@ -19,7 +19,7 @@ function recorder() {
     const call = sent.filter((msg) => msg.t === "call" && msg.m === m).at(-1);
     reply((call as { id: number }).id, r);
   };
-  const greeted = async (destination = "192.168.1.9:8787") => {
+  const greeted = async (destination = "ledge@192.168.1.9") => {
     const asking = shell.hello();
     answer("@hello", { client: "device-1", destination });
     return asking;
@@ -56,8 +56,8 @@ describe("the native call channel", () => {
   test("who we are and where we point is asked once, before any socket", async () => {
     const { sent, shell, greeted } = recorder();
     expect(shell.destination()).toBe("");
-    expect(await greeted("mac.local:8787")).toEqual({ client: "device-1", destination: "mac.local:8787" });
-    expect(shell.destination()).toBe("mac.local:8787");
+    expect(await greeted("dan@mac.local")).toEqual({ client: "device-1", destination: "dan@mac.local" });
+    expect(shell.destination()).toBe("dan@mac.local");
     // The layout is keyed by client id (remote.md §5), so the id has to be in
     // hand before the first dial rather than after it.
     expect(sent[0]).toEqual({ t: "call", id: 1, m: "@hello", p: {} });
@@ -174,8 +174,15 @@ function noServer(extra: Partial<RequestClient> = {}): RequestClient {
   };
 }
 
+const booted: number[] = [];
+
 function overlay(calls: (m: string, p: unknown) => Promise<unknown>, requests = noServer()): RequestClient {
-  return nativeOverlay(requests, { call: (m, p) => calls(m, p), destination: () => "mac.local:8787" }, "0.1.0-server");
+  return nativeOverlay(
+    requests,
+    { call: (m, p) => calls(m, p), destination: () => "dan@mac.local" },
+    "0.1.0-server",
+    () => booted.push(1),
+  );
 }
 
 describe("the client overlay", () => {
@@ -226,9 +233,13 @@ describe("the client overlay", () => {
 
   test("the connection list names the machine the shell reached", async () => {
     const status = await overlay(async () => null).connectionList({});
-    expect(status.connections.map((c) => c.destination)).toEqual(["mac.local:8787"]);
+    expect(status.connections.map((c) => c.destination)).toEqual(["dan@mac.local"]);
     expect(status.active).toBe(status.connections[0]!.id);
     expect(status.error).toBe("");
+    // Both are facts about how a phone connects, not placeholders: the host key
+    // was pinned at pairing, and the client key has no path because it is in
+    // the Secure Enclave (ios.md §4).
+    expect(status.connections[0]).toMatchObject({ pinned: true, keyPath: "" });
     // The SERVER's build, not the client's: the chrome shows what it reached.
     expect(status.build).toBe("0.1.0-server");
   });
@@ -239,8 +250,23 @@ describe("the client overlay", () => {
     expect((await o.connectionRemove({ id: "shell" })).error).toContain("one server");
     expect((await o.connectionProbe({ destination: "d" })).error).toContain("one server");
     expect((await o.connectionSelect({ id: "elsewhere" })).ok).toBe(false);
-    // Choosing the one that is already live is not an error.
-    expect(await o.connectionSelect({ id: (await o.connectionList({})).connections[0]!.id })).toEqual({ ok: true, error: "" });
+  });
+
+  // The ladder gives up for good when a restarted server answers with a new
+  // instance (shared/transport.ts), and choosing the connection again is what
+  // rebuilds from boot. On a phone that is the page reloading, and the row is
+  // the only recovery there is — so a refusal here would be an app that stays
+  // dead until it is force-quit.
+  test("choosing the one server again is a boot, and a wrong id is not", async () => {
+    const o = overlay(async () => null);
+    booted.length = 0;
+    expect(await o.connectionSelect({ id: (await o.connectionList({})).connections[0]!.id })).toEqual({
+      ok: true,
+      error: "",
+    });
+    expect(booted.length).toBe(1);
+    await o.connectionSelect({ id: "elsewhere" });
+    expect(booted.length).toBe(1);
   });
 
   test("everything else is the server's", async () => {

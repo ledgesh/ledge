@@ -10,10 +10,11 @@
 // is the TypeScript in src/shared/, running in the webview. That split is
 // ios.md §2 and it is why this directory is small.
 //
-// Phase 3 (ios.md §14) is the shell WITHOUT ssh: the transport is a plain TCP
-// socket to scripts/lan-bridge.ts on the same network. That fixture opens a
-// port and must never become a shipping mode; Socket.swift says so again where
-// the connection is actually made.
+// The wire is ssh, linked in rather than spawned (ios.md §3): iOS runs no
+// subprocesses, so SSHTransport.swift is what /usr/bin/ssh is on the Mac, and
+// the key it authenticates with is minted in the Secure Enclave and never
+// leaves it (§4). Everything above the byte stream is unchanged, because a
+// duplex does not know what carries it.
 import UIKit
 
 UIApplicationMain(

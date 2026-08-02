@@ -11,6 +11,11 @@ dist-native/
 dist-ios/
 build/
 
+# SwiftPM's checkouts and object files for the iOS client. Package.resolved is
+# committed on purpose — the pins are the supply chain — but the tree it clones
+# is a cache.
+ios/.build/
+
 # Release artifacts (the DMG, the update tarball, update.json). Tens of
 # megabytes per build, and the copies that matter are the ones published.
 artifacts/

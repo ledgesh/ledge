@@ -11,10 +11,15 @@ import WebKit
 /// answer.
 final class WebHost: UIViewController {
     private let config: ShellConfig
+    private let server: ServerRecord
+    /// Called when a dial fails for a reason retrying cannot fix: a host key
+    /// that changed, or a key the server will not accept. The page's ladder
+    /// would otherwise spend the next half minute asking the same question.
+    private let onRepair: (String) -> Void
     private let scheme = BundleScheme()
     private var webView: WKWebView!
 
-    private var socket: Socket?
+    private var socket: SSHTransport?
     private var generation = 0
     /// While the app is away, a dial is refused rather than attempted. iOS
     /// gives about thirty seconds of background execution and the page's
@@ -24,8 +29,10 @@ final class WebHost: UIViewController {
     /// write fails.
     private var away = false
 
-    init(config: ShellConfig) {
+    init(config: ShellConfig, server: ServerRecord, onRepair: @escaping (String) -> Void) {
         self.config = config
+        self.server = server
+        self.onRepair = onRepair
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -47,10 +54,8 @@ final class WebHost: UIViewController {
         // constraints below.
         web.scrollView.contentInsetAdjustmentBehavior = .never
         if #available(iOS 16.4, *) {
-            // Safari's Web Inspector against this build. This app is a phase-3
-            // fixture and being able to open its console is most of why it
-            // exists; the shipping build turns it off with the transport
-            // (ios.md §14).
+            // Safari's Web Inspector against this build. A release turns this
+            // off: an inspectable web view is a console on the user's notes.
             web.isInspectable = true
         }
         webView = web
@@ -74,7 +79,7 @@ final class WebHost: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        print("[shell] ledge -> \(config.destination), client \(config.client)")
+        print("[shell] ledge -> \(server.destination), client \(config.client)")
         webView.load(URLRequest(url: BundleScheme.entry))
     }
 
@@ -129,7 +134,22 @@ final class WebHost: UIViewController {
         socket?.close()
         generation += 1
         let gen = generation
-        let next = Socket(generation: gen, host: config.host, port: config.port)
+        let key: DeviceKey.Held
+        do {
+            key = try DeviceKey.load()
+        } catch {
+            return fail(id, error.localizedDescription)
+        }
+        let next = SSHTransport(
+            generation: gen,
+            server: server,
+            key: key,
+            // The pinned case, always. Nothing in the running app can be asked
+            // to trust a new key: that question belongs to pairing, where a
+            // person is looking at the screen.
+            hostKey: PinnedHostKey(openSSHLine: server.hostKey),
+            log: { print("[shell] \($0)") }
+        )
         socket = next
         next.open(
             ready: { [weak self] result in
@@ -141,7 +161,9 @@ final class WebHost: UIViewController {
                     case .failure(let error):
                         // Named, because "could not connect" without the
                         // address is the one error message nobody can act on.
-                        self.fail(id, "could not reach \(self.config.destination): \(error.localizedDescription)")
+                        let why = error.localizedDescription
+                        self.fail(id, why)
+                        if SSHFailure.needsPairing(error) { self.onRepair(why) }
                     }
                 }
             },
@@ -177,7 +199,7 @@ extension WebHost: WKScriptMessageHandler {
 
         switch method {
         case "@hello":
-            reply(id, ["client": config.client, "destination": config.destination])
+            reply(id, ["client": config.client, "destination": server.destination])
         case "@open":
             open(id)
         case "@close":

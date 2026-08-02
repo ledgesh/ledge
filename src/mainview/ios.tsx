@@ -70,7 +70,11 @@ async function start(): Promise<void> {
     if (!live) window.location.reload();
   });
 
-  await bootView(nativeOverlay(wire.requests, shell, peer.build));
+  // Choosing the server again, from the connection chrome, is the same boot:
+  // the ladder gives up for good when a restarted server answers with a new
+  // instance, and nothing below the transport can rebuild a session's state
+  // (shared/transport.ts). Reloading is how a page starts over.
+  await bootView(nativeOverlay(wire.requests, shell, peer.build, () => window.location.reload()));
   mark("view");
   await painted();
   mark("paint");

@@ -1,9 +1,10 @@
 # Ledge on iOS
 
-**§14 phases 1 to 3 are code. There is Swift, it runs, and it reaches a
-server.** `ios/` is an app that loads this repository's React view in a
-WKWebView and talks to `ledge-server` over a socket; what it does not yet have
-is ssh (phase 4), a phone-shaped screen (phase 5), or the rest of v1 (phase 6).
+**§14 phases 1 to 4 are code. There is Swift, it runs, and it reaches a server
+over ssh.** `ios/` is an app that loads this repository's React view in a
+WKWebView, authenticates to `ledge-server` with a key minted in the Secure
+Enclave, and pins the host key it was paired with; what it does not yet have is
+a phone-shaped screen (phase 5) or the rest of v1 (phase 6).
 This is phase 6 of `docs/contributor/remote.md`, which built the server the
 phone talks to and then stopped, because the client is a different problem in a
 different language. Everything below depends on remote.md phases 1 to 5 and
@@ -35,7 +36,7 @@ one it is in:
 | ----- | ----------- | ------------------- | ----- |
 | Electrobun (`bun/index.ts`) | `main.tsx` | in-process, or `ssh` | the Mac app |
 | Playwright (`harness.tsx`) | `harness.tsx` | `FakeStore`, in memory | nothing; `test:e2e` |
-| Swift (`ios/`) | `ios.tsx` | SSH, always (phase 3: TCP) | the iOS app |
+| Swift (`ios/`) | `ios.tsx` | SSH, always | the iOS app |
 
 **The view is bound to a server in one place, and the entry points differ only
 in which one.** `mainview/boot.tsx` is every `configureX` seam, the boot
@@ -202,6 +203,32 @@ management, keepalives, and every timeout are the app's to write. That is the
 largest single piece of Swift in this design and the phase most likely to
 take longer than it looks (§14).
 
+**Two of those blocks have no edges, and both cost a live debugging session.**
+Neither is a bug in NIOSSH; both are the shape of a library that hands back
+events and expects an application around them.
+
+- **An error is fired and then dropped.** A host key that fails the pin and a
+  key the server will not take both arrive as `errorCaught` on the connection's
+  pipeline. NIO's default for an unhandled error is to log it and carry on, so
+  without a handler at the tail the connection sits there, neither up nor down,
+  until something else gives up: a refusal that was immediate and specific
+  gets reported fifteen seconds later as "no answer in time".
+  `SSHTransport.swift`'s `FailOnError` is that handler, and it is why the
+  reasons in §4 reach a person at all.
+- **"No more methods" is a failed promise, not a nil.** The client auth
+  delegate's documentation says to fail the promise when there is nothing left
+  to offer. It means it: there is a `noFurtherMethods()` in the state machine
+  for the nil case and nothing in the library ever calls it, so answering nil
+  sends no message and waits for the server's login grace period.
+
+**The key algorithms line up with the Mac's, by luck rather than by
+agreement.** NIOSSH offers `ssh-ed25519` first, which is also the first entry
+in `connections.ts`'s `KEY_PREFERENCE`, so a pin taken by `ssh-keyscan` on a
+Mac names the key an iOS connection will actually be offered. That is worth
+knowing rather than relying on: the app pins what the connection in front of
+the user offered (§4), so the two lists agreeing is a convenience, not a
+requirement.
+
 ## 4. Keys live in the Secure Enclave
 
 **The phone mints its own key on first launch and never holds a copy of the
@@ -213,6 +240,31 @@ call into the enclave, gated by the device passcode or biometrics.
 That gives a property the Mac client does not have. A lost phone hands over
 no key material at all, because there is none to hand over, and revoking it
 is deleting one line from `authorized_keys` on the server.
+
+**The enclave is not gated per signature, and that is deliberate.** CryptoKit's
+default access control for an enclave key is "this device, while unlocked",
+which ties the key to the passcode at unlock time. Requiring `.userPresence`
+instead would put a Face ID scan in front of every signature, and §5's whole
+point is that reconnecting is the ordinary path on a phone: the prompt would
+land on an app switch, not on a login.
+
+**Two things the build has to do for the key to exist at all.** The private
+half is a keychain item, and the keychain answers `errSecMissingEntitlement`
+to a process with no application identity — which an unsigned bundle is. So
+`ios-build.ts` signs the app ad hoc and gives it `application-identifier` and
+a keychain access group (`ios/Resources/Ledge.entitlements`). On the Simulator
+those entitlements go in a Mach-O section (`__TEXT,__entitlements`) at link
+time, not in the signature; a signature that carries them is refused at launch
+with a POSIX 153 and no explanation. A device build puts the same plist in the
+signature, where a provisioning profile decides what the identifier really is.
+
+**The Simulator has an enclave.** On Apple silicon `SecureEnclave.isAvailable`
+is true inside the Simulator and `SecKeyCreateSignature` reaches the host's
+SEP, so the path a probe exercises is the real one rather than a stand-in.
+`DeviceKey.swift` keeps a software key anyway, for a Simulator that does not:
+it is refused on hardware, because a key on disk is a weaker thing than the one
+this section promises and silently downgrading to it is how a security property
+becomes a claim nobody checked.
 
 It also decides the key type: `ecdsa-sha2-nistp256`, because the Secure
 Enclave does P-256 and nothing else. OpenSSH accepts it by default. A server
@@ -260,16 +312,21 @@ Three consequences, in the order they bite:
   notification rather than on a timer. The ladder keeps its job, which is a
   wire that flaps while the app is on screen.
 
-  Phase 3 does the simplest true version: the shell closes the socket on the
-  way out and refuses a dial while the app is away, and on the way back the
-  page reloads unless its connection is somehow still live. Refusing the dial
-  is the part that is not obvious — iOS gives about thirty seconds of
-  background execution and the ladder is 31.75s long, so without it the whole
-  ladder runs in the background, succeeds, and hands back a socket that
-  suspension kills a moment later. Holding the socket across a short app
-  switch instead is an optimization, and the thing it would have to get right
-  is telling a live socket from a half-open one, which is the one distinction
-  that has no cheap answer.
+  The shell does the simplest true version: it closes the socket on the way
+  out and refuses a dial while the app is away, and on the way back the page
+  reloads unless its connection is somehow still live. Refusing the dial is the
+  part that is not obvious — iOS gives about thirty seconds of background
+  execution and the ladder is 31.75s long, so without it the whole ladder runs
+  in the background, succeeds, and hands back a socket that suspension kills a
+  moment later. Holding the socket across a short app switch instead is an
+  optimization, and the thing it would have to get right is telling a live
+  socket from a half-open one, which is the one distinction that has no cheap
+  answer.
+
+  Measured over ssh: leaving the app announces `reconnecting` and the refused
+  dial keeps the ladder from doing anything with it; coming back reloads and
+  reaches a server again 211ms later. A whole boot is cheaper than the
+  bookkeeping that would avoid it.
 - **The server is usually gone, and the sessions with it.** Sixty seconds of
   no client and nothing running is the daemon exiting. `running()` means a
   block in flight or a shell inside a foreground command, so an idle drawer
@@ -283,6 +340,15 @@ Three consequences, in the order they bite:
   flight rather than guessing (remote.md §7). The op log's window is 120
   seconds, so a write retried across a short background trip either lands
   once or is refused, and never applies twice.
+
+  The corollary is the phone's only dead end. A server that restarted is a new
+  instance, so the ladder stops for good rather than adopting it: sessions the
+  app believes in no longer exist, and nothing below the transport can rebuild
+  them. Recovery is choosing the connection again, which on a Mac re-attaches
+  and on a phone is the same boot as foregrounding — `nativeBridge.ts` answers
+  `connectionSelect` for its one server by reloading the page. Without that the
+  connection row is a dead label and the app waits to be force-quit, which is
+  what a live server restart actually did before this was written down.
 
 **The idle timeout stays at 60 seconds.** Raising it for phones would leave a
 process running on someone's Mac for a client that may never come back, and
@@ -301,29 +367,36 @@ feels, it is invisible on a Mac whose local server needs no handshake at all,
 and it is why §14's first measurable phase is a stopwatch rather than a
 screen.
 
-**The stopwatch, phase 3.** `ios.tsx` marks each phase and reports the line
-through the bridge's `@log`, so it comes out of `simctl launch --console-pty`.
-On a Simulator over loopback, warm:
+**The stopwatch.** `ios.tsx` marks each phase and reports the line through the
+bridge's `@log`, so it comes out of `simctl launch --console-pty`. On a
+Simulator, warm, over ssh to a container on loopback — with the plain TCP
+fixture phase 3 measured beside it:
 
-| Mark | At | Cost |
-| ---- | -- | ---- |
-| `bridge` | 190ms | loading and parsing the view |
-| `hello` | 197ms | 7ms — who we are, where we point |
-| `socket` | 211ms | 14ms — the TCP connect |
-| `server` | 218ms | 7ms — the protocol handshake |
-| `view` | 234ms | 16ms — the whole boot prefetch |
-| `paint` | 343ms | 109ms — the first composited frame |
+| Mark | At | Cost | Phase 3 |
+| ---- | -- | ---- | ------- |
+| `bridge` | 70ms | loading and parsing the view | 190ms |
+| `hello` | 72ms | 2ms — who we are, where we point | 7ms |
+| `socket` | 141ms | 69ms — TCP, key exchange, authentication, exec | 14ms |
+| `server` | 191ms | 50ms — the protocol handshake | 7ms |
+| `view` | 200ms | 9ms — the whole boot prefetch | 16ms |
+| `paint` | 247ms | 47ms — the first composited frame | 109ms |
 
 Three things to read off it, and one to distrust. **The prefetch is one round
 trip**, which is remote.md §12's claim measured rather than asserted: six
-requests across three workspaces cost 16ms on a wire whose one-way is under a
-millisecond. **The view is more than half the boot** and nothing about the
-transport will change that. **And the handshake is 21ms of the 343**, which is
-the number phase 4 makes worse: a key exchange and an authentication replace a
-`connect(2)`, and this row is where that regression will show. The number to
-distrust is `bridge`: a first launch after install measured 1548ms to paint
-against 343ms warm, so any figure taken from a cold Simulator is measuring the
-Simulator.
+requests across three workspaces cost 9ms, no worse over ssh than over a bare
+socket, because they are concurrent and the round trip is paid once. **The
+handshake is what phase 4 cost**, and the prediction was right about the row
+and low about the size: `socket` went from 14ms to 69, a key exchange and a
+P-256 signature in the Secure Enclave in place of a `connect(2)`. **And
+`server` is not a round trip**, it is a process launch: every ssh session runs
+`ledge-server serve` on the far side, and Bun starting is most of the 50ms —
+120ms when the daemon behind it has to start too. The number to distrust is
+`bridge`: a first launch after install measured 1548ms to paint, so any figure
+taken from a cold Simulator is measuring the Simulator.
+
+Four hundred milliseconds of ssh, end to end, and the app is on screen. That
+is the number that decides whether §14's "foregrounding is a boot" is a design
+or an apology.
 
 ## 6. Touch is a column the affordance matrix does not have
 
@@ -523,14 +596,32 @@ copied wholesale into the Mac app, so an `ios.html` sitting in it would be a
 dead page shipped to every Mac. `vite.ios.config.ts` writes `dist-ios/`, the
 sibling of `dist-cli/` and `dist-native/`.
 
-**The app is `swiftc` and a directory, not an Xcode project** (phase 3).
-`scripts/ios-build.ts` compiles `ios/Sources/*.swift`, writes an `Info.plist`,
-copies the view in beside it, and hands the result to `simctl`. There is no
-external dependency and no storyboard, so a project file would be a second,
-generated description of three facts that are already legible — unreadable in
-a diff and unverifiable except by opening Xcode. It becomes necessary at phase
-4, which brings a SwiftPM dependency, and at whatever phase first builds for a
-device, which brings signing.
+**The app is a package manifest and a directory, not an Xcode project.**
+`scripts/ios-build.ts` runs `swift build` over `ios/Package.swift`, writes an
+`Info.plist`, copies the view in beside it, and hands the result to `simctl`.
+A project file would be a second, generated description of facts that are
+already legible — unreadable in a diff and unverifiable except by opening
+Xcode. Phase 3 got away with a bare `swiftc` over a glob; phase 4 has a
+dependency to resolve, which is the one thing a glob cannot do, and SwiftPM is
+the smaller of the two answers to that.
+
+Four things that build has to do that Xcode would have done quietly, each of
+which announced itself as a launch failure with no obvious cause:
+
+| What | Why |
+| ---- | --- |
+| `-sdk` and `-target` pushed through `-Xswiftc`, `-Xcc` and the link | SwiftPM builds for its host and has no iOS destination. The last `-target` wins, which is why the output lands in a directory named for macOS and is an iOS Simulator binary |
+| The back-deployment shims copied into `Frameworks/` | A binary built with this toolchain and deployed to iOS 17 links a compatibility dylib for every standard-library type the runtime there lacks. Missing, it is a dyld abort at launch. The list is read out of the binary, because it belongs to the toolchain |
+| An ad hoc signature | The keychain answers `errSecMissingEntitlement` to a process with no application identity, and the device key is a keychain item (§4) |
+| Entitlements as a Mach-O section, not in the signature | The Simulator's rule, and not the device's. A signature carrying them is refused at launch with a POSIX 153 |
+
+**The Swift closure is a second set of attributions.** architecture.md §8 says
+every dependency travels with the binary it ships in; the Mac app's notices are
+generated from npm and committed, and the iOS app's are generated from the
+resolved SwiftPM checkouts into the bundle at build time. Seven packages, all
+Apache-2.0, whose LICENSE and NOTICE files both travel. What is still owed is a
+way to read it on the phone: the manual the app shows is the server's, and the
+server knows nothing about this app's dependencies.
 
 The webview loads the bundle over a scheme of its own
 (`ios/Sources/BundleScheme.swift`) rather than `file://`, because `file://`
@@ -565,10 +656,13 @@ Per `testing.md`'s categories:
   `scripts/probe-ssh.ts` stands up a real sshd with a real forced-command key
   (`scripts/ssh-probe/`). An iOS client dialing that same fixture gets the
   same proof the Bun client got, against the same server, which is worth more
-  than a second fixture written to be easy for Swift.
-- **What no harness can reach**: the Secure Enclave, NIOSSH against a real
-  network, the accessory bar, a finger, and the suspension lifecycle. Those are
-  a live probe with a device rather than a Mac.
+  than a second fixture written to be easy for Swift. testing.md §6 has the
+  recipe, including how a probe pairs a build without a human.
+- **What no harness can reach**: the accessory bar, a finger, and a real
+  network. Those are a live probe with a device rather than a Mac. The enclave,
+  NIOSSH and the suspension lifecycle turned out to be reachable from a
+  Simulator on Apple silicon (§4), which is the difference between "unproven"
+  and "unprovable".
 
 One trap to write down before it is stepped in: **the Simulator's Secure
 Enclave is not the device's.** A key-generation path that quietly falls back
@@ -624,15 +718,16 @@ inside the Mac app.
 3. **Done. The Swift shell, without SSH.** `ios/` is a WKWebView loading
    `dist-ios/` over a scheme of its own (§12), a bridge of ten strings (§2),
    the six client seams answered by UIKit, and a `Duplex` fed by an
-   `NWConnection` to `scripts/lan-bridge.ts`. `bun run ios` builds it and
-   launches it in the Simulator; `bun run lan` is the other end.
+   `NWConnection` to a TCP fixture on the same network. `bun run ios` builds it
+   and launches it in the Simulator.
 
-   **That fixture opens a port and must never become a shipping mode**:
+   **That fixture opened a port and had to never become a shipping mode**:
    remote.md §3's first claim is that the server opens none, and a debugging
    convenience that survives into a release undoes the entire authentication
-   design. It is safe because it cannot ship, not because nobody will ship it —
-   `scripts/` is in no build, and `src/bun/ports.test.ts` makes the other half
-   of the claim a test rather than a habit.
+   design. It was safe because it could not ship — `scripts/` is in no build —
+   and phase 4 deleted it, because a transport that is really ssh leaves it
+   with no client. `ports.test.ts` now sweeps the whole repository rather than
+   `src/`, which is the stronger claim that deletion made available.
 
    What it proved, on a Simulator against a scratch `LEDGE_NOTES_ROOT`: the
    note list arrives over the socket and renders; a keystroke in CodeMirror on
@@ -651,12 +746,33 @@ inside the Mac app.
    the Mac's most load-bearing component to do it. It belongs with the editor,
    below, because both are answers to "what does a phone show and how do you
    type into it".
-4. **SSH.** NIOSSH, the Secure Enclave key, the host-key delegate, and the
-   pairing screen. It dials `scripts/ssh-probe`'s fixture first, because that
-   fixture already enforces the forced command, and a real Mac second. It
-   replaces `ios/Sources/Socket.swift` and nothing above it: the page is handed
-   a `Duplex`, and a duplex does not know what carries it. §5's `socket` and
-   `server` rows are where the regression will show.
+4. **Done. SSH.** `SSHTransport.swift` is NIOSSH: a connect, a pinned host key,
+   a P-256 key that lives in the Secure Enclave, and an exec request whose
+   answer is the byte stream the page already knew how to read. `DeviceKey`,
+   `HostKey` and `Pairing` are the three around it. The view changed by one
+   boolean — its single connection row says `pinned` now — because a duplex
+   does not know what carries it.
+
+   What it proved, against `scripts/ssh-probe`'s container: the enclave signs
+   the authentication (`SecKeyCreateSignature` reaches the SEP even in a
+   Simulator); the forced command holds, checked by asking for `whoami` and
+   getting `ledge-server serve`; a key removed from `authorized_keys` is
+   refused in two seconds with the line to install; a host key that changed is
+   refused in one, **before the phone's key is ever offered**, with both
+   fingerprints on screen and no way to continue anyway; the fingerprints match
+   `ssh-keygen -lf` exactly; a note written on the server appears on the phone
+   with no interaction; and backgrounding, waiting and returning is a 211ms
+   boot. §5 has the numbers.
+
+   Three things went wrong that only a live run could have found, and all three
+   were the same shape — a refusal that had nowhere to go. §3 has two of them
+   (an error fired into a pipeline with no tail, and a delegate contract that
+   wants a failed promise); §5 has the third (a restarted server ends the
+   session, and the phone had no way to start another).
+
+   Not done here: a real device. Everything above is a Simulator on Apple
+   silicon, which has an enclave and a network but not a finger, a radio, or a
+   provisioning profile.
 5. **The screen, and the editor.** The single-pane tree §9 describes, a sidebar
    that overlays rather than takes a third of the width, the accessory bar, the
    disabled autocorrect, and §7's audit of what CM6 actually does on a current

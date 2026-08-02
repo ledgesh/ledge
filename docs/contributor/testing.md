@@ -223,30 +223,49 @@ signals — needs the SAME probe run twice against one scratch home: the second
 launch is what proves the state it wrote back is stable rather than creeping a
 title bar per restart.
 
-**The iOS variant** — for the seams that exist only there (the bridge, the
-socket, the pasteboard, the scheme handler, every number in `ios.md` §5). Three
-processes and a scratch root:
+**The iOS variant** — for the seams that exist only there (the bridge, ssh, the
+Secure Enclave, the pasteboard, the scheme handler, every number in `ios.md`
+§5). The server is `scripts/ssh-probe`'s container rather than a Bun process on
+the Mac: it is a real sshd with the §4 forced command already in it, and its
+filesystem is the scratch root, so nothing has to be pointed away from
+`~/.ledge`.
 
 ```
-LEDGE_NOTES_ROOT=<scratch> bun src/bun/serve.ts daemon   # the server
-LEDGE_NOTES_ROOT=<scratch> bun run lan                   # 127.0.0.1:8787
-bun run ios                                              # build, install, launch
+bun run ios -- --build                        # build; the app mints its key at first launch
+xcrun simctl launch --console-pty <dev> dev.ledge.ios     # read the [pair] line
+docker run -d --name ledge-ios-probe -p 127.0.0.1:22:22 \
+  -e LEDGE_PUBKEY="<that key>" ledge-sshd:probe
+ssh-keyscan -t ed25519 127.0.0.1              # the line to pin
+xcrun simctl launch --console-pty <dev> dev.ledge.ios \
+  -LedgeServer ledge@127.0.0.1 -LedgeHostKey "ssh-ed25519 AAAA…"
 ```
 
-The daemon creates `<scratch>/scratch/` on first run; seed the `.md` files
-into that, not into the root (same rule as above). The probe itself goes in
-`ios.tsx` and reports with the bridge's `@log`, which is why this variant needs
-no clipboard detour: the line comes straight out of `simctl launch
---console-pty` while the app is running. `xcrun simctl io <device> screenshot`
-is the other half, and it needs no permission from anybody.
+**A probe pairs with launch arguments, and that is not a back door.**
+UserDefaults reads `-key value` pairs off the command line, which is how
+`-LedgeServer` already worked; giving it `-LedgeHostKey` as well is a phone
+that considers itself paired without a human tapping Trust. Nothing on a device
+can set those, the pin is still compared on every connection, and the values
+live in the argument domain, so they vanish at the next launch and shadow
+anything the app stores.
 
-Two things this probe reaches that no other does. **A write that crosses a real
-socket**: dispatch into the live CodeMirror (`EditorView.findFromDOM`), wait
-past the 500ms autosave, and read the file on the Mac. And **a wire that really
-drops**: kill `bun run lan` and restart it, which is the reconnect ladder
-against a transport that actually went away rather than a process someone
-killed. Tear down by uninstalling the app (`simctl uninstall`), killing the two
-Bun processes by the pid you captured, and removing the scratch root.
+The probe reports with the bridge's `@log`, which is why this variant needs no
+clipboard detour: the line comes straight out of `--console-pty` while the app
+is running. `xcrun simctl io <device> screenshot` is the other half, and it
+needs no permission from anybody. **Do not `pkill` the launcher to move on** —
+it owns the app's pty and the app dies with it, which looks exactly like a
+crash on the next screenshot.
+
+What this probe reaches that no other does is every refusal. Overwrite
+`authorized_keys` in the container to see a key turned away; `rm
+/etc/ssh/ssh_host_* && ssh-keygen -A` and restart it to see a changed host key
+refused before the phone's key is ever offered; change the exec request to
+`whoami`, rebuild, and watch the forced command hand back `ledge-server serve`
+anyway. `docker stop` and `docker start` is a wire that really drops. And
+`simctl launch com.apple.mobilesafari` then relaunching Ledge is the suspension
+lifecycle, which is the one thing a phone does constantly.
+
+Tear down by uninstalling the app (`simctl uninstall`), `docker rm -f`, and
+checking that nothing still listens on 22.
 
 ## 7. The green bar
 

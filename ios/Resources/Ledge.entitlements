@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- The keychain is the reason this file exists. `SecItemAdd` answers
+       errSecMissingEntitlement (-34018) to a process with no application
+       identity at all, which is what an unsigned bundle is, and the device key
+       (ios/Sources/DeviceKey.swift) is a keychain item. Xcode signs even a
+       Simulator build for this reason; this build does it in ios-build.ts.
+
+       Ad hoc on the Simulator, so the identifier has no team prefix. A device
+       build replaces both halves with a real identity and a provisioning
+       profile, which is the same phase that needs a paid membership
+       (ios.md §12) — and it is the profile, not this file, that decides what
+       the identifier really is. -->
+  <key>application-identifier</key>
+  <string>dev.ledge.ios</string>
+  <key>keychain-access-groups</key>
+  <array>
+    <string>dev.ledge.ios</string>
+  </array>
+</dict>
+</plist>

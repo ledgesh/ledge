@@ -7,12 +7,19 @@
 // socket that answered somebody directly.
 //
 // The claim is one sentence and its violation is one line, which is exactly
-// the ratio that makes it worth a test rather than a review. ios.md phase 3
-// added a fixture that DOES open a port (scripts/lan-bridge.ts), and the
-// reason that is safe is structural: scripts/ is in no build. This is the
-// other half — the half that stops the fixture from being moved somewhere it
-// would ship, or a second one from being written under src/ by somebody who
-// only read the fixture.
+// the ratio that makes it worth a test rather than a review.
+//
+// **The scan is the whole repository**, not just `src/`. It was `src/` while
+// ios.md phase 3 had a fixture that deliberately opened one (`lan-bridge.ts`,
+// safe because `scripts/` is in no build); phase 4 gave the phone a real ssh
+// transport, the fixture lost its only client, and deleting it made the
+// stronger claim available. Nothing here listens, anywhere, including the
+// tools — so a fixture cannot be reintroduced in the corner where it would be
+// least noticed.
+//
+// The one port a developer's machine does open is Vite's, which
+// `playwright.config.ts` asks for by name: a dependency's dev server, launched
+// by a test run, shipped nowhere.
 //
 // Source is scanned rather than behavior observed, for portable.test.ts's
 // reason: a test that merely ran the code would prove this process opened no
@@ -21,12 +28,16 @@ import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-const SRC = join(import.meta.dir, "..");
-const REPO = join(SRC, "..");
+const REPO = join(import.meta.dir, "..", "..");
+
+// Everything that is checked in and compiled or run. The rest is either
+// generated (dist, build) or somebody else's (node_modules, .build).
+const SKIP = new Set(["node_modules", ".git", "dist", "dist-cli", "dist-ios", "dist-native", "build", ".build", "artifacts"]);
 
 function sources(dir: string): string[] {
   const out: string[] = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (SKIP.has(entry.name)) continue;
     const path = join(dir, entry.name);
     if (entry.isDirectory()) out.push(...sources(path));
     else if (/\.tsx?$/.test(entry.name)) out.push(path);
@@ -39,7 +50,7 @@ function code(text: string): string {
   return text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
 }
 
-const files = sources(SRC);
+const files = sources(REPO);
 const relative = (path: string): string => path.slice(REPO.length + 1);
 const named = files.map((p) => [relative(p), p] as const);
 
@@ -51,9 +62,9 @@ const UNIX_LISTEN = /\bBun\s*\.\s*listen\s*(?:<[^(]*>)?\s*\(\s*\{\s*unix\s*:/g;
 
 const count = (text: string, re: RegExp): number => text.match(re)?.length ?? 0;
 
-describe("nothing under src/ opens a port", () => {
+describe("nothing in this repository opens a port", () => {
   test("there is something to check", () => {
-    expect(files.length).toBeGreaterThan(50);
+    expect(files.length).toBeGreaterThan(150);
   });
 
   test.each(named)("%s", (name, path) => {
@@ -80,11 +91,15 @@ describe("nothing under src/ opens a port", () => {
   });
 });
 
-// The fixture is only safe where it is. An import would drag it into whatever
-// imported it, and the two things that import src/bun/ are the app bundle and
-// the server binary.
-describe("src/ does not import the fixtures", () => {
-  test.each(named)("%s", (name, path) => {
+// The build boundary is real and it points one way. `scripts/` is in no build:
+// not electrobun.config.ts's copy map, not `build:cli`, not the Dockerfile. So
+// a tool may import the app's modules — `scripts/licenses.ts` runs
+// `src/bun/licenses.ts`, which is how that logic is testable at all — and the
+// app may never import a tool, because doing so would quietly make a
+// developer's script part of what ships.
+describe("src/ does not import the tools", () => {
+  const inSrc = named.filter(([name]) => name.startsWith("src/"));
+  test.each(inSrc)("%s", (name, path) => {
     const text = code(readFileSync(path, "utf8"));
     expect({ file: name, imports: /["'](?:\.\.\/)+scripts\//.test(text) ? "scripts/" : null }).toEqual({
       file: name,
