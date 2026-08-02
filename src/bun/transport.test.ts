@@ -3,9 +3,16 @@
 // who speaks first, what happens to a request whose server has not finished
 // booting, and how a server answers a client that is not following the rules.
 //
-// No processes here. spawnDuplex and stdioDuplex are three lines of Bun API
-// each and are exercised for real in serve.fs.test.ts, which is the only place
-// a pipe can actually break.
+// The client's half lives in shared/transport.ts now, so the tests that need
+// only a client — the handshakes it refuses, and fedDuplex — are in
+// shared/transport.test.ts, which imports nothing from this directory. What
+// stays here is everything with a server in it, because that is what a server
+// is: the handler map, the coalescer, and the op log a replay is deduped
+// against.
+//
+// No processes here either. spawnDuplex and stdioDuplex are three lines of Bun
+// API each and are exercised for real in serve.fs.test.ts, which is the only
+// place a pipe can actually break.
 import { describe, expect, test } from "bun:test";
 import {
   CONTROL_FRAME,
@@ -16,11 +23,13 @@ import {
   parseControl,
   PROTOCOL_VERSION,
   PUSH_MESSAGES,
+  type RequestHandlers,
+  type ServerPush,
   type WireMessage,
 } from "../shared/wire";
-import { clientConnection, reconnectingClient, serverConnection, type Duplex, type ServerConnection } from "./transport";
+import { clientConnection, reconnectingClient, type Duplex } from "../shared/transport";
+import { serverConnection, type ServerConnection } from "./transport";
 import { createOpLog } from "./opLog";
-import type { RequestHandlers, ServerPush } from "./server";
 
 // --- a pipe -------------------------------------------------------------------
 
@@ -395,37 +404,6 @@ describe("a server facing a misbehaving client", () => {
     server.serve(handlers());
     await settle();
     expect(client.last()).toEqual({ t: "res", id: 1, r: { state: "locked" } });
-  });
-});
-
-// --- a client facing a server that is not there -------------------------------
-
-describe("a client facing a server that will not talk", () => {
-  test("a server that hangs up without a hello fails the connection", async () => {
-    const pipe = pipePair();
-    const client = clientConnection(pipe.b, { push: recordingPush().push, build: "0.1.0" });
-    pipe.a.close();
-    await expect(client.ready).rejects.toThrow(/connection to the server closed/);
-  });
-
-  test("a refused handshake reaches the client as the server's own words", async () => {
-    const pipe = pipePair();
-    const client = clientConnection(pipe.b, { push: recordingPush().push, build: "0.1.0" });
-    pipe.a.write(encodeControl({ t: "bye", why: "protocol version 1 on the client, 2 here" }));
-    await expect(client.ready).rejects.toThrow("protocol version 1 on the client, 2 here");
-  });
-
-  test("a server on another schema is refused before any request is sent", async () => {
-    const pipe = pipePair();
-    const seen: Uint8Array[] = [];
-    pipe.a.onData = (chunk) => seen.push(chunk);
-    const client = clientConnection(pipe.b, { push: recordingPush().push, build: "0.1.0" });
-    pipe.a.write(encodeControl({ ...hello("server", "0.9.0"), schema: "deadbeef" }));
-    await expect(client.ready).rejects.toThrow(/deadbeef/);
-    await expect(client.requests.vaultState({})).rejects.toThrow(/deadbeef/);
-    // The client's own hello and nothing after it: a request never went out
-    // over a connection whose protocol was already in doubt.
-    expect(seen.length).toBe(1);
   });
 });
 

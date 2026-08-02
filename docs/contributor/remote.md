@@ -1,8 +1,9 @@
 # Ledge remote servers
 
-**Implemented: §14 phases 1 to 5 are code, and the iOS client is still
-design.** The connection grammar §8 called for now lives in `interactions.md`
-§4-1, the state ownership §5 describes is the code's, and the resilience §7
+**Implemented: §14 phases 1 to 5 are code. Phase 6, the iOS client, is
+designed in `docs/contributor/ios.md`, whose own phase 1 has landed.** The
+connection grammar §8 called for now lives in `interactions.md` §4-1, the
+state ownership §5 describes is the code's, and the resilience §7
 promises is real: the server is a process behind a unix socket, a dropped wire
 reconnects and replays, and terminal output rides binary frames. The server
 runs on Linux and ships as an image, and `bun run probe:ssh` connects to one
@@ -144,11 +145,13 @@ rule per call site. The SCHEMA still says base64 everywhere and the view still
 receives base64, because Electrobun's bridge is JSON either way — so this is an
 optimization for the hop with a network in it and a no-op for the one without.
 
-The codec is `shared/wire.ts` and the two ends of a connection are
-`bun/transport.ts`, which is where the symmetry lives: a server dispatches
-`req` frames into the handler map `createServer` returned, and a client
-presents the answers as that same map, so `bun/index.ts` binds either one to
-the webview's RPC without knowing which it got.
+The codec is `shared/wire.ts`. The two ends of a connection are
+`shared/transport.ts` for the client and `bun/transport.ts` for the server,
+split along the line between what a webview can run and what it cannot
+(`ios.md` §2); the symmetry is across the pair, not inside one file. A server
+dispatches `req` frames into the handler map `createServer` returned, and a
+client presents the answers as that same map, so `bun/index.ts` binds either
+one to the webview's RPC without knowing which it got.
 
 **Multiplexing is required, not optional.** The schema is already
 bidirectional: `terminalOutput`, `runEvent`, `terminalExit`, `notesChanged`,
@@ -209,6 +212,13 @@ someone to click through pinning; what Ledge pinned stays in a file of its own
 so it can be read and revoked separately, and it is a projection of the
 connection records, so removing a connection removes its pin in the same
 breath.
+
+**That last claim is about a client that spawns OpenSSH, and it does not
+generalize.** A client with no subprocesses has to link an SSH library and
+compare the offered host key itself, which is what `ios.md` §3 does and what
+makes it the only end of this design with new cryptographic surface. The
+forced command is unaffected either way: it is enforced by the server's sshd,
+which does not care what dialled it.
 
 `BatchMode=yes` belongs to the same list, for a different reason: this ssh has
 no terminal, its stdout IS the protocol, and a passphrase prompt would either
@@ -332,10 +342,18 @@ Three consequences to hold onto:
   for a longer ring, not for a replay log.
 
 **A client that loses the wire re-dials rather than failing.** The ladder is
-250ms doubling to 8s, about 24 seconds in total, and that number is not
-arbitrary: it has to finish comfortably inside the daemon's idle timeout, or
-giving up would mean reconnecting to a process that had already decided nobody
-was coming. Requests made while it climbs are HELD, not failed. When it runs
+250ms doubling to 8s and then holding there, eight attempts and 31.75 seconds
+in total, and that number is not arbitrary: it has to finish inside the
+daemon's idle timeout, or giving up would mean reconnecting to a process that
+had already decided nobody was coming. The margin is the smaller half of a
+minute, so lengthening the ladder is a change to `IDLE_EXIT_MS` as well.
+
+Both numbers assume a client the operating system leaves running. One that
+gets suspended, as iOS suspends an app that leaves the foreground, is a
+different case: its timers do not fire, so it re-dials on waking rather than
+climbing a ladder, and the daemon it left behind is long gone. `ios.md` §5
+carries that case, and its answer is that sessions are lost and notes are
+not. Requests made while it climbs are HELD, not failed. When it runs
 out, the state is `lost`, what was held is refused with the last reason, and
 nothing new is accepted — an app that keeps taking requests for a server it
 cannot reach looks like it is working. Recovery from there is choosing the
@@ -648,7 +666,8 @@ Each phase leaves the app shippable.
    shell around it. No user-visible change, and the whole existing suite was
    the regression test.
 2. **Done.** The framed protocol (`shared/wire.ts`), the handshake, and both
-   ends of a connection (`bun/transport.ts`), with `bun/serve.ts` as the
+   ends of a connection (`shared/transport.ts` and `bun/transport.ts`, split
+   in phase 1 of `ios.md`), with `bun/serve.ts` as the
    `ledge-server serve` entry point. `LEDGE_CONNECT` points the Mac app at one
    instead of building its own. What is still owed here is the Mac-to-Mac pass
    with a forced-command key, which needs a second machine (§13).
@@ -686,5 +705,11 @@ Each phase leaves the app shippable.
    What is still owed: a wire that actually drops. A container on loopback
    answers in under 3ms and never sleeps, so the reconnect ladder is still
    proved by killing a process rather than by losing a network.
-6. **The iOS client**, which is its own document and depends on nothing above
-   being redone.
+6. **The iOS client**, which is `docs/contributor/ios.md` and depends on
+   nothing above being redone. That document is written and none of it is code
+   yet; its own §14 phases the work, starting with a move of this transport's
+   portable half into `src/shared/` so a webview can run it. Writing it
+   amended two sentences here, both marked below: §4's "Ledge parses no key
+   material" is true of a client that spawns OpenSSH and false of one that
+   links an SSH library, and §7's reconnect ladder is sized for a client the
+   operating system leaves running.

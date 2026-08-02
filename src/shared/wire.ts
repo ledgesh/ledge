@@ -1,10 +1,11 @@
 // The wire between a Ledge client and a Ledge server (remote.md §3).
 //
 // Both ends speak it and neither owns it, which is why it sits in shared/:
-// bun/transport.ts implements it over a child process's pipes today and an
-// ssh child tomorrow, and an iOS client reimplements it in Swift with this
-// file as the spec. Nothing here does I/O — it turns bytes into messages and
-// back, and that is all.
+// shared/transport.ts is the client's half and bun/transport.ts the server's,
+// over a child process's pipes here and an ssh child there. Nothing in this
+// file does I/O — it turns bytes into messages and back, and that is all,
+// which is also what lets the client's half run in a webview (ios.md §2)
+// rather than being reimplemented in Swift.
 //
 // A frame is a 4-byte big-endian length, a 1-byte type, then that many bytes
 // of payload. Type 0 is a JSON control frame: requests, responses, and the
@@ -215,6 +216,43 @@ const everyPushListed: MissingPush extends never ? true : MissingPush = true;
 void everyRequestListed;
 void everyPushListed;
 
+// --- the same surface as handler maps ----------------------------------------
+//
+// The lists above name the protocol; these three give it a shape a transport
+// can dispatch into. They are here rather than beside a server because both
+// ends need them: a client PRESENTS a RequestHandlers it satisfies over the
+// wire, and shared/transport.ts is the code that does it.
+
+/**
+ * The push half: `webview.messages` in rpc-schema.ts, one method per message.
+ * The Mac shell implements it over the Electrobun RPC; a socket transport
+ * implements it by writing frames.
+ */
+export type ViewPush = {
+  [K in keyof LedgeRPC["webview"]["messages"]]: (payload: LedgeRPC["webview"]["messages"][K]) => void;
+};
+
+/**
+ * What a SERVER may push. CLIENT_PUSHES are subtracted rather than stubbed:
+ * `connectionState` is a fact about the wire, and the end on the far side of a
+ * dropped one cannot report it (remote.md §7). Leaving it in this type would
+ * hand every server a method whose only correct implementation is not to call
+ * it.
+ */
+export type ServerPush = Omit<ViewPush, ClientPush>;
+
+/**
+ * The request half, derived from the schema rather than from Electrobun's
+ * generics, so this object is a plain map any transport can call. Binding it to
+ * `defineRPC` is then a pass-through, and the socket transport dispatches into
+ * the same seam.
+ */
+export type RequestHandlers = {
+  [K in keyof LedgeRPC["bun"]["requests"]]: (
+    params: LedgeRPC["bun"]["requests"][K]["params"],
+  ) => LedgeRPC["bun"]["requests"][K]["response"] | Promise<LedgeRPC["bun"]["requests"][K]["response"]>;
+};
+
 // --- what a replay may repeat ------------------------------------------------
 
 /**
@@ -317,14 +355,19 @@ function replace(payload: unknown, path: readonly string[], value: string): unkn
   return copy;
 }
 
-// Buffer, not atob: this runs in Bun on both ends of a connection, and the two
-// conversions are on the path of every keystroke's echo.
-function toBase64(bytes: Uint8Array): string {
-  return Buffer.from(bytes).toString("base64");
+/**
+ * The TC39 builtins rather than `Buffer`, and not `atob` either. Both
+ * conversions are on the path of every keystroke's echo, so they have to be the
+ * native ones; and a client half that runs in a webview (ios.md §2) has no
+ * `Buffer` to reach for. Bun and WebKit both have these — the harness's WebKit
+ * was probed for it, since it is the engine lineage the app ships in.
+ */
+export function toBase64(bytes: Uint8Array): string {
+  return bytes.toBase64();
 }
 
-function fromBase64(text: string): Uint8Array {
-  return new Uint8Array(Buffer.from(text, "base64"));
+export function fromBase64(text: string): Uint8Array {
+  return Uint8Array.fromBase64(text);
 }
 
 /**
@@ -547,4 +590,92 @@ function concat(a: Uint8Array, b: Uint8Array): Uint8Array {
   out.set(a, 0);
   out.set(b, a.length);
   return out;
+}
+
+// --- the binary companion, both directions -----------------------------------
+//
+// The rule at the top of this file, as the two objects that keep it. Here
+// rather than in a transport because BOTH transports need it and neither owns
+// it: the server writes companion frames and the client writes them, and the
+// halves live in different files now (shared/transport.ts and bun/transport.ts).
+
+/**
+ * Write one control message, with the payload's bulky base64 field (if it has
+ * one) as a binary frame immediately before it.
+ *
+ * Before, not after, and it matters: the receiver holds at most one waiting
+ * binary frame, so "the bytes that just arrived" is the whole correlation
+ * story. Sending them afterwards would mean a control frame that references
+ * something not yet in hand, which is a state a peer could leave open.
+ */
+export function writeMessage(
+  write: (b: Uint8Array) => void,
+  msg: WireMessage,
+  kind: "req" | "res" | "push",
+  method: string,
+): void {
+  const path = binaryPath(kind, method);
+  const body = msg.t === "req" ? msg.p : msg.t === "res" ? msg.r : msg.t === "push" ? msg.p : null;
+  const hoisted = path && body !== null ? hoistBinary(body, path) : null;
+  if (!hoisted) return write(encodeControl(msg));
+  const bin = nextBinaryId();
+  write(encodeBinary(bin, hoisted.bytes));
+  write(
+    encodeControl(
+      msg.t === "req"
+        ? { ...msg, p: hoisted.payload, bin }
+        : msg.t === "res"
+          ? { ...msg, r: hoisted.payload, bin }
+          : { ...(msg as { t: "push"; m: string; p: unknown }), p: hoisted.payload, bin },
+    ),
+  );
+}
+
+// Correlates a binary frame with the control frame behind it and nothing else,
+// so it only has to be unique against its immediate neighbour. Wrapped at 32
+// bits because the field is a u32 on the wire.
+let binaryId = 0;
+function nextBinaryId(): number {
+  binaryId = (binaryId + 1) >>> 0;
+  return binaryId;
+}
+
+/**
+ * The receiving side of the same rule: hold the bytes until the next control
+ * frame claims them, and refuse a second binary frame before that happens.
+ *
+ * Refusing is the point. A peer that can queue binary frames can make the
+ * other end hold megabytes on the promise of a control frame it never sends,
+ * and the cap on one frame does nothing about a thousand of them.
+ */
+export class BinaryHolder {
+  private held: { id: number; bytes: Uint8Array } | null = null;
+
+  hold(frame: Extract<Frame, { type: 1 }>): void {
+    if (this.held) throw new WireError("the peer sent two binary frames with no control frame between them");
+    this.held = { id: frame.id, bytes: frame.bytes };
+  }
+
+  /** Put the bytes back into the payload the sender took them from. Also the
+   * check that a claimed frame is the one that arrived. */
+  claim(msg: WireMessage, kind: "req" | "res" | "push", method: string): unknown {
+    const bin = msg.t === "req" || msg.t === "res" || msg.t === "push" ? msg.bin : undefined;
+    const body = msg.t === "req" ? msg.p : msg.t === "res" ? msg.r : msg.t === "push" ? msg.p : null;
+    // Held bytes are NOT dropped by a message that did not ask for them: that
+    // would turn a desync into a silent truncation, and idle() below is what
+    // catches it.
+    if (bin === undefined) return body;
+    const held = this.held;
+    this.held = null;
+    if (!held || held.id !== bin) throw new WireError("the peer claimed a binary frame that did not arrive");
+    const path = binaryPath(kind, method);
+    if (!path) throw new WireError(`the peer sent bytes with ${kind}:${method}, which carries none`);
+    return restoreBinary(body, path, held.bytes);
+  }
+
+  /** A control frame that claimed nothing leaves nothing held: bytes with no
+   * claimant are a desync, not a spare. */
+  idle(): boolean {
+    return this.held === null;
+  }
 }

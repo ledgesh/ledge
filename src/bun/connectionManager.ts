@@ -11,7 +11,7 @@
 // The router is the point. Everything above it — the webview's RPC, and every
 // command in it — holds one handler map for the life of the process and never
 // learns that the machine underneath it changed.
-import { REQUEST_METHODS } from "../shared/wire";
+import { REQUEST_METHODS, type RequestHandlers } from "../shared/wire";
 import {
   loadConnections,
   LOCAL_CONNECTION,
@@ -21,7 +21,6 @@ import {
   validateConnection,
   type Connection,
 } from "./connections";
-import type { RequestHandlers } from "./server";
 import type { ConnectionInfo } from "../shared/rpc-schema";
 
 /** One live connection: the handlers it serves and the way to end it. */

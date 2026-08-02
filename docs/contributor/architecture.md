@@ -17,10 +17,15 @@ allowed to be a wire. `remote.md` is where that lives.)
   the system clipboard. It has no UI.
 - **WKWebView** (`src/mainview/`) runs the React app. It owns everything the
   user sees and no machine state at all.
-- **`src/shared/`** is the contract between them — `rpc-schema.ts` plus the
-  few pure helpers both sides need (`slug.ts`). It imports from neither side,
-  ever: a shared module that reaches into `src/bun` or `src/mainview` has
-  stopped being the contract and become a participant.
+- **`src/shared/`** is the contract between them — `rpc-schema.ts`, the pure
+  helpers both sides need (`slug.ts`), the wire codec (`wire.ts`), and the
+  client's half of a connection (`transport.ts`). It imports from neither
+  side, ever: a shared module that reaches into `src/bun` or `src/mainview`
+  has stopped being the contract and become a participant. Nor may it reach
+  for a global only Bun has, which is the same rule seen from the other end —
+  the client's half has to run in a webview (`ios.md` §2), so a `Buffer` in
+  here is a module that has quietly stopped being shared. `portable.test.ts`
+  enforces both.
 
 Every crossing rides the typed Electrobun RPC defined in
 `src/shared/rpc-schema.ts`. There is no second channel: no direct filesystem

@@ -21,7 +21,7 @@ import { InlinePool, type InlineEvent } from "./inlinePool";
 import { takePaste } from "./paste";
 import { readProfile, writeProfile } from "./profiles";
 import type { ClientMethod } from "./clientSeams";
-import type { ClientPush } from "../shared/wire";
+import type { RequestHandlers, ServerPush } from "../shared/wire";
 import {
   backlinksTo,
   changeVaultPassphrase,
@@ -73,33 +73,7 @@ import { loadSettings, readSettingsFile, writeSettingsFile } from "./settings";
 import { resolveShellArgs, resolveSpawn, stampSessionFacts, type SessionFacts, type SpawnDeps } from "./spawnParams";
 import { buildRemoteSpawn } from "./remoteSpawn";
 import { readFileSync, statSync } from "node:fs";
-import type { LedgeRPC } from "../shared/rpc-schema";
 import { isHostName, LOCAL_HOST, type NoteParams } from "../shared/frontmatter";
-
-// The push half of the protocol: `webview.messages` in rpc-schema.ts, one
-// method per message. The shell implements it over the Electrobun RPC; a
-// socket transport implements it by writing frames. The server itself sends
-// all of them but `menuCommand`, which an AppKit click originates.
-//
-// CLIENT_PUSHES are subtracted rather than stubbed. `connectionState` is a
-// fact about the wire, and the end on the far side of a dropped one cannot
-// report it (remote.md §7); leaving it in this type would hand every server a
-// method whose only correct implementation is not to call it.
-export type ViewPush = {
-  [K in keyof LedgeRPC["webview"]["messages"]]: (payload: LedgeRPC["webview"]["messages"][K]) => void;
-};
-
-export type ServerPush = Omit<ViewPush, ClientPush>;
-
-// The request half, derived from the schema rather than from Electrobun's
-// generics, so this object is a plain map any transport can call. Binding it
-// to `defineRPC` is then a pass-through, and the socket transport that lands
-// next has the same seam to dispatch into.
-export type RequestHandlers = {
-  [K in keyof LedgeRPC["bun"]["requests"]]: (
-    params: LedgeRPC["bun"]["requests"][K]["params"],
-  ) => LedgeRPC["bun"]["requests"][K]["response"] | Promise<LedgeRPC["bun"]["requests"][K]["response"]>;
-};
 
 // The one native seam the server still has. The pasteboard and the menu bar
 // left with remote.md §10 (bun/clientSeams.ts); the folder dialog could not

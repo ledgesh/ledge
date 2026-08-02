@@ -17,11 +17,11 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CONTROL_FRAME, encodeControl, FRAME_HEADER_BYTES, FrameDecoder, hello, parseControl } from "../shared/wire";
+import { CONTROL_FRAME, encodeControl, FRAME_HEADER_BYTES, FrameDecoder, hello, parseControl, type ServerPush } from "../shared/wire";
 import { BUILD_VERSION } from "../shared/version";
-import { clientConnection, spawnDuplex, type ClientConnection } from "./transport";
+import { clientConnection, type ClientConnection } from "../shared/transport";
+import { spawnDuplex } from "./transport";
 import type { NoteMeta, WorkspaceRootInfo } from "../shared/rpc-schema";
-import type { ServerPush } from "./server";
 
 const SERVE = join(import.meta.dir, "serve.ts");
 const HOME = await mkdtemp(join(tmpdir(), "ledge-serve-"));

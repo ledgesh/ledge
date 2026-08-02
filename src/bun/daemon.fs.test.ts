@@ -14,10 +14,9 @@ import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startDaemon, connectToDaemon, IDLE_EXIT_NEVER, type Daemon } from "./daemon";
-import { clientConnection } from "./transport";
+import { clientConnection } from "../shared/transport";
 import { BUILD_VERSION } from "../shared/version";
-import { PUSH_MESSAGES } from "../shared/wire";
-import type { ServerPush } from "./server";
+import { PUSH_MESSAGES, type ServerPush } from "../shared/wire";
 
 const push = Object.fromEntries(PUSH_MESSAGES.map((m) => [m, () => {}])) as unknown as ServerPush;
 

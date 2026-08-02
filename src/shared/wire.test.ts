@@ -343,8 +343,18 @@ describe("payloads that ride binary frames", () => {
     const path = binaryPath("res", "assetRead")!;
     expect(hoistBinary({ image: null }, path)).toBeNull();
     expect(hoistBinary({ image: { dataB64: "", mime: "image/png" } }, path)).toBeNull();
-    const lifted = hoistBinary({ image: { dataB64: "iVBOR", mime: "image/png" } }, path)!;
+    const lifted = hoistBinary({ image: { dataB64: "iVBORw==", mime: "image/png" } }, path)!;
     expect(lifted.payload).toEqual({ image: { dataB64: "", mime: "image/png" } });
+  });
+
+  // Every base64 that reaches hoistBinary was written by toBase64 a few lines
+  // earlier: the pty drain loop's output, a file the server read, a paste the
+  // client encoded. So a string that is not base64 is a bug in this codebase,
+  // and the builtin refusing it is better than Buffer's old habit of decoding
+  // the prefix and discarding the rest — which would have put SHORT bytes on
+  // the wire and called it a success.
+  test("a field that is not base64 is refused rather than truncated", () => {
+    expect(() => hoistBinary({ sessionId: "s", dataB64: "not base64!" }, ["dataB64"])).toThrow();
   });
 
   test("the caller's payload is not mutated", () => {

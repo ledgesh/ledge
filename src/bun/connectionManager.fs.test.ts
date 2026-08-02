@@ -14,7 +14,7 @@ import { resolve, sep } from "node:path";
 import { APP_HOME } from "./workspaces";
 import { CONNECTIONS_PATH, KNOWN_HOSTS_PATH, LOCAL_ID, saveConnections, type Connection } from "./connections";
 import { CONNECTION_METHODS, createConnectionManager, type Attached } from "./connectionManager";
-import type { RequestHandlers } from "./server";
+import type { RequestHandlers } from "../shared/wire";
 
 if (!resolve(APP_HOME).startsWith(resolve(tmpdir()) + sep)) {
   throw new Error(`refusing to run filesystem tests against ${APP_HOME} — is the preload configured?`);

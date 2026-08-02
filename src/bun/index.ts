@@ -22,12 +22,14 @@ import { fitFrame, readFrame, writeFrame, type Rect } from "./windowFrame";
 import { startLogging } from "./log";
 import { EXTRACTION_DIRNAME, pruneExtractionDir } from "./updateCache";
 import { APP_HOME } from "./workspaces";
-import { createServer, type NativeDeps, type RequestHandlers, type ServerPush } from "./server";
+import { createServer, type NativeDeps } from "./server";
+import type { RequestHandlers, ServerPush } from "../shared/wire";
 import { clientOverlay, type ClientNative } from "./clientSeams";
 import { clientId } from "./clientHome";
 import { createConnectionManager, type Attached } from "./connectionManager";
 import { KNOWN_HOSTS_PATH, sshCommand, userKnownHosts, type Connection } from "./connections";
-import { reconnectingClient, spawnDuplex } from "./transport";
+import { reconnectingClient } from "../shared/transport";
+import { spawnDuplex } from "./transport";
 import { BUILD_VERSION } from "../shared/version";
 import type { LedgeRPC } from "../shared/rpc-schema";
 

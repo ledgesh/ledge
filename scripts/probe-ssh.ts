@@ -27,10 +27,11 @@ process.env["LEDGE_NOTES_ROOT"] = join(SCRATCH, "home");
 
 const { sshCommand, pickHostKey, knownHostsText } = await import("../src/bun/connections");
 type Connection = import("../src/bun/connections").Connection;
-const { clientConnection, spawnDuplex } = await import("../src/bun/transport");
+const { clientConnection } = await import("../src/shared/transport");
+const { spawnDuplex } = await import("../src/bun/transport");
 const { PUSH_MESSAGES } = await import("../src/shared/wire");
 const { BUILD_VERSION } = await import("../src/shared/version");
-type ServerPush = import("../src/bun/server").ServerPush;
+type ServerPush = import("../src/shared/wire").ServerPush;
 
 const REPO = join(import.meta.dir, "..");
 const IMAGE = "ledge-server:probe";

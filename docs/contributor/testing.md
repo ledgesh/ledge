@@ -54,6 +54,8 @@ test, it must be one — the doc states the rule, the test enforces it, and a
 violation fails CI instead of waiting for a reader. Existing examples, which
 new rules should imitate:
 
+- `src/shared/` imports from neither `src/bun` nor `src/mainview`, and
+  reaches for no global only Bun has (`shared/portable.test.ts`);
 - no two commands share a bare key on the same row kind, and every row verb
   declares its `targetKind` (`registry.test.ts`);
 - row verbs live in `listKeys`, never `keys` (`keys.test.ts`);

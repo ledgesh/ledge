@@ -22,7 +22,7 @@ import { loadClientSettings, readClientSettingsFile, writeClientSettingsFile } f
 import { mergeSettings, type Settings } from "../shared/settings";
 import { openableUrl } from "../shared/links";
 import { CONNECTION_METHODS } from "./connectionManager";
-import type { RequestHandlers } from "./server";
+import type { RequestHandlers } from "../shared/wire";
 
 export interface ClientNative {
   // The pasteboard's available flavors, or null where they cannot be read.

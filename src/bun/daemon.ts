@@ -21,12 +21,13 @@
 // in flight safe.
 import { chmodSync, mkdirSync, openSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { createServer, type NativeDeps, type ServerPush } from "./server";
-import { fedDuplex, serverConnection, type Duplex, type ServerConnection } from "./transport";
+import { createServer, type NativeDeps } from "./server";
+import { fedDuplex, type Duplex } from "../shared/transport";
+import { serverConnection, type ServerConnection } from "./transport";
 import { createOpLog } from "./opLog";
 import { LOG_DIR } from "./log";
 import { APP_HOME } from "./workspaces";
-import { PUSH_MESSAGES } from "../shared/wire";
+import { PUSH_MESSAGES, type ServerPush } from "../shared/wire";
 import { BUILD_VERSION } from "../shared/version";
 
 /** In the app home, so LEDGE_NOTES_ROOT moves it too and a scratch probe gets
