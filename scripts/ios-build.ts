@@ -504,7 +504,11 @@ if (phone && profile) {
     "--terminate-existing",
     BUNDLE_ID,
   ];
-  if (server !== null) launch.push("-LedgeServer", server);
+  // `--` first, and it is not optional: devicectl parses its own flags out of
+  // everything after the bundle id too, so `-LedgeServer` comes back as
+  // "Unknown option '-L'". simctl takes the same pair with no separator, which
+  // is why the two lines below this one and above it do not match.
+  if (server !== null) launch.push("--", "-LedgeServer", server);
   await run(launch);
   process.exit(0);
 }

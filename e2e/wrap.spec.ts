@@ -51,6 +51,11 @@ test("wrapped rows still hang under the content column", async ({ page }) => {
 
   const rows = await page.evaluate(() => {
     const content = document.querySelector(".cm-content")!;
+
+    // One column's width, averaged over ten of them. Measured as a whole
+    // hidden span: WebKit inflates the client rects of a range that starts or
+    // ends part-way through a text node by about a pixel, so slicing glyphs
+    // out of the line itself would measure ink the layout never used.
     const probe = document.createElement("span");
     probe.textContent = "0".repeat(10);
     probe.style.cssText = "position:absolute;visibility:hidden";
@@ -58,12 +63,33 @@ test("wrapped rows still hang under the content column", async ({ page }) => {
     const ch = probe.getBoundingClientRect().width / 10;
     probe.remove();
 
+    // The x each visual row of the line begins at. getClientRects yields one
+    // rect per row per text run — highlighting splits the marker off from the
+    // prose — so group by row and keep the leftmost, rather than taking the
+    // extremes over every run.
     const r = new Range();
     r.selectNodeContents(content.querySelector(".cm-line")!);
-    const lefts = [...r.getClientRects()].map((b) => Math.round(b.left));
-    return { first: Math.min(...lefts), last: Math.max(...lefts), ch };
+    const leftOf = new Map<number, number>();
+    for (const box of r.getClientRects()) {
+      const row = Math.round(box.top);
+      leftOf.set(row, Math.min(leftOf.get(row) ?? Infinity, box.left));
+    }
+    const lefts = [...leftOf].sort(([a], [b]) => a - b).map(([, left]) => left);
+    return { lefts, ch };
   });
 
-  // The line wrapped, and its later rows sit exactly one marker (2ch) in.
-  expect(rows.last - rows.first).toBe(Math.round(2 * rows.ch));
+  // The line wrapped, and every row after the first sits exactly one marker
+  // ("- ", two columns) in.
+  //
+  // Compared as real numbers, to half a pixel. The two sides come from
+  // different machinery — the hang is a `2ch` margin resolved against the
+  // font, the rows' x's are glyph positions — and they agree to about a
+  // thousandth of a pixel. Rounding each to an integer first threw that
+  // agreement away: `round(x + 22.254) - round(x)` is 23, not 22, for a
+  // quarter of the subpixel positions the line can land on, so the test
+  // failed on where the editor happened to sit rather than on the rule.
+  expect(rows.lefts.length).toBeGreaterThan(1);
+  for (const left of rows.lefts.slice(1)) {
+    expect(left - rows.lefts[0]!).toBeCloseTo(2 * rows.ch, 0);
+  }
 });

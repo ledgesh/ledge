@@ -108,6 +108,16 @@ Rules:
   text, `document.activeElement` — never on internals reached through
   `window`. (`window.__harness` exists for the few things with no visible
   surface, like the clipboard.)
+- **Pixel geometry is compared as real numbers, never as two rounded ones.**
+  `round(a) - round(b)` turns a subpixel gap into an off-by-one for a quarter
+  of the positions a line can land on, so the spec starts reporting where the
+  editor happened to sit rather than the rule it states. Round the quantity
+  being asserted instead of its inputs — `Math.round((x - origin) / ch)` is a
+  column index no thousandth of a pixel can move (`lists.spec.ts`) — or
+  compare the raw numbers to half a pixel with `toBeCloseTo(…, 0)`
+  (`wrap.spec.ts`). A column width is measured from a whole hidden span:
+  WebKit inflates the client rects of a range that starts or ends part-way
+  through a text node by about a pixel, which is not a width the layout used.
 - WebKit only, deliberately. A Chromium pass would green-light what the
   shipping engine then does differently.
 - **Two projects.** `webkit` is the desktop one and runs everything except
