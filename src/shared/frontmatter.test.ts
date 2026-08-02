@@ -92,7 +92,7 @@ describe("parseFrontmatter", () => {
     expect(parseFrontmatter(fm("template: daily\n")).params.template).toBe("daily");
     const { params, problems } = parseFrontmatter(fm("template: yes\n"));
     expect(params.template).toBe(false);
-    expect(problems).toEqual([`"template" must be true, false, or daily: "yes"`]);
+    expect(problems).toEqual([{ line: 2, message: `"template" must be true, false, or daily: "yes"` }]);
   });
 
   test("confirm takes exactly true or false; anything else costs the line", () => {
@@ -102,7 +102,7 @@ describe("parseFrontmatter", () => {
     // A typo must not read as "asks first": the key exists so the user KNOWS
     // which blocks pause, and a silent yes is as wrong as a silent no.
     expect(params.confirm).toBe(false);
-    expect(problems).toEqual([`"confirm" must be true or false: "always"`]);
+    expect(problems).toEqual([{ line: 2, message: `"confirm" must be true or false: "always"` }]);
   });
 
   test("an env var named template is an env var, not the marker", () => {
@@ -145,7 +145,7 @@ describe("parseFrontmatter", () => {
   test("an unknown key is reported, not silently ignored", () => {
     // Silence would read as "my frontmatter does nothing"; say so instead.
     const { params, problems } = parseFrontmatter(fm("cwds: /x\ncwd: /y\n"));
-    expect(problems).toEqual([`unknown key "cwds"`]);
+    expect(problems).toEqual([{ line: 2, message: `unknown key "cwds"` }]);
     expect(params.cwd).toBe("/y");
   });
 
@@ -176,7 +176,36 @@ describe("parseFrontmatter", () => {
 
   test("an indented line outside env: is a mistake worth naming", () => {
     const { problems } = parseFrontmatter(fm("cwd: /x\n  stray: line\n"));
-    expect(problems).toEqual([`indented line outside "env:": "stray: line"`]);
+    expect(problems).toEqual([{ line: 3, message: `indented line outside "env:": "stray: line"` }]);
+  });
+
+  test("a problem names the line it is on, counting the opening fence as 1", () => {
+    // The editor draws each message beside its own line, so the number is the
+    // whole reason the report is useful rather than merely present.
+    const { problems } = parseFrontmatter(fm("cwd: /x\nnonsense\nprofile: 9 bad\n"));
+    expect(problems).toEqual([
+      { line: 3, message: `not a "key: value" line: "nonsense"` },
+      { line: 4, message: `"profile" must be letters, digits, "-" or "_": "9 bad"` },
+    ]);
+  });
+
+  test("blank and comment lines are counted, not skipped", () => {
+    // They are structure-neutral to the GRAMMAR, but they still occupy a line
+    // and everything below them shifts down by one.
+    const { problems } = parseFrontmatter(fm("\n# just a note\n\ncwds: /x\n"));
+    expect(problems).toEqual([{ line: 5, message: `unknown key "cwds"` }]);
+  });
+
+  test("one line can be wrong more than once", () => {
+    // Per-token degradation means a tags: line reports each refusal, and the
+    // editor joins them onto that line rather than showing only the first.
+    const { problems } = parseFrontmatter(fm("tags: 123 456 ok\n"));
+    expect(problems.map((p) => p.line)).toEqual([2, 2]);
+  });
+
+  test("a CRLF block numbers its lines the same as an LF one", () => {
+    const { problems } = parseFrontmatter("---\r\ncwd: /x\r\ncwds: /y\r\n---\r\n# T\r\n");
+    expect(problems).toEqual([{ line: 3, message: `unknown key "cwds"` }]);
   });
 
   test("a top-level key after the env map closes it", () => {
@@ -250,6 +279,35 @@ describe("parseFrontmatter", () => {
       "home",
       "project/ledge",
     ]);
+  });
+
+  test("tags: takes the bracketed list too, the form other tools write", () => {
+    // The YAML flow sequence is how Obsidian and most Markdown editors spell
+    // a tag list, and a notes folder is shared ground: the brackets come off
+    // around the whole value, and nothing else about the line changes.
+    const bracketed = parseFrontmatter(fm("tags: [ops, runbook]\n"));
+    expect(bracketed.params.tags).toEqual(["ops", "runbook"]);
+    expect(bracketed.problems).toEqual([]);
+    expect(parseFrontmatter(fm("tags: [ops runbook]\n")).params.tags).toEqual(["ops", "runbook"]);
+    expect(parseFrontmatter(fm("tags: [ops]\n")).params.tags).toEqual(["ops"]);
+    // Quotes come off first, so a quoted list is still a list.
+    expect(parseFrontmatter(fm('tags: "[ops, runbook]"\n')).params.tags).toEqual(["ops", "runbook"]);
+  });
+
+  test("an unbalanced bracket stays the typo it looks like", () => {
+    // Only a MATCHED wrapping pair is punctuation. Reporting the odd one is
+    // what keeps a half-typed list from reading as a shorter one.
+    const { params, problems } = parseFrontmatter(fm("tags: [ops, runbook\n"));
+    expect(params.tags).toEqual(["runbook"]);
+    expect(problems.length).toBe(1);
+  });
+
+  test("tags: [] declares no tags, and is not a problem", () => {
+    // An explicitly empty list is a choice; a bare `tags:` is an unfinished
+    // line, which is why only that one is reported.
+    const { params, problems } = parseFrontmatter(fm("tags: []\n"));
+    expect(params.tags).toEqual([]);
+    expect(problems).toEqual([]);
   });
 
   test("tags: accepts the body's own spelling — a leading # comes off", () => {

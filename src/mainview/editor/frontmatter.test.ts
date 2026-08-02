@@ -78,6 +78,19 @@ describe("tagsValueSpans", () => {
   test("a wholly-quoted list degrades to no spans — styling, not parsing", () => {
     expect(tagsValueSpans('tags: "work home"')).toEqual([]);
   });
+
+  test("a bracketed list is spanned inside the brackets", () => {
+    // The parser takes `[a, b]` (shared/frontmatter.ts unbracket), so the
+    // pills have to as well; the brackets themselves stay unstyled.
+    expect(tagsValueSpans("tags: [ops, runbook]")).toEqual([
+      { from: 7, to: 10, tag: "ops" },
+      { from: 12, to: 19, tag: "runbook" },
+    ]);
+  });
+
+  test("an unbalanced bracket is not stripped, and costs only its own token", () => {
+    expect(tagsValueSpans("tags: [ops, runbook").map((t) => t.tag)).toEqual(["runbook"]);
+  });
 });
 
 describe("effectiveProfileLine", () => {

@@ -90,6 +90,17 @@ describe("tagRefsOf", () => {
     ]);
   });
 
+  test("a bracketed list points at the same line, its tokens spelled bare", () => {
+    const refs = tagRefsOf("---\ntags: [ops, #runbook]\n---\n# Title\n");
+    expect(refs).toEqual([
+      { tag: "ops", line: 2, raw: "ops" },
+      { tag: "runbook", line: 2, raw: "#runbook" },
+    ]);
+    // `raw` is what a reveal re-finds on the line, so stripping the brackets
+    // must leave every token a verbatim substring of it.
+    for (const r of refs) expect("tags: [ops, #runbook]").toContain(r.raw);
+  });
+
   test("frontmatter and body merge, frontmatter first", () => {
     const refs = tagRefsOf("---\ncwd: /x\ntags: work\n---\n# Title\n#home\n");
     expect(refs).toEqual([
@@ -113,6 +124,10 @@ describe("tagRefsOf", () => {
     "---\n# tags: commented out\n---\n# T\n", // comment line is not the key
     "---\ntags: Work work 123\n---\n# T\n", // dedupe + per-token degradation
     '---\ntags: "work home"\n---\n# T\n', // quoted values unquote first
+    "---\ntags: [work, home]\n---\n# T\n", // the bracketed list, unbracketed once
+    "---\ntags: [work\n---\n# T\n", // an unmatched bracket refuses its token
+    "---\ntags: []\n---\n# T\n", // an explicitly empty list is empty, not absent
+    "---\ntags: work\ntags: []\n---\n# T\n", // and it replaces, like any repeat
   ];
   test("frontmatter refs agree with parseFrontmatter on every discipline", () => {
     for (const text of agreeing) {

@@ -20,7 +20,7 @@ env:
 
 The grammar is small: flat `key: value` lines, plus one indented map under `env:`. Full-line `#` comments and blank lines are allowed, and a value with spaces can be quoted, as in `cwd: "~/My Notes"`.
 
-A bad line costs only itself, never the rest of the block, and an unknown key is reported as a probable misspelling rather than ignored.
+A bad line costs only itself, never the rest of the block. Ledge writes what it could not read beside the line, in red, and marks that line down its left edge: an unknown key says so rather than doing nothing quietly. The note is untouched and the message goes as soon as the line is right, so you can keep typing through it.
 
 ## cwd: where shells start
 

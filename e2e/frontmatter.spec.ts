@@ -172,6 +172,51 @@ test("the block completes its keys and values, hints attached", async ({ page })
   await expect(page.locator(".cm-line.ledge-fm", { hasText: "template: daily" })).toBeVisible();
 });
 
+test("a line the parser cannot read says so beside itself, and stops once fixed", async ({ page }) => {
+  await page.keyboard.press("Meta+n");
+  await page.keyboard.press("Meta+a");
+  await page.keyboard.type("---");
+  await page.keyboard.press("Enter"); // autoclose plants the closing fence
+  await page.keyboard.type("template: yes");
+  await page.keyboard.press("Escape"); // the value popup — typing, not picking
+
+  // The message names the typo and sits on the line that carries it; the line
+  // itself is marked, so a narrow window still says which one.
+  const problem = page.locator(".ledge-fm-problem");
+  await expect(problem).toHaveText(`"template" must be true, false, or daily: "yes"`);
+  await expect(page.locator(".cm-line.ledge-fm-bad")).toHaveCount(1);
+  // It is an annotation, not text: the note still holds only what was typed.
+  await expect(page.locator(".cm-line.ledge-fm-bad")).toContainText("template: yes");
+
+  // Fixing the line clears it live, the same rebuild-on-doc-change the dimming
+  // rides. Advisory throughout: nothing was ever blocked or refused.
+  for (let i = 0; i < 3; i += 1) await page.keyboard.press("Backspace");
+  await page.keyboard.type("true");
+  await page.keyboard.press("Escape");
+  await expect(problem).toHaveCount(0);
+  await expect(page.locator(".cm-line.ledge-fm-bad")).toHaveCount(0);
+  await expect(page.locator(".cm-line.ledge-fm")).toHaveCount(3);
+});
+
+test("a line wrong twice over annotates once, with both reasons", async ({ page }) => {
+  // Per-token degradation reports each refusal (a bad tag costs itself, not
+  // the tags beside it), and one line gets one annotation carrying both —
+  // a stack of messages on one short line would cover the block.
+  await page.keyboard.press("Meta+n");
+  await page.keyboard.press("Meta+a");
+  await page.keyboard.type("---");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("tags: 123 456 work");
+  await page.keyboard.press("Escape");
+
+  const problem = page.locator(".ledge-fm-problem");
+  await expect(problem).toHaveCount(1);
+  await expect(problem).toContainText(`"123"`);
+  await expect(problem).toContainText(`"456"`);
+  // The tag beside them survived, and is styled as one.
+  await expect(page.locator(".ledge-fm-tag")).toHaveText("work");
+});
+
 test("profile fields copy and paste through the clipboard bridge, mask notwithstanding", async ({ page }) => {
   await page.keyboard.press("Meta+n");
   for (const line of ["---", "profile: petstore", "---", "# Petstore calls"]) {

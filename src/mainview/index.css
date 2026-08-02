@@ -308,6 +308,28 @@ body {
   text-decoration-style: solid;
 }
 
+/* What the parser could not read on a block line (editor/frontmatter.ts): a
+   thin accent down the line's left edge, and the message drawn after its text.
+   The accent is an inset shadow, not a border, so marking a line cannot reflow
+   it. Both are toned toward the block's muted color rather than sitting at full
+   --err: a line is wrong for as long as it takes to finish typing it, and a
+   red bar flashing on every keystroke would make the block unwriteable. The
+   selector carries three classes because `.cm-line.ledge-fm span` above sets
+   color, size, weight and style on everything inside the block, and would
+   otherwise win. */
+.cm-line.ledge-fm-bad {
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--err) 55%, transparent);
+}
+.cm-line.ledge-fm .ledge-fm-problem {
+  margin-left: 1.5ch;
+  color: color-mix(in srgb, var(--err) 75%, var(--ed-muted));
+  font-style: italic;
+  /* The annotation is not in the document. A drag across the line, or ⌘A,
+     takes the note's own text and nothing of this. */
+  user-select: none;
+  -webkit-user-select: none;
+}
+
 /* The WKWebView-proof hand: a body-parented layer pinned over the editor
    (same trick as .ledge-overlay — elements outside the editing context
    honour `cursor`), holding one invisible click-through-proof div per
