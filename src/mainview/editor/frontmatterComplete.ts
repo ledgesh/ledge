@@ -89,7 +89,12 @@ export function frontmatterCompletionSource(context: CompletionContext): Complet
 
   const value = /^(template|confirm|tags|host)[ \t]*:([^]*)$/.exec(before);
   if (!value) return null;
-  const token = /[^,\s]*$/.exec(value[2]!)![0];
+  // "[" ends the token as a separator does: it opens a `tags:` flow sequence
+  // (shared/frontmatter.ts unbracket), so it is punctuation the completion
+  // must insert AFTER. Counting it into the token would put `from` on the
+  // bracket itself and accepting an option would eat it — `tags: [` + work
+  // has to become `tags: [work`, not `tags: work`.
+  const token = /[^,\s[]*$/.exec(value[2]!)![0];
 
   if (value[1] === "template" || value[1] === "confirm") {
     const options = value[1] === "template" ? TEMPLATE_VALUES : CONFIRM_VALUES;
@@ -112,7 +117,13 @@ export function frontmatterCompletionSource(context: CompletionContext): Complet
   // parser would dedupe anyway — the popup shouldn't offer a no-op).
   const infos = workspaceTags(state.facet(sessionIdFacet));
   if (infos.length === 0) return null;
-  const already = new Set(splitTagList(value[2]!).accepted.map((a) => a.tag.toLowerCase()));
+  // What is before the caret is a list still being typed, so an opening
+  // bracket has no closer yet and splitTagList — which strips only a MATCHED
+  // pair — would refuse `[work` and offer `work` a second time. Drop it here
+  // rather than teaching the shared split about unbalanced brackets: in a
+  // saved note an unclosed "[" really is the typo it looks like.
+  const listed = value[2]!.replace(/^([ \t]*)\[/, "$1");
+  const already = new Set(splitTagList(listed).accepted.map((a) => a.tag.toLowerCase()));
   already.delete((token.startsWith("#") ? token.slice(1) : token).toLowerCase());
   const options = infos
     .filter((t) => !already.has(t.tag.toLowerCase()))

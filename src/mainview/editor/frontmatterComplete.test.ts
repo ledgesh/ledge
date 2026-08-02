@@ -81,6 +81,21 @@ describe("frontmatterCompletionSource: values", () => {
     expect(labels(complete("---\ntags: work, w\n---\n", 17))).toEqual(["project/ledge"]);
   });
 
+  test("a flow sequence's opening bracket is punctuation, not part of the token", () => {
+    // `from` past the bracket is what keeps accepting an option from eating
+    // it: `tags: [` + work must become `tags: [work`, never `tags: work`.
+    const open = complete("---\ntags: [\n---\n", 11);
+    expect(open?.from).toBe(11);
+    expect(labels(open)).toEqual(["work", "project/ledge"]);
+    expect(complete("---\ntags: [w\n---\n", 12)?.from).toBe(11);
+  });
+
+  test("tags inside a still-unclosed bracket are not offered again", () => {
+    // The line before the caret has no closing "]" yet, so the dedupe cannot
+    // wait for splitTagList's matched pair.
+    expect(labels(complete("---\ntags: [work, w\n---\n", 18))).toEqual(["project/ledge"]);
+  });
+
   test("host: teaches the reserved word local, once", () => {
     expect(labels(complete("---\nhost: l\n---\n", 11))).toEqual(["local"]);
     expect(complete("---\nhost: local, x\n---\n", 18)).toBeNull();

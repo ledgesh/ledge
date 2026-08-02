@@ -11,13 +11,30 @@
 // Extent comes from shared/frontmatter.ts — the same `frontmatterEnd` the
 // params parser and the title logic use, so what gets dimmed is exactly what
 // gets parsed, never one line more or less.
+//
+// It is also where the block SAYS what it could not read. The parser refuses
+// per line (an unknown key, a name that could never reach a shell, a token
+// that is not a tag) and the refusal is drawn on the line it belongs to,
+// because the alternative is a note whose frontmatter silently does nothing.
+// This is the settings dialog's stance in the place frontmatter is actually
+// edited (architecture.md §6: validation previewed live, advisory only) —
+// nothing here blocks a keystroke, gates a save, or refuses to spawn. A
+// half-typed line is wrong for as long as it takes to finish typing it, so
+// the message has to be quiet enough to write through.
 import { StateField, type EditorState, type Extension, type Range } from "@codemirror/state";
-import { Decoration, type DecorationSet, EditorView, ViewPlugin } from "@codemirror/view";
+import {
+  Decoration,
+  type DecorationSet,
+  EditorView,
+  ViewPlugin,
+  WidgetType,
+} from "@codemirror/view";
 import {
   frontmatterEnd,
   isProfileName,
   isTagToken,
   parseFrontmatter,
+  unbracket,
   unquote,
 } from "../../shared/frontmatter";
 import { editProfile, openTag } from "./bridge";
@@ -69,15 +86,21 @@ export function profileValueSpan(
  * are spans (a refused token is no link, the profile rule); each carries the
  * tag the click should show, leading `#` stripped. A wholly-quoted list
  * (`tags: "a b"`) yields nothing: the quote glues into the first token and
- * fails isTagToken — styling degrades, parsing doesn't. Pure, like its
- * sibling, so the mapping is testable without an editor.
+ * fails isTagToken — styling degrades, parsing doesn't. The flow sequence's
+ * brackets are the case where degrading was NOT acceptable: `tags: [a, b]` is
+ * the common spelling, so they come off by the parser's own rule (unbracket)
+ * rather than costing every token its pill. Pure, like its sibling, so the
+ * mapping is testable without an editor.
  */
 export function tagsValueSpans(lineText: string): { from: number; to: number; tag: string }[] {
   const m = /^(tags[ \t]*:[ \t]*)(\S.*?)[ \t]*$/.exec(lineText.replace(/\r$/, ""));
   if (!m) return [];
-  const base = m[1]!.length;
+  // A stripped "[" shifts every token one column right of where it sits in
+  // `inner`; the spans are the LINE's, so the offset has to come back.
+  const inner = unbracket(m[2]!);
+  const base = m[1]!.length + (inner === m[2]! ? 0 : 1);
   const out: { from: number; to: number; tag: string }[] = [];
-  for (const tok of m[2]!.matchAll(/[^,\s]+/g)) {
+  for (const tok of inner.matchAll(/[^,\s]+/g)) {
     const raw = tok[0]!;
     const tag = raw.startsWith("#") ? raw.slice(1) : raw;
     if (!isTagToken(tag)) continue;
@@ -145,19 +168,73 @@ const FM_TAG = Decoration.mark({
   class: "ledge-fm-tag",
   attributes: { title: "⌘-click to show tagged notes" },
 });
+// The line the parser refused, so the message below has something to point at
+// on a narrow window: read the message, look left, that line.
+const PROBLEM = Decoration.line({ class: "ledge-fm ledge-fm-bad" });
+
+// What the parser could not read, drawn at the end of its own line.
+//
+// A widget rather than the `title` tooltip the two marks above use, because
+// those tooltips label an affordance someone went looking for and this is
+// news: a message you have to hover to discover is barely louder than the
+// silence it replaces, and a touch client has no hover to discover it with.
+// It is inert — `ignoreEvent` keeps clicks and selection out, so the block
+// stays ordinary editable text with something written in the margin.
+class ProblemWidget extends WidgetType {
+  constructor(readonly message: string) {
+    super();
+  }
+  eq(other: ProblemWidget) {
+    return other.message === this.message;
+  }
+  toDOM(): HTMLElement {
+    const el = document.createElement("span");
+    el.className = "ledge-fm-problem";
+    el.textContent = this.message;
+    // Decorative: the line's own text already carries the content, and a
+    // screen reader walking the document should not read the annotation as
+    // though the user had typed it.
+    el.setAttribute("aria-hidden", "true");
+    return el;
+  }
+  ignoreEvent() {
+    return true;
+  }
+}
 
 function build(state: EditorState): DecorationSet {
-  const span = frontmatterLineSpan(state.sliceDoc(0, Math.min(HEAD_BYTES, state.doc.length)));
+  const head = state.sliceDoc(0, Math.min(HEAD_BYTES, state.doc.length));
+  const span = frontmatterLineSpan(head);
   if (!span) return Decoration.none;
+  // Every problem on a line, in the parser's own order. Keyed by line because
+  // one line can be wrong more than once (`tags: 123 456` is two refusals),
+  // and reporting only the first would make fixing it look like whack-a-mole.
+  const byLine = new Map<number, string[]>();
+  for (const p of parseFrontmatter(head).problems) {
+    const at = byLine.get(p.line);
+    if (at) at.push(p.message);
+    else byLine.set(p.line, [p.message]);
+  }
   const ranges: Range<Decoration>[] = [];
   for (let n = span.first; n <= span.last; n += 1) {
     const line = state.doc.line(n);
-    ranges.push((n === span.first || n === span.last ? FENCE : BODY).range(line.from));
+    const bad = byLine.get(n);
+    ranges.push(
+      (n === span.first || n === span.last ? FENCE : bad ? PROBLEM : BODY).range(line.from),
+    );
     if (n !== span.first && n !== span.last) {
       const p = profileValueSpan(line.text);
       if (p) ranges.push(PROFILE.range(line.from + p.from, line.from + p.to));
       for (const t of tagsValueSpans(line.text)) {
         ranges.push(FM_TAG.range(line.from + t.from, line.from + t.to));
+      }
+      // side: 1 pins the widget after everything else at the line's end, so
+      // the caret at end-of-line still sits before it and typing continues
+      // the line rather than appearing to start past the message.
+      if (bad) {
+        ranges.push(
+          Decoration.widget({ widget: new ProblemWidget(bad.join(" · ")), side: 1 }).range(line.to),
+        );
       }
     }
   }

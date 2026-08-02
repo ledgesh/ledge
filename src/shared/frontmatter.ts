@@ -14,9 +14,19 @@
 // Bun-side policy, applied where the shell is spawned.
 //
 // Validation degrades per line, parseSettings-style: a bad line costs that
-// line (reported in `problems`, so the UI can surface it), never the rest of
-// the block and never a crash. The note is hand-edited text; a typo has to
-// degrade as gently as one in settings.jsonc does.
+// line, never the rest of the block and never a crash. The note is
+// hand-edited text; a typo has to degrade as gently as one in settings.jsonc
+// does — and, like settings.jsonc, it has to SAY SO. Every refusal here is a
+// `problem` carrying the line it is on, and the editor draws each one beside
+// its line (mainview/editor/frontmatter.ts). These strings are therefore
+// user-facing text: they follow docs/contributor/writing.md, which is why
+// none of them contains an em dash.
+//
+// The alternative, silence, is what this block shipped with, and it is the
+// worst failure available to a feature made of machinery you cannot see
+// working: a misspelled key means the note's shells quietly spawn as though
+// the line were not there. The one thing a user then has to go on is that
+// nothing happened.
 
 /** Parameters a note may declare. null / {} / [] mean "not declared". */
 export interface NoteParams {
@@ -75,9 +85,23 @@ export interface NoteParams {
 /** The reserved `host:` member meaning "this machine, no ssh". */
 export const LOCAL_HOST = "local";
 
+/**
+ * One thing wrong with the block, and the note line it is on (1-based, so it
+ * indexes a CodeMirror document directly). The line rides along because the
+ * only consumer is a per-line surface: the editor draws the message beside
+ * the line it belongs to (mainview/editor/frontmatter.ts). Deriving it there
+ * instead would mean a second walk of the block, and the parser's line
+ * discipline is subtle enough that shared/tags.ts needed an invariant test to
+ * keep ITS second walk honest. One walk, no drift.
+ */
+export interface FrontmatterProblem {
+  line: number;
+  message: string;
+}
+
 export interface Frontmatter {
   params: NoteParams;
-  problems: string[];
+  problems: FrontmatterProblem[];
   // Offset of the first content character after the closing fence (0 when the
   // note has no frontmatter). This is the one field slug.ts and the editor's
   // block styling need; they must agree with the parser on where the block
@@ -126,7 +150,8 @@ export function isTagToken(token: string): boolean {
 /**
  * Split a `tags:` value into its accepted tags and the tokens refused.
  * `tag` is the spelling with any leading "#" stripped; `raw` is the token
- * exactly as written (the reveal re-finds it on the line). Case-folded
+ * exactly as written (the reveal re-finds it on the line — `unbracket` keeps
+ * every token a verbatim substring of the line, so it still can). Case-folded
  * dedupe, first spelling wins. Exported for shared/tags.ts, which locates
  * the `tags:` line for occurrence refs: what the two ends accept from that
  * line must be the SAME list, so the split lives once, here.
@@ -137,7 +162,7 @@ export function splitTagList(value: string): {
 } {
   const accepted: { tag: string; raw: string }[] = [];
   const rejected: string[] = [];
-  for (const token of value.split(/[,\s]+/)) {
+  for (const token of unbracket(value).split(/[,\s]+/)) {
     if (!token) continue;
     const tag = token.startsWith("#") ? token.slice(1) : token;
     if (!isTagToken(tag)) rejected.push(token);
@@ -183,7 +208,7 @@ export function frontmatterEnd(text: string): number {
 export function parseFrontmatter(text: string): Frontmatter {
   const end = frontmatterEnd(text);
   const params: NoteParams = { cwd: null, profile: null, envFile: null, env: {}, hosts: [], tags: [], template: false, confirm: false, locked: null };
-  const problems: string[] = [];
+  const problems: FrontmatterProblem[] = [];
   if (end === 0) return { params, problems, end };
 
   // The lines between the fences: after the opener's newline, up to (not
@@ -195,7 +220,14 @@ export function parseFrontmatter(text: string): Frontmatter {
   // whether we are inside that map.
   let inEnv = false;
 
+  // Line 1 is the opening fence, so the first inner line is line 2; the loop
+  // advances this before its body, and `problem` closes over it so no report
+  // site has to remember to carry the number.
+  let lineNumber = 1;
+  const problem = (message: string) => problems.push({ line: lineNumber, message });
+
   for (const rawLine of inner.split("\n")) {
+    lineNumber += 1;
     const line = rawLine.replace(/\r$/, "");
     const trimmed = line.trim();
     // Blank lines and full-line comments are structure-neutral: they neither
@@ -205,7 +237,7 @@ export function parseFrontmatter(text: string): Frontmatter {
 
     const colon = trimmed.indexOf(":");
     if (colon <= 0) {
-      problems.push(`not a "key: value" line: "${trimmed}"`);
+      problem(`not a "key: value" line: "${trimmed}"`);
       continue;
     }
     const key = trimmed.slice(0, colon).trim();
@@ -213,15 +245,15 @@ export function parseFrontmatter(text: string): Frontmatter {
 
     if (/^\s/.test(line)) {
       if (!inEnv) {
-        problems.push(`indented line outside "env:": "${trimmed}"`);
+        problem(`indented line outside "env:": "${trimmed}"`);
         continue;
       }
       if (!isEnvName(key)) {
-        problems.push(`"env.${key}" is not a usable variable name`);
+        problem(`"env.${key}" is not a usable variable name`);
         continue;
       }
       if (!value) {
-        problems.push(`"env.${key}" has no value`);
+        problem(`"env.${key}" has no value`);
         continue;
       }
       params.env[key] = value;
@@ -231,17 +263,17 @@ export function parseFrontmatter(text: string): Frontmatter {
     inEnv = false;
     switch (key) {
       case "env":
-        if (value) problems.push(`"env" takes indented NAME: value lines, not an inline value`);
+        if (value) problem(`"env" takes indented NAME: value lines, not an inline value`);
         else inEnv = true;
         break;
       case "cwd":
       case "envFile":
         if (value) params[key] = value;
-        else problems.push(`"${key}" must be a non-empty value`);
+        else problem(`"${key}" must be a non-empty value`);
         break;
       case "profile":
-        if (!value) problems.push(`"profile" must be a non-empty value`);
-        else if (!isProfileName(value)) problems.push(`"profile" must be letters, digits, "-" or "_": "${value}"`);
+        if (!value) problem(`"profile" must be a non-empty value`);
+        else if (!isProfileName(value)) problem(`"profile" must be letters, digits, "-" or "_": "${value}"`);
         else params.profile = value;
         break;
       case "host": {
@@ -250,30 +282,34 @@ export function parseFrontmatter(text: string): Frontmatter {
         // list needs no new grammar. Per-token degradation, env-style: a bad
         // token costs itself, the machines beside it stay reachable.
         if (!value) {
-          problems.push(`"host" must name at least one machine (or "local")`);
+          problem(`"host" must name at least one machine (or "local")`);
           break;
         }
         params.hosts = []; // a repeated host: line replaces, like every other key
         for (const token of value.split(/[,\s]+/)) {
           if (!token) continue;
-          if (!isHostName(token)) problems.push(`"host" entry is not an ssh destination: "${token}"`);
+          if (!isHostName(token)) problem(`"host" entry is not an ssh destination: "${token}"`);
           else if (!params.hosts.includes(token)) params.hosts.push(token);
         }
         break;
       }
       case "tags": {
-        // One line, space- or comma-separated: `tags: work, #project/ledge`.
-        // A leading "#" per token is accepted and stripped — people write
-        // tags the way the body spells them. Per-token degradation,
-        // host-style: a bad token costs itself, the tags beside it survive.
+        // One line, space- or comma-separated, brackets optional:
+        // `tags: work, #project/ledge` and `tags: [work, project/ledge]` are
+        // the same list (splitTagList/unbracket). A leading "#" per token is
+        // accepted and stripped — people write tags the way the body spells
+        // them. Per-token degradation, host-style: a bad token costs itself,
+        // the tags beside it survive. Note `tags: []` is not empty-valued: an
+        // explicitly empty list declares no tags and is no more a problem
+        // than omitting the line, where a bare `tags:` is a line left unfinished.
         if (!value) {
-          problems.push(`"tags" must name at least one tag`);
+          problem(`"tags" must name at least one tag`);
           break;
         }
         const { accepted, rejected } = splitTagList(value);
         params.tags = accepted.map((a) => a.tag); // a repeated tags: line replaces
         for (const bad of rejected) {
-          problems.push(`"tags" entry is not a tag (letters, digits, "_", "-", "/"): "${bad}"`);
+          problem(`"tags" entry is not a tag (letters, digits, "_", "-", "/"): "${bad}"`);
         }
         break;
       }
@@ -284,7 +320,7 @@ export function parseFrontmatter(text: string): Frontmatter {
         if (value === "true") params.template = true;
         else if (value === "false") params.template = false;
         else if (value === "daily") params.template = "daily";
-        else problems.push(`"template" must be true, false, or daily: "${value}"`);
+        else problem(`"template" must be true, false, or daily: "${value}"`);
         break;
       case "confirm":
         // Exactly true or false. A typo defaulting to "asks first" would be
@@ -292,19 +328,19 @@ export function parseFrontmatter(text: string): Frontmatter {
         // whole point of the key is that the user knows which blocks pause.
         if (value === "true") params.confirm = true;
         else if (value === "false") params.confirm = false;
-        else problems.push(`"confirm" must be true or false: "${value}"`);
+        else problem(`"confirm" must be true or false: "${value}"`);
         break;
       case "locked":
         // Opaque here; bun/vault.ts owns the structure. A non-empty value
         // marks the note locked EVEN when malformed — a damaged header must
         // read as damage (refuse to decrypt), never as "unlocked after all".
         if (value) params.locked = value;
-        else problems.push(`"locked" is machine-written by Lock This Note — an empty value does nothing`);
+        else problem(`"locked" is machine-written by Lock This Note: an empty value does nothing`);
         break;
       default:
         // Same reasoning as parseSettings: a misspelled key silently ignored
         // reads as "my frontmatter does nothing" — say so instead.
-        problems.push(`unknown key "${key}"`);
+        problem(`unknown key "${key}"`);
     }
   }
 
@@ -320,5 +356,25 @@ export function unquote(v: string): string {
   if (v.length >= 2 && (v[0] === '"' || v[0] === "'") && v[v.length - 1] === v[0]) {
     return v.slice(1, -1);
   }
+  return v;
+}
+
+// Strip one pair of wrapping brackets, unquote's sibling and the same
+// concession: `tags: [ops, runbook]` means what it looks like. That is YAML's
+// flow sequence, and it is how Obsidian and most Markdown tools spell a tag
+// list — a notes folder is shared ground (architecture.md §3), so a list
+// written the way every other editor writes it must not read here as two
+// broken tokens. The grammar itself does not grow: this is one value's
+// punctuation coming off, not a new value TYPE, which is why the block's
+// multi-line `- item` sequence is still refused (it would be one).
+//
+// Only a matched, wrapping pair, so `tags: [ops` stays the typo it looks like
+// and is reported as one. Nothing legitimate is caught: no bracket can appear
+// inside a tag (isTagToken), so a stripped pair can only ever have been
+// punctuation. Exported for mainview/editor/frontmatter.ts, which must take
+// the brackets off at the same place or the form the parser accepts would
+// render as two refused tokens.
+export function unbracket(v: string): string {
+  if (v.length >= 2 && v[0] === "[" && v[v.length - 1] === "]") return v.slice(1, -1);
   return v;
 }

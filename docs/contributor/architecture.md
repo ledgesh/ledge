@@ -758,6 +758,17 @@ alike, which is what keeps all three telling one story about the note.
 - **Everything degrades, nothing throws.** A missing profile, a stale cwd, a
   bad env name each cost themselves — warned in the Bun log, and the shell
   still spawns. A dead Run button diagnoses nothing.
+- **A refusal is reported where the line is.** Degrading gently is only half
+  the contract: `parseFrontmatter` returns a problem per refused LINE (the
+  number rides along, so nothing downstream re-walks the block to place it),
+  and the editor draws each one beside its line (§6's file-is-the-UI stance,
+  same as ⌘,'s live validation). Silence was the original behavior and it is
+  the worst one available here — this block is machinery you cannot see
+  working, so a misspelled key is indistinguishable from a note that simply
+  has no frontmatter. Advisory only, in both directions: the report blocks no
+  save and no spawn, and Bun never consults it (a scan touching every note
+  would turn one typo into a log full of them). **A new key's refusal message
+  is user-facing text** and follows writing.md like any other.
 
 ## 7. Adding an RPC method
 

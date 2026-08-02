@@ -30,6 +30,10 @@ The panels share the right-hand slot, so opening one closes the other.
 
 Tag a note with inline `#hashtags` anywhere in the body, or with a frontmatter `tags:` line.
 
+The `tags:` line takes one list on one line, separated by commas or spaces, with or without square brackets. `tags: ops, runbook` and `tags: [ops, runbook]` declare the same two tags. A leading `#` on an entry is allowed and comes off, so you can spell tags the way the body does. The indented `- ops` form is not read, so keep the list on the `tags:` line.
+
+A tag is letters, digits, `_`, `-` and `/`, and needs at least one letter or `_`. That is why `#2024` and `#123` stay plain text: a year and an issue number are not tags. An entry Ledge cannot read as a tag is named beside the line, and the entries beside it still count. See [[Frontmatter and Environments]] for the rest of the block.
+
 ⌥⌘T opens the Tags panel: every tag in the workspace with its count, where Enter drills into the notes bearing one. Rendered tags in the editor are clickable, typing `#` in a note completes against the workspace's existing tags, and a query starting with `#` in the search overlay lists matching tags as rows.
 
 ## Find and replace in a note
