@@ -660,10 +660,16 @@ describe("note locking", () => {
     const note = await createNote(ROOT, `# Secrets\n\noriginal\n`);
     await lockNote(note.path);
     const base = (await readNote(note.path))!.mtimeMs;
-    // A foreign writer scribbles on the file (mtime moves on).
+    // A foreign writer scribbles on the file (mtime moves on). The wait goes
+    // BEFORE that write and not after it: what has to differ is the file's
+    // timestamp from `base`, and a pause taken once the scribble has landed
+    // separates nothing. On a filesystem whose timestamps are a whole
+    // millisecond apart, the lock, the read and the scribble otherwise all
+    // fall inside one, the guard correctly sees no divergence, and the test
+    // fails for a reason that has nothing to do with locking.
+    await new Promise((r) => setTimeout(r, 5)); // mtime granularity
     const cipher = await readRaw(note.path, "utf8");
     await writeRaw(note.path, cipher + "external-scribble\n");
-    await new Promise((r) => setTimeout(r, 5)); // mtime granularity
     const res = await writeNote(note.path, `# Secrets\n\n${NEEDLE}\n`, base);
     expect(res.divergedTo).not.toBeNull();
     const trashed = await readRaw(res.divergedTo!, "utf8");

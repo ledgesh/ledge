@@ -263,7 +263,7 @@ function AddConnection({ onCancel, onAdded }: { onCancel: () => void; onAdded: (
             Back
           </Button>
           <Button size="sm" disabled={busy} onClick={() => void save(probed.hostKey)}>
-            It Matches — Add
+            It Matches, Add
           </Button>
         </div>
       </div>

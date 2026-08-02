@@ -16,7 +16,14 @@
 // before anything can log (bun/mcp.ts has the same rule for the same reason):
 // one stray byte in a length-prefixed stream desynchronizes it with no way
 // back, and the session log keeps a copy either way.
-import { connectToDaemon, DAEMON_LOG, startDaemon, SOCKET_PATH } from "./daemon";
+import {
+  connectToDaemon,
+  DAEMON_LOG,
+  IDLE_EXIT_MS,
+  IDLE_EXIT_NEVER,
+  startDaemon,
+  SOCKET_PATH,
+} from "./daemon";
 import { stdioDuplex } from "./transport";
 import { startLogging } from "./log";
 import { APP_HOME } from "./workspaces";
@@ -56,9 +63,20 @@ export async function serve(): Promise<void> {
   await done;
 }
 
-export async function daemon(): Promise<void> {
-  const d = await startDaemon();
-  console.error(`[daemon] ledge-server ${BUILD_VERSION} on ${SOCKET_PATH}; app home: ${APP_HOME}`);
+/**
+ * BE this machine's server.
+ *
+ * `autostart` is the difference between a daemon `serve` conjured and one
+ * somebody asked for, and all it decides is whether the idle timeout applies
+ * (daemon.ts, IDLE_EXIT_MS). A container whose PID 1 is this, or a systemd
+ * unit, would otherwise be restarted every minute by its own supervisor for
+ * doing exactly what it was told.
+ */
+export async function daemon(autostart = false): Promise<void> {
+  const idleMs = autostart ? IDLE_EXIT_MS : IDLE_EXIT_NEVER;
+  const d = await startDaemon({ idleMs });
+  const life = idleMs > 0 ? `idle exit in ${idleMs}ms` : "staying until stopped";
+  console.error(`[daemon] ledge-server ${BUILD_VERSION} on ${SOCKET_PATH}; app home: ${APP_HOME}; ${life}`);
   // A signal is how a supervisor stops this — and how the probe does.
   for (const sig of ["SIGTERM", "SIGINT"] as const) process.on(sig, () => d.stop());
   await d.done;
@@ -71,9 +89,10 @@ if (import.meta.main) {
 
   const verb = process.argv[2] ?? "serve";
   if (verb !== "serve" && verb !== "daemon") {
-    console.error("usage: ledge-server [serve|daemon]");
+    console.error("usage: ledge-server [serve|daemon [--autostart]]");
     console.error("  serve   the protocol on stdin and stdout, attached to this machine's daemon");
-    console.error("  daemon  BE this machine's server; started on demand by serve");
+    console.error("  daemon  BE this machine's server; runs until stopped");
+    console.error("            --autostart  exit when idle; what serve passes to the one it starts");
     process.exit(2);
   }
 
@@ -82,7 +101,7 @@ if (import.meta.main) {
   // other's rotation.
   startLogging(verb === "daemon" ? DAEMON_LOG : "ledge-serve");
 
-  if (verb === "daemon") await daemon();
+  if (verb === "daemon") await daemon(process.argv.includes("--autostart"));
   else await serve();
   process.exit(0);
 }

@@ -1,0 +1,21 @@
+# The image builds the server from source, so the context is src/, scripts/,
+# and the files the build reads through them. Everything else is either the Mac
+# app, somebody's build output, or a set of secrets that has no business being
+# in a layer.
+*
+!src
+!scripts
+!package.json
+!tsconfig.json
+!bunfig.toml
+!electrobun.config.ts
+
+# The manual is compiled INTO the server (bun/docsContent.ts, remote.md §11),
+# so a VPS serves the pages that match its own version rather than the ones its
+# client happens to carry. The notices file is the manual's last page.
+!docs/user
+!THIRD-PARTY-NOTICES.md
+
+# Build outputs that would otherwise ride in under the exceptions above, and
+# whose Mach-O contents mean nothing on Linux.
+dist-native

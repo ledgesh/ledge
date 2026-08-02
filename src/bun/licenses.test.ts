@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import {
   collectPackages,
@@ -122,7 +122,14 @@ describe("THIRD-PARTY-NOTICES.md", () => {
   const committed = readFileSync(join(ROOT, "THIRD-PARTY-NOTICES.md"), "utf8");
   const packages = collectPackages(ROOT);
 
-  test("is current with the installed production tree", () => {
+  // The two tests that read the INSTALLED tree need one to be there. It always
+  // is on a machine that builds the app; it is not in the server's container
+  // (`Dockerfile`), which carries no npm dependencies because the server has
+  // none — and comparing the notices file against an empty walk would fail for
+  // saying nothing rather than for being stale.
+  const installed = existsSync(join(ROOT, "node_modules"));
+
+  test.skipIf(!installed)("is current with the installed production tree", () => {
     // Failing here means a dependency moved and the file did not: run
     // `bun run licenses` and commit the result.
     expect(renderNotices(packages)).toBe(committed);
@@ -136,7 +143,7 @@ describe("THIRD-PARTY-NOTICES.md", () => {
     for (const name of declared) expect(committed).toContain(`### ${name} `);
   });
 
-  test("reaches past the direct dependencies into their own", () => {
+  test.skipIf(!installed)("reaches past the direct dependencies into their own", () => {
     // react does not vendor its scheduler; a walk that stopped at the top
     // level would attribute the one and not the other.
     expect(packages.map((p) => p.name)).toContain("scheduler");

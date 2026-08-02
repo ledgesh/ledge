@@ -805,27 +805,35 @@ clears it.
 Bun-side: prefer `bun:ffi` and POSIX over native modules — node-pty is out for
 exactly this reason; the PTY is posix_spawn + poll.
 
-**The one compiled artifact: `libledge_pty.dylib`.** Two things the PTY cannot
-do through `bun:ffi` alone are C trampolines — `login_tty` between fork and
-exec (a controlling terminal, hence Ctrl-C) and a fixed-arity
-`ioctl(TIOCSWINSZ)` (resize, since bun:ffi mis-marshals variadics on arm64).
-Their source and signatures live in `bun/ptyNative.ts`, one declaration for
-two consumers: `scripts/build-native.ts` compiles them to a universal dylib
-that the copy map ships beside `index.js`, and `pty.ts` dlopens that file,
-falling back to compiling the same text in-process with bun:ffi's TinyCC.
+**The one compiled artifact: `libledge_pty`.** Two things the PTY cannot do
+through `bun:ffi` alone are C trampolines — `login_tty` between fork and exec
+(a controlling terminal, hence Ctrl-C) and a fixed-arity `ioctl(TIOCSWINSZ)`
+(resize, since bun:ffi mis-marshals variadics on arm64, and since the constant
+itself differs between the two kernels). Their source and signatures live in
+`bun/ptyNative.ts`, one declaration for two consumers: `scripts/build-native.ts`
+compiles them, and `pty.ts` dlopens the result, falling back to compiling the
+same text in-process with bun:ffi's TinyCC.
+
+One artifact, two spellings of it: a signed universal `.dylib` the copy map
+ships beside `index.js` in the Mac bundle, and a plain `.so` beside the server
+binary on Linux (`remote.md` §11). One C source with one `#if defined(__linux__)`
+in its includes, because `login_tty` is declared in `<util.h>` on BSD and
+`<utmp.h>` on glibc. There is no fat ELF, so the Linux side has no universal
+build and no `-arch` flags: the server is compiled in a container of its
+target's architecture instead.
 
 The build-time compile is the point, not an optimization. TinyCC needs the
-macOS SDK's headers, and a Mac with no Xcode and no Command Line Tools has
-none — an ordinary state for a machine that downloads an app rather than
-building one. There, the in-process compile fails, and it fails quietly in the
-worst possible place: Ctrl-C stops working in every terminal and resize
-becomes a no-op. Compiling on the build machine, which has the SDK by
-construction, moves that dependency off the user's. The dylib is signed by the
-same script (electrobun signs the bundle without `--deep` and only sweeps
-`*.node`, so nothing else in the pipeline would sign it, and an unsigned
-Mach-O in the bundle fails notarization), and it declares
-`-mmacosx-version-min` because clang otherwise stamps the build machine's
-macOS as the floor.
+SYSTEM HEADERS, and a machine that downloads the thing rather than building it
+has no reason to carry them: a Mac with no Xcode and no Command Line Tools has
+no `/usr/include` at all, and a debian-slim runtime has no `libc6-dev`. There,
+the in-process compile fails, and it fails quietly in the worst possible place:
+Ctrl-C stops working in every terminal and resize becomes a no-op. Compiling on
+the build machine, which has the headers by construction, moves that dependency
+off the user's. The dylib is signed by the same script (electrobun signs the
+bundle without `--deep` and only sweeps `*.node`, so nothing else in the
+pipeline would sign it, and an unsigned Mach-O in the bundle fails
+notarization), and it declares `-mmacosx-version-min` because clang otherwise
+stamps the build machine's macOS as the floor.
 
 A third native module needs the same bar as any dependency. Two exist because
 the alternative was a broken terminal, not because compiled code is on the

@@ -60,12 +60,21 @@ const HEADLESS: NativeDeps = {};
  *
  * `running()` overrides both: a daemon with a build in flight stays, which is
  * the entire point of the socket.
+ *
+ * The reason is entirely about the daemon nobody asked for, so it applies only
+ * to that one. A daemon somebody STARTED — a systemd unit, the container's PID
+ * 1 (`Dockerfile`) — stays until it is stopped, which `serve.ts` asks for with
+ * `idleMs: 0`. A supervisor restarting a process that correctly exited, every
+ * minute, forever, is not a design anyone would choose on purpose.
  */
 export const IDLE_EXIT_MS = 60_000;
+/** `idleMs` for a daemon that should stay until something stops it. */
+export const IDLE_EXIT_NEVER = 0;
 
 export interface DaemonOpts {
   socketPath?: string;
   pidPath?: string;
+  /** Milliseconds of idleness before exiting; `IDLE_EXIT_NEVER` to stay. */
   idleMs?: number;
   build?: string;
 }
@@ -183,7 +192,7 @@ export async function startDaemon(opts: DaemonOpts = {}): Promise<Daemon> {
   }
 
   function armIdleExit(): void {
-    if (stopped || idleTimer) return;
+    if (stopped || idleTimer || idleMs <= 0) return;
     idleTimer = setTimeout(() => {
       idleTimer = null;
       if (live) return;
@@ -320,7 +329,11 @@ async function tryConnect(socketPath: string): Promise<Fed | null> {
  * the second case: `bun serve.ts daemon` there, `ledge-server daemon` here.
  */
 function spawnDaemon(): void {
-  const argv = /(^|\/)bun$/.test(process.execPath) ? [process.execPath, Bun.main, "daemon"] : [process.execPath, "daemon"];
+  // --autostart is what makes the idle timeout apply: this daemon exists
+  // because a connection wanted one, so it should go when connections stop
+  // coming. One typed by a person, or written into a unit file, should not.
+  const head = /(^|\/)bun$/.test(process.execPath) ? [process.execPath, Bun.main] : [process.execPath];
+  const argv = [...head, "daemon", "--autostart"];
   let errFd: number | "ignore" = "ignore";
   try {
     mkdirSync(LOG_DIR, { recursive: true });

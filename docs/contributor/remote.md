@@ -1,11 +1,12 @@
 # Ledge remote servers
 
-**Partly implemented: §14 phases 1 to 4 are code, and Linux and iOS are still
+**Implemented: §14 phases 1 to 5 are code, and the iOS client is still
 design.** The connection grammar §8 called for now lives in `interactions.md`
 §4-1, the state ownership §5 describes is the code's, and the resilience §7
 promises is real: the server is a process behind a unix socket, a dropped wire
-reconnects and replays, and terminal output rides binary frames. What remains
-design is the Linux PTY port and the iOS client.
+reconnects and replays, and terminal output rides binary frames. The server
+runs on Linux and ships as an image, and `bun run probe:ssh` connects to one
+over a real sshd with the §4 forced command enforcing itself.
 This is a sibling standard beside `architecture.md` (whose process topology,
 trust boundary, and state-ownership rules it revises), `interactions.md`,
 `locking.md` (whose vault moves one hop away), and `testing.md` (whose
@@ -477,25 +478,59 @@ mistake waiting to be made.
 **The server ships as one binary** (`bun build --compile`) for macOS arm64
 and Linux x64/arm64, and as a Docker image for the hosts that want one. Build
 the image on debian-slim rather than alpine: the PTY layer is `bun:ffi` over
-`posix_spawn` and `forkpty`, and musl is a fight that buys nothing.
+`posix_spawn` and `forkpty`, and musl is a fight that buys nothing. musl also
+has no `posix_spawn_file_actions_addchdir_np` at all, which is the same rule
+seen from the other side. The floor is glibc 2.29 (Debian 11, Ubuntu 20.04,
+RHEL 9), set by that symbol.
+
+**The port is three names and one value.** `pty.ts` reaches libc by name, and
+almost nothing else about it differs: `O_RDWR`, `POLLIN` and `struct pollfd`
+agree, and every function in the table is POSIX. What does not agree is where
+`openpty` lives (libutil below glibc 2.34, libc at and above it, so it gets a
+handle of its own because `dlopen` resolves a table all at once), which header
+declares `login_tty` (`<util.h>` on BSD, `<utmp.h>` on glibc), and
+`POSIX_SPAWN_SETSID` (0x0400 against 0x0080, a value whose divergence is
+silent). `TIOCSWINSZ` differs too and never reaches TypeScript, because the
+`ioctl` goes through the trampoline and the compiler substitutes the right
+one; that is a second reason for the trampoline beyond the variadic one. The
+table is `ptyNative.ts`'s `PLATFORM`, and the rest of `src/bun/` is `node:fs`,
+`node:crypto`, and TypeScript.
+
+Two things the port found that reading could not, both of which shipped
+broken and neither of which is visible from macOS. A pty master whose child
+has exited reads 0 on macOS and fails with EIO on Linux, so `exited` never
+latched there: no `terminalExit`, and a session that stayed in the map
+forever. The portable answer is POLLHUP, which both kernels raise and which
+`poll` was already being called for. And nothing waited on a pty's child, so
+every closed drawer left a zombie — invisible in a window's lifetime, a pid
+leak in a server's.
+
+**Two deployments, and the image is built for one of them.** The binary on a
+VPS is reached by ssh, and `serve` autostarts the daemon on the first
+connection. The container's PID 1 IS the daemon and `docker exec` runs the
+pump, so the image ships no sshd: §3's argument for ssh is that Ledge
+inherits the most-audited daemon on the machine rather than writing an
+authentication system, and a second sshd inside a container gives that back
+for a second set of host keys and a second published port. The forced command
+§4 describes names `docker exec -i ledge ledge-server serve` instead.
+
+A daemon somebody STARTED does not idle out, which is what `--autostart`
+distinguishes: the timeout exists for the daemon an ssh conjured, and a
+supervisor restarting a container every minute for correctly deciding nobody
+was home is not a design anyone would choose.
 
 **Clients install and upgrade the server the way VS Code Remote does.** The
 client connects, reads the server's version from the handshake, and offers to
 push a matching binary when it is missing or mismatched. A user who prefers
-to manage it themselves runs the same binary from a package.
+to manage it themselves runs the same binary from a package. Not built:
+today's answer is `docs/user/18-notes-on-another-machine.md`'s two commands,
+which is honest for this audience and does not stay honest at a download page.
 
 **The handshake is the first frame in each direction** and carries the
 protocol version, the schema version, and the build. A schema mismatch
 refuses the connection with the two versions named and the upgrade offered.
 It does not negotiate a subset: a partially-understood protocol is how
 silent data-shaped bugs happen.
-
-**One module has to port to Linux**, and it should be spiked before anything
-else in §13 is committed to. `pty.ts` and `ptyNative.ts` reach libc through
-`bun:ffi`, and glibc differs from libSystem on symbol availability, on
-`forkpty` living in libutil, and on struct layouts. `architecture.md` §8's
-`libledge_pty.dylib` gains a Linux sibling built by the same script. The rest
-of `src/bun/` is `node:fs`, `node:crypto`, and TypeScript.
 
 The compiled-in docs corpus (`bun/docsContent.ts`) ships with the server, so
 a VPS serves the manual that matches its own version.
@@ -571,16 +606,39 @@ Per `testing.md`'s categories:
   and disagreements surface as failures rather than as drift; connection
   switching tears down and rebuilds workspace state; a dropped connection
   replays scrollback on reattach.
-- **Live probe (`testing.md` §6, scratch `LEDGE_NOTES_ROOT`)**: a real
-  `ssh localhost ledge-server serve` round trip, since ssh, the forced
-  command, and host-key pinning are native seams the harness cannot fake.
-  Then the same probe against a Linux box, for the PTY port.
+- **The PTY, against a real shell** (`pty.fs.test.ts`): a controlling
+  terminal, an interrupt that stops a foreground job, a ^C character the line
+  discipline turns into a signal, resize reaching the program inside, the
+  write queue, the exit latch, and the collection of the corpse. Everything
+  interesting about the PTY is a property of the kernel rather than of this
+  code, so it is also the port's proof: the same assertions run on both libcs,
+  and the container is where the second one answers.
+- **The whole server suite on glibc**: `docker build --target build` and
+  `bun test src/bun src/shared` inside it. It found the two Linux bugs §11
+  records, and a latent flake in `notes.fs.test.ts` that had put a pause
+  AFTER the write it was meant to separate rather than before it.
+- **Live probe (`testing.md` §6, scratch `LEDGE_NOTES_ROOT`)**: a real ssh
+  round trip, `bun run probe:ssh`, since ssh, the forced command, and
+  host-key pinning are native seams the harness cannot fake. It builds the
+  shipped image and a fixture that adds an sshd to it
+  (`scripts/ssh-probe/`), mints a throwaway key under the forced command, and
+  connects with the argv `connections.ts` actually builds. A probe that
+  hand-wrote an ssh command line would prove that ssh works, which was never
+  in doubt.
 
-The gap worth naming: everything above happens over pipes and a unix socket.
-Those are real process boundaries and real bytes, and they are not a network.
-Latency, a wire that drops mid-frame, and a middlebox that idles a connection
-out are what the reconnect ladder was written for, and none of them are
-exercised until the Mac-to-Mac pass.
+What it establishes, and each of these was a claim in this document before it
+was a fact: a key carrying `command="ledge-server serve"` runs that and not
+`whoami`, and not a shell; a changed host key refuses the connection with
+nothing offering to continue anyway; a note round-trips; the same `op` twice
+makes one note; a Linux pty answers a command typed from macOS through ssh and
+a daemon; and `docker exec` reaches a container whose PID 1 is the daemon.
+
+The gap that was worth naming through phases 2 to 4 is closed: the ssh hop is
+real, the sshd is real, and the forced command is enforced by sshd rather than
+asserted by a test. What remains unexercised is the part a container on
+loopback cannot supply — the round trip is sub-3ms here, and a wire that drops
+mid-frame, a middlebox that idles a connection out, and a laptop that sleeps
+mid-build are what the reconnect ladder was written for.
 
 ## 14. Phasing
 
@@ -614,13 +672,19 @@ Each phase leaves the app shippable.
    to the client, which leaves `bun/server.ts` with no `osascript` at all. The
    §12 audit found and fixed one serial-read loop and recorded one stated
    exception.
-   What is still owed, with phases 2 and 3's Mac-to-Mac pass: none of it has
-   run over a real ssh, so the daemon, the reconnect, and the dedupe are proved
-   over pipes and a unix socket rather than over a network that actually drops.
-   The socket is the honest half of that — it is a real second process, and
-   `serve.fs.test.ts` kills the client and watches the server keep the session
-   — but a wire with latency and a middlebox on it is a different test.
-5. **Linux**: the PTY port, the second dylib, the Docker image, the VPS
-   posture in `docs/user/`.
+   What phases 2 to 4 all owed was the ssh hop itself, and phase 5 paid it.
+5. **Done.** Linux, and the debt. The PTY port (`ptyNative.ts`'s `PLATFORM`,
+   the `#if defined(__linux__)` in the C, the `.so` that
+   `scripts/build-native.ts` now also builds), the `Dockerfile`, and
+   `docs/user/18-notes-on-another-machine.md`. `pty.fs.test.ts` is the port's
+   proof and runs on both libcs; the whole server suite runs on glibc in the
+   container.
+   The ssh round trip is `bun run probe:ssh` (§13): a real sshd, a real
+   forced-command key, real host-key pinning, and a Linux pty answering a
+   command typed from macOS. Every §4 claim about what that key can and
+   cannot do is now enforced rather than asserted.
+   What is still owed: a wire that actually drops. A container on loopback
+   answers in under 3ms and never sleeps, so the reconnect ladder is still
+   proved by killing a process rather than by losing a network.
 6. **The iOS client**, which is its own document and depends on nothing above
    being redone.

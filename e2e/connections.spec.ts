@@ -73,8 +73,8 @@ test("adding a server shows the host key's fingerprint before anything is pinned
 
   await expect(dialog(page).getByText("SHA256:harness+fake+key")).toBeVisible();
   // No "connect anyway": the only way forward says what it is agreeing to.
-  await expect(dialog(page).getByRole("button", { name: "It Matches — Add" })).toBeVisible();
-  await dialog(page).getByRole("button", { name: "It Matches — Add" }).click();
+  await expect(dialog(page).getByRole("button", { name: "It Matches, Add" })).toBeVisible();
+  await dialog(page).getByRole("button", { name: "It Matches, Add" }).click();
 
   const options = dialog(page).getByRole("option");
   await expect(options).toHaveCount(3);
@@ -90,7 +90,7 @@ test("a host that does not answer is a sentence, not a spinner", async ({ page }
   await dialog(page).getByLabel("SSH destination").fill("nowhere.invalid");
   await dialog(page).getByRole("button", { name: "Continue" }).click();
   await expect(dialog(page).getByText(/No answer from nowhere.invalid/)).toBeVisible();
-  await expect(dialog(page).getByRole("button", { name: "It Matches — Add" })).toHaveCount(0);
+  await expect(dialog(page).getByRole("button", { name: "It Matches, Add" })).toHaveCount(0);
 });
 
 // ⌫ on a focused row, the same remove verb the workspace strip uses — and the

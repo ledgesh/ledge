@@ -13,7 +13,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { startDaemon, connectToDaemon, type Daemon } from "./daemon";
+import { startDaemon, connectToDaemon, IDLE_EXIT_NEVER, type Daemon } from "./daemon";
 import { clientConnection } from "./transport";
 import { BUILD_VERSION } from "../shared/version";
 import { PUSH_MESSAGES } from "../shared/wire";
@@ -106,6 +106,23 @@ describe("a daemon nobody is using", () => {
     const raced = await Promise.race([d.done.then(() => "exited"), new Promise((r) => setTimeout(() => r("still up"), 600))]);
     expect(raced).toBe("still up");
     client.close();
+  });
+
+  // The daemon a person started, rather than one an ssh conjured: a systemd
+  // unit, or the container's PID 1. It has to survive having no client at all,
+  // because the alternative is a supervisor restarting it every minute for
+  // correctly deciding nobody was home.
+  test("stays put when it was asked to, with no client ever", async () => {
+    const { d, socketPath, pidPath } = await daemonIn({ idleMs: IDLE_EXIT_NEVER });
+    const raced = await Promise.race([
+      d.done.then(() => "exited"),
+      new Promise((r) => setTimeout(() => r("still up"), 500)),
+    ]);
+    expect(raced).toBe("still up");
+    expect(existsSync(socketPath)).toBe(true);
+    expect(existsSync(pidPath)).toBe(true);
+    d.stop();
+    await d.done;
   });
 });
 

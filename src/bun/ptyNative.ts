@@ -16,8 +16,44 @@
 // dependency off the user's.
 import type { FFIFunction } from "bun:ffi";
 
-/** The dylib's filename in the bundle and in `dist-native/`. */
-export const NATIVE_LIB = "libledge_pty.dylib";
+/** The trampolines' filename in `dist-native/`, and in the app bundle on the
+ * platform that has one. */
+export const NATIVE_LIB = process.platform === "darwin" ? "libledge_pty.dylib" : "libledge_pty.so";
+
+// What differs between the two libcs, in one place because the alternative is
+// a `process.platform` per call site in pty.ts.
+//
+// Only three things do, and only the third is a value rather than a name.
+// openpty, ttyname, poll, killpg, tcgetpgrp and the whole posix_spawn family
+// are POSIX and identical; O_RDWR, POLLIN and struct pollfd's layout agree
+// (0x2, 0x1, 8 bytes) on both; and TIOCSWINSZ does NOT agree (0x80087467 vs
+// 0x5414) but never reaches TypeScript, because ioctl goes through the
+// trampoline and the compiler substitutes the right one. That is a second
+// reason for the trampoline beyond the variadic one, and it is the reason a
+// ported constant table stays this short.
+//
+// The floor is glibc 2.29 (Debian 11, Ubuntu 20.04, RHEL 9), set by
+// posix_spawn_file_actions_addchdir_np. musl is out of scope: it has no
+// addchdir_np at all, which is `architecture.md` §8's debian-slim rule seen
+// from the other side.
+export const PLATFORM = process.platform === "darwin"
+  ? {
+    libc: ["libSystem.B.dylib"],
+    // openpty is libutil's on glibc, and libutil was folded into libc.so.6 in
+    // 2.34 (2021) — so a modern Debian finds it in the first candidate and
+    // Ubuntu 20.04 finds it in the second. dlopen resolves eagerly, so this is
+    // a separate handle rather than a bigger table: one missing name would
+    // otherwise take every symbol down with it.
+    ptyLib: ["libSystem.B.dylib"],
+    // BSD's flag. glibc's has a different value and would silently set some
+    // other attribute, which is the failure mode a shared constant invites.
+    POSIX_SPAWN_SETSID: 0x0400,
+  }
+  : {
+    libc: ["libc.so.6", "libc.so"],
+    ptyLib: ["libc.so.6", "libutil.so.1"],
+    POSIX_SPAWN_SETSID: 0x0080,
+  };
 
 // Spawning the shell so that Ctrl-C works.
 //
@@ -49,10 +85,20 @@ export const NATIVE_LIB = "libledge_pty.dylib";
 // no such limit exists, but a spawn writes before the child has done that, and
 // a remote block's body rides in on one long line. O_NONBLOCK turns that wait
 // into EAGAIN, which pty.ts can queue and retry.
+//
+// The includes are the port: login_tty is declared in <util.h> on BSD and in
+// <utmp.h> on glibc, whose <pty.h> holds openpty and forkpty instead. Same
+// three functions, same libc-level contract, two spellings of where to find
+// them — so the source stays one source and the preprocessor picks.
 export const NATIVE_C = `#include <fcntl.h>
 #include <sys/ioctl.h>
 #include <termios.h>
+#if defined(__linux__)
+#include <pty.h>
+#include <utmp.h>
+#else
 #include <util.h>
+#endif
 #include <unistd.h>
 
 int ledge_spawn_tty(int slave_fd, int master_fd, const char *cwd,

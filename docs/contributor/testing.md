@@ -158,8 +158,22 @@ a blank one — and the probe's own code never runs. Check the port before
 concluding the probe is broken.
 
 **The ssh transport** needs a machine to connect to, and "I have a server"
-is not a test setup anyone else can repeat. Run one: a container with
-`openssh-server`, published on `127.0.0.1:22` so a bare `host: 127.0.0.1` is a
+is not a test setup anyone else can repeat. Run one.
+
+For the SERVER transport (`remote.md` §3) that container is written down and
+runnable: `bun run probe:ssh` builds the shipped image, adds an sshd to it
+(`scripts/ssh-probe/`), installs a throwaway key under the §4 forced command,
+and connects with the argv `bun/connections.ts` builds. It asserts the things
+that are only true if ssh is really in the path: that the forced command
+displaces `whoami`, that a changed host key refuses with no way to continue
+anyway, and that a Linux pty answers a command typed from macOS. It holds
+`127.0.0.1:22` for a few seconds and removes everything it made. `bun test` in
+that same image (`docker build --target build`) runs the whole server suite on
+glibc, which is the Linux port's other half.
+
+For `host:` EXECUTION hosts, which is a different feature (`remote.md` §6),
+the container is still yours to build, and the shape is: `openssh-server`,
+published on `127.0.0.1:22` so a bare `host: 127.0.0.1` is a
 valid destination (Ledge builds `ssh -t <host>` with no room for a port), and
 an `ssh-agent` of its own on a scratch socket, with a throwaway key in the
 container's `authorized_keys`. Pass that socket as `SSH_AUTH_SOCK` and the

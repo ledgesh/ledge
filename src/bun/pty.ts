@@ -14,11 +14,25 @@
 import { dlopen, ptr, CString, cc } from "bun:ffi";
 import { existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { NATIVE_C, NATIVE_LIB, NATIVE_SYMBOLS } from "./ptyNative";
+import { dirname, join } from "node:path";
+import { NATIVE_C, NATIVE_LIB, NATIVE_SYMBOLS, PLATFORM } from "./ptyNative";
 
-const libc = dlopen("libSystem.B.dylib", {
-  openpty: { args: ["ptr", "ptr", "ptr", "ptr", "ptr"], returns: "i32" },
+// The first library that has all of `symbols`. Every candidate failing is
+// fatal and should be: there is no PTY without a libc, and the alternative is
+// a null check on every syscall in this file.
+function openFirst<T extends Parameters<typeof dlopen>[1]>(names: readonly string[], symbols: T) {
+  let last: unknown;
+  for (const name of names) {
+    try {
+      return dlopen(name, symbols);
+    } catch (err) {
+      last = err;
+    }
+  }
+  throw new Error(`no libc among ${names.join(", ")}: ${(last as Error)?.message}`);
+}
+
+const libc = openFirst(PLATFORM.libc, {
   ttyname: { args: ["i32"], returns: "ptr" },
   close: { args: ["i32"], returns: "i32" },
   read: { args: ["i32", "ptr", "u64"], returns: "i64" },
@@ -26,6 +40,7 @@ const libc = dlopen("libSystem.B.dylib", {
   poll: { args: ["ptr", "u64", "i32"], returns: "i32" },
   killpg: { args: ["i32", "i32"], returns: "i32" },
   tcgetpgrp: { args: ["i32"], returns: "i32" },
+  waitpid: { args: ["i32", "ptr", "i32"], returns: "i32" },
   posix_spawn_file_actions_init: { args: ["ptr"], returns: "i32" },
   posix_spawn_file_actions_addopen: { args: ["ptr", "i32", "ptr", "i32", "u32"], returns: "i32" },
   posix_spawn_file_actions_adddup2: { args: ["ptr", "i32", "i32"], returns: "i32" },
@@ -37,14 +52,57 @@ const libc = dlopen("libSystem.B.dylib", {
 });
 const s = libc.symbols;
 
+// Its own handle, because on glibc it may live in libutil rather than libc
+// (ptyNative.ts, PLATFORM) and dlopen resolves a table all at once.
+const { openpty } = openFirst(PLATFORM.ptyLib, {
+  openpty: { args: ["ptr", "ptr", "ptr", "ptr", "ptr"], returns: "i32" },
+}).symbols;
+
 const O_RDWR = 0x0002;
-const POSIX_SPAWN_SETSID = 0x0400;
+const POSIX_SPAWN_SETSID = PLATFORM.POSIX_SPAWN_SETSID;
 const POLLIN = 0x0001;
+// Same value on both kernels, unlike almost everything else here.
+const POLLHUP = 0x0010;
 const SIGINT = 2;
 // ETX: what the tty turns back into SIGINT at the far end of a connection.
 const INTR = "\x03";
 const SIGTERM = 15;
 const SIGKILL = 9;
+const WNOHANG = 1;
+
+// Children we have reason to think are dead, waiting to be collected.
+//
+// A pty's child is OUR child and nothing else in this process waits for it, so
+// an exit nobody reaps is a zombie holding a pid slot. On the desktop that is
+// bounded by how many terminals one window opens; on a server that runs for
+// weeks it is not, and the container has a pid limit (remote.md §11).
+//
+// waitpid(-1) would be one line instead of this and is wrong: it would also
+// collect whatever `Bun.spawn` is waiting for and take that exit code with it.
+// So the set holds pids we spawned, and only those.
+const unreaped = new Set<number>();
+let reaper: ReturnType<typeof setInterval> | null = null;
+
+function reap(pid: number): void {
+  if (pid <= 0) return;
+  unreaped.add(pid);
+  if (reaper) return;
+  // A poll rather than SIGCHLD: the handler would be process-wide, and this
+  // module does not get to install one on a runtime that has its own.
+  reaper = setInterval(() => {
+    for (const p of unreaped) {
+      // Nonzero is settled — the pid was collected, or it is ECHILD and never
+      // was ours to collect. Zero means it is still running, so keep waiting.
+      if (s.waitpid(p, null, WNOHANG) !== 0) unreaped.delete(p);
+    }
+    if (unreaped.size === 0 && reaper) {
+      clearInterval(reaper);
+      reaper = null;
+    }
+  }, 100);
+  // Nothing should stay alive on account of a corpse.
+  reaper.unref?.();
+}
 
 type SpawnFn = (
   slaveFD: number,
@@ -63,28 +121,35 @@ interface Native {
 
 type NativeSymbols = ReturnType<typeof dlopen<typeof NATIVE_SYMBOLS>>["symbols"];
 
-// Where a prebuilt libledge_pty.dylib may sit. Both entries are the SAME file
-// at two moments in its life: `scripts/build-native.ts` writes it to
-// dist-native/ in the checkout, and the bundle's copy map lands it beside this
+// Where a prebuilt libledge_pty may sit. The entries are the SAME file at
+// three moments in its life: `scripts/build-native.ts` writes it to
+// dist-native/ in the checkout, the app bundle's copy map lands it beside this
 // module in Resources/app/bun (the cli.js placement, for the cli.js reason —
-// import.meta.dir is the one path that reads the same in both layouts).
-// Checked in that order so a checkout run exercises the artifact the app will
+// import.meta.dir is the one path that reads the same in both layouts), and a
+// `bun build --compile` server ships it beside the executable.
+//
+// The compiled case needs its own entry because import.meta.dir inside such a
+// binary names a path in the embedded filesystem, where nothing was copied.
+// Checked in this order so a checkout run exercises the artifact that will
 // actually ship rather than the fallback.
 function libCandidates(): string[] {
   return [
     join(import.meta.dir, NATIVE_LIB),
     join(import.meta.dir, "..", "..", "dist-native", NATIVE_LIB),
+    join(dirname(process.execPath), NATIVE_LIB),
   ];
 }
 
 // The trampolines, loaded once. Two paths to the same symbols:
 //
-//   1. dlopen the dylib we compiled at build time. This is the path that runs
-//      on a user's machine, and the only one that works without the macOS SDK
-//      installed (ptyNative.ts's header).
+//   1. dlopen the library we compiled at build time. This is the path that
+//      runs on a user's machine, and the only one that works without the
+//      system headers installed (ptyNative.ts's header) — the macOS SDK, or
+//      libc6-dev on a Linux server, neither of which a machine that downloads
+//      a binary has any reason to carry.
 //   2. Compile the same source in-process with bun:ffi's TinyCC. Covers a
 //      checkout with no `bun run build:native` yet — a dev machine, where the
-//      SDK headers this needs are present by construction.
+//      headers this needs are present by construction.
 //
 // null means neither worked: the shell still runs, spawned by plain
 // posix_spawn with no controlling terminal, so ^C is inert and resize is a
@@ -132,12 +197,15 @@ function loadNative(): Native | null {
   return native;
 }
 
-// pollfd { int fd; short events; short revents; } -> 8 bytes
-function pollBufFor(fd: number): Uint8Array {
+// pollfd { int fd; short events; short revents; } -> 8 bytes, with a view onto
+// the answer. Reading revents back is what makes the hangup legible: poll is
+// here to tell "nothing yet" apart from "the child is gone", and the two
+// kernels agree on POLLHUP while disagreeing about everything else.
+function pollBufFor(fd: number): { buf: Uint8Array; revents: Int16Array } {
   const pollfd = new ArrayBuffer(8);
   new Int32Array(pollfd, 0, 1)[0] = fd;
   new Int16Array(pollfd, 4, 1)[0] = POLLIN;
-  return new Uint8Array(pollfd);
+  return { buf: new Uint8Array(pollfd), revents: new Int16Array(pollfd, 6, 1) };
 }
 
 export interface PtyOptions {
@@ -166,7 +234,7 @@ export class PtyProcess {
   readonly masterFD: number;
   private closed = false;
   private ended = false;
-  private pollBuf: Uint8Array;
+  private poll: { buf: Uint8Array; revents: Int16Array };
   private readBuf = new Uint8Array(65536);
   private readBufPtr: ReturnType<typeof ptr>;
   // Input the tty has not taken yet, and how far into it we got. See write().
@@ -197,7 +265,7 @@ export class PtyProcess {
     const slave = new Int32Array(1);
     // winsize { ushort row; ushort col; ushort xpixel; ushort ypixel; }
     const winp = new Uint16Array([opts.rows ?? 30, opts.columns ?? 120, 0, 0]);
-    if (s.openpty(ptr(master), ptr(slave), null, null, ptr(winp)) !== 0) {
+    if (openpty(ptr(master), ptr(slave), null, null, ptr(winp)) !== 0) {
       throw new Error("openpty failed");
     }
     const masterFD = master[0];
@@ -232,7 +300,7 @@ export class PtyProcess {
       s.close(slaveFD); // the parent has no use for the slave
       this.pid = pid;
       this.masterFD = masterFD;
-      this.pollBuf = pollBufFor(masterFD);
+      this.poll = pollBufFor(masterFD);
       this.readBufPtr = ptr(this.readBuf);
       return;
     }
@@ -272,7 +340,7 @@ export class PtyProcess {
 
     this.pid = pidBuf[0];
     this.masterFD = masterFD;
-    this.pollBuf = pollBufFor(masterFD);
+    this.poll = pollBufFor(masterFD);
     this.readBufPtr = ptr(this.readBuf);
   }
 
@@ -291,14 +359,27 @@ export class PtyProcess {
     // The other half of the tick: input the tty had no room for last time.
     this.flush();
     const chunks: Uint8Array[] = [];
-    while (s.poll(ptr(this.pollBuf), 1n, 0) > 0) {
+    while (s.poll(ptr(this.poll.buf), 1n, 0) > 0) {
       const n = Number(s.read(this.masterFD, this.readBufPtr, BigInt(this.readBuf.length)));
-      if (n > 0) chunks.push(this.readBuf.slice(0, n));
-      else {
-        // poll said readable but read yielded nothing: the child closed its end.
-        if (n === 0) this.ended = true;
-        break;
+      if (n > 0) {
+        chunks.push(this.readBuf.slice(0, n));
+        continue;
       }
+      // Nothing left to read. Whether that is a hangup or a momentary EAGAIN
+      // is POLLHUP's answer and not read()'s, because the two kernels report
+      // the same fact differently: a master whose slave is closed reads 0 on
+      // macOS and fails with EIO on Linux. Taking read()==0 as the only sign
+      // meant a shell that exited was never noticed there — no terminalExit,
+      // and a session that stayed in the map forever.
+      //
+      // Checked only after read comes up empty, because both kernels raise
+      // POLLHUP while the last of the output is still buffered, and a child's
+      // final line is exactly the one worth keeping.
+      if (!this.ended && (n === 0 || this.poll.revents[0] & POLLHUP)) {
+        this.ended = true;
+        reap(this.pid);
+      }
+      break;
     }
     if (chunks.length === 0) return null;
     if (chunks.length === 1) return chunks[0];
@@ -416,5 +497,8 @@ export class PtyProcess {
     if (fg > 0 && fg !== this.pid) s.killpg(fg, SIGKILL);
     s.killpg(this.pid, SIGKILL);
     s.close(this.masterFD);
+    // SIGKILL cannot be caught, but it is not instant either, and nothing will
+    // drain this pty again — so the collection has to be somebody else's tick.
+    reap(this.pid);
   }
 }

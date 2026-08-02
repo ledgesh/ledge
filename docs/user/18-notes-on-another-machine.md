@@ -1,0 +1,140 @@
+# Notes on Another Machine
+
+Ledge can keep your notes on a different machine and run this app as the window onto it. The other machine holds the notes, spawns the shells, and keeps them running; this one draws them. The transport is ssh, so there is no account to make and no service to sign up for.
+
+One machine at a time. The connection bar above the workspace strip always names the one you are typing into.
+
+This is a different feature from [[Remote Hosts]], and the difference matters. `host:` frontmatter says where a *block* runs. A connection says where the *note lives*. They compose: a note stored on your VPS can carry `host: prod`, and the VPS makes that outbound ssh connection, so this app never holds credentials for prod.
+
+## Add a server
+
+Click the connection bar, or run "Notes On…" from the palette or the File menu. Choose Add, then fill in three fields.
+
+| Field | What it takes |
+| --- | --- |
+| Name | Anything you want to see in the bar. |
+| SSH destination | `user@host`, a bare hostname, or a name from your `~/.ssh/config`. |
+| Key | A private key to offer, or blank to let your ssh config decide. |
+
+Ledge then fetches that machine's host key and shows you its fingerprint. Compare it against what the machine reports for itself:
+
+```sh
+ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
+```
+
+Choose "It Matches, Add" only when the two agree. Ledge pins the key and refuses any future connection that presents a different one. There is no "connect anyway".
+
+The pinned keys live in `~/.ledge/.client/known_hosts`, separate from your own `~/.ssh/known_hosts` so you can read and revoke them on their own. Your existing entries still work: a host you already trust needs no second pin.
+
+Press ⌫ on a row in the picker to remove that connection. This Mac cannot be removed, and neither can the connection you are currently using.
+
+## Switch servers
+
+The picker opens on the connection in use, so Enter means stay and moving somewhere else takes an arrow key first.
+
+Switching closes every tab and opens that machine's instead. Nothing is lost: the tabs are on the other machine and come back when you switch back.
+
+A connection that will not open costs you nothing. Ledge reaches the new machine before it lets go of the old one, so a typo or a sleeping laptop leaves you exactly where you were with the reason on screen. If the failure happens at launch, Ledge opens on this Mac and the bar reads "not reachable".
+
+## Install the server
+
+The other machine needs `ledge-server` on its PATH. Build it from a checkout of Ledge, on a machine of the same architecture as the one that will run it:
+
+```sh
+bun run build:native
+bun build src/bun/serve.ts --compile --outfile ledge-server
+```
+
+Copy `ledge-server` and `dist-native/libledge_pty.so` to the server, side by side, somewhere on the PATH. The `.so` holds two C functions the terminal needs, and without it beside the binary you get shells that run commands but ignore Ctrl-C.
+
+macOS arm64 and Linux x64/arm64 are supported. On Linux the floor is glibc 2.29, which means Debian 11, Ubuntu 20.04, RHEL 9, or anything newer. Alpine and other musl systems are not supported.
+
+Nothing else has to be installed and no port is opened. Ledge speaks its protocol over ssh's stdin and stdout.
+
+## Run the server in Docker
+
+The repository ships a `Dockerfile`. Build and run it:
+
+```sh
+docker build -t ledge-server .
+docker run -d --name ledge --restart unless-stopped -v ledge-data:/data ledge-server
+```
+
+Everything the server owns lives in `/data`: the notes, the workspace registry, the vault, and the logs. That volume is the whole backup.
+
+The image has no ssh daemon in it. The machine's own sshd is the one that answers, and it reaches into the container (see below). Running a second sshd inside a container means a second set of host keys and a second published port, for nothing.
+
+The image carries zsh, `ssh`, and nothing else your notes might want. Add what you need in an image of your own:
+
+```dockerfile
+FROM ledge-server
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends git python3
+USER ledge
+```
+
+## Restrict the key to Ledge
+
+Give the server a key that can speak Ledge's protocol and nothing else. In that machine's `~/.ssh/authorized_keys`:
+
+```
+restrict,command="ledge-server serve" ssh-ed25519 AAAA... ledge@laptop
+```
+
+For the Docker deployment, the forced command reaches into the container instead:
+
+```
+restrict,command="docker exec -i ledge ledge-server serve" ssh-ed25519 AAAA... ledge@laptop
+```
+
+That key cannot open a shell, forward a port, or run `scp`. Blocks in your notes still run, because they run through the protocol the forced command already permits.
+
+If you also want a client to run arbitrary commands on that machine, add a second unrestricted key as a separate act. Most connections never need one.
+
+## Expose ssh carefully
+
+A Ledge server executes the code in your notes. Anyone who can authenticate to it can run anything you could.
+
+On a VPS, bind sshd to a private interface rather than to the public internet. In `/etc/ssh/sshd_config`:
+
+```
+ListenAddress 100.x.y.z
+PasswordAuthentication no
+```
+
+Use the address your VPN or tailnet gives the machine. A Ledge server on `0.0.0.0` is a box on the public internet whose purpose is running code.
+
+On a Mac, the server needs Remote Login turned on in System Settings, under General then Sharing. Restrict it to specific users while you are there.
+
+## What lives on the server
+
+| On the server | On this Mac |
+| --- | --- |
+| Notes, images, and the trash | Theme, font sizes, and live preview |
+| Workspaces | Window size and position |
+| The vault and locked notes | The clipboard |
+| Profiles and their secrets | Which connections exist, and their pinned keys |
+| Shells, running blocks, and scrollback | |
+| The shell, interpreter, and trash settings | |
+
+Settings (⌘,) shows both files. The appearance half follows you between machines; the behavior half describes the machine it is on, because a VPS's shell is not your laptop's.
+
+Profile values never cross the connection. A note names a profile and the server reads the file at spawn, so the secrets exist only where the commands run ([[Profiles and Secrets]]).
+
+Unlocking a locked note sends the passphrase to the server, which is the only machine that can use it ([[Note Locking]]). The vault and its idle relock timer stay there.
+
+## When the connection drops
+
+The bar reads "reconnecting…" and Ledge re-dials for about twenty-four seconds. Requests made in the meantime wait rather than fail.
+
+Anything running keeps running. Shells belong to the server and survive a wire dropping, so a build carries on while you are on a train and its output is waiting when you come back. Reattaching replays the last 256 KB of each terminal.
+
+A save that was in flight when the wire dropped is retried once the connection is back, and applied once, even if the first attempt had already landed.
+
+If the reconnect runs out, the bar reads "disconnected" and Ledge stops accepting work for a machine it cannot reach. Choose the connection again from the picker to start over.
+
+## Limits
+
+- One connection at a time. Search, tags, backlinks, and wikilinks all stay within the machine you are on.
+- No moving a note between servers from inside the app. Use `rsync` or `git`; the notes are ordinary files ([[Tutorial: Keep Notes Synced]]).
+- No offline editing. The server has to be reachable to open a note.
