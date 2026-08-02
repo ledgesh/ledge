@@ -340,6 +340,68 @@ function duplexOver(io: {
 }
 
 /**
+ * A socket's write half, with the kernel's send buffer respected.
+ *
+ * `Socket.write` writes what fits and RETURNS HOW MUCH THAT WAS. Discarding
+ * that number drops every byte past the buffer, and the loss is silent in the
+ * worst possible way: the stream stops mid-frame, so the reader sits forever on
+ * a length prefix whose bytes will never arrive, and every response and push
+ * queued behind it is stuck there too. A note stops loading, and then the note
+ * list stops updating, and the connection still looks live because it is.
+ *
+ * The buffer is small and its size is the platform's: about 8KB for a unix
+ * socket on macOS and about 208KB on Linux. So the size at which a note
+ * disappears is a property of the machine the server runs on, and a fast reader
+ * never sees it at all — it drains the buffer as fast as the writer fills it.
+ * That is why this survived the ssh probe and every test: it takes a reader
+ * slow enough to push back, which is what a phone is (ios.md §2 — every frame
+ * crosses the WKWebView bridge as base64 through `evaluateJavaScript`).
+ *
+ * `drain` is the socket handler that says the buffer has room again. A caller
+ * that does not wire it up gets a stall instead of a truncation, which is not
+ * an improvement.
+ */
+export function socketWriter(socket: { write(bytes: Uint8Array): number }): {
+  write(bytes: Uint8Array): void;
+  drain(): void;
+} {
+  // The unwritten remainder, as one buffer. One rather than a queue of chunks
+  // because the frames it holds are already a byte stream: nothing downstream
+  // cares where the boundaries between write() calls were.
+  let held: Uint8Array | null = null;
+
+  function pump(): void {
+    while (held !== null) {
+      const wrote = socket.write(held);
+      // Not `wrote < 1`: a socket that has gone away returns -1 here, and
+      // spinning on it would be a busy loop against a dead peer. Both cases
+      // mean "stop and wait", and a closed socket's drain never comes.
+      if (wrote <= 0) return;
+      if (wrote >= held.length) {
+        held = null;
+        return;
+      }
+      held = held.subarray(wrote);
+    }
+  }
+
+  return {
+    write(bytes) {
+      if (held === null) {
+        held = bytes;
+      } else {
+        const merged = new Uint8Array(held.length + bytes.length);
+        merged.set(held, 0);
+        merged.set(bytes, held.length);
+        held = merged;
+      }
+      pump();
+    },
+    drain: pump,
+  };
+}
+
+/**
  * A child process's stdio. This is the whole transport story: `ssh <target>
  * ledge-server serve` for another machine and `ledge-server serve` for this
  * one differ only in the command, which is what keeps the local path from

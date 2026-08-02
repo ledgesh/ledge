@@ -28,7 +28,7 @@ import {
   type WireMessage,
 } from "../shared/wire";
 import { clientConnection, reconnectingClient, type Duplex } from "../shared/transport";
-import { serverConnection, type ServerConnection } from "./transport";
+import { serverConnection, socketWriter, type ServerConnection } from "./transport";
 import { createOpLog } from "./opLog";
 
 // --- a pipe -------------------------------------------------------------------
@@ -404,6 +404,116 @@ describe("a server facing a misbehaving client", () => {
     server.serve(handlers());
     await settle();
     expect(client.last()).toEqual({ t: "res", id: 1, r: { state: "locked" } });
+  });
+});
+
+describe("a socket that will not take it all at once", () => {
+  /**
+   * A socket with a send buffer, like the real one: it takes what fits and says
+   * so, and only a drain makes room. `taken` is everything the peer would
+   * actually receive.
+   */
+  function fakeSocket(buffer: number) {
+    const taken: number[] = [];
+    let room = buffer;
+    return {
+      taken,
+      socket: {
+        write(bytes: Uint8Array): number {
+          const wrote = Math.min(room, bytes.length);
+          for (let i = 0; i < wrote; i++) taken.push(bytes[i]!);
+          room -= wrote;
+          return wrote;
+        },
+      },
+      /** The peer read: room again, which is when Bun calls `drain`. */
+      empty() {
+        room = buffer;
+      },
+    };
+  }
+
+  const counting = (n: number) => Uint8Array.from({ length: n }, (_, i) => i % 256);
+
+  test("keeps the bytes the buffer would not take, and sends them on drain", () => {
+    const peer = fakeSocket(8);
+    const out = socketWriter(peer.socket);
+
+    out.write(counting(20));
+    // Eight bytes fit. The other twelve are this end's to remember: discarding
+    // what `write` did not take is the truncation this whole seam exists to
+    // stop, and it is silent — the reader is left waiting on a frame length
+    // whose bytes never come.
+    expect(peer.taken.length).toBe(8);
+
+    peer.empty();
+    out.drain();
+    expect(peer.taken.length).toBe(16);
+
+    peer.empty();
+    out.drain();
+    expect(peer.taken.length).toBe(20);
+    expect(peer.taken).toEqual([...counting(20)]);
+  });
+
+  test("a write while bytes are still held queues behind them, in order", () => {
+    const peer = fakeSocket(4);
+    const out = socketWriter(peer.socket);
+
+    out.write(Uint8Array.from([1, 2, 3, 4, 5, 6]));
+    out.write(Uint8Array.from([7, 8]));
+    expect(peer.taken).toEqual([1, 2, 3, 4]);
+
+    peer.empty();
+    out.drain();
+    peer.empty();
+    out.drain();
+    // 5 and 6 before 7 and 8: a stream whose second write overtook the
+    // remainder of its first would corrupt every frame after it.
+    expect(peer.taken).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+  });
+
+  test("a socket that has gone away is not spun on", () => {
+    let calls = 0;
+    const out = socketWriter({
+      write() {
+        calls += 1;
+        // What Bun returns for a socket that is closed.
+        return -1;
+      },
+    });
+    out.write(counting(100));
+    out.drain();
+    // Once per attempt and no more: a loop that treated -1 as "try again"
+    // would burn a core against a dead peer.
+    expect(calls).toBe(2);
+  });
+
+  test("a buffer big enough is one write and nothing held", () => {
+    const peer = fakeSocket(1024);
+    const out = socketWriter(peer.socket);
+    out.write(counting(300));
+    expect(peer.taken.length).toBe(300);
+    // Nothing waiting, so a drain that arrives anyway is a no-op rather than a
+    // second copy of what was already sent.
+    out.drain();
+    expect(peer.taken.length).toBe(300);
+  });
+
+  test("a response larger than the buffer arrives whole", () => {
+    // The shape of the bug this seam was written for: 291KB of note text
+    // through a send buffer of 8KB, which is what macOS gives a unix socket.
+    // Before this, the reader got the first 8KB and then nothing, forever.
+    const peer = fakeSocket(8 * 1024);
+    const out = socketWriter(peer.socket);
+    const note = counting(291 * 1024);
+    out.write(note);
+    for (let i = 0; i < 100 && peer.taken.length < note.length; i++) {
+      peer.empty();
+      out.drain();
+    }
+    expect(peer.taken.length).toBe(note.length);
+    expect(peer.taken).toEqual([...note]);
   });
 });
 

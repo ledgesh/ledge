@@ -23,7 +23,7 @@ import { chmodSync, mkdirSync, openSync, unlinkSync, writeFileSync } from "node:
 import { join } from "node:path";
 import { createServer, type NativeDeps } from "./server";
 import { fedDuplex, type Duplex } from "../shared/transport";
-import { serverConnection, type ServerConnection } from "./transport";
+import { serverConnection, socketWriter, type ServerConnection } from "./transport";
 import { createOpLog } from "./opLog";
 import { LOG_DIR } from "./log";
 import { APP_HOME } from "./workspaces";
@@ -129,19 +129,26 @@ export async function startDaemon(opts: DaemonOpts = {}): Promise<Daemon> {
   const done = new Promise<void>((resolve) => (settleDone = resolve));
   let stopped = false;
 
-  const listener = Bun.listen<{ io: ReturnType<typeof fedDuplex> }>({
+  const listener = Bun.listen<{ io: ReturnType<typeof fedDuplex>; out: ReturnType<typeof socketWriter> }>({
     unix: socketPath,
     socket: {
       open(socket) {
+        // Through socketWriter, not straight at the socket: a response bigger
+        // than the kernel's send buffer is written in pieces, and the pieces
+        // past the first are this end's to remember (bun/transport.ts).
+        const out = socketWriter(socket);
         const io = fedDuplex({
-          write: (bytes) => void socket.write(bytes),
+          write: (bytes) => out.write(bytes),
           close: () => void socket.end(),
         });
-        socket.data = { io };
+        socket.data = { io, out };
         accept(io);
       },
       data(socket, chunk) {
         socket.data.io.feed(new Uint8Array(chunk));
+      },
+      drain(socket) {
+        socket.data.out.drain();
       },
       close(socket) {
         socket.data.io.finish();
@@ -292,6 +299,7 @@ type Fed = ReturnType<typeof fedDuplex>;
 
 async function tryConnect(socketPath: string): Promise<Fed | null> {
   let io: Fed | null = null;
+  let out: ReturnType<typeof socketWriter> | null = null;
   try {
     const socket = await Bun.connect<undefined>({
       unix: socketPath,
@@ -300,12 +308,17 @@ async function tryConnect(socketPath: string): Promise<Fed | null> {
         // whatever arrives before a reader is attached, so neither of these
         // can fire into a null io.
         data: (_s, chunk) => io?.feed(new Uint8Array(chunk)),
+        // This end writes requests rather than responses, so it overflows the
+        // send buffer far less often than the daemon's end does. Far less often
+        // is not never: a paste of a large image is one write.
+        drain: () => out?.drain(),
         close: () => io?.finish(),
         error: () => io?.finish(),
       },
     });
+    out = socketWriter(socket);
     io = fedDuplex({
-      write: (bytes) => void socket.write(bytes),
+      write: (bytes) => out!.write(bytes),
       close: () => void socket.end(),
     });
     return io;
