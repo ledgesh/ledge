@@ -21,8 +21,7 @@ import { readClipboardHtml, readClipboardImage, readClipboardText, writeClipboar
 import { loadClientSettings, readClientSettingsFile, writeClientSettingsFile } from "./clientSettings";
 import { mergeSettings, type Settings } from "../shared/settings";
 import { openableUrl } from "../shared/links";
-import { CONNECTION_METHODS } from "./connectionManager";
-import type { RequestHandlers } from "../shared/wire";
+import { NATIVE_METHODS, type NativeMethod, type RequestHandlers } from "../shared/wire";
 
 export interface ClientNative {
   // The pasteboard's available flavors, or null where they cannot be read.
@@ -38,32 +37,9 @@ export interface ClientNative {
   readImage?(): Promise<Uint8Array | null>;
 }
 
-// The native six: the pasteboard, the browser, and the menu bar. Implemented
-// by clientSeams below.
-export const NATIVE_METHODS = [
-  "clipboardRead",
-  "clipboardWrite",
-  "clipboardReadRich",
-  "assetPaste",
-  "linkOpen",
-  "menuSet",
-] as const satisfies readonly (keyof RequestHandlers)[];
-
-export type NativeMethod = (typeof NATIVE_METHODS)[number];
-
-// Everything that never crosses the wire, which is the native seams plus the
-// connection list itself (bun/connectionManager.ts implements those; a server
-// asked which servers this app knows about would be answering about somebody
-// else's client).
-//
-// The list is the contract and both ends read it: the client shell serves
-// exactly these itself, and the server refuses exactly these. `satisfies`
-// keeps a typo from inventing a method, and server.ts's refusal map is keyed
-// by the same type, so a name added here without a matching refusal fails to
-// compile.
-export const CLIENT_METHODS = [...NATIVE_METHODS, ...CONNECTION_METHODS] as const satisfies readonly (keyof RequestHandlers)[];
-
-export type ClientMethod = (typeof CLIENT_METHODS)[number];
+// NATIVE_METHODS, CONNECTION_METHODS and CLIENT_METHODS are shared/wire.ts's:
+// this module is one shell's implementation of the first group, and iOS has
+// another (ios.md §2). The list has to outlive both.
 
 // Whether clipboardReadRich should pay for the osascript spawn. Fails open in
 // both directions that mean "we do not know": a platform with no format list

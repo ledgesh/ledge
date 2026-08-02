@@ -1,10 +1,13 @@
 # Ledge on iOS
 
-**§14 phases 1 and 2 are code; there is no Swift yet.** This is phase 6 of
-`docs/contributor/remote.md`, which built the server the phone talks to and
-then stopped, because the client is a different problem in a different
-language. Everything below depends on remote.md phases 1 to 5 and asks for
-none of them to be redone.
+**§14 phases 1 to 3 are code. There is Swift, it runs, and it reaches a
+server.** `ios/` is an app that loads this repository's React view in a
+WKWebView and talks to `ledge-server` over a socket; what it does not yet have
+is ssh (phase 4), a phone-shaped screen (phase 5), or the rest of v1 (phase 6).
+This is phase 6 of `docs/contributor/remote.md`, which built the server the
+phone talks to and then stopped, because the client is a different problem in a
+different language. Everything below depends on remote.md phases 1 to 5 and
+asks for none of them to be redone.
 
 The sixth sibling standard, beside `architecture.md` (whose process topology
 it extends by one more process), `interactions.md` (to whose affordance
@@ -28,11 +31,22 @@ owns what the user sees and no machine state at all.
 There are then three shells and one view, and the view does not know which
 one it is in:
 
-| Shell | Reaches a server by | Ships |
-| ----- | ------------------- | ----- |
-| Electrobun (`bun/index.ts`) | in-process, or `ssh` | the Mac app |
-| Playwright (`harness.tsx`) | `FakeStore`, in memory | nothing; `test:e2e` |
-| Swift (`ios/`) | SSH, always | the iOS app |
+| Shell | Entry point | Reaches a server by | Ships |
+| ----- | ----------- | ------------------- | ----- |
+| Electrobun (`bun/index.ts`) | `main.tsx` | in-process, or `ssh` | the Mac app |
+| Playwright (`harness.tsx`) | `harness.tsx` | `FakeStore`, in memory | nothing; `test:e2e` |
+| Swift (`ios/`) | `ios.tsx` | SSH, always (phase 3: TCP) | the iOS app |
+
+**The view is bound to a server in one place, and the entry points differ only
+in which one.** `mainview/boot.tsx` is every `configureX` seam, the boot
+prefetch and the render, over a `RequestClient` (`shared/wire.ts`); `main.tsx`
+hands it Electrobun's RPC and `ios.tsx` hands it a connection over a socket.
+The harness is the exception and stays one: it binds the seams to a `Map`
+rather than to a server, so it has nothing to share with the other two.
+
+That split is not tidiness. A second copy of boot.tsx in the iOS entry point is
+the third version this section warns about two paragraphs down: two halves of
+one client that can drift and mismatch each other.
 
 **There is no local server on iOS**, and that is the single fact the rest of
 this document falls out of. Bun does not run there, an app cannot spawn a
@@ -105,7 +119,31 @@ the cost is real, and the transport is unchanged. If the bridge ever measures
 as the bottleneck, a `WKURLSchemeHandler` can stream `Data` in the
 server-to-client direction, which is the direction with the volume; that is
 an optimization to reach for with a profile in hand, not a thing to build
-first.
+first. Phase 3 says it is not the bottleneck yet: a whole boot's frames cross
+it inside the 16ms between `server` and `view` in §5's measurement.
+
+**The bridge is ten strings, and it is written down twice.**
+`mainview/lib/nativeBridge.ts` is the page's half and
+`ios/Sources/WebHost.swift` is Swift's; between them is a byte stream in both
+directions and a request/response channel for what only a device can answer.
+Three rules keep it from growing into a second protocol:
+
+- **A frame is opaque.** Swift base64s what the socket gives it and hands over
+  what the page hands back. No Swift code parses a frame or knows a method
+  name.
+- **The calls are their own vocabulary.** `clipboard.read`, not
+  `clipboardRead`. They are not the schema's methods, and naming them as if
+  they were is the invitation to implement half the schema in Swift.
+  `clipboard.image` is the case that proves it: the schema's `assetPaste`
+  reads a pasteboard AND names a file in a workspace, which are two machines'
+  jobs (remote.md §5). Swift answers the first half and the page sends the
+  bytes on to `assetWrite` for the second, so the client still never names a
+  file.
+- **Every socket has a generation.** A reconnect opens the next one while the
+  previous one's close is still crossing the bridge, and a message from a
+  generation the page has moved on from is dropped rather than delivered.
+  Without it, the obituary of the connection that just died hangs up the one
+  that just replaced it.
 
 ## 3. SSH without an ssh binary
 
@@ -221,6 +259,17 @@ Three consequences, in the order they bite:
   that learned nothing, so the client dials on the foreground lifecycle
   notification rather than on a timer. The ladder keeps its job, which is a
   wire that flaps while the app is on screen.
+
+  Phase 3 does the simplest true version: the shell closes the socket on the
+  way out and refuses a dial while the app is away, and on the way back the
+  page reloads unless its connection is somehow still live. Refusing the dial
+  is the part that is not obvious — iOS gives about thirty seconds of
+  background execution and the ladder is 31.75s long, so without it the whole
+  ladder runs in the background, succeeds, and hands back a socket that
+  suspension kills a moment later. Holding the socket across a short app
+  switch instead is an optimization, and the thing it would have to get right
+  is telling a live socket from a half-open one, which is the one distinction
+  that has no cheap answer.
 - **The server is usually gone, and the sessions with it.** Sixty seconds of
   no client and nothing running is the daemon exiting. `running()` means a
   block in flight or a shell inside a foreground command, so an idle drawer
@@ -251,6 +300,30 @@ overlapped with the first frame. That is the latency the phone actually
 feels, it is invisible on a Mac whose local server needs no handshake at all,
 and it is why §14's first measurable phase is a stopwatch rather than a
 screen.
+
+**The stopwatch, phase 3.** `ios.tsx` marks each phase and reports the line
+through the bridge's `@log`, so it comes out of `simctl launch --console-pty`.
+On a Simulator over loopback, warm:
+
+| Mark | At | Cost |
+| ---- | -- | ---- |
+| `bridge` | 190ms | loading and parsing the view |
+| `hello` | 197ms | 7ms — who we are, where we point |
+| `socket` | 211ms | 14ms — the TCP connect |
+| `server` | 218ms | 7ms — the protocol handshake |
+| `view` | 234ms | 16ms — the whole boot prefetch |
+| `paint` | 343ms | 109ms — the first composited frame |
+
+Three things to read off it, and one to distrust. **The prefetch is one round
+trip**, which is remote.md §12's claim measured rather than asserted: six
+requests across three workspaces cost 16ms on a wire whose one-way is under a
+millisecond. **The view is more than half the boot** and nothing about the
+transport will change that. **And the handshake is 21ms of the 343**, which is
+the number phase 4 makes worse: a key exchange and an authentication replace a
+`connect(2)`, and this row is where that regression will show. The number to
+distrust is `bridge`: a first launch after install measured 1548ms to paint
+against 343ms warm, so any figure taken from a cold Simulator is measuring the
+Simulator.
 
 ## 6. Touch is a column the affordance matrix does not have
 
@@ -444,9 +517,25 @@ ships none of it. A phone connected to an old server sees that server's docs,
 which is the behavior that keeps the docs honest.
 
 The view is built by Vite and copied into the app bundle as a resource. Its
-entry point is a third one beside `main.tsx` and `harness.tsx`, binding the
-same `configureX` seams to the Swift bridge instead of to Electrobun or to
-`FakeStore`.
+entry point is a third one beside `main.tsx` and `harness.tsx` (§1), and its
+build is a second config rather than a second input on the first: `dist/` is
+copied wholesale into the Mac app, so an `ios.html` sitting in it would be a
+dead page shipped to every Mac. `vite.ios.config.ts` writes `dist-ios/`, the
+sibling of `dist-cli/` and `dist-native/`.
+
+**The app is `swiftc` and a directory, not an Xcode project** (phase 3).
+`scripts/ios-build.ts` compiles `ios/Sources/*.swift`, writes an `Info.plist`,
+copies the view in beside it, and hands the result to `simctl`. There is no
+external dependency and no storyboard, so a project file would be a second,
+generated description of three facts that are already legible — unreadable in
+a diff and unverifiable except by opening Xcode. It becomes necessary at phase
+4, which brings a SwiftPM dependency, and at whatever phase first builds for a
+device, which brings signing.
+
+The webview loads the bundle over a scheme of its own
+(`ios/Sources/BundleScheme.swift`) rather than `file://`, because `file://`
+gives every resource an opaque origin of its own and the view loads a
+CodeMirror language mode per fence through `import()`.
 
 ## 13. Testing
 
@@ -464,16 +553,22 @@ Per `testing.md`'s categories:
   §6's translation only on paper — the middle one it caught on the first run.
   What it cannot catch is the input itself: Playwright's touchscreen taps and
   does nothing else, so a long press is dispatched as pointer events, and
-  whether iOS delivers that same sequence under a finger is phase 3's live
-  probe, not this one's.
+  whether iOS delivers that same sequence under a finger is the Simulator's
+  question, answered by a hand on it rather than by any harness.
+- **The Simulator (`bun run ios`)**: `testing.md` §6's live probe, for the
+  seams that only exist here — the bridge, the socket, the pasteboard, the
+  scheme handler, and every boot number in §5. It is a better probe than the
+  Mac's, because the bridge has a `@log` call: a `PROBE key=value` line comes
+  out of `simctl launch --console-pty` directly, with no clipboard detour and
+  no waiting on `pbpaste`.
 - **The Swift side, against the fixture that already exists**:
   `scripts/probe-ssh.ts` stands up a real sshd with a real forced-command key
   (`scripts/ssh-probe/`). An iOS client dialing that same fixture gets the
   same proof the Bun client got, against the same server, which is worth more
   than a second fixture written to be easy for Swift.
 - **What no harness can reach**: the Secure Enclave, NIOSSH against a real
-  network, the accessory bar, and the suspension lifecycle. Those are
-  `testing.md` §6's live probe with a device rather than a Mac.
+  network, the accessory bar, a finger, and the suspension lifecycle. Those are
+  a live probe with a device rather than a Mac.
 
 One trap to write down before it is stepped in: **the Simulator's Secure
 Enclave is not the device's.** A key-generation path that quietly falls back
@@ -523,22 +618,50 @@ inside the Mac app.
    Deliberately not done here: the 390pt layout. The sidebar keeps its 224pt
    and leaves the editor 161, which is bad and is not a reachability problem —
    every verb in the specs above runs at that size. Panes, the drawer and the
-   single-pane tree §9 describes belong with the shell that has a real screen
-   (phase 3), not with a desktop window pretending to be small.
-3. **The Swift shell, without SSH.** WKWebView, the bundle, the bridge, the
-   six client seams, and a `Duplex` fed by a plain TCP socket to a
-   `ledge-server serve` on the LAN. It proves the view, the bridge, and §5's
-   boot latency before the hardest piece is in the way. **That fixture opens
-   a port and must never become a shipping mode**: remote.md §3's first
-   claim is that the server opens none, and a debugging convenience that
-   survives into a release undoes the entire authentication design.
+   single-pane tree §9 describes belong with the shell that has a real screen,
+   not with a desktop window pretending to be small. (That said phase 3 when it
+   was written, and phase 3 turned out to be the wrong home: see below.)
+3. **Done. The Swift shell, without SSH.** `ios/` is a WKWebView loading
+   `dist-ios/` over a scheme of its own (§12), a bridge of ten strings (§2),
+   the six client seams answered by UIKit, and a `Duplex` fed by an
+   `NWConnection` to `scripts/lan-bridge.ts`. `bun run ios` builds it and
+   launches it in the Simulator; `bun run lan` is the other end.
+
+   **That fixture opens a port and must never become a shipping mode**:
+   remote.md §3's first claim is that the server opens none, and a debugging
+   convenience that survives into a release undoes the entire authentication
+   design. It is safe because it cannot ship, not because nobody will ship it —
+   `scripts/` is in no build, and `src/bun/ports.test.ts` makes the other half
+   of the claim a test rather than a habit.
+
+   What it proved, on a Simulator against a scratch `LEDGE_NOTES_ROOT`: the
+   note list arrives over the socket and renders; a keystroke in CodeMirror on
+   the phone lands on disk on the Mac; the pasteboard round-trips through
+   `UIPasteboard`; `linkOpen` refuses a `javascript:` URL at the Swift
+   boundary, not just in the view; and killing the fixture mid-session takes
+   the app to "reconnecting" and restarting it takes it back to "live" — the
+   ladder in `shared/transport.ts`, over a wire that really dropped. §5 has the
+   boot numbers.
+
+   Deliberately not done here, and this is where phase 2's note above should
+   have pointed: **the phone's screen.** Phase 3's charter is the shell and the
+   transport, and the layout is neither. It is also not the small change it
+   looks: making the sidebar an overlay changes how every row in
+   `e2e/phone.spec.ts` is reached, so it needs its own specs, and it touches
+   the Mac's most load-bearing component to do it. It belongs with the editor,
+   below, because both are answers to "what does a phone show and how do you
+   type into it".
 4. **SSH.** NIOSSH, the Secure Enclave key, the host-key delegate, and the
    pairing screen. It dials `scripts/ssh-probe`'s fixture first, because that
-   fixture already enforces the forced command, and a real Mac second.
-5. **The editor.** The accessory bar, the disabled autocorrect, and §7's
-   audit of what CM6 actually does on a current iOS. This is the phase whose
-   size is genuinely unknown, and it is placed after the transport works so
-   that the unknown is isolated.
+   fixture already enforces the forced command, and a real Mac second. It
+   replaces `ios/Sources/Socket.swift` and nothing above it: the page is handed
+   a `Duplex`, and a duplex does not know what carries it. §5's `socket` and
+   `server` rows are where the regression will show.
+5. **The screen, and the editor.** The single-pane tree §9 describes, a sidebar
+   that overlays rather than takes a third of the width, the accessory bar, the
+   disabled autocorrect, and §7's audit of what CM6 actually does on a current
+   iOS. This is the phase whose size is genuinely unknown, and it is placed
+   after the transport works so that the unknown is isolated.
 6. **The rest of v1.** Search, tags, backlinks, the outline, daily notes,
    images through PHPicker, and unlocking.
 

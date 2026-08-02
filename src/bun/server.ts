@@ -20,7 +20,7 @@ import { PtyProcess } from "./pty";
 import { InlinePool, type InlineEvent } from "./inlinePool";
 import { takePaste } from "./paste";
 import { readProfile, writeProfile } from "./profiles";
-import type { ClientMethod } from "./clientSeams";
+import type { ClientMethod } from "../shared/wire";
 import type { RequestHandlers, ServerPush } from "../shared/wire";
 import {
   backlinksTo,

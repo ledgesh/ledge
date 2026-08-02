@@ -22,6 +22,8 @@
     "test:watch": "bun test --watch",
     "test:e2e": "playwright test",
     "probe:ssh": "bun scripts/probe-ssh.ts",
+    "lan": "bun scripts/lan-bridge.ts",
+    "ios": "bun scripts/ios-build.ts",
     "licenses": "bun scripts/licenses.ts"
   },
   "dependencies": {

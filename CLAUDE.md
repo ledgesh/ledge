@@ -40,13 +40,15 @@ the app as its built-in docs, via `src/bun/docsContent.ts`) lives in
   one-round-trip budget, Linux and the Docker image. Read before touching the
   wire, connections, the daemon, or anything that assumes the server is in
   this process.
-- **[ios.md](docs/contributor/ios.md)** — the iOS client (its §14 phases 1 and
-  2 are code; no Swift yet): the Swift shell around the same React view, why the
-  protocol stays in JavaScript and which half of the transport is therefore
-  portable, SSH without an ssh binary, Secure Enclave keys, and what iOS
-  suspension does to a connection. Its touch column is implemented and now
-  lives in interactions.md §1a. Read before touching
-  `src/shared/transport.ts` or continuing phase 6.
+- **[ios.md](docs/contributor/ios.md)** — the iOS client (its §14 phases 1 to 3
+  are code: `ios/` is a Swift app that reaches a server over TCP, with ssh,
+  the phone's screen and the rest of v1 still ahead): the shell around the same
+  React view, why the protocol stays in JavaScript and which half of the
+  transport is therefore portable, the ten-string bridge, SSH without an ssh
+  binary, Secure Enclave keys, and what iOS suspension does to a connection.
+  Its touch column is implemented and now lives in interactions.md §1a. Read
+  before touching `src/shared/transport.ts`, `src/mainview/boot.tsx`, `ios/`,
+  or continuing phase 4.
 - **[writing.md](docs/contributor/writing.md)** — documentation style: headings
   name the feature keyword-first, lead with the answer, one idea per sentence,
   mechanism before rationale, no aphorisms or design self-commentary, facts in
@@ -73,6 +75,8 @@ bunx vite build      # build the view
 bun run dev          # launch (bunx electrobun dev; bare `electrobun` is not on PATH)
 bun run release      # the signed, notarized DMG (releasing.md)
 bun run cli <verb>   # the `ledge` CLI from the checkout (src/bun/cli.ts; interactions.md §9)
+bun run ios          # build the iOS client and run it in the Simulator (ios.md §14)
+bun run lan          # the TCP fixture that iOS build talks to; NEVER a shipping mode
 ```
 
 Done means: tsc clean, build clean, tests green (e2e too when UI behavior

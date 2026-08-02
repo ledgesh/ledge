@@ -197,13 +197,63 @@ export const PUSH_MESSAGES = [
 
 /**
  * Pushes the client shell raises itself, which no server may send. The mirror
- * of CLIENT_METHODS (bun/clientSeams.ts) on the other direction of the wire:
- * the state of a connection is a fact about the wire, and the end holding the
- * far side of a dropped one is in no position to report it.
+ * of CLIENT_METHODS below on the other direction of the wire: the state of a
+ * connection is a fact about the wire, and the end holding the far side of a
+ * dropped one is in no position to report it.
  */
 export const CLIENT_PUSHES = ["connectionState"] as const satisfies readonly PushMessage[];
 
 export type ClientPush = (typeof CLIENT_PUSHES)[number];
+
+// --- what never becomes a frame ----------------------------------------------
+//
+// The lists above name what the protocol carries; these name what it refuses
+// to. They are here rather than beside their implementation because every
+// shell needs them and the shells are in different languages' worth of
+// different places: bun/clientSeams.ts serves the first group on a Mac,
+// bun/connectionManager.ts the second, and mainview/lib/nativeBridge.ts serves
+// both on iOS, where the implementations are Swift's and only the LIST is
+// portable (ios.md §2). bun/server.ts refuses exactly these names, keyed by
+// ClientMethod, so a name added here without a matching refusal fails to
+// compile.
+
+/**
+ * The native six: the pasteboard, the browser, and the menu bar.
+ *
+ * The pasteboard you copied from, the browser that should open a link, and the
+ * menu bar at the top of the screen all belong to the device in front of the
+ * user. Answering them on the server reaches the wrong machine — a VPS's empty
+ * pasteboard, a link opened in a browser nobody is looking at, a menu bar that
+ * does not exist and takes ⌘Q with it (remote.md §10).
+ */
+export const NATIVE_METHODS = [
+  "clipboardRead",
+  "clipboardWrite",
+  "clipboardReadRich",
+  "assetPaste",
+  "linkOpen",
+  "menuSet",
+] as const satisfies readonly RequestMethod[];
+
+export type NativeMethod = (typeof NATIVE_METHODS)[number];
+
+/** The five the view drives connections with. Which servers this app can
+ * connect to is nobody's business but this app's: a server asked to list them
+ * would be answering about somebody else's client (remote.md §8). */
+export const CONNECTION_METHODS = [
+  "connectionList",
+  "connectionSelect",
+  "connectionAdd",
+  "connectionRemove",
+  "connectionProbe",
+] as const satisfies readonly RequestMethod[];
+
+export type ConnectionMethod = (typeof CONNECTION_METHODS)[number];
+
+/** Everything a client shell serves itself, and a server refuses. */
+export const CLIENT_METHODS = [...NATIVE_METHODS, ...CONNECTION_METHODS] as const satisfies readonly RequestMethod[];
+
+export type ClientMethod = (typeof CLIENT_METHODS)[number];
 
 // Exhaustiveness, in the direction `satisfies` cannot see. It refuses a name
 // the schema does not have; these refuse a schema name the lists do not have,
@@ -251,6 +301,23 @@ export type RequestHandlers = {
   [K in keyof LedgeRPC["bun"]["requests"]]: (
     params: LedgeRPC["bun"]["requests"][K]["params"],
   ) => LedgeRPC["bun"]["requests"][K]["response"] | Promise<LedgeRPC["bun"]["requests"][K]["response"]>;
+};
+
+/**
+ * The same map from the calling side, where every answer is a promise.
+ *
+ * An IMPLEMENTOR may answer synchronously and often does — half of
+ * bun/server.ts's handlers are plain functions — so RequestHandlers admits
+ * both. A CALLER cannot: the answer may be on another machine, and code that
+ * reads it has to await either way. Stating that separately is what lets the
+ * view be written once against `requests.noteList({…}).then(…)` and bound to
+ * Electrobun on the Mac and to a socket on iOS (ios.md §2). Assignable to
+ * RequestHandlers, never the other way round.
+ */
+export type RequestClient = {
+  [K in keyof LedgeRPC["bun"]["requests"]]: (
+    params: LedgeRPC["bun"]["requests"][K]["params"],
+  ) => Promise<LedgeRPC["bun"]["requests"][K]["response"]>;
 };
 
 // --- what a replay may repeat ------------------------------------------------

@@ -8,6 +8,7 @@ node_modules/
 dist/
 dist-cli/
 dist-native/
+dist-ios/
 build/
 
 # Release artifacts (the DMG, the update tarball, update.json). Tens of

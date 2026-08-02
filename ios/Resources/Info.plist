@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleDevelopmentRegion</key>
+  <string>en</string>
+  <key>CFBundleExecutable</key>
+  <string>Ledge</string>
+  <key>CFBundleIdentifier</key>
+  <string>dev.ledge.ios</string>
+  <key>CFBundleInfoDictionaryVersion</key>
+  <string>6.0</string>
+  <key>CFBundleName</key>
+  <string>Ledge</string>
+  <key>CFBundleDisplayName</key>
+  <string>Ledge</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <!-- Stamped by scripts/ios-build.ts from package.json, so the app's version
+       and the protocol's build string cannot disagree. -->
+  <key>CFBundleShortVersionString</key>
+  <string>0.0.0</string>
+  <key>CFBundleVersion</key>
+  <string>1</string>
+  <key>LSRequiresIPhoneOS</key>
+  <true/>
+  <key>MinimumOSVersion</key>
+  <string>17.0</string>
+  <key>UIDeviceFamily</key>
+  <array>
+    <integer>1</integer>
+    <integer>2</integer>
+  </array>
+  <!-- Required, and not cosmetic: without it iOS runs the app letterboxed at a
+       legacy screen size, which would make every measurement of the phone
+       viewport a measurement of something else. -->
+  <key>UILaunchScreen</key>
+  <dict/>
+  <key>UISupportedInterfaceOrientations</key>
+  <array>
+    <string>UIInterfaceOrientationPortrait</string>
+    <string>UIInterfaceOrientationLandscapeLeft</string>
+    <string>UIInterfaceOrientationLandscapeRight</string>
+  </array>
+  <key>UIRequiredDeviceCapabilities</key>
+  <array>
+    <string>arm64</string>
+  </array>
+  <!-- A phase-3 build talks to scripts/lan-bridge.ts over plain TCP, which on a
+       real device is a local network connection and needs a reason the user can
+       read. The Simulator shares this Mac's network stack and never asks. -->
+  <key>NSLocalNetworkUsageDescription</key>
+  <string>Ledge connects to the Ledge server on your own machine.</string>
+  <!-- Where to find it. Overridden per launch by `simctl launch … -LedgeServer
+       host:port`, which is how a probe points a build at a scratch server
+       without rebuilding it (ios/Sources/ShellConfig.swift). -->
+  <key>LedgeServer</key>
+  <string>127.0.0.1:8787</string>
+</dict>
+</plist>

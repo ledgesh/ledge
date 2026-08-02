@@ -24,7 +24,7 @@ import {
   WireError,
   writeMessage,
   type Hello,
-  type RequestHandlers,
+  type RequestClient,
   type ServerPush,
   type WireMessage,
 } from "./wire";
@@ -44,7 +44,7 @@ export interface Duplex {
 /** The client's half. `requests` is the same shape a local server returns, so
  * everything above it is unchanged by being on another machine. */
 export interface ClientConnection {
-  requests: RequestHandlers;
+  requests: RequestClient;
   /** One request, with the option of naming its `op` (remote.md §7). The
    * primitive `requests` is built over; reconnectingClient uses it directly,
    * because replaying a request under the SAME op is the whole mechanism. */
@@ -206,7 +206,7 @@ export function clientConnection(
   // reconnectingClient() is what mints them, because it is what re-sends.
   const requests = Object.fromEntries(
     REQUEST_METHODS.map((m) => [m, (p: unknown) => call(m, p)]),
-  ) as unknown as RequestHandlers;
+  ) as unknown as RequestClient;
 
   raw(encodeControl(hello("client", opts.build, opts.client ?? "")));
 
@@ -390,7 +390,7 @@ export async function reconnectingClient(opts: ReconnectOpts): Promise<ClientCon
 
   const requests = Object.fromEntries(
     REQUEST_METHODS.map((m) => [m, (p: unknown) => call(m, p)]),
-  ) as unknown as RequestHandlers;
+  ) as unknown as RequestClient;
 
   return {
     requests,

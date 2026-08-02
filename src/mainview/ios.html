@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- No zoom, and no implicit zoom when a field takes focus: a text editor
+         whose viewport jumps on every tap into it is unusable, and pinch-zoom
+         inside a full-screen shell is the OS gesture the app is standing in
+         for. The safe areas are the shell's job, not the page's: the web view
+         is pinned to them in Swift (ios/Sources/WebHost.swift). -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+    />
+    <title>Ledge</title>
+    <!-- The appearance the CSS keys off (index.css), stamped before the first
+         paint so a launch cannot flash the wrong palette. This is the SYSTEM
+         answer only: a settings override cannot be known until boot has the
+         snapshot, at which point lib/theme.ts re-stamps. -->
+    <script>
+      document.documentElement.dataset.theme = window.matchMedia("(prefers-color-scheme: dark)").matches
+        ? "dark"
+        : "light";
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/ios.tsx"></script>
+  </body>
+</html>

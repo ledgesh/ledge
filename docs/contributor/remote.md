@@ -1,7 +1,8 @@
 # Ledge remote servers
 
 **Implemented: §14 phases 1 to 5 are code. Phase 6, the iOS client, is
-designed in `docs/contributor/ios.md`, whose own phase 1 has landed.** The
+designed in `docs/contributor/ios.md`, whose own phases 1 to 3 have landed —
+there is a Swift app, and it reaches a server.** The
 connection grammar §8 called for now lives in `interactions.md` §4-1, the
 state ownership §5 describes is the code's, and the resilience §7
 promises is real: the server is a process behind a unix socket, a dropped wire
@@ -120,6 +121,15 @@ rotation, a listening ingress, and an authentication system of Ledge's own,
 and it inherits the properties of the most-audited daemon on the machine.
 It is also what makes §4's capability restriction possible: an
 `authorized_keys` forced command can only force a command.
+
+That sentence is `src/bun/ports.test.ts`: every `Bun.listen` under `src/` is a
+unix socket, `Bun.serve` and the network builtins appear nowhere, and nothing
+under `src/` imports `scripts/`. The last clause is there because
+`scripts/lan-bridge.ts` DOES open a port — it is how an iOS client reaches a
+server before NIOSSH exists (`ios.md` §14) — and the thing that keeps it from
+being a shipping mode is that `scripts/` is in no build. A one-line move would
+undo that silently, so the test refuses the move rather than trusting the
+comment.
 
 Reachability is the user's existing problem and Ledge does not solve it
 again. A tailnet, a LAN, a jump host, or `~/.ssh/config` all work because

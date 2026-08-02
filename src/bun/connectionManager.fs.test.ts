@@ -13,7 +13,8 @@ import { tmpdir } from "node:os";
 import { resolve, sep } from "node:path";
 import { APP_HOME } from "./workspaces";
 import { CONNECTIONS_PATH, KNOWN_HOSTS_PATH, LOCAL_ID, saveConnections, type Connection } from "./connections";
-import { CONNECTION_METHODS, createConnectionManager, type Attached } from "./connectionManager";
+import { createConnectionManager, type Attached } from "./connectionManager";
+import { CONNECTION_METHODS } from "../shared/wire";
 import type { RequestHandlers } from "../shared/wire";
 
 if (!resolve(APP_HOME).startsWith(resolve(tmpdir()) + sep)) {

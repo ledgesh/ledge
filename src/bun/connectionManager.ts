@@ -11,7 +11,7 @@
 // The router is the point. Everything above it — the webview's RPC, and every
 // command in it — holds one handler map for the life of the process and never
 // learns that the machine underneath it changed.
-import { REQUEST_METHODS, type RequestHandlers } from "../shared/wire";
+import { REQUEST_METHODS, type ConnectionMethod, type RequestHandlers } from "../shared/wire";
 import {
   loadConnections,
   LOCAL_CONNECTION,
@@ -38,19 +38,9 @@ export interface ConnectionManager {
   shutdown(): void;
 }
 
-// The five the view drives connections with. Listed here and refused by
-// bun/server.ts through CLIENT_METHODS: a connection is this client's
-// configuration, and a server asked to list them would be answering about
-// somebody else's app.
-export const CONNECTION_METHODS = [
-  "connectionList",
-  "connectionSelect",
-  "connectionAdd",
-  "connectionRemove",
-  "connectionProbe",
-] as const satisfies readonly (keyof RequestHandlers)[];
-
-export type ConnectionMethod = (typeof CONNECTION_METHODS)[number];
+// CONNECTION_METHODS is shared/wire.ts's, with the rest of what never becomes
+// a frame. This module is the Mac's implementation of it; the phone has its
+// own and the list has to outlive both (ios.md §2).
 
 export function connectionInfo(c: Connection): ConnectionInfo {
   return {

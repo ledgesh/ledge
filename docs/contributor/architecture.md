@@ -27,12 +27,19 @@ allowed to be a wire. `remote.md` is where that lives.)
   here is a module that has quietly stopped being shared. `portable.test.ts`
   enforces both.
 
-Every crossing rides the typed Electrobun RPC defined in
-`src/shared/rpc-schema.ts`. There is no second channel: no direct filesystem
-access from the view (the webview cannot), no untyped message bus beside the
-schema. Each schema entry carries a comment saying what it is for and when it
-fires — the schema doubles as the protocol's documentation, so an uncommented
-entry is an undocumented protocol change.
+Every crossing rides the schema in `src/shared/rpc-schema.ts` — as the typed
+Electrobun RPC on the Mac, and as frames on a socket where the boundary is a
+wire. There is no second channel: no direct filesystem access from the view
+(the webview cannot), no untyped message bus beside the schema. Each schema
+entry carries a comment saying what it is for and when it fires — the schema
+doubles as the protocol's documentation, so an uncommented entry is an
+undocumented protocol change.
+
+The one thing that is not the schema is the iOS shell's bridge
+(`mainview/lib/nativeBridge.ts`, `ios.md` §2), and it is deliberately not a
+channel to the server: it is ten strings between the page and the Swift around
+it, for the socket and for what only a device can answer. It carries frames as
+opaque bytes and understands none of them.
 
 Two more entry points exist beside the app. The first is **the MCP server**
 (`src/bun/mcp.ts`, `bun run mcp`), a separate process that agent CLIs spawn

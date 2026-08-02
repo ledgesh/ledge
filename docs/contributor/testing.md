@@ -223,6 +223,31 @@ signals — needs the SAME probe run twice against one scratch home: the second
 launch is what proves the state it wrote back is stable rather than creeping a
 title bar per restart.
 
+**The iOS variant** — for the seams that exist only there (the bridge, the
+socket, the pasteboard, the scheme handler, every number in `ios.md` §5). Three
+processes and a scratch root:
+
+```
+LEDGE_NOTES_ROOT=<scratch> bun src/bun/serve.ts daemon   # the server
+LEDGE_NOTES_ROOT=<scratch> bun run lan                   # 127.0.0.1:8787
+bun run ios                                              # build, install, launch
+```
+
+The daemon creates `<scratch>/scratch/` on first run; seed the `.md` files
+into that, not into the root (same rule as above). The probe itself goes in
+`ios.tsx` and reports with the bridge's `@log`, which is why this variant needs
+no clipboard detour: the line comes straight out of `simctl launch
+--console-pty` while the app is running. `xcrun simctl io <device> screenshot`
+is the other half, and it needs no permission from anybody.
+
+Two things this probe reaches that no other does. **A write that crosses a real
+socket**: dispatch into the live CodeMirror (`EditorView.findFromDOM`), wait
+past the 500ms autosave, and read the file on the Mac. And **a wire that really
+drops**: kill `bun run lan` and restart it, which is the reconnect ladder
+against a transport that actually went away rather than a process someone
+killed. Tear down by uninstalling the app (`simctl uninstall`), killing the two
+Bun processes by the pid you captured, and removing the scratch root.
+
 ## 7. The green bar
 
 Before any work is called done, all of:

@@ -5,8 +5,8 @@
 // clipboard or opens a browser — a test suite that clobbered the user's
 // pasteboard would be worse than the bug it was looking for.
 import { describe, expect, test } from "bun:test";
-import { CLIENT_METHODS, clientSeams, NATIVE_METHODS, wantsHtml } from "./clientSeams";
-import { CONNECTION_METHODS } from "./connectionManager";
+import { clientSeams, wantsHtml } from "./clientSeams";
+import { CLIENT_METHODS, CONNECTION_METHODS, NATIVE_METHODS } from "../shared/wire";
 
 describe("the client's methods", () => {
   // NATIVE_METHODS is what clientSeams implements; CLIENT_METHODS is what the
