@@ -1,6 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { CircleHelp, Hash, Link2, PanelLeft, Search, TableOfContents, TerminalSquare, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import { useSinglePane } from "@/lib/viewport";
+import { pushLayer } from "@/commands/layers";
 import { ResizeHandle } from "@/components/ResizeHandle";
 import { TerminalDrawer } from "@/terminal/TerminalDrawer";
 import { configureBridge, requestHostPick, type HostPickRequest, type RunConfirmRequest } from "@/editor/bridge";
@@ -54,13 +57,71 @@ const SIDEBAR_MAX = 460;
 const TERM_MIN = 140;
 const EDITOR_MIN = 160; // space the editor row keeps when the terminal grows
 
+// A side panel that covers the editor instead of taking width from it: the
+// arrangement below PANES_MIN_WIDTH (lib/viewport.ts, ios.md §9). A phone that
+// gave the sidebar its usual 224 points would leave the editor 165, which is
+// the arrangement phase 2 shipped and called bad; this is the answer.
+//
+// 280 points, and no resize handle: the handle is a drag target for a pointer,
+// and on the client this exists for there is no pointer to drag it with. 280
+// of a phone's 390 also leaves 110 of the editor showing under the scrim,
+// which is what says the thing behind is still there. The 85% is for the
+// narrow end — a 320-point phone would otherwise get a drawer with almost no
+// editor beside it.
+function Drawer({
+  side,
+  onClose,
+  children,
+}: {
+  side: "left" | "right";
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  // A dismissible surface over the app is a modal layer like any other
+  // (interactions.md §6), so Escape closes it and the topmost-only rule sorts
+  // out a row menu opened inside it. The keyboard suppression that comes with
+  // being a layer costs nothing on the client this is for and is right on a
+  // narrowed window: the drawer is covering the app.
+  useEffect(() => pushLayer("overlay", onClose), [onClose]);
+  return (
+    <>
+      {/* onClick, not onPointerDown: WebKit sends a click after every touch,
+          and closing on the down would hand that click to whatever the drawer
+          was covering — the bug phase 2 found under the row menus. The
+          target check is ConfirmDialog's: a drag that starts inside and
+          releases out here must not dismiss. */}
+      <div
+        className="absolute inset-0 z-30 bg-black/40"
+        onClick={(e) => {
+          if (e.target === e.currentTarget) onClose();
+        }}
+      />
+      <aside
+        className={cn(
+          "absolute inset-y-0 z-40 w-[min(280px,85%)] bg-background shadow-xl",
+          side === "left" ? "left-0 border-r" : "right-0 border-l",
+        )}
+      >
+        {children}
+      </aside>
+    </>
+  );
+}
+
 function Shell() {
   const { state, dispatch, selected } = useWorkspace();
   const { exec } = useCommands();
+  // Whether the side panels take width or cover the editor (lib/viewport.ts).
+  // Live rather than boot-static, so a rotated phone and a dragged window both
+  // land in the arrangement that fits.
+  const singlePane = useSinglePane();
   const [termOpen, setTermOpen] = useState(false);
   const [termHeight, setTermHeight] = useState(280);
   const [sidebarWidth, setSidebarWidth] = useState(224);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  // Open by default where it is a pane, closed where it is a drawer: a phone
+  // that booted behind a scrim would be showing its chrome instead of the note
+  // the last session left focused.
+  const [sidebarOpen, setSidebarOpen] = useState(!singlePane);
   // The right-hand panel: one slot, three faces (Backlinks, Outline, Tags) —
   // the toggles are radio-with-off, opening one closes the others. Closed by
   // default (it earns its width per session), sized within the sidebar's own
@@ -75,13 +136,44 @@ function Shell() {
   // drill-in every time the panel blinks would punish the routing that makes
   // it useful.
   const [tagShown, setTagShown] = useState<string | null>(null);
+
+  // The two side panels are panes on a desktop and drawers on a phone, and the
+  // difference the toggles have to know about is that two drawers do not
+  // coexist: §9's tree is single-PANE, and stacking a second scrim on the
+  // first would cover a 390-point screen twice over. Read through refs because
+  // configureUi below binds these once, at mount, and a captured `singlePane`
+  // would still be the boot value after the first rotation.
+  const singlePaneRef = useRef(singlePane);
+  singlePaneRef.current = singlePane;
+  const sidebarOpenRef = useRef(sidebarOpen);
+  sidebarOpenRef.current = sidebarOpen;
+  const rightPanelRef = useRef(rightPanel);
+  rightPanelRef.current = rightPanel;
+
+  const openSidebar = useCallback((open: boolean) => {
+    if (open && singlePaneRef.current) setRightPanel(null);
+    setSidebarOpen(open);
+  }, []);
+  const openRightPanel = useCallback((face: "backlinks" | "outline" | "tags" | null) => {
+    if (face !== null && singlePaneRef.current) setSidebarOpen(false);
+    setRightPanel(face);
+  }, []);
+  // Stable identities: each is a <Drawer>'s onClose, and the layer it pushes
+  // is keyed on that function — a fresh one per render would unregister and
+  // re-register the Escape handler on every keystroke in the note behind it.
+  const closeSidebar = useCallback(() => setSidebarOpen(false), []);
+  const closeRightPanel = useCallback(() => setRightPanel(null), []);
+
   // The one "land on this tag" move, shared by the ui hook (panel/overlay
   // rows via tag.open) and the editor bridge (clicked #tags): open the Tags
   // face drilled into it.
-  const showTag = useCallback((tag: string) => {
-    setTagShown(tag);
-    setRightPanel("tags");
-  }, []);
+  const showTag = useCallback(
+    (tag: string) => {
+      setTagShown(tag);
+      openRightPanel("tags");
+    },
+    [openRightPanel],
+  );
   // Mode plus the seed for its input (note.fromTemplate opens the palette
   // pre-filtered; every other opener seeds ""). `seq` increments on every
   // open and keys the <Overlay>, forcing a REMOUNT even when one is already
@@ -119,6 +211,28 @@ function Shell() {
   const resizeRight = useCallback((w: number) => {
     setRightWidth(Math.max(SIDEBAR_MIN, Math.min(w, SIDEBAR_MAX)));
   }, []);
+  // Crossing INTO the drawer arrangement closes whatever was open, so a window
+  // dragged narrow does not land with its editor behind a scrim it never asked
+  // for. Deliberately one-way: coming back out does not reopen, because a pane
+  // that reappears on its own is harder to explain than one that stayed shut,
+  // and the toggle is right there in the header either way.
+  useEffect(() => {
+    if (!singlePane) return;
+    setSidebarOpen(false);
+    setRightPanel(null);
+  }, [singlePane]);
+
+  // A drawer's job ends when you pick something out of it. This covers every
+  // route into a note — a row in the browser, a tab, a workspace, a wikilink,
+  // the palette — because all of them land on a different focused doc. Picking
+  // the note that is already focused changes nothing and so closes nothing,
+  // which is the one case that reads as a dead tap; it is also the one case
+  // where leaving the drawer up costs the user nothing.
+  const focusedDoc = focusedDocId(selected);
+  useEffect(() => {
+    if (singlePane) setSidebarOpen(false);
+  }, [singlePane, focusedDoc, selected.id]);
+
   const resizeTerm = useCallback((h: number) => {
     const avail = stackRef.current?.clientHeight ?? window.innerHeight;
     setTermHeight(Math.max(TERM_MIN, Math.min(h, avail - EDITOR_MIN)));
@@ -280,10 +394,10 @@ function Shell() {
         });
       },
       closeTerminal: () => setTermOpen(false),
-      toggleSidebar: () => setSidebarOpen((o) => !o),
-      toggleBacklinks: () => setRightPanel((p) => (p === "backlinks" ? null : "backlinks")),
-      toggleOutline: () => setRightPanel((p) => (p === "outline" ? null : "outline")),
-      toggleTags: () => setRightPanel((p) => (p === "tags" ? null : "tags")),
+      toggleSidebar: () => openSidebar(!sidebarOpenRef.current),
+      toggleBacklinks: () => openRightPanel(rightPanelRef.current === "backlinks" ? null : "backlinks"),
+      toggleOutline: () => openRightPanel(rightPanelRef.current === "outline" ? null : "outline"),
+      toggleTags: () => openRightPanel(rightPanelRef.current === "tags" ? null : "tags"),
       showTag,
       openOverlay: (mode, initialQuery) => {
         overlaySeq.current += 1;
@@ -505,6 +619,18 @@ function Shell() {
   // installs the single window-level dispatcher that replaced the ad-hoc
   // keydown handlers that used to sit here.
 
+  // The right-hand slot's current face, named once because it renders in two
+  // arrangements — a pane beside the editor, a drawer over it — and both must
+  // show the same thing.
+  const rightFace =
+    rightPanel === "backlinks" ? (
+      <BacklinksPanel />
+    ) : rightPanel === "outline" ? (
+      <OutlinePanel />
+    ) : (
+      <TagsPanel tag={tagShown} onBack={() => setTagShown(null)} />
+    );
+
   return (
     <div className="flex h-screen flex-col bg-background text-foreground">
       <header className="flex h-11 shrink-0 items-center gap-2 border-b px-3">
@@ -596,45 +722,56 @@ function Shell() {
       </header>
 
       <div ref={stackRef} className="flex min-h-0 flex-1 flex-col">
-        <div className="flex min-h-0 flex-1">
-          {sidebarOpen && (
-            <>
-              <div style={{ width: sidebarWidth }} className="min-w-0 shrink-0">
+        {/* `relative` only where a drawer needs something to be absolute
+            against: the editor row, so a drawer stops above the terminal
+            rather than covering it — the drawer hides the note, and hiding a
+            running command with it would be a second surprise. */}
+        <div className={cn("flex min-h-0 flex-1", singlePane && "relative")}>
+          {sidebarOpen &&
+            (singlePane ? (
+              <Drawer side="left" onClose={closeSidebar}>
                 <Sidebar />
-              </div>
-              <ResizeHandle
-                axis="x"
-                current={sidebarWidth}
-                onResize={resizeSidebar}
-                title="Drag to resize workspaces"
-              />
-            </>
-          )}
+              </Drawer>
+            ) : (
+              <>
+                <div style={{ width: sidebarWidth }} className="min-w-0 shrink-0">
+                  <Sidebar />
+                </div>
+                <ResizeHandle
+                  axis="x"
+                  current={sidebarWidth}
+                  onResize={resizeSidebar}
+                  title="Drag to resize workspaces"
+                />
+              </>
+            ))}
+          {/* Always the full width under a drawer, and flex-1 beside a pane —
+              the same element either way, so switching arrangements never
+              remounts the editor pool underneath it. */}
           <main className="min-h-0 min-w-0 flex-1">
             <WorkspaceView />
           </main>
-          {rightPanel && (
-            <>
-              {/* The handle sits on the panel's far side (its left), so the
-                  delta inverts — the terminal-drawer arrangement, rotated. */}
-              <ResizeHandle
-                axis="x"
-                invert
-                current={rightWidth}
-                onResize={resizeRight}
-                title={`Drag to resize ${rightPanel}`}
-              />
-              <div style={{ width: rightWidth }} className="min-w-0 shrink-0">
-                {rightPanel === "backlinks" ? (
-                  <BacklinksPanel />
-                ) : rightPanel === "outline" ? (
-                  <OutlinePanel />
-                ) : (
-                  <TagsPanel tag={tagShown} onBack={() => setTagShown(null)} />
-                )}
-              </div>
-            </>
-          )}
+          {rightPanel &&
+            (singlePane ? (
+              <Drawer side="right" onClose={closeRightPanel}>
+                {rightFace}
+              </Drawer>
+            ) : (
+              <>
+                {/* The handle sits on the panel's far side (its left), so the
+                    delta inverts — the terminal-drawer arrangement, rotated. */}
+                <ResizeHandle
+                  axis="x"
+                  invert
+                  current={rightWidth}
+                  onResize={resizeRight}
+                  title={`Drag to resize ${rightPanel}`}
+                />
+                <div style={{ width: rightWidth }} className="min-w-0 shrink-0">
+                  {rightFace}
+                </div>
+              </>
+            ))}
         </div>
 
         {termOpen && (

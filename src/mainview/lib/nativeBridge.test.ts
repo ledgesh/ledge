@@ -121,6 +121,41 @@ describe("the byte stream", () => {
   });
 });
 
+// The accessory bar's half of the bridge (ios.md §7). Swift sends a command
+// id; the page hands it to the registry. Nothing here knows what any of the
+// ids mean, and that is the contract under test.
+describe("a button on the keyboard bar", () => {
+  test("arrives as the command id Swift sent, verbatim", () => {
+    const { shell } = recorder();
+    const ran: string[] = [];
+    shell.onVerb((id) => ran.push(id));
+    shell.deliver({ t: "verb", id: "format.bold" });
+    shell.deliver({ t: "verb", id: "format.indent" });
+    expect(ran).toEqual(["format.bold", "format.indent"]);
+  });
+
+  test("before anything subscribes, it is dropped rather than thrown", () => {
+    // The window between the page loading and bootView registering the
+    // dispatcher. A tap in it means nothing — there is no editor yet — and a
+    // throw here would land in `deliver`, which Swift calls from
+    // evaluateJavaScript and cannot handle.
+    const { shell } = recorder();
+    expect(() => shell.deliver({ t: "verb", id: "format.bold" })).not.toThrow();
+  });
+
+  test("a verb is not a reply, and settles no pending call", async () => {
+    // Both cross the same channel. An id collision between the two would be a
+    // native call resolving with a command name.
+    const { shell, sent } = recorder();
+    let settled = false;
+    void shell.call("clipboard.read", {}).then(() => (settled = true));
+    shell.deliver({ t: "verb", id: "format.bold" });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    expect(sent.at(-1)).toEqual({ t: "call", id: 1, m: "clipboard.read", p: {} });
+  });
+});
+
 // The reason `gen` exists. A reconnect dials while the previous socket's
 // obituary is still crossing the bridge, and both of these would otherwise
 // land on the connection that just replaced it.

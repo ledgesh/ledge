@@ -7,6 +7,8 @@
 // confirmation), and commands reach them through ctx.ui without the registry
 // importing any component.
 import { openSearchPanel } from "@codemirror/search";
+import { startCompletion } from "@codemirror/autocomplete";
+import { indentLess, indentMore } from "@codemirror/commands";
 import { EditorView } from "@codemirror/view";
 import { focusEditor, getEditorView, requestReveal } from "@/workspace/editorPool";
 import { revealSelection } from "@/workspace/reveal";
@@ -134,6 +136,19 @@ export const registryDeps: RegistryDeps = {
     bold: (docId) => withView(docId, (view) => toggleBold(view)),
     italic: (docId) => withView(docId, (view) => toggleItalic(view)),
     insertLink: (docId) => withView(docId, (view) => insertLink(view)),
+    // CodeMirror's own, so a bar button and the Tab key are the same act with
+    // the same undo history — not a second implementation of indentation.
+    indent: (docId) => withView(docId, (view) => void indentMore(view)),
+    outdent: (docId) => withView(docId, (view) => void indentLess(view)),
+    // Type the `[[` and then ask for the popup. `startCompletion` is needed
+    // because an inserted bracket is not a keystroke: the source matches on
+    // the text before the caret (editor/wikilinks.ts) but nothing would have
+    // asked it to look.
+    wikiLink: (docId) =>
+      withView(docId, (view) => {
+        view.dispatch(view.state.replaceSelection("[["));
+        startCompletion(view);
+      }),
     toggleTemplate: (docId) => withView(docId, (view) => toggleTemplateFlag(view)),
     editFrontmatter: (docId) => withView(docId, (view) => editFrontmatter(view)),
   },

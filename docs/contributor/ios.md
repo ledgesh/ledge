@@ -438,14 +438,29 @@ it is reachable right now, so a stale list is legible as one.
 this design.** CM6 supports touch devices. What it does not do is behave
 identically, and the gap is where this phase's risk sits.
 
-Reported against CM6 on iOS, each needing a re-check against the current
-release before anything is designed around it: selection drag handles missing
-from the editor, the cut/copy callout failing to appear after a double tap,
-"select all" from the callout moving the caret instead of selecting on large
-documents, autocapitalize misfiring at the start of a line, and swipe typing
-inserting a leading space. None of these is fatal and all of them are the
-kind of thing a user reads as "this app is broken" rather than "Safari is
-odd".
+Five defects were reported against CM6 on iOS, each needing a re-check before
+anything was designed around it. **All five were re-checked on iOS 18.5, in
+the shell, against a real server, and none of them reproduces:**
+
+| Reported | On iOS 18.5 |
+| --- | --- |
+| Selection drag handles missing from the editor | Present at both ends, and dragging one extends the selection |
+| The cut/copy callout failing to appear after a double tap | The callout appears over a selection, with Cut, Copy, Paste and AutoFill |
+| "Select all" from the callout moving the caret instead of selecting, on large documents | Selects the whole of a 4002-line, 291KB note |
+| Autocapitalize misfiring at the start of a line | A letter typed at column 0 stays lowercase |
+| Swipe typing inserting a leading space | QuickPath inserts the word at column 0 with nothing before it |
+
+So the risk this section was written around is gone, and the four decisions
+below stand on their own merits rather than as workarounds for any of it.
+
+One qualification, because it is the difference between "checked" and
+"assumed": the double-tap GESTURE was never synthesized. The Simulator tooling
+has no double tap, and two taps arrive more than 300ms apart, which iOS reads
+as a caret placement rather than a word selection. What the table records is
+that the callout that gesture is supposed to produce does appear, and that
+everything reachable from it works. The last two rows needed the real software
+keyboard, which the Simulator hides while a hardware keyboard is attached
+(testing.md §6 has how to get at it).
 
 Four decisions follow:
 
@@ -460,9 +475,38 @@ Four decisions follow:
   native `inputAccessoryView` rather than HTML, because HTML that tries to
   sit above the keyboard is fighting the visual viewport for the whole life
   of the app.
+
+  Built (`ios/Sources/AccessoryBar.swift`), and two things about it are worth
+  knowing. **It carries command ids and no behavior**: a tap sends
+  `{t: "verb", id}` over the bridge and the page's registry decides what that
+  means, through the same seam the Mac's menu bar has always used
+  (`mainview/lib/menu.ts`, `dispatchNativeCommand`). So Swift holds six
+  strings, and a renamed command leaves a button that does nothing and says so
+  rather than one that quietly does something else. **Indent and outdent were
+  not commands before this**: they were Tab and ⇧Tab in CodeMirror's keymap,
+  and the iPhone software keyboard has no Tab key, so they were not awkward on
+  a phone, they were unreachable. `format.indent`, `format.outdent` and
+  `format.wikiLink` exist now, with no chords of their own, and the palette
+  gets them too.
+
+  The install is the ugly part and is confined to one function. The first
+  responder while you type in a web page is not the `WKWebView` but a private
+  content view inside its scroll view, so overriding `inputAccessoryView` on a
+  WKWebView subclass gets a method UIKit never calls. `installAccessoryView`
+  makes a subclass of whatever class that content view actually is — discovered
+  from the live object, not named as a symbol — and re-points the instance at
+  it. Every step can fail without consequence: a miss logs a line and the app
+  keeps the system's own bar, which matters because the alternative failure
+  would be a crash on the first keystroke. It runs on every `didFinish`, not
+  only the first, because §5 makes foregrounding a reload.
 - **Autocorrect, autocapitalize and spellcheck are off on the editor.**
   Markdown is not prose to iOS's dictionary, and an autocorrected fence is a
-  broken one.
+  broken one. This needed no code: CodeMirror sets `spellcheck="false"`,
+  `autocorrect="off"` and `autocapitalize="off"` on its `contentDOM` itself,
+  and Ledge adds no `contentAttributes` entry that would override them. The
+  decision is pinned by an assertion in `e2e/phone.spec.ts` rather than by an
+  implementation, so it fails the day someone adds one — and the two table rows
+  above are the evidence that iOS honors all three.
 - **Nothing is deleted from the keymap to make touch work.** An iPad with a
   hardware keyboard is a Mac-shaped client and the existing keymap is already
   right for it. Serving it is not a v1 goal; breaking it would be a v1
@@ -520,6 +564,35 @@ That was already the design (remote.md §5) and the phone is the case it was
 written for: a three-pane layout restored onto a 390-point screen is the
 failure it prevents. The phone writes a single-pane tree of its own and the
 Mac never sees it.
+
+**One pane at a time, and the rule is a width rather than a device**
+(`mainview/lib/viewport.ts`). Below 640 points the sidebar and the right-hand
+panel stop taking width and cover the editor instead: a 280-point drawer over
+a scrim, dismissed by a tap on what it covers, by Escape, or by picking
+something out of it. The editor keeps the full width underneath either way, so
+opening and closing a drawer reflows nothing.
+
+Three things follow, and each is a test in `e2e/phone.spec.ts`:
+
+- **The drawer starts shut**, because a phone that booted showing its chrome
+  would not be showing the note the last session left focused. Phase 2 shipped
+  the desktop arrangement at this size and called it bad: 224 points of
+  sidebar, 161 of editor.
+- **Two drawers never stack.** Single-PANE is meant literally, so opening one
+  closes the other rather than laying a second scrim on the first.
+- **640, not 390-440.** The sidebar's floor is 180 points, so the side-by-side
+  arrangement stops being usable well before it stops being possible, and a Mac
+  window dragged that narrow has the same problem and gets the same answer. It
+  also leaves an iPad in portrait (744) on the pane branch, which §7 wants. The
+  query is on width alone and deliberately not on `(pointer: coarse)`: a
+  touchscreen laptop is a coarse pointer at 1920 points, and covering its editor
+  because it can be touched would be the wrong answer to the right question.
+
+What did NOT change is focus. Opening a note from a list row shows it without
+taking focus off the row (`workspace/PaneTree.tsx`), and the drawer keeps that
+rule rather than making an exception to it — which is also why a tap that
+navigates leaves focus nowhere instead of summoning the software keyboard over
+the note it just opened.
 
 **Appearance settings are already per device**, so the phone's font size is
 independent by construction and nothing new is needed to make it so.
@@ -773,11 +846,33 @@ inside the Mac app.
    Not done here: a real device. Everything above is a Simulator on Apple
    silicon, which has an enclave and a network but not a finger, a radio, or a
    provisioning profile.
-5. **The screen, and the editor.** The single-pane tree §9 describes, a sidebar
-   that overlays rather than takes a third of the width, the accessory bar, the
-   disabled autocorrect, and §7's audit of what CM6 actually does on a current
-   iOS. This is the phase whose size is genuinely unknown, and it is placed
-   after the transport works so that the unknown is isolated.
+5. **Done. The screen, and the editor.** The single-pane tree §9 describes: a
+   breakpoint in `mainview/lib/viewport.ts`, drawers instead of panes below it,
+   and seven tests in `e2e/phone.spec.ts` that hold the arrangement. The
+   accessory bar is `ios/Sources/AccessoryBar.swift` and three new registry
+   commands (§7). Autocorrect turned out to need no code at all.
+
+   **The unknown this phase was placed last to isolate was not there.** §7's
+   five reported CM6 defects were the reason for the ordering, and re-checking
+   them on iOS 18.5 found that none of the five reproduces — the table in §7 is
+   the audit. The work that remained was the layout, which was known, and the
+   bar, which was awkward for a reason nobody had written down: the first
+   responder inside a WKWebView is a private content view, so an
+   `inputAccessoryView` has to be installed on a class discovered at run time.
+
+   Two things the phone said that the harness could not. **Indent and outdent
+   had no commands**, only Tab and ⇧Tab in the editor's keymap — invisible as a
+   gap until the software keyboard turned out to have no Tab key, at which
+   point they were not chords a phone lacked but verbs it could not reach at
+   all. And a **291KB note that opened blank** turned out to be neither the
+   editor nor the phone: `bun/daemon.ts` was discarding the count `Socket.write`
+   returns, so everything past the kernel's send buffer was dropped mid-frame.
+   Every client before this one drained fast enough never to fill it; a client
+   that crosses every frame as base64 through `evaluateJavaScript` does not.
+   remote.md §3 has the fix.
+
+   Not done here, and now the only thing between this and §8's v1 list: a real
+   device. Everything above is still a Simulator.
 6. **The rest of v1.** Search, tags, backlinks, the outline, daily notes,
    images through PHPicker, and unlocking.
 

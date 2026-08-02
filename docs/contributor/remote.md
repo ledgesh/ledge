@@ -75,6 +75,25 @@ would otherwise be vague:
   beside the socket so the answer to "how do I stop it" is a command and not a
   hunt.
 
+**Both ends of that socket write through `socketWriter`** (`bun/transport.ts`),
+and the reason is a bug that took an iOS client to find. Bun's `Socket.write`
+writes what fits in the kernel's send buffer and RETURNS how much that was;
+both sites here discarded the number, so every byte past the buffer was
+dropped. Silently, and mid-frame: the reader was left waiting on a length
+prefix whose bytes were never coming, and every response and push queued behind
+it waited there too. A note stops loading, then the note list stops updating,
+and the connection still looks live because it is.
+
+The buffer is small and its size is the platform's — about 8KB for a unix
+socket on macOS, about 208KB on Linux — so the size at which a note vanished
+was a property of the machine the server ran on. Nothing caught it because a
+reader that drains as fast as the writer fills never sees a short write, and
+every client before iOS was that fast. `socketWriter` holds the remainder and
+flushes it on the socket's `drain`. Its tests are the fast half (a fake socket
+with a fixed buffer, including the ordering rule that a second write must not
+overtake the first's remainder), because the real thing needs a reader slow
+enough to provoke it — see testing.md §6.
+
 **The Mac app's own local server stays in this process.** It is the one case
 where the socket buys nothing: the same user, the same disk, and a quit that
 takes the window with it anyway. Making it a child would put a second binary in

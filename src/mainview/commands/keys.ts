@@ -239,6 +239,16 @@ export const COMMANDS = {
   "format.bold": { title: "Bold", keys: ["Mod-b"] },
   "format.italic": { title: "Italic", keys: ["Mod-i"] },
   "format.link": { title: "Insert Link", keys: ["Mod-k"] },
+  // Indent, outdent and the note picker: three acts a desktop reaches by
+  // typing (Tab, ⇧Tab, `[[`) and a phone cannot, because the iPhone software
+  // keyboard has no Tab key at all. They carry no chord of their own — Tab
+  // inside the editor is still the accelerator and is not going anywhere
+  // (editor/setup.ts indentKeymap) — but they are commands now so that the
+  // accessory bar has something to name and the palette has something to
+  // offer (ios.md §7).
+  "format.indent": { title: "Indent" },
+  "format.outdent": { title: "Outdent" },
+  "format.wikiLink": { title: "Link to Note" },
   // Palette-only: ⌘-click on the link itself is the accelerator
   // (editor/livePreview.ts), same grammar as the frontmatter profile name.
   // No chord: not frequent enough to spend one, and ⌘K is Insert Link above.

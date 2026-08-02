@@ -21,6 +21,10 @@ final class WebHost: UIViewController {
 
     private var socket: SSHTransport?
     private var generation = 0
+    /// The strip above the keyboard (ios.md §7). Built once and held here: it
+    /// is captured by the accessory getter installed on the web view's content
+    /// view, so it has to outlive the call that installs it.
+    private var accessory: UIView?
     /// While the app is away, a dial is refused rather than attempted. iOS
     /// gives about thirty seconds of background execution and the page's
     /// reconnect ladder is 31.75s long (ios.md §5), so without this the whole
@@ -48,6 +52,7 @@ final class WebHost: UIViewController {
         configuration.allowsInlineMediaPlayback = true
 
         let web = WKWebView(frame: .zero, configuration: configuration)
+        web.navigationDelegate = self
         web.scrollView.bounces = false
         // The page is a full-height app, not a document: WebKit's automatic
         // inset would add the safe areas a second time on top of the
@@ -178,6 +183,31 @@ final class WebHost: UIViewController {
                 }
             }
         )
+    }
+}
+
+extension WebHost: WKNavigationDelegate {
+    /// The accessory bar goes on after the page has loaded, because the view it
+    /// attaches to does not exist before then (AccessoryBar.swift).
+    ///
+    /// Every load, not only the first: §5 makes foregrounding a reload, and a
+    /// content view rebuilt by one would otherwise come back with the system's
+    /// bar and no way to indent.
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        if accessory == nil {
+            accessory = AccessoryBar.make { [weak self] id in
+                // The page decides what the id means; this end only says which
+                // button was pressed (mainview/lib/menu.ts).
+                self?.deliver(["t": "verb", "id": id])
+            }
+        }
+        guard let accessory else { return }
+        if !webView.installAccessoryView(accessory) {
+            // Not fatal, and worth a line: the app keeps the system's bar, so
+            // the symptom is a missing strip rather than anything broken, and
+            // this is the only place that would say why.
+            print("[shell] no accessory bar: the web view's content view was not found")
+        }
     }
 }
 

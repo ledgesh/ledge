@@ -14,7 +14,7 @@ import { eventToChord, resolveChord, type FocusDomain } from "./keymap";
 import { modalOpen } from "./layers";
 import { targetFromElement } from "./target";
 import { buildMenu } from "./menu";
-import { onMenuCommand, setAppMenu } from "@/lib/menu";
+import { onNativeCommand, setAppMenu } from "@/lib/menu";
 import { registryDeps, uiHooks } from "./glue";
 import type { Command, CommandCtx, CommandTarget } from "./types";
 
@@ -113,7 +113,7 @@ export function CommandProvider({ children }: { children: ReactNode }) {
   // invocation, which is the only honest one from the menu bar: the bar has no
   // row to point at, and the commands that need one are kept out of it
   // (interactions.md §10).
-  useEffect(() => onMenuCommand((action) => exec(action)), [exec]);
+  useEffect(() => onNativeCommand((action) => exec(action)), [exec]);
 
   // The menu bar is installed from Bun, so it cannot ask a `when` anything at
   // the moment the user pulls it down: it carries whatever enablement was true

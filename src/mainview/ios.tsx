@@ -14,6 +14,7 @@ import { reconnectingClient } from "../shared/transport";
 import { BUILD_VERSION } from "../shared/version";
 import { bootView, viewPush } from "./boot";
 import { attachShell, nativeOverlay } from "./lib/nativeBridge";
+import { dispatchNativeCommand } from "./lib/menu";
 
 // Milestones, in milliseconds since the page began loading.
 //
@@ -69,6 +70,15 @@ async function start(): Promise<void> {
   shell.onResume(() => {
     if (!live) window.location.reload();
   });
+
+  // The accessory bar above the keyboard (ios.md §7). Swift holds the buttons
+  // and their command ids; what a command id means is the registry's, here, as
+  // it is for the Mac's menu bar — which is why this is the same seam and not
+  // a second one (lib/menu.ts). Registered before bootView so a tap during the
+  // first paint has somewhere to go; it lands on a no-op until CommandProvider
+  // mounts, which is the right answer to a button pressed before there is an
+  // editor to press it against.
+  shell.onVerb((id) => dispatchNativeCommand(id));
 
   // Choosing the server again, from the connection chrome, is the same boot:
   // the ladder gives up for good when a restarted server answers with a new

@@ -81,7 +81,15 @@ export type ToPage =
   // The app came back to the foreground. Not a socket event: iOS runs no
   // timers in a suspended process, so the ladder cannot be what notices a
   // wire that died while the app was away (ios.md §5).
-  | { t: "resumed" };
+  | { t: "resumed" }
+  // A button on the keyboard accessory bar (ios.md §7). The payload is a
+  // command id and nothing else: the bar is a native surface naming a verb,
+  // exactly as the Mac's menu bar is, and the registry is the one place that
+  // knows what any of them mean. Swift holds six strings and no behavior, so
+  // a command that is renamed or withdrawn cannot leave a button that does
+  // something subtly different — it leaves one that does nothing, and says so
+  // in the console.
+  | { t: "verb"; id: string };
 
 /** What `@hello` answers: who this client is (remote.md §5), and what to call
  * the machine it is pointed at (§8 wants the indicator to name one). */
@@ -105,6 +113,8 @@ export interface Shell {
   log(text: string): void;
   /** Told when the app comes back to the foreground. */
   onResume(fn: () => void): void;
+  /** Told when a bar button was tapped, by command id. */
+  onVerb(fn: (id: string) => void): void;
   /** One message from Swift. */
   deliver(msg: ToPage): void;
 }
@@ -121,6 +131,7 @@ export function nativeShell(post: (msg: ToShell) => void): Shell {
   let live: { gen: number; io: ReturnType<typeof fedDuplex> } | null = null;
   let where = "";
   let resumed: () => void = () => {};
+  let verb: (id: string) => void = () => {};
 
   function call(m: ShellCall, p: unknown): Promise<unknown> {
     const id = nextId++;
@@ -145,6 +156,10 @@ export function nativeShell(post: (msg: ToShell) => void): Shell {
 
     onResume(fn) {
       resumed = fn;
+    },
+
+    onVerb(fn) {
+      verb = fn;
     },
 
     async hello() {
@@ -190,6 +205,9 @@ export function nativeShell(post: (msg: ToShell) => void): Shell {
         }
         case "resumed":
           resumed();
+          return;
+        case "verb":
+          verb(msg.id);
           return;
       }
     },

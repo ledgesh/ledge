@@ -80,6 +80,7 @@ section.
 | ↑/↓ roving focus (R5) | a tap; the tapped row is the focused row |
 | Bare-key row verbs | the row's menu |
 | ⌘P / ⇧⌘P / ⌥⌘P | the magnifier in the header, which opens the overlay |
+| ⌘B / ⌘I / ⌘K, Tab / ⇧Tab, `[[` | the keyboard accessory bar, on the clients that have one (ios.md §7) |
 
 - **The long press is 500 ms, and belongs to touch and pen only**
   (`lib/useRowMenu.ts`). A mouse is excluded deliberately: it has the right
@@ -99,6 +100,15 @@ section.
   the one surface that carries every command. One button for all three modes:
   it opens quick-open, whose own placeholder teaches the `>` and `#` that cross
   to the other two (§3).
+- **The editor's chords go on the accessory bar, which is the keyboard's own
+  chrome.** The palette can reach any of them, but a formatting verb used mid
+  sentence should not cost a trip through a modal surface that covers the
+  sentence. The bar names command ids and nothing else, so it is a sixth way in
+  to the registry rather than a second implementation of anything (ios.md §7).
+  Indent and outdent had to BECOME commands for this: they were keymap
+  bindings, and the iPhone software keyboard has no Tab key, so they failed the
+  rule below without anyone noticing — the registry test could not see them
+  because they were never in the registry.
 - **No verb behind a chord alone.** Every command is in the palette, or in a row
   menu, or has a control that runs it. `registry.test.ts` enforces that, and
   holds the exceptions as a named list rather than inferring them — a
@@ -223,7 +233,8 @@ CodeMirror and never at the window level.
 | Bold / Italic         | ⌘B / ⌘I                   | editor only (editor/formatting.ts); toggles `**`/`*` around the selection or the word at the caret — a bare caret drops an empty marker pair to type into. Run-based so the chords compose: ⌘I on `**bold**` stacks to `***both***` and ⌘I again peels only its own star |
 | Insert Link           | ⌘K                        | editor only; wraps the selection as `[text](url)` — a selected URL becomes the destination with the caret in the empty label, any other selection (or the word at the caret) becomes the label with the caret in the empty destination |
 | Open Link             | — (palette; click the rendered link as accelerator) | follows the link under the caret (editor/livePreview.ts) — a URL leaves the app, a `[[wikilink]]` opens the note it names. A RENDERED link (syntax concealed, including inside a rendered table and bare URLs the caret is outside) opens on plain click — while concealed it is a widget, not editable text, same reasoning as the checkbox. A REVEALED link is raw text being edited: plain click is a caret move, ⌘-click opens (same grammar as the profile name above; the underline goes solid while ⌘ is held). Mouse-editing a rendered link: click adjacent text or arrow in, which reveals it. Schemes are allowlisted (shared/links.ts) and re-checked Bun-side |
-| Link to Note (`[[`)   | — (typed, not a command)  | `[[` in the editor pops the note-title picker (editor/wikilinks.ts; Enter accepts and closes the `]]`, Escape closes the popup only). `[[Title]]` resolves by title, case-insensitive exact, against the note's OWN workspace — resolved renders link-styled and opens on the Open Link grammar above; DANGLING renders muted with no hand cursor, and a plain click is the ordinary caret move that reveals it for fixing (a dead "open" affordance on a link that goes nowhere would be worse). `[[Title#Heading]]` opens with that ATX heading revealed, degrading to the top of the note when the heading is gone |
+| Indent / Outdent      | Tab / ⇧Tab (also palette; the accessory bar on a phone) | editor only; CodeMirror's own `indentMore`/`indentLess`. Commands as well as keys because the iPhone software keyboard has no Tab key at all, so on a touch client these were not awkward, they were unreachable (ios.md §7). The keys are unchanged and remain the accelerator |
+| Link to Note (`[[`)   | typed, or the command (palette; the accessory bar on a phone) | `[[` in the editor pops the note-title picker (editor/wikilinks.ts; Enter accepts and closes the `]]`, Escape closes the popup only). `[[Title]]` resolves by title, case-insensitive exact, against the note's OWN workspace — resolved renders link-styled and opens on the Open Link grammar above; DANGLING renders muted with no hand cursor, and a plain click is the ordinary caret move that reveals it for fixing (a dead "open" affordance on a link that goes nowhere would be worse). `[[Title#Heading]]` opens with that ATX heading revealed, degrading to the top of the note when the heading is gone |
 | Toggle Checkbox       | — (palette; click the rendered box as accelerator) | toggles the `[ ]`/`[x]` on the caret's line (editor/livePreview.ts). The box is a widget, not editable text, so a plain click may act — the caret-move grammar protects text, and the box is not text |
 | Rename Workspace…     | `r` (also menu / palette / double-click) | |
 | Change Icon…          | `i` (also menu / palette) | opens the icon grid on the workspace's row |

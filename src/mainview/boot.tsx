@@ -24,7 +24,7 @@ import { configureNotes, dispatchExternalOpen, dispatchNotesChanged } from "./no
 import { configureVault, recordVaultState, refreshVaultState } from "./vault/channel";
 import { configureWorkspaces, recordDailyRoot, recordWorkspaceKinds } from "./workspace/channel";
 import { configureClipboard } from "./lib/clipboard";
-import { configureMenu, dispatchMenuCommand } from "./lib/menu";
+import { configureMenu, dispatchNativeCommand } from "./lib/menu";
 import { configureCli } from "./lib/cli";
 import { captureFailures, configureLog } from "./lib/log";
 import { configureAssets } from "./lib/assets";
@@ -63,7 +63,7 @@ export const viewPush: ViewPush = {
   // updates and every subscriber (placeholder faces, glyphs, palette faces)
   // re-renders from the one record.
   vaultChanged: ({ state }) => recordVaultState(state),
-  menuCommand: ({ action }) => dispatchMenuCommand(action),
+  menuCommand: ({ action }) => dispatchNativeCommand(action),
   // From the shell holding this end of the wire, never from a server
   // (remote.md §7).
   connectionState: ({ state, detail }) => recordLinkState(state, detail),

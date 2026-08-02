@@ -10,6 +10,7 @@ import {
   ArrowLeft,
   ArrowRight,
   Bold,
+  Brackets,
   CircleHelp,
   Braces,
   CalendarDays,
@@ -22,6 +23,8 @@ import {
   FolderInput,
   FolderOpen,
   Hash,
+  IndentDecrease,
+  IndentIncrease,
   Italic,
   KeyRound,
   Layers,
@@ -888,6 +891,13 @@ export function buildCommands(deps: RegistryDeps): Command[] {
     cmd("format.bold", editorCommand(deps, Bold, (ed, docId) => ed.bold(docId))),
     cmd("format.italic", editorCommand(deps, Italic, (ed, docId) => ed.italic(docId))),
     cmd("format.link", editorCommand(deps, Link, (ed, docId) => ed.insertLink(docId))),
+    // The three the keyboard reaches by typing on a desktop and cannot on a
+    // phone: Tab, ⇧Tab and `[[`. Registry commands so the accessory bar can
+    // name them (ios.md §7) — the bar sends a command id and nothing else, the
+    // same contract the menu bar has always had.
+    cmd("format.indent", editorCommand(deps, IndentIncrease, (ed, docId) => ed.indent(docId))),
+    cmd("format.outdent", editorCommand(deps, IndentDecrease, (ed, docId) => ed.outdent(docId))),
+    cmd("format.wikiLink", editorCommand(deps, Brackets, (ed, docId) => ed.wikiLink(docId))),
   ];
 
   // One palette entry per marked note — the workspace.select move: the

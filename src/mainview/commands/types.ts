@@ -233,6 +233,12 @@ export interface RegistryDeps {
     bold(docId: string): void;
     italic(docId: string): void;
     insertLink(docId: string): void;
+    // CodeMirror's own indentMore/indentLess, and the `[[` picker opened
+    // rather than typed. Named here because the keyboard that would otherwise
+    // reach them does not exist on a phone (ios.md §7).
+    indent(docId: string): void;
+    outdent(docId: string): void;
+    wikiLink(docId: string): void;
     // Add or remove the note's `template: true` frontmatter line in its LIVE
     // editor (editor/templateFlag.ts): an ordinary undoable edit, so autosave
     // and the watcher-driven list refresh carry the change everywhere else.

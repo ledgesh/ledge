@@ -264,8 +264,39 @@ anyway. `docker stop` and `docker start` is a wire that really drops. And
 `simctl launch com.apple.mobilesafari` then relaunching Ledge is the suspension
 lifecycle, which is the one thing a phone does constantly.
 
+**The software keyboard is hidden by default, and two of the things worth
+testing only exist on it.** A Simulator with a hardware keyboard attached — the
+default — routes text through it, so autocorrect, autocapitalize and QuickPath
+swipe typing never run, and a probe that types with `simctl` is not testing any
+of them. `defaults write com.apple.iphonesimulator ConnectHardwareKeyboard
+-bool false`, quit and reopen Simulator, and the on-screen keyboard comes back;
+`defaults delete` the key afterwards. It is a preference of the Simulator app,
+not a system setting, and reopening boots whichever device it feels like, so
+expect to `simctl boot` yours again. With it off, the audit in ios.md §7 is
+tappable: individual letter keys go through iOS's own input path, and
+`touch_path` across the letters IS a QuickPath swipe.
+
 Tear down by uninstalling the app (`simctl uninstall`), `docker rm -f`, and
 checking that nothing still listens on 22.
+
+**A slow reader is a test dimension, and until iOS there was no client that
+was one.** Everything that speaks the framed protocol — the harness, the Mac,
+the probes above — drains its socket as fast as the other end fills it, which
+means none of them can ever see a short write. The iOS shell crosses every
+frame as base64 through one `evaluateJavaScript` per 32KB chunk, and that is
+slow enough to push back through the bridge, through ssh, and onto the daemon's
+unix socket; it found a bug there that had been shipping the whole time
+(remote.md §3).
+
+So when a change touches a writer, ask what happens when the reader is slow,
+and reach for the cheap reproduction rather than the phone. A script that
+spawns `bun src/bun/serve.ts serve`, drives it with the real
+`clientConnection` over a hand-built `Duplex`, and sleeps between reads
+provokes it in seconds with no ssh and no device in the picture — and the
+failure is unmistakable, because a frame that stops mid-length-prefix wedges
+the stream for good rather than merely arriving late. Note that the threshold
+is the platform's, not the protocol's: about 8KB on macOS and about 208KB on
+Linux, so a size that reproduces on one may not on the other.
 
 ## 7. The green bar
 
