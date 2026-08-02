@@ -3,6 +3,7 @@ import { ChevronDown, Plus, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useCmdHeld } from "@/lib/useCmdHeld";
 import { useListNav } from "@/lib/useListNav";
+import { useRowMenu } from "@/lib/useRowMenu";
 import { ResizeHandle } from "@/components/ResizeHandle";
 import { ContextMenu } from "@/components/ContextMenu";
 import { RenameField } from "@/components/RenameField";
@@ -339,6 +340,7 @@ function WorkspaceRow({
   onDragEnd: () => void;
   onContextMenu: (x: number, y: number) => void;
 }) {
+  const press = useRowMenu(onContextMenu, onSelect);
   const Icon = iconFor(ws.symbol);
   const tabs = countTabs(ws.root);
   const panes = leafIds(ws.root).length;
@@ -349,18 +351,14 @@ function WorkspaceRow({
       data-ws
       {...rowProps}
       {...targetAttrs({ kind: "workspace", id: ws.id })}
+      {...press}
       // Don't arm the drag while renaming, or the pointer can't reach the input.
       draggable={!renaming}
       className={cn(
         "group relative flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 outline-none focus-visible:ring-1 focus-visible:ring-ring",
         selected ? "bg-accent" : "hover:bg-accent/50",
       )}
-      onClick={onSelect}
       onDoubleClick={onBeginRename}
-      onContextMenu={(e) => {
-        e.preventDefault();
-        onContextMenu(e.clientX, e.clientY);
-      }}
       onDragStart={(e) => {
         // Firefox refuses to start a drag unless some data is set.
         e.dataTransfer.setData("text/plain", ws.id);

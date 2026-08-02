@@ -12,7 +12,8 @@ ownership), `testing.md` (what gets tested, and how behavior is verified).
 ## 1. Affordance matrix
 
 Which affordances each class of action gets. "✓" is required, "–" is forbidden,
-blank is optional.
+blank is optional. A finger has four of these six columns unavailable to it;
+§1a is where each one lands instead.
 
 | Action class                                                    | Hotkey                      | Icon button          | Context menu       | Palette          | Double-click      | Drag   |
 | --------------------------------------------------------------- | --------------------------- | -------------------- | ------------------ | ---------------- | ----------------- | ------ |
@@ -60,6 +61,60 @@ Rules:
   `data-selected` for the dispatcher to collect the way it already collects
   `data-target-kind`, and commands opt in explicitly — a verb without the flag
   keeps acting on one row.
+
+## 1a. Touch
+
+**A touch client has no hotkey, no hover, no right-click and no double-click**
+— four of §1's six columns, including the one every high-frequency action is
+required to have. What survives is the palette and the context menu, and R1 and
+R6 already require both to carry everything. So touch needs a way to *reach*
+those two surfaces, not a grammar of its own, and that is the whole of this
+section.
+
+| Desktop affordance | Touch |
+| ------------------ | ----- |
+| Hotkey | the palette entry R1 already requires |
+| Hover-revealed button | the row's menu, per R2 |
+| Right-click | a long press on the row |
+| Double-click rename | the menu's Rename item, which R3 already calls the discoverable path |
+| ↑/↓ roving focus (R5) | a tap; the tapped row is the focused row |
+| Bare-key row verbs | the row's menu |
+| ⌘P / ⇧⌘P / ⌥⌘P | the magnifier in the header, which opens the overlay |
+
+- **The long press is 500 ms, and belongs to touch and pen only**
+  (`lib/useRowMenu.ts`). A mouse is excluded deliberately: it has the right
+  button already, and a held left button is how the strips reorder (R4). The
+  press cancels once the finger travels more than 10 px, because the gesture it
+  loses to is the list's own scroll. It opens the same menu the right-click
+  opens, at the same point, from the same callback — two inputs, one
+  implementation, and no second place for a row kind's verbs to be forgotten.
+- **The press focuses its row first.** Focus stops being invisible state when
+  no hover ever hinted at it: the ring is the whole answer to "what is this menu
+  about", and it is what R5's verbs address afterwards.
+- **The click that follows a press is swallowed.** WebKit sends one after every
+  touch, and a press that opened a menu must not also run the row's primary
+  action — the row was the question, not the instruction.
+- **The overlay's control is chrome, not a menu item.** ⌘P, ⇧⌘P and ⌥⌘P are
+  chords, and a client with no keyboard would otherwise have no way at all to
+  the one surface that carries every command. One button for all three modes:
+  it opens quick-open, whose own placeholder teaches the `>` and `#` that cross
+  to the other two (§3).
+- **No verb behind a chord alone.** Every command is in the palette, or in a row
+  menu, or has a control that runs it. `registry.test.ts` enforces that, and
+  holds the exceptions as a named list rather than inferring them — a
+  `palette: false` command with no menu item is exactly the bug it exists to
+  catch.
+- **Destructive verbs keep their confirmation and lose their accelerator**
+  (§4). ⌫ on a focused row has no touch form and does not get one; the menu
+  item in front of the existing confirm is the entire path.
+- **A menu fits the screen it opens on** (`lib/menuPlacement.ts`): below the
+  press where there is room, flipped above it where there is not, never past an
+  edge. A menu item you cannot see is a verb the user does not have.
+
+None of this is reachable in the shipping Mac app, where every pointer is a
+mouse; it is the affordance layer the iOS client stands on (`ios.md` §6, §14
+phase 2). It is exercised at 390x844 by `e2e/phone.spec.ts` in the `phone`
+project (testing.md §5).
 
 ## 2. Hotkey allocation policy
 

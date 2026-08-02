@@ -12,7 +12,24 @@ const ci = !!process.env["CI"];
 
 export default defineConfig({
   testDir: "e2e",
-  projects: [{ name: "webkit", use: { ...devices["Desktop Safari"] } }],
+  projects: [
+    { name: "webkit", use: { ...devices["Desktop Safari"] }, testIgnore: "phone.spec.ts" },
+    // The phone (ios.md §13): the same view at 390x844, with touch instead of
+    // a pointer and no keyboard at all. iPhone 14 carries the touch, the
+    // coarse pointer and the mobile user agent, and its browser is this
+    // suite's WebKit — so what runs here is the shipping engine at the
+    // shipping size, not a resized desktop. The viewport is overridden to the
+    // full 390x844: the descriptor's 664 is what is left after MOBILE
+    // SAFARI's chrome, and the iOS client is a full-screen WKWebView with
+    // none. Only phone.spec.ts runs in this project — the desktop suite
+    // asserts desktop affordances, and running it here would report a phone
+    // as broken for not having a hover.
+    {
+      name: "phone",
+      use: { ...devices["iPhone 14"], viewport: { width: 390, height: 844 } },
+      testMatch: "phone.spec.ts",
+    },
+  ],
   // A committed `test.only` silently reduces the suite to one test, and the
   // run still goes green — the failure mode CI exists to prevent.
   forbidOnly: ci,

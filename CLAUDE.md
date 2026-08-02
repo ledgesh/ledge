@@ -40,12 +40,13 @@ the app as its built-in docs, via `src/bun/docsContent.ts`) lives in
   one-round-trip budget, Linux and the Docker image. Read before touching the
   wire, connections, the daemon, or anything that assumes the server is in
   this process.
-- **[ios.md](docs/contributor/ios.md)** — the iOS client (its §14 phase 1 is
-  code; no Swift yet): the Swift shell around the same React view, why the
+- **[ios.md](docs/contributor/ios.md)** — the iOS client (its §14 phases 1 and
+  2 are code; no Swift yet): the Swift shell around the same React view, why the
   protocol stays in JavaScript and which half of the transport is therefore
-  portable, SSH without an ssh binary, Secure Enclave keys, what iOS
-  suspension does to a connection, and the touch column the affordance matrix
-  lacks. Read before touching `src/shared/transport.ts` or continuing phase 6.
+  portable, SSH without an ssh binary, Secure Enclave keys, and what iOS
+  suspension does to a connection. Its touch column is implemented and now
+  lives in interactions.md §1a. Read before touching
+  `src/shared/transport.ts` or continuing phase 6.
 - **[writing.md](docs/contributor/writing.md)** — documentation style: headings
   name the feature keyword-first, lead with the answer, one idea per sentence,
   mechanism before rationale, no aphorisms or design self-commentary, facts in

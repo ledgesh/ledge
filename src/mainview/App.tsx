@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { CircleHelp, Hash, Link2, PanelLeft, TableOfContents, TerminalSquare, X } from "lucide-react";
+import { CircleHelp, Hash, Link2, PanelLeft, Search, TableOfContents, TerminalSquare, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ResizeHandle } from "@/components/ResizeHandle";
 import { TerminalDrawer } from "@/terminal/TerminalDrawer";
@@ -516,6 +516,25 @@ function Shell() {
           title={tooltip("sidebar.toggle")}
         >
           <PanelLeft className="size-4" />
+        </Button>
+        {/* The overlay's control in the chrome (interactions.md §1a). ⌘P and
+            ⇧⌘P are chords, and a touch client has none — without this, the one
+            surface that carries every command would be unreachable there, and
+            with it every verb whose only other home is a hotkey. One button
+            for all three modes: it opens quick-open, whose own placeholder
+            teaches the `>` and `#` that cross to commands and to search.
+            A magnifier rather than the command's registry glyph (FileText),
+            which up here would read as "new note" — the backlinks button's
+            reasoning: the header picks the icon that distinguishes, and says
+            so. */}
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-7"
+          onClick={() => exec("palette.notes")}
+          title={tooltip("palette.notes")}
+        >
+          <Search className="size-4" />
         </Button>
         <div className="flex-1" />
         <Button

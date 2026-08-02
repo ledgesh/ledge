@@ -16,6 +16,7 @@ import { CalendarDays, ChevronRight, FileText, LayoutTemplate, Lock, LockOpen, P
 import { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { useListNav } from "@/lib/useListNav";
+import { useRowMenu } from "@/lib/useRowMenu";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ContextMenu } from "@/components/ContextMenu";
 import { useCommands } from "@/commands/CommandProvider";
@@ -424,16 +425,16 @@ function TrashRow({
   onContextMenu: (x: number, y: number) => void;
 }) {
   const { exec } = useCommands();
+  // Right-click, or a finger held on the row: both open this row's menu, which
+  // is where Delete Permanently lives for anyone without a hover.
+  const press = useRowMenu(onContextMenu);
   return (
     <div
       {...rowProps}
       {...targetAttrs({ kind: "trash", path: item.path })}
+      {...press}
       className={ROW_CLASS}
       title={item.path}
-      onContextMenu={(e) => {
-        e.preventDefault();
-        onContextMenu(e.clientX, e.clientY);
-      }}
     >
       <FileText className="size-3.5 shrink-0 text-muted-foreground/60" />
       <div className="min-w-0 flex-1 truncate text-[13px] leading-tight text-muted-foreground">
@@ -492,16 +493,16 @@ function NoteRow({
   onOpen: () => void;
   onContextMenu: (x: number, y: number) => void;
 }) {
+  // The click opens the note; a press held on the row opens the menu instead,
+  // and the click WebKit sends after it is swallowed there — a long press must
+  // not also open the note it was only asking about.
+  const press = useRowMenu(onContextMenu, onOpen);
   return (
     <div
       {...rowProps}
       {...targetAttrs({ kind: "note", path: note.path })}
+      {...press}
       className={cn(ROW_CLASS, current && "bg-accent hover:bg-accent")}
-      onClick={onOpen}
-      onContextMenu={(e) => {
-        e.preventDefault();
-        onContextMenu(e.clientX, e.clientY);
-      }}
       title={note.path}
     >
       {/* A template note (frontmatter template: true) swaps the glyph — the

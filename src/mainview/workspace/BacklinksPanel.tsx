@@ -18,6 +18,7 @@ import { tooltip } from "@/commands/format";
 import { targetAttrs } from "@/commands/target";
 import type { CommandTarget } from "@/commands/types";
 import { useListNav } from "@/lib/useListNav";
+import { useRowMenu } from "@/lib/useRowMenu";
 import { backlinksOf, onNotesChanged, type BacklinkHit } from "@/notes/channel";
 import { notesOf, useWorkspace } from "./store";
 import { focusedTab } from "./tree";
@@ -170,17 +171,14 @@ function BacklinkRow({
   onOpen: () => void;
   onContextMenu: (x: number, y: number) => void;
 }) {
+  const press = useRowMenu(onContextMenu, onOpen);
   return (
     <div
       {...rowProps}
       {...targetAttrs(targetOf(hit))}
+      {...press}
       className="group flex cursor-default flex-col gap-0.5 rounded-md px-2 py-1.5 outline-none hover:bg-accent/50 focus-visible:ring-1 focus-visible:ring-ring"
       title={hit.path}
-      onClick={onOpen}
-      onContextMenu={(e) => {
-        e.preventDefault();
-        onContextMenu(e.clientX, e.clientY);
-      }}
     >
       <div className="flex min-w-0 items-center gap-2">
         <FileText className="size-3.5 shrink-0 text-muted-foreground" />

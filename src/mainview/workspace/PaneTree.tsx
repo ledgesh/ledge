@@ -2,6 +2,7 @@ import { Fragment, useLayoutEffect, useRef, useState } from "react";
 import { Columns2, FilePlus, Plus, Rows2, SquareX, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useCmdHeld, useCtrlHeld } from "@/lib/useCmdHeld";
+import { useRowMenu } from "@/lib/useRowMenu";
 import { ContextMenu } from "@/components/ContextMenu";
 import { ResizeHandle } from "@/components/ResizeHandle";
 import { useCommands } from "@/commands/CommandProvider";
@@ -363,6 +364,13 @@ function TabItem({
   const active = leaf.activeTabId === tab.id;
   const [dragged, setDragged] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  // A tab is a row for menu purposes (R6): right-click, or a finger held on
+  // it, opens the same menu. That menu is where Close Tab and Close Others
+  // live for anyone without ⌘W, which is every touch client.
+  const press = useRowMenu(
+    onContextMenu,
+    () => dispatch({ type: "selectTab", paneId: leaf.id, tabId: tab.id }),
+  );
 
   // Keep the active tab on screen. With the strip's scrollbar hidden, a ⌃Tab
   // or ⌃N jump to a clipped tab would otherwise switch to something invisible.
@@ -374,6 +382,7 @@ function TabItem({
     <div
       ref={ref}
       data-tab
+      {...press}
       draggable
       className={cn(
         "group relative flex min-w-0 max-w-[180px] shrink-0 cursor-default items-center gap-1.5 border-r px-2.5 text-xs",
@@ -382,11 +391,6 @@ function TabItem({
           : "text-muted-foreground hover:bg-background/60",
         dragged && "opacity-40",
       )}
-      onClick={() => dispatch({ type: "selectTab", paneId: leaf.id, tabId: tab.id })}
-      onContextMenu={(e) => {
-        e.preventDefault();
-        onContextMenu(e.clientX, e.clientY);
-      }}
       onDragStart={(e) => {
         dragging = { fromPaneId: leaf.id, tabId: tab.id };
         // Firefox refuses to start a drag unless some data is set.

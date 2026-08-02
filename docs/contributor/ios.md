@@ -1,6 +1,6 @@
 # Ledge on iOS
 
-**§14 phase 1 is code; there is no Swift yet.** This is phase 6 of
+**§14 phases 1 and 2 are code; there is no Swift yet.** This is phase 6 of
 `docs/contributor/remote.md`, which built the server the phone talks to and
 then stopped, because the client is a different problem in a different
 language. Everything below depends on remote.md phases 1 to 5 and asks for
@@ -256,7 +256,10 @@ screen.
 
 **A phone has no hotkeys, no hover, no right-click and no double-click.** Four
 of the six columns in `interactions.md` §1 are unavailable, including the one
-that every high-frequency action is required to have.
+that every high-frequency action is required to have. The column exists now:
+this section is implemented (phase 2, §14) and its normative home is
+`interactions.md` §1a, which the view is built against. What stays here is why
+it was smaller than it looked.
 
 What survives is the palette and the context menu, and interactions.md
 already guarantees both exist for everything. **R1** puts every command in
@@ -267,26 +270,14 @@ therefore already required, and has been since before a phone was in scope.
 That is the finding that makes this phase smaller than it looks: the phone
 needs a way to *reach* those two surfaces, not a second grammar of its own.
 
-| Desktop affordance | Phone |
-| ------------------ | ----- |
-| Hotkey | the palette entry R1 already requires |
-| Hover-revealed button | the row's menu, per R2 |
-| Right-click context menu | long press on the row |
-| Double-click rename | the menu's Rename item, which R3 already calls the discoverable path |
-| ↑/↓ roving focus (R5) | tap; the tapped row is the focused row |
-| Bare-key row verbs | the row's menu |
-| ⌘K palette, ⌘P quick open | a persistent control in the chrome |
-
-Two rules to add rather than translate:
-
-- **Focus stops being invisible state.** R5's roving tabindex exists so the
-  verbs have something to address. On a phone the subject of a verb is the
-  row the menu opened from, and there is no hover to hint at it beforehand,
-  so a menu must never offer a verb whose target is a row the user cannot
-  see.
-- **Destructive verbs keep their confirm and lose their accelerator.** ⌫ on a
-  focused row has no touch equivalent and does not get one. The menu item in
-  front of the existing confirm (interactions.md §4) is the entire path.
+**The mapping itself lives in `interactions.md` §1a**, one table from desktop
+affordance to touch, with the long press's own rules (which pointers get it,
+what cancels it, what it does to focus) and the two that had to be added rather
+than translated: focus stops being invisible state when no hover ever hinted at
+it, and destructive verbs keep their confirmation while losing their
+accelerator. It is written there and not here because it is now behavior in the
+shipping view rather than a plan for one, and a table in two normative
+documents is a table that will disagree with itself.
 
 **The connection indicator is chrome, with more force than on the Mac.**
 remote.md §8 makes it persistent because running a command on the wrong box
@@ -467,11 +458,14 @@ Per `testing.md`'s categories:
   and the `authorized_keys` line the pairing screen generates, which must
   match what remote.md §4 specifies character for character.
 - **e2e (headless WebKit)**: a phone is the same view at a phone's viewport,
-  so the harness gains a mobile project at 390x844 rather than a second
-  harness. WebKit at that size is what catches a palette nobody can reach, a
-  row menu that opens off screen, and a verb that survived §6's translation
-  only on paper. Every rule in §6 that can be a spec should be one, which is
-  `testing.md` §3 applied to a new column.
+  so the harness gained a mobile project at 390x844 rather than a second
+  harness (phase 2, done). WebKit at that size is what catches a palette
+  nobody can reach, a row menu that opens off screen, and a verb that survived
+  §6's translation only on paper — the middle one it caught on the first run.
+  What it cannot catch is the input itself: Playwright's touchscreen taps and
+  does nothing else, so a long press is dispatched as pointer events, and
+  whether iOS delivers that same sequence under a finger is phase 3's live
+  probe, not this one's.
 - **The Swift side, against the fixture that already exists**:
   `scripts/probe-ssh.ts` stands up a real sshd with a real forced-command key
   (`scripts/ssh-probe/`). An iOS client dialing that same fixture gets the
@@ -510,11 +504,27 @@ inside the Mac app.
    consumer that set `onClose` before `onData` was told the wire was gone
    before it was given the last bytes that came over it — invisible with one
    consumer, which is what phase 3 stops being.
-2. **The phone viewport.** A mobile project in the e2e suite, and §6's
-   affordances behind it: row menus on long press, a palette control in the
-   chrome, destructive verbs reachable without an accelerator. Still the Mac
-   app, still no Swift. It ends with specs asserting that a phone-sized
-   client can reach every verb, which is the claim §6 makes on paper.
+2. **Done. The phone viewport.** The `phone` project runs the real view at
+   390x844 with touch and no chords, and §6's affordances are behind it:
+   a long press opens any row's menu (`lib/useRowMenu.ts`, one seam for every
+   row kind, tabs included), the header's magnifier opens the overlay, and
+   the destructive verbs run from their menus through the confirmations they
+   already had. The claim §6 made on paper is now two tests: `phone.spec.ts`
+   walks the surfaces, and `registry.test.ts` holds the invariant that no
+   command hides behind a chord (interactions.md §1a).
+
+   Two things the viewport caught that reading could not. A menu clamped its
+   TOP to a guessed 88px above the bottom of the window, so a menu of any real
+   height opened partly off a phone screen; placement is measured now
+   (`lib/menuPlacement.ts`). And the click WebKit sends after every touch was
+   reaching the row underneath, so a long press opened the note it was only
+   asking about.
+
+   Deliberately not done here: the 390pt layout. The sidebar keeps its 224pt
+   and leaves the editor 161, which is bad and is not a reachability problem —
+   every verb in the specs above runs at that size. Panes, the drawer and the
+   single-pane tree §9 describes belong with the shell that has a real screen
+   (phase 3), not with a desktop window pretending to be small.
 3. **The Swift shell, without SSH.** WKWebView, the bundle, the bridge, the
    six client seams, and a `Duplex` fed by a plain TCP socket to a
    `ledge-server serve` on the LAN. It proves the view, the bridge, and §5's

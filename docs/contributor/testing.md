@@ -58,6 +58,11 @@ new rules should imitate:
   reaches for no global only Bun has (`shared/portable.test.ts`);
 - no two commands share a bare key on the same row kind, and every row verb
   declares its `targetKind` (`registry.test.ts`);
+- every command is reachable without a keyboard — in the palette, in a row
+  menu, or behind a control that runs it (`registry.test.ts`, interactions.md
+  §1a). The menus are JSX, so this one reads the components' source; the
+  exceptions are a named list, and an entry a menu item has since made
+  unnecessary fails too;
 - row verbs live in `listKeys`, never `keys` (`keys.test.ts`);
 - the held-modifier badges show the same keys `keys.ts` binds;
 - note verbs refuse a trash target and vice versa;
@@ -105,6 +110,17 @@ Rules:
   surface, like the clipboard.)
 - WebKit only, deliberately. A Chromium pass would green-light what the
   shipping engine then does differently.
+- **Two projects.** `webkit` is the desktop one and runs everything except
+  `phone.spec.ts`; `phone` is the same view at 390x844 with touch, a coarse
+  pointer and no chords, and runs `phone.spec.ts` alone (ios.md §13). The
+  split is deliberate in both directions: the desktop specs assert hovers and
+  hotkeys a phone does not have, and the phone specs assert affordances that
+  say nothing about a desktop. The viewport is overridden past the iPhone
+  descriptor's own, which is what mobile Safari leaves after its chrome — the
+  iOS client is a full-screen WKWebView with none. A long press is dispatched
+  rather than driven: Playwright's touchscreen taps and does nothing else, so
+  the spec sends `pointerdown`, waits for the menu, then sends the `pointerup`
+  and the `click` WebKit really would.
 - The fake store mirrors `bun/notes.ts` semantics (naming-by-heading,
   enumeration on collision, move-don't-unlink). If a spec needs behavior the
   fake lacks, extend the fake to match the real store — never the reverse.

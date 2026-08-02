@@ -4,8 +4,9 @@
 // Reload / Inspect Element, suppressed app-wide in App.tsx). Items are usually
 // CommandMenuItem (commands/CommandMenuItem.tsx), which renders straight from
 // the command registry.
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
+import { placeMenu } from "@/lib/menuPlacement";
 import { pushLayer } from "@/commands/layers";
 
 export function ContextMenu({
@@ -24,6 +25,23 @@ export function ContextMenu({
   children: ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  // Where it actually goes, once its height is known. The first render places
+  // it naively at the anchor and the layout effect corrects before paint, so
+  // nothing flashes; height cannot be guessed, because a note's menu and a
+  // trashed note's are different lengths and a phone's bottom row is where
+  // that difference shows.
+  const [at, setAt] = useState({ x, y });
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    setAt(
+      placeMenu(
+        { x, y },
+        { w: el.offsetWidth, h: el.offsetHeight },
+        { w: window.innerWidth, h: window.innerHeight },
+      ),
+    );
+  }, [x, y]);
 
   useEffect(() => {
     const onDown = (e: PointerEvent) => {
@@ -45,15 +63,11 @@ export function ContextMenu({
     };
   }, [onClose]);
 
-  // Keep the menu on-screen: flip above / nudge left when it would overflow.
-  const left = Math.min(x, window.innerWidth - width - 8);
-  const top = Math.min(y, window.innerHeight - 88);
-
   return (
     <div
       ref={ref}
       role="menu"
-      style={{ left, top, width }}
+      style={{ left: at.x, top: at.y, width }}
       className="fixed z-50 rounded-md border bg-card p-1 text-card-foreground shadow-md"
     >
       {children}

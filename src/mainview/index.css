@@ -139,6 +139,23 @@ body {
   height: 100%;
 }
 
+/* Rows and tabs are objects, not prose (interactions.md §1a). A press held on
+   one opens its menu, and on a touch screen the platform's own answer to that
+   gesture — the text-selection callout, with its magnifier and its handles —
+   would arrive on top of ours over text nobody is trying to select. Selection
+   is turned off where it was never wanted anyway: a note title in the sidebar
+   is a label for a file, and the file is what the row's verbs act on.
+
+   Deliberately NOT touch-action: a row sits inside a scrolling list, and a
+   finger that starts on a row is how you scroll it. That gesture wins — the
+   press cancels itself when the finger travels (useRowMenu.ts). */
+[data-list-row],
+[data-tab] {
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
 /* --- Tab strip ----------------------------------------------------------------
    The tab bar's scrolling region (workspace/PaneTree.tsx). Tabs overflowing the
    pane scroll horizontally, but never show a scrollbar: a bar would eat the

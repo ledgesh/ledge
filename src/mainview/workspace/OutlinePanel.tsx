@@ -23,6 +23,7 @@ import { tooltip } from "@/commands/format";
 import { targetAttrs } from "@/commands/target";
 import type { CommandTarget } from "@/commands/types";
 import { useListNav } from "@/lib/useListNav";
+import { useRowMenu } from "@/lib/useRowMenu";
 import { onDocChanged } from "@/editor/docEvents";
 import { headingsOf, type NoteHeading } from "../../shared/wikilinks";
 import { getEditorView } from "./editorPool";
@@ -148,17 +149,14 @@ function HeadingRow({
   onJump: () => void;
   onContextMenu: (x: number, y: number) => void;
 }) {
+  const press = useRowMenu(onContextMenu, onJump);
   return (
     <div
       {...rowProps}
       {...targetAttrs(targetOf(docId, h))}
+      {...press}
       className="flex cursor-default items-center gap-2 rounded-md py-1 pr-2 outline-none hover:bg-accent/50 focus-visible:ring-1 focus-visible:ring-ring"
       style={{ paddingLeft: 8 + (h.level - 1) * 14 }}
-      onClick={onJump}
-      onContextMenu={(e) => {
-        e.preventDefault();
-        onContextMenu(e.clientX, e.clientY);
-      }}
     >
       <span
         className={`min-w-0 flex-1 truncate text-[13px] leading-tight ${h.level === 1 ? "font-medium" : ""}`}

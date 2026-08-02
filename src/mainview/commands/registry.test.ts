@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { readdirSync, readFileSync } from "node:fs";
 import { initialState, reducer, type Action, type AppState } from "@/workspace/store";
 import { buildCommands, paletteItems } from "./registry";
 import { parseKey, resolveChord, DEFAULT_DOMAINS, type FocusDomain } from "./keymap";
@@ -156,6 +157,51 @@ describe("registry", () => {
         targetKind: expect.any(String),
       });
     }
+  });
+
+  // interactions.md §1a, made a test rather than a paragraph (testing.md §3).
+  // A touch client has exactly two general surfaces — the palette, reached
+  // from the chrome control, and the row menus, reached by a long press — so a
+  // command that is in neither has to be reachable by tapping something, and
+  // if it is not, it does not exist on a phone at all.
+  //
+  // The exceptions are listed rather than inferred: a `palette: false` command
+  // with no menu item and no tap is exactly the bug this catches, and a
+  // regex over ids would hide it.
+  const TAPPED: Record<string, string> = {
+    "palette.commands":
+      "the overlay's `>` crossing, inside the overlay the chrome's own control opens",
+    "workspace.open": "tapping a workspace row IS switching to it",
+    "terminal.close": "the drawer's ✕, plus Toggle Terminal in the palette",
+    "tag.open": "tapping a tag row drills into it",
+  };
+  // ⌃1…9 by tab index: the tab itself is the affordance and the chord is only
+  // its accelerator, so there are nine of these and one reason.
+  const TAB_INDEX = /^tab\.select\.[1-9]$/;
+
+  test("every command is reachable without a keyboard", () => {
+    // Which commands a menu carries, read off the components that render them
+    // — the registry cannot know, since a menu is JSX.
+    const inAMenu = new Set<string>();
+    for (const file of readdirSync("src/mainview", { recursive: true })) {
+      if (typeof file !== "string" || !file.endsWith(".tsx")) continue;
+      const source = readFileSync(`src/mainview/${file}`, "utf8");
+      for (const item of source.match(/<CommandMenuItem[\s\S]*?\/>/g) ?? [])
+        for (const id of item.match(/"[\w.]+"/g) ?? []) inAMenu.add(id.slice(1, -1));
+    }
+
+    const unreachable = commands
+      .filter((c) => c.palette === false && !inAMenu.has(c.id) && !TAB_INDEX.test(c.id))
+      .map((c) => c.id)
+      .filter((id) => !(id in TAPPED));
+    expect(unreachable).toEqual([]);
+
+    // And the list stays honest: an entry that a menu item has since made
+    // unnecessary is removed, not left to accumulate.
+    const covered = Object.keys(TAPPED).filter(
+      (id) => !commands.some((c) => c.id === id) || inAMenu.has(id),
+    );
+    expect(covered).toEqual([]);
   });
 
   test("enablement: workspace.close needs a second workspace", () => {
