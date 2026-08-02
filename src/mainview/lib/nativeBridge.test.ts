@@ -4,7 +4,14 @@
 // and only the three lines that touch WebKit are not.
 import { describe, expect, test } from "bun:test";
 import { CLIENT_METHODS, fromBase64, REQUEST_METHODS, toBase64, type RequestClient } from "../../shared/wire";
-import { iosClientMethods, nativeOverlay, nativeShell, SHELL_CALLS, type ToShell } from "./nativeBridge";
+import {
+  focusReporter,
+  iosClientMethods,
+  nativeOverlay,
+  nativeShell,
+  SHELL_CALLS,
+  type ToShell,
+} from "./nativeBridge";
 
 function recorder() {
   const sent: ToShell[] = [];
@@ -153,6 +160,47 @@ describe("a button on the keyboard bar", () => {
     await Promise.resolve();
     expect(settled).toBe(false);
     expect(sent.at(-1)).toEqual({ t: "call", id: 1, m: "clipboard.read", p: {} });
+  });
+
+  test("and the bar is only offered over the editor", () => {
+    const { shell, sent } = recorder();
+    shell.editing(true);
+    expect(sent.at(-1)).toEqual({ t: "call", id: 1, m: "@editing", p: { on: true } });
+    shell.editing(false);
+    expect(sent.at(-1)).toEqual({ t: "call", id: 2, m: "@editing", p: { on: false } });
+  });
+});
+
+// The filter in front of that call. Focus events come in pairs and the editor
+// keeps focus across most of them; what the shell needs is the transitions.
+describe("what the keyboard is over, reported only when it changes", () => {
+  test("the steady state costs nothing", () => {
+    const told: boolean[] = [];
+    const report = focusReporter((on) => told.push(on));
+    report(true);
+    report(true);
+    report(true);
+    expect(told).toEqual([true]);
+  });
+
+  test("a page that has focused nothing yet says nothing", () => {
+    // The shell's own flag starts false and a reload resets it, so an opening
+    // `false` would be a bridge call that changes nothing — and, worse, a
+    // reloadInputViews on a keyboard that is not up.
+    const told: boolean[] = [];
+    const report = focusReporter((on) => told.push(on));
+    report(false);
+    expect(told).toEqual([]);
+  });
+
+  test("the editor to the search box, and back", () => {
+    const told: boolean[] = [];
+    const report = focusReporter((on) => told.push(on));
+    report(true); // a tap in the note
+    report(false); // the overlay's input takes it
+    report(false); // the focusout and the focusin both fired
+    report(true); // the overlay closed and the editor has it again
+    expect(told).toEqual([true, false, true]);
   });
 });
 

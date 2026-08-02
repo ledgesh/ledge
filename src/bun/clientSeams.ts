@@ -35,6 +35,13 @@ export interface ClientNative {
   // suite must never read the developer's own — which is why the paste seam
   // is the one that takes a dependency and the text ones do not.
   readImage?(): Promise<Uint8Array | null>;
+  // A picture chosen from this device, as PNG bytes, or null where the user
+  // cancelled. The macOS file dialog here and PHPicker on iOS (ios.md §11).
+  // Optional for readImage's reasons and one more: a client with no picker is a
+  // client where Insert Image… answers null, which is what a cancelled picker
+  // answers too, so the seam degrades into the outcome the view already
+  // handles.
+  pickImage?(): Promise<Uint8Array | null>;
 }
 
 // NATIVE_METHODS, CONNECTION_METHODS and CLIENT_METHODS are shared/wire.ts's:
@@ -129,6 +136,15 @@ export function clientSeams(
     // only after the editor has already declined to paste it as text.
     assetPaste: async ({ root, notePath }) => {
       const bytes = await (native.readImage ?? readClipboardImage)();
+      if (!bytes || bytes.length === 0) return { src: null };
+      return server.assetWrite({ root, notePath, dataB64: Buffer.from(bytes).toString("base64") });
+    },
+    // The same trip from a picker rather than a pasteboard. Identical below the
+    // first line, deliberately: what differs between "paste an image" and
+    // "insert an image" is where the bytes come from and nothing else, and the
+    // half that names the file is the server's in both cases.
+    assetPick: async ({ root, notePath }) => {
+      const bytes = await native.pickImage?.();
       if (!bytes || bytes.length === 0) return { src: null };
       return server.assetWrite({ root, notePath, dataB64: Buffer.from(bytes).toString("base64") });
     },

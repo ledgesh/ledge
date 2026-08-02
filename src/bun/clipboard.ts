@@ -119,6 +119,46 @@ export async function readClipboardHtml(): Promise<string> {
 // over.
 let tmpCounter = 0;
 
+/**
+ * A file the user picked, as image bytes the server can store, or null when it
+ * is not a picture at all.
+ *
+ * The other end of Insert Image… on a Mac (ios.md §11's photo picker is the
+ * phone's answer to the same verb). The picker itself is the caller's; this is
+ * what happens to what it chose.
+ *
+ * **PNG and JPEG pass through untouched**, which is the whole point: those are
+ * what `assetWrite` stores and what a note can render, and re-encoding a
+ * photograph as a lossless PNG multiplies its size by roughly ten for no gain
+ * anybody can see. Everything else — a HEIC, a TIFF, a PDF page — goes through
+ * `sips`, which ships with macOS, refuses what it cannot decode, and so answers
+ * "is this a picture" and "make it one I can store" in the same call.
+ */
+export async function imageFromFile(path: string): Promise<Uint8Array | null> {
+  const original = await readFile(path).catch(() => null);
+  if (!original) return null;
+  const bytes = new Uint8Array(original);
+  const png = bytes.length >= 4 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47;
+  const jpeg = bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+  if (png || jpeg) return bytes;
+
+  await ensureClientHome();
+  tmpCounter += 1;
+  const tmp = join(CLIENT_HOME, `.pick.tmp-${process.pid}-${tmpCounter}.png`);
+  try {
+    const p = Bun.spawn(["sips", "-s", "format", "png", path, "--out", tmp], {
+      stdout: "ignore",
+      stderr: "ignore",
+    });
+    if ((await p.exited) !== 0) return null;
+    return new Uint8Array(await readFile(tmp));
+  } catch {
+    return null; // no sips (non-macOS), or the file was not a picture
+  } finally {
+    await unlink(tmp).catch(() => {});
+  }
+}
+
 export async function readClipboardImage(): Promise<Uint8Array | null> {
   await ensureClientHome();
   tmpCounter += 1;

@@ -51,6 +51,12 @@
        Simulator shares this Mac's network stack and never asks. -->
   <key>NSLocalNetworkUsageDescription</key>
   <string>Ledge connects over SSH to the Ledge server on your own machine.</string>
+  <!-- NSPhotoLibraryUsageDescription is deliberately absent. Insert Image… uses
+       PHPicker (ios/Sources/PhotoPicker.swift), which runs out of process and
+       hands back only the picture the user chose, so the app never asks for
+       library access and never has it. A usage string here would be a sentence
+       describing something this app does not do, and would make the App Store
+       ask about a capability it does not use. -->
   <!-- What the pairing screen starts with, and only that: a destination is not
        a pin, and the host key still has to be confirmed on the phone. Overridden
        per launch by `simctl launch … -LedgeServer user@host`, which is how a

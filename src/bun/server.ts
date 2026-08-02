@@ -109,6 +109,7 @@ function clientSeamRefusals(): Pick<RequestHandlers, ClientMethod> {
     clipboardWrite: refuse("clipboardWrite"),
     clipboardReadRich: refuse("clipboardReadRich"),
     assetPaste: refuse("assetPaste"),
+    assetPick: refuse("assetPick"),
     linkOpen: refuse("linkOpen"),
     menuSet: refuse("menuSet"),
     connectionList: refuse("connectionList"),
@@ -470,6 +471,11 @@ export async function createServer(deps: {
     workspaceList: () => ({
       workspaces: listWorkspaceRoots(),
       dailyRoot: resolveConfiguredWorkspace(settings.daily.workspace, roots()),
+      // The same condition the two verbs below check before refusing. Reported
+      // once at boot so the view can leave them out of the palette instead:
+      // NO_DIALOG is a good sentence to read and a bad one to discover by
+      // running the only verb that looked like it would help.
+      folderDialog: !!native.pickFolder,
     }),
     workspaceCreate: async ({ name }) => {
       const root = await createManaged(name);

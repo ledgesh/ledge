@@ -25,6 +25,7 @@ import { APP_HOME } from "./workspaces";
 import { createServer, type NativeDeps } from "./server";
 import type { RequestHandlers, ServerPush } from "../shared/wire";
 import { clientOverlay, type ClientNative } from "./clientSeams";
+import { imageFromFile } from "./clipboard";
 import { clientId } from "./clientHome";
 import { createConnectionManager, type Attached } from "./connectionManager";
 import { KNOWN_HOSTS_PATH, sshCommand, userKnownHosts, type Connection } from "./connections";
@@ -95,8 +96,8 @@ const native: NativeDeps = {
 };
 
 // The seams that stay on this side of every connection (remote.md §10): the
-// pasteboard, the browser, and the menu bar are this Mac's, local server or
-// remote. AppKit supplies the two native halves.
+// pasteboard, the picture library, the browser, and the menu bar are this
+// Mac's, local server or remote. AppKit supplies the native halves.
 const clientNative: ClientNative = {
   clipboardFormats: () => {
     try {
@@ -106,6 +107,25 @@ const clientNative: ClientNative = {
       // pasteboard anyway.
       return null;
     }
+  },
+  // Insert Image…, on the machine with the screen. The phone's answer to the
+  // same verb is PHPicker (ios.md §11); this one is the file dialog, and the
+  // conversion behind it is what turns "any file the user picked" into bytes
+  // assetWrite can store (bun/clipboard.ts imageFromFile). A picked file that is
+  // not a picture comes back null — the same answer as a cancelled dialog, which
+  // the view already treats as "nothing to insert".
+  pickImage: async () => {
+    // pickFolder's comma caveat, for the same FFI: re-join and let the read
+    // refuse a path that does not exist rather than guessing where to split.
+    const picked = (
+      await Utils.openFileDialog({
+        startingFolder: homedir(),
+        canChooseFiles: true,
+        canChooseDirectory: false,
+        allowsMultipleSelection: false,
+      })
+    ).join(",");
+    return picked ? imageFromFile(picked) : null;
   },
   setMenu: (items) => ApplicationMenu.setApplicationMenu(items as ApplicationMenuItemConfig[]),
 };

@@ -6,7 +6,7 @@ import WebKit
 /// This is the whole of what Swift does with the protocol, which is nothing:
 /// a frame arrives from the page as base64 and goes down the socket as bytes,
 /// and bytes off the socket go up as base64. No frame is parsed here and no
-/// method name is understood except the ten in `SHELL_CALLS`
+/// method name is understood except the twelve in `SHELL_CALLS`
 /// (mainview/lib/nativeBridge.ts), which are the things only a device can
 /// answer.
 final class WebHost: UIViewController {
@@ -25,6 +25,15 @@ final class WebHost: UIViewController {
     /// is captured by the accessory getter installed on the web view's content
     /// view, so it has to outlive the call that installs it.
     private var accessory: UIView?
+    /// Whether what the keyboard is over is the EDITOR, as the page reports it.
+    /// One content view is the first responder for every field in the page, so
+    /// without this the formatting bar would appear over the search box and the
+    /// passphrase prompt as well.
+    private var editorFocused = false
+    /// The view to re-ask when it changes. Focus moving from the editor to
+    /// the search box is not a responder change, so UIKit has no reason to
+    /// call the getter again unless it is told to.
+    private weak var editingSurface: UIView?
     /// While the app is away, a dial is refused rather than attempted. iOS
     /// gives about thirty seconds of background execution and the page's
     /// reconnect ladder is 31.75s long (ios.md §5), so without this the whole
@@ -73,9 +82,26 @@ final class WebHost: UIViewController {
         // where it declines to set viewport-fit). One set of constraints beats
         // env(safe-area-inset-*) threaded through a layout that also has to
         // work in a desktop window.
+        //
+        // The bottom is the keyboard's, and that is the whole of ios.md §7's
+        // keyboard rule. A page pinned to the safe area keeps its full height
+        // when the keyboard comes up, so WebKit reveals the caret the only way
+        // left to it: by scrolling the document — which on a full-height app
+        // means scrolling the header and the tab strip off the top of the
+        // screen. Constrained to the keyboard instead, the page is simply
+        // shorter while the keyboard is up, the chrome stays where it is, and
+        // the editor's own scroller does the revealing.
+        //
+        // Two constraints rather than one because the guide sits at the view's
+        // bottom edge when no keyboard is up, which is BELOW the safe area: the
+        // required one is the floor, and the keyboard's is high-priority so it
+        // can lose to it.
+        let toKeyboard = web.bottomAnchor.constraint(equalTo: root.keyboardLayoutGuide.topAnchor)
+        toKeyboard.priority = .defaultHigh
         NSLayoutConstraint.activate([
             web.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor),
-            web.bottomAnchor.constraint(equalTo: root.safeAreaLayoutGuide.bottomAnchor),
+            web.bottomAnchor.constraint(lessThanOrEqualTo: root.safeAreaLayoutGuide.bottomAnchor),
+            toKeyboard,
             web.leadingAnchor.constraint(equalTo: root.safeAreaLayoutGuide.leadingAnchor),
             web.trailingAnchor.constraint(equalTo: root.safeAreaLayoutGuide.trailingAnchor),
         ])
@@ -194,20 +220,34 @@ extension WebHost: WKNavigationDelegate {
     /// content view rebuilt by one would otherwise come back with the system's
     /// bar and no way to indent.
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        // A fresh page has focused nothing yet, and a reload that kept the flag
+        // set would put the bar over whatever the new page focuses first.
+        editorFocused = false
         if accessory == nil {
-            accessory = AccessoryBar.make { [weak self] id in
-                // The page decides what the id means; this end only says which
-                // button was pressed (mainview/lib/menu.ts).
-                self?.deliver(["t": "verb", "id": id])
-            }
+            accessory = AccessoryBar.make(
+                tapped: { [weak self] id in
+                    // The page decides what the id means; this end only says
+                    // which button was pressed (mainview/lib/menu.ts).
+                    self?.deliver(["t": "verb", "id": id])
+                },
+                // Not routed through the page: putting the keyboard away is
+                // this end's business, and `endEditing` reaches the private
+                // first responder that a blur() in the page would have to find
+                // by guessing which element is focused.
+                dismiss: { [weak self] in self?.webView.endEditing(true) }
+            )
         }
-        guard let accessory else { return }
-        if !webView.installAccessoryView(accessory) {
+        let surface = webView.installAccessoryView { [weak self] in
+            self?.editorFocused == true ? self?.accessory : nil
+        }
+        guard let surface else {
             // Not fatal, and worth a line: the app keeps the system's bar, so
             // the symptom is a missing strip rather than anything broken, and
             // this is the only place that would say why.
             print("[shell] no accessory bar: the web view's content view was not found")
+            return
         }
+        editingSurface = surface
     }
 }
 
@@ -243,6 +283,18 @@ extension WebHost: WKScriptMessageHandler {
         case "@log":
             print("[view] \(params["text"] as? String ?? "")")
             reply(id, NSNull())
+        // `editing` on the wire; `editorFocused` here, because UIViewController
+        // already has an `editing` and a stored property cannot override it.
+        case "@editing":
+            let on = params["on"] as? Bool ?? false
+            if on != editorFocused {
+                editorFocused = on
+                // The responder has not changed — focus moved between two
+                // fields on one page — so UIKit will keep the bar it already
+                // has until it is asked again.
+                editingSurface?.reloadInputViews()
+            }
+            reply(id, NSNull())
         case "clipboard.read":
             reply(id, Natives.clipboardRead())
         case "clipboard.write":
@@ -252,6 +304,11 @@ extension WebHost: WKScriptMessageHandler {
             reply(id, Natives.clipboardReadRich())
         case "clipboard.image":
             reply(id, Natives.clipboardImage())
+        case "photos.pick":
+            // The one call that waits on a person. The reply is deferred until
+            // the picker closes, which the bridge already allows for — a call
+            // is a promise and nothing about it is timed on this end.
+            PhotoPicker.pick(over: self) { [weak self] base64 in self?.reply(id, base64) }
         case "link.open":
             reply(id, ["ok": Natives.linkOpen(params["url"] as? String ?? "")])
         case "menu.set":

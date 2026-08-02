@@ -36,7 +36,7 @@ import {
   type RequestClient,
 } from "../../shared/wire";
 
-/** What Swift implements: ten strings and a flat switch. */
+/** What Swift implements: twelve strings and a flat switch. */
 export const SHELL_CALLS = [
   // The bridge's own verbs, `@`-prefixed because no schema method can ever
   // collide with them. `@hello` is asked once, before any socket exists: the
@@ -50,6 +50,12 @@ export const SHELL_CALLS = [
   // default, and the window this matters most in is the one before a server is
   // reachable, when nothing can be written to its log either.
   "@log",
+  // Whether what the keyboard is over is the editor. One private content view
+  // is the first responder for every field in the page, so the shell cannot
+  // tell a note from a search box by itself, and the accessory bar it hangs off
+  // that responder would otherwise offer Bold over a passphrase prompt
+  // (ios.md §7).
+  "@editing",
   // The device's five answers. `menu.set` is a no-op on a phone (ios.md §11)
   // and is here anyway, because a shell that silently lacked a method would
   // be a hang rather than an error.
@@ -57,6 +63,10 @@ export const SHELL_CALLS = [
   "clipboard.write",
   "clipboard.readRich",
   "clipboard.image",
+  // The photo library, as PNG bytes (ios.md §11). Slow by the standards of
+  // everything else here — it puts a whole system picker on the screen and
+  // waits for a person — and answers "" for a cancel, which is the common case.
+  "photos.pick",
   "link.open",
   "menu.set",
 ] as const;
@@ -111,6 +121,10 @@ export interface Shell {
   /** A line on the shell's console, for the window where nothing else can
    * carry one. Never rejects: a log line is not worth a failure. */
   log(text: string): void;
+  /** Say whether the editor is what has focus, so the shell knows whether the
+   * keyboard it is about to show is over a note. Idempotent and cheap: only
+   * transitions are sent. */
+  editing(on: boolean): void;
   /** Told when the app comes back to the foreground. */
   onResume(fn: () => void): void;
   /** Told when a bar button was tapped, by command id. */
@@ -152,6 +166,10 @@ export function nativeShell(post: (msg: ToShell) => void): Shell {
 
     log(text) {
       void call("@log", { text }).catch(() => {});
+    },
+
+    editing(on) {
+      void call("@editing", { on }).catch(() => {});
     },
 
     onResume(fn) {
@@ -215,6 +233,27 @@ export function nativeShell(post: (msg: ToShell) => void): Shell {
 }
 
 /**
+ * The transition filter in front of `@editing`: pass it what has focus now, it
+ * calls `tell` only when the answer changed.
+ *
+ * Pure, and separate from the listener that feeds it, because the listener is
+ * three lines of DOM and this is the part with state. Focus events arrive in
+ * pairs — a focusout and a focusin per move — and the editor keeps focus across
+ * most of them, so an unfiltered reporter would cross the bridge on every
+ * caret move inside one note.
+ */
+export function focusReporter(tell: (on: boolean) => void): (editorFocused: boolean) => void {
+  // Not `false`: the shell's own default is false, and starting in step with it
+  // means the first report is sent only if it says something.
+  let last = false;
+  return (editorFocused) => {
+    if (editorFocused === last) return;
+    last = editorFocused;
+    tell(editorFocused);
+  };
+}
+
+/**
  * The server's handlers with the client's own laid over the top: the same
  * overlay bun/clientSeams.ts applies on a Mac, for a shell whose natives are
  * Swift's.
@@ -263,6 +302,16 @@ function clientSeams(
     // and neither does the shell (remote.md §2).
     assetPaste: async ({ root, notePath }) => {
       const dataB64 = (await shell.call("clipboard.image", {})) as string;
+      if (!dataB64) return { src: null };
+      return requests.assetWrite({ root, notePath, dataB64 });
+    },
+    // The one above with a photo library where the pasteboard was, which is
+    // §11's sentence made literal. It is also the only one of the two that
+    // matters here: a phone has a pasteboard, but nothing on it got there by
+    // being copied out of a browser, and the picture worth inserting is the one
+    // the camera took.
+    assetPick: async ({ root, notePath }) => {
+      const dataB64 = (await shell.call("photos.pick", {})) as string;
       if (!dataB64) return { src: null };
       return requests.assetWrite({ root, notePath, dataB64 });
     },

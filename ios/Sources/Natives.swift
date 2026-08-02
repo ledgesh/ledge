@@ -5,10 +5,12 @@ import UIKit
 /// These exist because the machine holding the notes is the wrong machine to
 /// ask. A VPS has no pasteboard, and a link opened on it opens in a browser
 /// nobody is looking at. The Mac's copies are bun/clientSeams.ts; these are the
-/// same six seams for a device where the answers are UIKit's.
+/// same seams for a device where the answers are UIKit's.
 ///
-/// The menu bar is the sixth, and a phone has none — the page answers `menuSet`
-/// itself rather than calling in here (ios.md §11).
+/// Two of them are not here. The menu bar, because a phone has none and the
+/// page answers `menuSet` itself (ios.md §11); and the picture library, which
+/// has its own file because it is the only seam that puts a screen up and waits
+/// for a person (PhotoPicker.swift).
 enum Natives {
     static func clipboardRead() -> String {
         UIPasteboard.general.string ?? ""

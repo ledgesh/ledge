@@ -1,4 +1,4 @@
-// The view end of the image-asset RPCs (assetRead / assetPaste), a configureX
+// The view end of the image-asset RPCs (assetRead / assetPaste / assetPick), a configureX
 // seam like clipboard.ts: main.tsx binds it to the live RPC, the harness binds
 // an in-memory fake, and editor/images.ts stays testable without either.
 //
@@ -16,15 +16,20 @@
 // locking.md §5), or null (missing/broken).
 export type AssetReadResult = { dataB64: string; mime: string } | { sealed: true } | null;
 
+type ProduceAsset = (folder: string, notePath: string | null) => Promise<string | null>;
+
 let readHandler: ((folder: string, src: string) => Promise<AssetReadResult>) | null = null;
-let pasteHandler: ((folder: string, notePath: string | null) => Promise<string | null>) | null = null;
+let pasteHandler: ProduceAsset | null = null;
+let pickHandler: ProduceAsset | null = null;
 
 export function configureAssets(fns: {
   read: (folder: string, src: string) => Promise<AssetReadResult>;
-  pasteImage: (folder: string, notePath: string | null) => Promise<string | null>;
+  pasteImage: ProduceAsset;
+  pickImage: ProduceAsset;
 }): void {
   readHandler = fns.read;
   pasteHandler = fns.pasteImage;
+  pickHandler = fns.pickImage;
 }
 
 // Resolved data: URLs by folder + markdown reference, so every redraw of a
@@ -64,4 +69,16 @@ export async function assetDataUrl(folder: string, src: string): Promise<string 
  */
 export function pasteImageAsset(folder: string, notePath: string | null = null): Promise<string | null> {
   return pasteHandler ? pasteHandler(folder, notePath) : Promise.resolve(null);
+}
+
+/**
+ * The same, from the device's picture PICKER rather than its pasteboard: the
+ * macOS file dialog, and on iOS the photo library (ios.md §11). Insert Image…
+ * calls this, and on a phone it is the only way an image gets into a note —
+ * there is no ⌘V there, and nothing has been copied.
+ *
+ * Resolves to null on a cancel, which is the common outcome and not a failure.
+ */
+export function pickImageAsset(folder: string, notePath: string | null = null): Promise<string | null> {
+  return pickHandler ? pickHandler(folder, notePath) : Promise.resolve(null);
 }

@@ -29,6 +29,7 @@ import { configureCli } from "./lib/cli";
 import { captureFailures, configureLog } from "./lib/log";
 import { configureAssets } from "./lib/assets";
 import { configureSettings } from "./lib/settings";
+import { recordFolderDialog } from "./lib/shell";
 import { configureConnections, recordLinkState, type ConnectionStatus } from "./lib/connections";
 import { applyAppearance } from "./lib/theme";
 import { DEFAULT_SETTINGS, type Settings } from "../shared/settings";
@@ -153,6 +154,7 @@ export function bootView(requests: RequestClient): Promise<void> {
   configureAssets({
     read: (folder, src) => requests.assetRead({ root: folder, src }).then((r) => (r.sealed ? { sealed: true as const } : r.image)),
     pasteImage: (folder, notePath) => requests.assetPaste({ root: folder, notePath }).then((r) => r.src),
+    pickImage: (folder, notePath) => requests.assetPick({ root: folder, notePath }).then((r) => r.src),
   });
 
   // The server owns the workspace folders; the view only ever holds roots and
@@ -238,6 +240,11 @@ async function boot(requests: RequestClient): Promise<void> {
     // Edit Daily Template faces (workspace/channel.ts).
     recordWorkspaceKinds(roots);
     recordDailyRoot(registry.dailyRoot);
+    // Whether the machine holding the notes has anybody at it to answer a
+    // folder picker (lib/shell.ts). Recorded here for the same reason the two
+    // above are: this fetch bypasses the channel wrapper, and it is the first
+    // round trip, so the answer is in place before the first palette opens.
+    recordFolderDialog(registry.folderDialog);
     const available = roots.filter((w) => w.available).map((w) => w.root);
     [settings, layout, connections] = await Promise.all([
       requests.settingsGet({}).then((r) => r.settings),

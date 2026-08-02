@@ -13,9 +13,11 @@ import { APP_HOME, createManaged, loadWorkspaces } from "./workspaces";
 import {
   assetsDirOf,
   assetPathOf,
+  extensionFor,
   imageMimeOf,
   readAsset,
   savePastedImage,
+  writePastedImage,
 } from "./assets";
 
 if (!resolve(APP_HOME).startsWith(resolve(tmpdir()) + sep)) {
@@ -151,6 +153,34 @@ describe("savePastedImage", () => {
     await savePastedImage(ROOT, BYTES);
     const names = await readdir(ASSETS);
     expect(names.filter((n) => n.startsWith("."))).toEqual([]);
+  });
+});
+
+// The name has to follow the bytes: imageMimeOf reads it back off the
+// extension, so a JPEG called .png is an image the browser has to sniff its way
+// into. It stopped being academic when the photo picker arrived (ios.md §11) —
+// a phone's pictures are photographs, and forcing them through PNG was a
+// tenfold size increase measured on the first one ever inserted.
+describe("the extension a paste is written under", () => {
+  const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]);
+  const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
+
+  test("JPEG bytes are named .jpg, and read back as image/jpeg", async () => {
+    const src = await writePastedImage(ROOT, JPEG);
+    expect(src).toMatch(/\.jpg$/);
+    expect(imageMimeOf(src!)).toBe("image/jpeg");
+  });
+
+  test("PNG bytes, and anything unrecognised, stay .png", async () => {
+    expect(await writePastedImage(ROOT, PNG)).toMatch(/\.png$/);
+    expect(await writePastedImage(ROOT, new Uint8Array([1, 2, 3, 4]))).toMatch(/\.png$/);
+  });
+
+  test("a truncated header is not read past its end", () => {
+    // Reachable: assetWrite takes whatever bytes a client sent, and a client is
+    // the least-trusted end (remote.md §2).
+    expect(extensionFor(new Uint8Array([]))).toBe(".png");
+    expect(extensionFor(new Uint8Array([0xff, 0xd8]))).toBe(".png");
   });
 });
 

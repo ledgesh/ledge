@@ -276,6 +276,22 @@ expect to `simctl boot` yours again. With it off, the audit in ios.md §7 is
 tappable: individual letter keys go through iOS's own input path, and
 `touch_path` across the letters IS a QuickPath swipe.
 
+**It also comes back on its own, and the symptom is not obvious.** A session
+long enough to build and relaunch a few times can find the hardware keyboard
+reattached, which looks like a bug in the app rather than in the Simulator: the
+accessory bar appears docked at the bottom of the screen with no keys above it,
+because that is exactly what iOS shows when a hardware keyboard is connected.
+Quit and reopen Simulator and it is right again. Anything about LAYOUT under the
+keyboard — which is most of what ios.md §7 now settles — is untestable in that
+state, because the keyboard that would change the layout never appears.
+
+**Rebuild the container after any schema change.** `ledge-sshd:probe` bakes the
+server in, and the handshake fingerprints the schema on both ends (remote.md
+§11), so a client built from a newer `rpc-schema.ts` is refused by an older
+image with "the server refused this client: schema … on the server". That is the
+check working, and it is a full `docker build` of both images to clear, which
+also loses the workspace the probe seeded.
+
 Tear down by uninstalling the app (`simctl uninstall`), `docker rm -f`, and
 checking that nothing still listens on 22.
 

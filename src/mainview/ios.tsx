@@ -13,8 +13,9 @@
 import { reconnectingClient } from "../shared/transport";
 import { BUILD_VERSION } from "../shared/version";
 import { bootView, viewPush } from "./boot";
-import { attachShell, nativeOverlay } from "./lib/nativeBridge";
+import { attachShell, focusReporter, nativeOverlay, type Shell } from "./lib/nativeBridge";
 import { dispatchNativeCommand } from "./lib/menu";
+import { configureShell } from "./lib/shell";
 
 // Milestones, in milliseconds since the page began loading.
 //
@@ -33,6 +34,15 @@ const painted = (): Promise<void> =>
   new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
 
 async function start(): Promise<void> {
+  // v1 on a phone does not run commands (ios.md §8). Set before anything
+  // renders, because what this decides is which verbs EXIST: a terminal button
+  // that appears for one frame and then leaves is worse than either answer.
+  //
+  // Cut for its interaction surface, not because it cannot work — the daemon on
+  // the other end spawns PTYs perfectly well — so this is one boolean and no
+  // code removed, and the phase after v1 turns it back on.
+  configureShell({ runsCommands: false });
+
   const shell = attachShell();
   mark("bridge");
   // Before the first dial: the client id keys the saved layout, and a phone
@@ -79,6 +89,7 @@ async function start(): Promise<void> {
   // mounts, which is the right answer to a button pressed before there is an
   // editor to press it against.
   shell.onVerb((id) => dispatchNativeCommand(id));
+  watchEditorFocus(shell);
 
   // Choosing the server again, from the connection chrome, is the same boot:
   // the ladder gives up for good when a restarted server answers with a new
@@ -89,6 +100,29 @@ async function start(): Promise<void> {
   await painted();
   mark("paint");
   shell.log(`[boot] ${destination}, ledge-server ${peer.build}: ${marks.join(" ")}`);
+}
+
+/**
+ * Tell the shell when the editor is what the keyboard is over (ios.md §7).
+ *
+ * Here rather than in the view, because it is a fact about this shell and no
+ * other: on a Mac nothing hangs off which element has focus, and the view has
+ * no business knowing that a phone's accessory bar exists. The editor is asked
+ * for by class, which is CodeMirror's own contract for its editable element and
+ * the same handle every spec in `e2e/` reaches for.
+ *
+ * Deferred to a timeout, and a microtask is not enough: microtasks drain
+ * between event listeners, so a check queued from `focusout` would still run
+ * while `activeElement` is the body and report a blur that the `focusin` a
+ * moment later contradicts. A timeout runs after the whole move has settled,
+ * and the pair of them collapses to one report.
+ */
+function watchEditorFocus(shell: Pick<Shell, "editing">): void {
+  const report = focusReporter((on) => shell.editing(on));
+  const later = (): void =>
+    void setTimeout(() => report(!!document.activeElement?.closest(".cm-content")), 0);
+  document.addEventListener("focusin", later, true);
+  document.addEventListener("focusout", later, true);
 }
 
 /**

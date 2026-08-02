@@ -12,7 +12,7 @@ import { ledgeBlocks } from "./blocks";
 import { ledgeFrontmatter } from "./frontmatter";
 import { livePreview } from "./livePreview";
 import { tableRendering } from "./tables";
-import { imagePasteInsert, imageRendering } from "./images";
+import { embedImage, imageRendering } from "./images";
 import { fenceClose } from "./fences";
 import { quoteExit } from "./quotes";
 import { listContinuation, tightLists } from "./lists";
@@ -196,22 +196,10 @@ const clipboardKeymap = Prec.highest(
             return;
           }
           // The pasted image belongs to this note's workspace: its reference
-          // will resolve against that folder. No folder (an editor outside
-          // the pool, e.g. a test) means nowhere to save — skip.
-          const folder = folderOf(view.state.facet(sessionIdFacet));
-          if (!folder) return;
-          // The note's own path rides along: Bun seals the paste at birth
-          // when the pasting note is LOCKED (locking.md §5) — decided
-          // from the disk, the path is only the address.
-          const src = await pasteImageAsset(folder, pathOf(view.state.facet(sessionIdFacet)));
-          if (!src) return;
-          const sel = view.state.selection.main;
-          const { insert, cursor } = imagePasteInsert(view.state.doc, sel, src);
-          view.dispatch({
-            changes: { from: sel.from, to: sel.to, insert },
-            selection: { anchor: sel.from + cursor },
-            userEvent: "input.paste",
-          });
+          // will resolve against that folder. The rest — where the caret ends
+          // up, what a null answer means — is shared with Insert Image…, which
+          // differs from this only in where the bytes come from.
+          await embedImage(view, pasteImageAsset);
         });
         return true;
       },

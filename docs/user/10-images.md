@@ -14,6 +14,14 @@ Ledge embeds only when the pasteboard holds an image and no text. A pasteboard h
 
 The file lands in `.ledge-assets/` inside the workspace folder, named by paste date. An attached project folder carries its pasted images with it, and the references stay relative. The folder is dot-prefixed so that Ledge's writes are identifiable inside a real project.
 
+## Insert a picture you have not copied
+
+Run **Insert Image…** from the palette to pick a picture instead of pasting one. Ledge saves it and inserts the reference exactly as a paste does.
+
+On a Mac this opens a file dialog. On a phone it opens the photo library, and the button for it sits on the bar above the keyboard: a phone has no ⌘V, so this is the way pictures get into a note there.
+
+A picture chosen this way is saved as a JPEG when it already is one (a photograph off a camera roll stays a tenth of the size it would be as a PNG), and as a PNG otherwise. Location data is not carried over.
+
 ## What renders
 
 Two kinds of source draw as images:

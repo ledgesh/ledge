@@ -499,15 +499,17 @@ timer already measures.
 - **Locked plaintext to an agent surface**, per §9.
 - **A path the client constructed.** Per §2.
 
-**Six RPC entries are the client's outright** and never become frames
+**Seven RPC entries are the client's outright** and never become frames
 (`bun/clientSeams.ts`, whose `CLIENT_METHODS` is the list both ends read):
 `clipboardWrite`, `clipboardRead`, `clipboardReadRich`, `assetPaste`,
-`linkOpen`, and `menuSet`. Opening a URL happens on the device the user is
-holding, not on the VPS, and a headless server handed the view's menu would
-swallow ⌘Q with it. The five connection entries (§8) join them for a different
-reason: a server has no business knowing which servers this client can reach.
+`assetPick`, `linkOpen`, and `menuSet`. Opening a URL happens on the device the
+user is holding, not on the VPS; the picture you want to insert is in that
+device's photo library or on its disk (ios.md §11); and a headless server handed
+the view's menu would swallow ⌘Q with it. The five connection entries (§8) join
+them for a different reason: a server has no business knowing which servers this
+client can reach.
 
-The server implements all eleven as REFUSALS rather than omitting them, because
+The server implements all twelve as REFUSALS rather than omitting them, because
 the handler map is total by construction; reaching one means a client forgot
 its overlay, and `{text: ""}` back from a clipboard read would look exactly
 like an empty clipboard until somebody went looking. `bun/server.ts` now has no

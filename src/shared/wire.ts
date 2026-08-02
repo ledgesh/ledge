@@ -164,6 +164,7 @@ export const REQUEST_METHODS = [
   "logReveal",
   "assetRead",
   "assetPaste",
+  "assetPick",
   "assetWrite",
   "connectionList",
   "connectionSelect",
@@ -218,19 +219,22 @@ export type ClientPush = (typeof CLIENT_PUSHES)[number];
 // compile.
 
 /**
- * The native six: the pasteboard, the browser, and the menu bar.
+ * The native seven: the pasteboard, the picture library, the browser, and the
+ * menu bar.
  *
- * The pasteboard you copied from, the browser that should open a link, and the
- * menu bar at the top of the screen all belong to the device in front of the
- * user. Answering them on the server reaches the wrong machine — a VPS's empty
- * pasteboard, a link opened in a browser nobody is looking at, a menu bar that
- * does not exist and takes ⌘Q with it (remote.md §10).
+ * The pasteboard you copied from, the photos you took, the browser that should
+ * open a link, and the menu bar at the top of the screen all belong to the
+ * device in front of the user. Answering them on the server reaches the wrong
+ * machine — a VPS's empty pasteboard, a file dialog opened on a screen nobody
+ * is looking at, a link opened in a browser nobody is looking at, a menu bar
+ * that does not exist and takes ⌘Q with it (remote.md §10).
  */
 export const NATIVE_METHODS = [
   "clipboardRead",
   "clipboardWrite",
   "clipboardReadRich",
   "assetPaste",
+  "assetPick",
   "linkOpen",
   "menuSet",
 ] as const satisfies readonly RequestMethod[];

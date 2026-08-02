@@ -23,6 +23,7 @@ import {
   type RunDestination,
 } from "./bridge";
 import { confirmFor, parseFenceInfo, type ConfirmSpec } from "./fenceInfo";
+import { runsCommands } from "../lib/shell";
 import { fenceCloser, fenceOpener } from "./fences";
 import { declaredHosts, frontmatterRange, profileChipAnchor } from "./frontmatter";
 import { LOCAL_HOST, parseFrontmatter } from "../../shared/frontmatter";
@@ -897,7 +898,12 @@ const overlayPlugin = ViewPlugin.fromClass(
         // has no end yet because it is still being typed, and a run pair that
         // blinks into existence on the fence line the user is halfway through
         // writing is noise, not an affordance. It appears when the block does.
-        if (isRunnable(c.lang) && c.closed) {
+        // `runsCommands` alongside the language test: a client that does not
+        // run blocks must not draw the button that runs one (ios.md §8). Absent
+        // rather than disabled — the gray-button argument is for a control that
+        // could work in another moment, and this one never can on this client —
+        // and the copy button below stays, because copying is not running.
+        if (runsCommands() && isRunnable(c.lang) && c.closed) {
           const runBtn = iconButton(PLAY_ICON, tooltip("block.runInline"), (e) => {
             e.preventDefault();
             runBlock(this.view, c.from, "inline");
@@ -1117,15 +1123,25 @@ export function ledgeBlocks(): Extension {
     runsField,
     decorationsField,
     overlayPlugin,
-    keymap.of([
-      {
-        key: keyOf("block.runInline")!,
-        run: (view) => runBlock(view, view.state.selection.main.head, "inline"),
-      },
-      {
-        key: keyOf("block.runInTerminal")!,
-        run: (view) => runBlock(view, view.state.selection.main.head, "terminal"),
-      },
-    ]),
+    // The chords, on a client that has them. Withheld with the buttons rather
+    // than left live: a phone reached by a paired hardware keyboard would
+    // otherwise be the one way to run a block on a client whose whole story is
+    // that it does not.
+    keymap.of(
+      runsCommands()
+        ? [
+            {
+              key: keyOf("block.runInline")!,
+              run: (view: EditorView) =>
+                runBlock(view, view.state.selection.main.head, "inline"),
+            },
+            {
+              key: keyOf("block.runInTerminal")!,
+              run: (view: EditorView) =>
+                runBlock(view, view.state.selection.main.head, "terminal"),
+            },
+          ]
+        : [],
+    ),
   ];
 }

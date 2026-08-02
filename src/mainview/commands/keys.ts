@@ -249,6 +249,11 @@ export const COMMANDS = {
   "format.indent": { title: "Indent" },
   "format.outdent": { title: "Outdent" },
   "format.wikiLink": { title: "Link to Note" },
+  // The picture, from wherever this device keeps pictures: the file dialog on a
+  // Mac, the photo library on a phone (ios.md §11). No chord, because ⌘V is
+  // already the desktop's way in and this is the OTHER source — and because on
+  // the client that has no ⌘V, a chord would be no way in at all.
+  "image.insert": { title: "Insert Image…" },
   // Palette-only: ⌘-click on the link itself is the accelerator
   // (editor/livePreview.ts), same grammar as the frontmatter profile name.
   // No chord: not frequent enough to spend one, and ⌘K is Insert Link above.

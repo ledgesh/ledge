@@ -35,7 +35,7 @@ import type { DocSlice, Span } from "./livePreview";
 import { frontmatterRange } from "./frontmatter";
 import { sessionIdFacet } from "./session";
 import { assetDataUrl } from "../lib/assets";
-import { folderOf } from "../notes/store";
+import { folderOf, pathOf } from "../notes/store";
 import { ASSETS_DIRNAME } from "../../shared/rpc-schema";
 
 /** A renderable image source. `remote` goes straight into the <img> src;
@@ -136,6 +136,42 @@ export function imagePasteInsert(
   const prefix = before.trim() === "" ? "" : "\n";
   const insert = `${prefix}${md}\n`;
   return { insert, cursor: insert.length };
+}
+
+/**
+ * Get an image from somewhere and embed it: the whole of what ⌘V-with-a-picture
+ * and Insert Image… have in common, which turns out to be everything except
+ * `produce`.
+ *
+ * `produce` is handed the note's workspace folder and its file path, and
+ * answers the markdown reference the server chose — `lib/assets.ts`'s two
+ * seams, which differ only in whether the bytes came off a pasteboard or out of
+ * a picker. Null is "nothing to insert" (an empty pasteboard, a cancelled
+ * picker) and is silent: neither is a failure and neither earns an error strip.
+ *
+ * The selection is re-read after the await rather than captured before it,
+ * because a picker is on screen for as long as a person takes to choose and the
+ * caret can move under it.
+ */
+export async function embedImage(
+  view: EditorView,
+  produce: (folder: string, notePath: string | null) => Promise<string | null>,
+): Promise<void> {
+  // No folder means an editor outside the pool (a test): nowhere to save.
+  const folder = folderOf(view.state.facet(sessionIdFacet));
+  if (!folder) return;
+  // The note's own path rides along: the server seals the write at birth when
+  // that note is LOCKED (locking.md §5) — decided from the disk, the path is
+  // only the address.
+  const src = await produce(folder, pathOf(view.state.facet(sessionIdFacet)));
+  if (!src) return;
+  const sel = view.state.selection.main;
+  const { insert, cursor } = imagePasteInsert(view.state.doc, sel, src);
+  view.dispatch({
+    changes: { from: sel.from, to: sel.to, insert },
+    selection: { anchor: sel.from + cursor },
+    userEvent: "input.paste",
+  });
 }
 
 // --- The view wrappers -------------------------------------------------------

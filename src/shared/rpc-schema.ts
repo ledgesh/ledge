@@ -178,7 +178,16 @@ export type LedgeRPC = {
       // the daily.workspace setting resolved to one of these roots (null when
       // unset or stale) — where ⌘J will act, which the Edit Daily Template
       // faces must point at. Boot-time like the setting itself (restart-applies).
-      workspaceList: { params: {}; response: { workspaces: WorkspaceRootInfo[]; dailyRoot: string | null } };
+      // `folderDialog` rides along for the same reason: it is a fact about the
+      // machine this registry lives on — whether anybody is sitting at it to
+      // answer a native folder picker — and it is false on every headless
+      // server, which is what lets the view leave Attach Folder and Move
+      // Workspace Folder OUT of the palette rather than offering two verbs that
+      // can only answer with an error strip (ios.md §8, mainview/lib/shell.ts).
+      workspaceList: {
+        params: {};
+        response: { workspaces: WorkspaceRootInfo[]; dailyRoot: string | null; folderDialog: boolean };
+      };
       // Create a managed workspace folder from a display name. Bun slugs the
       // name into a folder itself (the view never names a path — the same
       // trust move as noteCreate) and registers it. Sent by "New Workspace".
@@ -563,6 +572,18 @@ export type LedgeRPC = {
       // derives from the note itself — never from a view flag — whether the
       // paste must be sealed at birth (the note is locked, locking.md §5).
       assetPaste: { params: { root: string; notePath?: string | null }; response: { src: string | null } };
+      // The same trip, begun by asking the DEVICE for a picture instead of
+      // reading its pasteboard: the macOS file dialog, and on iOS the photo
+      // library (ios.md §11). Sent by Insert Image…, which is the only way in
+      // on a phone — there is no ⌘V there, and the picture the user wants is
+      // the one they took, not one they somehow copied.
+      //
+      // A client method for assetPaste's reason and answering in its shape: the
+      // picker belongs to the machine with a person at it, the bytes ride
+      // assetWrite, and the NAME still comes back from the machine that holds
+      // the notes. null is a cancelled picker, which is the common outcome and
+      // must not reach the server or the error strip.
+      assetPick: { params: { root: string; notePath?: string | null }; response: { src: string | null } };
       // Image bytes in, markdown reference out. The client's half of a paste
       // calls this; nothing in the view does. `dataB64` rides a binary frame
       // over a connection (shared/wire.ts) and is the base64 the schema says

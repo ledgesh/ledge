@@ -3,6 +3,7 @@ import { CircleHelp, Hash, Link2, PanelLeft, Search, TableOfContents, TerminalSq
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useSinglePane } from "@/lib/viewport";
+import { runsCommands } from "@/lib/shell";
 import { pushLayer } from "@/commands/layers";
 import { ResizeHandle } from "@/components/ResizeHandle";
 import { TerminalDrawer } from "@/terminal/TerminalDrawer";
@@ -663,16 +664,18 @@ function Shell() {
           <Search className="size-4" />
         </Button>
         <div className="flex-1" />
-        <Button
-          ref={termBtnRef}
-          variant={termOpen ? "secondary" : "ghost"}
-          size="icon"
-          className="size-7"
-          onClick={() => exec("terminal.toggle")}
-          title={tooltip("terminal.toggle")}
-        >
-          <TerminalSquare className="size-4" />
-        </Button>
+        {runsCommands() && (
+          <Button
+            ref={termBtnRef}
+            variant={termOpen ? "secondary" : "ghost"}
+            size="icon"
+            className="size-7"
+            onClick={() => exec("terminal.toggle")}
+            title={tooltip("terminal.toggle")}
+          >
+            <TerminalSquare className="size-4" />
+          </Button>
+        )}
         <Button
           variant={rightPanel === "outline" ? "secondary" : "ghost"}
           size="icon"

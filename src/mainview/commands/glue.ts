@@ -18,6 +18,8 @@ import { openLinkAtCursor, toggleTaskAt } from "@/editor/livePreview";
 import { insertLink, toggleBold, toggleItalic } from "@/editor/formatting";
 import { editFrontmatter } from "@/editor/frontmatterEdit";
 import { toggleTemplateFlag } from "@/editor/templateFlag";
+import { embedImage } from "@/editor/images";
+import { pickImageAsset } from "@/lib/assets";
 import { flushAllNow, saveNow } from "@/notes/store";
 import { lockNoteAndRefresh, lockVault, removeLockAndRefresh, vaultState } from "@/vault/channel";
 import {
@@ -149,6 +151,11 @@ export const registryDeps: RegistryDeps = {
         view.dispatch(view.state.replaceSelection("[["));
         startCompletion(view);
       }),
+    // The same embed the editor's ⌘V does, from the device's picker instead of
+    // its pasteboard (lib/assets.ts pickImageAsset). Fire and forget: the
+    // picker is on screen for as long as a person takes, and a command that
+    // awaited it would hold the dispatcher open for a minute.
+    insertImage: (docId) => withView(docId, (view) => void embedImage(view, pickImageAsset)),
     toggleTemplate: (docId) => withView(docId, (view) => toggleTemplateFlag(view)),
     editFrontmatter: (docId) => withView(docId, (view) => editFrontmatter(view)),
   },

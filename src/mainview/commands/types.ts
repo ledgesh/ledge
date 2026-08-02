@@ -239,6 +239,10 @@ export interface RegistryDeps {
     indent(docId: string): void;
     outdent(docId: string): void;
     wikiLink(docId: string): void;
+    // Ask the device for a picture and embed it. Async all the way down (a
+    // picker waits for a person), and the command does not wait on it: what
+    // comes back is an edit, not an answer.
+    insertImage(docId: string): void;
     // Add or remove the note's `template: true` frontmatter line in its LIVE
     // editor (editor/templateFlag.ts): an ordinary undoable edit, so autosave
     // and the watcher-driven list refresh carry the change everywhere else.

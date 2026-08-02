@@ -172,5 +172,24 @@ export async function rawAssetBytes(root: string, src: string): Promise<Buffer |
  * the file. */
 export async function writePastedImage(root: string, bytes: Uint8Array, seal = false): Promise<string | null> {
   if (bytes.length === 0) return null;
-  return savePastedImage(root, bytes, ".png", seal);
+  return savePastedImage(root, bytes, extensionFor(bytes), seal);
+}
+
+/**
+ * `.jpg` for JPEG bytes, `.png` for everything else.
+ *
+ * The extension has to follow the BYTES, because the name is what `imageMimeOf`
+ * reads back and a JPEG called `.png` is an image the browser has to sniff its
+ * way into. It became load-bearing when the picker arrived (ios.md §11): a
+ * pasteboard image is a screenshot and genuinely PNG, but a picture off a
+ * camera roll is a photograph, and re-encoding one losslessly turns 3 MB into
+ * 28 MB — measured, on the first photo ever inserted from a phone.
+ *
+ * Two magics and a default, not a format library: this decides a file
+ * extension, and anything it does not recognise is written as the `.png` it was
+ * always written as before.
+ */
+export function extensionFor(bytes: Uint8Array): string {
+  const jpeg = bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+  return jpeg ? ".jpg" : ".png";
 }

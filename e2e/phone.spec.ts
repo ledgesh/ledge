@@ -361,3 +361,204 @@ test.describe("with the tree on screen", () => {
     await expect(page.getByRole("button", { name: /^Trash/ })).toHaveCount(0);
   });
 });
+
+// --- the rest of v1, on a phone (ios.md §8, phase 6) -------------------------
+//
+// Search, tags, backlinks, the outline, daily notes and unlocking all existed
+// before this phase; what did not exist was any proof they are REACHABLE with a
+// finger. The desktop suite drives every one of them from a chord, and the
+// phone specs above drive the palette with `page.keyboard` — which is a
+// keyboard, and the one thing an iPhone does not have while a note is open.
+// These tap.
+
+test.describe("the v1 features, by tap", () => {
+  // Every panel is the right-hand drawer here (§9), so they take turns rather
+  // than stacking, and the header's own control is the way to each.
+  const face = (page: Page, name: RegExp) =>
+    page.getByRole("button", { name }).tap();
+
+  test("a search result opens the note it names, at its line", async ({
+    page,
+  }) => {
+    // The tap that matters. Enter picks the ACTIVE row and would pass even if
+    // nothing were clickable; a phone has no Enter, so the row itself has to be
+    // a target. It regressed once for a reason no unit test could see: the
+    // software keyboard scrolled the whole page between the touch and the
+    // click, so the click landed on whatever slid under the finger (ios.md §7).
+    await page.getByRole("button", { name: /Go to Note/ }).tap();
+    await page.keyboard.type("#gamma body");
+    await page.getByText("gamma body").last().tap();
+    await expect(page.locator(".cm-content").first()).toContainText(
+      "gamma body",
+    );
+  });
+
+  test("the tags panel is a drawer, and a tag drills into the notes bearing it", async ({
+    page,
+  }) => {
+    // A tagged note, made the way a phone makes one: the tree's own New Note
+    // button, since ⌘N is a chord. The harness's only tagged fixture is the
+    // LOCKED one, whose body is withheld — the rule working, not a gap
+    // (locking.md §8) — so the tag has to be written here. Waiting for the row
+    // is waiting for the SAVE: the directory is a scan of what is on disk.
+    await openSidebar(page);
+    // The tree's own, not the pane's: both say New Note, and the pane's is the
+    // one a phone cannot see while the drawer is over it.
+    await drawer(page).getByRole("button", { name: /New Note/ }).tap();
+    await page.keyboard.type("# Shipping\n\nrolling out #canary today");
+    // Reopened, because New Note put the drawer away with it (§9) — and the row
+    // is what says the note reached disk, which is what the directory scans.
+    await openSidebar(page);
+    await expect(noteRow(page, "Shipping")).toBeVisible();
+    await face(page, /Toggle Tags/);
+    await expect(drawer(page)).toBeVisible();
+    await page.locator('[data-target-kind="tag"]', { hasText: "canary" }).tap();
+    // The drill-in replaces the directory in the same drawer: still one panel,
+    // which is what §9's "two drawers never stack" means for a panel with two
+    // faces of its own.
+    await expect(drawer(page)).toHaveCount(1);
+    await expect(page.locator('[data-target-kind="tagnote"]')).toHaveCount(1);
+  });
+
+  test("backlinks and the outline take turns in the one drawer", async ({
+    page,
+  }) => {
+    await face(page, /Toggle Backlinks/);
+    await expect(drawer(page)).toContainText("Backlinks");
+    await face(page, /Toggle Outline/);
+    await expect(drawer(page)).toContainText("Outline");
+    await expect(drawer(page)).toHaveCount(1);
+  });
+
+  test("the tree drawer and a panel drawer never share the screen", async ({
+    page,
+  }) => {
+    await openSidebar(page);
+    await face(page, /Toggle Tags/);
+    await expect(drawer(page)).toHaveCount(1);
+    await expect(noteRow(page, "Alpha")).toHaveCount(0);
+  });
+
+  test("a locked note unlocks from its own placeholder, with no chord in reach", async ({
+    page,
+  }) => {
+    // ⌘L is the desktop's way in and the placeholder's button is the phone's.
+    // The passphrase field is the other thing this proves: it is the one input
+    // on a phone that the accessory bar must NOT decorate, which the shell
+    // enforces (ios.md §7) and which only the device can show.
+    // No navigation needed: the harness opens on the locked note, which is also
+    // the phone's own first-run shape — a client that restores last session's
+    // tab can restore a sealed one (ios.md §10).
+    await page.getByRole("button", { name: /Unlock Notes/ }).tap();
+    const dialog = page.locator('[data-testid="vault-dialog"]');
+    await expect(dialog).toBeVisible();
+    await dialog.getByPlaceholder("Passphrase").fill("letmein");
+    await dialog.getByRole("button", { name: "Unlock" }).tap();
+    await expect(dialog).toHaveCount(0);
+    await expect(page.locator(".cm-content").first()).toContainText(
+      "vaulted needle body",
+    );
+  });
+
+  test("Insert Image… embeds what the device's picker answered", async ({
+    page,
+  }) => {
+    // The phone has no ⌘V and nothing on its pasteboard: the picker is the only
+    // way a picture gets into a note there (ios.md §11), so this is not a
+    // convenience but the whole of the feature.
+    await page.getByRole("button", { name: /Go to Note/ }).tap();
+    await page.keyboard.type(">insert image");
+    await page.keyboard.press("Enter");
+    // The rendered widget, not the markdown: the insert parks the caret BELOW
+    // the image's line precisely so it renders straight away (editor/images.ts),
+    // which means the reference is concealed by the time this looks.
+    await expect(page.locator(".ledge-mdimage img")).toHaveCount(1);
+  });
+
+  test("a cancelled picker inserts nothing", async ({ page }) => {
+    await page.goto("/harness.html?pick=cancel");
+    await page.getByRole("button", { name: /Go to Note/ }).tap();
+    await page.keyboard.type(">insert image");
+    await page.keyboard.press("Enter");
+    await expect(page.locator(".ledge-mdimage")).toHaveCount(0);
+    await expect(page.locator(".cm-content").first()).not.toContainText(
+      ".ledge-assets/",
+    );
+  });
+});
+
+// --- what v1 on a phone does NOT have (ios.md §8) ----------------------------
+//
+// The cut is only real if the verbs are ABSENT. A palette that lists Toggle
+// Terminal and answers with an error strip teaches the user that the palette
+// lies, and §8 says so in as many words about Attach Folder.
+//
+// `?shell=ios` is the harness pretending to be the Swift shell rather than the
+// Electrobun one (harness.tsx): same view, same notes, a different answer to
+// what this DEVICE can do. Without it these same rows are present, which is the
+// point — the desktop keeps every one of them.
+
+test.describe("the iOS client, and what it does not run", () => {
+  const palette = async (page: Page, query: string) => {
+    await page.getByRole("button", { name: /Go to Note/ }).tap();
+    await page.keyboard.type(`>${query}`);
+  };
+
+  test.beforeEach(async ({ page }) => {
+    await page.goto("/harness.html?shell=ios");
+    await expect(
+      page.getByRole("button", { name: /Toggle Sidebar/ }),
+    ).toBeVisible();
+  });
+
+  test("no terminal: not in the chrome, not in the palette", async ({
+    page,
+  }) => {
+    await expect(
+      page.getByRole("button", { name: /Toggle Terminal/ }),
+    ).toHaveCount(0);
+    await palette(page, "terminal");
+    await expect(page.getByText("Toggle Terminal")).toHaveCount(0);
+  });
+
+  test("no run verbs, and no run button on a fence", async ({ page }) => {
+    await palette(page, "run block");
+    await expect(page.getByText("Run Block Inline")).toHaveCount(0);
+    await expect(page.getByText("Run Block in Terminal")).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    // The `sh` fence in the seeded Codebook note is the desktop suite's run
+    // fixture; here the pair beside it must not be drawn at all.
+    await expect(page.locator('[data-act="run"]')).toHaveCount(0);
+  });
+
+  test("no folder verbs, because the server has nobody at it to pick one", async ({
+    page,
+  }) => {
+    // A different reason from the terminal's and a different flag: this one is
+    // the SERVER saying it is headless (workspaceList folderDialog), so a Mac
+    // pointed at a VPS loses these two as well.
+    await palette(page, "folder");
+    await expect(page.getByText("Attach Folder as Workspace…")).toHaveCount(0);
+    await expect(page.getByText("Move Workspace Folder…")).toHaveCount(0);
+  });
+
+  test("the verbs that are IN v1 are all still there", async ({ page }) => {
+    // The other half of the claim, and the one that catches a gate written too
+    // wide: cutting the terminal must not cut the editor with it.
+    await palette(page, "");
+    // Scoped to the overlay: two of these titles are also live buttons on the
+    // screen behind it, and what is under test is what the PALETTE offers.
+    const list = page.locator("div.fixed.inset-0.z-50");
+    for (const title of [
+      "Insert Image…",
+      "Toggle Tags",
+      "Toggle Backlinks",
+      "Toggle Outline",
+      "Open Today's Daily Note",
+      "Unlock Notes…",
+      "New Note",
+    ]) {
+      await expect(list.getByText(title, { exact: true })).toHaveCount(1);
+    }
+  });
+});

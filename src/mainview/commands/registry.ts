@@ -23,6 +23,7 @@ import {
   FolderInput,
   FolderOpen,
   Hash,
+  Image,
   IndentDecrease,
   IndentIncrease,
   Italic,
@@ -60,6 +61,7 @@ import { findLeaf, focusedDocId, focusedTab, leafIds } from "@/workspace/tree";
 import { notesOf, trashOf } from "@/workspace/store";
 import { parseFrontmatter } from "../../shared/frontmatter";
 import type { NoteMeta } from "../../shared/rpc-schema";
+import { canPickFolder, runsCommands } from "../lib/shell";
 import { keysOf, listKeysOf, tabSelectKey, titleOf, workspaceSelectKey, type CommandId } from "./keys";
 import { chipOf } from "./format";
 import type { Command, CommandCtx, RegistryDeps } from "./types";
@@ -451,6 +453,10 @@ export function buildCommands(deps: RegistryDeps): Command[] {
     // to spend a chord on.
     cmd("workspace.attach", {
       icon: FolderOpen,
+      // Absent where the picker cannot open, rather than present and answering
+      // with NO_DIALOG: a headless server has nobody at it to choose a folder,
+      // and a phone is permanently that case (ios.md §8, lib/shell.ts).
+      when: () => canPickFolder(),
       run: (ctx) => {
         void deps.attachWorkspace(ctx.dispatch).then((err) => {
           if (err) ctx.ui.showError?.(err);
@@ -497,7 +503,10 @@ export function buildCommands(deps: RegistryDeps): Command[] {
     cmd("workspace.move", {
       icon: FolderInput,
       targetKind: "workspace",
-      when: (ctx) => !docsTargeted(ctx),
+      // Both faces end at the same native picker — the in-app chooser an
+      // external workspace stops at first only offers "back to the app home"
+      // beside it — so workspace.attach's condition governs this one too.
+      when: (ctx) => !docsTargeted(ctx) && canPickFolder(),
       run: (ctx) => {
         const id = targetWorkspaceId(ctx);
         const ws = ctx.state.workspaces.find((w) => w.id === id);
@@ -547,6 +556,11 @@ export function buildCommands(deps: RegistryDeps): Command[] {
     }),
     cmd("terminal.toggle", {
       icon: TerminalSquare,
+      // The four run verbs, and the one gate: v1 on a phone does not run
+      // commands (ios.md §8). Not a refusal — the daemon at the other end would
+      // spawn the PTY — but a surface that is not built, so the verbs that
+      // reach it are not offered.
+      when: () => runsCommands(),
       // The editor's CodeMirror keymap and the terminal's xterm handler own
       // Ctrl-` in their domains and route here through exec; the window layer
       // only fires it from page focus.
@@ -555,6 +569,7 @@ export function buildCommands(deps: RegistryDeps): Command[] {
     }),
     cmd("terminal.close", {
       icon: X,
+      when: () => runsCommands(),
       palette: false, // Toggle Terminal covers it
       run: (ctx) => ctx.ui.closeTerminal?.(),
     }),
@@ -677,7 +692,9 @@ export function buildCommands(deps: RegistryDeps): Command[] {
     // invent a second way to say what the frontmatter already says.
     cmd("profile.open", {
       icon: KeyRound,
-      when: (ctx) => currentProfile(ctx, deps) !== null,
+      // A profile is the environment a block runs in, so a client that does not
+      // run blocks has nothing to edit one for (ios.md §8's "editing profiles").
+      when: (ctx) => runsCommands() && currentProfile(ctx, deps) !== null,
       run: (ctx) => {
         const name = currentProfile(ctx, deps);
         if (name) ctx.ui.openProfileEditor?.(name);
@@ -872,10 +889,13 @@ export function buildCommands(deps: RegistryDeps): Command[] {
     cmd("editor.find", editorCommand(deps, Search, (ed, docId) => ed.find(docId))),
     cmd("editor.replace", editorCommand(deps, Replace, (ed, docId) => ed.replace(docId))),
     cmd("editor.save", editorCommand(deps, Save, (ed, docId) => ed.save(docId))),
-    cmd("block.runInline", editorCommand(deps, Play, (ed, docId) => ed.runInline(docId))),
+    // The two run verbs. `runs` on top of editorCommand's focused-doc test:
+    // both conditions have to hold, and the client-wide one is the reason a
+    // phone's palette has no "Run Block" in it at all (ios.md §8).
+    cmd("block.runInline", runs(editorCommand(deps, Play, (ed, docId) => ed.runInline(docId)))),
     cmd(
       "block.runInTerminal",
-      editorCommand(deps, TerminalSquare, (ed, docId) => ed.runInTerminal(docId)),
+      runs(editorCommand(deps, TerminalSquare, (ed, docId) => ed.runInTerminal(docId))),
     ),
     // Follows the link under the caret; ⌘-click on the link is the
     // accelerator (editor/livePreview.ts). A caret not on a link makes this a
@@ -898,6 +918,9 @@ export function buildCommands(deps: RegistryDeps): Command[] {
     cmd("format.indent", editorCommand(deps, IndentIncrease, (ed, docId) => ed.indent(docId))),
     cmd("format.outdent", editorCommand(deps, IndentDecrease, (ed, docId) => ed.outdent(docId))),
     cmd("format.wikiLink", editorCommand(deps, Brackets, (ed, docId) => ed.wikiLink(docId))),
+    // Not gated on anything: every client this runs on has SOME picture store,
+    // and the seam answers null where the user declined (lib/assets.ts).
+    cmd("image.insert", editorCommand(deps, Image, (ed, docId) => ed.insertImage(docId))),
   ];
 
   // One palette entry per marked note — the workspace.select move: the
@@ -1019,6 +1042,14 @@ function cycleTab(ctx: CommandCtx, dir: 1 | -1): void {
 // An editor-internal command: its keys are bound inside CodeMirror (domains:
 // [] keeps the window dispatcher out entirely); invoking it from the palette
 // refocuses the note's editor first, which deps.editor handles.
+/** The same command, additionally withheld where this client does not run
+ * commands (lib/shell.ts). Wraps rather than replaces `when`, so the editor's
+ * own focused-doc condition is not lost by the gating. */
+function runs(spec: Omit<Command, "id" | "title" | "keys">): Omit<Command, "id" | "title" | "keys"> {
+  const already = spec.when;
+  return { ...spec, when: (ctx) => runsCommands() && (already?.(ctx) ?? true) };
+}
+
 function editorCommand(
   deps: RegistryDeps,
   icon: Command["icon"],

@@ -485,9 +485,43 @@ Four decisions follow:
   rather than one that quietly does something else. **Indent and outdent were
   not commands before this**: they were Tab and ⇧Tab in CodeMirror's keymap,
   and the iPhone software keyboard has no Tab key, so they were not awkward on
-  a phone, they were unreachable. `format.indent`, `format.outdent` and
-  `format.wikiLink` exist now, with no chords of their own, and the palette
-  gets them too.
+  a phone, they were unreachable. `format.indent`, `format.outdent`,
+  `format.wikiLink` and `image.insert` exist now, with no chords of their own,
+  and the palette gets them too.
+
+  **The bar knows what it is over, and phase 6 is why.** One content view is
+  the first responder for every text field in the page, so the bar phase 5
+  installed appeared over the search box, the rename field and the passphrase
+  prompt as well — where Bold and Indent are not merely useless but wrong, since
+  the command they dispatch acts on the note BEHIND the overlay. The page
+  reports focus across the bridge (`@editing`, raised by a `focusin`/`focusout`
+  watcher in `ios.tsx`), and the accessory getter answers nil when the answer is
+  no. UIKit has to be told to ask again — `reloadInputViews()` — because moving
+  between two fields on one page is not a responder change.
+
+  **And it dismisses the keyboard**, which nothing else on the screen does: the
+  editor fills the window, so there is no blank page to tap, and tapping the
+  chrome does not blur a contenteditable. Without that button the keyboard takes
+  a third of the phone for the rest of the session.
+- **The web view is constrained to the keyboard, not to the safe area.** This
+  is one line of Auto Layout and it was the largest single defect phase 6 found.
+  A page pinned to the safe area keeps its full height when the keyboard
+  arrives, so WebKit reveals the caret the only way left to it: by scrolling the
+  document. On a full-height app that means scrolling the header and the tab
+  strip off the top of the screen, and every affordance with them.
+
+  Constrained to `keyboardLayoutGuide.topAnchor` instead (`WebHost.swift`), the
+  page is simply shorter while the keyboard is up. The chrome stays where it is,
+  dialogs re-centre in what is left, and the editor's own scroller does the
+  revealing. Two constraints rather than one, because the guide sits at the
+  view's bottom edge when no keyboard is up, which is BELOW the safe area: the
+  safe-area one is required and is the floor, the keyboard's is high-priority
+  and can lose to it.
+
+  It also fixed something that looked unrelated. **A tap on a search result did
+  nothing**, because the layout moved between the touch and the click WebKit
+  synthesizes after it, and the click landed on whatever had slid under the
+  finger. The desktop suite could never have caught it: it presses Enter.
 
   The install is the ugly part and is confined to one function. The first
   responder while you type in a web page is not the `WKWebView` but a private
@@ -528,6 +562,31 @@ commands.**
 | Workspace and connection switching | |
 | Unlocking a locked note (§10) | |
 
+**The cut is two booleans, and both make a verb ABSENT rather than present and
+failing** (`mainview/lib/shell.ts`). They come from different places because
+they answer different questions.
+
+`runsCommands` is the SHELL's own answer about itself, set before the first
+render (`ios.tsx`), and it withholds the terminal toggle from the chrome and
+the palette, the two run verbs from both, the run pair from every fence, the
+run chords from CodeMirror's keymap, and the profile editor — which is the
+environment a block runs in, so it has nothing to edit for. Nothing is deleted
+to achieve it: the daemon on the other end spawns PTYs perfectly well, and the
+phase after v1 turns the boolean back on.
+
+`folderDialog` is the SERVER's, and rides back on `workspaceList` at boot. It
+is false wherever nobody is sitting at the machine that holds the notes, which
+withholds Attach Folder and Move Workspace Folder. That one is not a phone
+question at all — a Mac pointed at a VPS gets the same answer, and used to get
+`bun/server.ts`'s refusal sentence instead, which is a good sentence to read
+and a bad one to discover by running the only verb that looked like it would
+help.
+
+The harness can be either shell: `harness.html?shell=ios` is the iOS one, and
+`e2e/phone.spec.ts` uses it to hold both halves of the claim — the cut verbs
+absent, and every v1 verb still there, because a gate written too wide would
+cut the editor along with the terminal.
+
 **Running commands is cut for its interaction surface, not because it cannot
 work.** A block that is running holds the daemon open through `running()`, so
 the run itself survives a backgrounded phone and its output is still in the
@@ -545,8 +604,8 @@ while the ssh transport is still new.
 **Attaching a workspace is cut because the server already refuses it.**
 `bun/server.ts` answers a headless folder dialog with "attaching a folder
 needs the app running on the machine that holds the notes". A phone is
-permanently that case. The verb should be absent rather than present and
-failing.
+permanently that case, which is why the flag that hides the verb is the
+server's rather than the shell's.
 
 ## 9. State ownership on a phone
 
@@ -631,12 +690,32 @@ own:
 - **Notes are not in Files.** The app's container holds no note bytes. There
   is nothing to export and nothing to sync, and the share sheet shares text
   the view already has rather than a file.
-- **Images arrive from the photo picker, not a pasteboard.** `assetPaste` is
-  a client seam (remote.md §10) and on iOS its source is PHPicker or the
-  camera. The bytes still ride `assetWrite` on a type-1 frame and the server
-  still names the file, seals it if the note is locked, and refuses a
-  read-only root. remote.md §2's "the client never names a file" is
-  unaffected.
+- **Images arrive from the photo picker, not a pasteboard.** Its own client
+  method rather than a different `assetPaste`: `assetPick` is that one with a
+  picker where the pasteboard was, and the two are identical below the first
+  line. The bytes still ride `assetWrite` on a type-1 frame and the server
+  still names the file, seals it if the note is locked, and refuses a read-only
+  root. remote.md §2's "the client never names a file" is unaffected.
+
+  It is a seam and not just an iOS path because the Mac has an answer to the
+  same verb — Insert Image… opens a file dialog there — and because
+  `CLIENT_METHODS` is total by construction: a name every shell must implement
+  cannot be one only one shell has.
+
+  **PHPicker, which is why there is no permission prompt and no
+  `NSPhotoLibraryUsageDescription`.** It runs out of process and hands back
+  only what the user chose, so the app never asks for library access and never
+  has it — iOS says as much on the picker itself. A usage string would describe
+  something this app does not do.
+
+  **JPEG, not PNG, and that was measured.** The first picture ever inserted from
+  a phone was 3 MB on the device and 28 MB after a lossless re-encode: ten times
+  the bytes over ssh, ten times the disk on the server, and nothing anybody can
+  see. The picker sends JPEG at 0.9 and `writePastedImage` reads the magic to
+  choose the extension, so the name follows the bytes. A screenshot pasted on a
+  Mac is still PNG, because there the source really is one. Re-encoding also
+  drops the EXIF, so the GPS a phone stamps on every picture does not travel to
+  the server with it.
 - **`menuSet` is a no-op.** There is no menu bar. It is already a client-only
   method the server refuses, so this costs nothing but a stub.
 - **`linkOpen` is `UIApplication.open`.** Opening a URL happens on the device
@@ -873,8 +952,35 @@ inside the Mac app.
 
    Not done here, and now the only thing between this and §8's v1 list: a real
    device. Everything above is still a Simulator.
-6. **The rest of v1.** Search, tags, backlinks, the outline, daily notes,
-   images through PHPicker, and unlocking.
+6. **Done. The rest of v1.** Search, tags, backlinks, the outline, daily notes,
+   images through PHPicker, and unlocking, every one of them exercised by a
+   finger against a real server. Six of the seven already existed; what did not
+   exist was any proof they could be REACHED that way, and the desktop suite
+   could not supply it because it drives all of them from a chord. Ten specs in
+   `e2e/phone.spec.ts` tap instead.
+
+   **The largest defect was the keyboard, and it was not in any of the seven.**
+   The web view was pinned to the safe area, so raising the keyboard scrolled
+   the whole document to keep the caret visible and took the header and the tab
+   strip off the top of the screen with it. §7 has the one line that fixes it
+   and the second defect it turned out to be causing: a tap on a search result
+   did nothing, because the layout moved between the touch and the click.
+   Two more of the same shape — the accessory bar appearing over the search box
+   and the passphrase prompt, and nothing on the screen able to put the keyboard
+   away — were phase 5's, invisible until phase 6 put a second text field on the
+   screen.
+
+   **§8's cut became two booleans** (`mainview/lib/shell.ts`), because a v1 that
+   shows a terminal button has not cut the terminal. One is the shell's own and
+   one is the server's, and the second fixes the Mac's remote case at the same
+   time.
+
+   The one genuinely new build is the picture picker (§11), and the number worth
+   keeping is the one it cost to learn: a camera photo re-encoded as a lossless
+   PNG is 28 MB where the JPEG is 1.7.
+
+   Not done here, and still the only thing between this and a shippable v1: a
+   real device. Everything above is a Simulator against a container.
 
 Live command execution is not in this list. It is the phase after v1, and §5
 says what it has to answer first: a client that can ask a server to hold its

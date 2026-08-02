@@ -37,7 +37,25 @@ import {
   type Theme,
 } from "../shared/settings";
 import { applyAppearance } from "./lib/theme";
+import { configureShell, recordFolderDialog } from "./lib/shell";
 import { configureLayout, restoredState } from "./workspace/persist";
+
+// Which shell to be. Two clients bind these seams for real — Electrobun on the
+// Mac and Swift on iOS (ios.md §1) — and they differ in what the DEVICE can do,
+// not in what the notes are. `?shell=ios` is how a spec asks for the second
+// one; anything else is the desktop app, which is what every spec written
+// before this got and still gets.
+//
+// Not derived from the viewport: a Mac window dragged to 390 points is still a
+// Mac, keeps its terminal, and §9 is careful that the only thing width decides
+// is the chrome's arrangement.
+const FAKING_IOS = new URLSearchParams(window.location.search).get("shell") === "ios";
+configureShell({ runsCommands: !FAKING_IOS });
+// The SERVER's half of the same picture, and a different question: whether the
+// machine holding the notes has anybody at it to answer a folder dialog. Set
+// here rather than arriving with workspaceList because this harness renders
+// without boot.tsx's boot(), which is what records it in the real shells.
+recordFolderDialog(!FAKING_IOS);
 import "./index.css";
 import App from "./App";
 
@@ -626,7 +644,14 @@ recordVaultState(store.vault.state);
 // was deleted) runs in specs without any dialog. create mirrors
 // createManaged's slug-and-enumerate.
 configureWorkspaces({
-  list: async () => ({ workspaces: store.workspaceList(), dailyRoot: null }),
+  // `folderDialog` follows the faked shell: the harness's "native dialog" is a
+  // function that always picks /external, which is a Mac with somebody at it.
+  // The ios shell is the headless case and gets the refusal the real one does.
+  list: async () => ({
+    workspaces: store.workspaceList(),
+    dailyRoot: null,
+    folderDialog: !FAKING_IOS,
+  }),
   create: async (name) => store.createManaged(name),
   attach: async () => {
     store.attach(EXTERNAL);
@@ -729,6 +754,9 @@ const assets = new Map<string, { dataB64: string; mime: string }>([
   [`${SCRATCH}\0assets/dot.png`, { dataB64: PIXEL_B64, mime: "image/png" }],
 ]);
 let pasteCount = 0;
+// `?pick=cancel` boots with a picker that answers null every time — the other
+// outcome of a dialog, and the one "nothing is inserted" needs.
+const PICK_CANCELS = new URLSearchParams(window.location.search).get("pick") === "cancel";
 configureAssets({
   read: async (folder, src) => assets.get(`${folder}\0${src}`) ?? null,
   // notePath is accepted (the real handler seals pastes into locked notes);
@@ -738,6 +766,18 @@ configureAssets({
   pasteImage: async (folder, _notePath) => {
     pasteCount += 1;
     const src = `.ledge-assets/pasted-${pasteCount}.png`;
+    assets.set(`${folder}\0${src}`, { dataB64: PIXEL_B64, mime: "image/png" });
+    return src;
+  },
+  // The "picker" always picks, so Insert Image… runs end to end in a spec with
+  // no dialog — attach's move, and the same fake file the paste writes. A
+  // cancel is the OTHER outcome and gets its own fake below, because "null does
+  // not insert" is behavior worth a test and cannot be shown by a picker that
+  // never cancels.
+  pickImage: async (folder, _notePath) => {
+    if (PICK_CANCELS) return null;
+    pasteCount += 1;
+    const src = `.ledge-assets/picked-${pasteCount}.png`;
     assets.set(`${folder}\0${src}`, { dataB64: PIXEL_B64, mime: "image/png" });
     return src;
   },

@@ -53,6 +53,7 @@ function stubDeps(over: Partial<RegistryDeps> = {}): RegistryDeps {
       indent: noop,
       outdent: noop,
       wikiLink: noop,
+      insertImage: noop,
       toggleTemplate: noop,
       editFrontmatter: noop,
     },

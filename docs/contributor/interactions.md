@@ -81,6 +81,8 @@ section.
 | Bare-key row verbs | the row's menu |
 | ⌘P / ⇧⌘P / ⌥⌘P | the magnifier in the header, which opens the overlay |
 | ⌘B / ⌘I / ⌘K, Tab / ⇧Tab, `[[` | the keyboard accessory bar, on the clients that have one (ios.md §7) |
+| ⌘V of a picture | Insert Image…, on the bar and in the palette: a phone has no ⌘V and nothing on its pasteboard got there by being copied |
+| Nothing dismisses the keyboard | the bar's own last button, apart from the verbs |
 
 - **The long press is 500 ms, and belongs to touch and pen only**
   (`lib/useRowMenu.ts`). A mouse is excluded deliberately: it has the right
@@ -109,6 +111,11 @@ section.
   bindings, and the iPhone software keyboard has no Tab key, so they failed the
   rule below without anyone noticing — the registry test could not see them
   because they were never in the registry.
+- **The bar appears over the editor and nowhere else.** It hangs off the web
+  view's first responder, and one responder serves every text field in the page,
+  so without a signal it decorates the search box and the passphrase prompt too
+  — offering Bold, which would act on the note behind the overlay. The page
+  tells the shell which it is (ios.md §7).
 - **No verb behind a chord alone.** Every command is in the palette, or in a row
   menu, or has a control that runs it. `registry.test.ts` enforces that, and
   holds the exceptions as a named list rather than inferring them — a
@@ -235,6 +242,7 @@ CodeMirror and never at the window level.
 | Open Link             | — (palette; click the rendered link as accelerator) | follows the link under the caret (editor/livePreview.ts) — a URL leaves the app, a `[[wikilink]]` opens the note it names. A RENDERED link (syntax concealed, including inside a rendered table and bare URLs the caret is outside) opens on plain click — while concealed it is a widget, not editable text, same reasoning as the checkbox. A REVEALED link is raw text being edited: plain click is a caret move, ⌘-click opens (same grammar as the profile name above; the underline goes solid while ⌘ is held). Mouse-editing a rendered link: click adjacent text or arrow in, which reveals it. Schemes are allowlisted (shared/links.ts) and re-checked Bun-side |
 | Indent / Outdent      | Tab / ⇧Tab (also palette; the accessory bar on a phone) | editor only; CodeMirror's own `indentMore`/`indentLess`. Commands as well as keys because the iPhone software keyboard has no Tab key at all, so on a touch client these were not awkward, they were unreachable (ios.md §7). The keys are unchanged and remain the accelerator |
 | Link to Note (`[[`)   | typed, or the command (palette; the accessory bar on a phone) | `[[` in the editor pops the note-title picker (editor/wikilinks.ts; Enter accepts and closes the `]]`, Escape closes the popup only). `[[Title]]` resolves by title, case-insensitive exact, against the note's OWN workspace — resolved renders link-styled and opens on the Open Link grammar above; DANGLING renders muted with no hand cursor, and a plain click is the ordinary caret move that reveals it for fixing (a dead "open" affordance on a link that goes nowhere would be worse). `[[Title#Heading]]` opens with that ATX heading revealed, degrading to the top of the note when the heading is gone |
+| Insert Image…         | — (palette; the accessory bar on a phone) | asks the DEVICE for a picture and embeds it: the file dialog on a Mac, the photo library on a phone (ios.md §11). No chord, because ⌘V is already the desktop's way in for the pasteboard and this is the other source — and on a phone, which has neither ⌘V nor anything on its pasteboard, it is the only way in. A cancelled picker inserts nothing and says nothing: cancelling is the common outcome, not a failure. The caret ends up below the image's line, so it renders straight away — the same insert ⌘V does |
 | Toggle Checkbox       | — (palette; click the rendered box as accelerator) | toggles the `[ ]`/`[x]` on the caret's line (editor/livePreview.ts). The box is a widget, not editable text, so a plain click may act — the caret-move grammar protects text, and the box is not text |
 | Rename Workspace…     | `r` (also menu / palette / double-click) | |
 | Change Icon…          | `i` (also menu / palette) | opens the icon grid on the workspace's row |
@@ -528,6 +536,22 @@ secret written to a synced file — because focus never moved.
 - The **menu bar** (§10) is the surface a first-time user scans before they
   know the palette exists. Its structure is a derived view of the registry,
   not a second list of features.
+- **A verb that cannot work on this client is absent, not present and
+  failing.** `when` already hides what does not apply to the target; two
+  registry-wide facts do the same for what does not apply to the CLIENT
+  (`mainview/lib/shell.ts`). `runsCommands` is the shell's own answer about
+  itself and withholds the terminal, the two run verbs and the profile editor
+  where they were cut (ios.md §8); `canPickFolder` is the SERVER's and
+  withholds Attach Folder and Move Workspace Folder wherever nobody is sitting
+  at the machine that holds the notes — a headless server, which a Mac can be
+  connected to as easily as a phone.
+
+  Both default to the desktop app's answer, so a shell that says nothing keeps
+  every verb: the failure mode of a forgotten call is a phone with a terminal
+  button, not a Mac without one. And the point is discoverability rather than
+  enforcement — the server refuses these calls regardless (remote.md §10). A
+  palette full of entries that answer with an error strip teaches the user that
+  the palette lies, which costs more than the missing row does.
 
 ## 9. The CLI (`ledge`)
 
