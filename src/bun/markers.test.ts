@@ -54,6 +54,22 @@ describe("markerCommand / markerInit", () => {
     expect(init).toMatch(/__ledge_precmd\(\) \{ local rc=\$\?;/);
   });
 
+  test("the first byte written to a fresh pty is expendable", () => {
+    // This line is the first thing ever written to a new pty, and on Linux the
+    // first byte of it can be swallowed by a line discipline that is still
+    // coming up. There is no error to see when it happens: one byte short, the
+    // definition names `_ledge_precmd` and the registration still names
+    // `__ledge_precmd`, so every block begins and none ever ends. A leading
+    // newline is what makes the loss cost nothing — whatever is left of it is
+    // an empty command line, and the definition starts on the next one.
+    const init = markerInit(NONCE);
+    expect(init.startsWith("\n")).toBe(true);
+    expect(init.slice(1).startsWith("__ledge_precmd()")).toBe(true);
+    // And the sacrifice has to be a byte the shell does nothing with: losing
+    // part of a padding COMMAND would leave the rest of it to run.
+    expect(init.indexOf("\n")).toBe(0);
+  });
+
   test("the hook stays quiet when no block is running", () => {
     // Prompts happen for reasons other than blocks; without this guard every one
     // of them would emit an end marker for whatever ran last.

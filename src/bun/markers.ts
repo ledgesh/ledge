@@ -53,10 +53,21 @@ export type MarkerEvent =
  * lands on the wrong row, and the `%` survives as a stray line under every
  * block's output. The drawer's shell is a different shell and keeps the
  * option: there the prompt IS the point.
+ *
+ * It opens with a bare newline because it is the FIRST thing ever written to a
+ * fresh pty, and on Linux the first byte of that write does not reliably
+ * arrive: the master takes it before the child has finished claiming the slave
+ * as its controlling terminal, and the line discipline coming up eats it. One
+ * byte short produces no error. It produces `_ledge_precmd() {…}` next to a
+ * `precmd_functions+=(__ledge_precmd)` naming a function that does not exist,
+ * so every block on that shell begins and no block ever ends. The newline is
+ * expendable: whatever is left of it is an empty command line, and the
+ * definition starts on the next one. Found on a Linux server
+ * (scripts/probe-ssh.ts), where it was every inline run.
  */
 export function markerInit(nonce: string): string {
   return (
-    `__ledge_precmd() { local rc=$?; [ -n "$__ledge_id" ] || return; ` +
+    `\n__ledge_precmd() { local rc=$?; [ -n "$__ledge_id" ] || return; ` +
     `printf '\\033]133;D;%d;ledge=${nonce}:%s\\a' "$rc" "$__ledge_id"; __ledge_id=; }; ` +
     `if [ -n "$ZSH_VERSION" ]; then unsetopt PROMPT_SP; precmd_functions+=(__ledge_precmd); ` +
     `else PROMPT_COMMAND="__ledge_precmd\${PROMPT_COMMAND:+;\$PROMPT_COMMAND}"; fi\n`
