@@ -688,6 +688,21 @@ distinguishes: the timeout exists for the daemon an ssh conjured, and a
 supervisor restarting a container every minute for correctly deciding nobody
 was home is not a design anyone would choose.
 
+**A server's toolchain is the user's, and TypeScript was not the exception it
+looked like.** The image carries zsh because that is settings.jsonc's default
+shell, and openssh-client because `host:` frontmatter dials out from the SERVER
+(§6); every language a note actually runs is added in a `FROM ledge-server` of
+the user's own, since guessing at that list is a maintenance claim on somebody
+else's toolchain. `blocks.interpreters` maps `ts` to the token "bun", which the
+app resolves to `process.execPath` because its main process IS a bun — and a
+server's `process.execPath` is `ledge-server`, that same bun with the server
+compiled into it, whose only verbs are `serve` and `daemon`. So a ```ts fence
+on a server answered with the server's own usage text and exit 2. `runner.ts`'s
+`bundledBun` resolves the token by binary name and gives a server "", which
+falls back to the PATH's `bun`: it runs where an admin installed one and says
+"command not found" where nobody did, which is what every other language on
+that machine was saying all along.
+
 **Clients install and upgrade the server the way VS Code Remote does.** The
 client connects, reads the server's version from the handshake, and offers to
 push a matching binary when it is missing or mismatched. A user who prefers

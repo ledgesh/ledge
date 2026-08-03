@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { DEFAULT_SETTINGS } from "../shared/settings";
-import { interpretersFor, runnerFor } from "./runner";
+import { bundledBun, interpretersFor, runnerFor } from "./runner";
 
 const INTERP = DEFAULT_SETTINGS.blocks.interpreters;
 const BUN = "/Applications/My Ledge.app/Contents/MacOS/bun";
@@ -47,6 +47,15 @@ describe("runnerFor", () => {
   test("a user override replaces the bundled-bun special case", () => {
     const spec = runnerFor("b6", "ts", "1", { ...INTERP, ts: "/opt/bun/bin/bun run" }, BUN);
     expect(spec.command).toBe("/opt/bun/bin/bun run /tmp/ledge-run-b6.ts");
+  });
+
+  // The bug this "" convention exists for: a server passed its own
+  // process.execPath, which is `ledge-server` rather than a bun, so a ```ts
+  // fence ran `ledge-server run /tmp/ledge-run-x.ts` and got the server's
+  // usage text and exit 2 back — a verb it does not have.
+  test("no bundled bun means the PATH's bun, the same answer a remote run gets", () => {
+    const spec = runnerFor("b13", "ts", "1", INTERP, "");
+    expect(spec.command).toBe("bun run /tmp/ledge-run-b13.ts");
   });
 
   test("php gets its opening tag supplied when the fence omits it", () => {
@@ -100,6 +109,25 @@ describe("runnerFor", () => {
     const key = "../../x";
     const spec = runnerFor("b10", key, "1", { [key]: "cat" }, BUN);
     expect(spec.path).toBe("/tmp/ledge-run-b10.x");
+  });
+});
+
+describe("bundledBun", () => {
+  test("the app's own runtime backs the token, and so does a checkout's bun", () => {
+    expect(bundledBun(BUN)).toBe(BUN);
+    expect(bundledBun("/Users/x/.bun/bin/bun")).toBe("/Users/x/.bun/bin/bun");
+  });
+
+  test("a compiled binary is not a bun, whatever it was built with", () => {
+    // `ledge-server` is bun with the server compiled into it, and its argv is
+    // the server's own: it answers `run` with a usage message, not TypeScript.
+    // Same binary in the image and on a VPS, same answer.
+    expect(bundledBun("/usr/local/bin/ledge-server")).toBe("");
+  });
+
+  test("the whole binary name has to be bun, not the end of one", () => {
+    expect(bundledBun("/opt/bin/notbun")).toBe("");
+    expect(bundledBun("/opt/bunny/server")).toBe("");
   });
 });
 

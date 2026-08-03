@@ -68,7 +68,7 @@ import { installShim, tildify } from "./cliShim";
 import { OPEN_REQUEST_PATH, takeOpenRequest } from "./openRequest";
 import { syncWatchers } from "./watch";
 import { readAsset, writePastedImage } from "./assets";
-import { interpretersFor, runnerFor } from "./runner";
+import { bundledBun, interpretersFor, runnerFor } from "./runner";
 import { loadSettings, readSettingsFile, writeSettingsFile } from "./settings";
 import { resolveShellArgs, resolveSpawn, stampSessionFacts, type SessionFacts, type SpawnDeps } from "./spawnParams";
 import { buildRemoteSpawn } from "./remoteSpawn";
@@ -89,6 +89,12 @@ export interface NativeDeps {
   // null when the user cancelled.
   pickFolder?(startingFolder: string): Promise<string | null>;
 }
+
+// What the interpreter value "bun" means for a block that runs on THIS
+// machine: the app's own runtime under Electrobun, and nothing on a server,
+// whose binary is a compiled program rather than a bun (runner.ts). Resolved
+// once, at module load, because it is a fact about this process.
+const BUNDLED_BUN = bundledBun(process.execPath);
 
 // What workspaceAttach and workspaceMove answer with when there is no dialog
 // to show. Data, not an exception: the schema gives both calls an `error`
@@ -626,8 +632,9 @@ export async function createServer(deps: {
       // are sourced so cwd/env changes carry across blocks within the note (its
       // persistent shell is reused; a run started while it is busy gets an
       // overflow shell whose state dies with the run — inlinePool.ts), other
-      // languages exec their interpreter on it. process.execPath is the app's
-      // bundled bun, backing the "bun" interpreter for TypeScript.
+      // languages exec their interpreter on it. BUNDLED_BUN is what backs the
+      // "bun" interpreter for TypeScript, and is "" on a server that has no
+      // bun to bundle.
       //
       // A remote run writes no local file: the file belongs on the target
       // machine, and the runner's command carries the body there in-band.
@@ -639,7 +646,7 @@ export async function createServer(deps: {
         language,
         code,
         interpretersFor(target, settings.blocks),
-        process.execPath,
+        BUNDLED_BUN,
         target !== LOCAL_HOST,
       );
       if (!spec.remote) await Bun.write(spec.path, spec.contents);
@@ -712,7 +719,7 @@ export async function createServer(deps: {
           language,
           text,
           interpretersFor(t.host, settings.blocks),
-          process.execPath,
+          BUNDLED_BUN,
           t.host !== LOCAL_HOST,
         );
         if (spec.kind === "interpreter") {

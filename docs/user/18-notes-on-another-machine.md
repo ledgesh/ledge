@@ -82,8 +82,11 @@ The image carries zsh, `ssh`, and nothing else your notes might want. Add what y
 FROM ledge-server
 USER root
 RUN apt-get update && apt-get install -y --no-install-recommends git python3
+COPY --from=oven/bun:1-debian /usr/local/bin/bun /usr/local/bin/bun
 USER ledge
 ```
+
+The `bun` line is there for `ts` blocks. The app carries its own copy of that runtime and a server carries none ([[Running Code]]).
 
 ## Restrict the key to Ledge
 

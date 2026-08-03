@@ -108,6 +108,8 @@ print(f"hello from Python {platform.python_version()}")
 
 TypeScript uses the Bun runtime bundled with the app, so `ts` blocks run with nothing installed.
 
+That runtime is the app's, not a server's. A note kept on another machine runs its `ts` blocks on whatever `bun` that machine has, and says `command not found` when it has none ([[Notes on Another Machine]]).
+
 ## Redis and Valkey
 
 A `redis` block is a list of commands, fed to `redis-cli` one line at a time.

@@ -42,10 +42,33 @@ const EXT: Record<string, string> = {
 };
 
 /**
- * Build the run for block `id`. `bunPath` is the bun binary bundled with the
- * app (process.execPath — the main process IS that bun): the interpreter value
- * "bun" resolves to it so TypeScript works with no bun install, and as its own
- * OS process it keeps user code out of the main process that owns the notes.
+ * What to pass as `bunPath` for a run on THIS machine: the running binary when
+ * it is a bun, and "" when it is not.
+ *
+ * The "bun" special case exists so a ```ts fence needs nothing installed, and
+ * that is true of the app because its main process IS a bun (Electrobun ships
+ * one as `Ledge.app/Contents/MacOS/bun`, the binary the launcher execs). It is
+ * NOT true of `ledge-server`, which is that same bun with the server compiled
+ * into it: `bun build --compile` makes a binary that runs its embedded program
+ * and nothing else, so `ledge-server run /tmp/ledge-run-x.ts` answered a
+ * TypeScript block with the server's own usage text and exit 2. "" resolves
+ * the token to the PATH's `bun` instead, which is the honest answer on a
+ * server: it runs where one is installed and says "command not found" where
+ * none is.
+ *
+ * By binary name, the same test daemon.ts makes for the same underlying fact:
+ * a compiled binary is named after the program inside it, never `bun`.
+ */
+export function bundledBun(execPath: string): string {
+  return /(^|\/)bun$/.test(execPath) ? execPath : "";
+}
+
+/**
+ * Build the run for block `id`. `bunPath` is the bun this machine ships with,
+ * or "" where it ships none (`bundledBun` above decides which): the
+ * interpreter value "bun" resolves to it so TypeScript works with no bun
+ * install, and as its own OS process it keeps user code out of the main
+ * process that owns the notes.
  *
  * `remote` builds the same run for a shell that lives on another machine
  * (bun/remoteSpawn.ts). Two things change and only these two:
@@ -85,8 +108,9 @@ export function runnerFor(
   // fence in a note is usually the bare statements — supply the tag.
   const contents = ext === "php" && !/^\s*<\?/.test(code) ? `<?php\n${code}` : code;
   // Quoted because the app bundle can live under a path with spaces; user
-  // values are NOT quoted (they are commands, possibly with flags).
-  const cmd = interpreter === "bun" ? (remote ? "bun run" : `"${bunPath}" run`) : interpreter;
+  // values are NOT quoted (they are commands, possibly with flags). No bundled
+  // bun reads the same as a remote one: the PATH's, or its absence, honestly.
+  const cmd = interpreter === "bun" ? (remote || !bunPath ? "bun run" : `"${bunPath}" run`) : interpreter;
   const run = `${cmd} ${path}`;
   return { kind: "interpreter", path, contents, command: remote ? remoteWrite(contents, path, run) : run, remote };
 }
