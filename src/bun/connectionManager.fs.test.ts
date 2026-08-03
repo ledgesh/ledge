@@ -24,7 +24,7 @@ if (!resolve(APP_HOME).startsWith(resolve(tmpdir()) + sep)) {
 const LAPTOP: Connection = {
   id: "laptop-1",
   name: "Laptop",
-  destination: "dan@laptop",
+  destination: "dev@laptop",
   keyPath: "",
   hostKey: "laptop ssh-ed25519 AAAAC3Nza",
   lastReached: 0,
@@ -242,6 +242,138 @@ describe("adding and removing", () => {
     expect(res.ok).toBe(false);
     expect(res.error).toContain("Switch somewhere else");
     expect(await served(m)).toBe(LAPTOP.id);
+  });
+});
+
+describe("editing", () => {
+  const edit = { id: LAPTOP.id, name: LAPTOP.name, destination: LAPTOP.destination, keyPath: "", hostKey: null };
+
+  test("a rename keeps everything else, pin included", async () => {
+    await saveConnections([LAPTOP], LOCAL_ID);
+    const m = await createConnectionManager({ attach: fakeAttach().attach });
+    expect(await m.requests.connectionUpdate({ ...edit, name: "Studio" })).toEqual({ ok: true, error: "" });
+    const stored = JSON.parse(await readFile(CONNECTIONS_PATH, "utf8")).connections;
+    expect(stored).toEqual([{ ...LAPTOP, name: "Studio" }]);
+    expect(await readFile(KNOWN_HOSTS_PATH, "utf8")).toBe(`${LAPTOP.hostKey}\n`);
+  });
+
+  // The account is not what a host key belongs to: keyscan asked the HOST, and
+  // `dev@laptop` to `ledge@laptop` is the same machine and the same key.
+  test("changing only the account keeps the pin", async () => {
+    await saveConnections([LAPTOP], LOCAL_ID);
+    const m = await createConnectionManager({ attach: fakeAttach().attach });
+    expect(await m.requests.connectionUpdate({ ...edit, destination: "ledge@laptop" })).toEqual({ ok: true, error: "" });
+    expect((await m.requests.connectionList({})).connections[1]).toMatchObject({
+      destination: "ledge@laptop",
+      pinned: true,
+    });
+  });
+
+  // A pin is a claim about one machine. Carried across, it would refuse every
+  // later connection with a message about a CHANGED host key — the most
+  // alarming possible wording for "you typed a new address".
+  test("an address that moved to another host has to be pinned again", async () => {
+    await saveConnections([LAPTOP], LOCAL_ID);
+    const m = await createConnectionManager({ attach: fakeAttach().attach });
+    const refused = await m.requests.connectionUpdate({ ...edit, destination: "dev@studio" });
+    expect(refused.ok).toBe(false);
+    expect(refused.error).toContain("another host");
+    expect(await readFile(KNOWN_HOSTS_PATH, "utf8")).toBe(`${LAPTOP.hostKey}\n`);
+
+    const pinned = await m.requests.connectionUpdate({
+      ...edit,
+      destination: "dev@studio",
+      hostKey: "studio ssh-ed25519 AAAAnew",
+    });
+    expect(pinned).toEqual({ ok: true, error: "" });
+    expect(await readFile(KNOWN_HOSTS_PATH, "utf8")).toBe("studio ssh-ed25519 AAAAnew\n");
+  });
+
+  test("a fresh pin naming a third machine is refused too", async () => {
+    await saveConnections([LAPTOP], LOCAL_ID);
+    const m = await createConnectionManager({ attach: fakeAttach().attach });
+    const res = await m.requests.connectionUpdate({
+      ...edit,
+      destination: "dev@studio",
+      hostKey: "somewhere-else ssh-ed25519 AAAA",
+    });
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("another host");
+  });
+
+  test("the same refusals a new connection gets", async () => {
+    await saveConnections([LAPTOP], LOCAL_ID);
+    const m = await createConnectionManager({ attach: fakeAttach().attach });
+    expect((await m.requests.connectionUpdate({ ...edit, destination: "-oProxyCommand=x" })).error)
+      .toContain("ssh destination");
+    expect((await m.requests.connectionUpdate({ ...edit, name: "  " })).error).toContain("name");
+    expect((await m.requests.connectionUpdate({ ...edit, id: "gone" })).error).toContain("no such connection");
+    // The server in this process is not a record, so there is nothing about it
+    // to change.
+    expect((await m.requests.connectionUpdate({ ...edit, id: LOCAL_ID })).error).toContain("not a connection you can edit");
+  });
+
+  // The wire in front of the user was built from the old address, so a row
+  // saying one machine over a session talking to another is the lie the
+  // indicator exists to prevent.
+  test("re-addressing the connection being served re-opens it", async () => {
+    await saveConnections([LAPTOP], LAPTOP.id);
+    const fake = fakeAttach();
+    const m = await createConnectionManager({ attach: fake.attach });
+    fake.log.length = 0;
+    expect(
+      await m.requests.connectionUpdate({ ...edit, destination: "dev@studio", hostKey: "studio ssh-ed25519 AAAAnew" }),
+    ).toEqual({ ok: true, error: "" });
+    // The new one BEFORE the old one goes, which is the order that makes the
+    // refusal below free.
+    expect(fake.log).toEqual([`attach:${LAPTOP.id}`, `shutdown:${LAPTOP.id}`]);
+  });
+
+  // The same promise switching makes: the session in front of the user survives
+  // an address that does not answer, and the reason arrives as a sentence.
+  test("an address that will not open costs nothing", async () => {
+    await saveConnections([LAPTOP], LAPTOP.id);
+    // By destination rather than by id, because an edit keeps the id: what is
+    // unreachable here is the new ADDRESS.
+    const log: string[] = [];
+    const attach = async (conn: Connection): Promise<Attached> => {
+      log.push(`attach:${conn.destination}`);
+      if (conn.destination === "dev@studio") throw new Error("host is down");
+      return {
+        requests: { vaultState: async () => ({ state: conn.destination }) } as unknown as RequestHandlers,
+        build: "build",
+        shutdown: () => log.push(`shutdown:${conn.destination}`),
+      };
+    };
+    const m = await createConnectionManager({ attach });
+    log.length = 0;
+
+    const res = await m.requests.connectionUpdate({
+      ...edit,
+      destination: "dev@studio",
+      hostKey: "studio ssh-ed25519 AAAAnew",
+    });
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("host is down");
+    expect(log).toEqual(["attach:dev@studio"]);
+    // Untouched: still the session the user was in, and the record still says
+    // where that session actually is.
+    expect(await served(m)).toBe(LAPTOP.destination);
+    expect((await m.requests.connectionList({})).connections[1]!.destination).toBe(LAPTOP.destination);
+    expect(await readFile(KNOWN_HOSTS_PATH, "utf8")).toBe(`${LAPTOP.hostKey}\n`);
+  });
+
+  // A rename of the connection being served changes nothing about how it is
+  // made, so tearing the session down for it would cost every open tab for a
+  // string.
+  test("renaming the connection being served does not re-open it", async () => {
+    await saveConnections([LAPTOP], LAPTOP.id);
+    const fake = fakeAttach();
+    const m = await createConnectionManager({ attach: fake.attach });
+    fake.log.length = 0;
+    await m.requests.connectionUpdate({ ...edit, name: "Studio" });
+    expect(fake.log).toEqual([]);
+    expect((await m.requests.connectionList({})).connections[1]!.name).toBe("Studio");
   });
 });
 

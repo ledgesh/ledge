@@ -34,28 +34,30 @@ const painted = (): Promise<void> =>
   new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
 
 async function start(): Promise<void> {
-  // v1 on a phone does not run commands (ios.md §8). Set before anything
-  // renders, because what this decides is which verbs EXIST: a terminal button
-  // that appears for one frame and then leaves is worse than either answer.
-  //
-  // Cut for its interaction surface, not because it cannot work — the daemon on
-  // the other end spawns PTYs perfectly well — so this is one boolean and no
-  // code removed, and the phase after v1 turns it back on.
-  //
-  // The other two are facts about this shell rather than cuts. A phone has one
-  // server and it was chosen on the native screen in front of this one (§4), so
-  // the dialog's add half would only ever reach the refusal in nativeBridge.ts;
-  // and its keyboard is on screen, which is what makes focus expensive enough
-  // for the read-only editor to give it up (lib/shell.ts).
-  configureShell({ runsCommands: false, managesServers: false, softKeyboard: true });
-
   const shell = attachShell();
   mark("bridge");
   // Before the first dial: the client id keys the saved layout, and a phone
   // restoring a desktop's three-pane tree onto a 390-point screen is the
   // failure that keying prevents (remote.md §5, ios.md §9).
-  const { client, destination } = await shell.hello();
+  const { client, destination, key } = await shell.hello();
   mark("hello");
+
+  // v1 on a phone does not run commands (ios.md §8). Set before anything
+  // renders — bootView below is the first of that — because what this decides
+  // is which verbs EXIST: a terminal button that appears for one frame and then
+  // leaves is worse than either answer.
+  //
+  // Cut for its interaction surface, not because it cannot work — the daemon on
+  // the other end spawns PTYs perfectly well — so this is one boolean and no
+  // code removed, and the phase after v1 turns it back on.
+  //
+  // The other two are facts about this shell rather than cuts. This client
+  // authenticates with one key of its own, in the Secure Enclave, so the
+  // connection form shows the line to install rather than asking for a path to
+  // a file that does not exist (§4); and its keyboard is on screen, which is
+  // what makes focus expensive enough for the read-only editor to give it up
+  // (lib/shell.ts).
+  configureShell({ runsCommands: false, deviceKey: key, softKeyboard: true });
 
   let live = true;
   const wire = await reconnectingClient({
@@ -97,11 +99,12 @@ async function start(): Promise<void> {
   shell.onVerb((id) => dispatchNativeCommand(id));
   watchEditorFocus(shell);
 
-  // Choosing the server again, from the connection chrome, is the same boot:
-  // the ladder gives up for good when a restarted server answers with a new
-  // instance, and nothing below the transport can rebuild a session's state
-  // (shared/transport.ts). Reloading is how a page starts over.
-  await bootView(nativeOverlay(wire.requests, shell, peer.build, () => window.location.reload()));
+  // Choosing a server from the connection chrome — the same one, or another —
+  // is the same boot: the ladder gives up for good when a restarted server
+  // answers with a new instance, and nothing below the transport can rebuild a
+  // session's state (shared/transport.ts). Reloading is how a page starts over,
+  // and `lib/connections.ts` does it once, after flushing.
+  await bootView(nativeOverlay(wire.requests, shell, peer.build));
   mark("view");
   await painted();
   mark("paint");

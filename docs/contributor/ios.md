@@ -123,7 +123,7 @@ an optimization to reach for with a profile in hand, not a thing to build
 first. Phase 3 says it is not the bottleneck yet: a whole boot's frames cross
 it inside the 16ms between `server` and `view` in §5's measurement.
 
-**The bridge is ten strings, and it is written down twice.**
+**The bridge is fifteen strings, and it is written down twice.**
 `mainview/lib/nativeBridge.ts` is the page's half and
 `ios/Sources/WebHost.swift` is Swift's; between them is a byte stream in both
 directions and a request/response channel for what only a device can answer.
@@ -284,6 +284,36 @@ which is the same problem the Mac client has today and the same one
 Ledge could append it for a phone on the same network, and that is a good v2
 and an unnecessary v1.
 
+**The native pairing screen is the empty case, and only that.** It exists
+because a phone with no server has no page to render a dialog in, and it is
+reached on a first launch, after a host key changes under a record that still
+exists, and after the last server is removed. Every server after the first is
+added from the connection dialog like a Mac's (remote.md §8) — the same list,
+the same fingerprint step — and the key line the pairing screen hands over is
+the same line that dialog's form shows, carried across on `@hello` because it
+is a fact about the device rather than about any connection to one.
+
+**A pin on a phone is a key and no hostname.** There is no `known_hosts` file
+here for a hostname to index (§3), so the record itself is the index, and
+nothing in the pin says which machine it came from. That is why editing an
+address onto a different host has to be pinned again rather than checked: the
+Mac can compare a `known_hosts` line's first field and refuse the mismatch, and
+this end can only compare the address it is being moved off.
+
+**A probe is a dial that stops at key exchange** (`CapturingHostKey`). There is
+no `ssh-keyscan` in this process, but the host key is offered before user auth,
+so the fingerprint arrives without this phone's key going on the wire and
+without the server having accepted it yet — which is exactly what a keyscan is.
+The delegate refuses every key it is shown; the refusal is the point, and the
+answer is read off `offered` afterwards.
+
+**Swift holds the list's bytes and the page holds its shape**, the same split
+`.layout.json` has on a Mac (architecture.md §6). `ServerStore` reads two fields
+out of the selection — an address to dial and a key to pin — and three bridge
+calls (`servers.list`, `servers.save`, `servers.probe`) are the whole of it. The
+alternative, a verb per operation, would have put "may this be removed" in Swift
+beside the Mac's copy of the same rule in TypeScript.
+
 One consequence to write down before it surprises someone: **deleting the app
 destroys the key.** The container goes, and the enclave reference with it. A
 reinstall is a new client with a new id, a new key, and a stale line in
@@ -345,10 +375,11 @@ Three consequences, in the order they bite:
   instance, so the ladder stops for good rather than adopting it: sessions the
   app believes in no longer exist, and nothing below the transport can rebuild
   them. Recovery is choosing the connection again, which on a Mac re-attaches
-  and on a phone is the same boot as foregrounding — `nativeBridge.ts` answers
-  `connectionSelect` for its one server by reloading the page. Without that the
-  connection row is a dead label and the app waits to be force-quit, which is
-  what a live server restart actually did before this was written down.
+  and on a phone is the same boot as foregrounding — choosing the server already
+  selected is an answer rather than a no-op, and `lib/connections.ts` flushes and
+  reloads the page. Without that the connection row is a dead label and the app
+  waits to be force-quit, which is what a live server restart actually did
+  before this was written down.
 - **A phone and a Mac on one server is a fight nobody wins**, until one of them
   concedes. The daemon serves one client and hands the session to whoever
   dialled last (remote.md §1), so each displaces the other; a phone that
@@ -574,8 +605,9 @@ commands.**
 | Editing, with live preview | Attaching a workspace folder |
 | Daily notes, templates, wikilinks | Editing profiles or behavior settings |
 | Rendered images, and adding them from the photo library | Moving a workspace |
-| The trash | Adding, removing or pinning a server |
+| The trash | |
 | Workspace and connection switching | |
+| Adding, editing and removing servers | |
 | Unlocking a locked note (§10) | |
 
 **Every cut is a boolean, and each one makes a verb ABSENT rather than present
@@ -590,14 +622,24 @@ environment a block runs in, so it has nothing to edit for. Nothing is deleted
 to achieve it: the daemon on the other end spawns PTYs perfectly well, and the
 phase after v1 turns the boolean back on.
 
-`managesServers` is the shell's too, and it is not a scope cut but a fact: a
-phone has exactly one server and it was chosen on the pairing screen before the
-page existed (§4). `nativeBridge.ts` already answers connectionAdd,
-connectionRemove and connectionProbe with "this build talks to one server", so
-what this withholds is the Add Server button in front of that refusal, and with
-it a key-path field asking for a file on a client whose key is in the Secure
-Enclave and has no path. The dialog keeps its list and keeps switching: choosing
-the one server again is how a phone reconnects (§5).
+`deviceKey` is the shell's too, and it is not a cut at all but a fact about
+which key authenticates. A phone adds, edits, removes and switches servers like
+any other client (remote.md §8) — `nativeBridge.ts` implements all six methods
+over `servers.list`, `servers.save` and `servers.probe`, and every rule about
+what may be removed is there rather than in Swift. What differs is the form:
+this client has exactly one key, in the Secure Enclave, which cannot be read out
+of it and so has no path (§4). So the form asks for no path and shows the
+`authorized_keys` line instead, because installing that line on the new server
+is the step before any new connection can work. One string rather than a
+boolean, because "which key" is the whole of the difference.
+
+Two rules follow from a phone having no local server to fall back to. Removing
+the last one is allowed and returns the app to the pairing screen, because
+otherwise a phone could never forget an address it typed wrong; and there is no
+boot-time fallback to report in `connectionList`, because a phone that cannot
+reach its server never renders the dialog at all — it shows `ios.tsx`'s sentence.
+Choosing the server already selected stays a real answer rather than a no-op:
+that is how a phone reconnects after the ladder gives up (§5).
 
 `softKeyboard` is the shell's third, and the only one that changes an editor
 rather than a verb. The read-only documentation editor stays focusable on a Mac
@@ -966,7 +1008,7 @@ inside the Mac app.
    not with a desktop window pretending to be small. (That said phase 3 when it
    was written, and phase 3 turned out to be the wrong home: see below.)
 3. **Done. The Swift shell, without SSH.** `ios/` is a WKWebView loading
-   `dist-ios/` over a scheme of its own (§12), a bridge of ten strings (§2),
+   `dist-ios/` over a scheme of its own (§12), a bridge of fifteen strings (§2),
    the six client seams answered by UIKit, and a `Duplex` fed by an
    `NWConnection` to a TCP fixture on the same network. `bun run ios` builds it
    and launches it in the Simulator.

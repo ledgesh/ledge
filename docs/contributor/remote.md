@@ -466,6 +466,32 @@ to it. The local server is a connection too, and not a stored one: always
 present, uneditable, unremovable, which is what stops "no connection
 configured" from being a state anything has to render.
 
+**Every client keeps a list, and the rules for it are written once.** A phone's
+list is a phone's (`ios/Sources/ShellConfig.swift` holds the bytes; ios.md §4),
+a Mac's is `connections.json`, and both are driven through the same six schema
+methods, so "can this be deleted" has one answer rather than one per client. The
+half of a connection that is a fact about *ssh* rather than about a machine's
+files — what may be an ssh destination, which host a pin belongs to — is
+`shared/connections.ts`, reachable from Bun and from a webview, because two
+implementations of that predicate would be two answers about the same string.
+
+**A pin does not follow a connection to another host.** Editing an address is
+therefore two steps whenever the host half changed, and one step whenever it did
+not: `dev@box` to `ledge@box` is the same machine and the same key. Carrying a
+pin across would not fail safe in any useful sense — it would refuse every later
+connection with a message about a CHANGED host key, which is the most alarming
+possible wording for "you typed a new name" and teaches exactly the
+click-through §4 exists to prevent. `connectionUpdate` takes `hostKey` as
+null-to-keep, so the refusal is enforced on the stored pin as well as on a
+supplied one.
+
+**Editing the connection being served re-opens it**, on the same terms a switch
+gets: the new address is reached before the old session is torn down, and a
+failure leaves the user exactly where they were. Anything less and the row would
+name one machine over a session talking to another, which is the one lie the
+indicator exists to prevent. A rename re-opens nothing, because nothing about
+how the connection is made has changed.
+
 **A connection that will not open never costs the one that works.** The new
 server is reached before the old one is torn down, and at boot a failure falls
 back to the local server with the reason kept, so the app opens onto this
@@ -544,11 +570,11 @@ timer already measures.
 `assetPick`, `linkOpen`, and `menuSet`. Opening a URL happens on the device the
 user is holding, not on the VPS; the picture you want to insert is in that
 device's photo library or on its disk (ios.md §11); and a headless server handed
-the view's menu would swallow ⌘Q with it. The five connection entries (§8) join
+the view's menu would swallow ⌘Q with it. The six connection entries (§8) join
 them for a different reason: a server has no business knowing which servers this
 client can reach.
 
-The server implements all twelve as REFUSALS rather than omitting them, because
+The server implements all thirteen as REFUSALS rather than omitting them, because
 the handler map is total by construction; reaching one means a client forgot
 its overlay, and `{text: ""}` back from a clipboard read would look exactly
 like an empty clipboard until somebody went looking. `bun/server.ts` now has no

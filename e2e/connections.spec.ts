@@ -68,7 +68,7 @@ test("adding a server shows the host key's fingerprint before anything is pinned
   await bar(page).click();
   await dialog(page).getByRole("button", { name: "Add Server…" }).click();
   await dialog(page).getByLabel("Name").fill("Laptop");
-  await dialog(page).getByLabel("SSH destination").fill("dan@laptop");
+  await dialog(page).getByLabel("SSH destination").fill("dev@laptop");
   await dialog(page).getByRole("button", { name: "Continue" }).click();
 
   await expect(dialog(page).getByText("SHA256:harness+fake+key")).toBeVisible();
@@ -83,6 +83,40 @@ test("adding a server shows the host key's fingerprint before anything is pinned
   await expect(options.nth(2)).toHaveText(/pinned/);
 });
 
+// A rename touches nothing about how the connection is made, so it saves in
+// one step and the pin it already has stays its own.
+test("a server can be renamed without being asked about its key again", async ({ page }) => {
+  await bar(page).click();
+  await dialog(page).getByRole("button", { name: "Edit VPS" }).click();
+  await expect(dialog(page).getByLabel("Name")).toHaveValue("VPS");
+  await expect(dialog(page).getByLabel("SSH destination")).toHaveValue("ledge@vps");
+  await dialog(page).getByLabel("Name").fill("Frankfurt");
+  await dialog(page).getByRole("button", { name: "Save" }).click();
+
+  const options = dialog(page).getByRole("option");
+  await expect(options.nth(1)).toHaveText(/Frankfurt/);
+  await expect(options.nth(1)).toHaveText(/pinned/);
+});
+
+// A pin is a claim about one machine, so an address that moved to another one
+// asks the same question adding did. The button says which of the two this is
+// before it is pressed.
+test("re-addressing a server onto another host asks for its fingerprint", async ({ page }) => {
+  await bar(page).click();
+  await dialog(page).getByRole("button", { name: "Edit VPS" }).click();
+  // Same host, different account: nothing to re-pin.
+  await dialog(page).getByLabel("SSH destination").fill("dev@vps");
+  await expect(dialog(page).getByRole("button", { name: "Save" })).toBeVisible();
+
+  await dialog(page).getByLabel("SSH destination").fill("ledge@frankfurt");
+  await expect(dialog(page).getByRole("button", { name: "Save" })).toHaveCount(0);
+  await dialog(page).getByRole("button", { name: "Continue" }).click();
+  await expect(dialog(page).getByText("SHA256:harness+fake+key")).toBeVisible();
+  await dialog(page).getByRole("button", { name: "It Matches, Save" }).click();
+
+  await expect(dialog(page).getByRole("option").nth(1)).toHaveText(/ledge@frankfurt/);
+});
+
 test("a host that does not answer is a sentence, not a spinner", async ({ page }) => {
   await bar(page).click();
   await dialog(page).getByRole("button", { name: "Add Server…" }).click();
@@ -95,14 +129,28 @@ test("a host that does not answer is a sentence, not a spinner", async ({ page }
 
 // ⌫ on a focused row, the same remove verb the workspace strip uses — and the
 // same refusal shape: the app must always have somewhere to work from.
-test("⌫ removes a configured server, and refuses on the one in use", async ({ page }) => {
+test("⌫ removes a configured server, and the local one has no such verb", async ({ page }) => {
   await bar(page).click();
   const options = dialog(page).getByRole("option");
+  // The server in this process is not a record: there is nothing about it to
+  // remove and nothing to edit, so neither control exists on its row.
+  await expect(dialog(page).getByRole("button", { name: /Edit This Mac/ })).toHaveCount(0);
+  await expect(dialog(page).getByRole("button", { name: /Remove This Mac/ })).toHaveCount(0);
   await options.first().press("Backspace");
-  await expect(dialog(page).getByText(/cannot be removed/)).toBeVisible();
   await expect(options).toHaveCount(2);
 
   await options.nth(1).press("Backspace");
+  await expect(options).toHaveCount(1);
+  await expect(options.first()).toHaveText(/This Mac/);
+});
+
+// The row verb has no touch form (interactions.md §1a), so the same two verbs
+// are controls on the row — present at rest rather than revealed by a hover a
+// phone cannot perform.
+test("a server is removable without a keyboard", async ({ page }) => {
+  await bar(page).click();
+  const options = dialog(page).getByRole("option");
+  await dialog(page).getByRole("button", { name: "Remove VPS" }).click();
   await expect(options).toHaveCount(1);
   await expect(options.first()).toHaveText(/This Mac/);
 });

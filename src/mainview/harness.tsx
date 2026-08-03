@@ -53,9 +53,10 @@ const FAKING_IOS = new URLSearchParams(window.location.search).get("shell") === 
 configureShell({
   runsCommands: !FAKING_IOS,
   // The whole triple ios.tsx sets, because two of them decide what a spec can
-  // see: whether the connection dialog offers to add a server, and whether the
-  // read-only editor is a text field the software keyboard would rise over.
-  managesServers: !FAKING_IOS,
+  // see: whether the connection form asks for a key file or shows the one this
+  // client already has, and whether the read-only editor is a text field the
+  // software keyboard would rise over.
+  deviceKey: FAKING_IOS ? 'restrict,command="ledge-server serve" ecdsa-sha2-nistp256 AAAAharness ledge-iphone-abc123' : "",
   softKeyboard: FAKING_IOS,
 });
 // The SERVER's half of the same picture, and a different question: whether the
@@ -842,16 +843,25 @@ configureSettings(
   },
 );
 // The connection list, in memory. Two entries so the picker has something to
-// switch BETWEEN, and one of them refuses to open: falling back to this Mac
-// with the reason showing is a state the chrome has to render, and a fake with
-// only a happy path would never reach it.
-let connections = [
-  { id: "local", name: "This Mac", destination: "", keyPath: "", pinned: false, lastReached: 0 },
-  { id: "vps-1", name: "VPS", destination: "ledge@vps", keyPath: "", pinned: true, lastReached: 1_700_000_000_000 },
-];
-let activeConn = "local";
+// switch BETWEEN, and on the Mac one of them refuses to open: falling back to
+// this Mac with the reason showing is a state the chrome has to render, and a
+// fake with only a happy path would never reach it.
+//
+// A phone's list has no local row and cannot have one — there is no server in
+// that process to fall back to (remote.md §8) — and that absence is the whole
+// reason its remove rule differs, so the fake has to have it too.
+let connections = FAKING_IOS
+  ? [
+      { id: "vps-1", name: "VPS", destination: "ledge@vps", keyPath: "", pinned: true, lastReached: 0 },
+      { id: "pi-1", name: "Pi", destination: "dev@pi.local", keyPath: "", pinned: true, lastReached: 0 },
+    ]
+  : [
+      { id: "local", name: "This Mac", destination: "", keyPath: "", pinned: false, lastReached: 0 },
+      { id: "vps-1", name: "VPS", destination: "ledge@vps", keyPath: "", pinned: true, lastReached: 1_700_000_000_000 },
+    ];
+let activeConn = FAKING_IOS ? "vps-1" : "local";
 // Destinations the fake server refuses, so a spec can drive the refusal path.
-const unreachable = new Set(["ledge@vps"]);
+const unreachable = FAKING_IOS ? new Set<string>() : new Set(["ledge@vps"]);
 configureConnections(
   { connections, active: activeConn, wanted: activeConn, error: "", build: "0.1.0-harness" },
   {
@@ -868,9 +878,26 @@ configureConnections(
       connections = [...connections, { id, name, destination, keyPath: "", pinned: hostKey !== "", lastReached: 0 }];
       return { id, error: "" };
     },
+    update: async ({ id, name, destination, keyPath, hostKey }) => {
+      const before = connections.find((c) => c.id === id);
+      if (!before) return { ok: false, error: "There is no such connection." };
+      if (id === "local") return { ok: false, error: "This Mac is not a connection you can edit." };
+      if (unreachable.has(destination) && id === activeConn) {
+        return { ok: false, error: `Could not reach ${name}: host is down` };
+      }
+      connections = connections.map((c) =>
+        c.id === id ? { ...c, name, destination, keyPath, pinned: hostKey === null ? c.pinned : hostKey !== "" } : c,
+      );
+      return { ok: true, error: "" };
+    },
     remove: async (id) => {
       if (id === "local") return { ok: false, error: "This Mac is always here; it cannot be removed." };
-      if (id === activeConn) return { ok: false, error: "Switch somewhere else before removing this connection." };
+      // A phone can remove the last one, because it has no local server to fall
+      // back to and that would otherwise be a server it could never forget
+      // (lib/nativeBridge.ts).
+      if (id === activeConn && (!FAKING_IOS || connections.length > 1)) {
+        return { ok: false, error: FAKING_IOS ? "Switch to another server before removing this one." : "Switch somewhere else before removing this connection." };
+      }
       connections = connections.filter((c) => c.id !== id);
       return { ok: true, error: "" };
     },

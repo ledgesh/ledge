@@ -16,6 +16,7 @@ import {
   loadConnections,
   LOCAL_CONNECTION,
   LOCAL_ID,
+  pinFitsHost,
   probeHostKey,
   saveConnections,
   validateConnection,
@@ -173,6 +174,52 @@ export async function createConnectionManager(deps: {
       connections = [...connections, conn];
       await persist();
       return { id: conn.id, error: "" };
+    },
+
+    connectionUpdate: async ({ id, name, destination, keyPath, hostKey }) => {
+      if (id === LOCAL_ID) return { ok: false, error: "This Mac is not a connection you can edit." };
+      const before = connections.find((c) => c.id === id);
+      if (!before) return { ok: false, error: "There is no such connection." };
+      const refusal = validateConnection({ name, destination, keyPath });
+      if (refusal) return { ok: false, error: refusal };
+      // Null keeps what is pinned; a line replaces it. Either way a pin is a
+      // claim about one machine, and carrying one to another address would
+      // refuse every later connection with a message about a CHANGED host key
+      // — so the caller reads the new machine's fingerprint instead
+      // (remote.md §4), and this is what makes forgetting to impossible.
+      const pin = hostKey === null ? before.hostKey : hostKey.trim();
+      if (!pinFitsHost(pin, destination)) {
+        return { ok: false, error: "That pinned key belongs to another host. Check the new host's fingerprint first." };
+      }
+      const next: Connection = {
+        ...before,
+        name: name.trim(),
+        destination: destination.trim(),
+        keyPath: keyPath.trim(),
+        hostKey: pin,
+      };
+      // How the connection is MADE changed, and the wire in front of the user
+      // was made the old way. Re-opened before the old one is torn down, like a
+      // switch: an edited address that does not answer must cost no more than a
+      // typo in the add form does.
+      if (id === active.id && (next.destination !== before.destination || next.keyPath !== before.keyPath)) {
+        let opened: Attached;
+        try {
+          opened = await deps.attach(next);
+        } catch (err) {
+          return { ok: false, error: `Could not reach ${next.name}: ${reason(err)}` };
+        }
+        const previous = live;
+        live = opened;
+        active = next;
+        error = "";
+        previous.shutdown();
+      } else if (id === active.id) {
+        active = next;
+      }
+      connections = connections.map((c) => (c.id === id ? next : c));
+      await persist();
+      return { ok: true, error: "" };
     },
 
     connectionRemove: async ({ id }) => {

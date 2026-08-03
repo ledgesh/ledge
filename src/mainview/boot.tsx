@@ -279,6 +279,7 @@ async function boot(requests: RequestClient): Promise<void> {
       list: () => requests.connectionList({}),
       select: (id) => requests.connectionSelect({ id }),
       add: (fields) => requests.connectionAdd(fields),
+      update: (fields) => requests.connectionUpdate(fields),
       remove: (id) => requests.connectionRemove({ id }),
       probe: (destination) => requests.connectionProbe({ destination }),
     });

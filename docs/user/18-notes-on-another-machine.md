@@ -26,7 +26,19 @@ Choose "It Matches, Add" only when the two agree. Ledge pins the key and refuses
 
 The pinned keys live in `~/.ledge/.client/known_hosts`, separate from your own `~/.ssh/known_hosts` so you can read and revoke them on their own. Your existing entries still work: a host you already trust needs no second pin.
 
-Press ⌫ on a row in the picker to remove that connection. This Mac cannot be removed, and neither can the connection you are currently using.
+Add as many as you like. The list is this app's own and lives on this machine, so nothing about it is stored on any server.
+
+## Edit or remove a server
+
+Every row in the picker carries two controls: a pencil to change it and a bin to remove it. Press ⌫ on a focused row to remove it without reaching for either.
+
+Editing opens the same form. A rename, or a change of account on the same machine, saves in one step, because neither changes which machine the pinned key belongs to.
+
+Changing the address to a different machine does not. The button reads "Continue" instead of "Save", Ledge asks that machine for its host key, and you compare the fingerprint again before anything is stored. A key pinned for one machine says nothing about another, and carrying it across would refuse every later connection with a warning about a changed host key.
+
+Use "Check Key Again" when a server you already have has legitimately rotated its host key. It is the same fingerprint step, on a connection you keep.
+
+This Mac cannot be removed or edited, and neither can the connection you are currently using: switch somewhere else first.
 
 ## Switch servers
 

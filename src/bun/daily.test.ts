@@ -5,25 +5,25 @@ import { describe, expect, test } from "bun:test";
 import { resolveConfiguredWorkspace } from "./daily";
 import { workspaceMatches } from "./workspaces";
 
-const HOME = "/home/dan";
-const ROOTS = ["/home/dan/.ledge/notes", "/home/dan/.ledge/journal", "/vault/journal"];
+const HOME = "/home/dev";
+const ROOTS = ["/home/dev/.ledge/notes", "/home/dev/.ledge/journal", "/vault/journal"];
 
 describe("workspaceMatches", () => {
   test("an exact registered path matches itself", () => {
-    expect(workspaceMatches("/home/dan/.ledge/notes", ROOTS, HOME)).toEqual(["/home/dan/.ledge/notes"]);
+    expect(workspaceMatches("/home/dev/.ledge/notes", ROOTS, HOME)).toEqual(["/home/dev/.ledge/notes"]);
   });
 
   test("~ expands before matching", () => {
-    expect(workspaceMatches("~/.ledge/notes", ROOTS, HOME)).toEqual(["/home/dan/.ledge/notes"]);
+    expect(workspaceMatches("~/.ledge/notes", ROOTS, HOME)).toEqual(["/home/dev/.ledge/notes"]);
   });
 
   test("a unique basename is shorthand for its root", () => {
-    expect(workspaceMatches("notes", ROOTS, HOME)).toEqual(["/home/dan/.ledge/notes"]);
+    expect(workspaceMatches("notes", ROOTS, HOME)).toEqual(["/home/dev/.ledge/notes"]);
   });
 
   test("a shared basename returns every claimant", () => {
     expect(workspaceMatches("journal", ROOTS, HOME)).toEqual([
-      "/home/dan/.ledge/journal",
+      "/home/dev/.ledge/journal",
       "/vault/journal",
     ]);
   });
@@ -40,8 +40,8 @@ describe("resolveConfiguredWorkspace", () => {
   });
 
   test("resolves a path or a unique name", () => {
-    expect(resolveConfiguredWorkspace("~/.ledge/notes", ROOTS, HOME)).toBe("/home/dan/.ledge/notes");
-    expect(resolveConfiguredWorkspace("notes", ROOTS, HOME)).toBe("/home/dan/.ledge/notes");
+    expect(resolveConfiguredWorkspace("~/.ledge/notes", ROOTS, HOME)).toBe("/home/dev/.ledge/notes");
+    expect(resolveConfiguredWorkspace("notes", ROOTS, HOME)).toBe("/home/dev/.ledge/notes");
   });
 
   test("an ambiguous name degrades to null rather than guessing", () => {

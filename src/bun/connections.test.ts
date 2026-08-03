@@ -5,6 +5,9 @@
 // posture of the whole transport, and that is a string comparison: an option
 // dropped in a refactor would turn a pinned connection into one that trusts
 // whoever answers, and nothing else in the system would notice.
+//
+// This machine's half only. What a destination and a pin ARE is both clients'
+// and is tested in shared/connections.test.ts.
 import { describe, expect, test } from "bun:test";
 import {
   knownHostsText,
@@ -15,29 +18,27 @@ import {
   pickHostKey,
   SSH_PATH,
   sshCommand,
-  validateConnection,
-  hostPart,
   type Connection,
 } from "./connections";
 
 const CONN: Connection = {
   id: "c1",
   name: "Laptop",
-  destination: "dan@laptop",
+  destination: "dev@laptop",
   keyPath: "",
   hostKey: "laptop ssh-ed25519 AAAAC3Nza",
   lastReached: 0,
 };
 
-const KNOWN = "/home/dan/.ledge/.client/known_hosts";
-const USER = "/home/dan/.ssh/known_hosts";
+const KNOWN = "/home/dev/.ledge/.client/known_hosts";
+const USER = "/home/dev/.ssh/known_hosts";
 
 describe("the ssh command", () => {
   const argv = sshCommand(CONN, KNOWN, USER);
 
   test("runs the server on the other machine", () => {
     expect(argv[0]).toBe(SSH_PATH);
-    expect(argv.slice(-3)).toEqual(["dan@laptop", "ledge-server", "serve"]);
+    expect(argv.slice(-3)).toEqual(["dev@laptop", "ledge-server", "serve"]);
   });
 
   // This ssh has no terminal: its stdout IS the protocol. A prompt would hang
@@ -69,8 +70,8 @@ describe("the ssh command", () => {
   });
 
   test("a named key is offered, and only it", () => {
-    const withKey = sshCommand({ ...CONN, keyPath: "/home/dan/.ssh/ledge" }, KNOWN, USER);
-    expect(withKey).toContain("/home/dan/.ssh/ledge");
+    const withKey = sshCommand({ ...CONN, keyPath: "/home/dev/.ssh/ledge" }, KNOWN, USER);
+    expect(withKey).toContain("/home/dev/.ssh/ledge");
     // Without IdentitiesOnly, ssh offers every key the agent holds first, and
     // a server with MaxAuthTries can refuse before reaching the named one.
     expect(withKey).toContain("IdentitiesOnly=yes");
@@ -85,36 +86,8 @@ describe("the ssh command", () => {
   // quoting of its own. What keeps that safe is the edge (validateConnection
   // below), which is the same predicate a note's `host:` frontmatter gets.
   test("the destination appears exactly once, and after every option", () => {
-    expect(argv.filter((a) => a === "dan@laptop")).toHaveLength(1);
-    expect(argv.indexOf("dan@laptop")).toBe(argv.lastIndexOf("-o") + 2);
-  });
-});
-
-describe("validating what someone typed", () => {
-  const ok = { name: "Laptop", destination: "dan@laptop", keyPath: "" };
-
-  test("a plain destination is accepted", () => {
-    expect(validateConnection(ok)).toBeNull();
-    expect(validateConnection({ ...ok, destination: "prod-01" })).toBeNull();
-    expect(validateConnection({ ...ok, destination: "laptop.local" })).toBeNull();
-  });
-
-  test.each([
-    ["", "nothing"],
-    ["   ", "only spaces"],
-  ])("a name of %p (%s) is refused", (name) => {
-    expect(validateConnection({ ...ok, name })).toContain("name");
-  });
-
-  // The refusals that matter: a leading "-" reads as an ssh OPTION once the
-  // destination becomes argv, and whitespace would split one argument into two.
-  test.each([
-    ["-oProxyCommand=touch /tmp/pwned", "an option"],
-    ["laptop; rm -rf /", "a command"],
-    ["dan@laptop extra", "two arguments"],
-    ["", "nothing"],
-  ])("a destination of %p (%s) is refused", (destination) => {
-    expect(validateConnection({ ...ok, destination })).not.toBeNull();
+    expect(argv.filter((a) => a === "dev@laptop")).toHaveLength(1);
+    expect(argv.indexOf("dev@laptop")).toBe(argv.lastIndexOf("-o") + 2);
   });
 });
 
@@ -224,17 +197,5 @@ describe("reading what a host answered", () => {
   test("output ssh-keygen could not describe is null, not a guess", () => {
     expect(parseFingerprint("")).toBeNull();
     expect(parseFingerprint("laptop is not a key file")).toBeNull();
-  });
-});
-
-// keyscan takes a host; the user half of a destination is ssh's business, not
-// the host key's.
-describe("the host half of a destination", () => {
-  test.each([
-    ["dan@laptop", "laptop"],
-    ["laptop", "laptop"],
-    ["dan@user@bastion", "bastion"],
-  ])("%p scans %p", (destination, host) => {
-    expect(hostPart(destination)).toBe(host);
   });
 });

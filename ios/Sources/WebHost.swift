@@ -11,15 +11,26 @@ import WebKit
 /// answer.
 final class WebHost: UIViewController {
     private let config: ShellConfig
-    private let server: ServerRecord
+    /// Which server the next `@open` dials. A var because the page edits the
+    /// list this came from and may point it somewhere else (`servers.save`);
+    /// the page reloads itself afterwards, so the change is read at the next
+    /// `@hello` and the next dial rather than applied to a live socket.
+    private var server: ServerRecord
     /// Called when a dial fails for a reason retrying cannot fix: a host key
     /// that changed, or a key the server will not accept. The page's ladder
     /// would otherwise spend the next half minute asking the same question.
     private let onRepair: (String) -> Void
+    /// Called when the list the page saved has nothing left in it to dial.
+    /// There is no local server on a phone to fall back to (remote.md §8), so
+    /// removing the last one means pairing again.
+    private let onUnpaired: () -> Void
     private let scheme = BundleScheme()
     private var webView: WKWebView!
 
     private var socket: SSHTransport?
+    /// The dial that asks a host for its key and hangs up. Held only so it is
+    /// not deallocated mid-handshake; it is never the page's byte stream.
+    private var probing: SSHTransport?
     private var generation = 0
     /// The strip above the keyboard (ios.md §7). Built once and held here: it
     /// is captured by the accessory getter installed on the web view's content
@@ -42,10 +53,16 @@ final class WebHost: UIViewController {
     /// write fails.
     private var away = false
 
-    init(config: ShellConfig, server: ServerRecord, onRepair: @escaping (String) -> Void) {
+    init(
+        config: ShellConfig,
+        server: ServerRecord,
+        onRepair: @escaping (String) -> Void,
+        onUnpaired: @escaping () -> Void
+    ) {
         self.config = config
         self.server = server
         self.onRepair = onRepair
+        self.onUnpaired = onUnpaired
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -210,6 +227,89 @@ final class WebHost: UIViewController {
             }
         )
     }
+
+    // --- the server list (remote.md §8) ---------------------------------------
+
+    /// Ask a host for its key, and hang up.
+    ///
+    /// `connectionProbe`'s answer, in the shape `bun/connections.ts` gives it,
+    /// so the same dialog reads both. There is no `ssh-keyscan` on a phone, so
+    /// this is a dial — but only as far as key exchange, which happens before
+    /// authentication: the fingerprint arrives without this phone's key going
+    /// on the wire and without the server having accepted it yet, which is
+    /// exactly what a keyscan is (`CapturingHostKey`).
+    ///
+    /// Generation 0, like pairing's: a page socket's generation is always
+    /// positive, so a `@close` for one can never reach this.
+    private func probe(_ id: Int, _ destination: String) {
+        let answer: (String, String, String, String) -> Void = { [weak self] key, print_, type, error in
+            self?.reply(id, ["hostKey": key, "fingerprint": print_, "keyType": type, "error": error])
+        }
+        if let problem = ServerRecord.problem(with: destination) { return answer("", "", "", problem) }
+        let key: DeviceKey.Held
+        do {
+            key = try DeviceKey.load()
+        } catch {
+            return answer("", "", "", error.localizedDescription)
+        }
+        let capture = CapturingHostKey()
+        let transport = SSHTransport(
+            generation: 0,
+            server: ServerRecord(destination: destination, hostKey: ""),
+            key: key,
+            hostKey: capture,
+            log: { print("[probe] \($0)") }
+        )
+        probing = transport
+        transport.open(
+            ready: { [weak self] result in
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    transport.close()
+                    self.probing = nil
+                    // The refusal IS the success: the delegate above declines
+                    // every key, so a captured offer means the handshake got far
+                    // enough to ask, and anything else is a host that could not
+                    // be reached at all.
+                    if let offer = capture.offered {
+                        return answer(offer.openSSHLine, offer.fingerprint, offer.keyType, "")
+                    }
+                    if case .failure(let error) = result {
+                        return answer("", "", "", error.localizedDescription)
+                    }
+                    answer("", "", "", "\(destination) did not offer a host key.")
+                }
+            },
+            bytes: { _ in },
+            end: {}
+        )
+    }
+
+    /// Take the list the page saved, and point at whatever it selected.
+    ///
+    /// The page owns every rule about what may be added, renamed or removed —
+    /// they are the same rules the Mac's `connectionManager.ts` enforces, in the
+    /// same language (mainview/lib/nativeBridge.ts). This end stores the bytes
+    /// and reads two fields out of the selection: an address to dial, and a key
+    /// to pin.
+    private func saveServers(_ id: Int, _ params: [String: Any]) {
+        let rows = params["servers"] as? [[String: Any]] ?? []
+        let servers = rows.map {
+            ServerRecord(
+                id: $0["id"] as? String ?? "",
+                name: $0["name"] as? String ?? "",
+                destination: $0["destination"] as? String ?? "",
+                hostKey: $0["hostKey"] as? String ?? ""
+            )
+        }
+        ServerStore.save(servers: servers, selected: params["selected"] as? String ?? "")
+        let now = ServerStore.selected()
+        if let now { server = now }
+        reply(id, ["ok": true])
+        // After the reply, because this swaps the window's root view controller
+        // out from under the web view that asked.
+        if now == nil { onUnpaired() }
+    }
 }
 
 extension WebHost: WKNavigationDelegate {
@@ -269,9 +369,27 @@ extension WebHost: WKScriptMessageHandler {
 
         switch method {
         case "@hello":
-            reply(id, ["client": config.client, "destination": server.destination])
+            // The `authorized_keys` line goes with the client id because it is
+            // the same kind of fact: about this DEVICE, asked once, and needed
+            // before a connection exists. The page shows it in the form that
+            // adds a server, since installing it there is the step before any
+            // new connection can work (ios.md §4).
+            let line = (try? DeviceKey.load()).map { DeviceKey.authorizedKeysLine($0, client: config.client) } ?? ""
+            reply(id, ["client": config.client, "destination": server.destination, "key": line])
         case "@open":
             open(id)
+        case "servers.list":
+            let stored = ServerStore.load()
+            reply(id, [
+                "servers": stored.servers.map {
+                    ["id": $0.id, "name": $0.name, "destination": $0.destination, "hostKey": $0.hostKey]
+                },
+                "selected": stored.selected,
+            ])
+        case "servers.save":
+            saveServers(id, params)
+        case "servers.probe":
+            probe(id, (params["destination"] as? String ?? "").trimmingCharacters(in: .whitespaces))
         case "@close":
             // By generation: a close for a socket that has already been
             // replaced must not take the live one with it.

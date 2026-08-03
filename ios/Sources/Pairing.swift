@@ -15,6 +15,7 @@ import UIKit
 /// no third answer.
 final class PairingViewController: UIViewController {
     private let client: String
+    private let suggestion: String
     private let onPaired: (ServerRecord) -> Void
 
     private let scroll = UIScrollView()
@@ -29,8 +30,9 @@ final class PairingViewController: UIViewController {
     private var held: DeviceKey.Held?
     private var dialing: SSHTransport?
 
-    init(client: String, because: String?, onPaired: @escaping (ServerRecord) -> Void) {
+    init(client: String, suggest: String, because: String?, onPaired: @escaping (ServerRecord) -> Void) {
         self.client = client
+        self.suggestion = suggest
         self.onPaired = onPaired
         super.init(nibName: nil, bundle: nil)
         reason.text = because
@@ -67,7 +69,7 @@ final class PairingViewController: UIViewController {
             say(error.localizedDescription)
             connect.isEnabled = false
         }
-        field.text = ShellConfig.suggestion
+        field.text = suggestion
     }
 
     // --- the layout -----------------------------------------------------------
@@ -211,9 +213,10 @@ final class PairingViewController: UIViewController {
                         guard let accepted = confirming.accepted else {
                             return self.say("That server did not offer a host key.")
                         }
-                        let paired = ServerRecord(destination: destination, hostKey: accepted.openSSHLine)
-                        ShellConfig.remember(paired)
-                        self.onPaired(paired)
+                        // By address, so re-pairing a server whose host key
+                        // changed re-pins the record that is already there
+                        // rather than leaving a duplicate beside it.
+                        self.onPaired(ServerStore.pair(destination: destination, hostKey: accepted.openSSHLine))
                     }
                 }
             },

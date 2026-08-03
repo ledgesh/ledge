@@ -599,7 +599,7 @@ export type LedgeRPC = {
         params: { root: string; notePath?: string | null; dataB64: string };
         response: { src: string | null };
       };
-      // Which server this client talks to (remote.md §8). All five are
+      // Which server this client talks to (remote.md §8). All six are
       // answered by the client shell and never forwarded: a connection is
       // client-side configuration, and a server has no opinion about who
       // connects to it.
@@ -631,6 +631,25 @@ export type LedgeRPC = {
       connectionAdd: {
         params: { name: string; destination: string; keyPath: string; hostKey: string };
         response: { id: string; error: string };
+      };
+      // Change one: its name, its address, or the key it offers.
+      //
+      // `hostKey` is null to keep whatever is pinned, a line to pin instead, or
+      // "" to pin nothing and let the user's own ssh decide. Three states
+      // because "" already means the third; and whichever it resolves to is
+      // refused when it names a host the new address does not, since a pin is a
+      // claim about one machine and reading the new one's fingerprint is the
+      // step that moving a connection is supposed to cost (remote.md §4).
+      //
+      // Editing the connection being served re-opens it, which is why this can
+      // answer with the same "could not reach" a switch does: the wire in front
+      // of the user was built from the old address, and a row that says one
+      // machine over a session talking to another is the lie the indicator
+      // exists to prevent. The caller reloads on ok for exactly that case, as
+      // it does for connectionSelect.
+      connectionUpdate: {
+        params: { id: string; name: string; destination: string; keyPath: string; hostKey: string | null };
+        response: { ok: boolean; error: string };
       };
       // Remove one, and its pin with it. The local server and the connection
       // currently being served both refuse.

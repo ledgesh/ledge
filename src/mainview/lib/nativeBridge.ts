@@ -27,6 +27,7 @@
 //
 // Nothing in this file touches WebKit. `attachShell` at the bottom is the
 // three lines that do, and everything above it is testable in Bun.
+import { hostPart, validateConnection } from "../../shared/connections";
 import { fedDuplex, type Duplex } from "../../shared/transport";
 import {
   CLIENT_METHODS,
@@ -36,7 +37,7 @@ import {
   type RequestClient,
 } from "../../shared/wire";
 
-/** What Swift implements: twelve strings and a flat switch. */
+/** What Swift implements: fifteen strings and a flat switch. */
 export const SHELL_CALLS = [
   // The bridge's own verbs, `@`-prefixed because no schema method can ever
   // collide with them. `@hello` is asked once, before any socket exists: the
@@ -69,6 +70,17 @@ export const SHELL_CALLS = [
   "photos.pick",
   "link.open",
   "menu.set",
+  // Which servers this phone knows (remote.md §8). Swift holds the bytes and
+  // dials the selection; every rule about what may be added, renamed or removed
+  // is `clientSeams` below, beside the Mac's in bun/connectionManager.ts —
+  // there is one right answer to "can this be deleted" and it should not be
+  // written twice in two languages.
+  "servers.list",
+  "servers.save",
+  // A dial as far as key exchange, which is where the host key is offered. What
+  // `ssh-keyscan` is on a Mac: a fingerprint, before this phone's key goes on
+  // the wire and before the server has been asked to accept it (ios.md §3).
+  "servers.probe",
 ] as const;
 
 export type ShellCall = (typeof SHELL_CALLS)[number];
@@ -101,11 +113,14 @@ export type ToPage =
   // in the console.
   | { t: "verb"; id: string };
 
-/** What `@hello` answers: who this client is (remote.md §5), and what to call
- * the machine it is pointed at (§8 wants the indicator to name one). */
+/** What `@hello` answers: who this client is (remote.md §5), what to call the
+ * machine it is pointed at (§8 wants the indicator to name one), and the
+ * `authorized_keys` line a server has to trust before this phone can reach it
+ * (ios.md §4) — a fact about the device, like the client id, asked once. */
 export interface ShellHello {
   client: string;
   destination: string;
+  key: string;
 }
 
 export interface Shell {
@@ -265,17 +280,45 @@ export function nativeOverlay(
   requests: RequestClient,
   shell: Pick<Shell, "call" | "destination">,
   build: string,
-  again: () => void,
 ): RequestClient {
-  return { ...requests, ...clientSeams(requests, shell, build, again) };
+  return { ...requests, ...clientSeams(requests, shell, build) };
 }
 
-/** One server, chosen by the shell, and no way to change it from in here. */
-const ONE_SERVER = "This build talks to one server.";
-const SHELL_ID = "shell";
+/** One server this phone knows, as Swift stores it (ios/Sources/ShellConfig).
+ * `keyPath` has no counterpart: the key is in the Secure Enclave and there is
+ * no file to name (ios.md §4). */
+interface ShellServer {
+  id: string;
+  name: string;
+  destination: string;
+  /** The pinned key's two fields, and no hostname: there is no known_hosts
+   * file here for a hostname to index. "" for a record whose pin was dropped
+   * because the server offered a different key. */
+  hostKey: string;
+}
+
+const NO_SUCH = "There is no such connection.";
+// A pin is the key of one machine, and this one carries no hostname to check
+// it against — so an address that moved to another host has to be asked for a
+// fingerprint again (remote.md §4). The dialog's own form sends one, so this
+// is the backstop rather than the path.
+const PIN_MOVED = "That pinned key belongs to another host. Check the new host's fingerprint first.";
 
 /**
- * The eleven a client shell answers itself (wire.ts CLIENT_METHODS), for iOS.
+ * A fresh record's id.
+ *
+ * Not `crypto.randomUUID`, which is secure-context only and this page is served
+ * from a custom scheme that is not one (lib/clipboard.ts says the same about
+ * `navigator.clipboard`). `getRandomValues` has no such gate.
+ */
+function newServerId(): string {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * The thirteen a client shell answers itself (wire.ts CLIENT_METHODS), for iOS.
  *
  * Typed as the whole list rather than as a partial map, so a name added to
  * CLIENT_METHODS fails to compile here until this shell answers it too. The
@@ -287,8 +330,12 @@ function clientSeams(
   requests: RequestClient,
   shell: Pick<Shell, "call" | "destination">,
   build: string,
-  again: () => void,
 ): Pick<RequestClient, ClientMethod> {
+  const stored = (): Promise<{ servers: ShellServer[]; selected: string }> =>
+    shell.call("servers.list", {}) as Promise<{ servers: ShellServer[]; selected: string }>;
+  const store = async (servers: ShellServer[], selected: string): Promise<void> => {
+    await shell.call("servers.save", { servers, selected });
+  };
   return {
     clipboardWrite: async ({ text }) => {
       await shell.call("clipboard.write", { text });
@@ -321,54 +368,117 @@ function clientSeams(
     // this is where it stops.
     menuSet: async () => ({ ok: true }),
 
-    // A phone has exactly one server: the one it was paired with. The list is a
-    // single truthful row rather than an empty one, because the indicator's job
-    // is to name the machine, and the four verbs that would change it refuse in
-    // a sentence — the screen that adds and pins a server is native (§4), for
-    // the same reason it has to exist before any of this can run.
+    // The connection list, which is the phone's own and not a server's — the
+    // same claim remote.md §8 makes about a Mac's. Swift holds the file; every
+    // rule below is this file's, so that "can this be deleted" has one answer
+    // rather than one per client.
     //
-    // `pinned` is true and `keyPath` is empty, and both are facts rather than
-    // placeholders: the connection has a pinned host key, and its client key
-    // has no path because it is in the Secure Enclave and cannot be read out of
-    // it at all.
-    connectionList: async () => ({
-      connections: [
-        {
-          id: SHELL_ID,
-          name: shell.destination(),
-          destination: shell.destination(),
+    // `active` is the selection and cannot be anything else: Swift dials
+    // whatever is selected at launch, and every change to the selection is
+    // followed by a reload (ios.md §5, "foregrounding is a boot"). A phone that
+    // could not reach its server never renders this at all — it shows the
+    // sentence in ios.tsx instead — so there is no boot-time fallback to report
+    // the way the Mac's local server is.
+    //
+    // `keyPath` is empty on every row, and that is a fact rather than a
+    // placeholder: this client's key is in the Secure Enclave and cannot be
+    // read out of it, let alone named by a file (ios.md §4).
+    connectionList: async () => {
+      const { servers, selected } = await stored();
+      return {
+        connections: servers.map((s) => ({
+          id: s.id,
+          name: s.name,
+          destination: s.destination,
           keyPath: "",
-          pinned: true,
+          pinned: s.hostKey !== "",
           lastReached: 0,
-        },
-      ],
-      active: SHELL_ID,
-      wanted: SHELL_ID,
-      error: "",
-      build,
-    }),
-    // Choosing the one server again is how a phone recovers, and it is the
-    // Mac's answer too: `connectionManager.ts` re-attaches when the connection
-    // it is asked for is the active one AND that one is in error, because
-    // nothing below can re-establish a session's state by itself
-    // (shared/transport.ts). The reconnect ladder stops for good when the
-    // server restarts under it — a new instance cannot honour a replay — and
-    // this is the row the chrome offers after that. On a phone, rebuilding
-    // from boot is reloading the page, which is §5's sentence again.
+        })),
+        active: selected,
+        wanted: selected,
+        error: "",
+        build,
+      };
+    },
+
+    // Switching is storing the selection; the reload that rebuilds the session
+    // is the caller's, after it has flushed (lib/connections.ts). Choosing the
+    // one already selected is not a no-op here and must not become one: it is
+    // how a phone reconnects after the ladder has given up, which on a phone is
+    // the ordinary path rather than the exception (ios.md §5).
     connectionSelect: async ({ id }) => {
-      if (id !== SHELL_ID) return { ok: false, error: ONE_SERVER };
-      again();
+      const { servers, selected } = await stored();
+      if (!servers.some((s) => s.id === id)) return { ok: false, error: NO_SUCH };
+      if (id !== selected) await store(servers, id);
       return { ok: true, error: "" };
     },
-    connectionAdd: async () => ({ id: "", error: ONE_SERVER }),
-    connectionRemove: async () => ({ ok: false, error: ONE_SERVER }),
-    connectionProbe: async () => ({ hostKey: "", fingerprint: "", keyType: "", error: ONE_SERVER }),
+
+    connectionAdd: async ({ name, destination, hostKey }) => {
+      const refusal = validateConnection({ name, destination, keyPath: "" });
+      if (refusal) return { id: "", error: refusal };
+      const { servers, selected } = await stored();
+      const server: ShellServer = {
+        id: newServerId(),
+        name: name.trim(),
+        destination: destination.trim(),
+        hostKey: hostKey.trim(),
+      };
+      await store([...servers, server], selected);
+      return { id: server.id, error: "" };
+    },
+
+    connectionUpdate: async ({ id, name, destination, hostKey }) => {
+      const refusal = validateConnection({ name, destination, keyPath: "" });
+      if (refusal) return { ok: false, error: refusal };
+      const { servers, selected } = await stored();
+      const before = servers.find((s) => s.id === id);
+      if (!before) return { ok: false, error: NO_SUCH };
+      // By the HOST half, because the user half is not what a host key belongs
+      // to: `dev@box` to `ledge@box` is the same machine and the same key.
+      const moved = hostPart(destination.trim()) !== hostPart(before.destination);
+      if (moved && hostKey === null) return { ok: false, error: PIN_MOVED };
+      const after: ShellServer = {
+        ...before,
+        name: name.trim(),
+        destination: destination.trim(),
+        hostKey: hostKey === null ? before.hostKey : hostKey.trim(),
+      };
+      await store(
+        servers.map((s) => (s.id === id ? after : s)),
+        selected,
+      );
+      return { ok: true, error: "" };
+    },
+
+    // The Mac refuses to remove the connection being served because it always
+    // has somewhere else to be — the server in its own process. A phone has
+    // none, so the last one CAN go, and doing so is how a phone forgets a
+    // server it typed wrong: Swift has nothing left to dial and shows the
+    // pairing screen (ios/Sources/WebHost.swift).
+    connectionRemove: async ({ id }) => {
+      const { servers, selected } = await stored();
+      if (!servers.some((s) => s.id === id)) return { ok: false, error: NO_SUCH };
+      if (id === selected && servers.length > 1) {
+        return { ok: false, error: "Switch to another server before removing this one." };
+      }
+      const left = servers.filter((s) => s.id !== id);
+      await store(left, left.some((s) => s.id === selected) ? selected : "");
+      return { ok: true, error: "" };
+    },
+
+    connectionProbe: async ({ destination }) =>
+      (await shell.call("servers.probe", { destination })) as {
+        hostKey: string;
+        fingerprint: string;
+        keyType: string;
+        error: string;
+      },
   };
 }
 
 /** What the overlay answers, for the test that holds it to CLIENT_METHODS. */
 export const iosClientMethods = (): string[] =>
-  Object.keys(clientSeams({} as RequestClient, { call: async () => null, destination: () => "" }, "", () => {}));
+  Object.keys(clientSeams({} as RequestClient, { call: async () => null, destination: () => "" }, ""));
 
 declare global {
   interface Window {

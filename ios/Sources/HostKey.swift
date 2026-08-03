@@ -85,6 +85,23 @@ final class PinnedHostKey: NIOSSHClientServerAuthenticationDelegate {
     }
 }
 
+/// The probe case: take the key on offer and go no further.
+///
+/// What `ssh-keyscan` is on a Mac (bun/connections.ts), and it has to be a dial
+/// because there is no keyscan here: the host key arrives during key exchange,
+/// before any authentication, so this learns the fingerprint without the phone's
+/// key ever going on the wire and without the server needing to accept it yet.
+/// Refusing is the point rather than a side effect — this connection exists to
+/// ask a question, and the answer is read off `offered` afterwards.
+final class CapturingHostKey: NIOSSHClientServerAuthenticationDelegate {
+    private(set) var offered: HostKeyOffer?
+
+    func validateHostKey(hostKey: NIOSSHPublicKey, validationCompletePromise: EventLoopPromise<Void>) {
+        offered = HostKeyOffer(hostKey)
+        validationCompletePromise.fail(HostKeyError.declined)
+    }
+}
+
 /// The pairing case: ask, and let the handshake wait for the answer.
 ///
 /// The delegate is asynchronous, which buys a property the Mac client does not

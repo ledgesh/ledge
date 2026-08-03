@@ -20,7 +20,14 @@ import { readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { isHostName } from "../shared/frontmatter";
+import { hostPart } from "../shared/connections";
 import { CLIENT_HOME, ensureClientHome } from "./clientHome";
+
+// The half of a connection that is a fact about ssh rather than about this
+// machine's files, re-exported so that "what a connection is" still has one
+// import path on this side. The phone reaches the same functions directly,
+// because it has no Bun to reach them through (shared/connections.ts).
+export { hostPart, pinFitsHost, pinnedHost, validateConnection } from "../shared/connections";
 
 export const CONNECTIONS_PATH = join(CLIENT_HOME, "connections.json");
 
@@ -110,24 +117,6 @@ function parseConnection(raw: unknown): Connection | null {
     hostKey: str(raw["hostKey"]),
     lastReached: typeof raw["lastReached"] === "number" && raw["lastReached"] > 0 ? raw["lastReached"] : 0,
   };
-}
-
-/**
- * What a user typed, refused with a reason or accepted as a connection. The
- * destination becomes argv for ssh, so it is checked with the same predicate a
- * note's `host:` frontmatter is (shared/frontmatter.ts): what it excludes is
- * option injection and the whitespace that would split one argument into two.
- */
-export function validateConnection(fields: { name: string; destination: string; keyPath: string }): string | null {
-  const name = fields.name.trim();
-  const destination = fields.destination.trim();
-  if (!name) return "A connection needs a name.";
-  if (!destination) return "A connection needs an ssh destination, like user@host.";
-  if (!isHostName(destination)) {
-    return `"${destination}" is not an ssh destination. Use a host, user@host, or a name from your ~/.ssh/config.`;
-  }
-  if (fields.keyPath.includes("\n")) return "A key path cannot contain a newline.";
-  return null;
 }
 
 /**
@@ -303,11 +292,4 @@ export async function probeHostKey(
   } catch (err) {
     return { error: `Could not run ssh-keygen (${err instanceof Error ? err.message : String(err)}).` };
   }
-}
-
-// keyscan takes a host, not a destination: `deploy@prod` is a user and a host,
-// and the user half is ssh's business, not the host key's.
-export function hostPart(destination: string): string {
-  const at = destination.lastIndexOf("@");
-  return at >= 0 ? destination.slice(at + 1) : destination;
 }

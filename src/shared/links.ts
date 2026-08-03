@@ -13,7 +13,7 @@
 
 const SCHEMES = new Set(["http", "https", "mailto"]);
 
-// A bare email, the way GFM autolinks one (<dan@example.com> parses to just
+// A bare email, the way GFM autolinks one (<dev@example.com> parses to just
 // the address). Deliberately crude: it only decides mailto-vs-refuse, and a
 // false negative merely makes a link unclickable.
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;

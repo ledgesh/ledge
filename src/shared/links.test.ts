@@ -21,8 +21,8 @@ describe("openableUrl", () => {
   });
 
   test("a bare email gets mailto, the way GFM autolinks read", () => {
-    expect(openableUrl("dan@example.com")).toBe("mailto:dan@example.com");
-    expect(openableUrl("mailto:dan@example.com")).toBe("mailto:dan@example.com");
+    expect(openableUrl("dev@example.com")).toBe("mailto:dev@example.com");
+    expect(openableUrl("mailto:dev@example.com")).toBe("mailto:dev@example.com");
   });
 
   test("javascript: is refused — the reason the list is an allowlist", () => {

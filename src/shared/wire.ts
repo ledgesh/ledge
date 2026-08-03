@@ -169,6 +169,7 @@ export const REQUEST_METHODS = [
   "connectionList",
   "connectionSelect",
   "connectionAdd",
+  "connectionUpdate",
   "connectionRemove",
   "connectionProbe",
   "layoutGet",
@@ -241,13 +242,14 @@ export const NATIVE_METHODS = [
 
 export type NativeMethod = (typeof NATIVE_METHODS)[number];
 
-/** The five the view drives connections with. Which servers this app can
+/** The six the view drives connections with. Which servers this app can
  * connect to is nobody's business but this app's: a server asked to list them
  * would be answering about somebody else's client (remote.md §8). */
 export const CONNECTION_METHODS = [
   "connectionList",
   "connectionSelect",
   "connectionAdd",
+  "connectionUpdate",
   "connectionRemove",
   "connectionProbe",
 ] as const satisfies readonly RequestMethod[];

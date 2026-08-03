@@ -28,7 +28,7 @@ function recorder() {
   };
   const greeted = async (destination = "ledge@192.168.1.9") => {
     const asking = shell.hello();
-    answer("@hello", { client: "device-1", destination });
+    answer("@hello", { client: "device-1", destination, key: "restrict,command=… ecdsa-sha2-nistp256 AAAA iphone" });
     return asking;
   };
   const opened = async (gen: number) => {
@@ -63,8 +63,15 @@ describe("the native call channel", () => {
   test("who we are and where we point is asked once, before any socket", async () => {
     const { sent, shell, greeted } = recorder();
     expect(shell.destination()).toBe("");
-    expect(await greeted("dan@mac.local")).toEqual({ client: "device-1", destination: "dan@mac.local" });
-    expect(shell.destination()).toBe("dan@mac.local");
+    // The device's three facts together, because all three are needed before a
+    // connection exists: the id keys the layout, the destination names the
+    // machine, and the key line is what a NEW server has to be given (§4).
+    expect(await greeted("dev@mac.local")).toEqual({
+      client: "device-1",
+      destination: "dev@mac.local",
+      key: "restrict,command=… ecdsa-sha2-nistp256 AAAA iphone",
+    });
+    expect(shell.destination()).toBe("dev@mac.local");
     // The layout is keyed by client id (remote.md §5), so the id has to be in
     // hand before the first dial rather than after it.
     expect(sent[0]).toEqual({ t: "call", id: 1, m: "@hello", p: {} });
@@ -257,16 +264,48 @@ function noServer(extra: Partial<RequestClient> = {}): RequestClient {
   };
 }
 
-const booted: number[] = [];
-
 function overlay(calls: (m: string, p: unknown) => Promise<unknown>, requests = noServer()): RequestClient {
-  return nativeOverlay(
-    requests,
-    { call: (m, p) => calls(m, p), destination: () => "dan@mac.local" },
-    "0.1.0-server",
-    () => booted.push(1),
-  );
+  return nativeOverlay(requests, { call: (m, p) => calls(m, p), destination: () => "dev@mac.local" }, "0.1.0-server");
 }
+
+interface StoredServer {
+  id: string;
+  name: string;
+  destination: string;
+  hostKey: string;
+}
+
+/**
+ * The phone's stored list, driven the way Swift drives it.
+ *
+ * Three calls are the whole of what that end persists
+ * (ios/Sources/ShellConfig.swift), so a fake holding them in a variable
+ * exercises every rule there is about adding, renaming and removing — because
+ * every one of those rules is in the overlay, on purpose, beside the Mac's in
+ * bun/connectionManager.ts rather than a second time in Swift.
+ */
+function withServers(servers: StoredServer[], selected = servers[0]?.id ?? "") {
+  const state = { servers, selected };
+  const probed: string[] = [];
+  const o = overlay(async (m, p) => {
+    if (m === "servers.list") return { servers: state.servers, selected: state.selected };
+    if (m === "servers.save") {
+      const saved = p as { servers: StoredServer[]; selected: string };
+      state.servers = saved.servers;
+      state.selected = saved.selected;
+      return { ok: true };
+    }
+    if (m === "servers.probe") {
+      probed.push((p as { destination: string }).destination);
+      return { hostKey: "ssh-ed25519 AAAAnew", fingerprint: "SHA256:new+key", keyType: "ssh-ed25519", error: "" };
+    }
+    return null;
+  });
+  return { state, probed, o };
+}
+
+const VPS: StoredServer = { id: "s1", name: "VPS", destination: "ledge@vps", hostKey: "ssh-ed25519 AAAAvps" };
+const PI: StoredServer = { id: "s2", name: "Pi", destination: "dev@pi.local", hostKey: "ssh-ed25519 AAAApi" };
 
 describe("the client overlay", () => {
   test("answers exactly the methods a server refuses", () => {
@@ -314,42 +353,133 @@ describe("the client overlay", () => {
     expect(await overlay(async () => "").assetPaste({ root: "/notes", notePath: "/notes/a.md" })).toEqual({ src: null });
   });
 
-  test("the connection list names the machine the shell reached", async () => {
-    const status = await overlay(async () => null).connectionList({});
-    expect(status.connections.map((c) => c.destination)).toEqual(["dan@mac.local"]);
-    expect(status.active).toBe(status.connections[0]!.id);
+  test("the connection list is this phone's own, and the selection is what is served", async () => {
+    const { o } = withServers([VPS, PI], PI.id);
+    const status = await o.connectionList({});
+    expect(status.connections.map((c) => c.name)).toEqual(["VPS", "Pi"]);
+    expect(status.active).toBe(PI.id);
+    expect(status.wanted).toBe(PI.id);
+    // No boot-time fallback to report: a phone with no reachable server never
+    // renders this at all, it shows ios.tsx's sentence instead.
     expect(status.error).toBe("");
-    // Both are facts about how a phone connects, not placeholders: the host key
-    // was pinned at pairing, and the client key has no path because it is in
-    // the Secure Enclave (ios.md §4).
+    // Facts about how a phone connects, not placeholders: the host key was
+    // pinned when the server was added, and the client key has no path because
+    // it is in the Secure Enclave (ios.md §4).
     expect(status.connections[0]).toMatchObject({ pinned: true, keyPath: "" });
     // The SERVER's build, not the client's: the chrome shows what it reached.
     expect(status.build).toBe("0.1.0-server");
   });
 
-  test("the four verbs that would change it refuse in a sentence", async () => {
-    const o = overlay(async () => null);
-    expect((await o.connectionAdd({ name: "n", destination: "d", keyPath: "", hostKey: "" })).error).toContain("one server");
-    expect((await o.connectionRemove({ id: "shell" })).error).toContain("one server");
-    expect((await o.connectionProbe({ destination: "d" })).error).toContain("one server");
+  test("a record whose pin was dropped is listed, and listed as unpinned", async () => {
+    const { o } = withServers([{ ...VPS, hostKey: "" }]);
+    expect((await o.connectionList({})).connections[0]).toMatchObject({ name: "VPS", pinned: false });
+  });
+
+  test("adding a server leaves the one being used alone", async () => {
+    const { state, o } = withServers([VPS]);
+    const { id, error } = await o.connectionAdd({
+      name: "Pi",
+      destination: "dev@pi.local",
+      keyPath: "",
+      hostKey: "ssh-ed25519 AAAApi",
+    });
+    expect(error).toBe("");
+    expect(state.servers.map((s) => s.name)).toEqual(["VPS", "Pi"]);
+    expect(state.selected).toBe(VPS.id);
+    expect(id).not.toBe("");
+    expect(id).not.toBe(VPS.id);
+  });
+
+  // The same predicate the Mac applies, in the same words: what a text field
+  // becomes is ssh's argv, and a destination starting with "-" is an option.
+  test("what could not be an ssh destination never reaches the store", async () => {
+    const { state, o } = withServers([VPS]);
+    expect((await o.connectionAdd({ name: "X", destination: "-oProxyCommand=x", keyPath: "", hostKey: "" })).error)
+      .toContain("not an ssh destination");
+    expect((await o.connectionAdd({ name: " ", destination: "dev@pi", keyPath: "", hostKey: "" })).error)
+      .toContain("name");
+    expect(state.servers).toHaveLength(1);
+  });
+
+  test("switching stores the selection, and choosing the one in use is not a refusal", async () => {
+    const { state, o } = withServers([VPS, PI], VPS.id);
+    expect(await o.connectionSelect({ id: PI.id })).toEqual({ ok: true, error: "" });
+    expect(state.selected).toBe(PI.id);
+    // The ladder gives up for good when a restarted server answers with a new
+    // instance (shared/transport.ts), and choosing the connection again is what
+    // rebuilds from boot — on a phone the only recovery there is, so a refusal
+    // would be an app that stays dead until it is force-quit.
+    expect(await o.connectionSelect({ id: PI.id })).toEqual({ ok: true, error: "" });
     expect((await o.connectionSelect({ id: "elsewhere" })).ok).toBe(false);
   });
 
-  // The ladder gives up for good when a restarted server answers with a new
-  // instance (shared/transport.ts), and choosing the connection again is what
-  // rebuilds from boot. On a phone that is the page reloading, and the row is
-  // the only recovery there is — so a refusal here would be an app that stays
-  // dead until it is force-quit.
-  test("choosing the one server again is a boot, and a wrong id is not", async () => {
-    const o = overlay(async () => null);
-    booted.length = 0;
-    expect(await o.connectionSelect({ id: (await o.connectionList({})).connections[0]!.id })).toEqual({
+  test("a rename keeps the pin and the address", async () => {
+    const { state, o } = withServers([VPS]);
+    expect(await o.connectionUpdate({ ...VPS, name: "Frankfurt", keyPath: "", hostKey: null })).toEqual({
       ok: true,
       error: "",
     });
-    expect(booted.length).toBe(1);
-    await o.connectionSelect({ id: "elsewhere" });
-    expect(booted.length).toBe(1);
+    expect(state.servers[0]).toEqual({ ...VPS, name: "Frankfurt" });
+  });
+
+  // The account is not what a host key belongs to, so this one saves in a step.
+  test("changing only the account keeps the pin", async () => {
+    const { state, o } = withServers([VPS]);
+    const res = await o.connectionUpdate({ ...VPS, destination: "dev@vps", keyPath: "", hostKey: null });
+    expect(res).toEqual({ ok: true, error: "" });
+    expect(state.servers[0]).toMatchObject({ destination: "dev@vps", hostKey: VPS.hostKey });
+  });
+
+  // The pin here is a key and no hostname — there is no known_hosts file on a
+  // phone for one to index — so nothing about it says which machine it came
+  // from. Carrying it to another address would fail every later dial with a
+  // message about a CHANGED host key.
+  test("an address that moved to another host has to be pinned again", async () => {
+    const { state, o } = withServers([VPS]);
+    const refused = await o.connectionUpdate({ ...VPS, destination: "ledge@other", keyPath: "", hostKey: null });
+    expect(refused.ok).toBe(false);
+    expect(refused.error).toContain("another host");
+    expect(state.servers[0]).toEqual(VPS);
+
+    const pinned = await o.connectionUpdate({
+      ...VPS,
+      destination: "ledge@other",
+      keyPath: "",
+      hostKey: "ssh-ed25519 AAAAother",
+    });
+    expect(pinned).toEqual({ ok: true, error: "" });
+    expect(state.servers[0]).toMatchObject({ destination: "ledge@other", hostKey: "ssh-ed25519 AAAAother" });
+  });
+
+  test("the server being used cannot go while there is another to switch to", async () => {
+    const { state, o } = withServers([VPS, PI], VPS.id);
+    expect((await o.connectionRemove({ id: VPS.id })).error).toContain("Switch to another server");
+    expect(state.servers).toHaveLength(2);
+    expect(await o.connectionRemove({ id: PI.id })).toEqual({ ok: true, error: "" });
+    expect(state.servers.map((s) => s.id)).toEqual([VPS.id]);
+    expect(state.selected).toBe(VPS.id);
+    expect((await o.connectionRemove({ id: PI.id })).error).toContain("no such connection");
+  });
+
+  // A Mac always has somewhere else to be — the server in its own process — so
+  // it refuses this. A phone has none, which is exactly why the last one has to
+  // be removable: it is the only way to forget a server that was typed wrong.
+  test("removing the last server is how a phone forgets one", async () => {
+    const { state, o } = withServers([VPS]);
+    expect(await o.connectionRemove({ id: VPS.id })).toEqual({ ok: true, error: "" });
+    expect(state.servers).toEqual([]);
+    expect(state.selected).toBe("");
+  });
+
+  test("a fingerprint comes from the shell, which is the only end that can dial", async () => {
+    const { probed, o } = withServers([VPS]);
+    expect(await o.connectionProbe({ destination: "ledge@new" })).toEqual({
+      hostKey: "ssh-ed25519 AAAAnew",
+      fingerprint: "SHA256:new+key",
+      keyType: "ssh-ed25519",
+      error: "",
+    });
+    expect(probed).toEqual(["ledge@new"]);
   });
 
   test("everything else is the server's", async () => {

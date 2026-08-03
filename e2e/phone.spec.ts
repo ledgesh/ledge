@@ -605,21 +605,45 @@ test.describe("the iOS client, and what it does not run", () => {
     await expect(page.getByText("Move Workspace Folder…")).toHaveCount(0);
   });
 
-  test("no Add Server: the one this phone has was chosen before the page existed", async ({
-    page,
-  }) => {
-    // ios.md §4: pairing is a native screen, and nativeBridge answers
-    // connectionAdd, connectionRemove and connectionProbe with a refusal. The
-    // dialog still lists the server and still switches to it — choosing the one
-    // server again is how a phone reconnects — but the path that ends in the
-    // refusal is gone, and with it a field asking for a key file on a client
-    // whose key is in the Secure Enclave and has no path.
+  test("a phone keeps its own list of servers, and adds to it here", async ({ page }) => {
+    // The native pairing screen is how the FIRST server gets a pin (ios.md §4),
+    // and every one after it is added from this dialog like a Mac's. What
+    // differs is which key authenticates: a phone has exactly one, in the
+    // Secure Enclave, so the form shows the line to install on the new server
+    // rather than asking for a path to a file that cannot exist.
     await palette(page, "notes on");
     await page.keyboard.press("Enter");
     const dialog = page.getByRole("dialog", { name: "Connections" });
     await expect(dialog).toBeVisible();
-    await expect(dialog.getByRole("button", { name: /Add Server/ })).toHaveCount(0);
-    await expect(dialog).toContainText("Paired with one server");
+    await expect(dialog.getByRole("option")).toHaveCount(2);
+
+    await dialog.getByRole("button", { name: "Add Server…" }).tap();
+    await expect(dialog).toContainText("authorized_keys");
+    await expect(dialog.getByText(/^restrict,command=/)).toBeVisible();
+    await expect(dialog.getByLabel(/^Key/)).toHaveCount(0);
+
+    await dialog.getByLabel("Name").fill("Studio");
+    await dialog.getByLabel("SSH destination").fill("dev@studio");
+    await dialog.getByRole("button", { name: "Continue" }).tap();
+    await expect(dialog.getByText("SHA256:harness+fake+key")).toBeVisible();
+    await dialog.getByRole("button", { name: "It Matches, Add" }).tap();
+    await expect(dialog.getByRole("option")).toHaveCount(3);
+  });
+
+  test("editing and removing a server are taps, not a hover and a bare key", async ({ page }) => {
+    // ⌫ on a focused row has no touch form and does not get one
+    // (interactions.md §1a), so both verbs are controls that are there at rest.
+    await palette(page, "notes on");
+    await page.keyboard.press("Enter");
+    const dialog = page.getByRole("dialog", { name: "Connections" });
+
+    await dialog.getByRole("button", { name: "Edit Pi" }).tap();
+    await dialog.getByLabel("Name").fill("Shed");
+    await dialog.getByRole("button", { name: "Save" }).tap();
+    await expect(dialog.getByRole("option").nth(1)).toHaveText(/Shed/);
+
+    await dialog.getByRole("button", { name: "Remove Shed" }).tap();
+    await expect(dialog.getByRole("option")).toHaveCount(1);
   });
 
   test("the manual is not a text field: tapping it raises no keyboard", async ({

@@ -115,6 +115,7 @@ function clientSeamRefusals(): Pick<RequestHandlers, ClientMethod> {
     connectionList: refuse("connectionList"),
     connectionSelect: refuse("connectionSelect"),
     connectionAdd: refuse("connectionAdd"),
+    connectionUpdate: refuse("connectionUpdate"),
     connectionRemove: refuse("connectionRemove"),
     connectionProbe: refuse("connectionProbe"),
   };

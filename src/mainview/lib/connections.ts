@@ -23,6 +23,14 @@ interface ConnectionHandlers {
   list: () => Promise<ConnectionStatus>;
   select: (id: string) => Promise<{ ok: boolean; error: string }>;
   add: (fields: { name: string; destination: string; keyPath: string; hostKey: string }) => Promise<{ id: string; error: string }>;
+  update: (fields: {
+    id: string;
+    name: string;
+    destination: string;
+    keyPath: string;
+    /** Null keeps whatever is pinned; a line replaces it; "" pins nothing. */
+    hostKey: string | null;
+  }) => Promise<{ ok: boolean; error: string }>;
   remove: (id: string) => Promise<{ ok: boolean; error: string }>;
   probe: (destination: string) => Promise<{ hostKey: string; fingerprint: string; keyType: string; error: string }>;
 }
@@ -129,6 +137,31 @@ export async function addConnection(fields: {
   const res = await handlers.add(fields);
   if (!res.error) await refreshConnections();
   return res;
+}
+
+/**
+ * Change one, and rebuild the session when what changed is how the connection
+ * being served is MADE.
+ *
+ * The reload is `selectConnection`'s, for the same reason: the shell has
+ * re-opened the wire against the new address, so everything server-scoped in
+ * this page is now the previous machine's. A rename needs none of it, which is
+ * why the caller says which kind of edit this was rather than this guessing.
+ */
+export async function updateConnection(
+  fields: { id: string; name: string; destination: string; keyPath: string; hostKey: string | null },
+  opts: { reconnected: boolean; flush: () => Promise<void> },
+): Promise<string | null> {
+  if (!handlers) return "Not connected to Ledge's own process.";
+  const res = await handlers.update(fields);
+  if (!res.ok) return res.error || "That connection could not be changed.";
+  if (opts.reconnected) {
+    await opts.flush().catch(() => {});
+    window.location.reload();
+    return null;
+  }
+  await refreshConnections();
+  return null;
 }
 
 export async function removeConnection(id: string): Promise<string | null> {

@@ -33,9 +33,15 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     private func show() {
         let config = ShellConfig.current()
         guard let server = config.server else { return showPairing(because: nil) }
-        let screen = WebHost(config: config, server: server) { [weak self] why in
-            self?.repair(why)
-        }
+        let screen = WebHost(
+            config: config,
+            server: server,
+            onRepair: { [weak self] why in self?.repair(why) },
+            // Nothing left to dial: the page removed the last server. A phone
+            // has no local server to fall back to the way a Mac does
+            // (remote.md §8), so the screen before any of this is the answer.
+            onUnpaired: { [weak self] in self?.showPairing(because: nil) }
+        )
         pairing = nil
         host = screen
         window?.rootViewController = screen
@@ -48,7 +54,18 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     /// survives being forgotten would otherwise build another web view, which
     /// would fail the same way, and ask for repair again.
     private func showPairing(because: String?) {
-        let screen = PairingViewController(client: ShellConfig.current().client, because: because) { [weak self] _ in
+        // Whatever the selected record still says, so a pin dropped by `repair`
+        // comes back to a screen that already knows the address: the key is the
+        // thing to look at again, not the machine. Nothing selected falls back
+        // to what the launch suggested, which is how a probe points a build at
+        // a scratch server.
+        let stored = ServerStore.load()
+        let suggestion = stored.servers.first(where: { $0.id == stored.selected })?.destination ?? ShellConfig.suggestion
+        let screen = PairingViewController(
+            client: ShellConfig.current().client,
+            suggest: suggestion,
+            because: because
+        ) { [weak self] _ in
             self?.show()
         }
         host = nil
@@ -63,7 +80,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         // The page's ladder keeps dialing while this decision is being made, so
         // every attempt would otherwise ask for the same screen.
         guard pairing == nil else { return }
-        ShellConfig.forgetPin()
+        ServerStore.forgetPin()
         showPairing(because: why)
     }
 

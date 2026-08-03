@@ -330,6 +330,13 @@ the failure it prevents, which is running a command on the wrong box.
 - **The chooser opens on the connection in use**, like the host picker: Enter
   means stay, and moving somewhere else costs a deliberate arrow. `⌫` on a row
   removes that connection, the same row verb the workspace strip uses.
+- **Edit and Remove are controls on the row, present at rest.** §1a says a
+  hover-revealed control is a control a touch client does not have and a bare
+  row verb has no touch form, and this dialog is the only surface either verb
+  appears on — there is no palette entry for "rename the VPS". So the two
+  controls sit at the end of every row that is a record, in the tab order beside
+  it, and the local server's row has neither because there is nothing about the
+  server in this process to change.
 - **No confirmation, by §4's arrangement-loss rule.** Nothing is destroyed:
   the tabs are on the other machine and come back when you switch back. What
   the dialog does instead is *say so* before the click ("Switching closes every
@@ -340,8 +347,19 @@ the failure it prevents, which is running a command on the wrong box.
   deliberately no "connect anyway": that button is the thing pinning exists to
   prevent, and an app that offers it has taught the click-through §4 warns
   about.
+- **Editing is the same form, and the same second step when it is earned.** A
+  pin belongs to one host, so moving an address onto another one asks the
+  fingerprint question again and the primary button says "Continue" rather than
+  "Save" before it is pressed. A rename, or a change of account on the same
+  host, saves in one step. A server that rotated its key legitimately would
+  otherwise cost a delete and a re-add, so the form carries "Check Key Again"
+  for exactly that.
 - **Two refusals keep the app somewhere it can work from**: the local server
-  cannot be removed, and neither can the connection currently being served.
+  cannot be removed, and neither can the connection currently being served. A
+  phone has no local server to fall back to, so there the second refusal holds
+  only while another server exists — removing the last one returns it to the
+  pairing screen, which is the only way a phone can forget an address it typed
+  wrong (ios.md §4).
 - **A connection that will not open costs nothing.** The new server is reached
   *before* the old one is torn down, so a typo or a sleeping laptop leaves the
   session exactly where it was, with the reason in the dialog. At boot the

@@ -22,13 +22,14 @@
 interface Shell {
   /** Whether this client offers to run blocks and open terminals. */
   runsCommands: boolean;
-  /** Whether a server can be added, removed or switched to from in here. */
-  managesServers: boolean;
+  /** This client's own `authorized_keys` line, or "" where it has no key of
+   * its own to install. */
+  deviceKey: string;
   /** Whether focusing text puts a keyboard on screen, over the page. */
   softKeyboard: boolean;
 }
 
-let shell: Shell = { runsCommands: true, managesServers: true, softKeyboard: false };
+let shell: Shell = { runsCommands: true, deviceKey: "", softKeyboard: false };
 
 export function configureShell(next: Partial<Shell>): void {
   shell = { ...shell, ...next };
@@ -41,19 +42,23 @@ export function runsCommands(): boolean {
 }
 
 /**
- * Whether the connection dialog's add/remove half belongs on this client
- * (remote.md §8).
+ * The line this client asks a server to trust, whole, or "" where the question
+ * does not arise (remote.md §8, §4).
  *
- * False on a phone, whose server is chosen on a native screen before the page
- * exists at all (ios.md §4) — it has exactly one, and `lib/nativeBridge.ts`
- * answers connectionAdd, connectionRemove and connectionProbe with a refusal.
- * The dialog still LISTS that server and still switches to it, because
- * choosing the one server again is how a phone reconnects; what goes is the
- * path that ends in the refusal, and with it a key-path field asking for a
- * file on a client whose key is in the Secure Enclave and has no path.
+ * Both clients add, edit and remove servers; what differs is which key
+ * authenticates. A Mac offers a key FILE, so its form asks for a path and its
+ * user installs whichever public key they already have. A phone has exactly one
+ * key, minted in the Secure Enclave, which cannot be read out of it and
+ * therefore has no path (ios.md §4) — so its form asks for no path and shows
+ * the `authorized_keys` line instead, because installing that line on the new
+ * server is the step before a new connection can work at all.
+ *
+ * One string rather than a pair of booleans: "which key" is the whole of the
+ * difference, and a client that has one of its own is exactly the client whose
+ * form should be showing it.
  */
-export function managesServers(): boolean {
-  return shell.managesServers;
+export function deviceKeyLine(): string {
+  return shell.deviceKey;
 }
 
 /**
