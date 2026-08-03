@@ -22,6 +22,8 @@ A note names at most one profile, and any number of notes can share one. Every d
 
 Click the profile name in the frontmatter block, or run "Edit Note Profile…" from the command palette. The command appears whenever the current note names a profile.
 
+On a touch device the palette command is the whole of it. The small key button beside the name is a pointer control and is not drawn there, and the command asks for nothing to be pointed at: it follows the note you are in.
+
 Either way you get Ledge's profile editor: KEY=value rows with the values masked.
 
 On disk the profile is a plain dotenv file: `KEY=value` per line, `#` comments, and an optional `export ` prefix. Ledge creates it readable only by you. Hand edits and editor edits coexist, and saves from the editor preserve your comments.

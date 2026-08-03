@@ -74,7 +74,7 @@ section.
 | Desktop affordance | Touch |
 | ------------------ | ----- |
 | Hotkey | the palette entry R1 already requires |
-| Hover-revealed button | the row's menu, per R2 — and the button is ABSENT, not transparent |
+| Hover-revealed button | the row's menu, per R2 — and the button is ABSENT, not transparent. Unless the verb has no equally direct path: then it is LIT and 44 points, which is the fence's ▶ |
 | Right-click | a long press on the row |
 | Double-click rename | the menu's Rename item, which R3 already calls the discoverable path |
 | ↑/↓ roving focus (R5) | a tap; the tapped row is the focused row |
@@ -114,6 +114,33 @@ section.
   (`hoverable:` is `@media (hover: hover)`; the desktop reveal keeps its
   reserved space, so nothing reflows on hover). The verb is not lost: it is in
   the row's own menu, which is what the table above already says.
+- **The other answer is LIT, and the verb picks between the two.** Absent works
+  because the menu or the palette is just as direct. Where it is not, the
+  control stays, is visible without being asked for, and is 44 points. A code
+  block's ▶ is the case: `block.runInline` is in the palette, but it acts on the
+  block the CARET is in, so the palette form of one tap is a tap in the block,
+  a tap on the magnifier, a typed `>`, and a choice — and running a block is
+  what a note is for. Same layer, opposite answer, one line apart: the
+  frontmatter profile chip is `display: none` on touch, because `profile.open`
+  (Edit Note Profile…) is note-scoped and its palette entry needs nothing
+  pointed at first. Both of the chip's desktop paths — the chip and ⌘-clicking
+  the name — are a pointer's, so nothing is left behind on a phone that was
+  reachable before.
+- **A card grows a lane for a control rather than the control growing over its
+  contents.** The block chrome is 22 points taller on touch and would have
+  covered the first line of the code it runs. So `.cm-line.ledge-code-top` gets
+  22 more points of top padding and the group is lifted by the same 22
+  (`index.css`), which puts it back where the small one ended: at the opening
+  fence, clear of the code. `editor/blocks.ts` still anchors it to that fence's
+  glyph and knows nothing about either number — the pair belongs next to each
+  other in one file, not one of them in a measurement.
+- **A reserved width that can shrink is not reserved.** Chrome drawn in the
+  body overlay (`editor/blocks.ts`) is invisible to the flexbox under it, so the
+  layout holds space for it with an empty element. At 44 points that space is a
+  third of the run panel's header, flex took it back, and the ✕ that interrupts
+  a run landed on top of the button that gives the keyboard back. `flex: 0 0` on
+  the reserved element, so it cannot; what gives instead is the spacer, which is
+  what a spacer is for.
 - **A read-only page is not a text field where the keyboard is on screen.** The
   documentation editor stays focusable on a Mac deliberately — find, ⌘C and ⌘↩
   on the manual's own runnable blocks all need it — and every one of those is a
@@ -163,10 +190,15 @@ section.
   control: a lone button can be missed and pressed again, and the app is full of
   16-point glyphs that are fine because nothing sits against them. The rule is
   for adjacent alternatives, where the miss does not land on nothing — it lands
-  on the neighbour and runs it. The two written for are the host picker's rows
-  and the run confirmation's Cancel/Run pair (§4a, §4b); the size lives on
-  `MenuItem` rather than on either of them, because a menu row is a tap target
-  wherever it appears. **Write it in pixels.** The document's root is `font:
+  on the neighbour and runs it. Four groups qualify: the host picker's rows and
+  the run confirmation's Cancel/Run pair (§4a, §4b), the fence's ▶ beside its
+  Copy, and the run panel's Back to note beside the Copy Output and ✕ that share
+  its header (§6a). The picker's and the confirmation's size lives on `MenuItem`
+  rather than on either of them, because a menu row is a tap target wherever it
+  appears. **Order the group by what a miss costs.** The ✕ dismisses a RUNNING
+  block by interrupting it, which is the most expensive miss in the app, so it
+  is the far end of its row with Copy Output between it and the button next
+  door. **Write it in pixels.** The document's root is `font:
   14px`, so every rem-based Tailwind size is 0.875 of its name and `min-h-11`
   silently means 38.5 — a touch target is a physical measurement and must not
   ride the app's typographic scale. `touch:` is `@media (hover: none)`, the
@@ -572,13 +604,19 @@ secret written to a synced file — because focus never moved.
   full-screen program is precisely what takes that one away: pinned to 24 rows
   with the keyboard up, the panel can be everything on screen. So the header
   carries a **Back to note** button, on the same `:focus-within` gate as the
-  hint beside it. It stands in for ⌘Escape rather than for the double tap, a
-  button being the one form no program can swallow, so it has no `pinned` case
-  and one label. That label is not "Done": the run is not done, and the ✕ a
-  little to its right is the control that interrupts one. It is 44 points
-  (§1a), which is what the header grows to on touch. The key names and the
-  button are two elements picked between by `@media (hover: …)` in `index.css`
-  — each query only adds, so no client can end up with both or with neither.
+  hint. It stands in for ⌘Escape rather than for the double tap, a button being
+  the one form no program can swallow, so it has no `pinned` case and one
+  label. That label is not "Done": the run is not done, and the ✕ a little to
+  its right is the control that interrupts one. It is 44 points (§1a), which is
+  what the header grows to on touch.
+- **The disclosure is the button on touch, and the sentence on a pointer
+  client** — one or the other, never both. "typing here · esc esc to exit" and
+  the button are picked between by `@media (hover: …)` in `index.css`, each
+  query only adding, so no client can end up with both or with neither. The
+  button says the same thing by existing: "Back to note" means nothing to
+  someone who is already in the note. It is also all that fits. At 390 points
+  the header holds the state, the exit, and the 44-point pair that copies and
+  interrupts, and the sentence is what the width has to spend.
 - **A focused run is the `terminal` domain**, not `editor`, though the panel
   lives inside `.cm-editor`: the shell owns Ctrl here as in the drawer
   (`domainOf` asks `.xterm` first).

@@ -536,9 +536,13 @@ body {
 .ledge-ctl-group.caret {
   opacity: 1;
 }
+/* The output panel's own pair (copy, dismiss). Given the header's exact height
+   by blocks.ts and centred in it, so the pair lands right whether the header is
+   a pointer client's 24 points or the 48 a touch client's controls need. */
 .ledge-close-wrap {
   position: absolute;
   display: inline-flex;
+  align-items: center;
   gap: 1px;
 }
 .ledge-close-wrap .ledge-btn {
@@ -578,17 +582,93 @@ body {
   opacity: 0.3;
   cursor: default;
 }
-.ledge-btn:disabled:hover {
-  background: transparent;
+/* Behind the media query for the reason every `hover:` utility is (§1a): iOS
+   sends a synthetic mousemove ahead of the click of a tap, and WebKit withholds
+   that click when the mousemove changed the rendering — so a hover background
+   here spends the first tap on painting itself, and the ▶ needs a second one.
+   Hand-written CSS, which is why Tailwind's hoverOnlyWhenSupported never
+   covered it: the tab strip's first-tap defect, one layer down. */
+@media (hover: hover) {
+  .ledge-btn:disabled:hover {
+    background: transparent;
+  }
+  .ledge-btn:hover {
+    background: var(--btn-hover);
+    color: var(--fg);
+  }
+  /* Copy-confirmed flash: the checkmark stays green even on hover for its beat. */
+  .ledge-btn.copied:hover {
+    color: var(--ok);
+  }
 }
-.ledge-btn:hover {
-  background: var(--btn-hover);
-  color: var(--fg);
-}
-/* Copy-confirmed flash: the checkmark stays green even on hover for its beat. */
-.ledge-btn.copied,
-.ledge-btn.copied:hover {
+/* Copy-confirmed flash: the checkmark goes green for a beat as click feedback
+   (blocks.ts flashCopied), on every client. */
+.ledge-btn.copied {
   color: var(--ok);
+}
+/* --- The same chrome, for a finger (interactions.md §1a) --------------------
+   Two changes, and the second follows from the first. The controls are always
+   lit, because the reveal above is a pointer's grammar: with no hover, a phone
+   would spend one tap summoning the pair and a second using it, and running a
+   block is the note's whole point. And they are 44 points, because a lit pair
+   is a pair a finger chooses between — the ▶ beside Copy, where the miss runs
+   the neighbour. Everything else here follows from those two: the card makes
+   room for the taller group, and the one control whose verb the palette carries
+   just as directly goes away instead of growing. */
+@media (hover: none) {
+  .ledge-ctl-group {
+    opacity: 1;
+    gap: 8px;
+    /* The group is 22 points taller and grows UPWARD, so that it ends where the
+       small one did: just past the opening fence, clear of the code. blocks.ts
+       anchors it to the fence's glyph and knows nothing about this; the card's
+       matching top padding below is the same 22, and the two belong next to
+       each other rather than one of them in the measurement. */
+    margin-top: -22px;
+  }
+  .ledge-ctl-group .ledge-btn {
+    pointer-events: auto;
+    width: 44px;
+    height: 44px;
+  }
+  /* A 13px glyph in a 44-point button reads as an empty box with a speck in it.
+     The target is the physical size; this is what the eye is given to aim at. */
+  .ledge-ctl-group .ledge-btn svg {
+    width: 18px;
+    height: 18px;
+  }
+  /* The lane the lifted group sits in: the pointer client's 8 plus that same 22.
+     The fence's own text is at the left of the card and the controls at the
+     right, so the two never meet — this buys height, not a second line. */
+  .cm-line.ledge-code-top {
+    padding-top: 30px;
+  }
+  /* The profile chip is the one control here that goes the other way: absent,
+     with the palette carrying the verb (§1a). It is a pointer accelerator for
+     ⌘-clicking the profile name, a chord a phone has not got either, and
+     `profile.open` — Edit Note Profile… — is note-scoped, so the palette entry
+     is exactly as direct as the chip. Nothing like that is true of the ▶, which
+     acts on ONE block and would cost a caret placement first. `display: none`
+     and not a fade: an invisible 16-point button still takes every tap that
+     lands on it. */
+  .ledge-ctl-group.ledge-fm-chip {
+    display: none;
+  }
+  /* The output panel's pair, for the same reason and one worse: the ✕ INTERRUPTS
+     a running command (blocks.ts cancels on dismiss), so a miss onto it is the
+     most expensive miss in the app. Copy sits between it and the Back to note
+     button, so the neighbour on that side is harmless. */
+  .ledge-close-wrap {
+    gap: 8px;
+  }
+  .ledge-close-wrap .ledge-btn {
+    width: 44px;
+    height: 44px;
+  }
+  .ledge-close-wrap .ledge-btn svg {
+    width: 18px;
+    height: 18px;
+  }
 }
 
 /* --- Inline output panel (block widget under a code block) ------------------ */
@@ -617,12 +697,11 @@ body {
 .ledge-term-gap {
   width: 48px;
 }
-/* On touch the header is where the panel's tap targets live, so it is sized
-   for one — unconditionally, not only while focused: a header that grew when
-   the run took the keyboard would move the terminal under the thumb about to
-   answer it. The extra reserved width is separation, and the neighbour it
-   separates from is the ✕ that interrupts the run. blocks.ts re-centres the
-   overlay pair on whatever height this leaves. */
+/* On touch the header is where all three of the panel's tap targets live, so it
+   is sized for one — unconditionally, not only while focused: a header that grew
+   when the run took the keyboard would move the terminal under the thumb about
+   to answer it. blocks.ts hands the overlay pair whatever height this leaves,
+   and the pair centres itself in it. */
 @media (hover: none) {
   .ledge-output-header {
     height: auto;
@@ -631,8 +710,17 @@ body {
        rule, which reads as a rendering fault rather than as a button. */
     min-height: 48px;
   }
+  /* The 96-point pair (two 44s and the gap between them), the 8 points it sits
+     inside the header's own right edge, and 16 points of clear space in front
+     of it. `flex: 0 0` because the reserved width is the only thing standing
+     between the header's text and an overlay it cannot see: let it shrink and
+     the Back to note button ends up UNDER the ✕ that interrupts the run, which
+     is what happened at 108 and flexible. What gives instead is the spacer. */
   .ledge-term-gap {
-    width: 72px;
+    flex: 0 0 120px;
+  }
+  .ledge-term-leave {
+    flex: 0 0 auto;
   }
 }
 .ledge-dot {
@@ -686,14 +774,16 @@ body {
   user-select: none;
   -webkit-user-select: none;
 }
-.ledge-output:focus-within .ledge-focus-hint {
-  display: inline;
-}
-/* The way back out of a focused run, in the two forms the two kinds of client
-   can actually use (interactions.md §6a). Each media query only ADDS, so the
-   two can never both apply and never both be missing: a client either hovers
-   or it does not. */
+/* The disclosure, in the two forms the two kinds of client can actually use
+   (interactions.md §6a). Each media query only ADDS, so the two can never both
+   apply and never both be missing: a client either hovers or it does not.
+   A pointer client gets the sentence and the keys it names; a touch client gets
+   the button, which says the same thing by existing — "Back to note" only means
+   anything to someone who is not in the note — and says it in a form that is
+   also the way out. Not both: at 390 points the header has room for one, and
+   the pair that interrupts the run has to fit beside it. */
 @media (hover: hover) {
+  .ledge-output:focus-within .ledge-focus-hint,
   .ledge-output:focus-within .ledge-focus-key {
     display: inline;
   }

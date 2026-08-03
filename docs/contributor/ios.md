@@ -1252,13 +1252,13 @@ confirmation's Cancel beside the button that runs the block. Seven specs drive
 both by tap at 390x844.
 
 Writing them is what established that a finger can open either one, which was
-the assumption worth testing rather than restating: the fence's ▶ is
-`opacity: 0` until the block is hovered or holds the caret, and a phone has only
-the second, so asking for a run there is a tap in the block and then a tap on
-the button. The size rule found the other thing no reading would have. Every rem
-in this app is 0.875 of its name — the document's root is `font: 14px` — so
-`min-h-11`, the utility that spells 44, renders 38.5. A tap target is a physical
-measurement and is written in pixels.
+the assumption worth testing rather than restating: the fence's ▶ was
+`opacity: 0` until the block was hovered or held the caret, and a phone has only
+the second, so asking for a run there cost a tap in the block and then a tap on
+the button. Fixed below. The size rule found the other thing no reading would
+have: every rem in this app is 0.875 of its name — the document's root is
+`font: 14px` — so `min-h-11`, the utility that spells 44, renders 38.5. A tap
+target is a physical measurement and is written in pixels.
 
 **A running block can be left without a chord.** interactions.md §6a hands the
 keyboard to a run when it first speaks, so a `sudo` prompt is answered by
@@ -1266,7 +1266,7 @@ typing, and takes it back on ⌘Escape or a double Escape — a phone has neithe
 and its one inherited exit, tapping the prose, is exactly what a full-screen
 program removes by pinning the panel to 24 rows. The panel's header now carries
 the exit as a **Back to note** button on touch, in place of the line of text
-that names those keys, and grows to 44 points to hold it.
+that names those keys, and grows to 48 points to hold a 44-point one.
 
 Two things came out of building it. The panel did not fit the screen at all: an
 xterm opens at 80 columns, the editor scrolls sideways to its widest thing, and
@@ -1274,13 +1274,36 @@ the re-fit then measured the overflow it had caused and kept it — 605 points
 inside a 370-point editor, with the run's own header off the right edge, and
 invisible on a Mac where 605 fits inside 1005. It opens at 2 columns now and
 grows into whatever it is given (interactions.md §1a). The second is that the
-overlay's copy and ✕ are positioned against a header height that was a
-constant; they are measured against the real one now, which is what lets the
-header be two different sizes.
+overlay's copy and ✕ were centred by arithmetic against a header height that was
+a constant. The header is now handed to them as their own height and flexbox
+centres them in it, which is what lets the header — and the buttons — be two
+sizes without a number in `editor/blocks.ts` knowing either.
 
-What the phase still has to answer is the rest of that cut. A software keyboard
+**And the fence's own controls are a finger's now.** They were a hover-revealed
+group of 22-point buttons, which on a phone meant a tap in the block to light
+the ▶ and a second one to use it, with Copy a pixel away from both. They are lit
+without being asked and 44 points on touch, and so are the panel's Copy Output
+and ✕ (interactions.md §1a). Three things had to give for that. The card grows a
+lane at its top rather than the group growing over the first line of the code it
+runs: 22 more points of top padding and the same 22 of lift, kept together in
+`index.css` while `editor/blocks.ts` goes on anchoring the group to the opening
+fence. The reserved width the run panel's header holds for the overlay pair had
+to stop being able to shrink — flex took it back and drew the ✕ over the Back to
+note button. And "typing here" is gone on touch: the button is the disclosure
+there, and the width it costs is what the pair needs (§6a).
+
+The profile chip is the one control in that layer that went the other way:
+absent, `display: none`, because Edit Note Profile… is note-scoped and its
+palette entry needs nothing pointed at first — which is not true of the ▶, and
+is the whole of why one is lit and the other is gone.
+
+`.ledge-btn:hover` moved behind `@media (hover: hover)` in the same pass. It is
+hand-written CSS, so Tailwind's `hoverOnlyWhenSupported` never covered it, and
+it is the tab strip's first-tap defect one layer down: a hover background is a
+rendering change, and WebKit withholds the click behind the synthetic mousemove
+that caused one. The headless project cannot see that, and only a device can
+settle it (phase 7).
+
+What the phase still has to answer is the rest of §8's cut. A software keyboard
 has no Ctrl, no Escape, no Tab and no arrows, and the accessory bar carries
-seven Markdown verbs over `.cm-content` only (§7). And the fence's own controls
-are a hover-revealed group of 22-point buttons — reachable, because the caret
-lights them too, but not yet sized for the hand reaching them, and neither is
-the ✕ that interrupts a run.
+seven Markdown verbs over `.cm-content` only (§7).

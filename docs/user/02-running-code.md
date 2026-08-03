@@ -6,6 +6,8 @@ Any fenced code block whose language is runnable gets a Run button, and the shel
 
 ⌘↩ runs the block under the caret inline. Output streams into the lower half of the block's own card, below a divider, and stays until you dismiss it. Hovering a block shows Run and Copy, a running block's Run button becomes Stop, and the output half offers Copy Output and Dismiss.
 
+On a touch device the buttons do not wait to be hovered. Every block wears Run and Copy in its top right corner, sized for a finger, and one tap on Run starts it. The card leaves them a lane of their own, so they never sit over the code they run.
+
 ⇧⌘↩ sends the block to the note's terminal drawer instead (⌃` toggles the drawer). There you can keep typing after the command finishes. An inline run ends when its command does.
 
 A block offers to run only once its fence is closed. While the closing ``` is still missing there is no Run button, because what the block contains is not settled: the next closing fence you type anywhere below it becomes this block's end. The third backtick writes the closing line for you, so a block is closed before you have typed a word of it, and a block written above another one never swallows it. Pressing Enter at the end of a fence opener does the same for an opener that arrived some other way, such as a paste.

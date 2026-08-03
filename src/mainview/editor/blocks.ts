@@ -575,6 +575,11 @@ interface CloseSpec {
   id: string;
   top: number;
   right: number;
+  // The header's measured height, handed to the wrapper as its own so flexbox
+  // centres the pair in it. Neither number is a constant: the header is 24
+  // points on a pointer client and 48 on a touch one, and the buttons inside
+  // are 22 or 44 (index.css). Arithmetic here would have to know both.
+  height: number;
 }
 // The frontmatter profile's edit button, anchored just past the value's last
 // glyph. It lives in this layer, not in the text, for the same reason every
@@ -780,15 +785,16 @@ const overlayPlugin = ViewPlugin.fromClass(
         if (!panel) continue;
         const r = panel.getBoundingClientRect();
         // Measured rather than assumed: the header is 24 points on a pointer
-        // client and 44 on a touch one, where it holds a 44-point control of
-        // its own (index.css, interactions.md §6a). The offset below is the
-        // empirical one for 24, plus half of whatever the header gained, which
-        // keeps this pair centred on either.
+        // client and 48 on a touch one, where it holds 44-point controls
+        // (index.css, interactions.md §6a). Give the wrapper that height and
+        // sit it on the panel's first inner pixel, and centring is CSS's
+        // problem — which is where the button sizes are.
         const headerH =
           panel.querySelector(".ledge-output-header")?.getBoundingClientRect().height ?? 24;
         closes.push({
           id: run.id,
-          top: r.top - base.top + 3 + (headerH - 24) / 2,
+          top: r.top - base.top + 1,
+          height: headerH,
           // Column-aligned with the block's own controls above. Those sit at
           // `cardInset + 10` inside a group with 2px padding and a 1px border,
           // so their glyphs land 13px in from the card edge; this wrapper has
@@ -877,6 +883,7 @@ const overlayPlugin = ViewPlugin.fromClass(
         if (!el) continue;
         el.style.top = `${c.top}px`;
         el.style.right = `${c.right}px`;
+        el.style.height = `${c.height}px`;
       }
       if (m.profile) {
         const el = this.layer.querySelector<HTMLElement>(`.ledge-ctl-group[data-block="fm"]`);

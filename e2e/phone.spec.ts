@@ -979,10 +979,6 @@ test.describe("giving the keyboard back, with no key to press", () => {
     await expect(page.locator(".cm-line").first()).toHaveText("# Untitled");
     await page.keyboard.press("Meta+a");
     await page.keyboard.insertText("# Untitled\n\n```sh\nsudo ls\n```\n");
-    // The tap that puts the caret in the block is also what lights the ▶: the
-    // fence's controls are `opacity: 0` until hover or caret, and a phone has
-    // only the second.
-    await page.locator(".cm-line", { hasText: "sudo ls" }).tap();
     await page.locator('[data-act="run"]').tap();
     await expect(page.locator(".ledge-output")).toBeVisible();
     const runs = await page.evaluate(() => window.__harness.inlineRuns());
@@ -993,9 +989,11 @@ test.describe("giving the keyboard back, with no key to press", () => {
 
   test("the panel offers a control where a Mac names two keys", async ({ page }) => {
     await talkingRun(page);
-    // Still the same disclosure — the keystrokes are going somewhere else and
-    // the panel has to say so. What differs is the half that follows it.
-    await expect(page.locator(".ledge-focus-hint")).toHaveText("typing here");
+    // The disclosure is the button, not a line of text beside one: "Back to
+    // note" only means anything to someone who is not in the note, and it is
+    // also the way back. The header has room for one of the two at 390 points,
+    // and the pair that interrupts the run has to fit beside it.
+    await expect(page.locator(".ledge-focus-hint")).toBeHidden();
     await expect(page.locator(".ledge-focus-key")).toBeHidden();
     await expect(page.locator(".ledge-term-leave")).toBeVisible();
   });
@@ -1024,7 +1022,6 @@ test.describe("giving the keyboard back, with no key to press", () => {
     // Nothing to give back, so nothing offering to: the control follows focus
     // rather than the run, which is what makes it impossible to leave stale.
     await expect(page.locator(".ledge-term-leave")).toBeHidden();
-    await expect(page.locator(".ledge-focus-hint")).toBeHidden();
   });
 
   test("the panel it sits in fits the screen", async ({ page }) => {
@@ -1045,17 +1042,29 @@ test.describe("giving the keyboard back, with no key to press", () => {
     expect(scroll.s).toBeLessThanOrEqual(scroll.w);
   });
 
-  test("it is 44 points, and clear of the ✕ that interrupts", async ({ page }) => {
+  test("all three of the header's controls are 44 points, and separated", async ({ page }) => {
     await talkingRun(page);
     const leave = (await page.locator(".ledge-term-leave").boundingBox())!;
     expect(leave.height).toBeGreaterThanOrEqual(44);
 
-    // The neighbour is the pair drawn in the body overlay, and the nearer of the
-    // two dismisses a still-running block by interrupting it. Same argument as
-    // the confirmation's Cancel/Run pair above: adjacent alternatives where the
-    // miss does not land on nothing (interactions.md §1a).
-    const copy = (await page.locator(".ledge-close-wrap button").first().boundingBox())!;
+    // Its neighbour is the pair drawn in the body overlay, and the FAR one of
+    // the two dismisses a still-running block by interrupting it. Same argument
+    // as the confirmation's Cancel/Run pair above: adjacent alternatives where
+    // the miss does not land on nothing (interactions.md §1a). Copy is what
+    // sits between, so the miss that costs anything needs two of them.
+    const pair = page.locator(".ledge-close-wrap button");
+    const copy = (await pair.first().boundingBox())!;
+    const dismiss = (await pair.last().boundingBox())!;
+    for (const b of [copy, dismiss]) {
+      expect(b.height).toBeGreaterThanOrEqual(44);
+      expect(b.width).toBeGreaterThanOrEqual(44);
+    }
     expect(copy.x - (leave.x + leave.width)).toBeGreaterThanOrEqual(16);
+    expect(dismiss.x - (copy.x + copy.width)).toBeGreaterThanOrEqual(8);
+
+    // And the header holds them: the reserved width in it does not shrink, or
+    // the pair ends up drawn over the button that gives the keyboard back.
+    expect(leave.x + leave.width).toBeLessThanOrEqual(copy.x);
   });
 
   test("the way back in is a tap on the terminal", async ({ page }) => {
@@ -1068,5 +1077,111 @@ test.describe("giving the keyboard back, with no key to press", () => {
     await page.locator(".xterm-screen").tap();
     await expect.poll(() => page.evaluate(IN_TERMINAL)).toBe(true);
     await expect(page.locator(".ledge-term-leave")).toBeVisible();
+  });
+});
+
+// --- the block's own chrome, for a finger ------------------------------------
+//
+// Every runnable fence carries the pair that runs and copies it, and on a
+// pointer client the pair is hover-revealed: `opacity: 0` until the pointer or
+// the caret is in the block. A phone has neither half of that. What it had
+// instead was two taps — one in the block to light the ▶, one on the ▶ — and a
+// 22-point target with its neighbour one pixel away.
+//
+// So on touch the controls are always lit and 44 points, and the card grows a
+// lane at its top to hold them. The one control that goes the other way is the
+// frontmatter profile chip: it is absent, because its verb is in the palette
+// and is note-scoped, which the ▶'s is not (interactions.md §1a).
+test.describe("running a block by finger", () => {
+  const palette = async (page: Page, query: string) => {
+    await page.getByRole("button", { name: /Go to Note/ }).tap();
+    await page.keyboard.type(`>${query}`);
+  };
+
+  test.beforeEach(async ({ page }) => {
+    await page.goto("/harness.html?shell=ios-runs");
+    await expect(page.getByRole("button", { name: /Toggle Sidebar/ })).toBeVisible();
+  });
+
+  // A note whose caret ends up AFTER the block, which is the state a pointer
+  // client draws no controls in: the block is neither hovered nor holding it.
+  async function noteWithBlock(page: Page): Promise<void> {
+    await page.keyboard.press("Meta+n");
+    await expect(page.locator(".cm-line").first()).toHaveText("# Untitled");
+    await page.keyboard.press("Meta+a");
+    await page.keyboard.insertText("# Untitled\n\nprose\n\n```sh\nsudo ls\nsecond line\n```\n");
+    await expect(page.locator('[data-act="run"]')).toHaveCount(1);
+  }
+
+  test("one tap runs it, with no tap to summon the button first", async ({ page }) => {
+    await noteWithBlock(page);
+    // Lit without being asked. The class the pointer toggles is still toggled
+    // here — WebKit sends a synthetic mousemove ahead of every tap — but it
+    // decides nothing on this client, which is the point: nothing about the
+    // rendering changes when that mousemove arrives, so WebKit does not
+    // withhold the click behind it (interactions.md §1a).
+    await expect(page.locator(".ledge-ctl-group")).toHaveCSS("opacity", "1");
+
+    await page.locator('[data-act="run"]').tap();
+    await expect(page.locator(".ledge-output")).toBeVisible();
+    expect(await page.evaluate(() => window.__harness.inlineRuns())).toHaveLength(1);
+  });
+
+  test("the pair is 44 points, and does not cover the code it runs", async ({ page }) => {
+    await noteWithBlock(page);
+    const buttons = page.locator(".ledge-ctl-group button");
+    await expect(buttons).toHaveCount(2); // ▶ and Copy; no drawer on this client
+    const run = (await buttons.first().boundingBox())!;
+    const copy = (await buttons.last().boundingBox())!;
+    for (const b of [run, copy]) {
+      expect(b.height).toBeGreaterThanOrEqual(44);
+      expect(b.width).toBeGreaterThanOrEqual(44);
+    }
+    expect(copy.x - (run.x + run.width)).toBeGreaterThanOrEqual(8);
+
+    // The card grew a lane for them rather than the group growing over the
+    // code: 22 more points of top padding, which is exactly what the group
+    // gained, and the group lifted by the same 22. So it still ends where the
+    // small one did, at the opening fence.
+    const group = (await page.locator(".ledge-ctl-group").boundingBox())!;
+    const card = (await page.locator(".cm-line.ledge-code-top").boundingBox())!;
+    const code = (await page.locator(".cm-line", { hasText: "sudo ls" }).boundingBox())!;
+    expect(group.y).toBeGreaterThanOrEqual(card.y);
+    expect(group.y + group.height).toBeLessThanOrEqual(code.y + 4);
+  });
+
+  test("the note does not scroll sideways to hold them", async ({ page }) => {
+    await noteWithBlock(page);
+    // The controls are the widest chrome in a card now, and a card is as wide
+    // as the note (interactions.md §1a): a group that overflowed would take the
+    // whole note sideways with it and put its own ▶ off the screen.
+    const scroll = await page.locator(".cm-scroller").evaluate((el) => ({
+      w: el.clientWidth,
+      s: el.scrollWidth,
+    }));
+    expect(scroll.s).toBeLessThanOrEqual(scroll.w);
+    const group = (await page.locator(".ledge-ctl-group").boundingBox())!;
+    expect(group.x + group.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+  });
+
+  test("the profile chip is not here, and Edit Note Profile… is", async ({ page }) => {
+    await page.keyboard.press("Meta+n");
+    await expect(page.locator(".cm-line").first()).toHaveText("# Untitled");
+    await page.keyboard.press("Meta+a");
+    await page.keyboard.insertText("---\nprofile: petstore\n---\n# Petstore calls\n");
+    await expect(page.locator(".ledge-fm-profile")).toBeVisible();
+
+    // Gone, not faded: an invisible 16-point button still takes every tap that
+    // lands on it, and this one sits in the middle of editable text.
+    await expect(page.locator('.ledge-ctl-group[data-block="fm"]')).toBeHidden();
+
+    // Both of its desktop paths are a pointer's — the chip, and ⌘-clicking the
+    // name — so the palette is the whole of this verb here. It is note-scoped,
+    // which is why that is no loss: nothing has to be pointed at first.
+    await palette(page, "edit note profile");
+    const overlay = page.locator("div.fixed.inset-0.z-50");
+    await expect(overlay.getByText("Edit Note Profile…", { exact: true })).toHaveCount(1);
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("dialog", { name: "Profile petstore" })).toBeVisible();
   });
 });
