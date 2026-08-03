@@ -51,12 +51,16 @@ export const SHELL_CALLS = [
   // default, and the window this matters most in is the one before a server is
   // reachable, when nothing can be written to its log either.
   "@log",
-  // Whether what the keyboard is over is the editor. One private content view
-  // is the first responder for every field in the page, so the shell cannot
-  // tell a note from a search box by itself, and the accessory bar it hangs off
-  // that responder would otherwise offer Bold over a passphrase prompt
-  // (ios.md §7).
-  "@editing",
+  // Which keyboard the keyboard is over. One private content view is the first
+  // responder for every field in the page, so the shell cannot tell a note from
+  // a search box by itself, and the accessory bar it hangs off that responder
+  // would otherwise offer Bold over a passphrase prompt (ios.md §7).
+  //
+  // Three answers rather than two, because a note and a RUNNING BLOCK want
+  // different keys and the panel a run draws lives inside the editor's own
+  // content: Bold over a program waiting for a `[y/N]` is the same wrong answer
+  // as Bold over a passphrase, one layer in.
+  "@focus",
   // The device's five answers. `menu.set` is a no-op on a phone (ios.md §11)
   // and is here anyway, because a shell that silently lacked a method would
   // be a hang rather than an error.
@@ -85,6 +89,14 @@ export const SHELL_CALLS = [
 
 export type ShellCall = (typeof SHELL_CALLS)[number];
 
+/**
+ * What the keyboard is over, and therefore which face the accessory bar wears
+ * (ios.md §7): the note's own Markdown verbs, the keys a running block needs
+ * (editor/inlineTerm.ts RUN_KEYS), or no bar at all — which is every other
+ * field on the page, where the note's verbs would act on the note behind.
+ */
+export type BarFace = "none" | "note" | "run";
+
 /** Page to shell. */
 export type ToShell = { t: "frame"; b: string } | { t: "call"; id: number; m: ShellCall; p: unknown };
 
@@ -107,11 +119,17 @@ export type ToPage =
   // A button on the keyboard accessory bar (ios.md §7). The payload is a
   // command id and nothing else: the bar is a native surface naming a verb,
   // exactly as the Mac's menu bar is, and the registry is the one place that
-  // knows what any of them mean. Swift holds six strings and no behavior, so
+  // knows what any of them mean. Swift holds the strings and no behavior, so
   // a command that is renamed or withdrawn cannot leave a button that does
   // something subtly different — it leaves one that does nothing, and says so
   // in the console.
-  | { t: "verb"; id: string };
+  | { t: "verb"; id: string }
+  // A button on the bar's OTHER face, over a running block. The same shape and
+  // the same rule one domain along: the name of a key, and what a key means is
+  // the page's (editor/inlineTerm.ts RUN_KEYS). Swift never learns that Ctrl-C
+  // is one byte — which is the difference between a bar and a terminal
+  // emulator, and this end is not the one holding the emulator.
+  | { t: "key"; k: string };
 
 /** What `@hello` answers: who this client is (remote.md §5), what to call the
  * machine it is pointed at (§8 wants the indicator to name one), and the
@@ -136,14 +154,15 @@ export interface Shell {
   /** A line on the shell's console, for the window where nothing else can
    * carry one. Never rejects: a log line is not worth a failure. */
   log(text: string): void;
-  /** Say whether the editor is what has focus, so the shell knows whether the
-   * keyboard it is about to show is over a note. Idempotent and cheap: only
-   * transitions are sent. */
-  editing(on: boolean): void;
+  /** Say what has focus, so the shell knows which bar the keyboard it is about
+   * to show should carry. Idempotent and cheap: only transitions are sent. */
+  focus(over: BarFace): void;
   /** Told when the app comes back to the foreground. */
   onResume(fn: () => void): void;
   /** Told when a bar button was tapped, by command id. */
   onVerb(fn: (id: string) => void): void;
+  /** Told when a key on the run's bar was tapped, by name. */
+  onKey(fn: (name: string) => void): void;
   /** One message from Swift. */
   deliver(msg: ToPage): void;
 }
@@ -161,6 +180,7 @@ export function nativeShell(post: (msg: ToShell) => void): Shell {
   let where = "";
   let resumed: () => void = () => {};
   let verb: (id: string) => void = () => {};
+  let key: (name: string) => void = () => {};
 
   function call(m: ShellCall, p: unknown): Promise<unknown> {
     const id = nextId++;
@@ -183,8 +203,8 @@ export function nativeShell(post: (msg: ToShell) => void): Shell {
       void call("@log", { text }).catch(() => {});
     },
 
-    editing(on) {
-      void call("@editing", { on }).catch(() => {});
+    focus(over) {
+      void call("@focus", { over }).catch(() => {});
     },
 
     onResume(fn) {
@@ -193,6 +213,10 @@ export function nativeShell(post: (msg: ToShell) => void): Shell {
 
     onVerb(fn) {
       verb = fn;
+    },
+
+    onKey(fn) {
+      key = fn;
     },
 
     async hello() {
@@ -242,13 +266,35 @@ export function nativeShell(post: (msg: ToShell) => void): Shell {
         case "verb":
           verb(msg.id);
           return;
+        case "key":
+          key(msg.k);
+          return;
       }
     },
   };
 }
 
 /**
- * The transition filter in front of `@editing`: pass it what has focus now, it
+ * Which face `el` having focus calls for (ios.md §7).
+ *
+ * The run is tested FIRST because it is inside the editor: a run's output panel
+ * is a CodeMirror block widget, so it sits in `.cm-content` and answers the
+ * note's own test. Asking in the other order is the phase 6 defect one layer in
+ * — a formatting bar over a program waiting for a password, whose Bold would
+ * act on the note behind it.
+ *
+ * Pure, and by class rather than by anything either surface exports: those two
+ * classes are what CodeMirror and `editor/blocks.ts` put in the DOM, and what
+ * every spec in `e2e/` already reaches for. Needs a document, so it is proved
+ * in the harness (e2e/phone.spec.ts) rather than in Bun.
+ */
+export function barFaceOf(el: Element | null): BarFace {
+  if (el?.closest(".ledge-output")) return "run";
+  return el?.closest(".cm-content") ? "note" : "none";
+}
+
+/**
+ * The transition filter in front of `@focus`: pass it what has focus now, it
  * calls `tell` only when the answer changed.
  *
  * Pure, and separate from the listener that feeds it, because the listener is
@@ -257,14 +303,14 @@ export function nativeShell(post: (msg: ToShell) => void): Shell {
  * most of them, so an unfiltered reporter would cross the bridge on every
  * caret move inside one note.
  */
-export function focusReporter(tell: (on: boolean) => void): (editorFocused: boolean) => void {
-  // Not `false`: the shell's own default is false, and starting in step with it
-  // means the first report is sent only if it says something.
-  let last = false;
-  return (editorFocused) => {
-    if (editorFocused === last) return;
-    last = editorFocused;
-    tell(editorFocused);
+export function focusReporter(tell: (over: BarFace) => void): (over: BarFace) => void {
+  // Not the first report: the shell's own default is "none", and starting in
+  // step with it means the first call is sent only if it says something.
+  let last: BarFace = "none";
+  return (over) => {
+    if (over === last) return;
+    last = over;
+    tell(over);
   };
 }
 

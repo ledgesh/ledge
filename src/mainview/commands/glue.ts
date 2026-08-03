@@ -15,6 +15,7 @@ import { revealSelection } from "@/workspace/reveal";
 import { openReplace } from "@/editor/find";
 import { runBlock } from "@/editor/blocks";
 import { openLinkAtCursor, toggleTaskAt } from "@/editor/livePreview";
+import { insertCodeBlock } from "@/editor/fences";
 import { insertLink, toggleBold, toggleItalic } from "@/editor/formatting";
 import { editFrontmatter } from "@/editor/frontmatterEdit";
 import { toggleTemplateFlag } from "@/editor/templateFlag";
@@ -152,6 +153,11 @@ export const registryDeps: RegistryDeps = {
         view.dispatch(view.state.replaceSelection("[["));
         startCompletion(view);
       }),
+    // The fence, planted rather than typed (editor/fences.ts). Nothing is
+    // dispatched where a block cannot go — inside another one, or inside the
+    // frontmatter — which is the same silence Open Link answers a caret that is
+    // not on a link with.
+    codeBlock: (docId) => withView(docId, (view) => void insertCodeBlock(view)),
     // The same embed the editor's ⌘V does, from the device's picker instead of
     // its pasteboard (lib/assets.ts pickImageAsset). Fire and forget: the
     // picker is on screen for as long as a person takes, and a command that

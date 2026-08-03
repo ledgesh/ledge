@@ -251,6 +251,11 @@ export const COMMANDS = {
   "format.indent": { title: "Indent" },
   "format.outdent": { title: "Outdent" },
   "format.wikiLink": { title: "Link to Note" },
+  // The fourth of the same kind, and the sharpest: ``` is three trips through
+  // the iPhone keyboard's numeric page with a long press each, for the one
+  // construct this app is FOR (editor/fences.ts). No chord either — typing the
+  // marks is the desktop's accelerator and it costs one key there.
+  "format.codeBlock": { title: "Code Block" },
   // The picture, from wherever this device keeps pictures: the file dialog on a
   // Mac, the photo library on a phone (ios.md §11). No chord, because ⌘V is
   // already the desktop's way in and this is the OTHER source — and because on

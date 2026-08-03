@@ -23,7 +23,7 @@ import {
   type RunDestination,
 } from "./bridge";
 import { confirmFor, parseFenceInfo, type ConfirmSpec } from "./fenceInfo";
-import { hasTerminal, runsBlocks } from "../lib/shell";
+import { hasTerminal, runsBlocks, softKeyboard } from "../lib/shell";
 import { fenceCloser, fenceOpener } from "./fences";
 import { declaredHosts, frontmatterRange, profileChipAnchor } from "./frontmatter";
 import { LOCAL_HOST, parseFrontmatter } from "../../shared/frontmatter";
@@ -407,8 +407,21 @@ function startInlineRun(
   // The test is deliberately taken THEN and not now: a run started from the
   // host picker (or a run button) leaves focus on the popover for a beat, and
   // the question that matters is where the user is when the answer is wanted.
-  const head = view.state.selection.main.head;
-  getInlineTerm(id)?.claimFocus(() => view.hasFocus && view.state.selection.main.head === head);
+  //
+  // Not on a client whose keyboard is on screen, and the test above is why. It
+  // asks whether the EDITOR has focus, which on a Mac is the same question as
+  // "is the user typing here" and on a phone is not: the editor holds focus
+  // with no keyboard up from the moment a pane opens (workspace/PaneTree.tsx)
+  // and again after every run hands it back (inlineTerm.freeze). So the claim
+  // was always true there, and honoring it moved focus to a text field — which
+  // is how iOS is asked to raise the keyboard. Every run a finger started
+  // opened the keyboard over the output it had just asked to see, and left it
+  // there. On a phone the panel takes the keyboard when it is TAPPED, which is
+  // the same rule the rest of this client already follows (interactions.md §6a).
+  if (!softKeyboard()) {
+    const head = view.state.selection.main.head;
+    getInlineTerm(id)?.claimFocus(() => view.hasFocus && view.state.selection.main.head === head);
+  }
   return true;
 }
 

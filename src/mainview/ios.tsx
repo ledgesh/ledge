@@ -14,7 +14,8 @@ import { reconnectingClient } from "../shared/transport";
 import { sessionHold } from "../shared/wire";
 import { BUILD_VERSION } from "../shared/version";
 import { bootView, viewPush } from "./boot";
-import { attachShell, focusReporter, nativeOverlay, type Shell } from "./lib/nativeBridge";
+import { attachShell, barFaceOf, focusReporter, nativeOverlay, type Shell } from "./lib/nativeBridge";
+import { sendRunKey } from "./editor/inlineTerm";
 import { dispatchNativeCommand } from "./lib/menu";
 import { configureShell } from "./lib/shell";
 
@@ -138,6 +139,12 @@ async function start(): Promise<void> {
   // mounts, which is the right answer to a button pressed before there is an
   // editor to press it against.
   shell.onVerb((id) => dispatchNativeCommand(id));
+  // The same seam for the bar's other face, one domain along: a key pressed at
+  // a running block, addressed to whichever panel has the keyboard
+  // (editor/inlineTerm.ts). Not the registry, because these are not verbs — a
+  // palette entry for Ctrl-C would be a command that acts on a focus the act of
+  // opening the palette has already taken away.
+  shell.onKey((name) => void sendRunKey(name));
   watchEditorFocus(shell);
 
   // Choosing a server from the connection chrome — the same one, or another —
@@ -153,13 +160,12 @@ async function start(): Promise<void> {
 }
 
 /**
- * Tell the shell when the editor is what the keyboard is over (ios.md §7).
+ * Tell the shell which keyboard the keyboard is over (ios.md §7).
  *
  * Here rather than in the view, because it is a fact about this shell and no
  * other: on a Mac nothing hangs off which element has focus, and the view has
- * no business knowing that a phone's accessory bar exists. The editor is asked
- * for by class, which is CodeMirror's own contract for its editable element and
- * the same handle every spec in `e2e/` reaches for.
+ * no business knowing that a phone's accessory bar exists. Which surface an
+ * element belongs to is `barFaceOf`, beside the filter it feeds.
  *
  * Deferred to a timeout, and a microtask is not enough: microtasks drain
  * between event listeners, so a check queued from `focusout` would still run
@@ -167,10 +173,9 @@ async function start(): Promise<void> {
  * moment later contradicts. A timeout runs after the whole move has settled,
  * and the pair of them collapses to one report.
  */
-function watchEditorFocus(shell: Pick<Shell, "editing">): void {
-  const report = focusReporter((on) => shell.editing(on));
-  const later = (): void =>
-    void setTimeout(() => report(!!document.activeElement?.closest(".cm-content")), 0);
+function watchEditorFocus(shell: Pick<Shell, "focus">): void {
+  const report = focusReporter((over) => shell.focus(over));
+  const later = (): void => void setTimeout(() => report(barFaceOf(document.activeElement)), 0);
   document.addEventListener("focusin", later, true);
   document.addEventListener("focusout", later, true);
 }

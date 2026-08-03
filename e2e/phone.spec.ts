@@ -927,20 +927,50 @@ test.describe("choosing a machine, and confirming a run, by finger", () => {
 
 // --- getting the keyboard back off a run ------------------------------------
 //
-// interactions.md §6a: a run takes the keyboard when it first speaks, so a
-// `sudo` password goes to sudo instead of into the note, and the way back is
-// ⌘Escape or two Escapes. A phone has no ⌘ and its software keyboard has no
+// interactions.md §6a: on a Mac a run takes the keyboard when it first speaks,
+// so a `sudo` password goes to sudo instead of into the note, and the way back
+// is ⌘Escape or two Escapes. A phone has no ⌘ and its software keyboard has no
 // Escape at all, which leaves one exit inherited by accident — tapping the
 // prose — and a full-screen program is exactly what takes that away: it pins
 // the panel to 24 rows, and 24 rows with the keyboard up is the whole screen.
 //
-// So the panel carries the exit as a control on this client. The desktop half
-// (who claims the keyboard, and when the claim lapses) is inline-focus.spec.ts's
-// and is not restated here.
-test.describe("giving the keyboard back, with no key to press", () => {
-  const IN_TERMINAL = () => !!document.activeElement?.closest(".xterm");
-  const IN_EDITOR = () => !!document.activeElement?.classList.contains("cm-content");
+// So the panel carries the exit as a control on this client, and the run does
+// not take the keyboard here at all: taking it means RAISING one over half the
+// screen, and the claim's test cannot tell a phone that is being typed into
+// from one that merely left focus in an editor. The desktop half (who claims
+// the keyboard, and when the claim lapses) is inline-focus.spec.ts's and is not
+// restated here.
+const IN_TERMINAL = () => !!document.activeElement?.closest(".xterm");
+const IN_EDITOR = () => !!document.activeElement?.classList.contains("cm-content");
 
+// A block run by finger, then made to speak, and the id of the run. PTYs are
+// inert in the harness, so `runOutput` pushes the first byte the way Bun's
+// runEvent would — which on a Mac is the moment the run claims the keyboard,
+// and here is the moment the panel starts inviting a tap.
+async function speakingRun(page: Page): Promise<string> {
+  await page.keyboard.press("Meta+n");
+  await expect(page.locator(".cm-line").first()).toHaveText("# Untitled");
+  await page.keyboard.press("Meta+a");
+  await page.keyboard.insertText("# Untitled\n\n```sh\nsudo ls\n```\n");
+  await page.locator('[data-act="run"]').tap();
+  await expect(page.locator(".ledge-output")).toBeVisible();
+  const runs = await page.evaluate(() => window.__harness.inlineRuns());
+  const id = runs[runs.length - 1]!.id;
+  await page.evaluate((runId) => window.__harness.runOutput(runId, "Password:"), id);
+  return id;
+}
+
+// The same, with the tap that answers it: everything below about giving the
+// keyboard BACK needs the panel to have it first, and on this client that is
+// something the user does rather than something the run does.
+async function talkingRun(page: Page): Promise<string> {
+  const id = await speakingRun(page);
+  await page.locator(".xterm-screen").tap();
+  await expect.poll(() => page.evaluate(IN_TERMINAL)).toBe(true);
+  return id;
+}
+
+test.describe("giving the keyboard back, with no key to press", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/harness.html?shell=ios");
     await expect(
@@ -948,21 +978,55 @@ test.describe("giving the keyboard back, with no key to press", () => {
     ).toBeVisible();
   });
 
-  // A block run by finger, then made to speak. PTYs are inert in the harness,
-  // so `runOutput` pushes the first byte the way Bun's runEvent would — which
-  // is the moment the run claims the keyboard, and the only thing this needs.
-  async function talkingRun(page: Page): Promise<void> {
-    await page.keyboard.press("Meta+n");
-    await expect(page.locator(".cm-line").first()).toHaveText("# Untitled");
-    await page.keyboard.press("Meta+a");
-    await page.keyboard.insertText("# Untitled\n\n```sh\nsudo ls\n```\n");
-    await page.locator('[data-act="run"]').tap();
-    await expect(page.locator(".ledge-output")).toBeVisible();
-    const runs = await page.evaluate(() => window.__harness.inlineRuns());
-    const id = runs[runs.length - 1]!.id;
-    await page.evaluate((runId) => window.__harness.runOutput(runId, "Password:"), id);
+  test("a run does not raise the keyboard: it waits to be tapped", async ({ page }) => {
+    // The whole reason the claim is off here. `view.hasFocus` is what a claim
+    // is tested against, and on this client it is true from the moment a pane
+    // opens and again after every run hands focus back — so honoring it moved
+    // the keyboard into a text field nobody asked to type in, which on iOS is
+    // how the software keyboard is raised. The output a finger just asked to
+    // see went behind it.
+    await speakingRun(page);
+    expect(await page.evaluate(IN_TERMINAL)).toBe(false);
+    expect(await page.evaluate(IN_EDITOR)).toBe(true);
+    // And the panel says how to get in, because nothing else would: a program
+    // waiting on a password is waiting on a tap.
+    await expect(page.locator(".ledge-tap-hint")).toBeVisible();
+  });
+
+  test("the invitation is itself a target, and the output stays one", async ({ page }) => {
+    await speakingRun(page);
+    // Words that say "tap to type" beside a terminal get aimed at, not just
+    // read, so they are a button and it does what it says.
+    await page.locator(".ledge-tap-hint").tap();
     await expect.poll(() => page.evaluate(IN_TERMINAL)).toBe(true);
-  }
+
+    // And the older way in is untouched: the button is an extra target, not a
+    // replacement for tapping the output.
+    await page.locator(".ledge-term-leave").tap();
+    await expect.poll(() => page.evaluate(IN_EDITOR)).toBe(true);
+    await page.locator(".xterm-screen").tap();
+    await expect.poll(() => page.evaluate(IN_TERMINAL)).toBe(true);
+  });
+
+  test("the invitation goes once it has been taken, and once the run is over", async ({
+    page,
+  }) => {
+    const id = await talkingRun(page);
+    // Answered: the panel has the keyboard, and the line that says so is the
+    // other one.
+    await expect(page.locator(".ledge-tap-hint")).toBeHidden();
+    await expect(page.locator(".ledge-term-leave")).toBeVisible();
+
+    await page.locator(".ledge-term-leave").tap();
+    await expect.poll(() => page.evaluate(IN_EDITOR)).toBe(true);
+    await expect(page.locator(".ledge-tap-hint")).toBeVisible();
+
+    // A frozen panel is output, not a program: typing into it would be typing
+    // at nothing, so it stops asking.
+    await page.evaluate((runId) => window.__harness.runEnd(runId, 0), id);
+    await expect(page.locator(".ledge-status")).toHaveText("Done");
+    await expect(page.locator(".ledge-tap-hint")).toBeHidden();
+  });
 
   test("the panel offers a control where a Mac names two keys", async ({ page }) => {
     await talkingRun(page);
@@ -1054,6 +1118,185 @@ test.describe("giving the keyboard back, with no key to press", () => {
     await page.locator(".xterm-screen").tap();
     await expect.poll(() => page.evaluate(IN_TERMINAL)).toBe(true);
     await expect(page.locator(".ledge-term-leave")).toBeVisible();
+  });
+});
+
+// --- the keys a running block needs -----------------------------------------
+//
+// The other half of the same problem (ios.md §7, §14). A phone can ANSWER a run
+// by typing — a password, a `[y/N]`, a pager's q — and had no key at all for
+// the program that wants Ctrl-C, Ctrl-D, Escape or an arrow: a software
+// keyboard has none of them, and the accessory bar carried the note's Markdown
+// verbs over every field in the page, this panel included.
+//
+// So the bar has a second face over a running block. The face itself is Swift
+// and only the Simulator can show it; what is asserted here is the half with
+// rules in it — which panel a key lands in, what bytes it becomes, and that the
+// page can tell a run apart from the note it is running inside.
+test.describe("the run's own keyboard", () => {
+  const inputs = (page: Page, id: string) =>
+    page.evaluate(
+      (runId) =>
+        window.__harness
+          .inlineInputs()
+          .filter((i) => i.id === runId)
+          .map((i) => i.data),
+      id,
+    );
+  const press = (page: Page, key: string) =>
+    page.evaluate((k) => window.__harness.runKey(k), key);
+
+  test.beforeEach(async ({ page }) => {
+    await page.goto("/harness.html?shell=ios");
+    await expect(page.getByRole("button", { name: /Toggle Sidebar/ })).toBeVisible();
+  });
+
+  test("the four things a software keyboard cannot say reach the program", async ({
+    page,
+  }) => {
+    const id = await talkingRun(page);
+    for (const key of ["ctrlC", "ctrlD", "escape", "up", "down", "left", "right"]) {
+      expect(await press(page, key)).toBe(true);
+    }
+    expect(await inputs(page, id)).toEqual([
+      "\x03",
+      "\x04",
+      "\x1b",
+      "\x1b[A",
+      "\x1b[B",
+      "\x1b[D",
+      "\x1b[C",
+    ]);
+  });
+
+  // Typing still works and is unchanged: the bar is what the keyboard cannot
+  // type, not a replacement for it.
+  test("beside what is typed, in the order it happened", async ({ page }) => {
+    const id = await talkingRun(page);
+    await page.keyboard.type("hunter2");
+    await press(page, "ctrlC");
+    expect((await inputs(page, id)).join("")).toBe("hunter2\x03");
+  });
+
+  test("a key lands in the panel that has the keyboard, and nowhere when none does", async ({
+    page,
+  }) => {
+    const id = await talkingRun(page);
+    await page.locator(".ledge-term-leave").tap();
+    await expect.poll(() => page.evaluate(IN_EDITOR)).toBe(true);
+    // The bar is gone with the focus on a real phone; here the call is made
+    // anyway, because "no panel has it" is the state a stale tap arrives in.
+    expect(await press(page, "ctrlC")).toBe(false);
+    expect(await inputs(page, id)).toEqual([]);
+  });
+
+  test("Back to note is a key on that bar, because the panel's own can scroll away", async ({
+    page,
+  }) => {
+    const id = await talkingRun(page);
+    expect(await press(page, "leave")).toBe(true);
+    await expect.poll(() => page.evaluate(IN_EDITOR)).toBe(true);
+    // Leaving is a focus move: nothing was sent to the program, and it is still
+    // running. The ✕ is the one that interrupts.
+    expect(await inputs(page, id)).toEqual([]);
+    await expect(page.locator(".ledge-status")).toHaveText("Running");
+  });
+
+  // The bar is native and its taps arrive as bare strings, so a name this page
+  // does not know has to be a refusal rather than bytes nobody chose.
+  test("a name the page does not know sends nothing", async ({ page }) => {
+    const id = await talkingRun(page);
+    expect(await press(page, "ctrlZ")).toBe(false);
+    expect(await press(page, "format.bold")).toBe(false);
+    expect(await inputs(page, id)).toEqual([]);
+  });
+
+  test("the bar's face follows the focus into the panel and back out", async ({
+    page,
+  }) => {
+    await talkingRun(page);
+    // The reason the order inside barFaceOf matters, asserted rather than
+    // asserted about: the panel a run draws IS inside the editor's content, so
+    // "is this the note?" is true of it too, and the bar would offer Bold to a
+    // program waiting for a password.
+    expect(
+      await page.locator(".ledge-output").evaluate((el) => !!el.closest(".cm-content")),
+    ).toBe(true);
+    expect(await page.evaluate(() => window.__harness.barFace())).toBe("run");
+
+    await page.locator(".ledge-term-leave").tap();
+    await expect.poll(() => page.evaluate(IN_EDITOR)).toBe(true);
+    expect(await page.evaluate(() => window.__harness.barFace())).toBe("note");
+
+    // And neither face over the search box: the note's verbs would act on the
+    // note behind it. What the shell puts there instead is one button that is
+    // never wrong to offer — the one that puts the keyboard away, since nothing
+    // else on this screen can (ios/Sources/AccessoryBar.swift).
+    await page.getByRole("button", { name: /Go to Note/ }).tap();
+    await expect(page.getByPlaceholder(/> commands/)).toBeVisible();
+    expect(await page.evaluate(() => window.__harness.barFace())).toBe("none");
+  });
+});
+
+// --- the block a finger can make ---------------------------------------------
+//
+// ``` is three trips through the iPhone keyboard's numeric page with a long
+// press each, for the one construct this app is for. Code Block is that act as
+// a verb: on the accessory bar (Swift, so the Simulator shows it) and in the
+// palette, which is what a spec can drive.
+test.describe("making a code block without typing a backtick", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto("/harness.html?shell=ios");
+    await expect(page.getByRole("button", { name: /Toggle Sidebar/ })).toBeVisible();
+  });
+
+  async function emptyNote(page: Page): Promise<void> {
+    await page.keyboard.press("Meta+n");
+    await expect(page.locator(".cm-line").first()).toHaveText("# Untitled");
+    await page.keyboard.press("Meta+a");
+    await page.keyboard.insertText("# Untitled\n\n");
+  }
+
+  const codeBlock = async (page: Page): Promise<void> => {
+    await page.getByRole("button", { name: /Go to Note/ }).tap();
+    await page.keyboard.type(">code block");
+    await page.keyboard.press("Enter");
+  };
+
+  test("the palette makes the block, and it is one the ▶ will run", async ({ page }) => {
+    await emptyNote(page);
+    await codeBlock(page);
+    // A language, not a bare fence: the ▶ comes from the info string's first
+    // word, so a block without one is the block a phone cannot use.
+    await expect(page.locator(".cm-line", { hasText: "```sh" })).toHaveCount(1);
+    await expect(page.locator('[data-act="run"]')).toHaveCount(1);
+  });
+
+  test("the caret is in the body, so the next thing typed is the command", async ({
+    page,
+  }) => {
+    await emptyNote(page);
+    await codeBlock(page);
+    await page.keyboard.type("git status");
+    // Inside the fences, which is the whole claim: one verb and the command.
+    const lines = await page.locator(".cm-line").allInnerTexts();
+    const at = lines.findIndex((l) => l.includes("git status"));
+    expect(lines[at - 1]).toContain("```sh");
+    expect(lines[at + 1]).toContain("```");
+  });
+
+  test("a selection is wrapped, with the language ready to be replaced", async ({
+    page,
+  }) => {
+    await emptyNote(page);
+    await page.keyboard.insertText("SELECT 1");
+    await page.keyboard.press("Shift+Home");
+    await codeBlock(page);
+    // The code was already written and the language is the guess: typing over
+    // the selection is the one gesture that fixes it.
+    await page.keyboard.type("sql");
+    await expect(page.locator(".cm-line", { hasText: "```sql" })).toHaveCount(1);
+    await expect(page.locator(".cm-line", { hasText: "SELECT 1" })).toHaveCount(1);
   });
 });
 

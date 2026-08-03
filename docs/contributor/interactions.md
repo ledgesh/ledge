@@ -80,10 +80,12 @@ section.
 | ↑/↓ roving focus (R5) | a tap; the tapped row is the focused row |
 | Bare-key row verbs | the row's menu |
 | ⌘P / ⇧⌘P / ⌥⌘P | the magnifier in the header, which opens the overlay |
-| ⌘B / ⌘I / ⌘K, Tab / ⇧Tab, `[[` | the keyboard accessory bar, on the clients that have one (ios.md §7) |
+| ⌘B / ⌘I / ⌘K, Tab / ⇧Tab, `[[`, ``` | the keyboard accessory bar, on the clients that have one (ios.md §7) |
 | ⌘V of a picture | Insert Image…, on the bar and in the palette: a phone has no ⌘V and nothing on its pasteboard got there by being copied |
-| ⌘Escape / Escape Escape out of a running block | a Back to note button in the run's own header (§6a) |
-| Nothing dismisses the keyboard | the bar's own last button, apart from the verbs |
+| Ctrl-C, Ctrl-D, Escape, the arrows, at a running block | the same bar wearing its other face, which is a keyboard rather than a menu (§6a) |
+| ⌘Escape / Escape Escape out of a running block | a Back to note button in the run's own header, and the last key on that face (§6a) |
+| Nothing dismisses the keyboard | the bar's own last button, apart from the verbs, and on every face that is not a run's |
+| A run taking the keyboard on its own | a tap on its panel, or on the Tap to type button in its header — raising a software keyboard should cost a deliberate touch (§6a) |
 
 - **The long press is 500 ms, and belongs to touch and pen only**
   (`lib/useRowMenu.ts`). A mouse is excluded deliberately: it has the right
@@ -168,12 +170,25 @@ section.
   Indent and outdent had to BECOME commands for this: they were keymap
   bindings, and the iPhone software keyboard has no Tab key, so they failed the
   rule below without anyone noticing — the registry test could not see them
-  because they were never in the registry.
+  because they were never in the registry. Code Block is the fourth of the same
+  kind and the one with the widest gap under it: ``` is three trips through the
+  numeric page with a long press each, for the construct this app is FOR. It
+  writes a language, because the ▶ comes from the info string and a bare fence
+  is the one block a phone cannot then use (`editor/fences.ts`).
 - **The bar appears over the editor and nowhere else.** It hangs off the web
   view's first responder, and one responder serves every text field in the page,
   so without a signal it decorates the search box and the passphrase prompt too
   — offering Bold, which would act on the note behind the overlay. The page
   tells the shell which it is (ios.md §7).
+- **And a running block is a different keyboard, not more verbs.** The panel a
+  run draws is a block widget INSIDE `.cm-content`, so the rule above reads it
+  as the note and offered Bold to a program waiting for a password. It gets its
+  own face instead: Ctrl-C, Ctrl-D, Escape and the four arrows, which are what a
+  software keyboard has no key for at all (§6a). The two faces are named the
+  same way and mean different things — a verb is a command id for the registry,
+  a key is a name for the focused panel (`editor/inlineTerm.ts` RUN_KEYS) — and
+  neither is a byte or a behavior on the native side. The palette is deliberately
+  not the answer here: opening it takes the focus the key was meant for.
 - **No verb behind a chord alone.** Every command is in the palette, or in a row
   menu, or has a control that runs it. `registry.test.ts` enforces that, and
   holds the exceptions as a named list rather than inferring them — a
@@ -593,6 +608,16 @@ secret written to a synced file — because focus never moved.
   still has DOM focus *and* the caret has not moved since ⌘↩ (`blocks.ts`
   startInlineRun → `claimFocus`). ⌘↩ and carry on writing is an ordinary
   flow; a build that speaks a minute later must not swallow the sentence.
+- **There is no claim at all where the keyboard is on screen**
+  (`softKeyboard()`), and the test above is why. It asks whether the EDITOR has
+  focus, which on a Mac means "the user is typing here" and on a phone means
+  almost nothing: the editor takes DOM focus when a pane opens and takes it
+  back after every run ends, both with no keyboard up. So the claim was always
+  true there, and honoring it focused a text field, which is how iOS is asked
+  to RAISE the keyboard — over the output the finger had just asked to see,
+  with the note's own way out (tapping the prose) behind it. A run on that
+  client moves the keyboard neither in nor out; the panel takes it when it is
+  tapped, and offers **Tap to type** while it is live and has not been.
 - **The panel says so while it holds focus**: lit border, header line naming
   the state and the way out, both `:focus-within` so they cannot drift from
   where focus is. Focusing never scrolls (`preventScroll`).
@@ -625,9 +650,46 @@ secret written to a synced file — because focus never moved.
   someone who is already in the note. It is also all that fits. At 390 points
   the header holds the state, the exit, and the 44-point pair that copies and
   interrupts, and the sentence is what the width has to spend.
+
+  The touch client has the *inverse* state to disclose as well, and it is the
+  one the sentence's slot is free for: with no claim, a live run that has not
+  been tapped is a program that may be waiting on an answer nothing announced.
+  So **Tap to type** sits there until the panel has the keyboard (the exit
+  replaces it) or the run ends (a frozen panel is output, and typing at it
+  would be typing at nothing). Both are pure CSS off `:focus-within` and a
+  `ledge-term-live` class, for the same reason the rest of this is: a header
+  that tracked focus in JavaScript would eventually disagree with where focus
+  actually went.
+
+  **And that one is a button too, because an instruction beside a terminal gets
+  aimed at.** It began as a line of text, and words telling a finger to tap
+  read as a label ON something tappable: the eye finds the sentence, the thumb
+  goes to the sentence, and nothing happens there. So the sentence is the
+  target. Tapping the output is untouched and is still what most people do —
+  this is the second way in, not the replacement — and the two share one path
+  (`focusTerm`), which is also the honored claim's, so a phone cannot end up
+  with a way in that scrolls the note differently from the other.
 - **A focused run is the `terminal` domain**, not `editor`, though the panel
   lives inside `.cm-editor`: the shell owns Ctrl here as in the drawer
   (`domainOf` asks `.xterm` first).
+- **On touch the keys the program wants come from the accessory bar's second
+  face.** Answering a run by typing already worked — a password, a `[y/N]`, a
+  pager's `q` — and everything a program asks for with a control key did not
+  exist on the client at all: no Ctrl, no Escape, no arrows. So while a run
+  holds the keyboard the bar carries `^C ^D esc ↑ ↓ ← →` and, in place of Hide
+  Keyboard, **Back to note** — the same act as the header's button, on the bar
+  because the header rides the note's scroller and a run pinned to 24 rows can
+  put it off the top of the screen. Seven keys and no sticky Ctrl: an armed
+  modifier is state the page holds and a native button has to draw, and the two
+  would part company the first time a run ended while it was held. What is not
+  on it (Tab, Ctrl-anything-else) stays unreachable on a phone, deliberately —
+  §14's list is what a phone could not do at all, and the bar is that list.
+- **An arrow is not one byte.** `ESC [ A` outside DECCKM and `ESC O A` inside
+  it, which is the mode every full-screen program sets while it owns the screen
+  — so the bytes are chosen against the live terminal's mode
+  (`inlineTerm.runKeyBytes`, unit-tested both ways). Sending the wrong form is
+  not a crash: it is an arrow that does nothing, in the one place arrows are the
+  whole interface.
 
 ## 7. Key dispatch contract
 

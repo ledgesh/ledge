@@ -66,6 +66,7 @@ export class InlineTerm {
   private readonly status: HTMLSpanElement;
   private readonly hostChip: HTMLSpanElement;
   private readonly focusHint: HTMLSpanElement;
+  private readonly tapHint: HTMLButtonElement;
   private readonly exitKey: HTMLSpanElement;
   private readonly leaveBtn: HTMLButtonElement;
   private readonly duration: HTMLSpanElement;
@@ -89,7 +90,10 @@ export class InlineTerm {
     private readonly opts: InlineTermOptions,
   ) {
     this.wrap = document.createElement("div");
-    this.wrap.className = "ledge-output";
+    // `live` is on the class as well as in the field below, because the header
+    // draws a state from it that also depends on focus (the tap hint), and a
+    // class is the only form :focus-within can be combined with.
+    this.wrap.className = "ledge-output ledge-term-live";
     this.wrap.contentEditable = "false";
     this.wrap.dataset.ledgeRun = id;
 
@@ -112,6 +116,26 @@ export class InlineTerm {
     this.focusHint = document.createElement("span");
     this.focusHint.className = "ledge-focus-hint";
     this.focusHint.textContent = "typing here";
+    // The other half of that sentence, and only a touch client has it: there,
+    // a run does NOT take the keyboard (editor/blocks.ts), so a program asking
+    // for a password is waiting on a tap nothing else would announce. Shown
+    // while the run is live and the keyboard is elsewhere; the line above
+    // replaces it the moment the panel has it.
+    //
+    // A button and not a line of text, though it started as one: words reading
+    // "tap to type" next to a terminal are aimed at as well as read, and a
+    // finger that lands on them has to be right. Tapping the output still
+    // does the same thing, and is what most people do.
+    this.tapHint = document.createElement("button");
+    this.tapHint.className = "ledge-tap-hint";
+    this.tapHint.textContent = "Tap to type";
+    // mousedown and preventDefault, like the button below: focus must not rest
+    // on the button on its way to the terminal. Taking it here, inside the
+    // gesture's own handler, is also what lets iOS raise the keyboard for it.
+    this.tapHint.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      this.focusTerm();
+    });
     // The way out, said twice, because the two kinds of client have nothing in
     // common here: one names the keys, the other IS the exit. Both are built
     // and only one is ever shown — the CSS picks by `@media (hover: …)`, so
@@ -156,6 +180,7 @@ export class InlineTerm {
       this.status,
       this.hostChip,
       spacer,
+      this.tapHint,
       this.focusHint,
       this.exitKey,
       this.leaveBtn,
@@ -316,9 +341,17 @@ export class InlineTerm {
     this.claim = null;
     if (!claim || this.disposed || !this.live) return;
     if (!this.host.isConnected || !claim()) return;
-    // preventScroll: the panel sits under the block the caret was in, so it is
-    // already in view; without this, focusing scrolls the widget to the top of
-    // the viewport and the note jumps under the user.
+    this.focusTerm();
+  }
+
+  /** Put the keyboard in the terminal: an honored claim, or a tap on the
+   * invitation in the header.
+   *
+   * preventScroll because the panel is already in view either way — it sits
+   * under the block the caret was in, or it is the thing that was just tapped —
+   * and without it focusing scrolls the widget to the top of the viewport,
+   * moving the note under the user. */
+  private focusTerm(): void {
     this.term.textarea?.focus({ preventScroll: true });
   }
 
@@ -329,8 +362,36 @@ export class InlineTerm {
     this.opts.onFocusEditor?.();
   }
 
-  private hasFocus(): boolean {
+  /** Whether the keyboard is over this run. Public because the pool answers
+   * `sendRunKey` with it: one page has many panels and at most one of them is
+   * what a key was pressed at. */
+  hasFocus(): boolean {
     return this.host.contains(document.activeElement);
+  }
+
+  /**
+   * One press on the keyboard a RUNNING block needs (ios.md §7, `RUN_KEYS`).
+   *
+   * Not typed and therefore not xterm's to encode: these arrive as a name from
+   * a bar that has no key event behind it, so the bytes are chosen here and
+   * handed to the shell the way `onData` hands over what was typed. The one
+   * thing that has to be asked of xterm is which cursor-key mode the program
+   * put the terminal in, because the answer changes what an arrow IS.
+   *
+   * `leave` is the member that sends nothing: it is the way back to the note,
+   * which on a Mac is ⌘Escape and on a phone has to be a control.
+   */
+  sendKey(key: RunKey): boolean {
+    if (this.disposed) return false;
+    if (key === "leave") {
+      this.leave();
+      return true;
+    }
+    // A frozen panel is output, not a program: its shell has already gone, and
+    // a key sent into it would be typing at nothing.
+    if (!this.live) return false;
+    this.opts.onInput?.(runKeyBytes(key, this.term.modes.applicationCursorKeysMode));
+    return true;
   }
 
   private setFocusHint(): void {
@@ -373,6 +434,7 @@ export class InlineTerm {
   freeze(): void {
     if (this.disposed) return;
     this.live = false;
+    this.wrap.classList.remove("ledge-term-live");
     // A run that is over asks for nothing: a claim that never came due (a
     // silent command that finished before its first byte) dies with it.
     this.claim = null;
@@ -490,6 +552,65 @@ export function escapeLeaves(o: { meta: boolean; pinned: boolean; sinceLastEscMs
   return o.sinceLastEscMs <= ESC_EXIT_MS;
 }
 
+// --- the keyboard a running block needs -------------------------------------
+//
+// A software keyboard has no Ctrl, no Escape and no arrows, so a phone can
+// answer a `sudo` password or a `[y/N]` by typing and has no key at all for the
+// program that wants one of these (ios.md §7, §14). They arrive by NAME from
+// the accessory bar's second face, which is a native surface that knows nothing
+// about terminals — exactly as the first face names commands and knows nothing
+// about the editor.
+//
+// Seven of them, and they are the four things that phase named: interrupt,
+// end-of-file, Escape, and an arrow in each direction. `leave` is the eighth
+// and is not a key the program sees; it is the ⌘Escape a phone cannot press,
+// on the bar because the panel's own Back to note button rides the note's
+// scroller and a run pinned to 24 rows can put it off the top of the screen.
+//
+// Deliberately NOT a modifier that arms the next letter, which is how a
+// terminal app on iOS usually gets at Ctrl-anything: an armed modifier is state
+// on this end that a native button has to be told about to draw, and the two
+// would drift the first time a run ended with it still held.
+export const RUN_KEYS = ["ctrlC", "ctrlD", "escape", "up", "down", "left", "right", "leave"] as const;
+
+export type RunKey = (typeof RUN_KEYS)[number];
+
+/** Whether `name` is one of them, for the bar's tap arriving as a bare string. */
+export function isRunKey(name: string): name is RunKey {
+  return (RUN_KEYS as readonly string[]).includes(name);
+}
+
+/**
+ * What a key sends to the shell — "" for `leave`, which sends nothing.
+ *
+ * `applicationCursor` is DECCKM, which vim, less and every ncurses program turn
+ * on while they own the screen: an arrow is `ESC O A` there and `ESC [ A`
+ * everywhere else. Sending the wrong one is not a crash, it is an arrow that
+ * does nothing in the one place arrows are the whole interface, so the mode is
+ * asked of the live terminal (xterm's `modes`) rather than assumed.
+ */
+export function runKeyBytes(key: RunKey, applicationCursor: boolean): string {
+  const cursor = applicationCursor ? "\x1bO" : "\x1b[";
+  switch (key) {
+    case "ctrlC":
+      return "\x03";
+    case "ctrlD":
+      return "\x04";
+    case "escape":
+      return "\x1b";
+    case "up":
+      return `${cursor}A`;
+    case "down":
+      return `${cursor}B`;
+    case "right":
+      return `${cursor}C`;
+    case "left":
+      return `${cursor}D`;
+    case "leave":
+      return "";
+  }
+}
+
 // --- row maths --------------------------------------------------------------
 
 // How many rows a finished run needs, given its output and where its cursor
@@ -541,6 +662,32 @@ export function releaseInlineTerm(id: string): void {
   if (!it) return;
   it.dispose();
   pool.delete(id);
+}
+
+/**
+ * A press on the run's own keyboard, addressed to whichever panel has focus
+ * (ios.md §7). False when the name is not one of `RUN_KEYS`, or when nothing is
+ * focused to press it at.
+ *
+ * The focused panel and not a run id, because the bar over the keyboard has no
+ * id to send: it appears BECAUSE a run took the keyboard, and the panel that
+ * took it is the one the user is looking at. A page holds one focus, so this
+ * asks the pool the same question the browser already answered.
+ *
+ * A string rather than a `RunKey` at the door, for the reason the verb path
+ * takes a bare command id (lib/menu.ts): the caller is a native bar whose
+ * buttons are strings, and a name this page does not know must fail visibly
+ * here rather than be typed into somewhere by accident.
+ */
+export function sendRunKey(name: string): boolean {
+  if (!isRunKey(name)) {
+    console.warn(`[run] no such key: ${name}`);
+    return false;
+  }
+  for (const it of pool.values()) {
+    if (it.hasFocus()) return it.sendKey(name);
+  }
+  return false;
 }
 
 // --- header formatting (kept local so the pool stands alone) ----------------

@@ -89,6 +89,7 @@ function stubDeps(
       indent: record("indent"),
       outdent: record("outdent"),
       wikiLink: record("wikiLink"),
+      codeBlock: record("codeBlock"),
       insertImage: record("insertImage"),
       toggleTemplate: record("toggleTemplate"),
       editFrontmatter: record("editFrontmatter"),

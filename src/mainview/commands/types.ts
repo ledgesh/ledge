@@ -243,6 +243,10 @@ export interface RegistryDeps {
     indent(docId: string): void;
     outdent(docId: string): void;
     wikiLink(docId: string): void;
+    // A fenced block where the caret is, or the selection wrapped in one
+    // (editor/fences.ts): the same block typing ``` opens, for the keyboard
+    // that has no backtick on it.
+    codeBlock(docId: string): void;
     // Ask the device for a picture and embed it. Async all the way down (a
     // picker waits for a person), and the command does not wait on it: what
     // comes back is an edit, not an answer.

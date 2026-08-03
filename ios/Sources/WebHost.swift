@@ -1,6 +1,21 @@
 import UIKit
 import WebKit
 
+/// Which keyboard the keyboard is over, as the page reports it (`@focus`, and
+/// `BarFace` in mainview/lib/nativeBridge.ts). The raw values are the wire's.
+enum BarFace: String {
+    /// Some other field in the page — a search box, a rename, a passphrase —
+    /// where the note's verbs would act on the note behind the overlay. Not
+    /// "no bar": the strip is still there, carrying the one button that is
+    /// never wrong (`AccessoryBar.bare`).
+    case none
+    /// The note itself: the Markdown face.
+    case note
+    /// A running block's terminal, which lives INSIDE the note's editor and so
+    /// cannot be told apart from it by anything this end can see.
+    case run
+}
+
 /// The window, the web view, and the bridge between them and the socket.
 ///
 /// This is the whole of what Swift does with the protocol, which is nothing:
@@ -32,15 +47,17 @@ final class WebHost: UIViewController {
     /// not deallocated mid-handshake; it is never the page's byte stream.
     private var probing: SSHTransport?
     private var generation = 0
-    /// The strip above the keyboard (ios.md §7). Built once and held here: it
-    /// is captured by the accessory getter installed on the web view's content
-    /// view, so it has to outlive the call that installs it.
-    private var accessory: UIView?
-    /// Whether what the keyboard is over is the EDITOR, as the page reports it.
+    /// The three strips above the keyboard (ios.md §7). Built once and held
+    /// here: they are captured by the accessory getter installed on the web
+    /// view's content view, so they have to outlive the call that installs it.
+    private var noteBar: UIView?
+    private var runBar: UIView?
+    private var bareBar: UIView?
+    /// Which of them the keyboard is over, as the page reports it (`@focus`).
     /// One content view is the first responder for every field in the page, so
-    /// without this the formatting bar would appear over the search box and the
-    /// passphrase prompt as well.
-    private var editorFocused = false
+    /// without this the formatting bar would appear over the search box, the
+    /// passphrase prompt and a running block's terminal as well.
+    private var face: BarFace = .none
     /// The view to re-ask when it changes. Focus moving from the editor to
     /// the search box is not a responder change, so UIKit has no reason to
     /// call the getter again unless it is told to.
@@ -322,9 +339,9 @@ extension WebHost: WKNavigationDelegate {
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         // A fresh page has focused nothing yet, and a reload that kept the flag
         // set would put the bar over whatever the new page focuses first.
-        editorFocused = false
-        if accessory == nil {
-            accessory = AccessoryBar.make(
+        face = .none
+        if noteBar == nil {
+            noteBar = AccessoryBar.markdown(
                 tapped: { [weak self] id in
                     // The page decides what the id means; this end only says
                     // which button was pressed (mainview/lib/menu.ts).
@@ -337,8 +354,23 @@ extension WebHost: WKNavigationDelegate {
                 dismiss: { [weak self] in self?.webView.endEditing(true) }
             )
         }
+        if runBar == nil {
+            // The same contract one domain along: a key name, and what it sends
+            // is the page's terminal's business (mainview/editor/inlineTerm.ts).
+            runBar = AccessoryBar.run(pressed: { [weak self] key in
+                self?.deliver(["t": "key", "k": key])
+            })
+        }
+        if bareBar == nil {
+            bareBar = AccessoryBar.bare(dismiss: { [weak self] in self?.webView.endEditing(true) })
+        }
         let surface = webView.installAccessoryView { [weak self] in
-            self?.editorFocused == true ? self?.accessory : nil
+            guard let self else { return nil }
+            switch self.face {
+            case .none: return self.bareBar
+            case .note: return self.noteBar
+            case .run: return self.runBar
+            }
         }
         guard let surface else {
             // Not fatal, and worth a line: the app keeps the system's bar, so
@@ -401,15 +433,16 @@ extension WebHost: WKScriptMessageHandler {
         case "@log":
             print("[view] \(params["text"] as? String ?? "")")
             reply(id, NSNull())
-        // `editing` on the wire; `editorFocused` here, because UIViewController
-        // already has an `editing` and a stored property cannot override it.
-        case "@editing":
-            let on = params["on"] as? Bool ?? false
-            if on != editorFocused {
-                editorFocused = on
+        case "@focus":
+            // An unknown face is no face: a page saying something this build
+            // does not understand must not leave the previous bar over it.
+            let next = BarFace(rawValue: params["over"] as? String ?? "") ?? .none
+            if next != face {
+                face = next
                 // The responder has not changed — focus moved between two
-                // fields on one page — so UIKit will keep the bar it already
-                // has until it is asked again.
+                // fields on one page, or from the note into the panel of a run
+                // inside it — so UIKit will keep the bar it already has until it
+                // is asked again.
                 editingSurface?.reloadInputViews()
             }
             reply(id, NSNull())

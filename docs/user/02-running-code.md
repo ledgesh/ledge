@@ -12,6 +12,10 @@ On a touch device the buttons do not wait to be hovered. Every block wears Run a
 
 A block offers to run only once its fence is closed. While the closing ``` is still missing there is no Run button, because what the block contains is not settled: the next closing fence you type anywhere below it becomes this block's end. The third backtick writes the closing line for you, so a block is closed before you have typed a word of it, and a block written above another one never swallows it. Pressing Enter at the end of a fence opener does the same for an opener that arrived some other way, such as a paste.
 
+On a phone the backtick is not on the letter keyboard, so the block is a verb instead: the code button on the bar above the keyboard, or "Code Block" in the command palette. It writes both fences and the language `sh`, and leaves the caret in the body, so the next thing you type is the command. Type over the `sh` to run something else.
+
+The same verb wraps a selection in a block, and selects the language for you, since the code is already written and `sh` is a guess about it.
+
 ## Answer a prompt from a running block
 
 An inline run can ask you things. When it prints its first output it takes the keyboard, so you answer a `sudo` password prompt or a `[y/N]` by typing. The panel header reads "typing here" while your keys go to the program, and focus returns to the note when the command finishes.
@@ -20,7 +24,15 @@ If you pressed ⌘↩ and carried on writing, the run does not take the keyboard
 
 To leave a running command, press Escape twice (the first Escape goes to the program, in case it wanted it) or ⌘Escape. While a full-screen program such as `vim` holds the panel, every Escape belongs to it, and ⌘Escape is the way out.
 
+On a phone a run never takes the keyboard by itself, because taking it would raise one over half the screen you just asked to look at. While a run is going and your keys are still in the note, its header carries a Tap to type button, which is how you answer a password prompt or a `[y/N]` there. Tapping the output does the same thing.
+
 On a touch device the header shows a Back to note button instead, for as long as the run holds the keyboard. Leaving does not stop the command: the run carries on, and tapping the output puts you back in it.
+
+The bar above the keyboard changes while the run holds it. In place of the writing verbs it carries the keys a software keyboard has not got: `^C`, `^D`, Escape, and the four arrows. That is how you interrupt a command, end one that is reading input, quit a pager, or move around in `vim`, `less` or `htop` from a phone.
+
+Back to note is the last button on that bar as well as in the panel's header, because a full screen program can push the header off the top of the screen.
+
+Everywhere else that last button hides the keyboard, which on a phone is the only way to put one away: the note fills the screen, so there is no blank space to tap.
 
 ## Confirm before running
 

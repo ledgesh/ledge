@@ -10,6 +10,7 @@ import {
   nativeOverlay,
   nativeShell,
   SHELL_CALLS,
+  type BarFace,
   type ToShell,
 } from "./nativeBridge";
 
@@ -169,12 +170,29 @@ describe("a button on the keyboard bar", () => {
     expect(sent.at(-1)).toEqual({ t: "call", id: 1, m: "clipboard.read", p: {} });
   });
 
-  test("and the bar is only offered over the editor", () => {
+  test("and the bar is told which of its faces to wear", () => {
     const { shell, sent } = recorder();
-    shell.editing(true);
-    expect(sent.at(-1)).toEqual({ t: "call", id: 1, m: "@editing", p: { on: true } });
-    shell.editing(false);
-    expect(sent.at(-1)).toEqual({ t: "call", id: 2, m: "@editing", p: { on: false } });
+    shell.focus("note");
+    expect(sent.at(-1)).toEqual({ t: "call", id: 1, m: "@focus", p: { over: "note" } });
+    shell.focus("run");
+    expect(sent.at(-1)).toEqual({ t: "call", id: 2, m: "@focus", p: { over: "run" } });
+    shell.focus("none");
+    expect(sent.at(-1)).toEqual({ t: "call", id: 3, m: "@focus", p: { over: "none" } });
+  });
+
+  // The run's face sends key names, not command ids, and lands somewhere else
+  // entirely (editor/inlineTerm.ts). One channel, two vocabularies, and neither
+  // may arrive as the other.
+  test("a key is not a verb", () => {
+    const { shell } = recorder();
+    const verbs: string[] = [];
+    const keys: string[] = [];
+    shell.onVerb((id) => verbs.push(id));
+    shell.onKey((k) => keys.push(k));
+    shell.deliver({ t: "key", k: "ctrlC" });
+    shell.deliver({ t: "verb", id: "format.bold" });
+    expect(keys).toEqual(["ctrlC"]);
+    expect(verbs).toEqual(["format.bold"]);
   });
 });
 
@@ -182,32 +200,46 @@ describe("a button on the keyboard bar", () => {
 // keeps focus across most of them; what the shell needs is the transitions.
 describe("what the keyboard is over, reported only when it changes", () => {
   test("the steady state costs nothing", () => {
-    const told: boolean[] = [];
-    const report = focusReporter((on) => told.push(on));
-    report(true);
-    report(true);
-    report(true);
-    expect(told).toEqual([true]);
+    const told: BarFace[] = [];
+    const report = focusReporter((over) => told.push(over));
+    report("note");
+    report("note");
+    report("note");
+    expect(told).toEqual(["note"]);
   });
 
   test("a page that has focused nothing yet says nothing", () => {
-    // The shell's own flag starts false and a reload resets it, so an opening
-    // `false` would be a bridge call that changes nothing — and, worse, a
-    // reloadInputViews on a keyboard that is not up.
-    const told: boolean[] = [];
-    const report = focusReporter((on) => told.push(on));
-    report(false);
+    // The shell's own state starts at "none" and a reload resets it, so an
+    // opening "none" would be a bridge call that changes nothing — and, worse,
+    // a reloadInputViews on a keyboard that is not up.
+    const told: BarFace[] = [];
+    const report = focusReporter((over) => told.push(over));
+    report("none");
     expect(told).toEqual([]);
   });
 
   test("the editor to the search box, and back", () => {
-    const told: boolean[] = [];
-    const report = focusReporter((on) => told.push(on));
-    report(true); // a tap in the note
-    report(false); // the overlay's input takes it
-    report(false); // the focusout and the focusin both fired
-    report(true); // the overlay closed and the editor has it again
-    expect(told).toEqual([true, false, true]);
+    const told: BarFace[] = [];
+    const report = focusReporter((over) => told.push(over));
+    report("note"); // a tap in the note
+    report("none"); // the overlay's input takes it
+    report("none"); // the focusout and the focusin both fired
+    report("note"); // the overlay closed and the editor has it again
+    expect(told).toEqual(["note", "none", "note"]);
+  });
+
+  // The move with no blur in the middle: a run takes the keyboard from the
+  // prose it is running under, and both surfaces are in the same editor. A
+  // filter that only knew "focused or not" would report nothing at all here,
+  // and the bar would keep offering Bold to a program waiting for a password.
+  test("the note to the run it started, and back", () => {
+    const told: BarFace[] = [];
+    const report = focusReporter((over) => told.push(over));
+    report("note");
+    report("run");
+    report("run");
+    report("note");
+    expect(told).toEqual(["note", "run", "note"]);
   });
 });
 

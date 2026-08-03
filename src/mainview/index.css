@@ -728,7 +728,8 @@ body {
   .ledge-term-gap {
     flex: 0 0 120px;
   }
-  .ledge-term-leave {
+  .ledge-term-leave,
+  .ledge-tap-hint {
     flex: 0 0 auto;
   }
 }
@@ -766,7 +767,8 @@ body {
   color: var(--ed-muted);
 }
 /* The panel holds the keyboard: a live run takes focus when it starts talking
-   (inlineTerm.ts claimFocus), so typing goes to the program and not the note.
+   (inlineTerm.ts claimFocus), or when a finger taps it on a client where that
+   claim is off, so typing goes to the program and not the note.
    That has to be visible without looking for a cursor, hence a lit border and
    a header line naming the state and the way out. Both are pure :focus-within,
    so they cannot drift from where focus actually is. */
@@ -801,12 +803,24 @@ body {
   .ledge-output:focus-within .ledge-term-leave {
     display: inline-flex;
   }
+  /* The invitation, and the reason it is only here: a run on this client does
+     not take the keyboard, because taking it means raising one over half the
+     screen (editor/blocks.ts). So a program that is waiting on an answer is
+     waiting on a tap, and nothing else in the panel says so. It goes the moment
+     the panel has the keyboard — the line beside it says the rest — and the
+     moment the run stops being one. */
+  .ledge-term-live:not(:focus-within) .ledge-tap-hint {
+    display: inline-flex;
+  }
 }
-/* Hidden until that rule shows it. A button, not a line of text, because the
-   keys it stands in for do not exist on this client and tapping the prose —
-   the Mac's other way out — is unavailable exactly when a full-screen program
-   has taken the screen. */
-.ledge-term-leave {
+/* Hidden until those rules show them, and both are buttons rather than lines of
+   text. Back to note, because the keys it stands in for do not exist on this
+   client and tapping the prose — the Mac's other way out — is unavailable
+   exactly when a full-screen program has taken the screen. Tap to type, because
+   an instruction sitting beside a terminal gets aimed at as well as read: the
+   words and the target had better be the same thing. */
+.ledge-term-leave,
+.ledge-tap-hint {
   display: none;
   appearance: none;
   align-items: center;

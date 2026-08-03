@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { escapeLeaves, liveRows, neededRows } from "./inlineTerm";
+import { escapeLeaves, isRunKey, liveRows, neededRows, RUN_KEYS, runKeyBytes } from "./inlineTerm";
 
 describe("neededRows", () => {
   test("counts the cursor's blank line, so xterm never has to scroll to keep it", () => {
@@ -68,5 +68,49 @@ describe("escapeLeaves", () => {
     // The one form no program can claim, so it is the exit that always exists.
     expect(escapeLeaves({ meta: true, pinned: true, sinceLastEscMs: 5000 })).toBe(true);
     expect(escapeLeaves({ meta: true, pinned: false, sinceLastEscMs: 5000 })).toBe(true);
+  });
+});
+
+describe("runKeyBytes", () => {
+  test("the three the software keyboard has no key for", () => {
+    expect(runKeyBytes("ctrlC", false)).toBe("\x03");
+    expect(runKeyBytes("ctrlD", false)).toBe("\x04");
+    expect(runKeyBytes("escape", false)).toBe("\x1b");
+  });
+
+  test("arrows in the ordinary mode", () => {
+    expect(runKeyBytes("up", false)).toBe("\x1b[A");
+    expect(runKeyBytes("down", false)).toBe("\x1b[B");
+    expect(runKeyBytes("right", false)).toBe("\x1b[C");
+    expect(runKeyBytes("left", false)).toBe("\x1b[D");
+  });
+
+  // DECCKM, which every full-screen program turns on: sending the other form
+  // is an arrow that does nothing, in the one place arrows are the interface.
+  test("arrows while a program owns the screen", () => {
+    expect(runKeyBytes("up", true)).toBe("\x1bOA");
+    expect(runKeyBytes("down", true)).toBe("\x1bOB");
+    expect(runKeyBytes("right", true)).toBe("\x1bOC");
+    expect(runKeyBytes("left", true)).toBe("\x1bOD");
+  });
+
+  // The mode is a fact about the cursor keys and nothing else.
+  test("the mode leaves the others alone", () => {
+    expect(runKeyBytes("ctrlC", true)).toBe("\x03");
+    expect(runKeyBytes("escape", true)).toBe("\x1b");
+  });
+
+  test("leave sends nothing: it is the way out, not a keystroke", () => {
+    expect(runKeyBytes("leave", false)).toBe("");
+    expect(runKeyBytes("leave", true)).toBe("");
+  });
+
+  // The bar's tap arrives as a bare string, so an id the page does not know
+  // has to be a refusal rather than bytes nobody chose.
+  test("the vocabulary is closed", () => {
+    for (const key of RUN_KEYS) expect(isRunKey(key)).toBe(true);
+    expect(isRunKey("ctrlZ")).toBe(false);
+    expect(isRunKey("format.bold")).toBe(false);
+    expect(isRunKey("")).toBe(false);
   });
 });

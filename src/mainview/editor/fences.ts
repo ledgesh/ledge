@@ -30,7 +30,7 @@ import {
   type StateCommand,
   type TransactionSpec,
 } from "@codemirror/state";
-import { EditorView, keymap } from "@codemirror/view";
+import { EditorView, keymap, type Command } from "@codemirror/view";
 import { frontmatterEnd } from "../../shared/frontmatter";
 
 // The frontmatter opener, shared/frontmatter.ts's FENCE: exactly three
@@ -218,6 +218,111 @@ export function typedFence(state: EditorState, mark: string): TransactionSpec | 
     userEvent: "input.type",
   };
 }
+
+// --- the block a finger asks for --------------------------------------------
+//
+// Everything above answers a fence being TYPED, which is the desktop's way in
+// and no way at all on a phone: the backtick is not on the iPhone keyboard's
+// letter page, so the three that open a block are three trips through the
+// numeric page and a long press each (ios.md §7). `format.codeBlock` is the
+// same act as a verb, so the accessory bar can name it and the palette can
+// offer it (interactions.md §1a).
+//
+// It writes a language rather than a bare fence, because a bare fence is the
+// one shape that cannot RUN: the ▶ comes from the info string's first word
+// being in `blocks.runnable` (editor/blocks.ts isRunnable), so a command that
+// left the info empty would hand a phone the block it could not use and no
+// hint about why.
+
+/**
+ * The language a new block is born with.
+ *
+ * `sh` because this is the notebook that runs commands, and because it is the
+ * one word that makes the new block runnable on the spot — the block a phone
+ * asks for is nearly always a command it is about to press ▶ on. Changing it
+ * is typing over a word on the letter page, which is the cheap half of what a
+ * phone can do; typing three backticks is the expensive half, and that is the
+ * half this command is here to spend.
+ */
+export const NEW_BLOCK_LANG = "sh";
+
+/**
+ * Whether `pos` sits somewhere a fence must not be planted: inside a
+ * frontmatter block (its fences are params, not code), on a fence line itself,
+ * or inside a block some earlier fence opened.
+ *
+ * The same walk `typedFence` does above, asked as a question rather than as a
+ * bail-out, and for the same reason: a second fence inside the first does not
+ * nest, it ends the block and starts junk.
+ */
+function withinCode(state: EditorState, pos: number): boolean {
+  const fmEnd = frontmatterEnd(state.sliceDoc(0, Math.min(HEAD_BYTES, state.doc.length)));
+  const line = state.doc.lineAt(pos);
+  if (line.from < fmEnd) return true;
+  if (fenceOpener(line.text)) return true;
+  if (line.from === fmEnd) return false;
+  return openMarkerAfter(state.sliceDoc(fmEnd, line.from).split("\n").slice(0, -1)) !== null;
+}
+
+/**
+ * The edit that puts a fenced block at the selection, or null where one cannot
+ * go (see `withinCode`) — a silent no-op, the same answer Open Link and Toggle
+ * Checkbox give a caret that is not on one.
+ *
+ * Two shapes, and the caret lands in each on the thing still missing:
+ * - a caret gets an empty block and sits in its BODY, because the language is
+ *   already written and the code is not;
+ * - a selection is wrapped whole and the LANGUAGE is selected, because the
+ *   code is already written and `sh` is a guess about it — one gesture
+ *   replaces the guess, and no gesture at all accepts it.
+ *
+ * A caret on a line with text puts the block after a blank line rather than
+ * against the prose. CommonMark reads it the same either way (a fence may
+ * interrupt a paragraph); what changes is the note, which a person also reads.
+ */
+export function insertCodeBlockSpec(state: EditorState): TransactionSpec | null {
+  const range = state.selection.main;
+  // A selection ending exactly at a line's start stops on the line above it:
+  // that is where the eye says it ends, and taking `lineAt(to)` whole would
+  // swallow a line nobody highlighted — including, where the selection stops
+  // against an existing block, that block's opening fence.
+  const end = !range.empty && state.doc.lineAt(range.to).from === range.to ? range.to - 1 : range.to;
+  if (withinCode(state, range.from) || withinCode(state, end)) return null;
+  const opener = `\`\`\`${NEW_BLOCK_LANG}`;
+
+  if (!range.empty) {
+    const first = state.doc.lineAt(range.from);
+    const last = state.doc.lineAt(end);
+    const body = state.sliceDoc(first.from, last.to);
+    return {
+      changes: { from: first.from, to: last.to, insert: `${opener}\n${body}\n\`\`\`` },
+      selection: { anchor: first.from + 3, head: first.from + opener.length },
+      userEvent: "input",
+    };
+  }
+
+  const line = state.doc.lineAt(range.head);
+  if (line.text.trim() === "") {
+    return {
+      changes: { from: line.from, to: line.to, insert: `${opener}\n\n\`\`\`` },
+      selection: { anchor: line.from + opener.length + 1 },
+      userEvent: "input",
+    };
+  }
+  return {
+    changes: { from: line.to, insert: `\n\n${opener}\n\n\`\`\`` },
+    selection: { anchor: line.to + opener.length + 3 },
+    userEvent: "input",
+  };
+}
+
+/** The command behind `format.codeBlock` (commands/glue.ts). */
+export const insertCodeBlock: Command = (view) => {
+  const spec = insertCodeBlockSpec(view.state);
+  if (!spec) return false;
+  view.dispatch(spec);
+  return true;
+};
 
 // The typing half. An input handler and not a keymap entry: the mark has to be
 // seen as text going in at a position, which is also what makes it inert for

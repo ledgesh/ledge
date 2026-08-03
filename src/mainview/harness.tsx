@@ -19,6 +19,8 @@ import { collectHits, type SearchHit } from "../shared/search";
 import { resolveWikiTitle, wikiRefsOf } from "../shared/wikilinks";
 import { normalizeTag, tagDirectoryOf, tagRefsOf, type TagInfo } from "../shared/tags";
 import { configureBridge, dispatchRunEvent, reconcileRuns } from "./editor/bridge";
+import { sendRunKey } from "./editor/inlineTerm";
+import { barFaceOf, type BarFace } from "./lib/nativeBridge";
 import { configureTerminal } from "./terminal/channel";
 import { configureNotes, dispatchExternalOpen, dispatchNotesChanged, type ExternalOpenInfo, type NoteFile } from "./notes/channel";
 import { configureVault, recordVaultState } from "./vault/channel";
@@ -704,6 +706,10 @@ const inlineRuns: { sessionId: string; id: string; host: string | null }[] = [];
 // that has not been told the panel's width runs the block believing the pty's
 // default, and anything laying out to COLUMNS gets it wrong for that run.
 const inlineResizes: { id: string; cols: number; rows: number }[] = [];
+// Everything typed AT a run, in order. Recorded because the run's own keyboard
+// is a native bar on the one client that has it (ios.md §7): what a spec can
+// see of Ctrl-C is the byte that left for the shell.
+const inlineInputs: { id: string; data: string }[] = [];
 // The reconnect reconciliation (bridge.ts reconcileRuns): what the client
 // claimed, and what this fake server says it is still running. Nothing by
 // default, which is the answer a server gives about a page that reloaded and
@@ -722,7 +728,9 @@ configureBridge({
   resizeInline: (_sessionId, id, cols, rows) => {
     inlineResizes.push({ id, cols, rows });
   },
-  inputInline: () => {},
+  inputInline: (_sessionId, id, data) => {
+    inlineInputs.push({ id, data });
+  },
   openLink: (url) => {
     linkOpens.push(url);
   },
@@ -957,6 +965,18 @@ declare global {
       inlineRuns: () => { sessionId: string; id: string; host: string | null }[];
       // Every grid reported to a run's shell, in order.
       inlineResizes: () => { id: string; cols: number; rows: number }[];
+      // Everything that reached a run's shell as input, in order.
+      inlineInputs: () => { id: string; data: string }[];
+      // A key on the run's accessory bar, pressed (ios.md §7). The bar is
+      // native and its taps arrive over the Swift bridge, so this stands in for
+      // Swift the way runOutput stands in for Bun — the page-side half is the
+      // half with rules in it: which panel the key lands in, and what bytes it
+      // becomes.
+      runKey: (name: string) => boolean;
+      // Which face the bar would wear for whatever has focus right now
+      // (lib/nativeBridge.ts barFaceOf). The ordering it encodes is the whole
+      // point: a run's panel is inside the editor.
+      barFace: () => BarFace;
       // Every set of run ids this client has claimed, in order (one per boot
       // and per reconnect; bridge.ts reconcileRuns).
       runClaims: () => string[][];
@@ -968,8 +988,13 @@ declare global {
       // Not the PTY coming back: the inert harness stays inert, and a spec that
       // wants real run behavior still belongs to the live probe. This drives
       // the ONE view-side seam a spec cannot otherwise reach — what the panel
-      // does when a run first speaks (it takes the keyboard, blocks.ts).
+      // does when a run first speaks (on a Mac it takes the keyboard,
+      // blocks.ts; on a phone it asks to be tapped).
       runOutput: (id: string, text: string) => void;
+      // And the run ending, which is the other half of that seam: the panel
+      // freezes, gives the keyboard back if it had it, and stops offering what
+      // only a live run can be offered.
+      runEnd: (id: string, exitCode: number | null) => void;
       // Simulate the CLI's openExternal push (a Bun-side watcher event has no
       // visible surface to drive it from).
       externalOpen: (open: ExternalOpenInfo) => void;
@@ -998,7 +1023,11 @@ window.__harness = {
   termPastes: () => termPastes.map((p) => ({ ...p })),
   inlineRuns: () => inlineRuns.map((r) => ({ ...r })),
   inlineResizes: () => inlineResizes.map((r) => ({ ...r })),
+  inlineInputs: () => inlineInputs.map((i) => ({ ...i })),
+  runKey: (name) => sendRunKey(name),
+  barFace: () => barFaceOf(document.activeElement),
   runOutput: (id, text) => dispatchRunEvent({ id, kind: "output", dataB64: btoa(text) }),
+  runEnd: (id, exitCode) => dispatchRunEvent({ id, kind: "ended", exitCode }),
   externalOpen: (open) => dispatchExternalOpen(open),
   notesChanged: (root) => dispatchNotesChanged(root),
   runClaims: () => runClaims.map((ids) => [...ids]),

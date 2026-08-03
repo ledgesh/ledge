@@ -555,33 +555,68 @@ Four decisions follow:
 - **The keyboard accessory bar is where the phone's chords go.** ⌘↩ has no
   touch equivalent, but the strip above the keyboard does: indent and
   outdent, the formatting trio that ⌘B, ⌘I and ⌘K own on the desktop
-  (interactions.md §2), and the `[[` that opens the wikilink picker. It is a
-  native `inputAccessoryView` rather than HTML, because HTML that tries to
-  sit above the keyboard is fighting the visual viewport for the whole life
-  of the app.
+  (interactions.md §2), the `[[` that opens the wikilink picker, and the ```
+  that opens a code block. It is a native `inputAccessoryView` rather than
+  HTML, because HTML that tries to sit above the keyboard is fighting the
+  visual viewport for the whole life of the app.
 
   Built (`ios/Sources/AccessoryBar.swift`), and two things about it are worth
   knowing. **It carries command ids and no behavior**: a tap sends
   `{t: "verb", id}` over the bridge and the page's registry decides what that
   means, through the same seam the Mac's menu bar has always used
-  (`mainview/lib/menu.ts`, `dispatchNativeCommand`). So Swift holds six
+  (`mainview/lib/menu.ts`, `dispatchNativeCommand`). So Swift holds eight
   strings, and a renamed command leaves a button that does nothing and says so
   rather than one that quietly does something else. **Indent and outdent were
   not commands before this**: they were Tab and ⇧Tab in CodeMirror's keymap,
   and the iPhone software keyboard has no Tab key, so they were not awkward on
   a phone, they were unreachable. `format.indent`, `format.outdent`,
-  `format.wikiLink` and `image.insert` exist now, with no chords of their own,
-  and the palette gets them too.
+  `format.wikiLink`, `format.codeBlock` and `image.insert` exist now, with no
+  chords of their own, and the palette gets them too. The last one to arrive is
+  the sharpest case of the same argument: the backtick is not on the letter
+  page, so ``` is three trips through the numeric page with a long press each —
+  and `format.codeBlock` writes `sh` with it, because the ▶ comes from the info
+  string's first word and a bare fence is the one block that cannot run
+  (`mainview/editor/fences.ts`).
 
   **The bar knows what it is over, and phase 6 is why.** One content view is
   the first responder for every text field in the page, so the bar phase 5
   installed appeared over the search box, the rename field and the passphrase
   prompt as well — where Bold and Indent are not merely useless but wrong, since
   the command they dispatch acts on the note BEHIND the overlay. The page
-  reports focus across the bridge (`@editing`, raised by a `focusin`/`focusout`
-  watcher in `ios.tsx`), and the accessory getter answers nil when the answer is
-  no. UIKit has to be told to ask again — `reloadInputViews()` — because moving
-  between two fields on one page is not a responder change.
+  reports focus across the bridge (`@focus`, raised by a `focusin`/`focusout`
+  watcher in `ios.tsx`). UIKit has to be told to ask again —
+  `reloadInputViews()` — because moving between two fields on one page is not a
+  responder change.
+
+  Phase 6 answered that with no bar at all, and that was half an answer. A
+  keyboard with no way to dismiss it is a trap on this client specifically: the
+  page is full height, so there is no blank space to tap, and its chrome does
+  not blur a field. So `none` is a FACE and not an absence — one button, Hide
+  Keyboard, and no verbs (`AccessoryBar.bare`). The rule the three faces encode
+  is that the note's verbs need the note, and putting the keyboard away never
+  needs anything.
+
+  **And the bar has a second face, because a running block wants a different
+  keyboard.** A software keyboard has no Ctrl, no Escape and no arrows, so a
+  phone could answer a run by typing (a password, a `[y/N]`, a pager's `q`) and
+  had no key at all for the program that wanted any of those — the gap phase 7
+  opened with. While a run holds the keyboard the strip carries `^C ^D esc ↑ ↓ ←
+  →`, and **Back to note** where Hide Keyboard sits on the other face: the same
+  act as the run panel's own button, on the bar because the panel's header rides
+  the note's scroller and a run pinned to 24 rows can put it off the top of the
+  screen.
+
+  Three things hold this together. The report is a FACE and not a boolean
+  (`BarFace`: `none`, `note`, `run`), because a run's panel is a CodeMirror block
+  widget and therefore inside `.cm-content` — asking "is this the editor?" first
+  is what put Bold over a password prompt, one layer below where phase 6 found
+  it (`barFaceOf`, ordered run-first, proved in `e2e/phone.spec.ts`). A key tap
+  sends `{t: "key", k}` and not a verb, because these are not commands: the
+  registry would have to find the focused panel, and the palette entry it would
+  earn is a row that takes away the focus it was meant for. And **Swift never
+  learns what a key sends** — `mainview/editor/inlineTerm.ts` turns the name into
+  bytes against the live terminal's cursor-key mode, which is the same division
+  the verb face has and the reason neither side holds a second opinion.
 
   **And it dismisses the keyboard**, which nothing else on the screen does: the
   editor fills the window, so there is no blank page to tap, and tapping the
@@ -617,6 +652,18 @@ Four decisions follow:
   keeps the system's own bar, which matters because the alternative failure
   would be a crash on the first keystroke. It runs on every `didFinish`, not
   only the first, because §5 makes foregrounding a reload.
+
+  **The provider hangs off the view, not off the class**, and this cost a
+  session to find. A class pair can be registered once under a name and never
+  again, so a closure baked into the getter answers for the first web view the
+  process ever built — and there is a second whenever pairing swaps the root
+  controller out, which a changed host key or an emptied server list does. It
+  fails silently rather than loudly: the old `WebHost` is kept alive by the
+  message handler its own web view retains, so the getter goes on reading a
+  `face` that nothing updates, and the WHOLE bar is missing until the app is
+  killed. An associated object on the content view, set on every install, is
+  the fix; the symptom to recognise is a phone whose keyboard has no strip
+  above it at all after a re-pair.
 - **Autocorrect, autocapitalize and spellcheck are off on the editor.**
   Markdown is not prose to iOS's dictionary, and an autocorrected fence is a
   broken one. This needed no code: CodeMirror sets `spellcheck="false"`,
@@ -1220,9 +1267,13 @@ inside the Mac app.
    caught in the act.
 
    What still waits on a hand: §5's lifecycle across a suspension that really
-   suspends, the accessory bar under a finger rather than under Playwright's
-   pointer events, the geometry of a 14 Pro Max against a keyboard fix built
-   on a 16, and whether the fence's run button survives WebKit's first-tap rule.
+   suspends, both faces of the accessory bar under a finger rather than under
+   Playwright's pointer events — including whether eight buttons and a fixed
+   44-point one are comfortable at 393 points, and whether a run started by a
+   tap brings the keyboard up at all, since a phone shows one for a
+   programmatic focus only inside a gesture — the geometry of a 14 Pro Max
+   against a keyboard fix built on a 16, and whether the fence's run button
+   survives WebKit's first-tap rule.
    That last one is the tab strip's defect again, one layer down: `.ledge-btn`'s
    hover style is hand-written CSS rather than a Tailwind utility, so
    `hoverOnlyWhenSupported` never gated it, and Playwright's touch emulation is
@@ -1268,13 +1319,15 @@ have: every rem in this app is 0.875 of its name — the document's root is
 `font: 14px` — so `min-h-11`, the utility that spells 44, renders 38.5. A tap
 target is a physical measurement and is written in pixels.
 
-**A running block can be left without a chord.** interactions.md §6a hands the
-keyboard to a run when it first speaks, so a `sudo` prompt is answered by
-typing, and takes it back on ⌘Escape or a double Escape — a phone has neither,
+**A running block can be left without a chord.** interactions.md §6a handed the
+keyboard to a run when it first spoke, so a `sudo` prompt is answered by
+typing, and took it back on ⌘Escape or a double Escape — a phone has neither,
 and its one inherited exit, tapping the prose, is exactly what a full-screen
 program removes by pinning the panel to 24 rows. The panel's header now carries
 the exit as a **Back to note** button on touch, in place of the line of text
-that names those keys, and grows to 48 points to hold a 44-point one.
+that names those keys, and grows to 48 points to hold a 44-point one. (The
+claim itself came off this client later in the phase, below; the exit did not,
+because a tap can still put the keyboard in the panel.)
 
 Two things came out of building it. The panel did not fit the screen at all: an
 xterm opens at 80 columns, the editor scrolls sideways to its widest thing, and
@@ -1320,12 +1373,92 @@ rendering change, and WebKit withholds the click behind the synthetic mousemove
 that caused one. The headless project cannot see that, and only a device can
 settle it (phase 7).
 
-What the phase still has to answer is the keyboard a RUNNING block needs, which
-is a different keyboard from the one that writes the note. A software keyboard
-has no Ctrl, no Escape, no Tab and no arrows, and the accessory bar carries
-seven Markdown verbs over `.cm-content` only (§7) — so a phone answers a `sudo`
-password, a `[y/N]` or a pager's `q` by typing them, and has no key at all for
-the program that wants Ctrl-C, Ctrl-D, Escape or an arrow. The ✕ is the whole of
-the way out of one of those, and it kills the run rather than answering it. The
-drawer is not on that list and is not waiting for anything: a phone stays
-without one (§8).
+**The keyboard a RUNNING block needs is a different keyboard, and the bar wears
+it as a second face.** A software keyboard has no Ctrl, no Escape and no arrows,
+so a phone could answer a `sudo` password, a `[y/N]` or a pager's `q` by typing
+and had no key at all for the program that wanted one of the others — the ✕ was
+the whole of the way out of a full-screen program, and it kills the run rather
+than answering it. Over a run the strip is now `^C ^D esc ↑ ↓ ← →` with **Back
+to note** where Hide Keyboard sits, which is §7's list of what a phone could not
+say, made pressable.
+
+Building it turned up the defect underneath: the bar was already appearing over
+a running block, wearing the note's verbs. The `@editing` boolean phase 6 added
+asks whether `.cm-content` has focus, and a run's panel is a block widget INSIDE
+`.cm-content` — so Bold was on offer over a password prompt, one layer below
+where phase 6 found the same thing at the search box. The report is a face now
+(`none`, `note`, `run`) and the classifier asks the run first, which is the
+whole of the fix and is what `e2e/phone.spec.ts` pins.
+
+Two decisions are worth keeping. There is **no sticky Ctrl**, which is how a
+terminal app on iOS usually reaches Ctrl-anything: an armed modifier is state
+the page holds and a native button has to draw, and the two would part company
+the first time a run ended while it was held — so the two control keys anyone
+actually presses are keys of their own and the rest stay unreachable. And **an
+arrow is not one byte**: `ESC [ A` outside DECCKM, `ESC O A` inside it, which is
+the mode vim, less and every ncurses program set while they own the screen, so
+the bytes are chosen against the live terminal's mode rather than assumed
+(`inlineTerm.runKeyBytes`).
+
+The same pass answered the other thing a finger could not do, one surface over:
+`format.codeBlock`, because ``` is three trips through the numeric page with a
+long press each (§7). The drawer is on neither list and is not waiting for
+anything: a phone stays without one (§8).
+
+Both were driven end to end in the Simulator against the Docker fixture
+(testing.md §6), which is where the two faces exist at all: one tap on the code
+button wrote a `sh` block with its closer and a lit ▶, and running `echo ready;
+cat` swapped the strip to the run's face by itself. `^C` on it ended the `cat`
+on the Linux server — the panel said `Interrupted` and the terminal echoed the
+`^C` — and the strip went back to the Markdown face with the focus. **Back to
+note** on the bar moved the focus without touching the run, which stayed
+`Running`. Eight buttons and the fixed one fit 393 points with room to spare.
+What the Simulator cannot show is the geometry under a real software keyboard
+(it docks the bar at the bottom while a hardware keyboard is attached, which is
+also iOS's own behavior), so the comfort of eight is still phase 7's to settle.
+
+**Running a block trapped the phone behind its own keyboard, and two separate
+defects had to line up for it.** The report was a screenshot: a finished run, a
+software keyboard over half the note, and no strip above it to put the keyboard
+away. Each half is worth keeping.
+
+The bar was missing entirely, on every face, and the cause is one line of
+`installAccessoryView`. A runtime class pair can be registered once under a
+name, so the branch that reuses an existing one re-points the content view at a
+class whose `inputAccessoryView` still calls the FIRST closure ever installed —
+which reads a `face` belonging to a `WebHost` that pairing replaced. It cannot
+even fail loudly: the old host is kept alive by the message handler its own web
+view retains, so the getter answers `none` forever instead of nil. Any re-pair
+(a changed host key, an emptied server list) cost the whole bar until the app
+was killed. The provider is an associated object on the content view now, set
+on every install.
+
+And `none` stopped meaning "no bar". Phase 6 chose nil so the note's verbs
+would not sit over a search box, which was right about the verbs and wrong
+about the strip: this page is full height, so there is nothing to tap that
+would dismiss a keyboard, and its chrome does not blur a field. The third face
+is one button — Hide Keyboard, no verbs — and it is what makes "the keyboard
+can always be put away" true rather than usually true.
+
+The keyboard should not have been up at all, which is the second defect and the
+older one. A run claims the keyboard when it first prints if the editor still
+has focus and the caret has not moved (interactions.md §6a). On a Mac that
+tests whether the user is typing there; on a phone it tests almost nothing,
+because the editor takes DOM focus when a pane opens (`workspace/PaneTree.tsx`)
+and takes it back after every run ends (`inlineTerm.freeze`), both with no
+keyboard up. So the claim was always live, and honoring it focused a text
+field, which is how iOS is asked to RAISE the keyboard — over the output the
+finger had just asked to see. `startInlineRun` does not claim on a client whose
+keyboard is on screen; the panel takes the keyboard when it is tapped, and
+offers `Tap to type` while it is live and has not been, since with no claim
+nothing else announces a program waiting on an answer.
+
+That invitation is a button, and only after it shipped as a line of text was it
+obvious why it had to be: an instruction beside a terminal is aimed at, not just
+read. The words say to tap, so the thumb goes to the words. Tapping the output
+still works and is the path most people take; both go through one `focusTerm`,
+which is the honored claim's path as well.
+
+Verified in the Simulator against the same fixture: a run started by tapping ▶
+leaves the focus where it was and the panel invites a tap, and a tap on the
+terminal moves the focus into it and swaps the strip to the run's face.
