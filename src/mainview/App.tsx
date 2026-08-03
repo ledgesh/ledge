@@ -716,8 +716,8 @@ function Shell() {
             variant={workspaceKind(selected.folder) === "docs" ? "secondary" : "ghost"}
             size="icon"
             className="size-7"
-            onClick={() => exec("docs.open")}
-            title={tooltip("docs.open")}
+            onClick={() => exec("docs.toggle")}
+            title={tooltip("docs.toggle")}
           >
             <CircleHelp className="size-4" />
           </Button>

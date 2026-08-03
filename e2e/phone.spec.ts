@@ -142,6 +142,69 @@ test("the breakpoint is a width, not a device", async ({ page }) => {
   await expectWidth(page.locator("main"), 390);
 });
 
+// --- nothing appears under a finger (interactions.md §1a) --------------------
+//
+// iOS sends a synthetic mousemove ahead of the click of every tap, and WebKit
+// WITHHOLDS that click if the mousemove changed the rendering: the tap is spent
+// painting a hover nobody can see the point of, and it takes a second one to
+// act. Switching notes on a phone cost two taps for exactly this reason — the
+// tab strip's close ✕ fades in on `group-hover`.
+//
+// So the claim under test is not "the tap works" (it does here either way:
+// Playwright's WebKit is the engine, not iOS's UI process, and nothing
+// withholds anything). It is the CAUSE: on a client that reports `hover: none`,
+// no hover style may apply and no hover-revealed control may exist. This
+// project reports it — the iPhone 14 descriptor carries the coarse pointer —
+// which is what lets a harness stand in for the behavior it cannot reproduce.
+test.describe("a tap changes nothing but what it acts on", () => {
+  test("hover styles do not apply where there is no hover", async ({ page }) => {
+    expect(
+      await page.evaluate(() => matchMedia("(hover: none)").matches),
+    ).toBe(true);
+    // The tab strip's ✕ is the one that cost the taps. Absent, not transparent:
+    // an invisible button still takes every tap that lands on it, which on a
+    // 390-point strip is a close target at the end of every tab.
+    const tab = page.locator("[data-tab]").first();
+    await expect(tab).toBeVisible();
+    await expect(tab.getByRole("button")).toHaveCount(0);
+    // And the row that carries the same pattern (Sidebar.tsx).
+    await openSidebar(page);
+    const ws = page.locator('[data-target-kind="workspace"]').first();
+    await expect(ws.getByRole("button")).toHaveCount(0);
+  });
+
+  test("the hover WebKit sends ahead of the click paints nothing", async ({ page }) => {
+    // The mechanism, driven for real: `hover()` moves the mouse, which is what
+    // sets `:hover` — a dispatched mouseover would not, and a spec that faked
+    // one would pass whether or not the gate existed. Under
+    // `hoverOnlyWhenSupported` every `hover:` rule sits inside
+    // `@media (hover: hover)`, so on this client there is nothing for WebKit's
+    // observer to notice and the click that follows lands.
+    // An INACTIVE tab: `hover:bg-background/60` is on that branch only, and the
+    // active one has a background of its own with no hover rule to gate.
+    await openSidebar(page);
+    await noteRow(page, "Beta").tap();
+    const tab = page.locator("[data-tab]").first();
+    await expect(tab).not.toHaveText(/Beta/);
+    const bg = () => tab.evaluate((el) => getComputedStyle(el).backgroundColor);
+    const before = await bg();
+    await tab.hover();
+    expect(await bg()).toBe(before);
+  });
+
+  test("one tap on a tab shows that tab's note", async ({ page }) => {
+    await openSidebar(page);
+    await noteRow(page, "Beta").tap();
+    await openSidebar(page);
+    await noteRow(page, "Gamma").tap();
+    await expect(page.locator(".cm-content").first()).toContainText("gamma body");
+    // One tap, and the note behind it changed. This is the user-visible half of
+    // the two above; on a device it is the half that was broken.
+    await page.locator("[data-tab]", { hasText: "Beta" }).tap();
+    await expect(page.locator(".cm-content").first()).toContainText("beta body");
+  });
+});
+
 test("the editor refuses iOS's corrections", async ({ page }) => {
   // ios.md §7: an autocorrected fence is a broken one. CodeMirror sets all
   // three on its contentDOM and Ledge adds no contentAttributes entry, so
@@ -540,6 +603,58 @@ test.describe("the iOS client, and what it does not run", () => {
     await palette(page, "folder");
     await expect(page.getByText("Attach Folder as Workspace…")).toHaveCount(0);
     await expect(page.getByText("Move Workspace Folder…")).toHaveCount(0);
+  });
+
+  test("no Add Server: the one this phone has was chosen before the page existed", async ({
+    page,
+  }) => {
+    // ios.md §4: pairing is a native screen, and nativeBridge answers
+    // connectionAdd, connectionRemove and connectionProbe with a refusal. The
+    // dialog still lists the server and still switches to it — choosing the one
+    // server again is how a phone reconnects — but the path that ends in the
+    // refusal is gone, and with it a field asking for a key file on a client
+    // whose key is in the Secure Enclave and has no path.
+    await palette(page, "notes on");
+    await page.keyboard.press("Enter");
+    const dialog = page.getByRole("dialog", { name: "Connections" });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole("button", { name: /Add Server/ })).toHaveCount(0);
+    await expect(dialog).toContainText("Paired with one server");
+  });
+
+  test("the manual is not a text field: tapping it raises no keyboard", async ({
+    page,
+  }) => {
+    // The read-only editor stays focusable on a Mac on purpose — find, ⌘C and
+    // ⌘↩ on the manual's own runnable blocks all need it. A phone has none of
+    // those chords and does have a keyboard that would cover half the page it
+    // just opened, so there the contentDOM stops being editable at all.
+    await page.getByRole("button", { name: "Documentation", exact: true }).tap();
+    const content = page.locator(".cm-content").first();
+    await expect(content).toHaveAttribute("contenteditable", "false");
+    await content.tap();
+    await expect(content).not.toBeFocused();
+    // Still a document: selecting and copying it is iOS's own gesture on any
+    // uneditable text, and every line is there to select.
+    await expect(content).toContainText("Getting Started");
+  });
+
+  test("the help button closes the manual, which on a phone is the only way out", async ({
+    page,
+  }) => {
+    // The strip is the documented way back and it lives inside the drawer the
+    // manual is covering; ⌘1 is a chord. So the button that opened it has to
+    // close it, or the manual is a room with no door (interactions.md §1a).
+    const help = page.getByRole("button", { name: "Documentation", exact: true });
+    await help.tap();
+    await expect(page.locator("[data-tab]", { hasText: "Getting Started" })).toBeVisible();
+    await help.tap();
+    // Back on the notes, and nothing was closed: the manual keeps its tabs, so
+    // the tap that brings it back lands where it was left.
+    await expect(page.locator("[data-tab]", { hasText: "Getting Started" })).toHaveCount(0);
+    // Back on the workspace it opened from, which the harness starts on: the
+    // locked note and its placeholder.
+    await expect(page.locator('[data-testid="locked-face"]')).toBeVisible();
   });
 
   test("the verbs that are IN v1 are all still there", async ({ page }) => {

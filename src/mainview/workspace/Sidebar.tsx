@@ -378,7 +378,9 @@ function WorkspaceRow({
       </div>
       {canClose && (
         <button
-          className="flex size-5 shrink-0 items-center justify-center rounded opacity-0 hover:bg-background group-hover:opacity-100"
+          // Absent rather than invisible where nothing can hover it (the tab
+          // strip's ✕, PaneTree.tsx): Close Workspace is in this row's menu.
+          className="hidden size-5 shrink-0 items-center justify-center rounded opacity-0 hover:bg-background group-hover:opacity-100 hoverable:flex"
           title={tooltip("workspace.close")}
           onClick={(e) => {
             e.stopPropagation();

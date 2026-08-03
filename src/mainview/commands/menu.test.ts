@@ -26,6 +26,7 @@ function stubDeps(over: Partial<RegistryDeps> = {}): RegistryDeps {
     workspaceKind: () => "external",
     docsFolder: () => null,
     openDocs: async () => {},
+    closeDocs: noop,
     restartSession: noop,
     revealBacklink: noop,
     jumpToHeading: noop,

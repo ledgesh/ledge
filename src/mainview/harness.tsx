@@ -50,7 +50,14 @@ import { configureLayout, restoredState } from "./workspace/persist";
 // Mac, keeps its terminal, and §9 is careful that the only thing width decides
 // is the chrome's arrangement.
 const FAKING_IOS = new URLSearchParams(window.location.search).get("shell") === "ios";
-configureShell({ runsCommands: !FAKING_IOS });
+configureShell({
+  runsCommands: !FAKING_IOS,
+  // The whole triple ios.tsx sets, because two of them decide what a spec can
+  // see: whether the connection dialog offers to add a server, and whether the
+  // read-only editor is a text field the software keyboard would rise over.
+  managesServers: !FAKING_IOS,
+  softKeyboard: FAKING_IOS,
+});
 // The SERVER's half of the same picture, and a different question: whether the
 // machine holding the notes has anybody at it to answer a folder dialog. Set
 // here rather than arriving with workspaceList because this harness renders

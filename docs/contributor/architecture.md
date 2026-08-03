@@ -406,7 +406,7 @@ exactly like a note — from one special root that can never be written:
   root (kind and all), scans include its pages, and `read_note` serves them —
   agents may read the manual.
 - **The view renders it as the hidden Documentation workspace**: opened by
-  `docs.open` (interactions.md), present in `state.workspaces` like any
+  `docs.toggle` (interactions.md), present in `state.workspaces` like any
   workspace (panes, tabs, search, and persistence just work) but filtered
   from the strip and ⌘1…9, its mutating verbs gated by `when`s, and its
   editors created read-only (`editor/setup.ts`: a transaction filter drops

@@ -46,6 +46,21 @@ test("⌘1 is the way back, and the docs workspace survives reopening", async ({
   await expect(page.locator("[data-tab]", { hasText: "Getting Started" })).toHaveCount(1);
 });
 
+// The button is the RELIABLE way back, and ⌘1 is not: the docs workspace being
+// no strip row is exactly what leaves the manual with no row of its own to
+// click away from, and a phone has neither the strip (it is inside the drawer
+// the manual covers) nor the chord.
+test("the help button closes the manual too, back to where it opened from", async ({ page }) => {
+  await openDocs(page);
+  await docsButton(page).click();
+  await expect(noteRow(page, "Alpha")).toBeVisible();
+  await expect(noteRow(page, "Getting Started")).toHaveCount(0);
+  // Nothing was closed, only deselected: the page is still open behind, so
+  // coming back costs no reload and lands where it was left.
+  await openDocs(page);
+  await expect(page.locator("[data-tab]", { hasText: "Getting Started" })).toHaveCount(1);
+});
+
 test("the editor is read-only: keystrokes land nowhere, and no save ever fires", async ({ page }) => {
   await openDocs(page);
   const first = page.locator(".cm-line").first();

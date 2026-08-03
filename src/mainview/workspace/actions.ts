@@ -81,6 +81,14 @@ export async function attachWorkspace(
 // page rather than the manual (Help > Third-Party Licenses). Asking for a page
 // also gives up the shortcut below: "open the manual again" should leave you
 // where you were, while "show me the licenses" has to actually show them.
+//
+// The workspace the manual was opened FROM, so the same button can put it away
+// (closeDocs below). A module-level `let` like the rest of the view's small
+// singletons: it is one id, it belongs to no note and no workspace, and
+// keeping it in the store would put a fact about a header button into the
+// state that gets persisted and reduced.
+let cameFrom: string | null = null;
+
 export async function openDocs(
   state: AppState,
   dispatch: (action: Action) => void,
@@ -89,6 +97,10 @@ export async function openDocs(
   const folder = docsFolder();
   if (!folder) return; // Bun never reported one; the command's `when` hides this path
   const existing = state.workspaces.find((w) => w.folder === folder);
+  // Recorded before anything is selected, and only when coming from somewhere
+  // else: opening the manual twice in a row must not overwrite the way back
+  // with the manual itself.
+  if (!existing || state.selectedId !== existing.id) cameFrom = state.selectedId;
   if (!page && existing && tabPaths(existing.root).length > 0) {
     dispatch({ type: "selectWorkspace", id: existing.id });
     return;
@@ -118,6 +130,36 @@ export async function openDocs(
   // The browser (and quick-open) need the page list now, not at the next
   // focus refresh; the reducer seeded the folder empty.
   if (fetched) dispatch({ type: "notesLoaded", folder, notes });
+}
+
+/**
+ * Put the manual away: select the workspace it was opened from.
+ *
+ * The other half of one toggle (docs.toggle), and the reason there is one. The
+ * docs workspace is deliberately not a strip row and not a ⌘1…9 slot, so the
+ * documented way back — select some other workspace — is a surface the manual
+ * itself is covering. On a Mac that costs a glance at the strip; on a phone the
+ * strip is inside a drawer, and a lit button that does nothing when pressed
+ * again is a dead end (ios.md §9).
+ *
+ * Nothing is closed. The docs workspace stays in `state.workspaces` with its
+ * tabs where they were, which is what makes coming back cheap and is already
+ * how every other workspace switch behaves.
+ *
+ * The remembered id is checked against the live list rather than trusted: the
+ * workspace it names can have been closed while the manual was up.
+ */
+export function closeDocs(state: AppState, dispatch: (action: Action) => void): void {
+  const folder = docsFolder();
+  const back =
+    state.workspaces.find((w) => w.id === cameFrom && w.folder !== folder) ??
+    // Whatever is left that is not the manual. A workspace ALWAYS is: the
+    // reducer refuses to close the last one, and the docs workspace is never
+    // the first (it is added by openDocs, over a folder Bun reported).
+    state.workspaces.find((w) => w.folder !== folder);
+  if (!back) return;
+  cameFrom = null;
+  dispatch({ type: "selectWorkspace", id: back.id });
 }
 
 // Close Workspace, the folder half: the reducer closes the view (refusing the

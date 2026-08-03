@@ -2,7 +2,7 @@
 
 Ledge is the notebook for developers and DevOps. It runs code and commands straight from your Markdown.
 
-This page lives in the built-in Documentation workspace, which is read-only. You can select, copy, and run everything here, but writing happens in your own notes. Click a workspace in the sidebar or press ⌘1 to get back to them.
+This page lives in the built-in Documentation workspace, which is read-only. You can select, copy, and run everything here, but writing happens in your own notes. Press the help button again to put the manual away and go back to what you were reading; clicking a workspace in the sidebar or pressing ⌘1 does the same thing.
 
 ## Run your first block
 

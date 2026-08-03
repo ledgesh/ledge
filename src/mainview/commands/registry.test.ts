@@ -41,6 +41,7 @@ function stubDeps(
     openDocs: async (_state, _dispatch, page) => {
       calls.push(page ? `openDocs:${page}` : "openDocs");
     },
+    closeDocs: () => calls.push("closeDocs"),
     restartSession: record("restartSession"),
     openDailyNote: async (folder) => {
       calls.push(`openDailyNote:${folder}`);
@@ -788,15 +789,25 @@ describe("registry", () => {
   const docsSelectedState = () =>
     apply(initialState(FOLDER, []), { type: "addWorkspace", name: "Documentation", folder: DOCS });
 
-  test("docs.open shows only when a docs root exists, and routes to the openDocs edge", () => {
+  test("docs.toggle shows only when a docs root exists, and routes to the openDocs edge", () => {
     // The base stub reports no docs root: hidden (a harness or failed boot).
-    expect(find(commands, "docs.open").when!(makeCtx(initialState(FOLDER, [])))).toBe(false);
+    expect(find(commands, "docs.toggle").when!(makeCtx(initialState(FOLDER, [])))).toBe(false);
     const calls: string[] = [];
     const cmds = buildCommands(docsDeps(calls));
     const ctx = makeCtx(initialState(FOLDER, []));
-    expect(find(cmds, "docs.open").when!(ctx)).toBe(true);
-    find(cmds, "docs.open").run(ctx);
+    expect(find(cmds, "docs.toggle").when!(ctx)).toBe(true);
+    find(cmds, "docs.toggle").run(ctx);
     expect(calls).toEqual(["openDocs"]);
+  });
+
+  // The other half, and the reason the command is a toggle at all: the docs
+  // workspace is no strip row and no ⌘1…9 slot, so the surface that would
+  // otherwise be the way back is one the manual itself is covering.
+  test("docs.toggle closes the manual when the manual is what is selected", () => {
+    const calls: string[] = [];
+    const cmds = buildCommands(docsDeps(calls));
+    find(cmds, "docs.toggle").run(makeCtx(docsSelectedState()));
+    expect(calls).toEqual(["closeDocs"]);
   });
 
   // The licenses have to be reachable in the shipped app, not only in the
@@ -809,7 +820,7 @@ describe("registry", () => {
     expect(find(cmds, "docs.licenses").when!(ctx)).toBe(true);
     find(cmds, "docs.licenses").run(ctx);
     expect(calls).toEqual(["openDocs:Third-Party Licenses"]);
-    // Hidden with no docs root, same as docs.open: there is nothing to open.
+    // Hidden with no docs root, same as docs.toggle: there is nothing to open.
     expect(find(commands, "docs.licenses").when!(makeCtx(initialState(FOLDER, [])))).toBe(false);
   });
 

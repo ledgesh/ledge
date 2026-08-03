@@ -244,13 +244,22 @@ export function buildCommands(deps: RegistryDeps): Command[] {
     // the strip and ⌘1…9, read-only end to end; the header's help button is
     // the icon surface. Hidden entirely when Bun reported no docs root (a
     // failed boot, a harness without one).
-    cmd("docs.open", {
+    //
+    // A toggle, like the four panel buttons beside it in the header and for
+    // the same reason: that button already renders LIT while the manual is
+    // selected, and a lit control that does nothing when pressed again is a
+    // dead end. It is the only one here that matters, too — the way back the
+    // manual documents is "select another workspace", and the surface that
+    // lives on is the strip, which on a phone is inside the drawer the manual
+    // is covering.
+    cmd("docs.toggle", {
       // A question mark, not a book: on a notes app, a book glyph reads as
       // "another notebook", while ? is the universal help affordance.
       icon: CircleHelp,
       when: () => deps.docsFolder() !== null,
       run: (ctx) => {
-        void deps.openDocs(ctx.state, ctx.dispatch);
+        if (docsSelected(ctx)) deps.closeDocs(ctx.state, ctx.dispatch);
+        else void deps.openDocs(ctx.state, ctx.dispatch);
       },
     }),
     // The bundled licenses, as the manual's last page. It is a page and not a

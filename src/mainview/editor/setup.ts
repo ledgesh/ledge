@@ -28,6 +28,7 @@ import { copyText, readClipboard, readRichClipboard } from "../lib/clipboard";
 import { blockPasteInsert, parsePasteHtml, richPasteMarkdown, verbatimPaste } from "./htmlPaste";
 import { pasteImageAsset } from "../lib/assets";
 import { settings } from "../lib/settings";
+import { softKeyboard } from "../lib/shell";
 import { keyOf } from "../commands/keys";
 
 // Ledge styles raw Markdown, and — since livePreview() landed — conceals the
@@ -397,6 +398,15 @@ const theme = EditorView.theme({
 // autosaves — the Bun-side write refusal (bun/workspaces.ts
 // assertWritableRoot) stays the enforcement of record; this is what makes the
 // refusal unreachable in normal use.
+//
+// The one client that gives the focus up is the one whose keyboard is on
+// screen (lib/shell.ts softKeyboard). All three things focus was kept FOR are
+// chords, and a phone has none of them: ⌘↩ does not exist there at all
+// (ios.md §8 cuts running), find and ⌘C are chords too, and iOS selects and
+// copies uneditable text natively anyway. What is left is the cost — tapping
+// the manual raises a keyboard over half of it, to type into a document that
+// drops every edit — so there `editable` goes off and the contentDOM stops
+// being a text field.
 export function createEditor(parent: HTMLElement, doc: string, sessionId: string, readOnly = false): EditorView {
   return new EditorView({
     parent,
@@ -410,6 +420,7 @@ export function createEditor(parent: HTMLElement, doc: string, sessionId: string
               EditorState.transactionFilter.of((tr) =>
                 tr.docChanged && !tr.annotation(fromDisk) ? [] : tr,
               ),
+              softKeyboard() ? EditorView.editable.of(false) : [],
             ]
           : [],
         history(),

@@ -74,7 +74,7 @@ section.
 | Desktop affordance | Touch |
 | ------------------ | ----- |
 | Hotkey | the palette entry R1 already requires |
-| Hover-revealed button | the row's menu, per R2 |
+| Hover-revealed button | the row's menu, per R2 — and the button is ABSENT, not transparent |
 | Right-click | a long press on the row |
 | Double-click rename | the menu's Rename item, which R3 already calls the discoverable path |
 | ↑/↓ roving focus (R5) | a tap; the tapped row is the focused row |
@@ -97,6 +97,28 @@ section.
 - **The click that follows a press is swallowed.** WebKit sends one after every
   touch, and a press that opened a menu must not also run the row's primary
   action — the row was the question, not the instruction.
+- **No hover style may apply on a touch client, and this is a correctness rule
+  rather than a cosmetic one.** iOS sends a synthetic mousemove ahead of the
+  click of every tap, and WebKit's ContentChangeObserver WITHHOLDS that click
+  when the mousemove changed the rendering: the tap is spent painting the hover,
+  and it takes a second tap to act. Switching notes on a phone cost two taps for
+  exactly this reason, the tab strip's close ✕ fading in on `group-hover`. Every
+  `hover:` and `group-hover:` utility is therefore inside `@media (hover: hover)`
+  (`tailwind.config.js`, `future.hoverOnlyWhenSupported`), which is a no-op on a
+  Mac and the whole fix on a phone.
+- **A control the hover REVEALED is absent on touch, not transparent.** Gating
+  the variant stops the reveal but leaves a resting `opacity-0` button in the
+  layout, still taking every tap that lands on it — an invisible 16-point close
+  target at the end of every tab. `hidden hoverable:flex` removes it instead
+  (`hoverable:` is `@media (hover: hover)`; the desktop reveal keeps its
+  reserved space, so nothing reflows on hover). The verb is not lost: it is in
+  the row's own menu, which is what the table above already says.
+- **A read-only page is not a text field where the keyboard is on screen.** The
+  documentation editor stays focusable on a Mac deliberately — find, ⌘C and ⌘↩
+  on the manual's own runnable blocks all need it — and every one of those is a
+  chord a phone does not have, while the focus itself costs half the page. So
+  `softKeyboard` (`lib/shell.ts`) turns `EditorView.editable` off there and iOS
+  selects and copies the text natively instead.
 - **The overlay's control is chrome, not a menu item.** ⌘P, ⇧⌘P and ⌥⌘P are
   chords, and a client with no keyboard would otherwise have no way at all to
   the one surface that carries every command. One button for all three modes:
@@ -217,7 +239,7 @@ CodeMirror and never at the window level.
 | Toggle Outline        | ⌥⌘O                       | the right panel's second face: the active note's headings, derived live from the editor doc (`headingsOf` — the fence-aware scan shared with the MCP appender and the heading reveal). The right-panel toggles are radio-with-off: opening one closes the others, since they share the one slot. Enter/click moves the caret to the heading in the note's own editor |
 | Toggle Tags           | ⌥⌘T                       | the right panel's third face: the workspace's tag directory — every tag its notes carry (inline `#hashtags` and frontmatter `tags:` lines, shared/tags.ts owns the grammar; the same scan agents get from the MCP `tags` tool), alphabetical with per-NOTE counts. Enter/click on a tag drills into its occurrences; Enter/click on an occurrence opens the bearing note with the tag's line revealed (the backlink grammar). Clicking a rendered `#tag` in the editor, a `#`-query tag row in the overlay, or ⌘-clicking a frontmatter `tags:` token all land in the same drill-in. Rendered tags open on plain click (they are pills, not editable text — the checkbox reasoning); a tag under the caret is revealed text: plain click moves the caret, ⌘-click follows. Typing `#` plus a character in the editor pops the tag picker (the workspace's own tags; a bare `#` stays quiet — headings start that way) |
 | Settings…             | ⌘,                        | opens settings.jsonc in Ledge's own editor dialog — raw JSONC, comments as the documentation, launch-time problems previewed live but never blocking Save (architecture.md §6: the file is the UI; edits apply at the next launch) |
-| Documentation         | — (palette; the header's help button) | opens the built-in docs as a HIDDEN READ-ONLY workspace (architecture.md §3b): never a strip row, absent from ⌘1…9 (the numbers index what the strip shows — and stay the way back), landing on Getting Started. Pages are ordinary notes to every read surface — browser, ⌘P, ⌥⌘P, outline, wikilinks — and their fenced blocks still run (the docs' shell demos are live); everything mutating is gated view-side (New Note hidden, Delete/lock absent from the row menu, the editor drops keystrokes) and refused Bun-side regardless. The header button is lit while the docs workspace is selected, since no row can show that. Closing the workspace (palette) is arrangement only; the button reopens it. No chord: docs are a sometimes destination |
+| Documentation         | — (palette; the header's help button) | opens the built-in docs as a HIDDEN READ-ONLY workspace (architecture.md §3b): never a strip row, absent from ⌘1…9 (the numbers index what the strip shows — and stay the way back), landing on Getting Started. Pages are ordinary notes to every read surface — browser, ⌘P, ⌥⌘P, outline, wikilinks — and their fenced blocks still run (the docs' shell demos are live); everything mutating is gated view-side (New Note hidden, Delete/lock absent from the row menu, the editor drops keystrokes) and refused Bun-side regardless. The header button is lit while the docs workspace is selected, since no row can show that, and it TOGGLES: pressing it again selects the workspace the manual was opened from, leaving its tabs where they were. Being no strip row is exactly what leaves the manual without a row to click away from, and on a phone the strip is inside the drawer the manual covers, so the lit button is the only door. Closing the workspace (palette) is arrangement only; the button reopens it. No chord: docs are a sometimes destination |
 | Restart Note Shell    | — (palette)               | kills the current note's shells; its frontmatter params apply at respawn (architecture.md §6a) |
 | Add / Edit Frontmatter | ⌥⌘,                      | one command with a live title (a keyed command cannot be a two-faces pair — the dispatcher ignores `when`): with no block it inserts empty fences at the top with the caret on the body line between (Add); with one it moves the caret into the block (Edit). The block is still hand-edited text — the command only spares the scroll-up-and-type-fences gesture. A line the parser REFUSES says so where it sits: the message drawn after the line's text, the line marked down its left edge (`editor/frontmatter.ts`, from `parseFrontmatter`'s own per-line problems, so what is reported and what is ignored cannot drift). The settings dialog's stance in the place frontmatter is actually edited (architecture.md §6): advisory only — nothing blocks a keystroke, gates the save, or refuses to spawn, and the message clears the moment the line parses. A widget rather than a hover tooltip, because this is news rather than a label on an affordance, and a touch client has no hover to spend. Inside the block, completion teaches the grammar (editor/frontmatterComplete.ts, part of the one appCompletion): the seven params keys with one-line hints at line start (accepting writes the colon too; keys already declared are not re-offered), `template:` values (true / daily / false, explained), `tags:` values (the workspace's tags, the `#` picker's vocabulary), `host:` offers the reserved "local" |
 | Paste / Paste as Plain Text | ⌘V / ⇧⌘V (editor-internal, not commands) | ⌘V pastes the pasteboard's text — translated to Markdown when the pasteboard ALSO carries formatted HTML that says more than its text flavor does (editor/htmlPaste.ts): headings, emphasis, links, lists and tasks, tables, quotes, code blocks with their language, and images whose URL a note can resolve. Formatting spelled as a style declaration counts too (`font-weight: 700` is how Google Docs and Apple Notes ship bold, with no `<b>` anywhere). ⇧⌘V is the same paste with the translation left out — macOS's own "Paste and Match Style" slot, and where every other Markdown editor puts it. THE PLAIN TEXT WINS BY DEFAULT: HTML holding no formatting element at all is span-and-div soup, which is what a copy out of a terminal, VS Code, or DevTools puts up beside its text — converting it would double-space a copied stack of lines and gain nothing, so `hasFormatting` declines, as does a conversion that comes out saying what the text already said. A paste into a fenced block, a code span, or the frontmatter is verbatim regardless: there the bytes are the point. Inside the app the question never arises — the copy path is pbcopy, which writes text alone. Not registry commands for the reason ⌘C/⌘X are not: the chords are bound at `Prec.highest` inside CodeMirror because the views:// scheme is not a secure context and the clipboard has to go through Bun (§10 lists both as inner-owned, so the menu bar cannot claim them) |

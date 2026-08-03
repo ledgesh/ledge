@@ -22,9 +22,13 @@
 interface Shell {
   /** Whether this client offers to run blocks and open terminals. */
   runsCommands: boolean;
+  /** Whether a server can be added, removed or switched to from in here. */
+  managesServers: boolean;
+  /** Whether focusing text puts a keyboard on screen, over the page. */
+  softKeyboard: boolean;
 }
 
-let shell: Shell = { runsCommands: true };
+let shell: Shell = { runsCommands: true, managesServers: true, softKeyboard: false };
 
 export function configureShell(next: Partial<Shell>): void {
   shell = { ...shell, ...next };
@@ -34,6 +38,36 @@ export function configureShell(next: Partial<Shell>): void {
  * a command can run (the host picker, profiles) belong on this client. */
 export function runsCommands(): boolean {
   return shell.runsCommands;
+}
+
+/**
+ * Whether the connection dialog's add/remove half belongs on this client
+ * (remote.md §8).
+ *
+ * False on a phone, whose server is chosen on a native screen before the page
+ * exists at all (ios.md §4) — it has exactly one, and `lib/nativeBridge.ts`
+ * answers connectionAdd, connectionRemove and connectionProbe with a refusal.
+ * The dialog still LISTS that server and still switches to it, because
+ * choosing the one server again is how a phone reconnects; what goes is the
+ * path that ends in the refusal, and with it a key-path field asking for a
+ * file on a client whose key is in the Secure Enclave and has no path.
+ */
+export function managesServers(): boolean {
+  return shell.managesServers;
+}
+
+/**
+ * Whether this client's keyboard is on screen, and therefore costs half the
+ * page whenever anything takes focus.
+ *
+ * The one place it decides anything is the read-only (documentation) editor,
+ * which stays focusable on a Mac on purpose — find, ⌘C and ⌘↩ on the manual's
+ * own runnable blocks all need it (editor/setup.ts). On a phone none of those
+ * three exist and the focus summons a keyboard over a page nothing can type
+ * into, so there the same editor is not editable at all.
+ */
+export function softKeyboard(): boolean {
+  return shell.softKeyboard;
 }
 
 // The server's half. Not part of `Shell` above because it arrives from a

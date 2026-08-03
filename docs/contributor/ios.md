@@ -372,14 +372,21 @@ bridge's `@log`, so it comes out of `simctl launch --console-pty`. On a
 Simulator, warm, over ssh to a container on loopback — with the plain TCP
 fixture phase 3 measured beside it:
 
-| Mark | At | Cost | Phase 3 |
-| ---- | -- | ---- | ------- |
-| `bridge` | 70ms | loading and parsing the view | 190ms |
-| `hello` | 72ms | 2ms — who we are, where we point | 7ms |
-| `socket` | 141ms | 69ms — TCP, key exchange, authentication, exec | 14ms |
-| `server` | 191ms | 50ms — the protocol handshake | 7ms |
-| `view` | 200ms | 9ms — the whole boot prefetch | 16ms |
-| `paint` | 247ms | 47ms — the first composited frame | 109ms |
+| Mark | At | Cost | Phase 3 | On a phone |
+| ---- | -- | ---- | ------- | ---------- |
+| `bridge` | 70ms | loading and parsing the view | 190ms | 57ms |
+| `hello` | 72ms | 2ms — who we are, where we point | 7ms | 58ms |
+| `socket` | 141ms | 69ms — TCP, key exchange, authentication, exec | 14ms | 530ms |
+| `server` | 191ms | 50ms — the protocol handshake | 7ms | 707ms |
+| `view` | 200ms | 9ms — the whole boot prefetch | 16ms | 888ms |
+| `paint` | 247ms | 47ms — the first composited frame | 109ms | 942ms |
+
+The last column is an iPhone over Wi-Fi to the same fixture on the LAN
+(phase 7), and it is the one to read for what shipping feels like. Everything
+that is the phone's own work is faster than the Simulator's; everything that
+crosses the network is four to ten times slower. `socket` is 472ms because a
+real key exchange over Wi-Fi is, and `server` adds 177ms of Bun starting on the
+other side. Still under a second to paint, which is the answer §5 needed.
 
 Three things to read off it, and one to distrust. **The prefetch is one round
 trip**, which is remote.md §12's claim measured rather than asserted: six
@@ -558,13 +565,13 @@ commands.**
 | Editing, with live preview | Attaching a workspace folder |
 | Daily notes, templates, wikilinks | Editing profiles or behavior settings |
 | Rendered images, and adding them from the photo library | Moving a workspace |
-| The trash | |
+| The trash | Adding, removing or pinning a server |
 | Workspace and connection switching | |
 | Unlocking a locked note (§10) | |
 
-**The cut is two booleans, and both make a verb ABSENT rather than present and
-failing** (`mainview/lib/shell.ts`). They come from different places because
-they answer different questions.
+**Every cut is a boolean, and each one makes a verb ABSENT rather than present
+and failing** (`mainview/lib/shell.ts`). They come from different places
+because they answer different questions.
 
 `runsCommands` is the SHELL's own answer about itself, set before the first
 render (`ios.tsx`), and it withholds the terminal toggle from the chrome and
@@ -573,6 +580,22 @@ run chords from CodeMirror's keymap, and the profile editor — which is the
 environment a block runs in, so it has nothing to edit for. Nothing is deleted
 to achieve it: the daemon on the other end spawns PTYs perfectly well, and the
 phase after v1 turns the boolean back on.
+
+`managesServers` is the shell's too, and it is not a scope cut but a fact: a
+phone has exactly one server and it was chosen on the pairing screen before the
+page existed (§4). `nativeBridge.ts` already answers connectionAdd,
+connectionRemove and connectionProbe with "this build talks to one server", so
+what this withholds is the Add Server button in front of that refusal, and with
+it a key-path field asking for a file on a client whose key is in the Secure
+Enclave and has no path. The dialog keeps its list and keeps switching: choosing
+the one server again is how a phone reconnects (§5).
+
+`softKeyboard` is the shell's third, and the only one that changes an editor
+rather than a verb. The read-only documentation editor stays focusable on a Mac
+on purpose — find, ⌘C and ⌘↩ on the manual's own runnable blocks all need it —
+and a phone has none of those chords while the focus costs half the screen to a
+keyboard that can type nothing. So `EditorView.editable` goes off there, and iOS
+selects and copies the text natively instead (interactions.md §1a).
 
 `folderDialog` is the SERVER's, and rides back on `workspaceList` at boot. It
 is false wherever nobody is sitting at the machine that holds the notes, which
@@ -865,8 +888,18 @@ Per `testing.md`'s categories:
   screen, and appends whatever `authorized_keys` line is pasted into it. A
   Simulator shares this Mac's network stack and can dial `127.0.0.1`; a phone
   cannot, and that is the only reason the fixture has a second mode.
-- **What no harness can reach**: a finger, a radio, the phone's own enclave,
-  and a suspension that really suspends. Those are a live probe with a device
+- **What no harness can reach**: WebKit's own tap heuristics. iOS withholds the
+  click of a tap whose synthetic hover changed the rendering
+  (interactions.md §1a), and that decision lives in WebKit's UI process, not in
+  the engine Playwright drives — the harness taps and the click always lands, so
+  the two-tap tab bug ran green through every phone spec that existed. The
+  Simulator reproduces it exactly, which makes this one of the few things worth
+  driving there by hand rather than asserting from a spec. What a spec CAN hold
+  is the cause: this project reports `hover: none`, so it can assert that no
+  hover style applies and no hover-revealed control exists, which is the
+  condition WebKit is reacting to.
+- **What no harness and no Simulator can reach**: a finger, a radio, the
+  phone's own enclave, and a suspension that really suspends. Those are a live probe with a device
   rather than a Mac. NIOSSH and the lifecycle turned out to be reachable from a
   Simulator on Apple silicon (§4), which is the difference between "unproven"
   and "unprovable" — but the enclave a Simulator reaches is the host Mac's SEP,
@@ -1042,21 +1075,41 @@ inside the Mac app.
    and installs for hardware (§12); `bun run probe:ssh -- --serve` puts the
    fixture somewhere a phone can dial (§13).
 
-   What is proven is the build. `vtool` reads `IOS` rather than `IOSSIMULATOR`,
-   the signature is an Apple Development identity carrying the team, the
-   entitlements in it are the three the profile grants and no more, and the
-   profile is in the bundle. What is not proven is anything that runs: the
-   first install onto a phone that has never had one fails on Developer Mode,
-   and the entry for it does not appear in Settings until that failure has
-   happened, so it cannot be turned on in advance.
+   The build is proven and so is what runs on it. `vtool` reads `IOS` rather
+   than `IOSSIMULATOR`, the signature is an Apple Development identity carrying
+   the team, the entitlements in it are the three the profile grants and no
+   more, and the profile is in the bundle. On the phone: `[pair] key in the
+   Secure Enclave` with `ecdsa-sha2-nistp256`, which clears §13's trap about a
+   software key that quietly ships; the fixture accepts that algorithm; and the
+   dial works over both a tailnet and the LAN. The install itself has one
+   unavoidable failure in front of it — the first one onto a phone that has
+   never had a development build fails on Developer Mode, and the Settings entry
+   for it does not appear until that failure has happened, so it cannot be
+   turned on in advance.
 
-   Four things wait on this and can be got no other way. The phone's own Secure
-   Enclave, and with it §13's trap about a software key that quietly ships.
-   §5's lifecycle across a suspension that really suspends. The accessory bar
-   under a finger rather than under Playwright's pointer events. And the
-   geometry of a 14 Pro Max against a keyboard fix built on a 16. The first
-   Local Network prompt belongs here too: a Simulator shares this Mac's network
-   stack and is never asked.
+   **iOS's Local Network prompt is indistinguishable from a routing failure,
+   and it is not a release blocker.** A dial to a LAN address before the
+   permission is granted returns `EHOSTUNREACH` — the same errno as no route at
+   all — and the prompt fires on that first local-subnet connection, by which
+   time the dial that triggered it has already failed. Granting it and dialing
+   again is the whole fix; nothing in the app needs to change. It is written
+   down because "could not reach" with a prompt behind it reads exactly like
+   "could not reach" without one, and retrying is what nobody thinks to do.
+
+   **What the device found that no harness could**: switching notes cost two
+   taps. WebKit withholds the click of any tap whose synthetic hover changed the
+   rendering, and the tab strip's close ✕ fades in on `group-hover`
+   (interactions.md §1a). The manual raised a keyboard over a document nothing
+   can type into, and had no way out but the strip inside the drawer it was
+   covering. And the connection dialog offered to add a server on the one client
+   that cannot. All four are §13's "what no harness can reach" in practice —
+   though the first is reproducible in the Simulator, which is where it was
+   caught in the act.
+
+   What still waits on a hand: §5's lifecycle across a suspension that really
+   suspends, the accessory bar under a finger rather than under Playwright's
+   pointer events, and the geometry of a 14 Pro Max against a keyboard fix built
+   on a 16.
 
 Live command execution is not in this list. It is the phase after v1, and §5
 says what it has to answer first: a client that can ask a server to hold its

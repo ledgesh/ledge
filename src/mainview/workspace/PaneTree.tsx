@@ -404,8 +404,14 @@ function TabItem({
       }}
     >
       <span className="truncate">{tab.title}</span>
+      {/* `hidden hoverable:flex`, not `flex`: on a client with no hover this
+          button can never be revealed, and an invisible one still takes the
+          taps that land on it — a 16-point close target at the end of every
+          tab, on the strip's own tap surface. Absent there instead; Close Tab
+          is in the menu a long press opens, which is where §1a puts every
+          hover-revealed verb. */}
       <button
-        className="flex size-4 shrink-0 items-center justify-center rounded opacity-0 hover:bg-accent group-hover:opacity-100"
+        className="hidden size-4 shrink-0 items-center justify-center rounded opacity-0 hover:bg-accent group-hover:opacity-100 hoverable:flex"
         title={tooltip("tab.close")}
         onClick={(e) => {
           e.stopPropagation();

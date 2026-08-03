@@ -150,13 +150,17 @@ export interface RegistryDeps {
   // and every read-only verb to the docs workspace.
   workspaceKind(folder: string): "managed" | "external" | "docs" | null;
   // The built-in documentation's folder handle (null when Bun reported none —
-  // the docs.open command hides then), and the open itself: select the
+  // the docs.toggle command hides then), and the open itself: select the
   // Documentation workspace, adding it over that folder first if needed
   // (workspace/actions.ts openDocs).
   docsFolder(): string | null;
   // `page` lands on one page by title instead of the manual's front (Help >
   // Third-Party Licenses).
   openDocs(state: AppState, dispatch: (a: Action) => void, page?: string): Promise<void>;
+  // The other half of the toggle: select the workspace the manual was opened
+  // from, leaving it open behind. Nothing closes — a workspace switch is what
+  // this is.
+  closeDocs(state: AppState, dispatch: (a: Action) => void): void;
   // Kill a note's shells so the next run respawns them with its current
   // frontmatter params.
   restartSession(docId: string): void;

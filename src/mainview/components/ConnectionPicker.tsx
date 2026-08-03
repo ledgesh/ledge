@@ -23,6 +23,7 @@ import {
   type ConnectionStatus,
 } from "@/lib/connections";
 import { flushAllNow } from "@/notes/store";
+import { managesServers } from "@/lib/shell";
 import type { ConnectionInfo } from "../../shared/rpc-schema";
 
 // What a host answered, waiting to be confirmed. Held rather than pinned: the
@@ -89,14 +90,27 @@ export function ConnectionPicker({ onClose }: { onClose: () => void }) {
         ) : (
           <>
             <ConnectionList status={status} busy={busy} onPick={switchTo} onRemove={remove} />
+            {/* The add half is a whole client's worth of assumption: that this
+                process can reach an ssh binary, hold a key file, and keep a
+                list. A phone can do none of the three — its one server was
+                chosen on a native screen before this page existed, and its key
+                is in the Secure Enclave and has no path (ios.md §4) — so
+                connectionAdd, connectionRemove and connectionProbe all answer
+                with a refusal there. Absent rather than present and failing
+                (lib/shell.ts). The list stays, and so does picking from it:
+                choosing the one server again is how a phone reconnects. */}
             <div className="mt-3 flex items-center justify-between">
               <p className="text-[11px] text-muted-foreground">
-                Switching closes every tab and reopens this machine&apos;s.
+                {managesServers()
+                  ? "Switching closes every tab and reopens this machine's."
+                  : "Paired with one server. Choose it again to reconnect."}
               </p>
-              <Button size="sm" variant="ghost" onClick={() => setAdding(true)}>
-                <Plus className="mr-1 size-3.5" />
-                Add Server…
-              </Button>
+              {managesServers() && (
+                <Button size="sm" variant="ghost" onClick={() => setAdding(true)}>
+                  <Plus className="mr-1 size-3.5" />
+                  Add Server…
+                </Button>
+              )}
             </div>
           </>
         )}

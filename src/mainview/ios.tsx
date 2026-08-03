@@ -41,7 +41,13 @@ async function start(): Promise<void> {
   // Cut for its interaction surface, not because it cannot work — the daemon on
   // the other end spawns PTYs perfectly well — so this is one boolean and no
   // code removed, and the phase after v1 turns it back on.
-  configureShell({ runsCommands: false });
+  //
+  // The other two are facts about this shell rather than cuts. A phone has one
+  // server and it was chosen on the native screen in front of this one (§4), so
+  // the dialog's add half would only ever reach the refusal in nativeBridge.ts;
+  // and its keyboard is on screen, which is what makes focus expensive enough
+  // for the read-only editor to give it up (lib/shell.ts).
+  configureShell({ runsCommands: false, managesServers: false, softKeyboard: true });
 
   const shell = attachShell();
   mark("bridge");
