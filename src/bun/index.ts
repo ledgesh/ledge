@@ -27,7 +27,7 @@ import type { RequestHandlers, ServerPush } from "../shared/wire";
 import { clientOverlay, type ClientNative } from "./clientSeams";
 import { imageFromFile } from "./clipboard";
 import { clientId } from "./clientHome";
-import { createConnectionManager, type Attached } from "./connectionManager";
+import { createConnectionManager, type Attached, type ConnectionManager } from "./connectionManager";
 import { KNOWN_HOSTS_PATH, sshCommand, userKnownHosts, type Connection } from "./connections";
 import { reconnectingClient } from "../shared/transport";
 import { spawnDuplex } from "./transport";
@@ -164,6 +164,12 @@ const sayConnectionState = (p: { state: "live" | "reconnecting" | "lost"; detail
 // the arrangement this Mac left behind is this Mac's either way (remote.md §5).
 const me = await clientId();
 
+// Null until the manager exists, and `attach` below closes over it: the FIRST
+// connection is opened by createConnectionManager itself, so nothing can hand
+// the manager to the thing that builds it. Only the drop report reads it, and
+// a connection cannot be lost before it has been made.
+let manager: ConnectionManager | null = null;
+
 /**
  * Open one connection. The manager decides WHICH and when; this decides how,
  * because how is the only part that needs Electrobun's version string and a
@@ -202,6 +208,11 @@ async function attach(conn: Connection): Promise<Attached> {
     client: me,
     onState: (state, detail) => {
       if (state !== "live") console.warn(`[connect] ${conn.name}: ${detail}`);
+      // A ladder that ran out, or a server that said goodbye. The manager has
+      // to know, or choosing this same connection again — the recovery the
+      // chrome offers, and the only one there is — would be the no-op it is
+      // for a connection that is already working (connectionManager.ts).
+      if (state === "lost") manager?.lost(conn.id, detail);
       sayConnectionState({ state, detail });
     },
   });
@@ -214,7 +225,8 @@ async function attach(conn: Connection): Promise<Attached> {
   };
 }
 
-const { requests, shutdown } = await createConnectionManager({ attach });
+manager = await createConnectionManager({ attach });
+const { requests, shutdown } = manager;
 
 rpc = defineLedgeRPC(requests);
 

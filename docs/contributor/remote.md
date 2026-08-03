@@ -68,7 +68,14 @@ would otherwise be vague:
   would be one stream with two readers and no rule for who gets what. Displacing
   is also what lets a reconnect take over from a half-open connection nobody has
   noticed is dead. Per-client attachment is where multi-client would have to
-  start, and nothing here promises it.
+  start, and nothing here promises it. The displaced client is told why and
+  STOPS; §7 is where that half lives, and it is what keeps a policy from
+  becoming a fight.
+- **A connection displaces on the hello, not on the socket.** A socket that has
+  not said who it is is not a client yet. The distinction is load-bearing
+  because probing whether a daemon is behind a socket file is a connect and an
+  immediate hangup (`clearStaleSocket`), and on the accept that probe would
+  throw whoever is using the server off their session.
 - **An idle daemon exits after a minute**, unless something is running. A
   process per machine, started by an ssh nobody remembers making, is not a
   feature; a build that survives you closing the laptop is. `.server.pid` sits
@@ -387,6 +394,38 @@ out, the state is `lost`, what was held is refused with the last reason, and
 nothing new is accepted — an app that keeps taking requests for a server it
 cannot reach looks like it is working. Recovery from there is choosing the
 connection again (`interactions.md` §4-1), which rebuilds everything from boot.
+That recovery has to work on a connection the manager still considers active,
+which is why a wire giving up is reported to `connectionManager.ts`: choosing
+the server already being served is otherwise a deliberate no-op.
+
+**The ladder does not start over unless the connection lasted.** A ladder that
+resets on every success is not bounded, because a connection that dies the
+moment it is made buys a fresh one each time: eight attempts becomes eight
+attempts forever, at an ssh handshake and a process on the server per turn. So
+a connection has to hold for ten seconds to earn a new ladder, and one that does
+not resumes the old one where it left off and reaches the end. Ten seconds is
+well below any link a person would call working and well above a flap, which
+was measured at three a second.
+
+**A server that says goodbye is not dialled again.** A wire that broke cannot
+say anything, so a reason means the server decided: it handed the session to
+another client (§8), it is shutting down, or it refused the handshake. The
+ladder is for the wire, and running it against a decision is an argument with
+a server that has already answered. The state goes straight to `lost` in the
+server's own words. The difference is carried on the connection
+(`farewell()`) rather than by matching on the wording of an error, for the same
+reason `ConnectionLost` is a type.
+
+Two clients on one daemon are what makes this concrete, and it is the ordinary
+shape of a Mac and a phone pointed at the same machine rather than an exotic
+one. The server hands the session to whoever dialled last, so each displaces
+the other; if both re-dial, neither ever stops. Measured over real ssh into the
+Docker fixture, before and after:
+
+| | Connections in 12s | Indicator changes | End state |
+| --- | --- | --- | --- |
+| Both re-dial | 29 | 82 | none, forever |
+| The displaced one stops | 2 | 1 | one client served, the other told why |
 
 **Mutating calls carry an `op` and the server dedupes them.** A client that
 retries a write after a reconnect must not apply it twice: the second attempt
@@ -645,11 +684,17 @@ Per `testing.md`'s categories:
   `"../../.ssh/id_rsa"` throws over the wire exactly as it throws today; a
   forced-command key cannot obtain a shell; a replayed write applies once.
 - **Filesystem, over a real socket** (`daemon.fs.test.ts`, `serve.fs.test.ts`):
-  a second connection displaces the first and is told why; an idle daemon
-  exits and a busy one does not; a push with no client attached is dropped
-  rather than thrown, which is a bug this suite caught rather than prevented;
-  and a whole `serve` process killed and restarted, with the server's state
-  still there.
+  a second connection displaces the first and is told why; a socket that never
+  says who it is displaces nobody; an idle daemon exits and a busy one does
+  not; a push with no client attached is dropped rather than thrown, which is a
+  bug this suite caught rather than prevented; and a whole `serve` process
+  killed and restarted, with the server's state still there.
+- **The reconnect ladder, at both of its ends** (`transport.test.ts`): a bye
+  is not dialled again; a connection that dies as soon as it is made does not
+  buy a fresh ladder; and a connection that HELD gets the whole ladder back,
+  which is the half that would otherwise disconnect a working session on its
+  ninth ordinary drop. The clock is injected beside `sleep`, so none of the
+  three waits for anything.
 - **e2e (headless WebKit)**: the harness gains a real server over an
   in-process transport beside `FakeStore`, so the same specs run against both
   and disagreements surface as failures rather than as drift; connection

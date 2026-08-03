@@ -16,6 +16,13 @@
 // (remote.md §8), and it is also what makes a reconnect work — the new
 // connection takes over from the half-open one nobody has noticed is dead.
 //
+// The other half of that rule is the displaced client's, and it is what makes
+// this a policy rather than a fight: the reason travels in the `bye`, and a
+// client told it was displaced stops instead of re-dialling
+// (shared/transport.ts). Two that re-dialled would kick each other off several
+// times a second for as long as both were running, which is what a Mac and a
+// phone pointed at one machine actually did.
+//
 // What the socket buys, precisely: a run keeps going when the wire drops, and
 // the op log (bun/opLog.ts) survives to make the client's replay of what was
 // in flight safe.
@@ -184,18 +191,29 @@ export async function startDaemon(opts: DaemonOpts = {}): Promise<Daemon> {
       clearTimeout(idleTimer);
       idleTimer = null;
     }
-    const previous = live;
-    const conn = serverConnection(io, { build, ops, instance });
-    live = conn;
+    // On the hello and not on the socket. A connection that has not said who
+    // it is is not a client yet, and the difference is not hypothetical:
+    // clearStaleSocket below decides whether a daemon is behind a socket file
+    // by connecting to it and hanging up, and on the accept that probe would
+    // throw the person actually using this server off their session.
+    const takeOver = (): void => {
+      const previous = live;
+      live = conn;
+      // AFTER the new one is live, so the pushes a teardown emits go to the
+      // client that is still here rather than to the one being hung up on.
+      // The reason travels: a client that knows it was displaced stops rather
+      // than re-dialling, and two that re-dialled would displace each other
+      // for as long as both were running (shared/transport.ts).
+      previous?.close("another client connected to this server");
+    };
+    const conn = serverConnection(io, { build, ops, instance, greeted: takeOver });
     conn.serve(server.requests);
-    // AFTER the new one is live, so the pushes a teardown emits go to the
-    // client that is still here rather than to the one being hung up on.
-    previous?.close("another client connected to this server");
     void conn.closed.then(() => {
-      if (live === conn) {
-        live = null;
-        armIdleExit();
-      }
+      if (live === conn) live = null;
+      // Whichever connection this was: a silent socket closing leaves an
+      // unattended daemon exactly as an attached client leaving does, and the
+      // timer was cleared when it arrived.
+      if (!live) armIdleExit();
     });
   }
 

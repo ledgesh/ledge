@@ -750,7 +750,12 @@ describe("a client that reconnects", () => {
       current = { server, pipe };
       return pipe.b;
     };
-    return { dial, cut: () => current?.pipe.a.close(), dials: () => dials };
+    return {
+      dial,
+      cut: () => current?.pipe.a.close(),
+      bye: (why: string) => current?.server.close(why),
+      dials: () => dials,
+    };
   }
 
   const instant = { delaysMs: [0, 0, 0], sleep: () => Promise.resolve() };
@@ -867,5 +872,95 @@ describe("a client that reconnects", () => {
     // And nothing new is accepted: an app that keeps taking requests for a
     // server it cannot reach looks like it is working.
     await expect(client.requests.vaultState({})).rejects.toThrow("There is no connection to the server.");
+  });
+
+  // A wire cannot say anything, so a reason means the server DECIDED. The
+  // ladder is for the other case, and running it against a decision is an
+  // argument with a server that has already answered: the daemon serves one
+  // client and gives the session to whoever dialled last, so two clients that
+  // both re-dialled "another client connected" would displace each other for
+  // as long as both were running, several times a second, at an ssh handshake
+  // and a server process per turn.
+  test("a server that says goodbye is not dialled again", async () => {
+    const wire = reconnectable(handlers());
+    const states: string[] = [];
+    const client = await reconnectingClient({
+      dial: wire.dial,
+      push: recordingPush().push,
+      build: "0.1.0",
+      onState: (s, d) => states.push(`${s}:${d}`),
+      ...instant,
+    });
+    wire.bye("another client connected to this server");
+    await settle();
+    expect(wire.dials()).toBe(1);
+    // In the server's own words, because "the connection dropped" would send
+    // the user looking at their network for something that is not there.
+    expect(states).toEqual(["lost:Disconnected: another client connected to this server."]);
+    await expect(client.requests.vaultState({})).rejects.toThrow("There is no connection to the server.");
+  });
+
+  // The general shape of the same failure, for every cause that does NOT come
+  // with a bye: a server that crashes as it boots, an ssh killed with its
+  // session, a forced command that exits. The ladder ends, but it used to start
+  // over on every success, so a connection that died the moment it was made had
+  // an unbounded budget one rung at a time.
+  test("a connection that dies as soon as it is made does not buy a fresh ladder", async () => {
+    let dials = 0;
+    const dial = (): Duplex => {
+      dials += 1;
+      const pipe = pipePair();
+      // Cut on the handshake and not before it: a dial that never completed is
+      // an ordinary failure, and what has to be caught here is the one that
+      // LOOKS like a recovery.
+      const server = serverConnection(pipe.a, {
+        build: "0.1.0",
+        instance: "one-server",
+        greeted: () => pipe.a.close(),
+      });
+      server.serve(handlers());
+      return pipe.b;
+    };
+    const states: string[] = [];
+    const client = await reconnectingClient({
+      dial,
+      push: recordingPush().push,
+      build: "0.1.0",
+      onState: (s, d) => states.push(`${s}:${d}`),
+      // A clock that does not move: every connection is instantaneous, which
+      // is the property being tested rather than a fixture's convenience.
+      now: () => 0,
+      ...instant,
+    });
+    await settle();
+    // One boot dial plus the ladder's three rungs, and then it stops. The
+    // states alternate live/reconnecting the whole way, which is precisely what
+    // a user watching the indicator sees, and precisely why the count matters.
+    expect(dials).toBe(1 + instant.delaysMs.length);
+    expect(states.at(-1)).toContain("lost:");
+    await expect(client.requests.vaultState({})).rejects.toThrow("There is no connection to the server.");
+  });
+
+  // The other half of the rule, and the one that would bite a real user: a
+  // connection that HELD earns the whole ladder back, so an ordinary drop on a
+  // long session is never mistaken for a flap.
+  test("a connection that held gets the whole ladder again", async () => {
+    const wire = reconnectable(handlers());
+    let clock = 0;
+    const client = await reconnectingClient({
+      dial: wire.dial,
+      push: recordingPush().push,
+      build: "0.1.0",
+      now: () => clock,
+      ...instant,
+    });
+    // Four drops, each after a connection that stood up for a minute. A ladder
+    // that only ever advanced would have run out on the fourth.
+    for (let i = 0; i < 4; i++) {
+      clock += 60_000;
+      wire.cut();
+      expect(await client.requests.vaultState({})).toEqual({ state: "locked" });
+    }
+    expect(wire.dials()).toBe(5);
   });
 });

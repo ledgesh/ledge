@@ -35,6 +35,17 @@ export interface Attached {
 export interface ConnectionManager {
   /** Stable for the life of the process, whatever it is pointed at. */
   requests: RequestHandlers;
+  /**
+   * The wire to `id` gave up for good: its ladder ran out, or the server said
+   * goodbye (shared/transport.ts).
+   *
+   * Recorded rather than acted on, because there is nothing to act on — a
+   * transport that stopped stopped on purpose, and re-dialling behind the
+   * user's back is the loop it stopped to avoid. What this buys is the
+   * documented recovery: choosing the same connection again is normally a
+   * no-op, and it has to attach afresh once the one being pointed at is dead.
+   */
+  lost(id: string, detail: string): void;
   shutdown(): void;
 }
 
@@ -185,6 +196,12 @@ export async function createConnectionManager(deps: {
 
   return {
     requests: { ...router, ...handlers },
+    lost: (id, detail) => {
+      // By id, because the connection being torn down on the way to another
+      // one can report its own end after the switch has already happened, and
+      // marking the new connection dead would be worse than saying nothing.
+      if (id === active.id) error = detail;
+    },
     shutdown: () => live.shutdown(),
   };
 }

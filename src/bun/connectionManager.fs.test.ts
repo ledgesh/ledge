@@ -155,6 +155,32 @@ describe("switching", () => {
     expect((await m.requests.connectionSelect({ id: "nope" })).ok).toBe(false);
     expect(await served(m)).toBe(LOCAL_ID);
   });
+
+  // The no-op above is right for a connection that is working and wrong for
+  // one that is dead, and a transport that gave up stays given up on purpose
+  // (shared/transport.ts). Choosing the same server again is the recovery the
+  // chrome offers, and it is the only one there is, so it has to attach.
+  test("selecting the one being served DOES reconnect once its wire has given up", async () => {
+    await saveConnections([LAPTOP], LAPTOP.id);
+    const fake = fakeAttach();
+    const m = await createConnectionManager({ attach: fake.attach });
+    m.lost(LAPTOP.id, "Disconnected: another client connected to this server.");
+    expect(await m.requests.connectionSelect({ id: LAPTOP.id })).toEqual({ ok: true, error: "" });
+    expect(fake.log).toEqual([`attach:${LAPTOP.id}`, `attach:${LAPTOP.id}`, `shutdown:${LAPTOP.id}`]);
+  });
+
+  // A connection reports its own end, and the one being torn down on the way
+  // to another can report it after the switch has already landed. Marking the
+  // connection now in front of the user dead would be worse than silence.
+  test("a connection that dies after being switched away from marks nothing", async () => {
+    await saveConnections([LAPTOP], LOCAL_ID);
+    const fake = fakeAttach();
+    const m = await createConnectionManager({ attach: fake.attach });
+    await m.requests.connectionSelect({ id: LAPTOP.id });
+    m.lost(LOCAL_ID, "Lost the connection: host is down.");
+    expect(await m.requests.connectionSelect({ id: LAPTOP.id })).toEqual({ ok: true, error: "" });
+    expect(fake.log).toEqual([`attach:${LOCAL_ID}`, `attach:${LAPTOP.id}`, `shutdown:${LOCAL_ID}`]);
+  });
 });
 
 describe("adding and removing", () => {

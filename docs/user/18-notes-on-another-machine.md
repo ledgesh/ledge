@@ -125,7 +125,7 @@ Unlocking a locked note sends the passphrase to the server, which is the only ma
 
 ## When the connection drops
 
-The bar reads "reconnecting…" and Ledge re-dials for about twenty-four seconds. Requests made in the meantime wait rather than fail.
+The bar reads "reconnecting…" and Ledge re-dials for about thirty seconds. Requests made in the meantime wait rather than fail.
 
 Anything running keeps running. Shells belong to the server and survive a wire dropping, so a build carries on while you are on a train and its output is waiting when you come back. Reattaching replays the last 256 KB of each terminal.
 
@@ -133,8 +133,11 @@ A save that was in flight when the wire dropped is retried once the connection i
 
 If the reconnect runs out, the bar reads "disconnected" and Ledge stops accepting work for a machine it cannot reach. Choose the connection again from the picker to start over.
 
+Ledge also stops when the server hangs up on purpose rather than the wire failing. The commonest reason is another device connecting to the same server (see Limits below), and hovering the bar names it. Re-dialling something the server decided would only take the connection back off the device you just picked up, so Ledge waits for you to choose.
+
 ## Limits
 
 - One connection at a time. Search, tags, backlinks, and wikilinks all stay within the machine you are on.
+- One device at a time per server. A server serves whoever connected last, so opening Ledge on your phone against the same machine disconnects your Mac, and the Mac says so rather than fighting for it back. Both keep their own tabs and panes; picking the connection again on either one takes the server back.
 - No moving a note between servers from inside the app. Use `rsync` or `git`; the notes are ordinary files ([[Tutorial: Keep Notes Synced]]).
 - No offline editing. The server has to be reachable to open a note.

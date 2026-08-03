@@ -71,10 +71,22 @@ export interface ServerOpts {
   ops?: OpLog;
   /** Overrides for the output coalescer, for tests that cannot wait 30ms. */
   coalesce?: { ms?: number; bytes?: number };
+  /**
+   * Called once the client's hello has been accepted, and never for a socket
+   * that opened and said nothing.
+   *
+   * The distinction is the daemon's: it serves one client and hands the
+   * session to whoever arrived last, and a connection that has not identified
+   * itself is not a client yet. Probing the socket to see whether a daemon is
+   * behind it is a connect and an immediate close (bun/daemon.ts
+   * clearStaleSocket), and on the accept that would displace the person
+   * actually using the server.
+   */
+  greeted?(): void;
 }
 
 export function serverConnection(duplex: Duplex, opts: ServerOpts): ServerConnection {
-  const { build, ops, coalesce, instance = "" } = opts;
+  const { build, ops, coalesce, instance = "", greeted: onGreet } = opts;
   const decoder = new FrameDecoder();
   const incoming = new BinaryHolder();
   let handlers: RequestHandlers | null = null;
@@ -211,6 +223,7 @@ export function serverConnection(duplex: Duplex, opts: ServerOpts): ServerConnec
       }
       greeted = true;
       peerClient = msg.client;
+      onGreet?.();
       return;
     }
     switch (msg.t) {

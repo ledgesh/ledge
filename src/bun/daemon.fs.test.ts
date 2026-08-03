@@ -73,6 +73,27 @@ describe("one client at a time", () => {
     await second.ready;
     await first.closed;
     await expect(first.requests.vaultState({})).rejects.toThrow("another client connected to this server");
+    // And the reason survives as a REASON rather than only as an error
+    // message: the client's ladder reads it to tell a server that decided from
+    // a wire that broke, and re-dialling the first would put two clients back
+    // to displacing each other forever (shared/transport.ts).
+    expect(first.farewell()).toBe("another client connected to this server");
+  });
+
+  // The rule is about clients, and a socket that has not said who it is is not
+  // one yet. This is exactly what clearStaleSocket does to decide whether a
+  // daemon is behind a socket file — connect, then hang up — so on the accept
+  // rather than on the hello it would throw the person using the server off
+  // their session every time a second daemon tried to start.
+  test("a socket that never says who it is takes nothing from the client that did", async () => {
+    const { socketPath, pidPath } = await daemonIn();
+    const client = await connect(socketPath, "mac-1");
+    await client.ready;
+
+    await expect(startDaemon({ socketPath, pidPath, idleMs: 1000 })).rejects.toThrow();
+
+    expect(await client.requests.vaultState({})).toBeDefined();
+    expect(client.farewell()).toBe(null);
   });
 });
 

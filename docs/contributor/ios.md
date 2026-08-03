@@ -349,6 +349,15 @@ Three consequences, in the order they bite:
   `connectionSelect` for its one server by reloading the page. Without that the
   connection row is a dead label and the app waits to be force-quit, which is
   what a live server restart actually did before this was written down.
+- **A phone and a Mac on one server is a fight nobody wins**, until one of them
+  concedes. The daemon serves one client and hands the session to whoever
+  dialled last (remote.md §1), so each displaces the other; a phone that
+  re-dialled a displacement would loop against the Mac forever, several times a
+  second, and iOS would be paying for a full ssh handshake and a Secure Enclave
+  signature each turn. remote.md §7 is where the concession lives: the server's
+  goodbye ends the ladder, so the phone lands on `lost` naming the machine and
+  stays there until it is chosen again. Nothing about it is iOS-specific, which
+  is why none of it is in `ios/`.
 
 **The idle timeout stays at 60 seconds.** Raising it for phones would leave a
 process running on someone's Mac for a client that may never come back, and

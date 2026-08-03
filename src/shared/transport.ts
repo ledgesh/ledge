@@ -54,6 +54,16 @@ export interface ClientConnection {
    * anything at all. */
   ready: Promise<Hello>;
   closed: Promise<void>;
+  /**
+   * Why the server said it was hanging up, once `closed` has settled. Null for
+   * a wire that simply stopped.
+   *
+   * A wire cannot say anything, so a reason means the server DECIDED: it gave
+   * the session to another client (bun/daemon.ts), it is shutting down, or it
+   * refused this client's handshake. Re-dialling a decision is not recovery,
+   * which is why this is on the interface rather than folded into the error.
+   */
+  farewell(): string | null;
   close(): void;
 }
 
@@ -215,6 +225,7 @@ export function clientConnection(
     call,
     ready,
     closed,
+    farewell: () => farewell,
     close: () => fail(new Error("this client closed the connection")),
   };
 }
@@ -251,13 +262,37 @@ export interface ReconnectOpts {
    * threw the sessions away. */
   delaysMs?: readonly number[];
   sleep?(ms: number): Promise<void>;
+  /** The clock the steadiness rule below reads, injectable for the same reason
+   * `sleep` is: a test drives both and waits for neither. */
+  now?(): number;
 }
 
 const RECONNECT_DELAYS = [250, 500, 1000, 2000, 4000, 8000, 8000, 8000] as const;
 
+/**
+ * How long a connection has to hold before it has earned a fresh ladder.
+ *
+ * The ladder ends, which is the only thing that makes it a ladder — but it
+ * used to start over on every success, so a connection that died the moment it
+ * was made had an unbounded budget one rung at a time. Two clients on one
+ * daemon are exactly that shape: the server hands the session to whichever
+ * dialled last (bun/daemon.ts), so each displaces the other and neither ever
+ * stops, at the cost of an ssh handshake and a process on the server per turn.
+ *
+ * That particular fight ends before this rule is reached, because a `bye`
+ * stops the ladder outright. This is what makes the shape of it impossible
+ * whatever the cause: a server that crashes as it boots, an ssh killed with
+ * its session, a forced command that exits. Ten seconds is thirty times the
+ * observed flap and far below any connection a person would call working, so
+ * a link worth keeping resets the ladder every time and a link that is not
+ * gets told to the user instead of retried forever.
+ */
+const STEADY_MS = 10_000;
+
 export async function reconnectingClient(opts: ReconnectOpts): Promise<ClientConnection> {
   const delays = opts.delaysMs ?? RECONNECT_DELAYS;
   const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const now = opts.now ?? (() => Date.now());
   // Unique to this process, so an op id cannot collide with one the server
   // recorded for a previous run of this same client (the id in the handshake
   // is stable across launches; a counter starting at 1 is not).
@@ -272,6 +307,14 @@ export async function reconnectingClient(opts: ReconnectOpts): Promise<ClientCon
   let instance = first.instance;
   let state: "live" | "reconnecting" | "lost" = "live";
   let shut = false;
+  // Where the ladder is, and when the connection it is climbing towards last
+  // stood up. Both live out here because the rule that reads them spans
+  // reconnects: one attempt cannot tell a flap from a drop.
+  let rung = 0;
+  let liveSince = now();
+  // Set only by a server that said goodbye, which is what makes it different
+  // from every other way a connection ends.
+  let goodbye: string | null = null;
   let settleClosed!: () => void;
   const closed = new Promise<void>((resolve) => (settleClosed = resolve));
   // Resolves whenever the connection is live again, so a request that arrives
@@ -295,6 +338,19 @@ export async function reconnectingClient(opts: ReconnectOpts): Promise<ClientCon
   function watch(c: ClientConnection): void {
     void c.closed.then(() => {
       if (shut || c !== conn) return;
+      // A server that SAID why it was hanging up decided to; a wire that broke
+      // could not have. The ladder exists for the second case only, and running
+      // it against the first is not recovery — it is an argument with a server
+      // that already answered. Displacement is the one that bites: the daemon
+      // serves one client and gives the session to whoever dialled last, so two
+      // clients that both re-dialled would kick each other off forever, several
+      // times a second, each turn costing an ssh handshake and a process on the
+      // server.
+      const why = c.farewell();
+      if (why !== null) {
+        goodbye = why;
+        return give(`Disconnected: ${why}.`);
+      }
       void reconnect();
     });
   }
@@ -303,9 +359,13 @@ export async function reconnectingClient(opts: ReconnectOpts): Promise<ClientCon
     let wake!: () => void;
     resume = new Promise<void>((r) => (wake = r));
     announce("reconnecting", "The connection dropped. Reconnecting…");
+    // A connection that HELD has earned a fresh ladder; one that died as soon
+    // as it was made has not, and climbing from the bottom again is how a
+    // bounded retry becomes an unbounded one (STEADY_MS).
+    if (now() - liveSince >= STEADY_MS) rung = 0;
     let last = "the connection dropped";
-    for (const delay of delays) {
-      await sleep(delay);
+    while (rung < delays.length) {
+      await sleep(delays[rung++]!);
       if (shut) return wake();
       let next: ClientConnection;
       try {
@@ -324,6 +384,7 @@ export async function reconnectingClient(opts: ReconnectOpts): Promise<ClientCon
       }
       conn = next;
       watch(next);
+      liveSince = now();
       announce("live", "");
       wake();
       // Under the SAME op ids. The server answers from its record if it ran
@@ -334,12 +395,13 @@ export async function reconnectingClient(opts: ReconnectOpts): Promise<ClientCon
     give(`Lost the connection: ${last}.`, wake);
   }
 
-  // The ladder is over, or a different server answered. Recovery from here is
-  // choosing the connection again (interactions.md §4-1), which rebuilds
-  // everything from boot: nothing in this module could re-establish a
-  // session's state by itself, and pretending otherwise would mean an app that
-  // looks connected to sessions that no longer exist.
-  function give(detail: string, wake: () => void): void {
+  // The ladder is over, a different server answered, or the server said
+  // goodbye. Recovery from here is choosing the connection again
+  // (interactions.md §4-1), which rebuilds everything from boot: nothing in
+  // this module could re-establish a session's state by itself, and pretending
+  // otherwise would mean an app that looks connected to sessions that no
+  // longer exist.
+  function give(detail: string, wake: () => void = () => {}): void {
     announce("lost", detail);
     const err = new Error(detail);
     for (const held of inflight.values()) held.reject(err);
@@ -397,6 +459,7 @@ export async function reconnectingClient(opts: ReconnectOpts): Promise<ClientCon
     call: (m, p) => call(m, p),
     ready: Promise.resolve(first),
     closed,
+    farewell: () => goodbye,
     close() {
       shut = true;
       // Before the connection goes, because the whole point of holding a
