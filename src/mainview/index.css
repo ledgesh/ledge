@@ -619,6 +619,15 @@ body {
   .ledge-ctl-group {
     opacity: 1;
     gap: 8px;
+    /* The box is not drawn here. A pointer client's group is two small glyphs
+       floating OVER the first line of the code, and the fill and border are
+       what separate them from it; this one has a lane of its own and floats
+       over nothing, so the same box is a 50-point empty panel with a speck in
+       it. Transparent rather than removed: the 2px padding and the 1px border
+       are what put the glyph column 13px inside the card, which is where
+       editor/blocks.ts puts the output panel's own pair to line up with. */
+    background: transparent;
+    border-color: transparent;
     /* The group is 22 points taller and grows UPWARD, so that it ends where the
        small one did: just past the opening fence, clear of the code. blocks.ts
        anchors it to the fence's glyph and knows nothing about this; the card's

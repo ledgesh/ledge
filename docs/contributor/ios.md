@@ -630,47 +630,55 @@ Four decisions follow:
   right for it. Serving it is not a v1 goal; breaking it would be a v1
   mistake.
 
-## 8. What v1 is, and what it cuts
+## 8. What a phone does, and what it cuts
 
-**v1 reads, edits, creates, searches and navigates notes. It does not run
-commands.**
+**A phone reads, edits, creates, searches and navigates notes, and runs their
+blocks inline. It has no terminal drawer.**
 
-| In v1 | Out of v1 |
-| ----- | --------- |
-| The note list, quick open, full-text search | Running blocks and terminal drawers |
-| Tags, backlinks, the outline | The host picker and the run confirmation |
-| Editing, with live preview | Attaching a workspace folder |
-| Daily notes, templates, wikilinks | Editing profiles or behavior settings |
-| Rendered images, and adding them from the photo library | Moving a workspace |
+| On a phone | Not on a phone |
+| ---------- | -------------- |
+| The note list, quick open, full-text search | The terminal drawer |
+| Tags, backlinks, the outline | Attaching a workspace folder |
+| Editing, with live preview | Moving a workspace |
+| Daily notes, templates, wikilinks | |
+| Rendered images, and adding them from the photo library | |
+| Running a block inline, with the host picker and the confirmation | |
+| Editing the note's profile, which is what a run's environment is | |
 | The trash | |
 | Workspace and connection switching | |
 | Adding, editing and removing servers | |
 | Unlocking a locked note (§10) | |
+
+v1 shipped with the whole right-hand column one row longer: running was cut too,
+and the phase after it put running back (§14). What follows is how a cut is
+made, which is the same machinery either way.
 
 **Every cut is a boolean, and each one makes a verb ABSENT rather than present
 and failing** (`mainview/lib/shell.ts`). They come from different places
 because they answer different questions.
 
 `runsBlocks` and `hasTerminal` are the SHELL's own answers about itself, both
-set before the first render (`ios.tsx`), and v1 says false to both. `runsBlocks`
-withholds Run Block Inline from the palette and CodeMirror's keymap, the ▶ from
-every runnable fence, and the profile editor — which is the environment a block
-runs in, so it has nothing to edit for. `hasTerminal` withholds the toggle from
-the chrome and the palette, Close Terminal, and Run Block in Terminal, which is
-the one verb that needs both answers because it takes a block out of the note
-and puts it in the drawer. Restart Note Shell needs either: both surfaces spawn
-the shells it kills.
+set before the first render (`ios.tsx`), and a phone says true to the first and
+false to the second. `runsBlocks` withholds Run Block Inline from the palette
+and CodeMirror's keymap, the ▶ from every runnable fence, and the profile editor
+— which is the environment a block runs in, so it has nothing to edit for.
+`hasTerminal` withholds the toggle from the chrome and the palette, Close
+Terminal, and Run Block in Terminal, which is the one verb that needs both
+answers because it takes a block out of the note and puts it in the drawer.
+Restart Note Shell needs either: both surfaces spawn the shells it kills.
 
-**Two booleans rather than one, because the cut lifts in two steps.** The phase
-after v1 runs blocks on a phone that still has no drawer (§14), and that is not
-a transitional state to be tolerated but where a phone stays: inline output is a
+**Two booleans rather than one, because the cut lifted in two steps and stopped
+between them.** A phone runs blocks and has no drawer, and that is not a
+transitional state to be tolerated but where a phone stays: inline output is a
 panel under the fence, and a drawer is a second arrangement, a second focus
 domain, and a keyboard grammar (Ctrl-`` ` ``, Escape) a phone cannot type. One
 boolean could not describe that client without either offering it a drawer it
 does not have or withholding the runs it does.
 
-Nothing is deleted to achieve any of it: the daemon on the other end spawns
-PTYs perfectly well, and the phase after v1 turns the first boolean back on.
+Nothing was deleted to achieve any of it, which is what made the second step one
+line: the daemon on the other end spawns PTYs perfectly well, and turning
+`runsBlocks` back on is the whole of what running on a phone took, once the
+touch column of the surfaces it lights was built (§6, interactions.md §1a).
 
 `deviceKey` is the shell's too, and it is not a cut at all but a fact about
 which key authenticates. A phone adds, edits, removes and switches servers like
@@ -706,28 +714,26 @@ question at all — a Mac pointed at a VPS gets the same answer, and used to get
 and a bad one to discover by running the only verb that looked like it would
 help.
 
-The harness can be any of the three shells. `harness.html?shell=ios` is v1's,
-and `e2e/phone.spec.ts` uses it to hold both halves of the claim — the cut verbs
-absent, and every v1 verb still there, because a gate written too wide would cut
-the editor along with the terminal. `?shell=ios-runs` is the phase after it, and
-it holds the third claim, that the middle configuration is coherent rather than
-half of a broken one: the ▶ on a fence with no terminal button beside it, Run
-Block Inline in the palette without Run Block in Terminal, and the drawer still
-gone from the chrome. Anything else is the desktop, which keeps every verb.
+The harness can be either shell. `harness.html?shell=ios` is a phone's, and
+`e2e/phone.spec.ts` uses it to hold both halves of the claim — the cut verbs
+absent, and every verb a phone does have still there, because a gate written too
+wide would cut the editor along with the terminal. It holds the middle
+configuration in one place too: the ▶ on a fence with no terminal button beside
+it, Run Block Inline in the palette without Run Block in Terminal, and the
+drawer gone from the chrome. Anything else is the desktop, which keeps every
+verb. There was a second phone shell, `?shell=ios-runs`, for as long as the
+client was a step behind the view; it is gone, because the two now describe the
+same client.
 
-**Running commands is cut for its interaction surface, not because it cannot
-work.** A block that is running holds the daemon open through `running()`, so
-the run itself survives a backgrounded phone and its output is still in the
-ring when the app comes back, as long as the phone returns before the next
-idle check finds nothing running. That grace is anything from zero to sixty
-seconds after the run ends, depending on where it fell in the window relative
-to the last check. What does not survive is an idle drawer, and what does not
-exist yet is any of the rest of it: the host picker
-(interactions.md §4a), the confirmation (§4b), the unterminated-fence refusal
-(§4c), the rules about who owns the keyboard while a block runs (§6a), and an
-ANSI terminal on a phone screen. That is the part of the app where being
-wrong runs a command on the wrong machine, and it is not the part to build
-while the ssh transport is still new.
+**A run outlives the app being backgrounded.** A block that is running holds the
+daemon open through `running()`, so the run itself survives, and its output is
+still in the ring when the app comes back, as long as the phone returns before
+the next idle check finds nothing running. That grace is anything from zero to
+sixty seconds after the run ends, depending on where it fell in the window
+relative to the last check. A run also survives the page it was started from: a
+foregrounded reload claims the panels it can still show and the server ends the
+rest (`inlineClaim`, remote.md §7). What does not survive is an idle drawer,
+which is one of the reasons a phone has none.
 
 **Attaching a workspace is cut because the server already refuses it.**
 `bun/server.ts` answers a headless folder dialog with "attaching a folder
@@ -1223,22 +1229,24 @@ inside the Mac app.
    not the ContentChangeObserver. It taps fine in the harness, which is exactly
    what the ✕ did.
 
-Live command execution is not in this list. It is the phase after v1, and the
-two things §5 said it had to answer first are both built. A client asks for its
-sessions to be held and the server sets the term (`Hello.hold`, `HOLD_MAX_MS`),
-which holds nothing for a phone yet, because §8's cut means a phone opens no
-shells to hold. And a run's output being a push keyed by its id, with no attach
+Live command execution is the phase after v1, and it is in the client now:
+`ios.tsx` says `runsBlocks: true`. The two things §5 said it had to answer first
+were built before it. A client asks for its sessions to be held and the server
+sets the term (`Hello.hold`, `HOLD_MAX_MS`), which is what a backgrounded phone
+comes back to. And a run's output being a push keyed by its id, with no attach
 beside it, no longer leaves a foreground reload with a run the new page can
-neither see nor `cancelRun` — dismissing a panel is what sends that today,
-and a reload is not a dismissal, so the boot claims what it can still show
-instead and the server ends the rest (`inlineClaim`, remote.md §7).
+neither see nor `cancelRun` — dismissing a panel is what sends that, and a
+reload is not a dismissal, so the boot claims what it can still show instead and
+the server ends the rest (`inlineClaim`, remote.md §7).
 
 **The cut it lifts is inline runs and not the drawer**, which is why §8's
-`runsCommands` is now `runsBlocks` and `hasTerminal`. That is a client the
-harness can be (`?shell=ios-runs`) and the specs hold before there is any phone
-behind it: the ▶ without the terminal button beside it, Run Block Inline without
-Run Block in Terminal, and Restart Note Shell back, which a phone was offered
-throughout v1 and had no shell to restart.
+`runsCommands` is now `runsBlocks` and `hasTerminal`: the ▶ without the terminal
+button beside it, Run Block Inline without Run Block in Terminal, and Restart
+Note Shell back, which a phone was offered nothing to restart throughout v1.
+The specs held all of it before there was a phone behind it, against a second
+harness shell — `?shell=ios-runs` — which existed for exactly as long as the
+client was a step behind the view. Flipping the boolean retired it: `?shell=ios`
+is that client, and one shell cannot drift from the thing it stands in for.
 
 **The two questions asked before a command runs are answered.** The host picker
 and the run confirmation (interactions.md §4a, §4b) were built around a
@@ -1292,6 +1300,14 @@ to stop being able to shrink — flex took it back and drew the ✕ over the Bac
 note button. And "typing here" is gone on touch: the button is the disclosure
 there, and the width it costs is what the pair needs (§6a).
 
+A fourth thing came off the device, and it is the lane's own consequence. The
+group draws a bordered, filled box around itself, which at 22 points is what
+separates two small glyphs from the code they float OVER; around 44-point
+buttons in a lane of their own it is a 50-point empty panel with a speck in it,
+and it floats over nothing. It is transparent on touch rather than removed,
+because its 2px padding and 1px border are what put the glyph column 13px inside
+the card, where `editor/blocks.ts` puts the output panel's pair to line up.
+
 The profile chip is the one control in that layer that went the other way:
 absent, `display: none`, because Edit Note Profile… is note-scoped and its
 palette entry needs nothing pointed at first — which is not true of the ▶, and
@@ -1304,6 +1320,12 @@ rendering change, and WebKit withholds the click behind the synthetic mousemove
 that caused one. The headless project cannot see that, and only a device can
 settle it (phase 7).
 
-What the phase still has to answer is the rest of §8's cut. A software keyboard
+What the phase still has to answer is the keyboard a RUNNING block needs, which
+is a different keyboard from the one that writes the note. A software keyboard
 has no Ctrl, no Escape, no Tab and no arrows, and the accessory bar carries
-seven Markdown verbs over `.cm-content` only (§7).
+seven Markdown verbs over `.cm-content` only (§7) — so a phone answers a `sudo`
+password, a `[y/N]` or a pager's `q` by typing them, and has no key at all for
+the program that wants Ctrl-C, Ctrl-D, Escape or an arrow. The ✕ is the whole of
+the way out of one of those, and it kills the run rather than answering it. The
+drawer is not on that list and is not waiting for anything: a phone stays
+without one (§8).

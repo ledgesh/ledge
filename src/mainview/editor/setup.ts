@@ -401,9 +401,9 @@ const theme = EditorView.theme({
 //
 // The one client that gives the focus up is the one whose keyboard is on
 // screen (lib/shell.ts softKeyboard). All three things focus was kept FOR are
-// chords, and a phone has none of them: ⌘↩ does not exist there at all
-// (ios.md §8 cuts running), find and ⌘C are chords too, and iOS selects and
-// copies uneditable text natively anyway. What is left is the cost — tapping
+// chords, and a phone can type none of them: a software keyboard has no ⌘ for
+// ⌘↩, none for find and none for ⌘C, and iOS selects and copies uneditable text
+// natively anyway. What is left is the cost — tapping
 // the manual raises a keyboard over half of it, to type into a document that
 // drops every edit — so there `editable` goes off and the contentDOM stops
 // being a text field.

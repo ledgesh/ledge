@@ -134,6 +134,14 @@ section.
   fence, clear of the code. `editor/blocks.ts` still anchors it to that fence's
   glyph and knows nothing about either number — the pair belongs next to each
   other in one file, not one of them in a measurement.
+- **A control that stops floating over things stops needing the box that says
+  so.** The same group draws a filled, bordered box around its buttons on a
+  pointer client, where it is what holds two 22-point glyphs apart from the code
+  underneath them. In a lane of its own it holds them apart from nothing, and
+  the box is a 50-point empty panel with a speck in it — which is what a device
+  showed. Transparent on touch rather than removed: the padding and border are
+  load-bearing for where the glyph column lands, and only the paint was the
+  problem.
 - **A reserved width that can shrink is not reserved.** Chrome drawn in the
   body overlay (`editor/blocks.ts`) is invisible to the flexbox under it, so the
   layout holds space for it with an empty element. At 44 points that space is a

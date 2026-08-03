@@ -550,7 +550,7 @@ test.describe("the v1 features, by tap", () => {
   });
 });
 
-// --- what v1 on a phone does NOT have (ios.md §8) ----------------------------
+// --- what a phone does NOT have (ios.md §8) ----------------------------------
 //
 // The cut is only real if the verbs are ABSENT. A palette that lists Toggle
 // Terminal and answers with an error strip teaches the user that the palette
@@ -561,7 +561,7 @@ test.describe("the v1 features, by tap", () => {
 // what this DEVICE can do. Without it these same rows are present, which is the
 // point — the desktop keeps every one of them.
 
-test.describe("the iOS client, and what it does not run", () => {
+test.describe("the iOS client, and what it does not have", () => {
   const palette = async (page: Page, query: string) => {
     await page.getByRole("button", { name: /Go to Note/ }).tap();
     await page.keyboard.type(`>${query}`);
@@ -582,26 +582,6 @@ test.describe("the iOS client, and what it does not run", () => {
     ).toHaveCount(0);
     await palette(page, "terminal");
     await expect(page.getByText("Toggle Terminal")).toHaveCount(0);
-  });
-
-  test("no run verbs, and no run button on a fence", async ({ page }) => {
-    await palette(page, "run block");
-    await expect(page.getByText("Run Block Inline")).toHaveCount(0);
-    await expect(page.getByText("Run Block in Terminal")).toHaveCount(0);
-    await page.keyboard.press("Escape");
-    // The `sh` fence in the seeded Codebook note is the desktop suite's run
-    // fixture; here the pair beside it must not be drawn at all.
-    await expect(page.locator('[data-act="run"]')).toHaveCount(0);
-  });
-
-  test("no Restart Note Shell either, on a client that opens no shells", async ({
-    page,
-  }) => {
-    // The verb that kills a note's shells, on the one client that has none:
-    // both surfaces that spawn them are cut, so it restarts nothing and had no
-    // business being offered (lib/shell.ts).
-    await palette(page, "restart");
-    await expect(page.getByText("Restart Note Shell")).toHaveCount(0);
   });
 
   test("no folder verbs, because the server has nobody at it to pick one", async ({
@@ -691,7 +671,7 @@ test.describe("the iOS client, and what it does not run", () => {
     await expect(page.locator('[data-testid="locked-face"]')).toBeVisible();
   });
 
-  test("the verbs that are IN v1 are all still there", async ({ page }) => {
+  test("the verbs a phone does have are all still there", async ({ page }) => {
     // The other half of the claim, and the one that catches a gate written too
     // wide: cutting the terminal must not cut the editor with it.
     await palette(page, "");
@@ -712,18 +692,17 @@ test.describe("the iOS client, and what it does not run", () => {
   });
 });
 
-// --- the phone that runs blocks, and still has no drawer ---------------------
+// --- the phone runs blocks, and still has no drawer --------------------------
 //
-// §8's cut lifts in two steps (ios.md §14), so between v1 and a phone that has
-// everything there is a client that runs blocks inline and has no terminal.
-// That is not a transitional state to be tolerated: inline output is a panel
-// under the fence, and a drawer is a second arrangement with a keyboard grammar
-// (Ctrl-`, Escape) a phone cannot type, so the middle is where a phone stays.
+// §8's cut lifted in two steps (ios.md §14), and this is where it stopped: a
+// client that runs blocks inline and has no terminal. Not a transitional state
+// to be tolerated but where a phone stays — inline output is a panel under the
+// fence, and a drawer is a second arrangement with a keyboard grammar (Ctrl-`,
+// Escape) a phone cannot type.
 //
-// `?shell=ios-runs` is that client. Everything else about it matches `?shell=ios`
-// above, which is what makes the two describes a pair: the same view, told one
-// different thing about itself.
-test.describe("the phone that runs blocks, without a terminal", () => {
+// The same `?shell=ios` as the describe above, which is the point: one client,
+// asserted from both directions.
+test.describe("the phone runs blocks, without a terminal", () => {
   const palette = async (page: Page, query: string) => {
     await page.getByRole("button", { name: /Go to Note/ }).tap();
     await page.keyboard.type(`>${query}`);
@@ -731,7 +710,7 @@ test.describe("the phone that runs blocks, without a terminal", () => {
   const overlay = (page: Page) => page.locator("div.fixed.inset-0.z-50");
 
   test.beforeEach(async ({ page }) => {
-    await page.goto("/harness.html?shell=ios-runs");
+    await page.goto("/harness.html?shell=ios");
     await expect(
       page.getByRole("button", { name: /Toggle Sidebar/ }),
     ).toBeVisible();
@@ -804,17 +783,15 @@ test.describe("choosing a machine, and confirming a run, by finger", () => {
     await expect(page.locator(".cm-line", { hasText: "uptime" })).toBeVisible();
   }
 
-  // How a finger asks for a run. Two taps, and the first is not ceremony: the
-  // fence's controls are `opacity: 0` until the block is hovered or holds the
-  // caret (index.css), and a phone has only the second of those — so the tap
-  // that puts the caret in the block is what lights the ▶ it then taps.
+  // How a finger asks for a run: one tap on the ▶, which is lit without being
+  // asked on a client with no hover to ask with (index.css, §1a). Writing these
+  // specs is what found it costing two.
   async function tapRun(page: Page): Promise<void> {
-    await page.locator(".cm-line", { hasText: "uptime" }).tap();
     await page.locator('[data-act="run"]').tap();
   }
 
   test.beforeEach(async ({ page }) => {
-    await page.goto("/harness.html?shell=ios-runs");
+    await page.goto("/harness.html?shell=ios");
     await expect(
       page.getByRole("button", { name: /Toggle Sidebar/ }),
     ).toBeVisible();
@@ -965,7 +942,7 @@ test.describe("giving the keyboard back, with no key to press", () => {
   const IN_EDITOR = () => !!document.activeElement?.classList.contains("cm-content");
 
   test.beforeEach(async ({ page }) => {
-    await page.goto("/harness.html?shell=ios-runs");
+    await page.goto("/harness.html?shell=ios");
     await expect(
       page.getByRole("button", { name: /Toggle Sidebar/ }),
     ).toBeVisible();
@@ -1099,7 +1076,7 @@ test.describe("running a block by finger", () => {
   };
 
   test.beforeEach(async ({ page }) => {
-    await page.goto("/harness.html?shell=ios-runs");
+    await page.goto("/harness.html?shell=ios");
     await expect(page.getByRole("button", { name: /Toggle Sidebar/ })).toBeVisible();
   });
 
@@ -1143,11 +1120,19 @@ test.describe("running a block by finger", () => {
     // code: 22 more points of top padding, which is exactly what the group
     // gained, and the group lifted by the same 22. So it still ends where the
     // small one did, at the opening fence.
-    const group = (await page.locator(".ledge-ctl-group").boundingBox())!;
+    const groupEl = page.locator(".ledge-ctl-group");
+    const group = (await groupEl.boundingBox())!;
     const card = (await page.locator(".cm-line.ledge-code-top").boundingBox())!;
     const code = (await page.locator(".cm-line", { hasText: "sudo ls" }).boundingBox())!;
     expect(group.y).toBeGreaterThanOrEqual(card.y);
     expect(group.y + group.height).toBeLessThanOrEqual(code.y + 4);
+
+    // And the box a pointer client draws around the pair is not drawn around
+    // this one. It is there to separate two small glyphs from the code they
+    // float over; here the lane above does that, and the same fill and border
+    // around 44-point buttons is a 50-point empty panel with a speck in it.
+    await expect(groupEl).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+    await expect(groupEl).toHaveCSS("border-top-color", "rgba(0, 0, 0, 0)");
   });
 
   test("the note does not scroll sideways to hold them", async ({ page }) => {

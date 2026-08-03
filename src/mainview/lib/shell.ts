@@ -2,12 +2,12 @@
 // the notes can — two different questions, and the view needs both.
 //
 // Everything else in the app is a fact about the notes and belongs to the
-// server. These are not. Whether commands run is a decision the SHELL makes
-// about itself (ios.md §8 cuts running from v1 on a phone, for its interaction
-// surface rather than because it cannot work), and whether a folder can be
-// picked is a fact about the machine at the other end (a headless server has no
-// dialog to open, which is true of a VPS reached from a Mac exactly as it is of
-// one reached from a phone).
+// server. These are not. Whether a note's blocks run HERE is a decision the
+// SHELL makes about itself (ios.md §8: a phone has no terminal drawer, and cut
+// inline runs as well until the surfaces they need had a touch column), and
+// whether a folder can be picked is a fact about the machine at the other end
+// (a headless server has no dialog to open, which is true of a VPS reached from
+// a Mac exactly as it is of one reached from a phone).
 //
 // All of them exist so that a verb which cannot work is ABSENT rather than
 // present and failing (ios.md §8, interactions.md §4). A palette full of
@@ -49,11 +49,10 @@ export function configureShell(next: Partial<Shell>): void {
  * is the environment a block runs in and has nothing to edit for otherwise.
  *
  * Separate from `hasTerminal` because running a block and having a drawer are
- * separate surfaces, and the phase after v1 wants one without the other
- * (ios.md §14): a phone runs blocks inline, where the output is a panel under
- * the fence, before it has a terminal — a drawer is a second arrangement, a
- * second focus domain, and a keyboard grammar (Ctrl-`, Escape) a phone has no
- * way to type. One boolean could not say that; two can.
+ * separate surfaces, and a phone has the first without the second (ios.md §8):
+ * an inline run is a panel under the fence, while a drawer is a second
+ * arrangement, a second focus domain, and a keyboard grammar (Ctrl-`, Escape) a
+ * phone has no way to type. One boolean could not say that; two can.
  */
 export function runsBlocks(): boolean {
   return shell.runsBlocks;

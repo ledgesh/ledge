@@ -706,7 +706,7 @@ export function buildCommands(deps: RegistryDeps): Command[] {
     cmd("profile.open", {
       icon: KeyRound,
       // A profile is the environment a block runs in, so a client that does not
-      // run blocks has nothing to edit one for (ios.md §8's "editing profiles").
+      // run blocks has nothing to edit one for (ios.md §8).
       when: (ctx) => runsBlocks() && currentProfile(ctx, deps) !== null,
       run: (ctx) => {
         const name = currentProfile(ctx, deps);
@@ -904,9 +904,9 @@ export function buildCommands(deps: RegistryDeps): Command[] {
     cmd("editor.save", editorCommand(deps, Save, (ed, docId) => ed.save(docId))),
     // The two run verbs, and the two client-wide facts they need. Each sits on
     // top of editorCommand's focused-doc test, and the client-wide half is the
-    // reason a phone's palette has no "Run Block" in it at all (ios.md §8).
-    // They differ because the destination does: inline draws a panel under the
-    // fence, and in-terminal needs a drawer to put the command in.
+    // reason a phone's palette has the first of these and not the second
+    // (ios.md §8). They differ because the destination does: inline draws a
+    // panel under the fence, and in-terminal needs a drawer to put it in.
     cmd("block.runInline", onClient(runsBlocks, editorCommand(deps, Play, (ed, docId) => ed.runInline(docId)))),
     cmd(
       "block.runInTerminal",

@@ -50,15 +50,17 @@ import { configureLayout, restoredState } from "./workspace/persist";
 // Mac, keeps its terminal, and §9 is careful that the only thing width decides
 // is the chrome's arrangement.
 //
-// The phone has two of them, because §8's cut lifts in two steps (ios.md §14):
-// `ios` is v1, which runs nothing, and `ios-runs` is the phase after it, which
-// runs blocks inline and still has no terminal drawer. Everything else about
-// the two is identical, which is the point — the pair is what proves the
-// middle configuration is coherent rather than half of a broken one.
+// One phone shell and not two. §8's cut lifted in two steps and there was a
+// `?shell=ios-runs` beside this one while the second step was ahead of the
+// client (ios.md §14); now `ios.tsx` says `runsBlocks: true`, so that middle
+// configuration is what a phone IS and there is nothing left for the pair to
+// tell apart. What a phone still says no to is the drawer, and it says it here.
 const SHELL = new URLSearchParams(window.location.search).get("shell") ?? "";
-const FAKING_IOS = SHELL === "ios" || SHELL === "ios-runs";
+const FAKING_IOS = SHELL === "ios";
 configureShell({
-  runsBlocks: !FAKING_IOS || SHELL === "ios-runs",
+  // `runsBlocks` is not in this list because it is true of every shell the
+  // harness can be — a phone runs a note's blocks inline exactly as a Mac does,
+  // and the two differ over the drawer alone (lib/shell.ts).
   hasTerminal: !FAKING_IOS,
   // The whole set ios.tsx sets, because two of them decide what a spec can
   // see: whether the connection form asks for a key file or shows the one this

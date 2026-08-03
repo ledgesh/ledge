@@ -63,16 +63,22 @@ async function start(): Promise<void> {
   const { client, destination, key } = await shell.hello();
   mark("hello");
 
-  // v1 on a phone does not run commands (ios.md §8). Set before anything
-  // renders — bootView below is the first of that — because what this decides
-  // is which verbs EXIST: a terminal button that appears for one frame and then
-  // leaves is worse than either answer.
+  // A phone runs a note's blocks, and has no terminal drawer (ios.md §8). Set
+  // before anything renders — bootView below is the first of that — because
+  // what this decides is which verbs EXIST: a terminal button that appears for
+  // one frame and then leaves is worse than either answer.
   //
-  // Cut for its interaction surface, not because it cannot work — the daemon on
-  // the other end spawns PTYs perfectly well — so this is two booleans and no
-  // code removed, and the phase after v1 turns them back on one at a time:
-  // blocks run inline first, because the drawer needs a second arrangement and
-  // a keyboard grammar a phone cannot type (ios.md §14, lib/shell.ts).
+  // v1 said false to both, for the interaction surface rather than because it
+  // could not work: the daemon on the other end spawns PTYs perfectly well.
+  // Lifting the first is what the two booleans were split for. A run is a panel
+  // under the fence, the ▶ on that fence is lit and 44 points because a finger
+  // has no hover to summon it with, the run takes the keyboard when it first
+  // speaks and hands it back on Back to note (interactions.md §1a, §6a), and it
+  // outlives the connection that carried it (remote.md §7).
+  //
+  // `hasTerminal` stays false, and is where a phone stays rather than a step
+  // not yet taken: a drawer is a second arrangement, a second focus domain, and
+  // a keyboard grammar (Ctrl-`, Escape) a phone has no way to type.
   //
   // The other two are facts about this shell rather than cuts. This client
   // authenticates with one key of its own, in the Secure Enclave, so the
@@ -81,7 +87,7 @@ async function start(): Promise<void> {
   // what makes focus expensive enough for the read-only editor to give it up
   // (lib/shell.ts).
   configureShell({
-    runsBlocks: false,
+    runsBlocks: true,
     hasTerminal: false,
     deviceKey: key,
     softKeyboard: true,
