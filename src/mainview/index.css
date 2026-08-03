@@ -613,6 +613,28 @@ body {
   user-select: none;
   -webkit-user-select: none;
 }
+/* Reserved for the copy and dismiss pair, drawn in the body overlay. */
+.ledge-term-gap {
+  width: 48px;
+}
+/* On touch the header is where the panel's tap targets live, so it is sized
+   for one — unconditionally, not only while focused: a header that grew when
+   the run took the keyboard would move the terminal under the thumb about to
+   answer it. The extra reserved width is separation, and the neighbour it
+   separates from is the ✕ that interrupts the run. blocks.ts re-centres the
+   overlay pair on whatever height this leaves. */
+@media (hover: none) {
+  .ledge-output-header {
+    height: auto;
+    /* 44 for the control plus 2 above and below: at exactly 44 the button's
+       border lands on the panel's own top border and on the header's bottom
+       rule, which reads as a rendering fault rather than as a button. */
+    min-height: 48px;
+  }
+  .ledge-term-gap {
+    width: 72px;
+  }
+}
 .ledge-dot {
   width: 7px;
   height: 7px;
@@ -655,7 +677,8 @@ body {
   border-color: color-mix(in srgb, var(--link) 60%, var(--panel-border));
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--link) 18%, transparent);
 }
-.ledge-focus-hint {
+.ledge-focus-hint,
+.ledge-focus-key {
   display: none;
   font-size: 10px;
   color: var(--ed-muted);
@@ -665,6 +688,40 @@ body {
 }
 .ledge-output:focus-within .ledge-focus-hint {
   display: inline;
+}
+/* The way back out of a focused run, in the two forms the two kinds of client
+   can actually use (interactions.md §6a). Each media query only ADDS, so the
+   two can never both apply and never both be missing: a client either hovers
+   or it does not. */
+@media (hover: hover) {
+  .ledge-output:focus-within .ledge-focus-key {
+    display: inline;
+  }
+}
+@media (hover: none) {
+  .ledge-output:focus-within .ledge-term-leave {
+    display: inline-flex;
+  }
+}
+/* Hidden until that rule shows it. A button, not a line of text, because the
+   keys it stands in for do not exist on this client and tapping the prose —
+   the Mac's other way out — is unavailable exactly when a full-screen program
+   has taken the screen. */
+.ledge-term-leave {
+  display: none;
+  appearance: none;
+  align-items: center;
+  /* 44 points, in pixels: this is a physical size and must not ride the
+     typographic scale (interactions.md §1a). The header grows to hold it. */
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  background: var(--btn-hover);
+  color: var(--fg);
+  font: 12px -apple-system, system-ui, sans-serif;
+  white-space: nowrap;
+  cursor: pointer;
 }
 .ledge-duration {
   font-size: 11px;

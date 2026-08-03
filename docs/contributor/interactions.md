@@ -82,6 +82,7 @@ section.
 | ⌘P / ⇧⌘P / ⌥⌘P | the magnifier in the header, which opens the overlay |
 | ⌘B / ⌘I / ⌘K, Tab / ⇧Tab, `[[` | the keyboard accessory bar, on the clients that have one (ios.md §7) |
 | ⌘V of a picture | Insert Image…, on the bar and in the palette: a phone has no ⌘V and nothing on its pasteboard got there by being copied |
+| ⌘Escape / Escape Escape out of a running block | a Back to note button in the run's own header (§6a) |
 | Nothing dismisses the keyboard | the bar's own last button, apart from the verbs |
 
 - **The long press is 500 ms, and belongs to touch and pen only**
@@ -149,6 +150,15 @@ section.
 - **A menu fits the screen it opens on** (`lib/menuPlacement.ts`): below the
   press where there is room, flipped above it where there is not, never past an
   edge. A menu item you cannot see is a verb the user does not have.
+- **Nothing in a note may be wider than the note.** The editor scrolls
+  sideways to whatever its widest thing is, and on a 390-point screen that
+  scroll takes the chrome of every panel off the right edge with it. The one
+  that did was the inline run's: an xterm opens at 80 columns, so it pushed the
+  content out to 80 columns and the re-fit then measured the overflow it had
+  caused and agreed with it — a stable wrong answer, harmless at 1005 points
+  and the whole panel at 370. Anything with an intrinsic width inside the
+  document has to start smaller than the space it will be given and grow into
+  it (`editor/inlineTerm.ts` opens at 2 columns and 1 row for exactly this).
 - **A control a finger chooses BETWEEN is at least 44 points tall.** Not every
   control: a lone button can be missed and pressed again, and the app is full of
   16-point glyphs that are fine because nothing sits against them. The rule is
@@ -556,6 +566,19 @@ secret written to a synced file — because focus never moved.
     tap, so the first has already gone through. The drawer (§6 layer 5) does
     take Escape from its shell; the inline panel is where full-screen
     programs actually get run, so it cannot afford that tradeoff.
+- **On touch the exit is a control in the header, because neither key exists.**
+  A phone has no ⌘, and its software keyboard has no Escape at all. That leaves
+  the exit a Mac never has to think about — clicking the prose — and a
+  full-screen program is precisely what takes that one away: pinned to 24 rows
+  with the keyboard up, the panel can be everything on screen. So the header
+  carries a **Back to note** button, on the same `:focus-within` gate as the
+  hint beside it. It stands in for ⌘Escape rather than for the double tap, a
+  button being the one form no program can swallow, so it has no `pinned` case
+  and one label. That label is not "Done": the run is not done, and the ✕ a
+  little to its right is the control that interrupts one. It is 44 points
+  (§1a), which is what the header grows to on touch. The key names and the
+  button are two elements picked between by `@media (hover: …)` in `index.css`
+  — each query only adds, so no client can end up with both or with neither.
 - **A focused run is the `terminal` domain**, not `editor`, though the panel
   lives inside `.cm-editor`: the shell owns Ctrl here as in the drawer
   (`domainOf` asks `.xterm` first).

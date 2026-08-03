@@ -66,6 +66,8 @@ export class InlineTerm {
   private readonly status: HTMLSpanElement;
   private readonly hostChip: HTMLSpanElement;
   private readonly focusHint: HTMLSpanElement;
+  private readonly exitKey: HTMLSpanElement;
+  private readonly leaveBtn: HTMLButtonElement;
   private readonly duration: HTMLSpanElement;
   private readonly term: Terminal;
   private readonly fit: FitAddon;
@@ -109,12 +111,57 @@ export class InlineTerm {
     // get back out (the Escape grammar below).
     this.focusHint = document.createElement("span");
     this.focusHint.className = "ledge-focus-hint";
+    this.focusHint.textContent = "typing here";
+    // The way out, said twice, because the two kinds of client have nothing in
+    // common here: one names the keys, the other IS the exit. Both are built
+    // and only one is ever shown — the CSS picks by `@media (hover: …)`, so
+    // there is no live media query to re-read and no state to keep in step.
+    this.exitKey = document.createElement("span");
+    this.exitKey.className = "ledge-focus-key";
+    // A phone has neither ⌘Escape nor an Escape to press twice, and the way
+    // out a Mac never needs — tapping the prose — is exactly what a full-screen
+    // program takes away: pinned to 24 rows with the keyboard up, the panel can
+    // be the whole screen (interactions.md §6a). So the touch client gets a
+    // control, and it is the analogue of ⌘Escape rather than of the double tap:
+    // a button is the one form no program can swallow, so it needs no `pinned`
+    // case and never changes its label.
+    //
+    // "Back to note" and not "Done": the run is not done, and must not look
+    // like it is being stopped. Leaving is a focus move; the ✕ beside it is the
+    // one that interrupts.
+    this.leaveBtn = document.createElement("button");
+    this.leaveBtn.className = "ledge-term-leave";
+    this.leaveBtn.textContent = "Back to note";
+    // mousedown, like every other button in the editor's chrome (blocks.ts
+    // iconButton), and preventDefault so focus never lands on the button on the
+    // way past. On a phone that is not a nicety: focus moving textarea → button
+    // → editor puts the software keyboard away and brings it back, and the
+    // point of leaving is to carry on typing.
+    this.leaveBtn.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      this.leave();
+    });
     this.setFocusHint();
     this.duration = document.createElement("span");
     this.duration.className = "ledge-duration";
+    // Reserved for the copy and dismiss buttons, which are drawn in the body
+    // overlay rather than in here (blocks.ts) and so take no space of their
+    // own. Wider on touch, where what sits to the left of them is a 44-point
+    // control and not a line of 10px text: the gap is the separation between
+    // "give the keyboard back" and "interrupt this run".
     const gap = document.createElement("span");
-    gap.style.width = "48px";
-    this.header.append(this.dot, this.status, this.hostChip, spacer, this.focusHint, this.duration, gap);
+    gap.className = "ledge-term-gap";
+    this.header.append(
+      this.dot,
+      this.status,
+      this.hostChip,
+      spacer,
+      this.focusHint,
+      this.exitKey,
+      this.leaveBtn,
+      this.duration,
+      gap,
+    );
     this.wrap.appendChild(this.header);
 
     this.body = document.createElement("div");
@@ -147,6 +194,17 @@ export class InlineTerm {
       // liveRows() never shrinks a running grid, so the starting size is the
       // smallest the panel can ever be.
       rows: 1,
+      // And at the narrowest grid xterm allows, for a sharper version of the
+      // same reason: the panel has no width of its own. It fills the editor's
+      // content, and the editor's content is as wide as its widest thing — so
+      // an xterm that opens at the default 80 columns PUSHES the content out to
+      // 80 columns, and the re-fit then measures that and agrees with it. A
+      // stable wrong answer, invisible on a Mac (605 points inside a 1005-point
+      // editor) and the whole panel on a phone: 605 inside 370, so the note
+      // scrolled sideways and the run's own header ran off the screen. Opening
+      // at 2 leaves nothing to push with, and the first re-fit grows the grid to
+      // whatever the editor actually is.
+      cols: 2,
       theme: xtermTheme(isDarkAppearance()),
       cursorBlink: false,
       allowProposedApi: true,
@@ -276,7 +334,7 @@ export class InlineTerm {
   }
 
   private setFocusHint(): void {
-    this.focusHint.textContent = this.pinned ? "typing here · ⌘esc to exit" : "typing here · esc esc to exit";
+    this.exitKey.textContent = this.pinned ? "· ⌘esc to exit" : "· esc esc to exit";
   }
 
   write(bytes: Uint8Array): void {

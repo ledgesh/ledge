@@ -39,9 +39,14 @@ test("a run takes the keyboard when it first speaks, and says so", async ({ page
   await page.evaluate((runId) => window.__harness.runOutput(runId, "Password:"), id);
 
   await expect.poll(() => page.evaluate(IN_TERMINAL)).toBe(true);
-  // And the panel says whose keys these are, with the way out.
-  await expect(page.locator(".ledge-focus-hint")).toBeVisible();
-  await expect(page.locator(".ledge-focus-hint")).toHaveText("typing here · esc esc to exit");
+  // And the panel says whose keys these are, with the way out. Two elements,
+  // because the way out is not the same sentence on a client with no keys: the
+  // touch half of this is phone.spec.ts's.
+  await expect(page.locator(".ledge-focus-hint")).toHaveText("typing here");
+  await expect(page.locator(".ledge-focus-key")).toHaveText("· esc esc to exit");
+  // And the control that stands in for those keys is not on a Mac, which has
+  // them.
+  await expect(page.locator(".ledge-term-leave")).toBeHidden();
 });
 
 test("a user who went back to writing keeps the keyboard", async ({ page }) => {

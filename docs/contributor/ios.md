@@ -1260,10 +1260,27 @@ in this app is 0.875 of its name — the document's root is `font: 14px` — so
 `min-h-11`, the utility that spells 44, renders 38.5. A tap target is a physical
 measurement and is written in pixels.
 
+**A running block can be left without a chord.** interactions.md §6a hands the
+keyboard to a run when it first speaks, so a `sudo` prompt is answered by
+typing, and takes it back on ⌘Escape or a double Escape — a phone has neither,
+and its one inherited exit, tapping the prose, is exactly what a full-screen
+program removes by pinning the panel to 24 rows. The panel's header now carries
+the exit as a **Back to note** button on touch, in place of the line of text
+that names those keys, and grows to 44 points to hold it.
+
+Two things came out of building it. The panel did not fit the screen at all: an
+xterm opens at 80 columns, the editor scrolls sideways to its widest thing, and
+the re-fit then measured the overflow it had caused and kept it — 605 points
+inside a 370-point editor, with the run's own header off the right edge, and
+invisible on a Mac where 605 fits inside 1005. It opens at 2 columns now and
+grows into whatever it is given (interactions.md §1a). The second is that the
+overlay's copy and ✕ are positioned against a header height that was a
+constant; they are measured against the real one now, which is what lets the
+header be two different sizes.
+
 What the phase still has to answer is the rest of that cut. A software keyboard
 has no Ctrl, no Escape, no Tab and no arrows, and the accessory bar carries
-seven Markdown verbs over `.cm-content` only (§7). The hatches interactions.md
-§6a gives for taking the keyboard back from a running block are ⌘Escape and a
-double Escape, neither of which exists on a phone. And the fence's own controls
+seven Markdown verbs over `.cm-content` only (§7). And the fence's own controls
 are a hover-revealed group of 22-point buttons — reachable, because the caret
-lights them too, but not yet sized for the hand reaching them.
+lights them too, but not yet sized for the hand reaching them, and neither is
+the ✕ that interrupts a run.

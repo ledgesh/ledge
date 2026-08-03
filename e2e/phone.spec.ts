@@ -947,3 +947,126 @@ test.describe("choosing a machine, and confirming a run, by finger", () => {
     expect((await page.evaluate(() => window.__harness.inlineRuns()))[0].host).toBe("db2");
   });
 });
+
+// --- getting the keyboard back off a run ------------------------------------
+//
+// interactions.md §6a: a run takes the keyboard when it first speaks, so a
+// `sudo` password goes to sudo instead of into the note, and the way back is
+// ⌘Escape or two Escapes. A phone has no ⌘ and its software keyboard has no
+// Escape at all, which leaves one exit inherited by accident — tapping the
+// prose — and a full-screen program is exactly what takes that away: it pins
+// the panel to 24 rows, and 24 rows with the keyboard up is the whole screen.
+//
+// So the panel carries the exit as a control on this client. The desktop half
+// (who claims the keyboard, and when the claim lapses) is inline-focus.spec.ts's
+// and is not restated here.
+test.describe("giving the keyboard back, with no key to press", () => {
+  const IN_TERMINAL = () => !!document.activeElement?.closest(".xterm");
+  const IN_EDITOR = () => !!document.activeElement?.classList.contains("cm-content");
+
+  test.beforeEach(async ({ page }) => {
+    await page.goto("/harness.html?shell=ios-runs");
+    await expect(
+      page.getByRole("button", { name: /Toggle Sidebar/ }),
+    ).toBeVisible();
+  });
+
+  // A block run by finger, then made to speak. PTYs are inert in the harness,
+  // so `runOutput` pushes the first byte the way Bun's runEvent would — which
+  // is the moment the run claims the keyboard, and the only thing this needs.
+  async function talkingRun(page: Page): Promise<void> {
+    await page.keyboard.press("Meta+n");
+    await expect(page.locator(".cm-line").first()).toHaveText("# Untitled");
+    await page.keyboard.press("Meta+a");
+    await page.keyboard.insertText("# Untitled\n\n```sh\nsudo ls\n```\n");
+    // The tap that puts the caret in the block is also what lights the ▶: the
+    // fence's controls are `opacity: 0` until hover or caret, and a phone has
+    // only the second.
+    await page.locator(".cm-line", { hasText: "sudo ls" }).tap();
+    await page.locator('[data-act="run"]').tap();
+    await expect(page.locator(".ledge-output")).toBeVisible();
+    const runs = await page.evaluate(() => window.__harness.inlineRuns());
+    const id = runs[runs.length - 1]!.id;
+    await page.evaluate((runId) => window.__harness.runOutput(runId, "Password:"), id);
+    await expect.poll(() => page.evaluate(IN_TERMINAL)).toBe(true);
+  }
+
+  test("the panel offers a control where a Mac names two keys", async ({ page }) => {
+    await talkingRun(page);
+    // Still the same disclosure — the keystrokes are going somewhere else and
+    // the panel has to say so. What differs is the half that follows it.
+    await expect(page.locator(".ledge-focus-hint")).toHaveText("typing here");
+    await expect(page.locator(".ledge-focus-key")).toBeHidden();
+    await expect(page.locator(".ledge-term-leave")).toBeVisible();
+  });
+
+  test("tapping it hands the keyboard to the note, and does not stop the run", async ({
+    page,
+  }) => {
+    await talkingRun(page);
+    await page.locator(".ledge-term-leave").tap();
+
+    await expect.poll(() => page.evaluate(IN_EDITOR)).toBe(true);
+    // Leaving is a focus move and nothing else: the panel is still there, still
+    // running, and its output is still on screen. The ✕ is the one that
+    // interrupts.
+    await expect(page.locator(".ledge-output")).toBeVisible();
+    await expect(page.locator(".ledge-status")).toHaveText("Running");
+    // And with the keyboard back in the note, it goes in the note.
+    await page.keyboard.type("still writing");
+    await expect(page.locator(".cm-line", { hasText: "still writing" })).toBeVisible();
+  });
+
+  test("it is only there while the run holds the keyboard", async ({ page }) => {
+    await talkingRun(page);
+    await expect(page.locator(".ledge-term-leave")).toBeVisible();
+    await page.locator(".ledge-term-leave").tap();
+    // Nothing to give back, so nothing offering to: the control follows focus
+    // rather than the run, which is what makes it impossible to leave stale.
+    await expect(page.locator(".ledge-term-leave")).toBeHidden();
+    await expect(page.locator(".ledge-focus-hint")).toBeHidden();
+  });
+
+  test("the panel it sits in fits the screen", async ({ page }) => {
+    await talkingRun(page);
+    // A control off the right edge is not a control, and the panel had no width
+    // of its own to keep it on: it fills the editor's content, the content is as
+    // wide as its widest thing, and an xterm opening at 80 columns WAS that
+    // thing — 605 points inside a 370-point editor, with the re-fit measuring
+    // the overflow it caused and agreeing with it. Harmless on a Mac, where 605
+    // fits; here it put the whole header off the screen.
+    const panel = (await page.locator(".ledge-output").boundingBox())!;
+    expect(panel.x + panel.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+    // Sideways scroll is the symptom, and the note is what does it.
+    const scroll = await page.locator(".cm-scroller").evaluate((el) => ({
+      w: el.clientWidth,
+      s: el.scrollWidth,
+    }));
+    expect(scroll.s).toBeLessThanOrEqual(scroll.w);
+  });
+
+  test("it is 44 points, and clear of the ✕ that interrupts", async ({ page }) => {
+    await talkingRun(page);
+    const leave = (await page.locator(".ledge-term-leave").boundingBox())!;
+    expect(leave.height).toBeGreaterThanOrEqual(44);
+
+    // The neighbour is the pair drawn in the body overlay, and the nearer of the
+    // two dismisses a still-running block by interrupting it. Same argument as
+    // the confirmation's Cancel/Run pair above: adjacent alternatives where the
+    // miss does not land on nothing (interactions.md §1a).
+    const copy = (await page.locator(".ledge-close-wrap button").first().boundingBox())!;
+    expect(copy.x - (leave.x + leave.width)).toBeGreaterThanOrEqual(16);
+  });
+
+  test("the way back in is a tap on the terminal", async ({ page }) => {
+    await talkingRun(page);
+    await page.locator(".ledge-term-leave").tap();
+    await expect.poll(() => page.evaluate(IN_EDITOR)).toBe(true);
+
+    // The exit has to be reversible or it is a trap: the run is still asking
+    // for a password, and answering it must not need the block re-run.
+    await page.locator(".xterm-screen").tap();
+    await expect.poll(() => page.evaluate(IN_TERMINAL)).toBe(true);
+    await expect(page.locator(".ledge-term-leave")).toBeVisible();
+  });
+});

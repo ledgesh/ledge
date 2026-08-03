@@ -18,6 +18,8 @@ If you pressed ⌘↩ and carried on writing, the run does not take the keyboard
 
 To leave a running command, press Escape twice (the first Escape goes to the program, in case it wanted it) or ⌘Escape. While a full-screen program such as `vim` holds the panel, every Escape belongs to it, and ⌘Escape is the way out.
 
+On a touch device the header shows a Back to note button instead, for as long as the run holds the keyboard. Leaving does not stop the command: the run carries on, and tapping the output puts you back in it.
+
 ## Confirm before running
 
 Add `confirm` after the language on the fence and Ledge asks before running the block:

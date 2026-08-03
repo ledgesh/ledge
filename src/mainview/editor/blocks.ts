@@ -779,9 +779,16 @@ const overlayPlugin = ViewPlugin.fromClass(
         const panel = view.dom.querySelector<HTMLElement>(`[data-ledge-run="${run.id}"]`);
         if (!panel) continue;
         const r = panel.getBoundingClientRect();
+        // Measured rather than assumed: the header is 24 points on a pointer
+        // client and 44 on a touch one, where it holds a 44-point control of
+        // its own (index.css, interactions.md §6a). The offset below is the
+        // empirical one for 24, plus half of whatever the header gained, which
+        // keeps this pair centred on either.
+        const headerH =
+          panel.querySelector(".ledge-output-header")?.getBoundingClientRect().height ?? 24;
         closes.push({
           id: run.id,
-          top: r.top - base.top + 3, // 3px into the 24px header
+          top: r.top - base.top + 3 + (headerH - 24) / 2,
           // Column-aligned with the block's own controls above. Those sit at
           // `cardInset + 10` inside a group with 2px padding and a 1px border,
           // so their glyphs land 13px in from the card edge; this wrapper has
