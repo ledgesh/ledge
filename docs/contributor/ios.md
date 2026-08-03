@@ -326,13 +326,15 @@ again.
 
 **iOS suspends an app shortly after it leaves the foreground, and a suspended
 app's socket dies.** Reconnecting is the ordinary path on a phone, not the
-failure path, and three numbers decide what that costs:
+failure path, and five numbers decide what that costs:
 
 | Clock | Length |
 | ----- | ------ |
 | Background execution after leaving the foreground | about 30s, then suspension |
 | The reconnect ladder (`shared/transport.ts` `RECONNECT_DELAYS`) | 8 attempts, 31.75s |
 | The daemon's idle exit (`daemon.ts` `IDLE_EXIT_MS`) | 60s |
+| The session hold this client asks for (`mainview/ios.tsx` `SESSION_HOLD_MS`) | 5 min |
+| The most a daemon will grant (`daemon.ts` `HOLD_MAX_MS`) | 10 min |
 
 Three consequences, in the order they bite:
 
@@ -357,14 +359,14 @@ Three consequences, in the order they bite:
   dial keeps the ladder from doing anything with it; coming back reloads and
   reaches a server again 211ms later. A whole boot is cheaper than the
   bookkeeping that would avoid it.
-- **The server is usually gone, and the sessions with it.** Sixty seconds of
-  no client and nothing running is the daemon exiting. `running()` means a
-  block in flight or a shell inside a foreground command, so an idle drawer
-  sitting at a prompt holds nothing. remote.md §7's "sessions outlive
-  connections" therefore holds for a Mac that reconnects inside half a minute
-  and not for a phone that comes back after lunch. What is lost is the PTYs
-  and the scrollback ring; what is not lost is the notes, which is the right
-  side of that trade.
+- **The server is gone in a minute unless the client asked it to stay.** Sixty
+  seconds of no client and nothing running is the daemon exiting. `running()`
+  means a block in flight or a shell inside a foreground command, so an idle
+  drawer sitting at a prompt does not count. A client that declared a session
+  hold moves that deadline out to what it was granted; the paragraph below is
+  the whole of that mechanism, and past the grant the answer is what it always
+  was. What is lost then is the PTYs and the scrollback ring; what is not lost
+  is the notes, which is the right side of that trade.
 - **The writes are already safe.** A reconnect that reaches a *different*
   daemon instance sees a different `Hello.instance` and fails what was in
   flight rather than guessing (remote.md §7). The op log's window is 120
@@ -390,12 +392,40 @@ Three consequences, in the order they bite:
   stays there until it is chosen again. Nothing about it is iOS-specific, which
   is why none of it is in `ios/`.
 
-**The idle timeout stays at 60 seconds.** Raising it for phones would leave a
-process running on someone's Mac for a client that may never come back, and
-the phone has nothing worth keeping alive while v1 does not run commands
-(§8). When live execution arrives, the answer is a client that declares it
-wants its sessions held, with the server timing that request out on its own
-terms. It is not a bigger constant.
+**The idle timeout stays at 60 seconds, and a client asks for longer.** Raising
+the constant for phones would leave a process running on someone's Mac for every
+client that may never come back. So the ask is the client's and the term is the
+server's: a client's hello carries `hold`, the milliseconds it wants its
+sessions kept once the connection ends, and a server's hello carries the longest
+it will grant. Both ends apply `wire.ts` `sessionHold` to that pair. When the
+client goes, the daemon arms its idle timer for what this connection was granted
+rather than for `IDLE_EXIT_MS`.
+
+Three parts of that shape are load-bearing:
+
+- **The ask is stated at connect time, not on the way out.** iOS gives about
+  thirty seconds of background execution and can give none at all: an app that
+  is force-quit, or killed under memory pressure, runs no further line of code.
+  An ask made when the connection ends would never be made in the cases that
+  most need it.
+- **The hellos cross rather than answering each other.** A server sends its own
+  the moment the socket opens, before any client has asked, so no grant can
+  travel back inside this handshake. Both ends computing the same number from
+  the same pair costs no round trip, and neither end has to guess.
+- **A hold applies to a session, not to a socket.** The daemon holds only while
+  something is open to hold (`server.sessionsOpen()`: a note's inline shell or a
+  drawer's, at a prompt or not). A client that asked for a hold and opened no
+  shell has nothing to come back to, and gets the ordinary sixty seconds.
+
+What a hold buys is exactly what `running()` is right to ignore: a shell at a
+prompt, holding the cwd it was `cd`'d to and whatever the last block exported. A
+run in flight was already keeping the daemon alive and still is, hold or no
+hold.
+
+**The ceiling is not the ordinary grant.** Five minutes is what a locked screen
+and a message answered costs, and a phone is granted it whole; ten is there for
+a client that asks for something nobody waits through. A number that always came
+back clamped would teach nobody anything on the day it mattered.
 
 **So foregrounding is a boot, and the boot is the number to measure.** The
 view's boot builds the registry, the note lists, the tags and the layout, and
@@ -966,7 +996,9 @@ exist.
 The lifecycle itself is testable and should be tested by hand every time §5
 changes: background the app, wait past 60 seconds, foreground it, and check
 that it dials, that the daemon is a new instance, and that a write made just
-before backgrounding did not apply twice.
+before backgrounding did not apply twice. Once a phone opens shells, the same
+walk with one open should find the SAME instance inside the session hold and a
+new one past it.
 
 ## 14. Phasing
 
@@ -1162,6 +1194,19 @@ inside the Mac app.
    pointer events, and the geometry of a 14 Pro Max against a keyboard fix built
    on a 16.
 
-Live command execution is not in this list. It is the phase after v1, and §5
-says what it has to answer first: a client that can ask a server to hold its
-sessions, and a server that times that request out on its own terms.
+Live command execution is not in this list. It is the phase after v1, and the
+first thing §5 said it had to answer is built: a client asks for its sessions to
+be held and the server sets the term (`Hello.hold`, `HOLD_MAX_MS`). It holds
+nothing for a phone yet, because §8's cut means a phone opens no shells to hold.
+
+What the phase still has to answer is the rest of that cut. A run's output is a
+push keyed by its id with no attach beside it, so a foreground reload leaves an
+inline run going on the server that the new page cannot see and cannot
+`cancelRun`, because it never learned the id — dismissing a panel is what sends
+that today, and a reload is not a dismissal. A software keyboard has no Ctrl, no
+Escape, no Tab and no arrows, and the accessory bar carries seven Markdown verbs
+over `.cm-content` only (§7). The hatches interactions.md §6a gives for taking
+the keyboard back from a running block are ⌘Escape and a double Escape, neither
+of which exists on a phone. And the host picker and the run confirmation
+(interactions.md §4a, §4b) are dialogs built around a keyboard grammar, on the
+one surface where being wrong runs a command on the wrong machine.

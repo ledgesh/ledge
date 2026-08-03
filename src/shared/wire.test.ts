@@ -25,6 +25,7 @@ import {
   REQUEST_METHODS,
   restoreBinary,
   SCHEMA_VERSION,
+  sessionHold,
   WireError,
   type Frame,
   type WireMessage,
@@ -265,6 +266,76 @@ describe("the handshake", () => {
   // client that cannot connect.
   test("an empty id is accepted", () => {
     expect(checkHello(hello("client", "0.1.0", ""), "client")).toBeNull();
+  });
+
+  // Two numbers under one name: what the client asks for, and the most the
+  // server will do. Which is which is decided by the role, because the hellos
+  // cross rather than answering each other.
+  test("the ask and the ceiling ride the same field, one from each end", () => {
+    expect(hello("client", "0.1.0", "abc-123", "", 300_000).hold).toBe(300_000);
+    expect(hello("server", "0.1.0", "", "one-server", 600_000).hold).toBe(600_000);
+    // And by default nobody asks and nobody offers: a desktop client is not
+    // suspended out from under its connection, and has no reason to.
+    expect(hello("client", "0.1.0").hold).toBe(0);
+    expect(hello("server", "0.1.0").hold).toBe(0);
+  });
+
+  test("the hold survives the round trip", () => {
+    const sent = hello("client", "0.1.0", "abc-123", "", 300_000);
+    expect(parseControl(JSON.stringify(sent))).toEqual(sent);
+  });
+
+  // Absent is lenient for the same reason the client id is: a peer old enough
+  // to omit it fails on the protocol version instead, which names both numbers.
+  test("a hello with no hold asks for nothing", () => {
+    expect(parseControl('{"t":"hello","role":"client","protocol":2,"schema":"a","build":"b"}')).toMatchObject({
+      hold: 0,
+    });
+  });
+
+  // Stricter than the two strings beside it, because this one is arithmetic
+  // the server does on a number the client chose: NaN compares false against
+  // everything, and the timer it reached would be armed for nothing.
+  test.each([
+    ["a string", '"soon"'],
+    ["not a number", "null"],
+    ["negative", "-1"],
+    ["infinite", "1e999"],
+  ])("a hold that is %s is refused", (_what, value) => {
+    const text = `{"t":"hello","role":"client","protocol":2,"schema":"a","build":"b","hold":${value}}`;
+    expect(() => parseControl(text)).toThrow(WireError);
+  });
+});
+
+// The client names what it wants, the server names what it will do, and the
+// term is the server's because the process being kept alive is the server's
+// (remote.md §7, bun/daemon.ts HOLD_MAX_MS).
+describe("the session hold", () => {
+  test("an ask the server keeps that long is granted whole", () => {
+    expect(sessionHold(300_000, 600_000)).toBe(300_000);
+  });
+
+  test("an absurd ask is clamped rather than refused", () => {
+    expect(sessionHold(86_400_000, 600_000)).toBe(600_000);
+  });
+
+  // Both of the ways this ends up zero, and they mean the same thing to the
+  // daemon: nothing here is worth keeping a process for.
+  test("nothing offered and nothing asked both come to nothing", () => {
+    expect(sessionHold(300_000, 0)).toBe(0);
+    expect(sessionHold(0, 600_000)).toBe(0);
+    expect(sessionHold(-1, 600_000)).toBe(0);
+  });
+
+  // The reason it is one function rather than a rule each end keeps: they
+  // compute it from opposite sides of the same pair and must not disagree,
+  // and no reply carries the answer back.
+  test("both ends reach the same number without either being told", () => {
+    const ASK = 300_000;
+    const CEILING = 600_000;
+    const fromServer = hello("server", "0.1.0", "", "one-server", CEILING);
+    const fromClient = hello("client", "0.1.0", "phone-1", "", ASK);
+    expect(sessionHold(ASK, fromServer.hold)).toBe(sessionHold(fromClient.hold, CEILING));
   });
 });
 

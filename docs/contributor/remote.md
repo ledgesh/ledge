@@ -280,6 +280,7 @@ splits again, by machine:
 | Vault and locked notes (`.vault.json`) | server | §9 |
 | Profiles (`~/.config/ledge/profiles/`) | server | never transmitted, §10 |
 | PTYs, sessions, scrollback | server | §7, and they outlive a connection |
+| How long they outlive it | server, on the client's ask | §7, `Hello.hold` |
 | The dedupe window for replayed writes | server | §7, spans reconnects |
 | The watcher | server | pushes `notesChanged` as today |
 | Behavior settings (shell, interpreters, trash TTL, daily workspace) | server | facts about that machine |
@@ -387,9 +388,10 @@ minute, so lengthening the ladder is a change to `IDLE_EXIT_MS` as well.
 Both numbers assume a client the operating system leaves running. One that
 gets suspended, as iOS suspends an app that leaves the foreground, is a
 different case: its timers do not fire, so it re-dials on waking rather than
-climbing a ladder, and the daemon it left behind is long gone. `ios.md` §5
-carries that case, and its answer is that sessions are lost and notes are
-not. Requests made while it climbs are HELD, not failed. When it runs
+climbing a ladder, and the daemon it left behind is gone unless it asked for
+it to stay (the session hold below). `ios.md` §5 carries that case, and its
+answer is that a client says what it needs and notes are never at stake either
+way. Requests made while it climbs are HELD, not failed. When it runs
 out, the state is `lost`, what was held is refused with the last reason, and
 nothing new is accepted — an app that keeps taking requests for a server it
 cannot reach looks like it is working. Recovery from there is choosing the
@@ -397,6 +399,33 @@ connection again (`interactions.md` §4-1), which rebuilds everything from boot.
 That recovery has to work on a connection the manager still considers active,
 which is why a wire giving up is reported to `connectionManager.ts`: choosing
 the server already being served is otherwise a deliberate no-op.
+
+**A client can ask for its sessions to be kept, and the server sets the term.**
+The handshake carries two numbers under one name (`wire.ts` `Hello.hold`): from
+a client, how long it wants its sessions after this connection ends; from a
+server, the longest it will grant. Both ends apply `sessionHold` to the pair,
+because the two hellos cross rather than answering each other, so no grant can
+travel back inside the handshake that asked. When the client goes, the daemon
+arms its idle timer for what that connection was granted instead of
+`IDLE_EXIT_MS`.
+
+Three rules make it a policy rather than a lever:
+
+- **It is the departing connection's grant, never the largest one seen.** A
+  displaced client has been told so and has stopped re-dialling, so it is not
+  coming back and its ask is not a claim made on behalf of the client that took
+  the session over.
+- **A hold over nothing is no hold.** It applies only while a session is open
+  to hold (`sessionsOpen()`: a note's inline shell or a drawer's, at a prompt or
+  not). Keeping a process for a client that opened no shell is the "started by
+  an ssh nobody remembers making" that the idle timer exists to end.
+- **A hold is a deadline, not an exemption.** `running()` still overrides both,
+  and a hold that expires exits exactly as the sixty seconds would have.
+
+The client that needs this is a phone: iOS suspends an app shortly after it
+leaves the foreground and can kill it outright, so the ask has to be on file
+before the connection ends by any means (`ios.md` §5, and `HOLD_MAX_MS` for the
+ceiling and why it is where it is).
 
 **The ladder does not start over unless the connection lasted.** A ladder that
 resets on every success is not bounded, because a connection that dies the

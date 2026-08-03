@@ -11,6 +11,7 @@
 // re-implements any of it (§2), and the parts that are genuinely a phone's —
 // the socket, the pasteboard, the keys — are the ten strings the bridge names.
 import { reconnectingClient } from "../shared/transport";
+import { sessionHold } from "../shared/wire";
 import { BUILD_VERSION } from "../shared/version";
 import { bootView, viewPush } from "./boot";
 import { attachShell, focusReporter, nativeOverlay, type Shell } from "./lib/nativeBridge";
@@ -32,6 +33,26 @@ const mark = (what: string): void => void marks.push(`${what}=${Math.round(perfo
 // been composited. An approximation, and the only one a page can make.
 const painted = (): Promise<void> =>
   new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+
+/**
+ * How long this client asks a server to keep its sessions once it goes away
+ * (wire.ts `Hello.hold`), and the one number in the protocol that is a phone's
+ * rather than a server's.
+ *
+ * Stated at connect time because iOS gives no useful moment to state it later:
+ * the app is suspended shortly after it leaves the foreground, and a client
+ * that is force-quit or killed for memory never gets a moment at all. So this
+ * says what should happen when this connection ends by ANY means, before it has
+ * ended by any of them.
+ *
+ * Five minutes is what a locked screen, a message answered and a way back costs.
+ * It is deliberately far short of the daemon's ceiling (bun/daemon.ts
+ * `HOLD_MAX_MS`), which is there for a client asking something absurd rather
+ * than for this one: the ordinary phone should be granted what it asks for
+ * whole, and a number that always came back clamped would teach nobody anything
+ * when it did.
+ */
+export const SESSION_HOLD_MS = 5 * 60_000;
 
 async function start(): Promise<void> {
   const shell = attachShell();
@@ -69,6 +90,7 @@ async function start(): Promise<void> {
     push: viewPush,
     build: BUILD_VERSION,
     client,
+    hold: SESSION_HOLD_MS,
     onState: (state, detail) => {
       live = state === "live";
       shell.log(`[link] ${state}: ${detail}`);
@@ -77,6 +99,12 @@ async function start(): Promise<void> {
   });
   const peer = await wire.ready;
   mark("server");
+  // What the ask above actually bought. Computed here rather than read off a
+  // reply, because the two hellos cross rather than answering each other
+  // (wire.ts `Hello.hold`). Reported and not acted on: nothing in the view
+  // behaves differently for it yet, and a server whose ceiling is under this
+  // client's ask is precisely what a live probe has to be able to see.
+  const held = sessionHold(SESSION_HOLD_MS, peer.hold);
 
   // §5, made literal: foregrounding is a boot. The shell closes the socket on
   // the way out (a suspended app's socket dies anyway, and a half-open one
@@ -108,7 +136,7 @@ async function start(): Promise<void> {
   mark("view");
   await painted();
   mark("paint");
-  shell.log(`[boot] ${destination}, ledge-server ${peer.build}: ${marks.join(" ")}`);
+  shell.log(`[boot] ${destination}, ledge-server ${peer.build}, hold ${Math.round(held / 1000)}s: ${marks.join(" ")}`);
 }
 
 /**

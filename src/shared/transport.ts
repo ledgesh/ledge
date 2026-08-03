@@ -79,7 +79,7 @@ interface Pending {
 
 export function clientConnection(
   duplex: Duplex,
-  opts: { push: ServerPush; build: string; client?: string },
+  opts: { push: ServerPush; build: string; client?: string; hold?: number },
 ): ClientConnection {
   const decoder = new FrameDecoder();
   const incoming = new BinaryHolder();
@@ -218,7 +218,7 @@ export function clientConnection(
     REQUEST_METHODS.map((m) => [m, (p: unknown) => call(m, p)]),
   ) as unknown as RequestClient;
 
-  raw(encodeControl(hello("client", opts.build, opts.client ?? "")));
+  raw(encodeControl(hello("client", opts.build, opts.client ?? "", "", opts.hold ?? 0)));
 
   return {
     requests,
@@ -252,6 +252,19 @@ export interface ReconnectOpts {
   push: ServerPush;
   build: string;
   client?: string;
+  /**
+   * How long to ask the server to keep this client's sessions after the wire
+   * ends, in ms; omitted by a client that does not ask (`Hello.hold`).
+   *
+   * The ladder below and this are answers to two different failures. The ladder
+   * is for a wire that flaps while the client is running: it notices, and it
+   * climbs. A client the operating system SUSPENDS runs no timers at all, so it
+   * cannot notice anything — and the server it left behind decides on its own
+   * clock whether the sessions are still worth a process. Stating the ask up
+   * front is what reaches that decision, because a suspended client is not
+   * given a moment to say anything on the way out (ios.md §5).
+   */
+  hold?: number;
   /** Told about every change, for the indicator in the chrome (remote.md §8).
    * Never called with "live" before the FIRST connection: boot failure belongs
    * to the caller, not to a state change. */
@@ -324,7 +337,15 @@ export async function reconnectingClient(opts: ReconnectOpts): Promise<ClientCon
   function open(): Promise<ClientConnection> | ClientConnection {
     const dialed = opts.dial();
     const build = (d: Duplex) =>
-      clientConnection(d, { push: opts.push, build: opts.build, ...(opts.client === undefined ? {} : { client: opts.client }) });
+      clientConnection(d, {
+        push: opts.push,
+        build: opts.build,
+        ...(opts.client === undefined ? {} : { client: opts.client }),
+        // Every dial, not only the first: the ask is a property of the client
+        // rather than of one connection, and a reconnect that dropped it would
+        // hold nothing for the app switch after this one.
+        ...(opts.hold === undefined ? {} : { hold: opts.hold }),
+      });
     return dialed instanceof Promise ? dialed.then(build) : build(dialed);
   }
 

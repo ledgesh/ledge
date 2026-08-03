@@ -207,6 +207,53 @@ describe("a client and a server over one connection", () => {
     expect(await client.requests.vaultState({})).toEqual({ state: "locked" });
   });
 
+  // The session hold rides the handshake for the reason the id does, and one
+  // more: a client the operating system suspends is given no moment to say
+  // anything on the way out (ios.md §5), so what should happen when this
+  // connection ends is stated before it has ended by any means.
+  test("the two ends state the ask and the ceiling in one crossing exchange", async () => {
+    const pipe = pipePair();
+    const server = serverConnection(pipe.a, { build: "0.1.0", holdMax: 600_000 });
+    server.serve(handlers());
+    const client = clientConnection(pipe.b, {
+      push: recordingPush().push,
+      build: "0.1.0",
+      client: "phone-1",
+      hold: 300_000,
+    });
+    // Each end knows the granted number from its own side of the pair; nothing
+    // travels back to tell either (wire.ts `sessionHold`).
+    expect((await client.ready).hold).toBe(600_000);
+    expect(server.hold()).toBe(300_000);
+  });
+
+  test("an ask past the ceiling is clamped to the server's own terms", async () => {
+    const pipe = pipePair();
+    const server = serverConnection(pipe.a, { build: "0.1.0", holdMax: 600_000 });
+    server.serve(handlers());
+    const client = clientConnection(pipe.b, { push: recordingPush().push, build: "0.1.0", hold: 86_400_000 });
+    await client.ready;
+    expect(server.hold()).toBe(600_000);
+  });
+
+  // The desktop's case: it is not suspended out from under its connection and
+  // does not ask, so nothing is held for it.
+  test("a client that asks for nothing is held for nothing", async () => {
+    const { server, client } = connect();
+    await client.ready;
+    expect(server.hold()).toBe(0);
+  });
+
+  // And the stale-socket probe's case (daemon.ts clearStaleSocket): a socket
+  // that opened and said nothing is not a client, so there is no ask to grant
+  // even from a server willing to grant one.
+  test("a socket that never says who it is asks for nothing", () => {
+    const pipe = pipePair();
+    const server = serverConnection(pipe.a, { build: "0.1.0", holdMax: 600_000 });
+    server.serve(handlers());
+    expect(server.hold()).toBe(0);
+  });
+
   // The whole reason a guard stays server-side (remote.md §2): it refuses over
   // the wire exactly as it refuses in-process, and its own words are what the
   // caller sees.
@@ -734,7 +781,7 @@ describe("a replayed request applies once (remote.md §7)", () => {
 describe("a client that reconnects", () => {
   /** A server behind a dial() that can be cut and rebuilt, which is what a
    * dropped ssh looks like from this side. */
-  function reconnectable(handlerMap: RequestHandlers, opts: { instance?: () => string } = {}) {
+  function reconnectable(handlerMap: RequestHandlers, opts: { instance?: () => string; holdMax?: number } = {}) {
     const ops = createOpLog();
     let current: { server: ServerConnection; pipe: ReturnType<typeof pipePair> } | null = null;
     let dials = 0;
@@ -745,6 +792,7 @@ describe("a client that reconnects", () => {
         build: "0.1.0",
         ops,
         instance: opts.instance ? opts.instance() : "one-server",
+        ...(opts.holdMax === undefined ? {} : { holdMax: opts.holdMax }),
       });
       server.serve(handlerMap);
       current = { server, pipe };
@@ -755,6 +803,7 @@ describe("a client that reconnects", () => {
       cut: () => current?.pipe.a.close(),
       bye: (why: string) => current?.server.close(why),
       dials: () => dials,
+      hold: () => current?.server.hold() ?? -1,
     };
   }
 
@@ -786,6 +835,27 @@ describe("a client that reconnects", () => {
     expect(await pending).toEqual({ mtimeMs: 1, divergedTo: null });
     expect(writes).toBe(1);
     expect(wire.dials()).toBe(2);
+  });
+
+  // The ask is a property of the CLIENT, not of one connection. A reconnect
+  // that dropped it would hold nothing for the app switch after this one, which
+  // is exactly when a phone needs it (ios.md §5) — and the ladder's ordinary
+  // job is a wire that flapped, so the next connection is usually the one that
+  // will be suspended.
+  test("every dial re-states the session hold", async () => {
+    const wire = reconnectable(handlers(), { holdMax: 600_000 });
+    const client = await reconnectingClient({
+      dial: wire.dial,
+      push: recordingPush().push,
+      build: "0.1.0",
+      hold: 300_000,
+      ...instant,
+    });
+    expect(wire.hold()).toBe(300_000);
+    wire.cut();
+    await client.requests.vaultState({}); // held until the ladder lands
+    expect(wire.dials()).toBe(2);
+    expect(wire.hold()).toBe(300_000);
   });
 
   test("a request made mid-reconnect waits instead of failing", async () => {

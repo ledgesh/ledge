@@ -78,6 +78,22 @@ export interface Hello {
   // one case where replaying would apply a write twice. Comparing this is how
   // a client tells "the wire came back" from "the server came back".
   instance: string;
+  // How long this client asks the server to keep its sessions alive after the
+  // connection ends, in milliseconds; 0 from a client that does not ask.
+  //
+  // From a server it is the other half of the same number: the longest hold it
+  // will grant, stated before it has heard anyone ask. The two hellos CROSS
+  // rather than answering each other — the server sends its own the moment the
+  // socket opens — so a grant cannot travel back in this handshake. Both ends
+  // instead apply `sessionHold` to the pair and reach the same number, which
+  // costs no round trip and leaves the term the server's (remote.md §7).
+  //
+  // Absent from a peer that predates the field, and 0 there means no hold,
+  // which is the behavior that peer already had. That is why this does not bump
+  // PROTOCOL_VERSION: neither the framing nor the message set changed shape,
+  // and refusing an older peer outright would be a worse answer than the one it
+  // already gives.
+  hold: number;
 }
 
 /**
@@ -469,8 +485,21 @@ export const SCHEMA_VERSION = fingerprint([
   ...PUSH_MESSAGES.map((m) => `push:${m}`),
 ]);
 
-export function hello(role: "client" | "server", build: string, client = "", instance = ""): Hello {
-  return { t: "hello", role, protocol: PROTOCOL_VERSION, schema: SCHEMA_VERSION, build, client, instance };
+export function hello(role: "client" | "server", build: string, client = "", instance = "", hold = 0): Hello {
+  return { t: "hello", role, protocol: PROTOCOL_VERSION, schema: SCHEMA_VERSION, build, client, instance, hold };
+}
+
+/**
+ * How long a server keeps its sessions for a client that has gone away: what
+ * the client asked for, under the server's own ceiling.
+ *
+ * Both ends compute it, from the pair of hellos, because those cross on the
+ * wire (see `Hello.hold`). A client asking for a day is not refused; it is
+ * granted the longest this server keeps a process for nobody
+ * (bun/daemon.ts `HOLD_MAX_MS`), and it can see that it was clamped.
+ */
+export function sessionHold(asked: number, ceiling: number): number {
+  return Math.max(0, Math.min(asked, ceiling));
 }
 
 /**
@@ -557,6 +586,13 @@ export function parseControl(text: string): WireMessage {
       // with no client".
       if (m["client"] !== undefined && typeof m["client"] !== "string") return bad("a hello with a non-string client");
       if (m["instance"] !== undefined && typeof m["instance"] !== "string") return bad("a hello with a non-string instance");
+      // Structural, unlike the two above, because this one is arithmetic the
+      // server does on a number the client chose: a NaN would make every
+      // comparison against it false, and the timer it ends up in would be armed
+      // for nothing. Absent is still fine, and means no hold.
+      if (m["hold"] !== undefined && (typeof m["hold"] !== "number" || !Number.isFinite(m["hold"]) || m["hold"] < 0)) {
+        return bad("a hello with an unusable hold");
+      }
       return {
         t: "hello",
         role: m["role"],
@@ -565,6 +601,7 @@ export function parseControl(text: string): WireMessage {
         build: m["build"],
         client: typeof m["client"] === "string" ? m["client"] : "",
         instance: typeof m["instance"] === "string" ? m["instance"] : "",
+        hold: typeof m["hold"] === "number" ? m["hold"] : 0,
       };
     case "req": {
       if (!isId(m["id"]) || typeof m["m"] !== "string") return bad("a request with no id or method");

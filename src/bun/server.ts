@@ -127,6 +127,12 @@ export interface LedgeServer {
    * a command. Asked by the daemon when its last client goes away (remote.md
    * §7) — a run keeps going, an idle prompt is not worth a process. */
   running(): boolean;
+  /** Whether any session exists to hold: a note's inline shell or a drawer's,
+   * at a prompt or not. The daemon asks this instead when the client that left
+   * declared a session hold — an idle shell is worth nothing to a client that
+   * is not coming back, and worth its cwd and its exported variables to one
+   * that said it is (remote.md §7). */
+  sessionsOpen(): boolean;
   // Tear down every shell. The caller owns the process-exit hook, because it
   // usually has its own last-moment work (the shell saves the window frame).
   shutdown(): void;
@@ -959,6 +965,10 @@ export async function createServer(deps: {
     // sitting at a prompt for as long as the tab is open, and that is not work
     // in progress.
     running: () => inlinePool.running() || [...terms.values()].some(isBusy),
+    // Every shell, busy or not, and the drawer's counted by existing rather
+    // than by isBusy: a zsh sitting at a prompt is precisely what a hold is
+    // for, and it is what `running` above is right to ignore.
+    sessionsOpen: () => inlinePool.sessionsOpen() || terms.size > 0,
     shutdown() {
       clearInterval(drain);
       inlinePool.closeAll();

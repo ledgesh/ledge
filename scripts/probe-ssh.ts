@@ -36,7 +36,7 @@ const { sshCommand, pickHostKey, knownHostsText } = await import("../src/bun/con
 type Connection = import("../src/bun/connections").Connection;
 const { clientConnection } = await import("../src/shared/transport");
 const { spawnDuplex } = await import("../src/bun/transport");
-const { PUSH_MESSAGES } = await import("../src/shared/wire");
+const { PUSH_MESSAGES, sessionHold } = await import("../src/shared/wire");
 const { BUILD_VERSION } = await import("../src/shared/version");
 type ServerPush = import("../src/shared/wire").ServerPush;
 
@@ -225,7 +225,17 @@ try {
   const push = Object.fromEntries(
     PUSH_MESSAGES.map((m) => [m, (p: unknown) => heard.push([m, p])]),
   ) as unknown as ServerPush;
-  const client = clientConnection(spawnDuplex(argv), { push, build: BUILD_VERSION, client: "probe-mac" });
+  // Standing in for a phone: the same number mainview/ios.tsx sends
+  // (SESSION_HOLD_MS), asked over a real ssh hop rather than a pipe, because a
+  // hello field that survives a unix socket is not yet a hello field that
+  // survived ssh.
+  const ASK = 5 * 60_000;
+  const client = clientConnection(spawnDuplex(argv), {
+    push,
+    build: BUILD_VERSION,
+    client: "probe-mac",
+    hold: ASK,
+  });
   const t0 = Date.now();
   const hello = await client.ready;
   ok("handshake", `ledge-server ${hello.build}, instance ${hello.instance.slice(0, 8)}, ${Date.now() - t0}ms`);
@@ -283,6 +293,28 @@ try {
   check("the shell ran and answered", seen.includes("PTY-42"));
   check("and it is a Linux one", /Linux[\s\S]*PTY-42/.test(seen), JSON.stringify(seen.slice(-120)));
   client.close();
+
+  step("[hold] a session hold, asked over ssh and answered by a real daemon");
+  check("the server states a ceiling in its handshake", hello.hold > 0, `${Math.round(hello.hold / 1000)}s`);
+  check("and this client's ask fits inside it", sessionHold(ASK, hello.hold) === ASK, `asked ${Math.round(ASK / 1000)}s`);
+  // The client that just left had a terminal session open, so the daemon it
+  // was talking to should have armed the hold rather than the ordinary minute
+  // (ios.md §5). Its own log is the only place that decision is visible from
+  // out here, and the ssh teardown has to reach it first.
+  const wanted = `holding this client's sessions for ${Math.round(sessionHold(ASK, hello.hold) / 1000)}s`;
+  // The ssh user's own app home, which is not the image's `/data`: a daemon an
+  // ssh conjured belongs to whoever the forced-command key authenticated as.
+  const daemonLog = "/home/ledge/.ledge/logs/ledge-server.log";
+  let armed = "";
+  for (let i = 0; i < 30 && !armed.includes(wanted); i++) {
+    await Bun.sleep(200);
+    armed = run(["docker", "exec", NAME, "sh", "-c", `cat ${daemonLog} 2>&1`], { quiet: true }).out;
+  }
+  check(
+    "the daemon armed the hold rather than the idle timeout",
+    armed.includes(wanted),
+    armed.includes(wanted) ? wanted : armed.trim().split("\n").slice(-1)[0]?.slice(0, 70),
+  );
 
   step("[container] the other deployment: PID 1 is the daemon, docker exec is the pump");
   run(["docker", "rm", "-f", `${NAME}-plain`], { quiet: true });

@@ -28,19 +28,25 @@ afterEach(async () => {
   for (const dir of dirs.splice(0)) await rm(dir, { recursive: true, force: true });
 });
 
-async function daemonIn(opts: { idleMs?: number } = {}) {
+async function daemonIn(opts: { idleMs?: number; holdMs?: number } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "ledge-daemon-unit-"));
   dirs.push(dir);
   const socketPath = join(dir, "server.sock");
   const pidPath = join(dir, "server.pid");
-  const d = await startDaemon({ socketPath, pidPath, idleMs: opts.idleMs ?? 60_000, build: BUILD_VERSION });
+  const d = await startDaemon({
+    socketPath,
+    pidPath,
+    idleMs: opts.idleMs ?? 60_000,
+    ...(opts.holdMs === undefined ? {} : { holdMs: opts.holdMs }),
+    build: BUILD_VERSION,
+  });
   started.push(d);
   return { d, socketPath, pidPath };
 }
 
-const connect = async (socketPath: string, who: string) => {
+const connect = async (socketPath: string, who: string, hold?: number) => {
   const duplex = await connectToDaemon({ socketPath, spawn: () => {}, timeoutMs: 2000 });
-  return clientConnection(duplex, { push, build: BUILD_VERSION, client: who });
+  return clientConnection(duplex, { push, build: BUILD_VERSION, client: who, ...(hold === undefined ? {} : { hold }) });
 };
 
 describe("one client at a time", () => {
@@ -143,6 +149,73 @@ describe("a daemon nobody is using", () => {
     expect(existsSync(pidPath)).toBe(true);
     d.stop();
     await d.done;
+  });
+});
+
+// The windows here are milliseconds where production is minutes, and the same
+// constraint applies as above: a hold has to be comfortably longer than the
+// idle window it replaces, or the two are indistinguishable and the test proves
+// nothing about which one was used.
+describe("a client that said it is coming back", () => {
+  // iOS suspends an app shortly after it leaves the foreground and its socket
+  // dies with it (ios.md §5), so on a phone "no client" is the ordinary state
+  // of a connection that is still wanted. What the ask buys is the one thing
+  // `running()` is right to ignore: a shell sitting at a prompt.
+  test("keeps an idle session past the window that would have ended it", async () => {
+    const { d, socketPath } = await daemonIn({ idleMs: 150, holdMs: 5_000 });
+    const client = await connect(socketPath, "phone-1", 700);
+    await client.ready;
+    // A drawer's shell, spawned and then left alone. Nothing is executing in
+    // it, so `running()` is false and the old rule would throw it away.
+    await client.requests.terminalAttach({ sessionId: "note-1" });
+    client.close();
+
+    const raced = await Promise.race([
+      d.done.then(() => "exited"),
+      new Promise((r) => setTimeout(() => r("still up"), 450)),
+    ]);
+    expect(raced).toBe("still up");
+    // And it still ends: a hold is a longer deadline, not an exemption.
+    await d.done;
+  });
+
+  // A hold applies to something. A client that asked for one and opened no
+  // shell has nothing to come back TO, and keeping the process for it is the
+  // "started by an ssh nobody remembers making" the timer exists to end.
+  test("holds nothing for a client that opened no session", async () => {
+    const { d, socketPath } = await daemonIn({ idleMs: 150, holdMs: 60_000 });
+    const client = await connect(socketPath, "phone-1", 60_000);
+    await client.ready;
+    client.close();
+    await d.done; // on the ordinary window, rather than the minute it asked for
+  });
+
+  // The other half of asking: the answer is not the client's to give, so an
+  // ask nobody would wait through is clamped rather than refused.
+  test("an absurd ask is answered with the server's own ceiling", async () => {
+    const { d, socketPath } = await daemonIn({ idleMs: 150, holdMs: 400 });
+    const client = await connect(socketPath, "phone-1", 60 * 60_000);
+    await client.ready;
+    await client.requests.terminalAttach({ sessionId: "note-1" });
+    client.close();
+    await d.done; // in 400ms, rather than the hour
+  });
+
+  // On the DEPARTING connection's terms, and not the longest anything ever
+  // asked for. A displaced client has been told so and has stopped re-dialling
+  // (shared/transport.ts): it is not coming back, and its hold is not a claim
+  // on behalf of the client that took the session over.
+  test("a displaced client's hold does not outlive its connection", async () => {
+    const { d, socketPath } = await daemonIn({ idleMs: 150, holdMs: 60_000 });
+    const phone = await connect(socketPath, "phone-1", 60_000);
+    await phone.ready;
+    await phone.requests.terminalAttach({ sessionId: "note-1" });
+
+    const mac = await connect(socketPath, "mac-1"); // asks for nothing
+    await mac.ready;
+    await phone.closed;
+    mac.close();
+    await d.done; // the Mac's window, not the minute the phone asked for
   });
 });
 

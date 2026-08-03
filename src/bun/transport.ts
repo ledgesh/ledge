@@ -22,6 +22,7 @@ import {
   hello,
   parseControl,
   PUSH_MESSAGES,
+  sessionHold,
   toBase64,
   WireError,
   writeMessage,
@@ -42,6 +43,11 @@ export interface ServerConnection {
    * correct at the only time anyone asks: no request is dispatched before the
    * handshake, so any handler reading this already has the answer. */
   client(): string;
+  /** How long this client asked for its sessions to be held once this
+   * connection ends, under `ServerOpts.holdMax` (wire.ts `Hello.hold`). 0 until
+   * a hello has arrived, and 0 for a client that did not ask — which are the
+   * same answer, because neither is a client to keep a process for. */
+  hold(): number;
   closed: Promise<void>;
   close(why?: string): void;
 }
@@ -83,15 +89,28 @@ export interface ServerOpts {
    * actually using the server.
    */
   greeted?(): void;
+  /**
+   * The longest session hold this server will grant, in ms (wire.ts
+   * `Hello.hold`). Announced in its own hello, before any client has asked, and
+   * applied to whatever the client does ask for.
+   *
+   * Absent means none, which is right for a server that dies with its
+   * connection: there is nothing to hold sessions FOR. The daemon supplies its
+   * own ceiling, because it is the thing being kept alive.
+   */
+  holdMax?: number;
 }
 
 export function serverConnection(duplex: Duplex, opts: ServerOpts): ServerConnection {
-  const { build, ops, coalesce, instance = "", greeted: onGreet } = opts;
+  const { build, ops, coalesce, instance = "", greeted: onGreet, holdMax = 0 } = opts;
   const decoder = new FrameDecoder();
   const incoming = new BinaryHolder();
   let handlers: RequestHandlers | null = null;
   let greeted = false;
   let peerClient = "";
+  // What this connection's client asked for, under this server's ceiling. Read
+  // after the connection ends, by whoever decides how long to stay (daemon.ts).
+  let peerHold = 0;
   let open = true;
   // Requests that beat createServer to the door. A server sends its hello
   // immediately (it is a constant, and waiting would make a slow boot look
@@ -223,6 +242,7 @@ export function serverConnection(duplex: Duplex, opts: ServerOpts): ServerConnec
       }
       greeted = true;
       peerClient = msg.client;
+      peerHold = sessionHold(msg.hold, holdMax);
       onGreet?.();
       return;
     }
@@ -280,7 +300,7 @@ export function serverConnection(duplex: Duplex, opts: ServerOpts): ServerConnec
     ]),
   ) as unknown as ServerPush;
 
-  raw(encodeControl(hello("server", build, "", instance)));
+  raw(encodeControl(hello("server", build, "", instance, holdMax)));
 
   return {
     push,
@@ -289,6 +309,7 @@ export function serverConnection(duplex: Duplex, opts: ServerOpts): ServerConnec
       for (const { id, m, p, op } of waiting.splice(0)) void dispatch(id, m, p, op);
     },
     client: () => peerClient,
+    hold: () => peerHold,
     closed,
     close,
   };

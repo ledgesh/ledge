@@ -25,7 +25,10 @@
 //
 // What the socket buys, precisely: a run keeps going when the wire drops, and
 // the op log (bun/opLog.ts) survives to make the client's replay of what was
-// in flight safe.
+// in flight safe. What a client can additionally ASK for is that its idle
+// shells keep going too, which is the one case the rules above get wrong on
+// their own — a phone suspended by iOS looks exactly like a client that is
+// never coming back (HOLD_MAX_MS).
 import { chmodSync, mkdirSync, openSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createServer, type NativeDeps } from "./server";
@@ -67,7 +70,10 @@ const HEADLESS: NativeDeps = {};
  * should find the same server rather than pay for a fresh boot.
  *
  * `running()` overrides both: a daemon with a build in flight stays, which is
- * the entire point of the socket.
+ * the entire point of the socket. A client that declared a session hold
+ * overrides the LENGTH instead (`HOLD_MAX_MS`), because what it is coming back
+ * to is a shell that is merely idle — which `running()` is right not to count
+ * and wrong to be asked about.
  *
  * The reason is entirely about the daemon nobody asked for, so it applies only
  * to that one. A daemon somebody STARTED — a systemd unit, the container's PID
@@ -79,11 +85,32 @@ export const IDLE_EXIT_MS = 60_000;
 /** `idleMs` for a daemon that should stay until something stops it. */
 export const IDLE_EXIT_NEVER = 0;
 
+/**
+ * The longest a client can ask this daemon to keep its sessions after going
+ * away (wire.ts `Hello.hold`).
+ *
+ * The ask exists because a phone is suspended shortly after it leaves the
+ * foreground and is given no moment to say anything on the way out (ios.md §5),
+ * so it says it at connect time instead. This is the other half: the client
+ * names what it wants and the server names what it will do, and the term is the
+ * server's because the process being kept alive is the server's.
+ *
+ * Ten minutes is a ceiling, not the ordinary grant. It bites only a client
+ * asking for something no person waits through; the phone asks for five
+ * (mainview/ios.tsx) and gets it whole. Past ten minutes the shell still has
+ * its cwd and its exported variables and nobody has the thread of what they
+ * were for, and the cost of guessing high is a process on someone's Mac for a
+ * phone that is in a pocket.
+ */
+export const HOLD_MAX_MS = 10 * 60_000;
+
 export interface DaemonOpts {
   socketPath?: string;
   pidPath?: string;
   /** Milliseconds of idleness before exiting; `IDLE_EXIT_NEVER` to stay. */
   idleMs?: number;
+  /** The ceiling on a client's session hold; `HOLD_MAX_MS` by default. */
+  holdMs?: number;
   build?: string;
 }
 
@@ -97,6 +124,7 @@ export async function startDaemon(opts: DaemonOpts = {}): Promise<Daemon> {
   const socketPath = opts.socketPath ?? SOCKET_PATH;
   const pidPath = opts.pidPath ?? PID_PATH;
   const idleMs = opts.idleMs ?? IDLE_EXIT_MS;
+  const holdMax = opts.holdMs ?? HOLD_MAX_MS;
   const build = opts.build ?? BUILD_VERSION;
 
   mkdirSync(APP_HOME, { recursive: true });
@@ -206,29 +234,44 @@ export async function startDaemon(opts: DaemonOpts = {}): Promise<Daemon> {
       // for as long as both were running (shared/transport.ts).
       previous?.close("another client connected to this server");
     };
-    const conn = serverConnection(io, { build, ops, instance, greeted: takeOver });
+    const conn = serverConnection(io, { build, ops, instance, greeted: takeOver, holdMax });
     conn.serve(server.requests);
     void conn.closed.then(() => {
       if (live === conn) live = null;
       // Whichever connection this was: a silent socket closing leaves an
       // unattended daemon exactly as an attached client leaving does, and the
       // timer was cleared when it arrived.
-      if (!live) armIdleExit();
+      //
+      // On the DEPARTING connection's own terms, and not the longest anything
+      // ever asked for. A client that was displaced has been told so and has
+      // stopped re-dialling (shared/transport.ts), so it is not coming back and
+      // its hold is not a claim on the client that took over.
+      if (!live) armIdleExit(conn.hold());
     });
   }
 
-  function armIdleExit(): void {
+  function armIdleExit(hold = 0): void {
     if (stopped || idleTimer || idleMs <= 0) return;
+    // A hold applies only where there is something to hold: a client that asked
+    // for one and opened no shell has nothing to come back TO, and keeping the
+    // process for it is the "started by an ssh nobody remembers making" this
+    // timer exists to end.
+    const wait = hold > 0 && server.sessionsOpen() ? hold : idleMs;
+    // Seconds once there are enough of them to round without lying. Every hold
+    // in production is minutes; the ones that are not are a test's.
+    if (wait !== idleMs) {
+      console.error(`[daemon] holding this client's sessions for ${wait >= 10_000 ? `${Math.round(wait / 1000)}s` : `${wait}ms`}`);
+    }
     idleTimer = setTimeout(() => {
       idleTimer = null;
       if (live) return;
       // Asked at the deadline rather than when the client left: a run that
       // finishes in the meantime should not hold the process, and one that
       // starts cannot (nobody is here to start it).
-      if (server.running()) return armIdleExit();
+      if (server.running()) return armIdleExit(hold);
       console.error(`[daemon] no client and nothing running; exiting (${socketPath})`);
       stop();
-    }, idleMs);
+    }, wait);
   }
 
   function stop(): void {

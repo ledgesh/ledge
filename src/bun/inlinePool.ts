@@ -308,9 +308,11 @@ export class InlinePool {
   }
 
   /** Whether any block is mid-run. What the daemon asks before deciding a
-   * client that went away can be allowed to take the server with it: an idle
-   * shell is worth nothing once nobody is watching it, and a running one is
-   * the whole reason a server outlives its connection (remote.md §7). */
+   * client that went away can be allowed to take the server with it: a block
+   * still running is the whole reason a server outlives its connection
+   * (remote.md §7). An idle shell is worth nothing to a client that said
+   * nothing, and worth keeping for one that declared a hold, which is what
+   * `sessionsOpen` below answers instead. */
   running(): boolean {
     for (const session of this.sessions.values()) {
       for (const slot of this.slots(session)) {
@@ -318,6 +320,18 @@ export class InlinePool {
       }
     }
     return false;
+  }
+
+  /**
+   * Whether any note has an inline shell at all, running or sitting idle.
+   *
+   * What a session hold is FOR: a note's shell keeps the cwd it was `cd`'d to
+   * and whatever the last block exported, so a client coming back to it is
+   * coming back to state nothing else can rebuild. A server with none of these
+   * has nothing to hold, however long its client asked for (daemon.ts).
+   */
+  sessionsOpen(): boolean {
+    return this.sessions.size > 0;
   }
 
   /** Process exit: close every shell of every note. */

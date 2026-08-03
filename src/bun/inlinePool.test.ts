@@ -232,6 +232,36 @@ describe("lifecycle", () => {
     expect(shells[0].written).toContain("source /tmp/c.sh");
   });
 
+  // The two questions the daemon asks, and the gap between them is the whole
+  // of a session hold: a note's shell that finished its last block is not
+  // RUNNING, and it is still the cwd and the exported variables a client that
+  // said it is coming back will come back to (daemon.ts).
+  test("a finished run leaves a session open, though nothing is running", () => {
+    const { pool, shells, drained } = makePool();
+    expect(pool.running()).toBe(false);
+    expect(pool.sessionsOpen()).toBe(false);
+
+    pool.run("note", "a", "source /tmp/a.sh");
+    shells[0].emit(began("a"));
+    drained();
+    expect(pool.running()).toBe(true);
+    expect(pool.sessionsOpen()).toBe(true);
+
+    shells[0].emit(ended("a"));
+    drained();
+    expect(pool.running()).toBe(false);
+    expect(pool.sessionsOpen()).toBe(true);
+  });
+
+  test("closing the note's session leaves nothing to hold", () => {
+    const { pool, shells, drained } = makePool();
+    pool.run("note", "a", "source /tmp/a.sh");
+    shells[0].emit(began("a") + ended("a"));
+    drained();
+    pool.closeSession("note");
+    expect(pool.sessionsOpen()).toBe(false);
+  });
+
   test("a persistent shell dying mid-block ends its run with no exit code and respawns on the next run", () => {
     const { pool, shells, drained } = makePool();
     pool.run("note", "a", "source /tmp/a.sh");
