@@ -292,6 +292,16 @@ try {
   }
   check("the shell ran and answered", seen.includes("PTY-42"));
   check("and it is a Linux one", /Linux[\s\S]*PTY-42/.test(seen), JSON.stringify(seen.slice(-120)));
+
+  // A block left running on the far machine, so the [orphan] step below has
+  // something real to collect. `sleep` rather than anything that prints: what
+  // has to be true is that it is still executing when its client goes away.
+  const RUN = "probe-run-1";
+  const ranEvent = (kind: string) =>
+    heard.some(([m, p]) => m === "runEvent" && (p as { id: string; kind: string }).id === RUN && (p as { kind: string }).kind === kind);
+  await client.requests.runBlock({ sessionId: "s1", id: RUN, code: "sleep 300", language: "sh" });
+  for (let i = 0; i < 100 && !ranEvent("began"); i++) await Bun.sleep(100);
+  check("an inline block is running on the far machine", ranEvent("began"));
   client.close();
 
   step("[hold] a session hold, asked over ssh and answered by a real daemon");
@@ -315,6 +325,28 @@ try {
     armed.includes(wanted),
     armed.includes(wanted) ? wanted : armed.trim().split("\n").slice(-1)[0]?.slice(0, 70),
   );
+
+  step("[orphan] a run the page that started it can no longer show");
+  // What a phone whose webview was killed leaves behind: a run still executing
+  // on the far machine, started by a connection that is gone, with no id left
+  // on this side to stop it by. A fresh connection claims nothing and the
+  // daemon collects the difference (rpc-schema inlineClaim).
+  const reboot = clientConnection(spawnDuplex(argv), { push, build: BUILD_VERSION, client: "probe-mac", hold: ASK });
+  const rebooted = await reboot.ready;
+  // The claim only means anything against the server that still holds the run;
+  // a restarted daemon would have taken the shells with it.
+  check("the same daemon answered the new connection", rebooted.instance === hello.instance, rebooted.instance.slice(0, 8));
+  const claimed = await reboot.requests.inlineClaim({ ids: [] });
+  check(
+    "it was still running the run nobody can show",
+    claimed.orphaned === 1 && claimed.running.length === 0,
+    `${claimed.orphaned} orphaned, ${claimed.running.length} confirmed`,
+  );
+  for (let i = 0; i < 100 && !ranEvent("ended"); i++) await Bun.sleep(100);
+  check("and the interrupt reached the sleep through ssh and the pty", ranEvent("ended"));
+  // Nothing left to orphan: the same question a second time finds the pool clear.
+  check("a second claim finds nothing", (await reboot.requests.inlineClaim({ ids: [] })).orphaned === 0);
+  reboot.close();
 
   step("[container] the other deployment: PID 1 is the daemon, docker exec is the pump");
   run(["docker", "rm", "-f", `${NAME}-plain`], { quiet: true });

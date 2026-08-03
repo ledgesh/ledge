@@ -120,6 +120,10 @@ interface BridgeHandlers {
   // `onPick` fires with the chosen host; dismissal fires nothing.
   pickHost: (req: HostPickRequest) => void;
   cancelRun: (sessionId: string, id: string) => void;
+  // Tell the server which inline runs this client can still show, and get back
+  // the ones it is really running (inlineClaim; see reconcileRuns). Unwired
+  // outside the app, where there is no server to be out of step with.
+  claimRuns: (ids: string[]) => Promise<string[]>;
   resizeInline: (sessionId: string, id: string, cols: number, rows: number) => void;
   inputInline: (sessionId: string, id: string, data: string) => void;
   // Open the profile editor dialog (App owns it). The editor calls this when
@@ -240,9 +244,24 @@ export function toNative(message: unknown): void {
 // several editor tabs/panes coexist without routing bookkeeping. That check is
 // what makes the broadcast safe rather than merely convenient: without it every
 // open note re-writes the same output into the one panel that shows it.
-const runEventSinks = new Set<(ev: RunEvent) => void>();
 
-export function onRunEvent(sink: (ev: RunEvent) => void): () => void {
+/**
+ * One mounted editor's end of the run channel: where a run event goes, and
+ * which of its runs are still going.
+ *
+ * The second half is the same fact from the other side, and it is here rather
+ * than in its own registry because the two are the same lifetime exactly: an
+ * editor that has stopped receiving events is an editor whose runs nobody can
+ * see, which is precisely what reconcileRuns must not claim.
+ */
+export interface RunSink {
+  apply(ev: RunEvent): void;
+  live(): string[];
+}
+
+const runEventSinks = new Set<RunSink>();
+
+export function onRunEvent(sink: RunSink): () => void {
   runEventSinks.add(sink);
   return () => {
     runEventSinks.delete(sink);
@@ -250,7 +269,45 @@ export function onRunEvent(sink: (ev: RunEvent) => void): () => void {
 }
 
 export function dispatchRunEvent(ev: RunEvent): void {
-  for (const sink of runEventSinks) sink(ev);
+  for (const sink of runEventSinks) sink.apply(ev);
+}
+
+/**
+ * Line this client's inline runs up with the server's. Called once at boot and
+ * again on every reconnect (mainview/boot.tsx), which are the two moments the
+ * two ends can have drifted apart.
+ *
+ * Both directions drift, and each is fixed by one half of the answer:
+ *
+ * A run the client can no longer show — a page that reloaded and lost every
+ * panel it had — is one the server would otherwise keep executing invisibly,
+ * with no id left anywhere to stop it by. Naming what we still have lets the
+ * server interrupt the rest.
+ *
+ * A run the CLIENT still shows and the server has already finished is the
+ * mirror image, and it is what a dropped connection leaves behind: a push with
+ * nowhere to go is dropped rather than queued (bun/daemon.ts), so the ended
+ * event that would have closed the panel can simply have been lost. Those are
+ * closed out here with no exit status, the same shape a shell dying under a run
+ * produces — which is honest, because what happened to it is exactly what we
+ * could not see.
+ */
+export async function reconcileRuns(): Promise<void> {
+  const claim = handlers.claimRuns;
+  if (!claim) return;
+  const ids = [...new Set([...runEventSinks].flatMap((sink) => sink.live()))];
+  let running: string[];
+  try {
+    running = await claim(ids);
+  } catch {
+    // The wire went again mid-question. The connection that replaces this one
+    // asks it again, and until then nothing has been claimed or closed out.
+    return;
+  }
+  const alive = new Set(running);
+  for (const id of ids) {
+    if (!alive.has(id)) dispatchRunEvent({ id, kind: "ended", exitCode: null });
+  }
 }
 
 // --- terminal-shell busy state ----------------------------------------------

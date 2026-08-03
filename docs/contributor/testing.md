@@ -194,7 +194,12 @@ runnable: `bun run probe:ssh` builds the shipped image, adds an sshd to it
 and connects with the argv `bun/connections.ts` builds. It asserts the things
 that are only true if ssh is really in the path: that the forced command
 displaces `whoami`, that a changed host key refuses with no way to continue
-anyway, and that a Linux pty answers a command typed from macOS. It holds
+anyway, that a Linux pty answers a command typed from macOS, that the daemon
+holds a departed client's sessions for what it asked (`remote.md` §7), and that
+a run the next connection cannot show is interrupted when it claims. That last
+step is what found a one-byte pty race that made every inline run on a Linux
+server begin and never end (`bun/markers.ts`), which is the kind of thing only
+a real shell on a real kernel says out loud. It holds
 `127.0.0.1:22` for a few seconds and removes everything it made. `bun test` in
 that same image (`docker build --target build`) runs the whole server suite on
 glibc, which is the Linux port's other half.

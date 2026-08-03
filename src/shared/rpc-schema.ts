@@ -393,6 +393,24 @@ export type LedgeRPC = {
       // claude) can be driven in place. Base64 like terminalInput. The view only
       // sends this while the block's command is the running foreground process.
       inlineInput: { params: { sessionId: string; id: string; dataB64: string }; response: { ok: boolean } };
+      // The inline runs this client can still show, and an instruction about the
+      // rest: every run the server is executing that `ids` does not name is
+      // interrupted, exactly as dismissing its panel would (cancelRun). Sent at
+      // boot and after every reconnect, the two moments a client's idea of what
+      // is running can have gone stale.
+      //
+      // A reloaded page claims nothing, because a run event is a push keyed by
+      // an id that page never learned: without this the run would keep going,
+      // keep the server alive under it, and be both invisible and unstoppable.
+      // The drawer needs no equivalent — its shell is re-adopted by
+      // terminalAttach, which replays the scrollback with it.
+      //
+      // The answer is which of `ids` the server is really running, so a client
+      // that missed an ended event while the wire was down (a push with nowhere
+      // to go is dropped; bun/daemon.ts) closes those panels out instead of
+      // leaving them on "Running" for good. `orphaned` is how many unclaimed
+      // runs were interrupted, for the log.
+      inlineClaim: { params: { ids: string[] }; response: { running: string[]; orphaned: number } };
       // Terminal drawer input and resize, targeting one note's terminal shell.
       // Keystrokes and pasted text go through terminalInput; the drawer's fit
       // computes cols/rows for terminalResize. This shell is separate from the

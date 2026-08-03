@@ -567,3 +567,82 @@ describe("stopping a run that never began", () => {
     expect(drained()).toEqual([{ type: "ended", blockId: "a", exitCode: 130 }]);
   });
 });
+
+describe("claiming what a client can still show", () => {
+  test("stops the runs the claim leaves out and reports the ones it keeps", () => {
+    const { pool, shells, drained } = makePool();
+    pool.run("note", "a", "source /tmp/a.sh");
+    pool.run("other", "b", "source /tmp/b.sh");
+    shells[0].emit(began("a"));
+    shells[1].emit(began("b"));
+    drained();
+
+    expect(pool.claim(["a"])).toEqual({ running: ["a"], orphaned: ["b"] });
+    expect(shells[0].interrupts).toBe(0);
+    expect(shells[1].interrupts).toBe(1);
+  });
+
+  test("a page that reloaded claims nothing, and everything stops", () => {
+    const { pool, shells, drained } = makePool();
+    pool.run("note", "a", "source /tmp/a.sh");
+    shells[0].emit(began("a"));
+    drained();
+
+    expect(pool.claim([]).orphaned).toEqual(["a"]);
+    expect(shells[0].interrupts).toBe(1);
+    // The interrupt, not a teardown: the shell keeps the cwd and the exports
+    // the last block left it, which is the whole of what a session hold buys
+    // the client that comes back (daemon.ts).
+    expect(shells[0].closed).toBe(false);
+    shells[0].emit(ended("a", 130));
+    expect(drained()).toEqual([{ type: "ended", blockId: "a", exitCode: 130 }]);
+  });
+
+  test("an unclaimed run that never began is closed out, shell and all", () => {
+    // Same pair as cancel: no job to signal and no marker coming, so the pool
+    // is the only thing that can end this run.
+    const { pool, shells, drained } = makePool();
+    pool.run("note", "a", "source /tmp/a.sh");
+    drained();
+
+    expect(pool.claim([]).orphaned).toEqual(["a"]);
+    expect(drained()).toEqual([{ type: "ended", blockId: "a", exitCode: null }]);
+    expect(shells[0].closed).toBe(true);
+  });
+
+  test("a claim for a run that already ended is simply not confirmed", () => {
+    // The other direction: the client still shows a panel because the ended
+    // event was pushed at a wire that was down. Nothing here to stop — the
+    // answer is what tells it so.
+    const { pool, shells, drained } = makePool();
+    pool.run("note", "a", "source /tmp/a.sh");
+    shells[0].emit(began("a") + ended("a", 0));
+    drained();
+
+    expect(pool.claim(["a"])).toEqual({ running: [], orphaned: [] });
+    expect(shells[0].interrupts).toBe(0);
+  });
+
+  test("an idle pool answers a claim without stopping anything", () => {
+    const { pool } = makePool();
+    expect(pool.claim([])).toEqual({ running: [], orphaned: [] });
+  });
+
+  test("reaches the overflow shell a second concurrent run got", () => {
+    const { pool, shells, drained } = makePool();
+    pool.run("note", "a", "source /tmp/a.sh");
+    shells[0].emit(began("a"));
+    drained();
+    pool.run("note", "b", "source /tmp/b.sh");
+    shells[1].emit(began("b"));
+    drained();
+
+    expect(pool.claim(["a"]).orphaned).toEqual(["b"]);
+    expect(shells[0].interrupts).toBe(0);
+    expect(shells[1].interrupts).toBe(1);
+    // And the overflow shell goes with its run, as it does on any other end.
+    shells[1].emit(ended("b", 130));
+    drained();
+    expect(shells[1].closed).toBe(true);
+  });
+});

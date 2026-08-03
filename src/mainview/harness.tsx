@@ -18,7 +18,7 @@ import { instantiateTemplate, isoDateOf } from "../shared/template";
 import { collectHits, type SearchHit } from "../shared/search";
 import { resolveWikiTitle, wikiRefsOf } from "../shared/wikilinks";
 import { normalizeTag, tagDirectoryOf, tagRefsOf, type TagInfo } from "../shared/tags";
-import { configureBridge, dispatchRunEvent } from "./editor/bridge";
+import { configureBridge, dispatchRunEvent, reconcileRuns } from "./editor/bridge";
 import { configureTerminal } from "./terminal/channel";
 import { configureNotes, dispatchExternalOpen, dispatchNotesChanged, type ExternalOpenInfo, type NoteFile } from "./notes/channel";
 import { configureVault, recordVaultState } from "./vault/channel";
@@ -690,11 +690,21 @@ const inlineRuns: { sessionId: string; id: string; host: string | null }[] = [];
 // that has not been told the panel's width runs the block believing the pty's
 // default, and anything laying out to COLUMNS gets it wrong for that run.
 const inlineResizes: { id: string; cols: number; rows: number }[] = [];
+// The reconnect reconciliation (bridge.ts reconcileRuns): what the client
+// claimed, and what this fake server says it is still running. Nothing by
+// default, which is the answer a server gives about a page that reloaded and
+// the one with a visible consequence — the panels close out.
+const runClaims: string[][] = [];
+let runsStillRunning: string[] = [];
 configureBridge({
   runInline: (sessionId, id, _code, _language, host) => {
     inlineRuns.push({ sessionId, id, host });
   },
   cancelRun: () => {},
+  claimRuns: (ids) => {
+    runClaims.push([...ids]);
+    return Promise.resolve(ids.filter((id) => runsStillRunning.includes(id)));
+  },
   resizeInline: (_sessionId, id, cols, rows) => {
     inlineResizes.push({ id, cols, rows });
   },
@@ -933,6 +943,13 @@ declare global {
       inlineRuns: () => { sessionId: string; id: string; host: string | null }[];
       // Every grid reported to a run's shell, in order.
       inlineResizes: () => { id: string; cols: number; rows: number }[];
+      // Every set of run ids this client has claimed, in order (one per boot
+      // and per reconnect; bridge.ts reconcileRuns).
+      runClaims: () => string[][];
+      // Which runs the fake server admits to still running when claimed. Set
+      // before driving linkState("live") to choose which half of the
+      // reconciliation a spec is testing.
+      holdRuns: (ids: string[]) => void;
       // Push one output byte-string at a run, the way Bun's runEvent would.
       // Not the PTY coming back: the inert harness stays inert, and a spec that
       // wants real run behavior still belongs to the live probe. This drives
@@ -970,7 +987,16 @@ window.__harness = {
   runOutput: (id, text) => dispatchRunEvent({ id, kind: "output", dataB64: btoa(text) }),
   externalOpen: (open) => dispatchExternalOpen(open),
   notesChanged: (root) => dispatchNotesChanged(root),
-  linkState: (state, detail) => recordLinkState(state, detail),
+  runClaims: () => runClaims.map((ids) => [...ids]),
+  holdRuns: (ids) => {
+    runsStillRunning = [...ids];
+  },
+  // The same pair boot.tsx's connectionState push does, because a reconnect
+  // that did not reconcile is not the reconnect the app performs.
+  linkState: (state, detail) => {
+    recordLinkState(state, detail);
+    if (state === "live") void reconcileRuns();
+  },
   store,
 };
 

@@ -10,8 +10,8 @@
 import { Transaction } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { createEditor } from "../editor/setup";
-import { handleRunEvent, pingOverlay } from "../editor/blocks";
-import { onRunEvent } from "../editor/bridge";
+import { handleRunEvent, pingOverlay, runningRunIds } from "../editor/blocks";
+import { onRunEvent, type RunSink } from "../editor/bridge";
 import { fromDisk } from "../editor/session";
 import { readNote } from "../notes/channel";
 import {
@@ -71,6 +71,13 @@ function applyRunEvent(view: EditorView, ev: RunEvent): void {
   if (ev.kind === "began") handleRunEvent(view, ev.id, "started", null);
   else if (ev.kind === "output") handleRunEvent(view, ev.id, "output", ev.dataB64);
   else handleRunEvent(view, ev.id, "finished", ev.exitCode);
+}
+
+// One editor's end of the run channel (bridge.ts RunSink): events in, and the
+// runs it still shows out. Registered and dropped together, so a view that was
+// replaced cannot go on claiming runs whose panels went with it.
+function runSink(view: EditorView): RunSink {
+  return { apply: (ev) => applyRunEvent(view, ev), live: () => runningRunIds(view.state) };
 }
 
 interface Entry {
@@ -327,7 +334,7 @@ function acquire(tab: TabState, folder: string, handlers: DocHandlers): { entry:
   // was captured at bind and tabs never change workspace, so the choice is
   // per-editor-lifetime, like every settings read.
   const view = createEditor(host, tab.path ? "" : seedDoc(tab.seed), docId, workspaceKind(folder) === "docs");
-  const offRun = onRunEvent((ev) => applyRunEvent(view, ev));
+  const offRun = onRunEvent(runSink(view));
   // CodeMirror does not watch its container for size changes; a pane resize (a
   // divider drag, the terminal drawer opening) needs an explicit re-measure.
   const ro = new ResizeObserver(() => view.requestMeasure());
@@ -358,7 +365,7 @@ function evictToHeldFace(docId: string, entry: Entry, damaged: boolean): void {
   entry.view.destroy();
   const view = createEditor(entry.host, "", docId);
   entry.view = view;
-  entry.offRun = onRunEvent((ev) => applyRunEvent(view, ev));
+  entry.offRun = onRunEvent(runSink(view));
   showHeldFace(entry, damaged);
 }
 

@@ -17,6 +17,7 @@ import { startDaemon, connectToDaemon, IDLE_EXIT_NEVER, type Daemon } from "./da
 import { clientConnection } from "../shared/transport";
 import { BUILD_VERSION } from "../shared/version";
 import { PUSH_MESSAGES, type ServerPush } from "../shared/wire";
+import type { RunEvent } from "../shared/rpc-schema";
 
 const push = Object.fromEntries(PUSH_MESSAGES.map((m) => [m, () => {}])) as unknown as ServerPush;
 
@@ -216,6 +217,72 @@ describe("a client that said it is coming back", () => {
     await phone.closed;
     mac.close();
     await d.done; // the Mac's window, not the minute the phone asked for
+  });
+});
+
+describe("runs the client that started them can no longer show", () => {
+  // A run event is a push keyed by a run id, so a page that reloaded knows
+  // none of them: the run would go on executing, hold the daemon under it, and
+  // have no id left anywhere to stop it by. The claim at the next boot is what
+  // collects it (rpc-schema inlineClaim). Driven through a real PTY, because
+  // what has to be true is that the shell's foreground job actually dies.
+  const watching = async (socketPath: string, who: string) => {
+    const seen: RunEvent[] = [];
+    const duplex = await connectToDaemon({ socketPath, spawn: () => {}, timeoutMs: 2000 });
+    const conn = clientConnection(duplex, {
+      push: { ...push, runEvent: (ev: RunEvent) => void seen.push(ev) },
+      build: BUILD_VERSION,
+      client: who,
+    });
+    await conn.ready;
+    return { conn, seen };
+  };
+
+  const until = async (cond: () => boolean, ms = 5_000): Promise<boolean> => {
+    const deadline = Date.now() + ms;
+    while (Date.now() < deadline && !cond()) await new Promise((r) => setTimeout(r, 20));
+    return cond();
+  };
+
+  test("a fresh page claims nothing, and the run it never learned about stops", async () => {
+    const { socketPath } = await daemonIn({ idleMs: 60_000 });
+    const first = await watching(socketPath, "phone-1");
+    expect((await first.conn.requests.runBlock({ sessionId: "note-1", id: "run-1", code: "sleep 30", language: "sh" })).accepted).toBe(true);
+    expect(await until(() => first.seen.some((ev) => ev.kind === "began"))).toBe(true);
+    first.conn.close();
+
+    // The page came back with no panels, so it names no runs.
+    const next = await watching(socketPath, "phone-1");
+    expect(await next.conn.requests.inlineClaim({ ids: [] })).toEqual({ running: [], orphaned: 1 });
+    // 130 is the shell reporting the interrupt itself: the job died, and the
+    // note's shell lived to say so.
+    expect(await until(() => next.seen.some((ev) => ev.kind === "ended"))).toBe(true);
+    expect(next.seen.find((ev) => ev.kind === "ended")).toEqual({ id: "run-1", kind: "ended", exitCode: 130 });
+  });
+
+  test("a run the client still shows is confirmed and left running", async () => {
+    const { socketPath } = await daemonIn({ idleMs: 60_000 });
+    const client = await watching(socketPath, "mac-1");
+    await client.conn.requests.runBlock({ sessionId: "note-1", id: "run-1", code: "sleep 30", language: "sh" });
+    expect(await until(() => client.seen.some((ev) => ev.kind === "began"))).toBe(true);
+
+    // The wire flapped, the panel survived: the claim is what tells the server
+    // this run still has somewhere to be seen.
+    expect(await client.conn.requests.inlineClaim({ ids: ["run-1"] })).toEqual({ running: ["run-1"], orphaned: 0 });
+    await new Promise((r) => setTimeout(r, 200));
+    expect(client.seen.some((ev) => ev.kind === "ended")).toBe(false);
+  });
+
+  test("a run the server already finished is simply not confirmed", async () => {
+    const { socketPath } = await daemonIn({ idleMs: 60_000 });
+    const client = await watching(socketPath, "mac-1");
+    await client.conn.requests.runBlock({ sessionId: "note-1", id: "run-1", code: "true", language: "sh" });
+    expect(await until(() => client.seen.some((ev) => ev.kind === "ended"))).toBe(true);
+
+    // The client asks about a panel whose ended event it might never have got
+    // (a push with nowhere to go is dropped). Nothing to stop, and the empty
+    // answer is what lets it close the panel out.
+    expect(await client.conn.requests.inlineClaim({ ids: ["run-1"] })).toEqual({ running: [], orphaned: 0 });
   });
 });
 

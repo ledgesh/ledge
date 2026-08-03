@@ -281,6 +281,7 @@ splits again, by machine:
 | Profiles (`~/.config/ledge/profiles/`) | server | never transmitted, §10 |
 | PTYs, sessions, scrollback | server | §7, and they outlive a connection |
 | How long they outlive it | server, on the client's ask | §7, `Hello.hold` |
+| Which inline runs are still worth executing | server, on the client's claim | §7, `inlineClaim` |
 | The dedupe window for replayed writes | server | §7, spans reconnects |
 | The watcher | server | pushes `notesChanged` as today |
 | Behavior settings (shell, interpreters, trash TTL, daily workspace) | server | facts about that machine |
@@ -377,6 +378,31 @@ Three consequences to hold onto:
 - **The ring is the only buffer.** Output older than 256 KB is gone, on
   reconnect exactly as it is on pane switch. A client that needs more asks
   for a longer ring, not for a replay log.
+
+**Inline runs have no attach, so a client reconciles them instead.** All three
+bullets above are the drawer's: it has a ring and `terminalAttach` to replay it.
+An inline run has neither. It is a `runEvent` push keyed by a run id, and the
+only thing that knows that id is the panel the page is drawing. A page that
+reloaded knows none of them, which leaves the run executing with nothing on
+screen able to show it, no id anywhere able to stop it, and `running()` keeping
+the daemon alive underneath. So the client sends `inlineClaim` at boot and after
+every reconnect, naming the runs it can still show, and the server interrupts
+the ones it did not name — the same interrupt dismissing a panel sends, so the
+note's shell keeps the cwd and the exports the block left it.
+
+The answer settles the other direction. A push with nowhere to go is dropped
+rather than queued, so the `ended` event for a run that finished while the wire
+was down is simply gone, and its panel would sit on Running for good with that
+block's run button disabled behind it. `inlineClaim` replies with the claimed
+runs the server is actually executing, and the client closes the rest out with
+no exit status, which is exactly what it knows.
+
+The cost is worth stating plainly: coming back to a server collects what you
+left running on it. Leaving kills nothing — switching to another connection
+leaves that machine's runs alone, and a wire that merely dropped reconnects into
+panels that are still there — but the boot that returns finds them unshowable
+and ends them. What the alternative preserves is a run nobody can watch, stop,
+or read, which is not a kept run.
 
 **A client that loses the wire re-dials rather than failing.** The ladder is
 250ms doubling to 8s and then holding there, eight attempts and 31.75 seconds

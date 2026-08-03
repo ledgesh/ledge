@@ -359,6 +359,13 @@ Three consequences, in the order they bite:
   dial keeps the ladder from doing anything with it; coming back reloads and
   reaches a server again 211ms later. A whole boot is cheaper than the
   bookkeeping that would avoid it.
+
+  The reload takes every inline run panel with it, which is a problem the
+  drawer does not have — it re-attaches and replays its ring, while a run is
+  only a push keyed by an id the old page owned. So the boot claims the runs it
+  can still show and the server interrupts the rest (remote.md §7,
+  `inlineClaim`). The hold below is untouched by that: what a hold keeps is the
+  shell, and a run in flight was never the thing it was for.
 - **The server is gone in a minute unless the client asked it to stay.** Sixty
   seconds of no client and nothing running is the daemon exiting. `running()`
   means a block in flight or a shell inside a foreground command, so an idle
@@ -1195,18 +1202,20 @@ inside the Mac app.
    on a 16.
 
 Live command execution is not in this list. It is the phase after v1, and the
-first thing §5 said it had to answer is built: a client asks for its sessions to
-be held and the server sets the term (`Hello.hold`, `HOLD_MAX_MS`). It holds
-nothing for a phone yet, because §8's cut means a phone opens no shells to hold.
+two things §5 said it had to answer first are both built. A client asks for its
+sessions to be held and the server sets the term (`Hello.hold`, `HOLD_MAX_MS`),
+which holds nothing for a phone yet, because §8's cut means a phone opens no
+shells to hold. And a run's output being a push keyed by its id, with no attach
+beside it, no longer leaves a foreground reload with a run the new page can
+neither see nor `cancelRun` — dismissing a panel is what sends that today,
+and a reload is not a dismissal, so the boot claims what it can still show
+instead and the server ends the rest (`inlineClaim`, remote.md §7).
 
-What the phase still has to answer is the rest of that cut. A run's output is a
-push keyed by its id with no attach beside it, so a foreground reload leaves an
-inline run going on the server that the new page cannot see and cannot
-`cancelRun`, because it never learned the id — dismissing a panel is what sends
-that today, and a reload is not a dismissal. A software keyboard has no Ctrl, no
-Escape, no Tab and no arrows, and the accessory bar carries seven Markdown verbs
-over `.cm-content` only (§7). The hatches interactions.md §6a gives for taking
-the keyboard back from a running block are ⌘Escape and a double Escape, neither
-of which exists on a phone. And the host picker and the run confirmation
-(interactions.md §4a, §4b) are dialogs built around a keyboard grammar, on the
-one surface where being wrong runs a command on the wrong machine.
+What the phase still has to answer is the rest of that cut. A software keyboard
+has no Ctrl, no Escape, no Tab and no arrows, and the accessory bar carries
+seven Markdown verbs over `.cm-content` only (§7). The hatches interactions.md
+§6a gives for taking the keyboard back from a running block are ⌘Escape and a
+double Escape, neither of which exists on a phone. And the host picker and
+the run confirmation (interactions.md §4a, §4b) are dialogs built around a
+keyboard grammar, on the one surface where being wrong runs a command on the
+wrong machine.

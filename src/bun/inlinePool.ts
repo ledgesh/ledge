@@ -196,9 +196,43 @@ export class InlinePool {
    */
   cancel(sessionId: string, id: string): void {
     const slot = this.slotFor(sessionId, id);
-    if (!slot) return;
-    slot.shell.interrupt();
-    if (!slot.began) slot.abandoned = true;
+    if (slot) this.interrupt(slot);
+  }
+
+  /**
+   * Line the pool up with the runs a client can still show: interrupt every run
+   * `keep` does not name, and answer which of `keep` is actually running.
+   *
+   * A run is only ever stopped by the panel that shows it (`cancel` above), and
+   * a client that reloaded has no panels: its runs would keep going with nothing
+   * on screen to see them, nothing able to stop them (the ids went with the old
+   * page), and the server held alive underneath. So the client says what it
+   * still has and this collects the difference — the same interrupt, for the
+   * same reason, reaching the runs whose panel went away without a click.
+   *
+   * One client at a time (bun/daemon.ts), so "every run this pool is executing"
+   * and "every run that client started" are the same set, and an unclaimed run
+   * is an orphan rather than somebody else's.
+   */
+  claim(keep: readonly string[]): { running: string[]; orphaned: string[] } {
+    const wanted = new Set(keep);
+    const running: string[] = [];
+    const orphaned: string[] = [];
+    for (const session of this.sessions.values()) {
+      for (const slot of this.slots(session)) {
+        // activeRun first: it is set at write time, and the parser's view of
+        // the same run lags it by one echo (see Slot).
+        const id = slot.activeRun ?? slot.parser.openBlockId;
+        if (id === null) continue;
+        if (wanted.has(id)) {
+          running.push(id);
+          continue;
+        }
+        orphaned.push(id);
+        this.interrupt(slot);
+      }
+    }
+    return { running, orphaned };
   }
 
   /** Keystrokes / pasted text for the program run `id` is executing. */
@@ -396,6 +430,14 @@ export class InlinePool {
 
   private slots(session: Session): Slot[] {
     return [...session.primaries.values(), ...session.overflow.values()];
+  }
+
+  // Stop what a slot is running, by whichever of the two routes applies: a
+  // signal for a run that began, and the abandoned flag for one that never did.
+  // `cancel` states why they differ; `claim` needs the same pair.
+  private interrupt(slot: Slot): void {
+    slot.shell.interrupt();
+    if (!slot.began) slot.abandoned = true;
   }
 
   private slotFor(sessionId: string, id: string): Slot | undefined {

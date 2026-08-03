@@ -18,7 +18,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import type { NoteMeta, TrashMeta, WorkspaceRootInfo } from "../shared/rpc-schema";
 import type { RequestClient, ViewPush } from "../shared/wire";
-import { configureBridge, dispatchRunEvent, setTerminalBusy } from "./editor/bridge";
+import { configureBridge, dispatchRunEvent, reconcileRuns, setTerminalBusy } from "./editor/bridge";
 import { bytesToB64, configureTerminal, dispatchTerminalOutput, dispatchTerminalExit } from "./terminal/channel";
 import { configureNotes, dispatchExternalOpen, dispatchNotesChanged } from "./notes/channel";
 import { configureVault, recordVaultState, refreshVaultState } from "./vault/channel";
@@ -67,7 +67,13 @@ export const viewPush: ViewPush = {
   menuCommand: ({ action }) => dispatchNativeCommand(action),
   // From the shell holding this end of the wire, never from a server
   // (remote.md §7).
-  connectionState: ({ state, detail }) => recordLinkState(state, detail),
+  connectionState: ({ state, detail }) => {
+    recordLinkState(state, detail);
+    // "live" is only ever announced for a RE-connection (the first one is the
+    // caller's boot, not a state change), which makes it exactly the moment to
+    // ask what became of the runs whose events were pushed at a dead wire.
+    if (state === "live") void reconcileRuns();
+  },
 };
 
 /**
@@ -97,6 +103,7 @@ export function bootView(requests: RequestClient): Promise<void> {
     cancelRun: (sessionId, id) => {
       void requests.cancelRun({ sessionId, id });
     },
+    claimRuns: (ids) => requests.inlineClaim({ ids }).then((r) => r.running),
     resizeInline: (sessionId, id, cols, rows) => {
       void requests.inlineResize({ sessionId, id, cols, rows });
     },
@@ -301,6 +308,12 @@ async function boot(requests: RequestClient): Promise<void> {
   configureCli({
     install: () => requests.cliInstall({}),
   });
+  // A fresh page claims nothing, which is the point: whatever this server is
+  // still running was started by the page this one replaced, and no id from it
+  // survived the reload (editor/bridge.ts reconcileRuns). Not awaited — the
+  // window should not wait on it — but sent early, because until it lands those
+  // runs are executing with nothing on screen able to show or stop them.
+  void reconcileRuns();
   // After render, not gating it: the mirrored default ("locked") renders
   // locked notes as placeholders either way, which is correct until — and
   // almost always after — this lands ("unlocked" cannot survive a relaunch;

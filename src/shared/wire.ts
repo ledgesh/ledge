@@ -157,6 +157,7 @@ export const REQUEST_METHODS = [
   "cancelRun",
   "inlineResize",
   "inlineInput",
+  "inlineClaim",
   "terminalInput",
   "terminalPaste",
   "terminalResize",

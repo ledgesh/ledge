@@ -675,6 +675,17 @@ export async function createServer(deps: {
       inlinePool.input(sessionId, id, fromB64(dataB64));
       return { ok: true };
     },
+    inlineClaim: ({ ids }) => {
+      // The client's runs, reconciled with this server's (see rpc-schema).
+      // Nothing here is per session: a reloaded page has no sessions yet
+      // either, and the orphans it is asking about are spread across every
+      // note it had open before.
+      const { running, orphaned } = inlinePool.claim(ids);
+      if (orphaned.length > 0) {
+        console.warn(`[run] interrupted ${orphaned.length} run(s) no client can show:`, orphaned.join(", "));
+      }
+      return { running, orphaned: orphaned.length };
+    },
     terminalInput: ({ sessionId, dataB64 }) => {
       termFor(sessionId).term.write(fromB64(dataB64));
       return { ok: true };

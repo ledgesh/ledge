@@ -141,6 +141,10 @@ The bar reads "reconnecting…" and Ledge re-dials for about thirty seconds. Req
 
 Anything running keeps running. Shells belong to the server and survive a wire dropping, so a build carries on while you are on a train and its output is waiting when you come back. Reattaching replays the last 256 KB of each terminal.
 
+A block's output panel is the exception, and only across a restart. The panel lives in the page rather than on the server, so a wire that drops and comes back finds it still there with the run still going.
+
+A Ledge that has relaunched has no panel, and no way to show that run or stop it. So blocks left running on a server are stopped the next time Ledge connects to it, which includes switching to another connection and back. A terminal is not affected, because reattaching finds its shell where you left it.
+
 A save that was in flight when the wire dropped is retried once the connection is back, and applied once, even if the first attempt had already landed.
 
 If the reconnect runs out, the bar reads "disconnected" and Ledge stops accepting work for a machine it cannot reach. Choose the connection again from the picker to start over.

@@ -1083,6 +1083,21 @@ export function handleRunEvent(view: EditorView, id: string, kind: string, paylo
   }
 }
 
+/**
+ * The runs this editor still shows as going — what it claims when the client
+ * lines itself up with the server (bridge.ts reconcileRuns).
+ *
+ * Panels are the only record a run has on this side: an editor destroyed by a
+ * relock, a tab closed, a page reloaded all take theirs with them, and a run
+ * this returns nothing for is one nobody here could see or stop.
+ */
+export function runningRunIds(state: EditorState): string[] {
+  return state
+    .field(runsField)
+    .filter((r) => r.state === "running")
+    .map((r) => r.id);
+}
+
 export function failAllRuns(view: EditorView): void {
   for (const r of view.state.field(runsField)) {
     if (r.state === "running") {

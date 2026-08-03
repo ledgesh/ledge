@@ -381,6 +381,10 @@ describe("which requests carry an op (remote.md §7)", () => {
     expect(needsOp("noteDelete")).toBe(true);
     expect(needsOp("terminalInput")).toBe(true);
     expect(needsOp("openRequestTake")).toBe(true);
+    // It reads like a question and it is not one: an unclaimed run is
+    // interrupted by the asking, so a replay must be answered from the record
+    // rather than run again against whatever is going by then.
+    expect(needsOp("inlineClaim")).toBe(true);
   });
 
   // The list is stated as the READS so that the default is to dedupe. A method
