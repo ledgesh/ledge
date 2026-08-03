@@ -775,3 +775,175 @@ test.describe("the phone that runs blocks, without a terminal", () => {
     await expect(overlay(page).getByText("Toggle Terminal", { exact: true })).toHaveCount(0);
   });
 });
+
+// --- the two questions asked before a command runs --------------------------
+//
+// interactions.md §4a and §4b, on a client with no keyboard. Both were designed
+// around one: the picker is "⌘↩ then Enter to repeat, an arrow to go elsewhere",
+// and both dismiss on an Escape a software keyboard does not have. A finger
+// keeps the ordering and loses the whole economy — every row is one tap, so the
+// preselection stops being cheaper than the alternative and the only things left
+// holding the answer apart are how big the targets are and what they say.
+//
+// So these specs assert three things the desktop suite cannot: that a finger can
+// open both, that the targets are 44 points, and that the last pick is marked
+// rather than merely focused. What each dialog MEANS is host-picker.spec.ts's
+// and run-confirm.spec.ts's, and is not restated here.
+test.describe("choosing a machine, and confirming a run, by finger", () => {
+  // A note with a runnable block, written with the keyboard: composing a note is
+  // setup, and every VERB below is a tap. `uptime` because the confirmation
+  // shows the code, and a spec should be able to point at the line it shows.
+  const NOTE = (frontmatter: string) =>
+    `---\n${frontmatter}\n---\n# Untitled\n\n\`\`\`sh\nuptime\n\`\`\`\n`;
+
+  async function blockNote(page: Page, frontmatter: string): Promise<void> {
+    await page.keyboard.press("Meta+n");
+    await expect(page.locator(".cm-line").first()).toHaveText("# Untitled");
+    await page.keyboard.press("Meta+a");
+    await page.keyboard.insertText(NOTE(frontmatter));
+    await expect(page.locator(".cm-line", { hasText: "uptime" })).toBeVisible();
+  }
+
+  // How a finger asks for a run. Two taps, and the first is not ceremony: the
+  // fence's controls are `opacity: 0` until the block is hovered or holds the
+  // caret (index.css), and a phone has only the second of those — so the tap
+  // that puts the caret in the block is what lights the ▶ it then taps.
+  async function tapRun(page: Page): Promise<void> {
+    await page.locator(".cm-line", { hasText: "uptime" }).tap();
+    await page.locator('[data-act="run"]').tap();
+  }
+
+  test.beforeEach(async ({ page }) => {
+    await page.goto("/harness.html?shell=ios-runs");
+    await expect(
+      page.getByRole("button", { name: /Toggle Sidebar/ }),
+    ).toBeVisible();
+  });
+
+  test("the picker opens from a fence a finger tapped, and the row is the answer", async ({
+    page,
+  }) => {
+    await blockNote(page, "host: web1 db2");
+    await tapRun(page);
+
+    // The dialog RENDERS, which is the assumption this file exists to stop
+    // making, and nothing has run behind it.
+    await expect(page.getByRole("menu")).toBeVisible();
+    expect(await page.evaluate(() => window.__harness.inlineRuns())).toHaveLength(0);
+
+    await page.getByRole("menuitem", { name: "db2" }).tap();
+    await expect(page.getByRole("menu")).toHaveCount(0);
+    await expect.poll(() => page.evaluate(() => window.__harness.inlineRuns())).toHaveLength(1);
+    expect((await page.evaluate(() => window.__harness.inlineRuns()))[0].host).toBe("db2");
+  });
+
+  test("both machines are 44-point targets, adjacent in one list", async ({
+    page,
+  }) => {
+    await blockNote(page, "host: web1 db2");
+    await tapRun(page);
+    const rows = page.getByRole("menuitem");
+    await expect(rows).toHaveCount(2);
+    // The number is the platform's floor for a finger. It matters more here than
+    // in any other menu in the app: the two rows are `staging` and `prod`, they
+    // sit against each other, and the cost of hitting the wrong one is a command
+    // on the wrong machine.
+    for (const h of await rows.evaluateAll((els) =>
+      els.map((el) => el.getBoundingClientRect().height),
+    )) {
+      expect(h).toBeGreaterThanOrEqual(44);
+    }
+  });
+
+  test("the last machine is marked, not merely focused", async ({ page }) => {
+    await blockNote(page, "host: web1 db2");
+    await tapRun(page);
+    // Nothing marked yet: the session has no last pick to preselect.
+    await expect(page.locator("[data-preferred]")).toHaveCount(0);
+    await page.getByRole("menuitem", { name: "db2" }).tap();
+    await expect.poll(() => page.evaluate(() => window.__harness.inlineRuns())).toHaveLength(1);
+
+    // One live run per block gates re-running, and PTYs are inert here, so the
+    // panel has to go before the block is free again.
+    await page.getByTitle("Dismiss").tap();
+    await tapRun(page);
+    const marked = page
+      .getByRole("menuitem")
+      .filter({ has: page.locator("[data-preferred]") });
+    await expect(marked).toHaveCount(1);
+    await expect(marked).toContainText("db2");
+  });
+
+  test("a tap outside is the Escape a phone has not got, and it runs nothing", async ({
+    page,
+  }) => {
+    await blockNote(page, "host: web1 db2");
+    await tapRun(page);
+    const menu = (await page.getByRole("menu").boundingBox())!;
+    const below = menu.y + menu.height + 80;
+    expect(below).toBeLessThan(page.viewportSize()!.height); // the tap lands on screen
+    await page.touchscreen.tap(30, below);
+    await expect(page.getByRole("menu")).toHaveCount(0);
+    expect(await page.evaluate(() => window.__harness.inlineRuns())).toHaveLength(0);
+  });
+
+  test("the confirmation's two buttons are 44 points and not against each other", async ({
+    page,
+  }) => {
+    await blockNote(page, "confirm: true");
+    await tapRun(page);
+    const dialog = page.getByRole("alertdialog");
+    await expect(dialog).toBeVisible();
+    // §4b: the code is shown, because the fence body is the truth about what is
+    // about to run.
+    await expect(dialog).toContainText("uptime");
+
+    const boxes = await dialog.getByRole("button").evaluateAll((els) =>
+      els.map((el) => {
+        const r = el.getBoundingClientRect();
+        return { left: r.left, right: r.right, height: r.height };
+      }),
+    );
+    expect(boxes).toHaveLength(2);
+    for (const b of boxes) expect(b.height).toBeGreaterThanOrEqual(44);
+    // Cancel and the button that runs `rm -rf` are the pair on screen; a
+    // desktop's 8 points between them is a comfortable click and a bad tap.
+    const [cancel, run] = boxes as [(typeof boxes)[0], (typeof boxes)[0]];
+    expect(run.left - cancel.right).toBeGreaterThanOrEqual(16);
+  });
+
+  test("Cancel is a tap, and so is Run, and only one of them runs anything", async ({
+    page,
+  }) => {
+    await blockNote(page, "confirm: true");
+    await tapRun(page);
+    await page.getByRole("alertdialog").getByRole("button", { name: "Cancel" }).tap();
+    await expect(page.getByRole("alertdialog")).toHaveCount(0);
+    expect(await page.evaluate(() => window.__harness.inlineRuns())).toHaveLength(0);
+
+    // Nothing remembered: §4b's always-ask survives losing the keyboard.
+    await tapRun(page);
+    await page
+      .getByRole("alertdialog")
+      .getByRole("button", { name: "Run", exact: true })
+      .tap();
+    await expect.poll(() => page.evaluate(() => window.__harness.inlineRuns())).toHaveLength(1);
+  });
+
+  test("the machine is chosen first, then named in the question, with no chord in it", async ({
+    page,
+  }) => {
+    await blockNote(page, "host: web1 db2\nconfirm: true");
+    await tapRun(page);
+    await page.getByRole("menuitem", { name: "db2" }).tap();
+
+    // §4b's ordering, driven entirely by taps: the picker, then a question that
+    // can name what was picked.
+    const dialog = page.getByRole("alertdialog");
+    await expect(dialog).toContainText("db2");
+    expect(await page.evaluate(() => window.__harness.inlineRuns())).toHaveLength(0);
+    await dialog.getByRole("button", { name: "Run", exact: true }).tap();
+    await expect.poll(() => page.evaluate(() => window.__harness.inlineRuns())).toHaveLength(1);
+    expect((await page.evaluate(() => window.__harness.inlineRuns()))[0].host).toBe("db2");
+  });
+});

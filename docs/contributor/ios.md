@@ -1215,8 +1215,13 @@ inside the Mac app.
 
    What still waits on a hand: §5's lifecycle across a suspension that really
    suspends, the accessory bar under a finger rather than under Playwright's
-   pointer events, and the geometry of a 14 Pro Max against a keyboard fix built
-   on a 16.
+   pointer events, the geometry of a 14 Pro Max against a keyboard fix built
+   on a 16, and whether the fence's run button survives WebKit's first-tap rule.
+   That last one is the tab strip's defect again, one layer down: `.ledge-btn`'s
+   hover style is hand-written CSS rather than a Tailwind utility, so
+   `hoverOnlyWhenSupported` never gated it, and Playwright's touch emulation is
+   not the ContentChangeObserver. It taps fine in the harness, which is exactly
+   what the ✕ did.
 
 Live command execution is not in this list. It is the phase after v1, and the
 two things §5 said it had to answer first are both built. A client asks for its
@@ -1235,11 +1240,30 @@ behind it: the ▶ without the terminal button beside it, Run Block Inline witho
 Run Block in Terminal, and Restart Note Shell back, which a phone was offered
 throughout v1 and had no shell to restart.
 
+**The two questions asked before a command runs are answered.** The host picker
+and the run confirmation (interactions.md §4a, §4b) were built around a
+keyboard: ⌘↩ then Enter repeats the last machine, an arrow leaves it, Escape
+backs out of either. A finger keeps the ordering and loses the whole economy —
+every row is one tap, so the preselection is no longer the cheap answer, and the
+focus ring is holding a fact that nothing else on the screen states. So the
+preferred machine is now marked as well as focused, and the controls a finger
+chooses BETWEEN grow to 44 points: the picker's two rows, and the
+confirmation's Cancel beside the button that runs the block. Seven specs drive
+both by tap at 390x844.
+
+Writing them is what established that a finger can open either one, which was
+the assumption worth testing rather than restating: the fence's ▶ is
+`opacity: 0` until the block is hovered or holds the caret, and a phone has only
+the second, so asking for a run there is a tap in the block and then a tap on
+the button. The size rule found the other thing no reading would have. Every rem
+in this app is 0.875 of its name — the document's root is `font: 14px` — so
+`min-h-11`, the utility that spells 44, renders 38.5. A tap target is a physical
+measurement and is written in pixels.
+
 What the phase still has to answer is the rest of that cut. A software keyboard
 has no Ctrl, no Escape, no Tab and no arrows, and the accessory bar carries
 seven Markdown verbs over `.cm-content` only (§7). The hatches interactions.md
 §6a gives for taking the keyboard back from a running block are ⌘Escape and a
-double Escape, neither of which exists on a phone. And the host picker and
-the run confirmation (interactions.md §4a, §4b) are dialogs built around a
-keyboard grammar, on the one surface where being wrong runs a command on the
-wrong machine.
+double Escape, neither of which exists on a phone. And the fence's own controls
+are a hover-revealed group of 22-point buttons — reachable, because the caret
+lights them too, but not yet sized for the hand reaching them.

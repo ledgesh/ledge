@@ -75,6 +75,14 @@ export default {
       // row's own menu carrying the verb — while leaving the desktop reveal
       // exactly as it was, space reserved and all, so nothing reflows on hover.
       addVariant("hoverable", "@media (hover: hover)");
+      // `touch:` is the exact complement, for the rules that are about the SIZE
+      // of what points rather than about a hover style: a mouse is a pixel and a
+      // finger is a pad, so a control sized for one is a mis-tap on the other.
+      // The same media feature both ways deliberately — a client either hovers
+      // or it does not, and two different discriminators would eventually
+      // disagree about the same device (lib/viewport.ts says why width answers
+      // the layout question and nothing else).
+      addVariant("touch", "@media (hover: none)");
     }),
   ],
 };

@@ -97,7 +97,20 @@ export function MenuItem({
       title={title}
       disabled={disabled}
       className={cn(
-        "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm",
+        // 44 points on a client with no pointer: the smallest thing a finger
+        // hits reliably. Written here rather than on any one menu because a menu
+        // row is a tap target wherever it appears — the same move
+        // `hoverOnlyWhenSupported` makes, fixing the rule at the control instead
+        // of at the sites someone remembered. The row it was written for is the
+        // host picker's (interactions.md §4a): `staging` and `prod` are adjacent
+        // items in one list, and 30 points of row is how a finger runs a command
+        // on the wrong machine.
+        //
+        // `[44px]` and not `min-h-11`, which is 2.75rem: this document's root is
+        // `font: 14px` (index.css), so every rem in the app is 0.875 of its
+        // nominal pixel and the utility would have quietly given 38.5. A touch
+        // target is a physical size and must not ride the typographic scale.
+        "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm touch:min-h-[44px]",
         destructive
           ? "text-destructive hover:bg-destructive/10"
           : "hover:bg-accent hover:text-accent-foreground",

@@ -149,6 +149,19 @@ section.
 - **A menu fits the screen it opens on** (`lib/menuPlacement.ts`): below the
   press where there is room, flipped above it where there is not, never past an
   edge. A menu item you cannot see is a verb the user does not have.
+- **A control a finger chooses BETWEEN is at least 44 points tall.** Not every
+  control: a lone button can be missed and pressed again, and the app is full of
+  16-point glyphs that are fine because nothing sits against them. The rule is
+  for adjacent alternatives, where the miss does not land on nothing — it lands
+  on the neighbour and runs it. The two written for are the host picker's rows
+  and the run confirmation's Cancel/Run pair (§4a, §4b); the size lives on
+  `MenuItem` rather than on either of them, because a menu row is a tap target
+  wherever it appears. **Write it in pixels.** The document's root is `font:
+  14px`, so every rem-based Tailwind size is 0.875 of its name and `min-h-11`
+  silently means 38.5 — a touch target is a physical measurement and must not
+  ride the app's typographic scale. `touch:` is `@media (hover: none)`, the
+  complement of `hoverable:` above and the same media feature, so the two
+  variants cannot come to disagree about one device.
 
 None of this is reachable in the shipping Mac app, where every pointer is a
 mouse; it is the affordance layer the iOS client stands on (`ios.md` §6, §14
@@ -378,6 +391,13 @@ of a misfire is asymmetric. The rules:
   last pick focused: repeating the same machine is ⌘↵ then Enter; a
   *different* machine takes a deliberate arrow first. Dismissal runs
   nothing. (e2e/host-picker.spec.ts states each of these executably.)
+- **On touch the preselection is marked, not merely focused.** A finger has no
+  Enter to make repeating cheap and no arrow to make leaving deliberate: every
+  row costs one tap, so the focus ring is carrying a fact — which machine ran
+  last — that nothing else on screen says. The preferred row therefore shows a
+  check, on every client, and §1a's 44 points are what keep two adjacent
+  machine names apart once the keyboard's economy is gone. The dismissal that
+  replaces Escape is the outside press the popover already had.
 - **One declared host asks nothing** — it runs there silently, and the run
   buttons' tooltips carry ": on <host>" so the target is visible before the
   click (joined with ", asks first" when §4b applies: where a run lands and
@@ -429,6 +449,12 @@ redis-cli -n 0 flushdb
   what says where that shell is.
 - **Always-ask, no "don't ask again."** §4a's reasoning exactly: a remembered
   yes is the state the marker exists to prevent. Cancelling remembers nothing.
+- **On touch, size carries what focus was carrying.** Focus lands on Cancel on
+  every client, and on a phone that stops meaning anything: there is no Return
+  for it to disarm. What is left is a destructive button beside a safe one, so
+  both grow to §1a's 44 points and the gap between them doubles. Cancel is also
+  the Escape a software keyboard does not have — the backdrop press is the
+  other one, and it was there already.
 - **The dialog shows the block's code.** A custom `confirm="…"` is a headline,
   not a substitute for reading what runs.
 - **It is a speedbump, not a boundary.** Whoever can edit the note can delete

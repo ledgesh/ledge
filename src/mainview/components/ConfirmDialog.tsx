@@ -71,11 +71,34 @@ export function ConfirmDialog({
             {detail}
           </pre>
         )}
-        <div className="mt-4 flex justify-end gap-2">
-          <Button ref={cancelRef} size="sm" variant="ghost" onClick={onCancel}>
+        {/* Both buttons grow to 44 points on a client with no pointer, and the
+            gap between them grows with them. A `sm` button is 32 points 8 points
+            from its neighbour, which is a comfortable pair to click and an
+            uncomfortable pair to tap — and the pair here is Cancel beside the
+            button that runs `rm -rf` (interactions.md §4b), where the mis-tap is
+            not a mis-tap but the thing the dialog exists to prevent. Focus still
+            lands on Cancel; that just stops meaning anything without a keyboard
+            behind it, which is why the sizes have to carry it instead.
+
+            Pixels rather than the rem-based `h-11`/`gap-4`, for the reason
+            ContextMenu.tsx spells out: this document's root is 14px, so those
+            utilities would have given 38.5 and 14. */}
+        <div className="mt-4 flex justify-end gap-2 touch:gap-[16px]">
+          <Button
+            ref={cancelRef}
+            size="sm"
+            variant="ghost"
+            className="touch:h-[44px] touch:px-5 touch:text-sm"
+            onClick={onCancel}
+          >
             Cancel
           </Button>
-          <Button size="sm" variant="destructive" onClick={onConfirm}>
+          <Button
+            size="sm"
+            variant="destructive"
+            className="touch:h-[44px] touch:px-5 touch:text-sm"
+            onClick={onConfirm}
+          >
             {confirmLabel}
           </Button>
         </div>
