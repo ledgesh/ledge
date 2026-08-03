@@ -2,16 +2,17 @@
 // the notes can — two different questions, and the view needs both.
 //
 // Everything else in the app is a fact about the notes and belongs to the
-// server. These two are not. Whether commands run is a decision the SHELL
-// makes about itself (ios.md §8 cuts running from v1 on a phone, for its
-// interaction surface rather than because it cannot work), and whether a
-// folder can be picked is a fact about the machine at the other end (a
-// headless server has no dialog to open, which is true of a VPS reached from a
-// Mac exactly as it is of one reached from a phone).
+// server. These are not. Whether commands run is a decision the SHELL makes
+// about itself (ios.md §8 cuts running from v1 on a phone, for its interaction
+// surface rather than because it cannot work), and whether a folder can be
+// picked is a fact about the machine at the other end (a headless server has no
+// dialog to open, which is true of a VPS reached from a Mac exactly as it is of
+// one reached from a phone).
 //
-// Both exist so that a verb which cannot work is ABSENT rather than present
-// and failing (ios.md §8, interactions.md §4). A palette full of entries that
-// answer with an error strip teaches the user that the palette lies.
+// All of them exist so that a verb which cannot work is ABSENT rather than
+// present and failing (ios.md §8, interactions.md §4). A palette full of
+// entries that answer with an error strip teaches the user that the palette
+// lies.
 //
 // A configureX seam like the others (architecture.md, "State ownership"): the
 // entry point sets it before bootView, the registry's `when` predicates and the
@@ -20,8 +21,10 @@
 // forgotten call is a phone with a terminal button, not a Mac without one.
 
 interface Shell {
-  /** Whether this client offers to run blocks and open terminals. */
-  runsCommands: boolean;
+  /** Whether this client offers to run a note's blocks. */
+  runsBlocks: boolean;
+  /** Whether this client has a terminal drawer. */
+  hasTerminal: boolean;
   /** This client's own `authorized_keys` line, or "" where it has no key of
    * its own to install. */
   deviceKey: string;
@@ -29,16 +32,47 @@ interface Shell {
   softKeyboard: boolean;
 }
 
-let shell: Shell = { runsCommands: true, deviceKey: "", softKeyboard: false };
+let shell: Shell = {
+  runsBlocks: true,
+  hasTerminal: true,
+  deviceKey: "",
+  softKeyboard: false,
+};
 
 export function configureShell(next: Partial<Shell>): void {
   shell = { ...shell, ...next };
 }
 
-/** Whether the run verbs, the terminal, and everything that only matters when
- * a command can run (the host picker, profiles) belong on this client. */
-export function runsCommands(): boolean {
-  return shell.runsCommands;
+/**
+ * Whether a block in a note can be run from this client: the inline run verb
+ * and its chord, the ▶ on every runnable fence, and the profile editor, which
+ * is the environment a block runs in and has nothing to edit for otherwise.
+ *
+ * Separate from `hasTerminal` because running a block and having a drawer are
+ * separate surfaces, and the phase after v1 wants one without the other
+ * (ios.md §14): a phone runs blocks inline, where the output is a panel under
+ * the fence, before it has a terminal — a drawer is a second arrangement, a
+ * second focus domain, and a keyboard grammar (Ctrl-`, Escape) a phone has no
+ * way to type. One boolean could not say that; two can.
+ */
+export function runsBlocks(): boolean {
+  return shell.runsBlocks;
+}
+
+/**
+ * Whether this client has a terminal drawer: the chrome's button, the toggle
+ * and close verbs, and "Run Block in Terminal", which is the one verb that
+ * needs both answers because it takes a block out of the note and puts it in
+ * the drawer.
+ */
+export function hasTerminal(): boolean {
+  return shell.hasTerminal;
+}
+
+/** Whether a note on this client can have a shell of its own at all — either
+ * surface spawns one, and Restart Note Shell is the verb that kills it. */
+export function spawnsSessions(): boolean {
+  return shell.runsBlocks || shell.hasTerminal;
 }
 
 /**

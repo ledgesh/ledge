@@ -49,10 +49,18 @@ import { configureLayout, restoredState } from "./workspace/persist";
 // Not derived from the viewport: a Mac window dragged to 390 points is still a
 // Mac, keeps its terminal, and §9 is careful that the only thing width decides
 // is the chrome's arrangement.
-const FAKING_IOS = new URLSearchParams(window.location.search).get("shell") === "ios";
+//
+// The phone has two of them, because §8's cut lifts in two steps (ios.md §14):
+// `ios` is v1, which runs nothing, and `ios-runs` is the phase after it, which
+// runs blocks inline and still has no terminal drawer. Everything else about
+// the two is identical, which is the point — the pair is what proves the
+// middle configuration is coherent rather than half of a broken one.
+const SHELL = new URLSearchParams(window.location.search).get("shell") ?? "";
+const FAKING_IOS = SHELL === "ios" || SHELL === "ios-runs";
 configureShell({
-  runsCommands: !FAKING_IOS,
-  // The whole triple ios.tsx sets, because two of them decide what a spec can
+  runsBlocks: !FAKING_IOS || SHELL === "ios-runs",
+  hasTerminal: !FAKING_IOS,
+  // The whole set ios.tsx sets, because two of them decide what a spec can
   // see: whether the connection form asks for a key file or shows the one this
   // client already has, and whether the read-only editor is a text field the
   // software keyboard would rise over.

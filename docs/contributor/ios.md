@@ -651,13 +651,26 @@ commands.**
 and failing** (`mainview/lib/shell.ts`). They come from different places
 because they answer different questions.
 
-`runsCommands` is the SHELL's own answer about itself, set before the first
-render (`ios.tsx`), and it withholds the terminal toggle from the chrome and
-the palette, the two run verbs from both, the run pair from every fence, the
-run chords from CodeMirror's keymap, and the profile editor — which is the
-environment a block runs in, so it has nothing to edit for. Nothing is deleted
-to achieve it: the daemon on the other end spawns PTYs perfectly well, and the
-phase after v1 turns the boolean back on.
+`runsBlocks` and `hasTerminal` are the SHELL's own answers about itself, both
+set before the first render (`ios.tsx`), and v1 says false to both. `runsBlocks`
+withholds Run Block Inline from the palette and CodeMirror's keymap, the ▶ from
+every runnable fence, and the profile editor — which is the environment a block
+runs in, so it has nothing to edit for. `hasTerminal` withholds the toggle from
+the chrome and the palette, Close Terminal, and Run Block in Terminal, which is
+the one verb that needs both answers because it takes a block out of the note
+and puts it in the drawer. Restart Note Shell needs either: both surfaces spawn
+the shells it kills.
+
+**Two booleans rather than one, because the cut lifts in two steps.** The phase
+after v1 runs blocks on a phone that still has no drawer (§14), and that is not
+a transitional state to be tolerated but where a phone stays: inline output is a
+panel under the fence, and a drawer is a second arrangement, a second focus
+domain, and a keyboard grammar (Ctrl-`` ` ``, Escape) a phone cannot type. One
+boolean could not describe that client without either offering it a drawer it
+does not have or withholding the runs it does.
+
+Nothing is deleted to achieve any of it: the daemon on the other end spawns
+PTYs perfectly well, and the phase after v1 turns the first boolean back on.
 
 `deviceKey` is the shell's too, and it is not a cut at all but a fact about
 which key authenticates. A phone adds, edits, removes and switches servers like
@@ -693,10 +706,14 @@ question at all — a Mac pointed at a VPS gets the same answer, and used to get
 and a bad one to discover by running the only verb that looked like it would
 help.
 
-The harness can be either shell: `harness.html?shell=ios` is the iOS one, and
-`e2e/phone.spec.ts` uses it to hold both halves of the claim — the cut verbs
-absent, and every v1 verb still there, because a gate written too wide would
-cut the editor along with the terminal.
+The harness can be any of the three shells. `harness.html?shell=ios` is v1's,
+and `e2e/phone.spec.ts` uses it to hold both halves of the claim — the cut verbs
+absent, and every v1 verb still there, because a gate written too wide would cut
+the editor along with the terminal. `?shell=ios-runs` is the phase after it, and
+it holds the third claim, that the middle configuration is coherent rather than
+half of a broken one: the ▶ on a fence with no terminal button beside it, Run
+Block Inline in the palette without Run Block in Terminal, and the drawer still
+gone from the chrome. Anything else is the desktop, which keeps every verb.
 
 **Running commands is cut for its interaction surface, not because it cannot
 work.** A block that is running holds the daemon open through `running()`, so
@@ -1210,6 +1227,13 @@ beside it, no longer leaves a foreground reload with a run the new page can
 neither see nor `cancelRun` — dismissing a panel is what sends that today,
 and a reload is not a dismissal, so the boot claims what it can still show
 instead and the server ends the rest (`inlineClaim`, remote.md §7).
+
+**The cut it lifts is inline runs and not the drawer**, which is why §8's
+`runsCommands` is now `runsBlocks` and `hasTerminal`. That is a client the
+harness can be (`?shell=ios-runs`) and the specs hold before there is any phone
+behind it: the ▶ without the terminal button beside it, Run Block Inline without
+Run Block in Terminal, and Restart Note Shell back, which a phone was offered
+throughout v1 and had no shell to restart.
 
 What the phase still has to answer is the rest of that cut. A software keyboard
 has no Ctrl, no Escape, no Tab and no arrows, and the accessory bar carries

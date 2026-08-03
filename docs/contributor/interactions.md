@@ -577,21 +577,34 @@ secret written to a synced file — because focus never moved.
   know the palette exists. Its structure is a derived view of the registry,
   not a second list of features.
 - **A verb that cannot work on this client is absent, not present and
-  failing.** `when` already hides what does not apply to the target; two
+  failing.** `when` already hides what does not apply to the target;
   registry-wide facts do the same for what does not apply to the CLIENT
-  (`mainview/lib/shell.ts`). `runsCommands` is the shell's own answer about
-  itself and withholds the terminal, the two run verbs and the profile editor
-  where they were cut (ios.md §8); `canPickFolder` is the SERVER's and
-  withholds Attach Folder and Move Workspace Folder wherever nobody is sitting
+  (`mainview/lib/shell.ts`). Three of them, two the shell's own answers about
+  itself and one the server's:
+
+  | Fact | Whose | Withholds |
+  | ---- | ----- | --------- |
+  | `runsBlocks` | shell | Run Block Inline and its chord, the ▶ on every runnable fence, the profile editor |
+  | `hasTerminal` | shell | Toggle Terminal, Close Terminal, the chrome's button, Run Block in Terminal and its chord |
+  | `canPickFolder` | server | Attach Folder as Workspace…, Move Workspace Folder… |
+
+  Running a block and having a drawer are separate surfaces, which is why they
+  are separate facts: a phone runs blocks inline before it has a terminal
+  (ios.md §14), and inline output is a panel under the fence where a drawer is
+  a second arrangement and a keyboard grammar. Run Block in Terminal is the one
+  verb that needs both answers, because it takes a block out of the note and
+  puts it in the drawer. Restart Note Shell needs either, because both surfaces
+  spawn the shells it kills. `canPickFolder` is false wherever nobody is sitting
   at the machine that holds the notes — a headless server, which a Mac can be
   connected to as easily as a phone.
 
-  Both default to the desktop app's answer, so a shell that says nothing keeps
-  every verb: the failure mode of a forgotten call is a phone with a terminal
-  button, not a Mac without one. And the point is discoverability rather than
-  enforcement — the server refuses these calls regardless (remote.md §10). A
-  palette full of entries that answer with an error strip teaches the user that
-  the palette lies, which costs more than the missing row does.
+  All three default to the desktop app's answer, so a shell that says nothing
+  keeps every verb: the failure mode of a forgotten call is a phone with a
+  terminal button, not a Mac without one. And the point is discoverability
+  rather than enforcement — the server refuses these calls regardless
+  (remote.md §10). A palette full of entries that answer with an error strip
+  teaches the user that the palette lies, which costs more than the missing row
+  does.
 
 ## 9. The CLI (`ledge`)
 

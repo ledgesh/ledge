@@ -3,7 +3,7 @@ import { CircleHelp, Hash, Link2, PanelLeft, Search, TableOfContents, TerminalSq
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useSinglePane } from "@/lib/viewport";
-import { runsCommands } from "@/lib/shell";
+import { hasTerminal } from "@/lib/shell";
 import { pushLayer } from "@/commands/layers";
 import { ResizeHandle } from "@/components/ResizeHandle";
 import { TerminalDrawer } from "@/terminal/TerminalDrawer";
@@ -664,7 +664,7 @@ function Shell() {
           <Search className="size-4" />
         </Button>
         <div className="flex-1" />
-        {runsCommands() && (
+        {hasTerminal() && (
           <Button
             ref={termBtnRef}
             variant={termOpen ? "secondary" : "ghost"}

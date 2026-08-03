@@ -4,6 +4,7 @@ import { initialState, reducer, type Action, type AppState } from "@/workspace/s
 import { buildCommands, paletteItems } from "./registry";
 import { parseKey, resolveChord, DEFAULT_DOMAINS, type FocusDomain } from "./keymap";
 import type { Command, CommandCtx, RegistryDeps } from "./types";
+import { configureShell } from "@/lib/shell";
 
 // Stub deps: the registry never touches the editor stack or the clipboard in
 // tests; we only record that the right edge was invoked. `noteHead` is what a
@@ -895,5 +896,64 @@ describe("registry", () => {
     // The real workspace is the last visible one: closing it would strand the
     // user in a workspace with no strip row.
     expect(find(cmds, "workspace.close").when!(on(realWs.id))).toBe(false);
+  });
+});
+
+// Two facts about the CLIENT rather than the target (lib/shell.ts), and the
+// thing worth pinning is that they are two: the phase after v1 runs blocks on a
+// phone that still has no terminal drawer (ios.md §14), and one boolean could
+// not describe that client without either offering it a drawer it does not have
+// or withholding the runs it does.
+//
+// Only `when` is read here. Nothing is deleted to achieve a cut — every command
+// is still built and `run` still works — so a test that invoked them would be
+// asking the wrong question.
+describe("what this client has a surface for", () => {
+  // Module state, so it is set for the `when` calls and put back after: every
+  // other test in this file expects the desktop's answers.
+  function shell(
+    next: { runsBlocks: boolean; hasTerminal: boolean },
+    check: (visible: (id: string) => boolean) => void,
+  ): void {
+    configureShell(next);
+    try {
+      const cmds = buildCommands(stubDeps([], "---\nprofile: petstore\n---\n# T\n"));
+      const ctx = makeCtx(initialState(FOLDER, []));
+      check((id) => find(cmds, id).when?.(ctx) ?? true);
+    } finally {
+      configureShell({ runsBlocks: true, hasTerminal: true });
+    }
+  }
+
+  const RUNNING = ["block.runInline", "profile.open"];
+  const DRAWER = ["block.runInTerminal", "terminal.toggle", "terminal.close"];
+  // The id is in the assertion rather than the message so a failure names the
+  // verb that went the wrong way.
+  const shows = (visible: (id: string) => boolean, id: string, want: boolean) =>
+    expect(`${id}:${visible(id)}`).toBe(`${id}:${want}`);
+
+  test("the desktop has every one of them, which is the default a shell inherits", () => {
+    shell({ runsBlocks: true, hasTerminal: true }, (visible) => {
+      for (const id of [...RUNNING, ...DRAWER, "session.restart"]) shows(visible, id, true);
+    });
+  });
+
+  test("v1 on a phone has neither, so no verb reaches a surface that is not built", () => {
+    shell({ runsBlocks: false, hasTerminal: false }, (visible) => {
+      for (const id of [...RUNNING, ...DRAWER, "session.restart"]) shows(visible, id, false);
+    });
+  });
+
+  test("blocks without a drawer: the inline half stays, the drawer half goes", () => {
+    // The configuration the split exists for. "Run Block in Terminal" is the
+    // one verb that needs both answers — it takes a block out of the note and
+    // puts it in a drawer — so it goes with the drawer, not with the runs.
+    shell({ runsBlocks: true, hasTerminal: false }, (visible) => {
+      for (const id of RUNNING) shows(visible, id, true);
+      for (const id of DRAWER) shows(visible, id, false);
+      // A note that runs blocks has a shell of its own, and this is the verb
+      // that kills it.
+      shows(visible, "session.restart", true);
+    });
   });
 });

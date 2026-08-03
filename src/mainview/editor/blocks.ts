@@ -23,7 +23,7 @@ import {
   type RunDestination,
 } from "./bridge";
 import { confirmFor, parseFenceInfo, type ConfirmSpec } from "./fenceInfo";
-import { runsCommands } from "../lib/shell";
+import { hasTerminal, runsBlocks } from "../lib/shell";
 import { fenceCloser, fenceOpener } from "./fences";
 import { declaredHosts, frontmatterRange, profileChipAnchor } from "./frontmatter";
 import { LOCAL_HOST, parseFrontmatter } from "../../shared/frontmatter";
@@ -898,18 +898,27 @@ const overlayPlugin = ViewPlugin.fromClass(
         // has no end yet because it is still being typed, and a run pair that
         // blinks into existence on the fence line the user is halfway through
         // writing is noise, not an affordance. It appears when the block does.
-        // `runsCommands` alongside the language test: a client that does not
-        // run blocks must not draw the button that runs one (ios.md §8). Absent
-        // rather than disabled — the gray-button argument is for a control that
-        // could work in another moment, and this one never can on this client —
-        // and the copy button below stays, because copying is not running.
-        if (runsCommands() && isRunnable(c.lang) && c.closed) {
+        // The client's own facts alongside the language test: a client that
+        // does not run blocks must not draw the button that runs one, and one
+        // with no drawer must not draw the button that fills it (ios.md §8,
+        // lib/shell.ts). Absent rather than disabled — the gray-button argument
+        // is for a control that could work in another moment, and these never
+        // can on this client — and the copy button below stays, because copying
+        // is not running.
+        //
+        // Separately, because the pair is not a unit: the phase after v1 runs
+        // blocks on a phone that still has no drawer, and there the ▶ is the
+        // whole group.
+        const runnable = isRunnable(c.lang) && c.closed;
+        if (runnable && runsBlocks()) {
           const runBtn = iconButton(PLAY_ICON, tooltip("block.runInline"), (e) => {
             e.preventDefault();
             runBlock(this.view, c.from, "inline");
           });
           runBtn.dataset.act = "run";
           group.appendChild(runBtn);
+        }
+        if (runnable && runsBlocks() && hasTerminal()) {
           const termBtn = iconButton(TERMINAL_ICON, tooltip("block.runInTerminal"), (e) => {
             e.preventDefault();
             runBlock(this.view, c.from, "terminal");
@@ -1141,22 +1150,27 @@ export function ledgeBlocks(): Extension {
     // The chords, on a client that has them. Withheld with the buttons rather
     // than left live: a phone reached by a paired hardware keyboard would
     // otherwise be the one way to run a block on a client whose whole story is
-    // that it does not.
-    keymap.of(
-      runsCommands()
+    // that it does not — and one chord at a time, because a client can run
+    // blocks and still have nowhere to put one in a terminal.
+    keymap.of([
+      ...(runsBlocks()
         ? [
             {
               key: keyOf("block.runInline")!,
               run: (view: EditorView) =>
                 runBlock(view, view.state.selection.main.head, "inline"),
             },
+          ]
+        : []),
+      ...(runsBlocks() && hasTerminal()
+        ? [
             {
               key: keyOf("block.runInTerminal")!,
               run: (view: EditorView) =>
                 runBlock(view, view.state.selection.main.head, "terminal"),
             },
           ]
-        : [],
-    ),
+        : []),
+    ]),
   ];
 }

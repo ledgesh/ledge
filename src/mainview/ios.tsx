@@ -69,8 +69,10 @@ async function start(): Promise<void> {
   // leaves is worse than either answer.
   //
   // Cut for its interaction surface, not because it cannot work — the daemon on
-  // the other end spawns PTYs perfectly well — so this is one boolean and no
-  // code removed, and the phase after v1 turns it back on.
+  // the other end spawns PTYs perfectly well — so this is two booleans and no
+  // code removed, and the phase after v1 turns them back on one at a time:
+  // blocks run inline first, because the drawer needs a second arrangement and
+  // a keyboard grammar a phone cannot type (ios.md §14, lib/shell.ts).
   //
   // The other two are facts about this shell rather than cuts. This client
   // authenticates with one key of its own, in the Secure Enclave, so the
@@ -78,7 +80,12 @@ async function start(): Promise<void> {
   // a file that does not exist (§4); and its keyboard is on screen, which is
   // what makes focus expensive enough for the read-only editor to give it up
   // (lib/shell.ts).
-  configureShell({ runsCommands: false, deviceKey: key, softKeyboard: true });
+  configureShell({
+    runsBlocks: false,
+    hasTerminal: false,
+    deviceKey: key,
+    softKeyboard: true,
+  });
 
   let live = true;
   const wire = await reconnectingClient({

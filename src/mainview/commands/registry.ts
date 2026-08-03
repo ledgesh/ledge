@@ -61,7 +61,7 @@ import { findLeaf, focusedDocId, focusedTab, leafIds } from "@/workspace/tree";
 import { notesOf, trashOf } from "@/workspace/store";
 import { parseFrontmatter } from "../../shared/frontmatter";
 import type { NoteMeta } from "../../shared/rpc-schema";
-import { canPickFolder, runsCommands } from "../lib/shell";
+import { canPickFolder, hasTerminal, runsBlocks, spawnsSessions } from "../lib/shell";
 import { keysOf, listKeysOf, tabSelectKey, titleOf, workspaceSelectKey, type CommandId } from "./keys";
 import { chipOf } from "./format";
 import type { Command, CommandCtx, RegistryDeps } from "./types";
@@ -565,11 +565,12 @@ export function buildCommands(deps: RegistryDeps): Command[] {
     }),
     cmd("terminal.toggle", {
       icon: TerminalSquare,
-      // The four run verbs, and the one gate: v1 on a phone does not run
-      // commands (ios.md §8). Not a refusal — the daemon at the other end would
-      // spawn the PTY — but a surface that is not built, so the verbs that
-      // reach it are not offered.
-      when: () => runsCommands(),
+      // The drawer's own gate, and not the same question as running a block
+      // (lib/shell.ts): a phone runs blocks inline before it has a drawer to
+      // put one in. Not a refusal either way — the daemon at the other end
+      // would spawn the PTY — but a surface that is not built, so the verbs
+      // that reach it are not offered.
+      when: () => hasTerminal(),
       // The editor's CodeMirror keymap and the terminal's xterm handler own
       // Ctrl-` in their domains and route here through exec; the window layer
       // only fires it from page focus.
@@ -578,7 +579,7 @@ export function buildCommands(deps: RegistryDeps): Command[] {
     }),
     cmd("terminal.close", {
       icon: X,
-      when: () => runsCommands(),
+      when: () => hasTerminal(),
       palette: false, // Toggle Terminal covers it
       run: (ctx) => ctx.ui.closeTerminal?.(),
     }),
@@ -689,7 +690,10 @@ export function buildCommands(deps: RegistryDeps): Command[] {
     // the note's current frontmatter params — the restart-applies escape hatch.
     cmd("session.restart", {
       icon: RefreshCw,
-      when: (ctx) => focusedDocId(ctx.selected) !== null,
+      // Both surfaces spawn the shells this kills, so either one is reason
+      // enough to offer it — and a client with neither has no shell to restart
+      // and should never have been offering it (lib/shell.ts).
+      when: (ctx) => spawnsSessions() && focusedDocId(ctx.selected) !== null,
       run: (ctx) => {
         const docId = focusedDocId(ctx.selected);
         if (docId) deps.restartSession(docId);
@@ -703,7 +707,7 @@ export function buildCommands(deps: RegistryDeps): Command[] {
       icon: KeyRound,
       // A profile is the environment a block runs in, so a client that does not
       // run blocks has nothing to edit one for (ios.md §8's "editing profiles").
-      when: (ctx) => runsCommands() && currentProfile(ctx, deps) !== null,
+      when: (ctx) => runsBlocks() && currentProfile(ctx, deps) !== null,
       run: (ctx) => {
         const name = currentProfile(ctx, deps);
         if (name) ctx.ui.openProfileEditor?.(name);
@@ -898,13 +902,18 @@ export function buildCommands(deps: RegistryDeps): Command[] {
     cmd("editor.find", editorCommand(deps, Search, (ed, docId) => ed.find(docId))),
     cmd("editor.replace", editorCommand(deps, Replace, (ed, docId) => ed.replace(docId))),
     cmd("editor.save", editorCommand(deps, Save, (ed, docId) => ed.save(docId))),
-    // The two run verbs. `runs` on top of editorCommand's focused-doc test:
-    // both conditions have to hold, and the client-wide one is the reason a
-    // phone's palette has no "Run Block" in it at all (ios.md §8).
-    cmd("block.runInline", runs(editorCommand(deps, Play, (ed, docId) => ed.runInline(docId)))),
+    // The two run verbs, and the two client-wide facts they need. Each sits on
+    // top of editorCommand's focused-doc test, and the client-wide half is the
+    // reason a phone's palette has no "Run Block" in it at all (ios.md §8).
+    // They differ because the destination does: inline draws a panel under the
+    // fence, and in-terminal needs a drawer to put the command in.
+    cmd("block.runInline", onClient(runsBlocks, editorCommand(deps, Play, (ed, docId) => ed.runInline(docId)))),
     cmd(
       "block.runInTerminal",
-      runs(editorCommand(deps, TerminalSquare, (ed, docId) => ed.runInTerminal(docId))),
+      onClient(
+        () => runsBlocks() && hasTerminal(),
+        editorCommand(deps, TerminalSquare, (ed, docId) => ed.runInTerminal(docId)),
+      ),
     ),
     // Follows the link under the caret; ⌘-click on the link is the
     // accelerator (editor/livePreview.ts). A caret not on a link makes this a
@@ -1051,12 +1060,15 @@ function cycleTab(ctx: CommandCtx, dir: 1 | -1): void {
 // An editor-internal command: its keys are bound inside CodeMirror (domains:
 // [] keeps the window dispatcher out entirely); invoking it from the palette
 // refocuses the note's editor first, which deps.editor handles.
-/** The same command, additionally withheld where this client does not run
- * commands (lib/shell.ts). Wraps rather than replaces `when`, so the editor's
- * own focused-doc condition is not lost by the gating. */
-function runs(spec: Omit<Command, "id" | "title" | "keys">): Omit<Command, "id" | "title" | "keys"> {
+/** The same command, additionally withheld where this client says it has no
+ * surface for it (lib/shell.ts). Wraps rather than replaces `when`, so the
+ * editor's own focused-doc condition is not lost by the gating. */
+function onClient(
+  can: () => boolean,
+  spec: Omit<Command, "id" | "title" | "keys">,
+): Omit<Command, "id" | "title" | "keys"> {
   const already = spec.when;
-  return { ...spec, when: (ctx) => runsCommands() && (already?.(ctx) ?? true) };
+  return { ...spec, when: (ctx) => can() && (already?.(ctx) ?? true) };
 }
 
 function editorCommand(

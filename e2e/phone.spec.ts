@@ -594,6 +594,16 @@ test.describe("the iOS client, and what it does not run", () => {
     await expect(page.locator('[data-act="run"]')).toHaveCount(0);
   });
 
+  test("no Restart Note Shell either, on a client that opens no shells", async ({
+    page,
+  }) => {
+    // The verb that kills a note's shells, on the one client that has none:
+    // both surfaces that spawn them are cut, so it restarts nothing and had no
+    // business being offered (lib/shell.ts).
+    await palette(page, "restart");
+    await expect(page.getByText("Restart Note Shell")).toHaveCount(0);
+  });
+
   test("no folder verbs, because the server has nobody at it to pick one", async ({
     page,
   }) => {
@@ -699,5 +709,69 @@ test.describe("the iOS client, and what it does not run", () => {
     ]) {
       await expect(list.getByText(title, { exact: true })).toHaveCount(1);
     }
+  });
+});
+
+// --- the phone that runs blocks, and still has no drawer ---------------------
+//
+// §8's cut lifts in two steps (ios.md §14), so between v1 and a phone that has
+// everything there is a client that runs blocks inline and has no terminal.
+// That is not a transitional state to be tolerated: inline output is a panel
+// under the fence, and a drawer is a second arrangement with a keyboard grammar
+// (Ctrl-`, Escape) a phone cannot type, so the middle is where a phone stays.
+//
+// `?shell=ios-runs` is that client. Everything else about it matches `?shell=ios`
+// above, which is what makes the two describes a pair: the same view, told one
+// different thing about itself.
+test.describe("the phone that runs blocks, without a terminal", () => {
+  const palette = async (page: Page, query: string) => {
+    await page.getByRole("button", { name: /Go to Note/ }).tap();
+    await page.keyboard.type(`>${query}`);
+  };
+  const overlay = (page: Page) => page.locator("div.fixed.inset-0.z-50");
+
+  test.beforeEach(async ({ page }) => {
+    await page.goto("/harness.html?shell=ios-runs");
+    await expect(
+      page.getByRole("button", { name: /Toggle Sidebar/ }),
+    ).toBeVisible();
+  });
+
+  test("a runnable fence keeps the ▶ and loses the terminal beside it", async ({
+    page,
+  }) => {
+    // The pair is two controls, not one widget: this is the assertion that
+    // stops a client which runs blocks from drawing the button that fills a
+    // drawer it does not have.
+    await page.keyboard.press("Meta+n");
+    await expect(page.locator(".cm-line").first()).toHaveText("# Untitled");
+    await page.keyboard.press("Meta+a");
+    await page.keyboard.insertText("```sh\npwd\n```\n");
+    await expect(page.locator('[data-act="run"]')).toHaveCount(1);
+    await expect(page.locator('[data-act="term"]')).toHaveCount(0);
+  });
+
+  test("the palette offers the inline run, and the note shell it spawns", async ({
+    page,
+  }) => {
+    await palette(page, "run block");
+    await expect(overlay(page).getByText("Run Block Inline", { exact: true })).toHaveCount(1);
+    await expect(
+      overlay(page).getByText("Run Block in Terminal", { exact: true }),
+    ).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    // Back with the runs, because an inline run spawns the shell this kills.
+    await palette(page, "restart");
+    await expect(overlay(page).getByText("Restart Note Shell", { exact: true })).toHaveCount(1);
+  });
+
+  test("the drawer stays cut: not in the chrome, not in the palette", async ({
+    page,
+  }) => {
+    await expect(
+      page.getByRole("button", { name: /Toggle Terminal/ }),
+    ).toHaveCount(0);
+    await palette(page, "terminal");
+    await expect(overlay(page).getByText("Toggle Terminal", { exact: true })).toHaveCount(0);
   });
 });
