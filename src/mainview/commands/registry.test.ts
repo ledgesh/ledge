@@ -4,7 +4,7 @@ import { initialState, reducer, type Action, type AppState } from "@/workspace/s
 import { buildCommands, paletteItems } from "./registry";
 import { parseKey, resolveChord, DEFAULT_DOMAINS, type FocusDomain } from "./keymap";
 import type { Command, CommandCtx, RegistryDeps } from "./types";
-import { configureShell } from "@/lib/shell";
+import { configureShell, recordServerCaps } from "@/lib/shell";
 
 // Stub deps: the registry never touches the editor stack or the clipboard in
 // tests; we only record that the right edge was invoked. `noteHead` is what a
@@ -954,6 +954,43 @@ describe("what this client has a surface for", () => {
       // A note that runs blocks has a shell of its own, and this is the verb
       // that kills it.
       shows(visible, "session.restart", true);
+    });
+  });
+
+  // The same cut one machine out: not what this client has a surface for but
+  // what the machine holding the notes has at all. Both answers arrive together
+  // on the boot handshake (workspaceList), and both are false on a headless
+  // server whether a Mac or a phone is looking at it.
+  function serverCaps(next: { folderDialog: boolean; cliShim: boolean }, check: (visible: (id: string) => boolean) => void): void {
+    recordServerCaps(next);
+    try {
+      const cmds = buildCommands(stubDeps());
+      const ctx = makeCtx(initialState(FOLDER, []));
+      check((id) => find(cmds, id).when?.(ctx) ?? true);
+    } finally {
+      recordServerCaps({ folderDialog: true, cliShim: true });
+    }
+  }
+
+  test("notes on this Mac: the verbs that write to the notes machine are all offered", () => {
+    serverCaps({ folderDialog: true, cliShim: true }, (visible) => {
+      for (const id of ["workspace.attach", "workspace.move", "cli.install"]) shows(visible, id, true);
+    });
+  });
+
+  test("notes on a server: no dialog to open there, and no CLI to install there", () => {
+    serverCaps({ folderDialog: false, cliShim: false }, (visible) => {
+      for (const id of ["workspace.attach", "workspace.move", "cli.install"]) shows(visible, id, false);
+    });
+  });
+
+  // Two facts, not one: a machine can have a person at it and still have
+  // nothing to install, which is what a `bun src/bun/serve.ts` in a checkout is
+  // (serve.fs.test.ts).
+  test("the two server facts are independent", () => {
+    serverCaps({ folderDialog: true, cliShim: false }, (visible) => {
+      shows(visible, "workspace.attach", true);
+      shows(visible, "cli.install", false);
     });
   });
 });

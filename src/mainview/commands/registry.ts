@@ -61,7 +61,7 @@ import { findLeaf, focusedDocId, focusedTab, leafIds } from "@/workspace/tree";
 import { notesOf, trashOf } from "@/workspace/store";
 import { parseFrontmatter } from "../../shared/frontmatter";
 import type { NoteMeta } from "../../shared/rpc-schema";
-import { canPickFolder, hasTerminal, runsBlocks, spawnsSessions } from "../lib/shell";
+import { canInstallCli, canPickFolder, hasTerminal, runsBlocks, spawnsSessions } from "../lib/shell";
 import { keysOf, listKeysOf, tabSelectKey, titleOf, workspaceSelectKey, type CommandId } from "./keys";
 import { chipOf } from "./format";
 import type { Command, CommandCtx, RegistryDeps } from "./types";
@@ -668,8 +668,14 @@ export function buildCommands(deps: RegistryDeps): Command[] {
     // result you have to go hunting for in a bin dir did not finish its job:
     // success (where it landed, whether PATH sees it) in the neutral strip,
     // failure (a foreign file squatting the name) in the error strip.
+    //
+    // The PATH is the notes machine's, so the verb belongs to a machine with a
+    // CLI on it: a server has none to install (lib/shell.ts), and offering the
+    // install anyway would answer a hopeful palette entry with a paragraph
+    // about a path inside the server binary.
     cmd("cli.install", {
       icon: TerminalSquare,
+      when: () => canInstallCli(),
       run: (ctx) => {
         void deps.installCli().then((r) => {
           if (r.ok) ctx.ui.showNotice?.(r.message);

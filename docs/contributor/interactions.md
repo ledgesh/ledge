@@ -674,14 +674,15 @@ secret written to a synced file — because focus never moved.
 - **A verb that cannot work on this client is absent, not present and
   failing.** `when` already hides what does not apply to the target;
   registry-wide facts do the same for what does not apply to the CLIENT
-  (`mainview/lib/shell.ts`). Three of them, two the shell's own answers about
-  itself and one the server's:
+  (`mainview/lib/shell.ts`). Four of them, two the shell's own answers about
+  itself and two the notes machine's:
 
   | Fact | Whose | Withholds |
   | ---- | ----- | --------- |
   | `runsBlocks` | shell | Run Block Inline and its chord, the ▶ on every runnable fence, the profile editor |
   | `hasTerminal` | shell | Toggle Terminal, Close Terminal, the chrome's button, Run Block in Terminal and its chord |
   | `canPickFolder` | server | Attach Folder as Workspace…, Move Workspace Folder… |
+  | `canInstallCli` | server | Install Shell Command (ledge) |
 
   Running a block and having a drawer are separate surfaces, which is why they
   are separate facts: a phone runs blocks inline before it has a terminal
@@ -693,7 +694,15 @@ secret written to a synced file — because focus never moved.
   at the machine that holds the notes — a headless server, which a Mac can be
   connected to as easily as a phone.
 
-  All three default to the desktop app's answer, so a shell that says nothing
+  The server's two arrive together, on `workspaceList`'s first round trip, and
+  they are two because a machine can have a person at it and still have nothing
+  to install. `canInstallCli` is the notes machine's answer rather than the
+  client's for the same reason `canPickFolder` is: the install writes a file
+  over there, and the `ledge` it writes reads the notes over there. A compiled
+  `ledge-server` has no CLI beside it to exec (`bun/cliShim.ts`), so the verb is
+  absent on every connection to one.
+
+  All four default to the desktop app's answer, so a shell that says nothing
   keeps every verb: the failure mode of a forgotten call is a phone with a
   terminal button, not a Mac without one. And the point is discoverability
   rather than enforcement — the server refuses these calls regardless

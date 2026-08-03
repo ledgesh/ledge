@@ -184,9 +184,17 @@ export type LedgeRPC = {
       // server, which is what lets the view leave Attach Folder and Move
       // Workspace Folder OUT of the palette rather than offering two verbs that
       // can only answer with an error strip (ios.md §8, mainview/lib/shell.ts).
+      // `cliShim` is the same shape of fact for Install Shell Command: whether
+      // this machine has a CLI to put on a PATH, which the app carries beside
+      // its main module and a compiled `ledge-server` does not carry at all.
       workspaceList: {
         params: {};
-        response: { workspaces: WorkspaceRootInfo[]; dailyRoot: string | null; folderDialog: boolean };
+        response: {
+          workspaces: WorkspaceRootInfo[];
+          dailyRoot: string | null;
+          folderDialog: boolean;
+          cliShim: boolean;
+        };
       };
       // Create a managed workspace folder from a display name. Bun slugs the
       // name into a folder itself (the view never names a path — the same

@@ -109,16 +109,28 @@ export function softKeyboard(): boolean {
 }
 
 // The server's half. Not part of `Shell` above because it arrives from a
-// different place at a different time: the shell knows its own answer at boot,
-// and this one comes back with `workspaceList` on the first round trip, which
-// is also why it defaults to true — the window between the two is one paint
-// long, and a verb that flickers in is better than one that flickers out.
-let folderDialog = true;
+// different place at a different time: the shell knows its own answers at boot,
+// and these come back with `workspaceList` on the first round trip, which is
+// also why they default to true — the window between the two is one paint long,
+// and a verb that flickers in is better than one that flickers out.
+//
+// Both are the same question asked about two verbs: does the machine at the
+// other end have the thing this verb needs? A headless server has neither, and
+// a Mac reaches one as easily as a phone does.
+interface ServerCaps {
+  /** Whether that machine can open a native folder picker. */
+  folderDialog: boolean;
+  /** Whether that machine has a `ledge` CLI to put on its own PATH. */
+  cliShim: boolean;
+}
 
-/** Record whether the server can open a native folder picker. From
- * `workspaceList`, at boot. */
-export function recordFolderDialog(can: boolean): void {
-  folderDialog = can;
+let server: ServerCaps = { folderDialog: true, cliShim: true };
+
+/** Record what the machine holding the notes can do. From `workspaceList`, at
+ * boot — field by field, so a response carrying more than these two does not
+ * leave its extras here. */
+export function recordServerCaps(caps: ServerCaps): void {
+  server = { folderDialog: caps.folderDialog, cliShim: caps.cliShim };
 }
 
 /** Whether the machine holding the notes can ask a person to choose a folder.
@@ -126,5 +138,19 @@ export function recordFolderDialog(can: boolean): void {
  * workspaceMove with "attaching a folder needs the app running on the machine
  * that holds the notes", and this is how the verb stops being offered first. */
 export function canPickFolder(): boolean {
-  return folderDialog;
+  return server.folderDialog;
+}
+
+/**
+ * Whether the machine holding the notes can put `ledge` on its own PATH.
+ *
+ * The server's answer and not this client's, because the install writes a file
+ * over there and the CLI it points at reads the notes over there: a `ledge`
+ * installed on your Mac reads the notes your Mac holds, which are not the notes
+ * on your screen. False on a server, where the shim has nothing to exec — a
+ * compiled `ledge-server` is one program and the CLI is not in it
+ * (bun/cliShim.ts).
+ */
+export function canInstallCli(): boolean {
+  return server.cliShim;
 }

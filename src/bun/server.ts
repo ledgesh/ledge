@@ -96,11 +96,28 @@ export interface NativeDeps {
 // once, at module load, because it is a fact about this process.
 const BUNDLED_BUN = bundledBun(process.execPath);
 
+// The CLI entry a `ledge` shim would exec, beside this module: the app's
+// build.copy puts dist-cli/cli.js next to index.js for exactly that
+// (electrobun.config.ts, cliShim.ts). A compiled `ledge-server` has no
+// neighbour to find — `bun build --compile` embeds one program and the CLI is
+// not it — so on a server this is a path inside /$bunfs that never existed.
+// Answered once at load, because a file that shipped beside the binary does
+// not appear later, and the boot handshake reports it (workspaceList below).
+const CLI_ENTRY = resolve(import.meta.dir, "cli.js");
+const CAN_INSTALL_CLI = statSync(CLI_ENTRY, { throwIfNoEntry: false })?.isFile() === true;
+
 // What workspaceAttach and workspaceMove answer with when there is no dialog
 // to show. Data, not an exception: the schema gives both calls an `error`
 // string precisely so a refusal can reach the user as a sentence.
 const NO_DIALOG =
   "A headless server cannot open a folder dialog. Attaching a folder needs the app running on the machine that holds the notes.";
+
+// The same sentence-shaped refusal for cliInstall, and it exists for the same
+// reason NO_DIALOG does: the palette leaves the verb out (mainview/lib/shell.ts),
+// and anything that asks anyway gets a reason instead of the shim's own
+// "the CLI entry is missing at /$bunfs/root/cli.js", which is true and useless.
+const NO_CLI =
+  "A server has no CLI to install. `ledge` ships with the app, so installing it needs the app running on the machine that holds the notes.";
 
 // The other half of bun/clientSeams.ts: the same names, refusing. Typed as the
 // full Pick, so adding a name there without adding it here does not compile —
@@ -489,6 +506,9 @@ export async function createServer(deps: {
       // NO_DIALOG is a good sentence to read and a bad one to discover by
       // running the only verb that looked like it would help.
       folderDialog: !!native.pickFolder,
+      // And the same trade for Install Shell Command, whose refusal a server
+      // could only ever answer with (CLI_ENTRY above).
+      cliShim: CAN_INSTALL_CLI,
     }),
     workspaceCreate: async ({ name }) => {
       const root = await createManaged(name);
@@ -851,12 +871,15 @@ export async function createServer(deps: {
     // there), and execPath is the bundle's own bun — the exact pair the
     // shim will exec (bun/cliShim.ts). The message is composed here, not
     // in the view: the landing dir, the PATH verdict, and any failure are
-    // server-side facts.
+    // server-side facts. A machine with no such pair refuses first, in its own
+    // words: the view already knows (workspaceList's `cliShim`) and does not
+    // offer the verb, so reaching here at all is a client that asked anyway.
     cliInstall: async () => {
+      if (!CAN_INSTALL_CLI) return { ok: false, message: NO_CLI };
       try {
         const res = await installShim({
           execPath: process.execPath,
-          entryPath: resolve(import.meta.dir, "cli.js"),
+          entryPath: CLI_ENTRY,
           pathVar: process.env["PATH"] ?? "",
         });
         return {

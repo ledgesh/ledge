@@ -37,7 +37,7 @@ import {
   type Theme,
 } from "../shared/settings";
 import { applyAppearance } from "./lib/theme";
-import { configureShell, recordFolderDialog } from "./lib/shell";
+import { configureShell, recordServerCaps } from "./lib/shell";
 import { configureLayout, restoredState } from "./workspace/persist";
 
 // Which shell to be. Two clients bind these seams for real — Electrobun on the
@@ -69,11 +69,13 @@ configureShell({
   deviceKey: FAKING_IOS ? 'restrict,command="ledge-server serve" ecdsa-sha2-nistp256 AAAAharness ledge-iphone-abc123' : "",
   softKeyboard: FAKING_IOS,
 });
-// The SERVER's half of the same picture, and a different question: whether the
-// machine holding the notes has anybody at it to answer a folder dialog. Set
-// here rather than arriving with workspaceList because this harness renders
-// without boot.tsx's boot(), which is what records it in the real shells.
-recordFolderDialog(!FAKING_IOS);
+// The SERVER's half of the same picture, and a different question: what the
+// machine holding the notes can do for itself. Set here rather than arriving
+// with workspaceList because this harness renders without boot.tsx's boot(),
+// which is what records it in the real shells. Both answers follow the faked
+// shell: the ios one stands in for a phone against a headless server, which has
+// no dialog to open and no CLI to hand over.
+recordServerCaps({ folderDialog: !FAKING_IOS, cliShim: !FAKING_IOS });
 import "./index.css";
 import App from "./App";
 
@@ -662,13 +664,15 @@ recordVaultState(store.vault.state);
 // was deleted) runs in specs without any dialog. create mirrors
 // createManaged's slug-and-enumerate.
 configureWorkspaces({
-  // `folderDialog` follows the faked shell: the harness's "native dialog" is a
-  // function that always picks /external, which is a Mac with somebody at it.
-  // The ios shell is the headless case and gets the refusal the real one does.
+  // Both server facts follow the faked shell: the harness's "native dialog" is
+  // a function that always picks /external, which is a Mac with somebody at it,
+  // and its CLI is the app's. The ios shell is the headless case and gets the
+  // refusals the real one does.
   list: async () => ({
     workspaces: store.workspaceList(),
     dailyRoot: null,
     folderDialog: !FAKING_IOS,
+    cliShim: !FAKING_IOS,
   }),
   create: async (name) => store.createManaged(name),
   attach: async () => {

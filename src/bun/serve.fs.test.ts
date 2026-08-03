@@ -105,6 +105,21 @@ test("a headless server refuses to attach a folder, with a reason", async () => 
   expect(res.error).toContain("headless server");
 });
 
+// The same shape one verb over. A server has no CLI to put on its PATH: the
+// shim execs the runtime and entry that wrote it, and there is no cli.js beside
+// this module in a checkout any more than there is one inside a compiled
+// `ledge-server`. The answer rides the boot handshake so the palette can leave
+// the verb out (mainview/lib/shell.ts), and the call refuses in a sentence
+// rather than with the shim's "the CLI entry is missing at …", which names a
+// path no user has ever seen and tells them to rebuild the app.
+test("a server has no CLI to install, and says so on the handshake and again if asked", async () => {
+  const { cliShim } = (await client.requests.workspaceList({})) as { cliShim: boolean };
+  expect(cliShim).toBe(false);
+  const res = (await client.requests.cliInstall({})) as { ok: boolean; message: string };
+  expect(res.ok).toBe(false);
+  expect(res.message).toContain("no CLI to install");
+});
+
 // The other half of remote.md §10, and the reason the refusals are throws: a
 // server that answered `{text: ""}` here would look exactly like an empty
 // clipboard, and the bug would live in whatever the user pasted next. The real

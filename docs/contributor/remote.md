@@ -703,6 +703,20 @@ falls back to the PATH's `bun`: it runs where an admin installed one and says
 "command not found" where nobody did, which is what every other language on
 that machine was saying all along.
 
+**The CLI is not in that binary either, and the palette says so first.** A
+`ledge` shim execs the exact runtime and entry that wrote it (`bun/cliShim.ts`),
+which in the app is `Contents/MacOS/bun` plus the `cli.js` that
+`electrobun.config.ts` copies beside `index.js`. A compiled `ledge-server` has
+no such neighbour, so `cliInstall` there could only fail, and it used to fail by
+naming a path inside `/$bunfs` and advising a rebuild. `workspaceList` now
+reports `cliShim` alongside `folderDialog`, on the same round trip and for the
+same reason: Install Shell Command is absent on a connection to a server rather
+than present and failing (interactions.md §8). The call still refuses if it
+arrives, in a sentence about where the CLI lives. Giving a server a CLI is a
+different piece of work than hiding a verb that cannot run — it needs the CLI
+compiled into the server binary behind a verb of its own, which is the same
+restructuring `serve.ts`'s argv guard would need to run a file.
+
 **Clients install and upgrade the server the way VS Code Remote does.** The
 client connects, reads the server's version from the handshake, and offers to
 push a matching binary when it is missing or mismatched. A user who prefers
