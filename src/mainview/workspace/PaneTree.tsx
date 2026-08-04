@@ -278,22 +278,36 @@ function TabBar({ leaf, focused }: { leaf: LeafNode; focused: boolean }) {
           </button>
         )}
       </div>
-      {/* Absent on touch, which is §1a's other answer and the one this group
-          earns. Three 21-point buttons half a point apart were the densest
-          thing in the app, and growing them would spend 132 of a phone's 390
-          points on a pane arrangement it cannot use: a split at this width is
-          two 195-point editors. All three verbs are in the palette and all
-          three are pane-scoped — they act on the FOCUSED pane, so the palette
-          entry needs nothing pointed at first, which is exactly the test the
-          frontmatter chip passed and the fence's ▶ failed. */}
-      <div className="flex shrink-0 items-center gap-0.5 border-l px-1 touch:hidden">
+      {/* The two SPLITS are absent on touch, which is §1a's other answer and the
+          one they earn: three 21-point buttons half a point apart were the
+          densest thing in the app, and growing them would spend 132 of a
+          phone's 390 points on a pane arrangement it cannot use — a split at
+          this width is two 195-point editors. Both stay in the palette and in a
+          tab's menu, so a split someone asks for by name is a split they get.
+
+          Close Pane is not that verb and does not take that answer. It is the
+          way OUT of the arrangement, and hiding it beside the two that make one
+          left a phone in a split it could not leave except by knowing to type
+          ">close pane". Its cost in the state a phone actually lives in is
+          zero, because canClosePane withholds it until a second pane exists; in
+          the state that traps you, 44 points for the exit is the trade. The
+          group goes with it on touch, or its border would hang off the end of
+          the strip with nothing inside. */}
+      <div
+        className={cn(
+          "flex shrink-0 items-center gap-0.5 border-l px-1",
+          !canClosePane && "touch:hidden",
+        )}
+      >
         <PaneAction
+          className="touch:hidden"
           title={tooltip("pane.splitRight")}
           onClick={() => exec("pane.splitRight", { kind: "pane", paneId: leaf.id })}
         >
           <Columns2 className="size-3.5" />
         </PaneAction>
         <PaneAction
+          className="touch:hidden"
           title={tooltip("pane.splitDown")}
           onClick={() => exec("pane.splitDown", { kind: "pane", paneId: leaf.id })}
         >
@@ -301,6 +315,7 @@ function TabBar({ leaf, focused }: { leaf: LeafNode; focused: boolean }) {
         </PaneAction>
         {canClosePane && (
           <PaneAction
+            className="touch:size-[44px]"
             title={tooltip("pane.close")}
             onClick={() => exec("pane.close", { kind: "pane", paneId: leaf.id })}
           >
@@ -331,6 +346,17 @@ function TabBar({ leaf, focused }: { leaf: LeafNode; focused: boolean }) {
             target={{ kind: "pane", paneId: leaf.id }}
             onClose={() => setMenu(null)}
           />
+          {/* Beside the two verbs that put you in a split, the one that takes
+              you out. This menu is where a touch client makes a split — it has
+              no ⌘D and, until the strip's ✕ came back above, no way to unmake
+              one either. Disabled rather than missing while a workspace has a
+              single pane: R6 menus advertise the pane's verbs, and a verb that
+              vanishes teaches nothing about why. */}
+          <CommandMenuItem
+            id="pane.close"
+            target={{ kind: "pane", paneId: leaf.id }}
+            onClose={() => setMenu(null)}
+          />
         </ContextMenu>
       )}
     </div>
@@ -345,15 +371,20 @@ function DropMarker() {
 function PaneAction({
   title,
   onClick,
+  className,
   children,
 }: {
   title: string;
   onClick: () => void;
+  className?: string;
   children: React.ReactNode;
 }) {
   return (
     <button
-      className="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+      className={cn(
+        "flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground",
+        className,
+      )}
       title={title}
       onClick={onClick}
     >

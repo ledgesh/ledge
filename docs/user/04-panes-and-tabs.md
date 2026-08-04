@@ -12,9 +12,9 @@ The new pane opens with a fresh Untitled note and takes focus. Either side can s
 
 In the read-only Documentation workspace the new pane opens empty instead, because there is no new note to make there. It still takes focus, so the next page you open lands in it and the two sit side by side.
 
-A tab's context menu carries Split Right and Split Down too, and those act on the tab's own pane rather than the focused one.
+A tab's context menu carries Split Right, Split Down and Close Pane too, and those act on the tab's own pane rather than the focused one.
 
-On a phone the tab strip has no split buttons, because two panes on a screen this narrow are two editors about 195 points wide. The commands are still in the palette, so a split you ask for by name is a split you get.
+On a phone the tab strip has no split buttons, because two panes on a screen this narrow are two editors about 195 points wide. The commands are still in the palette and in a tab's menu, so a split you ask for by name is a split you get.
 
 ## Focus a pane
 
@@ -34,9 +34,13 @@ A pane can take between 12% and 88% of the space its split divides. The ratio is
 
 ⇧⌘W closes the focused pane, and its space returns to the neighboring pane.
 
+The ✕ at the end of a pane's tab strip does the same for that pane, and a tab's context menu carries Close Pane too. Both appear only once a workspace has more than one pane, so the single-pane arrangement shows nothing to close.
+
 The last remaining pane in a workspace does not close.
 
 Closing a pane's tabs one at a time leaves the pane standing and empty, showing a New Note button. ⇧⌘W is what removes the pane itself.
+
+On a phone the ✕ stays, unlike the two split buttons beside it. There is no ⇧⌘W to press there, so the ✕ and the menu item are the two ways out of a split.
 
 ## Tabs in a pane
 

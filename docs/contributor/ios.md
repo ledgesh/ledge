@@ -1488,3 +1488,12 @@ points is two 195-point editors and all three verbs are pane-scoped entries in
 the palette. The measurement is a spec now (`e2e/phone.spec.ts`), and it names
 no control — a list of remembered selectors is exactly what produced the list of
 four.
+
+Two of those three. Close Pane came back, because hiding it was hiding an exit
+rather than an offer: a phone still splits from the palette and from a tab's
+menu, and with the ✕ gone it reached a two-pane layout whose only way out was
+knowing to type `>close pane`. The ✕ is 44 on touch and `canClosePane` keeps it
+off the strip until a second pane exists, so the arrangement a phone actually
+lives in pays nothing for it, and Close Pane now sits beside the two splits in
+the tab menu. The sweep would never have caught this: it measures the controls a
+state puts on screen, and the bug was a control that was not there.

@@ -244,14 +244,25 @@ section.
   border is inside the border box and `items-stretch` fills the content box. It
   is 45. The run panel's header learned the same thing at 48 (§6a), and both
   numbers are a border's, not a margin of comfort.
-- **The other answer stays available, and the pane controls take it.** Split
-  Right, Split Down and Close Pane were three 21-point buttons half a point
+- **The other answer stays available, and the two splits take it.** Split Right
+  and Split Down sat with Close Pane in three 21-point buttons half a point
   apart, and growing them would have spent 132 of a phone's 390 points on an
   arrangement it cannot use — a split at this width is two 195-point editors.
-  All three are pane-scoped verbs in the palette, acting on the FOCUSED pane
-  with nothing to point at first, which is the test the frontmatter chip passed
-  and the fence's ▶ failed. `touch:hidden`, and the palette keeps them: a split
+  Both are pane-scoped verbs in the palette and in a tab's menu, acting with
+  nothing to point at first, which is the test the frontmatter chip passed and
+  the fence's ▶ failed. `touch:hidden`, and both surfaces keep them: a split
   someone asks for by name is still a split they get.
+- **Absent applies to the way in, never to the way out.** Close Pane went with
+  its two neighbours on the argument above, and that argument does not cover
+  it: it is not the arrangement, it is the exit from one. Nothing withdrew the
+  two ways IN — the palette and the tab menu both still split — so a phone could
+  reach a two-pane layout it had no visible way to leave, and the only way out
+  was knowing to type `>close pane` into an overlay meant for finding notes. The
+  ✕ stays at 44 on touch. It costs nothing in the state a phone lives in,
+  because `canClosePane` withholds it until a second pane exists, and Close Pane
+  joins the two splits in the tab menu so the menu that makes the arrangement
+  can also unmake it. Before hiding a control on touch, ask which of the two it
+  is; if a state is reachable, leaving it must be reachable the same way.
 - **The spec measures rather than remembers** (`phone.spec.ts`, "every target a
   finger chooses between"). It walks the states a phone can reach, asks the DOM
   for every interactive element in each, and fails on any under 44 in either

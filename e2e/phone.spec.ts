@@ -425,6 +425,77 @@ test.describe("with the tree on screen", () => {
   });
 });
 
+// --- a split is a place you can leave (interactions.md §1a) ------------------
+//
+// A phone can make a split three ways: `>split right` in the palette, and Split
+// Right or Split Down in a tab's menu. For a while it could make one and not
+// unmake it. The strip's ✕ was hidden along with the two split buttons beside
+// it, on the argument that a phone cannot use a pane arrangement — which is an
+// argument for not OFFERING one, and it took the exit away with the entrance.
+// Nothing withdrew the two ways in, so the only way out was knowing to type
+// ">close pane" into an overlay meant for finding notes.
+//
+// The drawer stays shut for all of these: it is 280 of 390 points with a scrim
+// over the rest, so an open tree covers both strips and every tap would land on
+// the scrim instead of the control it names.
+test.describe("a split this client can make, it can leave", () => {
+  const editors = (page: Page) => page.locator(".cm-editor");
+  const closePane = (page: Page) => page.getByRole("button", { name: /Close Pane/ });
+
+  test("with one pane there is no exit, because there is nothing to leave", async ({
+    page,
+  }) => {
+    // What keeps the control free: canClosePane withholds it until a second
+    // pane exists, so the state a phone actually lives in pays nothing for it.
+    // Its two neighbours are gone at every width — they are the arrangement,
+    // not the way back from it.
+    await expect(editors(page)).toHaveCount(1);
+    await expect(closePane(page)).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /Split Right/ })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /Split Down/ })).toHaveCount(0);
+  });
+
+  test("a split made from the palette is closed from the strip", async ({ page }) => {
+    await page.getByRole("button", { name: /Go to Note/ }).tap();
+    await page.keyboard.type(">split right");
+    await page.keyboard.press("Enter");
+    await expect(editors(page)).toHaveCount(2);
+    // One per pane, in the strip of the pane it closes, so nothing has to be
+    // focused or pointed at first — the same property that let the palette
+    // carry the other two.
+    await expect(closePane(page)).toHaveCount(2);
+    await closePane(page).first().tap();
+    await expect(editors(page)).toHaveCount(1);
+    await expect(closePane(page)).toHaveCount(0);
+  });
+
+  test("and it is a target a finger can hit", async ({ page }) => {
+    // The sweep below walks the states a phone can reach, and a two-pane
+    // arrangement is not one of them: it walks the chrome, not every layout the
+    // registry can produce. So this control asserts its own 44.
+    await page.getByRole("button", { name: /Go to Note/ }).tap();
+    await page.keyboard.type(">split right");
+    await page.keyboard.press("Enter");
+    const box = await closePane(page).first().boundingBox();
+    expect(box!.width).toBeGreaterThanOrEqual(44);
+    expect(box!.height).toBeGreaterThanOrEqual(44);
+  });
+
+  test("a split made from a tab's menu is closed from the same menu", async ({
+    page,
+  }) => {
+    // The menu is where this client makes a split, having no ⌘D, and it offered
+    // both splits and no way back. Both verbs are pane-scoped and both address
+    // the pressed tab's pane, not the focused one.
+    await pressAndHold(page.locator("[data-tab]").first());
+    await page.getByRole("menuitem", { name: "Split Down" }).tap();
+    await expect(editors(page)).toHaveCount(2);
+    await pressAndHold(page.locator("[data-tab]").first());
+    await page.getByRole("menuitem", { name: "Close Pane" }).tap();
+    await expect(editors(page)).toHaveCount(1);
+  });
+});
+
 // --- the rest of v1, on a phone (ios.md §8, phase 6) -------------------------
 //
 // Search, tags, backlinks, the outline, daily notes and unlocking all existed
