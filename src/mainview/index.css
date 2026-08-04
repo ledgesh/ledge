@@ -347,16 +347,34 @@ body {
   -webkit-user-select: none;
 }
 
-/* The WKWebView-proof hand: a body-parented layer pinned over the editor
-   (same trick as .ledge-overlay — elements outside the editing context
-   honour `cursor`), holding one invisible click-through-proof div per
-   rendered link / checkbox. Below the block controls (z 100), which must
-   stay clickable above everything. */
+/* --- The stacking ladder ----------------------------------------------------
+   Two layers in this app are parented to <body> rather than to the pane whose
+   editor they cover (.ledge-linklayer here and .ledge-overlay below, both for
+   the same WKWebView reason). Being body-parented, their z-index competes with
+   the React tree's at the root, so the whole ladder has to be written in one
+   place or the two halves cannot be compared:
+
+      10  .ledge-linklayer   hotspots over rendered links and checkboxes
+      20  .ledge-overlay     a block's run / terminal / copy / dismiss controls
+      30  the drawer's scrim                                        (App.tsx)
+      40  the drawer itself                                         (App.tsx)
+      50  every modal: dialogs, menus, pickers, the palette   (Tailwind z-50)
+
+   The body-parented pair sits BELOW the modal layer. They were 90 and 100 —
+   above everything the app can put on screen — which painted a code block's
+   run and copy buttons over an open dialog. On a pointer client that was
+   cosmetic. On a touch client those buttons are 44 points square with
+   `pointer-events: auto`, so a tap aimed at the dialog ran the block behind it
+   instead. Every dialog covers the viewport with its own backdrop, so once the
+   controls are under 50 the backdrop takes the tap and the ladder needs no
+   help from React state.
+
+   Anything positioned added later belongs on this ladder, named here. */
 .ledge-linklayer {
   position: fixed;
   overflow: hidden;
   pointer-events: none;
-  z-index: 90;
+  z-index: 10;
 }
 .ledge-linklayer .ledge-hotspot {
   position: absolute;
@@ -514,12 +532,15 @@ body {
    pinned over the editor's rect (top/left/size set from JS). WebKit forces the
    text I-beam on anything inside the `.cm-editor` editing context regardless of
    `cursor`; living outside that subtree lets the control buttons honour
-   `cursor: pointer`. The layer never eats pointer events, only its buttons do. */
+   `cursor: pointer`. The layer never eats pointer events, only its buttons do.
+
+   z-index 20, which is the ladder's (see .ledge-linklayer): above the editor it
+   covers, below anything modal that covers IT. */
 .ledge-overlay {
   position: fixed;
   overflow: hidden;
   pointer-events: none;
-  z-index: 100;
+  z-index: 20;
 }
 .ledge-ctl-group {
   position: absolute;

@@ -1539,3 +1539,82 @@ test.describe("every target a finger chooses between", () => {
     expect(await sweep(page)).toEqual([]);
   });
 });
+
+// --- the stacking ladder (index.css) -----------------------------------------
+//
+// A block's controls are drawn in a layer parented to <body> rather than to the
+// pane whose editor they cover, so their z-index competes with the whole app's
+// instead of with the note's. They sat at 100, above every dialog, drawer and
+// menu the app can put on screen. On a pointer client that was a ▶ painted over
+// an open dialog and nothing worse. Here the same buttons are 44 points square
+// and take pointer events, so a tap aimed at the dialog ran the block behind it.
+//
+// What these assert is what a tap lands on, not what the stylesheet says. A
+// spec that read the two z-indexes back and compared them would still pass the
+// day a third layer arrives between them, and these two are declared in a
+// different file from the rest of the ladder, so declaration order is not
+// evidence either.
+test.describe("what covers the note covers its block controls", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto("/harness.html?shell=ios");
+    await expect(page.getByRole("button", { name: /Toggle Sidebar/ })).toBeVisible();
+    await page.keyboard.press("Meta+n");
+    await expect(page.locator(".cm-line").first()).toHaveText("# Untitled");
+    await page.keyboard.press("Meta+a");
+    await page.keyboard.insertText(
+      "# Untitled\n\n[a link](https://example.com)\n\n```sh\nsudo ls\n```\n",
+    );
+    await expect(page.locator('[data-act="run"]')).toHaveCount(1);
+    await expect(page.locator(".ledge-hotspot")).toHaveCount(1);
+  });
+
+  // Everything in the two body-parented layers that still takes its own taps:
+  // the block's buttons, and the invisible hotspot a rendered link is clicked
+  // through. Both layers pass pointer events except at those, and both were
+  // above the modal layer. elementFromPoint at the middle asks what WebKit asks
+  // when a finger lands there, which is the question the bug was about, and it
+  // honours `pointer-events`, so the layers themselves stay transparent to it.
+  const takingTaps = (page: Page) =>
+    page.evaluate(`(() => {
+      const taken = [];
+      const sel = '.ledge-overlay .ledge-btn, .ledge-linklayer .ledge-hotspot';
+      for (const el of document.querySelectorAll(sel)) {
+        const r = el.getBoundingClientRect();
+        if (r.width === 0 || r.height === 0) continue;
+        const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+        if (hit && el.contains(hit)) taken.push(el.title || el.dataset.act || el.className);
+      }
+      return taken;
+    })()`);
+
+  test("with nothing over the note, they take their own taps", async ({ page }) => {
+    // The control for the three below. A probe that found nothing — wrong
+    // selector, controls not drawn yet, a layer that had gone — would pass
+    // every "covered" assertion without the ladder existing at all.
+    // ▶ and Copy (no terminal drawer on this client), and the link's hotspot.
+    expect(await takingTaps(page)).toHaveLength(3);
+  });
+
+  test("a dialog takes the tap, not the ▶ underneath it", async ({ page }) => {
+    await openSidebar(page);
+    await page.locator("[data-connection]").tap();
+    await expect(page.getByRole("dialog", { name: "Connections" })).toBeVisible();
+    expect(await takingTaps(page)).toEqual([]);
+  });
+
+  test("so does the palette", async ({ page }) => {
+    await page.getByRole("button", { name: /Go to Note/ }).tap();
+    await expect(page.getByPlaceholder(/Search notes/)).toBeVisible();
+    expect(await takingTaps(page)).toEqual([]);
+  });
+
+  test("and the drawer, whose scrim is what covers the note", async ({ page }) => {
+    // The drawer is 280 of 390 points and the controls are at the note's right
+    // edge, so the thing actually over them is the scrim. It is on the ladder
+    // for that reason: a tap on the dark part of the screen closes the tree,
+    // and it used to run whatever block was under the dark part instead.
+    await openSidebar(page);
+    await expect(scrim(page)).toBeVisible();
+    expect(await takingTaps(page)).toEqual([]);
+  });
+});

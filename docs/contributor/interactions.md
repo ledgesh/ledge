@@ -628,6 +628,36 @@ run pushes nothing and suppresses nothing — it is a place focus can *be*, not
 a surface over the app. Its Escape rule is local, sits below every layer here,
 and lives in §6a.
 
+**The stacking order says the same thing in pixels, and it is written in one
+place.** Two of this app's layers are parented to `<body>` rather than to the
+pane they cover — the block chrome and the link hotspots, both for the
+WKWebView reason in `index.css` — so their z-index competes with the React
+tree's at the root rather than with the note's. The whole ladder is therefore
+declared together, above `.ledge-linklayer`:
+
+| z | Layer |
+| --- | --- |
+| 10 | `.ledge-linklayer`: hotspots over rendered links and checkboxes |
+| 20 | `.ledge-overlay`: a block's run / terminal / copy / dismiss controls |
+| 30 | The drawer's scrim (`App.tsx`) |
+| 40 | The drawer itself (`App.tsx`) |
+| 50 | Every modal above: dialogs, menus, pickers, the palette (`z-50`) |
+
+The two body-parented layers were 90 and 100, which put them above everything
+the stack here can open. That is the failure mode of a ladder written in two
+files: the logical stack said the dialog was on top and the pixels said the
+block's ▶ was. On a pointer client it showed as a glyph painted over a dialog;
+on a touch client those buttons are 44 points square and take pointer events
+(§1a), so the tap aimed at the dialog ran the block behind it. Every modal
+covers the viewport with its own backdrop, so ordering the ladder correctly is
+the whole fix — nothing has to consult React state to know it is covered.
+
+A menu is the exception, and deliberately: it has no backdrop, and it dismisses
+on the press that lands outside it. Anything positioned added later belongs on
+this ladder, named in that comment. `e2e/phone.spec.ts` proves it by asking
+`elementFromPoint` what a tap would actually hit, not by reading the numbers
+back.
+
 ## 6a. Who owns the keyboard while a block runs
 
 An inline run is answerable: `sudo` asks for a password, an installer asks
