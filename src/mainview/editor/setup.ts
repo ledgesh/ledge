@@ -318,14 +318,12 @@ const theme = EditorView.theme({
     lineHeight: "1",
     cursor: "pointer",
   },
-  ".ledge-search-btn:hover": { backgroundColor: "var(--btn-hover)" },
   // Lit state for the "All" toggle (all matches currently selected).
   ".ledge-search-btn.active": {
     backgroundColor: "hsl(var(--primary))",
     color: "hsl(var(--primary-foreground))",
     borderColor: "transparent",
   },
-  ".ledge-search-btn.active:hover": { backgroundColor: "hsl(var(--primary))" },
   ".ledge-search-toggle": {
     flex: "0 0 24px",
     padding: "0",
@@ -335,6 +333,14 @@ const theme = EditorView.theme({
     transition: "transform 0.12s ease",
   },
   ".ledge-search-toggle.open": { transform: "rotate(90deg)" },
+  // The middle of the find row, in two nested boxes: `steps` steps through
+  // matches, `toggles` changes what counts as one, and `opts` holds both. All
+  // three are invisible on a pointer client — the gaps inside them are the
+  // row's own, so every control sits exactly where it did as a loose child —
+  // and they are what the touch block below moves as units instead of leaving
+  // six buttons to break wherever the arithmetic lands.
+  ".ledge-search-opts": { display: "inline-flex", alignItems: "center", gap: "5px" },
+  ".ledge-search-steps": { display: "inline-flex", alignItems: "center", gap: "5px" },
   ".ledge-search-toggles": { display: "inline-flex", alignItems: "center", gap: "3px", marginLeft: "2px" },
   ".ledge-search-check": {
     display: "inline-flex",
@@ -348,7 +354,6 @@ const theme = EditorView.theme({
     cursor: "pointer",
     userSelect: "none",
   },
-  ".ledge-search-check:hover": { backgroundColor: "var(--btn-hover)" },
   ".ledge-search-check input": { margin: "0", cursor: "pointer" },
   ".ledge-search-close": {
     marginLeft: "auto",
@@ -356,7 +361,79 @@ const theme = EditorView.theme({
     color: "var(--ed-muted)",
     fontSize: "16px",
   },
-  ".ledge-search-close:hover": { color: "var(--fg)" },
+
+  // Every hover in this panel, behind the feature that says a pointer can
+  // hover. Tailwind's `hoverOnlyWhenSupported` does this for the rest of the
+  // app and does not reach here (interactions.md §1a), and §1a calls the rule a
+  // correctness one rather than a cosmetic one: iOS sends a synthetic mousemove
+  // ahead of the click of every tap, and WebKit WITHHOLDS that click when the
+  // mousemove changed the rendering, so an ungated hover spends the first tap
+  // painting itself. A phone screenshot showed the chevron wearing its hover
+  // background with nothing hovering it, which is the same defect the tab
+  // strip's ✕ had.
+  "@media (hover: hover)": {
+    ".ledge-search-btn:hover": { backgroundColor: "var(--btn-hover)" },
+    ".ledge-search-btn.active:hover": { backgroundColor: "hsl(var(--primary))" },
+    ".ledge-search-check:hover": { backgroundColor: "var(--btn-hover)" },
+    ".ledge-search-close:hover": { color: "var(--fg)" },
+  },
+
+  // The same toolbar for a finger (interactions.md §1a, ios.md §14).
+  //
+  // None of the app's `touch:` rules reach any of the above. This panel is
+  // built by hand in editor/find.ts and themed here, in a JS style object, so
+  // Tailwind never sees it — which is how it stayed a 26-point row at every
+  // width while the rest of the chrome grew. At 390 points that row measured
+  // 508 wide, and the × that closes it sat past the right edge of a container
+  // that does not scroll. Escape closes the panel too (find.ts's keymap), and a
+  // phone has no key to press. So Find could be opened here and not closed.
+  //
+  // The fix is the layout rather than a smaller ×, and it is two rows STATED
+  // rather than two rows that happened. The find row is the field between the
+  // chevron and the ×, and everything else is under it. Nothing here is a phone
+  // layout: it is the same arrangement at 320 points and at 1024, because the
+  // break is an element rather than a sum. The first version left it to the sum
+  // and it was two tidy rows at 390 and, at 430, a × stranded mid-row between
+  // the field and the arrows with the checkboxes orphaned below. Everything is
+  // 44 (§1a).
+  "@media (hover: none)": {
+    ".ledge-search": { padding: "8px" },
+    ".ledge-search-row": { flexWrap: "wrap", gap: "6px" },
+    ".ledge-search-row + .ledge-search-row:not([hidden])": { marginTop: "6px" },
+    // Basis 0 and grow: the field is whatever the row has left, which is the
+    // whole width minus two 44s at any size.
+    ".ledge-search-field": { flex: "1 1 0", height: "44px", fontSize: "16px" },
+    ".ledge-search-btn": { height: "44px", minWidth: "44px" },
+    ".ledge-search-toggle": { flex: "0 0 44px", fontSize: "20px" },
+    ".ledge-search-close": { fontSize: "20px" },
+    // The chevron, the × and the three checkboxes are borderless on a pointer
+    // client because a hover is what finds them: their resting state is a
+    // rectangle of nothing, and moving the mouse over it is how you learn where
+    // it starts and stops. Nothing hovers here, so a resting state is the only
+    // state there is, and without a box the second row read as three buttons
+    // and three specks floating beside them. All six take the same box, which
+    // is also what makes the exit above read as a button rather than a glyph.
+    ".ledge-search-toggle, .ledge-search-close, .ledge-search-check": {
+      border: "1px solid hsl(var(--border))",
+    },
+    // Under the chevron, so the replace field still starts where find does.
+    ".ledge-search-gutter": { flex: "0 0 44px" },
+    // The break. Full width puts the options on their own row wherever the row
+    // above ends, and the order puts them after the ×, which is what keeps the
+    // exit on the first row instead of trailing six buttons.
+    ".ledge-search-opts": { order: "1", flexBasis: "100%", flexWrap: "wrap", gap: "6px" },
+    ".ledge-search-steps": { gap: "6px" },
+    ".ledge-search-toggles": { gap: "6px" },
+    ".ledge-search-check": {
+      height: "44px",
+      minWidth: "44px",
+      justifyContent: "center",
+      fontSize: "13px",
+    },
+    // The box stays a box: the label around it is the 44, and the tick only has
+    // to be legible at arm's length rather than hittable on its own.
+    ".ledge-search-check input": { width: "16px", height: "16px" },
+  },
 
   // The `[[` completion popup (editor/wikilinks.ts), styled to the app chrome
   // like the find panel above: shadcn surface tokens, the palette's row

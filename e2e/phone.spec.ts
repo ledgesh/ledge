@@ -496,6 +496,127 @@ test.describe("a split this client can make, it can leave", () => {
   });
 });
 
+// --- so is the find panel (interactions.md §1a) ------------------------------
+//
+// The same defect one layer down, and not one the sweep could have found: the
+// find toolbar is built by hand in editor/find.ts and themed in a JS style
+// object in editor/setup.ts, so no `touch:` rule has ever reached it. It stayed
+// a 26-point row at every width. At 390 the row measured 508, which put the ×
+// that closes it 118 points past the right edge of a container that does not
+// scroll, and the panel's other exit is Escape.
+//
+// These measure rather than read the stylesheet back. The bug was arithmetic —
+// a row of fixed widths adding up to more than the screen — so the assertion
+// has to be arithmetic too, and it fails again the day a fourth button joins
+// the row.
+//
+// At two widths, because the first fix was tuned to one. It let flex wrap where
+// the sum said, which was two tidy rows at 390 and, at a 430-point Pro Max, an
+// × stranded between the field and the arrows with the checkboxes orphaned on
+// the row below. A layout that only holds at the width someone tested is the
+// same class of bug as the one above, and 390 alone cannot see it.
+for (const width of [390, 430]) {
+  test.describe(`the find panel a finger opens, a finger can close (${width}pt)`, () => {
+    const panel = (page: Page) => page.locator(".ledge-search");
+    const close = (page: Page) => page.locator(".ledge-search-close");
+    const field = (page: Page) => page.locator(".ledge-search-field").first();
+
+    // Find and Replace rather than Find: both rows on screen is the widest and
+    // tallest the panel gets, and typing the whole title leaves the palette
+    // with one row to act on (four commands start with "Find").
+    async function openFind(page: Page): Promise<void> {
+      await page.setViewportSize({ width, height: 844 });
+      await page.getByRole("button", { name: /Go to Note/ }).tap();
+      await page.keyboard.type(">find and replace");
+      await page.keyboard.press("Enter");
+      await expect(panel(page)).toBeVisible();
+    }
+
+    test("the × is beside the field, at the end of its row, and it closes the panel", async ({
+      page,
+    }) => {
+      await openFind(page);
+      const box = (await close(page).boundingBox())!;
+      const query = (await field(page).boundingBox())!;
+      expect(box.width).toBeGreaterThanOrEqual(44);
+      expect(box.height).toBeGreaterThanOrEqual(44);
+      // On the field's row and after it. Both halves matter: the stranded ×
+      // was on the field's row too, with three buttons between it and the end.
+      expect(box.y).toBeCloseTo(query.y, 0);
+      expect(box.x).toBeGreaterThanOrEqual(query.x + query.width);
+      expect(box.x + box.width).toBeLessThanOrEqual(width);
+      expect(box.x + box.width).toBeGreaterThanOrEqual(width - 16);
+      // And the field has the rest of the row: the width minus two 44-point
+      // controls, their gaps and the panel's padding. This is what the second
+      // row is FOR, and it is the assertion the 430 case failed at 160 points.
+      expect(query.width).toBeGreaterThanOrEqual(width - 120);
+      // The tap, not Escape: Escape is the exit this client cannot press, and
+      // a spec that closed the panel with it would pass on the broken layout.
+      await close(page).tap();
+      await expect(panel(page)).toHaveCount(0);
+    });
+
+    test("the options are all on the row under it", async ({ page }) => {
+      await openFind(page);
+      // Counted first, because "none of them are above the line" is a claim
+      // about six controls and passes vacuously about none — which is exactly
+      // what it did against the version that had no such box.
+      await expect(
+        page.locator(".ledge-search-opts .ledge-search-btn, .ledge-search-opts .ledge-search-check"),
+      ).toHaveCount(6);
+      const query = (await field(page).boundingBox())!;
+      const above = await page.evaluate(
+        (bottom) =>
+          [...document.querySelectorAll(".ledge-search-opts *")]
+            .filter((el) => el.getBoundingClientRect().top < bottom - 1)
+            .map((el) => el.getAttribute("title") || el.textContent || el.tagName),
+        query.y + query.height,
+      );
+      expect(above).toEqual([]);
+    });
+
+    test("and nothing in it runs off the edge of the screen", async ({ page }) => {
+      await openFind(page);
+      const over = await page.evaluate(() => {
+        const out: string[] = [];
+        for (const el of document.querySelectorAll(".ledge-search, .ledge-search *")) {
+          const r = el.getBoundingClientRect();
+          if (r.width === 0 && r.height === 0) continue;
+          if (r.right <= window.innerWidth && r.left >= 0) continue;
+          out.push(`${el.className || el.tagName} @ ${Math.round(r.left)}..${Math.round(r.right)}`);
+        }
+        return out;
+      });
+      expect(over).toEqual([]);
+    });
+
+    test("every control in it has a box at rest", async ({ page }) => {
+      // The other half of gating the hovers. Four of these controls said where
+      // they were only when a pointer was over them — the chevron, the × and
+      // the three checkboxes are borderless on a Mac — and a client that cannot
+      // hover has the resting state and nothing else. Computed style rather
+      // than a screenshot, because what is being asserted is that a box exists
+      // at all, and a border width is the honest measurement of that.
+      await openFind(page);
+      const bare = await page.evaluate(() =>
+        [...document.querySelectorAll(".ledge-search-btn, .ledge-search-check")]
+          .filter((el) => getComputedStyle(el).borderTopWidth === "0px")
+          .map((el) => el.getAttribute("title") || el.textContent || el.tagName),
+      );
+      expect(bare).toEqual([]);
+    });
+
+    test("the button that rewrites the note says which All it is", async ({ page }) => {
+      // Two buttons said "All": one selects every match, one replaces every
+      // match. The title told them apart and a tooltip is a pointer's (§1a), so
+      // the destructive one carries the word in its label.
+      await openFind(page);
+      await expect(page.getByRole("button", { name: "Replace All" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "All", exact: true })).toHaveCount(1);
+    });
+  });
+}
+
 // --- the rest of v1, on a phone (ios.md §8, phase 6) -------------------------
 //
 // Search, tags, backlinks, the outline, daily notes and unlocking all existed
@@ -1517,6 +1638,16 @@ test.describe("every target a finger chooses between", () => {
       if (r.width === 0 || r.height === 0) continue;
       const cs = getComputedStyle(el);
       if (cs.visibility === 'hidden' || cs.opacity === '0') continue;
+      // A control its own label wraps is not a target of its own: a tap
+      // anywhere in the label reaches it, so the label's box is the one a
+      // finger aims at and the one that has to be 44. The find panel's three
+      // checkboxes are twelve points inside a 44-point pill (editor/find.ts),
+      // which is the shape this is about.
+      const label = el.closest('label');
+      if (label && label !== el) {
+        const lr = label.getBoundingClientRect();
+        if (lr.width >= 44 && lr.height >= 44) continue;
+      }
       if (r.width >= 44 && r.height >= 44) continue;
       bad.push(
         (el.getAttribute('aria-label') || el.getAttribute('title') || el.textContent || el.tagName)
@@ -1599,6 +1730,21 @@ test.describe("every target a finger chooses between", () => {
       expect(await sweep(page)).toEqual([]);
       await button.tap();
     }
+  });
+
+  test("the find panel, which no `touch:` rule reaches", async ({ page }) => {
+    // The one surface in the app that Tailwind does not style: CodeMirror's
+    // panel slot, filled by editor/find.ts and sized by a JS style object
+    // (editor/setup.ts). The sweep does not care where a rule comes from, which
+    // is the point of sweeping the rendered boxes instead of the sources.
+    await page.getByRole("button", { name: /Go to Note/ }).tap();
+    await page.keyboard.type(">find and replace");
+    await page.keyboard.press("Enter");
+    await expect(page.locator(".ledge-search")).toBeVisible();
+    // Ten targets, four of them a glyph wide: two arrows, three checkboxes and
+    // the ×, which is the only way out of this panel on a client with no
+    // Escape.
+    expect(await sweep(page)).toEqual([]);
   });
 
   test("the machine switcher, and the dialog it opens", async ({ page }) => {

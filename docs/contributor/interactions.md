@@ -263,13 +263,51 @@ section.
   joins the two splits in the tab menu so the menu that makes the arrangement
   can also unmake it. Before hiding a control on touch, ask which of the two it
   is; if a state is reachable, leaving it must be reachable the same way.
+- **A surface the utility layer does not reach gets none of this for free.** The
+  find panel is built as DOM by hand (`editor/find.ts`) and sized by a JS style
+  object handed to `EditorView.theme` (`editor/setup.ts`), so Tailwind has never
+  seen it and no `touch:` rule has ever applied to it. It stayed a 26-point row
+  at every width — 508 points of fixed widths in a 390-point viewport, with the
+  × that closes it past the right edge of a container that does not scroll, and
+  Escape, which this client cannot press, as the only other exit. Opened on a
+  phone, it could not be closed. The theme carries its own `@media (hover: none)`
+  and `@media (hover: hover)` blocks now, the same two media features the
+  variants use, and it needed BOTH: the panel's `:hover` rules were ungated,
+  which is the two-tap defect above and showed up as a chevron wearing its hover
+  background with nothing hovering it. Anything styled outside the utility layer
+  has to state its touch sizes and gate its hovers where it is styled, because
+  nothing else states them for it. **And gating a hover is only half of it,
+  where the hover was the affordance.** The chevron, the × and the three
+  checkboxes had no border on purpose: a pointer finds the edges of a control by
+  moving over it, so the box could wait until it was asked for. Gate that and
+  nothing asks, and the row reads as three buttons with three specks floating
+  beside them. They take the border at rest on touch. Before gating a hover, ask
+  what it was doing: hiding a control, or drawing one.
+- **Two rows stated beat two rows that happened.** The first version of that
+  layout let flex wrap where the arithmetic fell, which was the intended two
+  rows at 390 points and, at a 430-point phone, a × stranded mid-row between the
+  field and the arrows with the checkboxes orphaned below. A wrap point is a sum
+  of every fixed width in the row, so it moves when the screen moves and when
+  anyone adds a button. The break is an element now — one box around the options
+  at `flex-basis: 100%`, ordered after the × — so the arrangement is the same at
+  320 points and at 1024, and the field takes whatever is left rather than
+  whatever the buttons did not want. Where a layout must hold at more than one
+  size, assert it at more than one size: `phone.spec.ts` runs the panel's specs
+  at 390 and 430, and 390 alone could not see this.
 - **The spec measures rather than remembers** (`phone.spec.ts`, "every target a
   finger chooses between"). It walks the states a phone can reach, asks the DOM
   for every interactive element in each, and fails on any under 44 in either
   direction. It names no control, which is the point — a list of remembered
-  selectors is what produced the four-group list above. The one control it would
-  have caught unfairly is the inline rename field, which covers its whole row
-  and has no neighbour to miss onto; it takes the 44 anyway rather than earn an
+  selectors is what produced the four-group list above. What it does not do is
+  find the states: it measures the ones someone thought to open, and the find
+  panel is one the registry could produce all along and no test had opened, which
+  is how a 26-point row survived an audit that measured everything else. Two
+  exemptions, both properties of the box rather than of the control: a zero-sized
+  element is not a small target but no target, and a control its own `<label>`
+  wraps is not a target either, because the tap lands on the label — the panel's
+  checkboxes are 12 points inside a 44-point pill. The one control it would have
+  caught unfairly is the inline rename field, which covers its whole row and has
+  no neighbour to miss onto; it takes the 44 anyway rather than earn an
   exception, and its row grows to hold it.
 
 None of this is reachable in the shipping Mac app, where every pointer is a

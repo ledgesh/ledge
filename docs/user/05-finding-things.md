@@ -39,3 +39,9 @@ A tag is letters, digits, `_`, `-` and `/`, and needs at least one letter or `_`
 ## Find and replace in a note
 
 ⌘F finds within the current note, ⇧⌘F finds and replaces, and ⌘G and ⇧⌘G step through the matches.
+
+The panel opens above the note with its field focused. The arrows step through the matches, All selects all of them at once, and the three small toggles are match case, regular expression, and whole word. The chevron at the left end opens the replace row, where Replace rewrites the next match and Replace All rewrites every one.
+
+Escape closes the panel, and so does the × at its top right.
+
+On a phone the panel takes two rows: the field and the × on the first, the arrows and the toggles on the second. There is no Escape key to press there, so the × is the way out.

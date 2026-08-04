@@ -1497,3 +1497,42 @@ off the strip until a second pane exists, so the arrangement a phone actually
 lives in pays nothing for it, and Close Pane now sits beside the two splits in
 the tab menu. The sweep would never have caught this: it measures the controls a
 state puts on screen, and the bug was a control that was not there.
+
+Asking what else had been shut in the same way turned up one more, and this one
+predates the touch column entirely. The find panel is the app's only chrome that
+Tailwind does not style: `editor/find.ts` builds it as DOM and `editor/setup.ts`
+sizes it in the JS style object it hands to `EditorView.theme`, so no `touch:`
+rule has ever reached it and it stayed a 26-point row at every width. At 390 that
+row measures 508. The × that closes it ended 118 points past the right edge of
+`.cm-panels`, which does not scroll sideways, and the panel's other exit is
+Escape. So Find and Find and Replace, both in this client's palette, opened a
+panel it could not close. The theme has an `@media (hover: none)` block of its
+own now: the field sits between the chevron and the ×, the six option buttons
+are on the row under it, and everything is 44. Neither the sweep nor the audit
+that produced it had opened this panel, which is the general lesson —
+`e2e/phone.spec.ts` measures the states someone thought to walk, and a state
+nobody walks is not a state nobody can reach.
+
+It took two goes, and the second one is the reusable part. The first left the
+two rows to flex: the widths added up to a break in the right place at 390
+points, and a screenshot from a 430-point phone came back with the × stranded
+between the field and the arrows, the checkboxes orphaned on the row below, and
+the find field starved to its 160-point basis while the replace field under it
+ran to 245. A wrap point is a sum, so it moves with the screen. The break is an
+element now — the options are one box at `flex-basis: 100%`, ordered after the ×
+— which gives the same arrangement at every width and lets the field take the
+row's remainder (274 at 390, 314 at 430). The panel's specs run at both widths
+for that reason. The same screenshot showed the chevron wearing a hover
+background: these rules are outside Tailwind, so `hoverOnlyWhenSupported` never
+gated them, and iOS's synthetic mousemove had painted one. They are behind
+`@media (hover: hover)` now, which is §1a's two-tap rule and not a cosmetic one.
+
+Gating them turned out to be half a change. Four of these controls carried no
+border on purpose — the chevron, the ×, and the three checkbox pills — because a
+pointer finds a control's edges by moving across it and the hover was the box.
+With the hover gated, nothing draws them, and the second row read as three
+buttons with three specks beside them. All six take a border at rest on touch,
+which is the general form: before gating a hover, ask whether it was hiding a
+control or drawing one. The other thing a phone cannot ask for is a title, and
+two buttons here said "All" — one selects every match, one rewrites every match.
+The one that changes the note is "Replace All" now, on every client.

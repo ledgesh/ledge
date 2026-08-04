@@ -88,7 +88,9 @@ class SearchPanel implements Panel {
     const prev = btn("↑", "ledge-search-btn", "Previous match (⇧Enter)", () => findPrevious(this.view));
     const next = btn("↓", "ledge-search-btn", "Next match (Enter)", () => findNext(this.view));
     this.allBtn = btn("All", "ledge-search-btn", "Select all matches (toggle)", () => this.toggleAll());
-    const all = this.allBtn;
+    // The three that step through matches, boxed so they can move as one.
+    const steps = make("div", "ledge-search-steps");
+    steps.append(prev, next, this.allBtn);
 
     const cs = check("Aa", "Match case", this.query.caseSensitive);
     const re = check(".*", "Regular expression", this.query.regexp);
@@ -104,14 +106,34 @@ class SearchPanel implements Panel {
       this.view.focus();
     });
 
+    // Everything that is not the field or the way out, in one box.
+    //
+    // On a pointer client the box changes nothing: same order, same gaps, one
+    // flex container inside another. On touch it is what makes the second row a
+    // decision rather than an accident. The first version of the touch layout
+    // let flex wrap wherever the arithmetic landed, which was two tidy rows at
+    // 390 points and, at 430, a × stranded between the field and the arrows
+    // with the checkboxes orphaned below. One element with `flex-basis: 100%`
+    // breaks the line in the same place at every width (setup.ts's
+    // `@media (hover: none)`).
+    const opts = make("div", "ledge-search-opts");
+    opts.append(steps, toggles);
+
     const findRow = make("div", "ledge-search-row");
-    findRow.append(this.toggle, this.findField, prev, next, all, toggles, close);
+    findRow.append(this.toggle, this.findField, opts, close);
 
     // --- replace row (hidden until the chevron is toggled) ---
     const gutter = make("div", "ledge-search-gutter"); // aligns the field under the find field
     this.replaceField = field("Replace", this.query.replace);
     const repl = btn("Replace", "ledge-search-btn", "Replace next match", () => replaceNext(this.view));
-    const replAll = btn("All", "ledge-search-btn", "Replace all matches", () => replaceAll(this.view));
+    // "Replace All" and not "All", which is what it said while the row above it
+    // also said All. The two mean different things — that one selects every
+    // match, this one rewrites every match — and the title that told them apart
+    // is a tooltip, which a touch client has no way to ask for (interactions.md
+    // §1a). The one that changes the note is the one that has to say so.
+    const replAll = btn("Replace All", "ledge-search-btn", "Replace all matches", () =>
+      replaceAll(this.view),
+    );
     this.replaceRow = make("div", "ledge-search-row");
     this.replaceRow.hidden = true;
     this.replaceRow.append(gutter, this.replaceField, repl, replAll);
