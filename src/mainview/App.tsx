@@ -634,11 +634,19 @@ function Shell() {
 
   return (
     <div className="flex h-screen flex-col bg-background text-foreground">
-      <header className="flex h-11 shrink-0 items-center gap-2 border-b px-3">
+      {/* 48 points on touch, and the buttons below are 44 (interactions.md §1a).
+          This row is the densest group of adjacent alternatives in the app —
+          seven lit buttons, no two of which do anything like the same thing —
+          and at 38.5 points with 25-point targets a miss on the magnifier
+          opened the tree and a miss on Tags swapped the whole workspace for the
+          manual. The 44s fit: seven of them, six 7-point gaps and the padding
+          come to 371 of a phone's 390, and the client that ships this has six
+          (no terminal drawer, lib/shell.ts). */}
+      <header className="flex h-11 shrink-0 items-center gap-2 border-b px-3 touch:h-[48px]">
         <Button
           variant={sidebarOpen ? "secondary" : "ghost"}
           size="icon"
-          className="size-7"
+          className="size-7 touch:size-[44px]"
           onClick={() => exec("sidebar.toggle")}
           title={tooltip("sidebar.toggle")}
         >
@@ -657,7 +665,7 @@ function Shell() {
         <Button
           variant="ghost"
           size="icon"
-          className="size-7"
+          className="size-7 touch:size-[44px]"
           onClick={() => exec("palette.notes")}
           title={tooltip("palette.notes")}
         >
@@ -669,7 +677,7 @@ function Shell() {
             ref={termBtnRef}
             variant={termOpen ? "secondary" : "ghost"}
             size="icon"
-            className="size-7"
+            className="size-7 touch:size-[44px]"
             onClick={() => exec("terminal.toggle")}
             title={tooltip("terminal.toggle")}
           >
@@ -679,7 +687,7 @@ function Shell() {
         <Button
           variant={rightPanel === "outline" ? "secondary" : "ghost"}
           size="icon"
-          className="size-7"
+          className="size-7 touch:size-[44px]"
           onClick={() => exec("outline.toggle")}
           title={tooltip("outline.toggle")}
         >
@@ -688,7 +696,7 @@ function Shell() {
         <Button
           variant={rightPanel === "backlinks" ? "secondary" : "ghost"}
           size="icon"
-          className="size-7"
+          className="size-7 touch:size-[44px]"
           onClick={() => exec("backlinks.toggle")}
           title={tooltip("backlinks.toggle")}
         >
@@ -700,7 +708,7 @@ function Shell() {
         <Button
           variant={rightPanel === "tags" ? "secondary" : "ghost"}
           size="icon"
-          className="size-7"
+          className="size-7 touch:size-[44px]"
           onClick={() => exec("tags.toggle")}
           title={tooltip("tags.toggle")}
         >
@@ -715,7 +723,7 @@ function Shell() {
           <Button
             variant={workspaceKind(selected.folder) === "docs" ? "secondary" : "ghost"}
             size="icon"
-            className="size-7"
+            className="size-7 touch:size-[44px]"
             onClick={() => exec("docs.toggle")}
             title={tooltip("docs.toggle")}
           >

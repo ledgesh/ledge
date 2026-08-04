@@ -223,7 +223,7 @@ function ConnectionRow({
         aria-selected={active}
         data-active={active}
         disabled={busy}
-        className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] hover:bg-accent focus:bg-accent focus:outline-none disabled:opacity-60"
+        className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] hover:bg-accent focus:bg-accent focus:outline-none disabled:opacity-60 touch:min-h-[44px]"
         onClick={onPick}
         onKeyDown={(e) => {
           // ⌫ on a focused row, the same remove verb the workspace strip uses.
@@ -284,7 +284,11 @@ function RowButton({
       aria-label={label}
       disabled={disabled}
       onClick={onClick}
-      className={`shrink-0 rounded-md p-1.5 text-muted-foreground hover:bg-accent focus:bg-accent focus:outline-none disabled:opacity-60 ${
+      // 44 on touch, and Remove is why: this row is three adjacent
+      // alternatives half a point apart — switch machine, edit it, delete it —
+      // and the third is destructive (§1a orders a group by what a miss
+      // costs; here Edit is what sits between the other two).
+      className={`flex shrink-0 items-center justify-center rounded-md p-1.5 text-muted-foreground hover:bg-accent focus:bg-accent focus:outline-none disabled:opacity-60 touch:size-[44px] ${
         destructive ? "hover:text-destructive focus:text-destructive" : "hover:text-foreground focus:text-foreground"
       }`}
     >
@@ -472,7 +476,7 @@ function Field({
         autoCapitalize="off"
         autoCorrect="off"
         onChange={(e) => onChange(e.target.value)}
-        className={`rounded-md border border-input bg-transparent px-2 py-1 text-[13px] focus:outline-none focus:ring-1 focus:ring-ring ${
+        className={`rounded-md border border-input bg-transparent px-2 py-1 text-[13px] focus:outline-none focus:ring-1 focus:ring-ring touch:min-h-[44px] ${
           mono ? "font-mono" : ""
         }`}
       />

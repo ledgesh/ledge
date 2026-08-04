@@ -213,20 +213,53 @@ section.
   control: a lone button can be missed and pressed again, and the app is full of
   16-point glyphs that are fine because nothing sits against them. The rule is
   for adjacent alternatives, where the miss does not land on nothing — it lands
-  on the neighbour and runs it. Four groups qualify: the host picker's rows and
-  the run confirmation's Cancel/Run pair (§4a, §4b), the fence's ▶ beside its
-  Copy, and the run panel's Back to note beside the Copy Output and ✕ that share
-  its header (§6a). The picker's and the confirmation's size lives on `MenuItem`
-  rather than on either of them, because a menu row is a tap target wherever it
-  appears. **Order the group by what a miss costs.** The ✕ dismisses a RUNNING
-  block by interrupting it, which is the most expensive miss in the app, so it
-  is the far end of its row with Copy Output between it and the button next
-  door. **Write it in pixels.** The document's root is `font:
+  on the neighbour and runs it. **Order the group by what a miss costs.** The ✕
+  dismisses a RUNNING block by interrupting it, which is the most expensive miss
+  in the app, so it is the far end of its row with Copy Output between it and
+  the button next door. **Write it in pixels.** The document's root is `font:
   14px`, so every rem-based Tailwind size is 0.875 of its name and `min-h-11`
   silently means 38.5 — a touch target is a physical measurement and must not
   ride the app's typographic scale. `touch:` is `@media (hover: none)`, the
   complement of `hoverable:` above and the same media feature, so the two
   variants cannot come to disagree about one device.
+- **Almost everything the chrome is made of qualifies, and the app shipped
+  believing four things did.** The rule arrived with a named list — the host
+  picker's rows, the run confirmation's Cancel/Run pair, the fence's ▶ beside
+  its Copy, the run panel's Back to note — and every one of them was a control
+  someone had just been looking at. Measuring instead turned up a 38-point
+  header of seven 25-point buttons seven points apart, 26-point note rows and
+  27-point tabs with no gap at all between them, a 21-point machine switcher, a
+  13-point Trash disclosure, a 28-point icon grid three points apart, and a
+  connection row whose third adjacent alternative deletes a server. The list was
+  never the rule; it was the part of the rule someone had walked through.
+- **So put the size on the control, not at the call site.** `MenuItem` and the
+  shadcn `Button` variants (`sm`, `default`, `lg`, `icon`) carry `touch:` sizes
+  themselves, which is what covers the dialog written next year: every dialog's
+  action pair is `size="sm"`, and Cancel beside Save at 28 points is the same
+  defect in six files. Where a control is one of a kind the size goes on it —
+  `ROW_CLASS` for the note lists, the tab strip's own height, the connection
+  row's Edit and Remove.
+- **Height comes from the box the children stretch into, not the box you
+  named.** The tab strip at `h-[44px]` with a `border-b` gives its tabs 43: the
+  border is inside the border box and `items-stretch` fills the content box. It
+  is 45. The run panel's header learned the same thing at 48 (§6a), and both
+  numbers are a border's, not a margin of comfort.
+- **The other answer stays available, and the pane controls take it.** Split
+  Right, Split Down and Close Pane were three 21-point buttons half a point
+  apart, and growing them would have spent 132 of a phone's 390 points on an
+  arrangement it cannot use — a split at this width is two 195-point editors.
+  All three are pane-scoped verbs in the palette, acting on the FOCUSED pane
+  with nothing to point at first, which is the test the frontmatter chip passed
+  and the fence's ▶ failed. `touch:hidden`, and the palette keeps them: a split
+  someone asks for by name is still a split they get.
+- **The spec measures rather than remembers** (`phone.spec.ts`, "every target a
+  finger chooses between"). It walks the states a phone can reach, asks the DOM
+  for every interactive element in each, and fails on any under 44 in either
+  direction. It names no control, which is the point — a list of remembered
+  selectors is what produced the four-group list above. The one control it would
+  have caught unfairly is the inline rename field, which covers its whole row
+  and has no neighbour to miss onto; it takes the 44 anyway rather than earn an
+  exception, and its row grows to hold it.
 
 None of this is reachable in the shipping Mac app, where every pointer is a
 mouse; it is the affordance layer the iOS client stands on (`ios.md` §6, §14

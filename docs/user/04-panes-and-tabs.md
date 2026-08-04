@@ -14,6 +14,8 @@ In the read-only Documentation workspace the new pane opens empty instead, becau
 
 A tab's context menu carries Split Right and Split Down too, and those act on the tab's own pane rather than the focused one.
 
+On a phone the tab strip has no split buttons, because two panes on a screen this narrow are two editors about 195 points wide. The commands are still in the palette, so a split you ask for by name is a split you get.
+
 ## Focus a pane
 
 Click anywhere in a pane to focus it. The caret moves to that pane's editor, and the other panes dim.

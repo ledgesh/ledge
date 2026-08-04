@@ -136,8 +136,12 @@ function showHeldFace(entry: Entry, damaged: boolean): void {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.dataset.testid = "locked-face-unlock";
+    // The lone `touch:` in this file, and it belongs here rather than in the
+    // stylesheet because the class list is the whole styling of a face built by
+    // hand (§1a). It is the only way past a locked note on a client with no ⌘,
+    // and on a phone it stands where the drawer's rows were a moment ago.
     btn.className =
-      "rounded-md border bg-background px-3 py-1.5 text-sm shadow-sm hover:bg-accent hover:text-accent-foreground";
+      "rounded-md border bg-background px-3 py-1.5 text-sm shadow-sm hover:bg-accent hover:text-accent-foreground touch:min-h-[44px] touch:px-4";
     btn.textContent = "Unlock Notes…";
     btn.addEventListener("click", () => lockedUi.requestUnlock?.());
     face.append(btn);

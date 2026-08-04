@@ -135,7 +135,7 @@ export function VaultDialog({
               setPass(e.target.value);
               setProblem(null);
             }}
-            className="mt-3 w-full rounded border bg-transparent px-2.5 py-1.5 text-sm outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            className="mt-3 w-full rounded border bg-transparent px-2.5 py-1.5 text-sm outline-none focus-visible:ring-1 focus-visible:ring-ring touch:min-h-[44px]"
           />
           {(setup || change) && (
             <input
@@ -147,7 +147,7 @@ export function VaultDialog({
                 setConfirm(e.target.value);
                 setProblem(null);
               }}
-              className="mt-2 w-full rounded border bg-transparent px-2.5 py-1.5 text-sm outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              className="mt-2 w-full rounded border bg-transparent px-2.5 py-1.5 text-sm outline-none focus-visible:ring-1 focus-visible:ring-ring touch:min-h-[44px]"
             />
           )}
           {problem && <p className="mt-2 text-[12px] text-destructive">{problem}</p>}

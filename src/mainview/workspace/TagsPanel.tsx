@@ -99,12 +99,12 @@ export function TagsPanel({ tag, onBack }: { tag: string | null; onBack: () => v
 
   return (
     <aside className="flex h-full min-h-0 flex-col border-l bg-background">
-      <div className="flex h-9 shrink-0 items-center gap-1.5 border-b px-3">
+      <div className="flex h-9 shrink-0 items-center gap-1.5 border-b px-3 touch:h-[48px]">
         {drilled ? (
           <Button
             variant="ghost"
             size="icon"
-            className="size-6 -ml-1.5"
+            className="size-6 -ml-1.5 touch:size-[44px]"
             onClick={onBack}
             title="All tags"
           >
@@ -121,7 +121,7 @@ export function TagsPanel({ tag, onBack }: { tag: string | null; onBack: () => v
         <Button
           variant="ghost"
           size="icon"
-          className="size-6"
+          className="size-6 touch:size-[44px]"
           onClick={() => exec("tags.toggle")}
           title={tooltip("tags.toggle")}
         >
@@ -206,7 +206,7 @@ function TagRow({
     <div
       {...rowProps}
       {...targetAttrs(tagTarget(info))}
-      className="group flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 outline-none hover:bg-accent/50 focus-visible:ring-1 focus-visible:ring-ring"
+      className="group flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 outline-none hover:bg-accent/50 focus-visible:ring-1 focus-visible:ring-ring touch:min-h-[44px]"
       onClick={onOpen}
     >
       <Hash className="size-3.5 shrink-0 text-muted-foreground" />
@@ -236,7 +236,7 @@ function HitRow({
       {...rowProps}
       {...targetAttrs(hitTarget(hit))}
       {...press}
-      className="group flex cursor-default flex-col gap-0.5 rounded-md px-2 py-1.5 outline-none hover:bg-accent/50 focus-visible:ring-1 focus-visible:ring-ring"
+      className="group flex cursor-default flex-col gap-0.5 rounded-md px-2 py-1.5 outline-none hover:bg-accent/50 focus-visible:ring-1 focus-visible:ring-ring touch:min-h-[44px]"
       title={hit.path}
     >
       <div className="flex min-w-0 items-center gap-2">

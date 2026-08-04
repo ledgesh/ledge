@@ -46,7 +46,10 @@ export function ConnectionBar() {
       // destination is the fact.
       title={`${trouble || (local ? "Notes on this Mac" : `Notes on ${conn.destination}`)} — ${tooltip("connection.switch")}`}
       onClick={() => exec("connection.switch")}
-      className="flex w-full items-center gap-1.5 border-b px-2 py-1 text-left text-[11px] text-muted-foreground hover:bg-accent/50"
+      // 21 points, flush against the workspace strip below it, for the control
+      // that replaces every note, tab, tag and shell on screen (§1a). The text
+      // stays 11px: this is a physical target, not a bigger label.
+      className="flex w-full items-center gap-1.5 border-b px-2 py-1 text-left text-[11px] text-muted-foreground hover:bg-accent/50 touch:min-h-[44px]"
     >
       <Icon className={`size-3 shrink-0 ${trouble ? "text-destructive" : ""}`} />
       <span className="min-w-0 flex-1 truncate">{conn.name}</span>

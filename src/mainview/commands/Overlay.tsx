@@ -249,9 +249,15 @@ export function Overlay({
             setIndex(0);
           }}
           onKeyDown={onKeyDown}
-          className="shrink-0 border-b bg-transparent px-3.5 py-2.5 text-sm outline-none placeholder:text-muted-foreground"
+          className="shrink-0 border-b bg-transparent px-3.5 py-2.5 text-sm outline-none placeholder:text-muted-foreground touch:min-h-[44px]"
         />
 
+        {/* Every row below carries `touch:min-h-[44px]` (§1a), and this list is
+            where it matters most: on a client with no chords this overlay is
+            THE surface that carries every command, reached from the header's
+            magnifier because ⌘P is not typeable. Four row kinds, four copies of
+            the size — they are four different shapes (a verb, a tag, a search
+            hit, a note) rather than one component wearing four hats. */}
         <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto p-1">
           {count === 0 ? (
             <p className="px-2.5 py-3 text-center text-[11px] text-muted-foreground">
@@ -273,7 +279,7 @@ export function Overlay({
                   key={item.id}
                   data-active={i === active ? "" : undefined}
                   className={cn(
-                    "flex cursor-default items-center gap-2 rounded px-2.5 py-1.5",
+                    "flex cursor-default items-center gap-2 rounded px-2.5 py-1.5 touch:min-h-[44px]",
                     i === active && "bg-accent",
                   )}
                   // Highlight follows the pointer, so mouse and keyboard agree
@@ -305,7 +311,7 @@ export function Overlay({
                   key={`tag:${t.tag}`}
                   data-active={i === active ? "" : undefined}
                   className={cn(
-                    "flex cursor-default items-center gap-2 rounded px-2.5 py-1.5",
+                    "flex cursor-default items-center gap-2 rounded px-2.5 py-1.5 touch:min-h-[44px]",
                     i === active && "bg-accent",
                   )}
                   onMouseMove={() => setIndex(i)}
@@ -328,7 +334,7 @@ export function Overlay({
                     key={`${hit.path}:${hit.line}`}
                     data-active={i === active ? "" : undefined}
                     className={cn(
-                      "flex cursor-default items-center gap-2 rounded px-2.5 py-1.5",
+                      "flex cursor-default items-center gap-2 rounded px-2.5 py-1.5 touch:min-h-[44px]",
                       i === active && "bg-accent",
                     )}
                     onMouseMove={() => setIndex(i)}
@@ -355,7 +361,7 @@ export function Overlay({
                 key={note.path}
                 data-active={i === active ? "" : undefined}
                 className={cn(
-                  "flex cursor-default items-center gap-2 rounded px-2.5 py-1.5",
+                  "flex cursor-default items-center gap-2 rounded px-2.5 py-1.5 touch:min-h-[44px]",
                   i === active && "bg-accent",
                 )}
                 onMouseMove={() => setIndex(i)}

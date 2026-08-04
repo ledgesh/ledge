@@ -106,7 +106,11 @@ export function IconPicker({
           aria-label={label}
           aria-pressed={key === current}
           className={cn(
-            "flex size-8 items-center justify-center rounded outline-none",
+            // A 6-wide grid of 28-point cells three points apart was the worst
+            // ratio of target to neighbour in the app, and every neighbour is
+            // another icon for the same workspace. At 44 the grid is 295 points
+            // wide, which still fits a phone.
+            "flex size-8 items-center justify-center rounded outline-none touch:size-[44px]",
             key === current
               ? "bg-accent text-foreground"
               : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",

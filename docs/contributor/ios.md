@@ -1462,3 +1462,29 @@ which is the honored claim's path as well.
 Verified in the Simulator against the same fixture: a run started by tapping ▶
 leaves the focus where it was and the panel invites a tap, and a tap on the
 terminal moves the focus into it and swaps the strip to the run's face.
+
+**The size rule had been applied to the four controls someone had looked at.**
+Fixing the ▶ and the run panel left the rest of the chrome where phase 2 found
+it, and the next report was the obvious one: everything else is small too. What
+answered it was a measurement rather than another reading — a script that boots
+the harness at 390x844, walks it through the states a phone can reach, and asks
+the DOM for the box of every interactive element in each. It found a 38-point
+header of seven 25-point buttons, 26-point note rows in the one drawer that
+reaches another note, 27-point tabs with no gap between them, a 21-point
+machine switcher, a 13-point Trash disclosure, a 28-point workspace icon grid
+three points apart, and a connection row whose third adjacent target removes a
+server. None of that is subtle, and none of it was going to be noticed by
+reading a diff.
+
+The sizes now live on `MenuItem` and on the shadcn `Button` variants rather
+than at the call sites, which is what covers the dialog nobody has written yet:
+every dialog's action pair is `size="sm"`, so Cancel beside Save was the same
+28 points in six files. Two things came out of it worth keeping. The tab strip
+at `h-[44px]` gives its tabs 43, because `items-stretch` fills the content box
+and the bottom border is inside the border box — the same point the run panel's
+header paid for at 48. And the pane controls took §1a's other answer: three
+21-point buttons half a point apart, `touch:hidden`, because a split at 390
+points is two 195-point editors and all three verbs are pane-scoped entries in
+the palette. The measurement is a spec now (`e2e/phone.spec.ts`), and it names
+no control — a list of remembered selectors is exactly what produced the list of
+four.

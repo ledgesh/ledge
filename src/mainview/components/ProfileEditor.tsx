@@ -154,7 +154,7 @@ export function ProfileEditor({ name, onClose }: { name: string; onClose: () => 
                   aria-invalid={badKey(r)}
                   onChange={(e) => set(i, { key: e.target.value })}
                   onKeyDown={(e) => clipboardKeys(e, (v) => set(i, { key: v }))}
-                  className={`h-7 w-40 rounded-md border bg-background px-2 font-mono text-[12px] outline-none focus:border-ring ${
+                  className={`h-7 w-40 rounded-md border bg-background px-2 font-mono text-[12px] outline-none focus:border-ring touch:h-[44px] ${
                     badKey(r) ? "border-destructive" : "border-input"
                   }`}
                 />
@@ -167,12 +167,12 @@ export function ProfileEditor({ name, onClose }: { name: string; onClose: () => 
                   aria-label="Variable value"
                   onChange={(e) => set(i, { value: e.target.value })}
                   onKeyDown={(e) => clipboardKeys(e, (v) => set(i, { value: v }))}
-                  className="h-7 min-w-0 flex-1 rounded-md border border-input bg-background px-2 font-mono text-[12px] outline-none focus:border-ring"
+                  className="h-7 min-w-0 flex-1 rounded-md border border-input bg-background px-2 font-mono text-[12px] outline-none focus:border-ring touch:h-[44px]"
                 />
                 <button
                   type="button"
                   aria-label="Remove variable"
-                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground touch:size-[44px]"
                   onClick={() => setRows((rs) => rs.filter((_, j) => j !== i))}
                 >
                   <X className="h-3.5 w-3.5" />

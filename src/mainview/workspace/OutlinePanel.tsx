@@ -75,7 +75,7 @@ export function OutlinePanel() {
 
   return (
     <aside className="flex h-full min-h-0 flex-col border-l bg-background">
-      <div className="flex h-9 shrink-0 items-center gap-1.5 border-b px-3">
+      <div className="flex h-9 shrink-0 items-center gap-1.5 border-b px-3 touch:h-[48px]">
         <TableOfContents className="size-3.5 shrink-0 text-muted-foreground" />
         <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
           Outline
@@ -85,7 +85,7 @@ export function OutlinePanel() {
         <Button
           variant="ghost"
           size="icon"
-          className="size-6"
+          className="size-6 touch:size-[44px]"
           onClick={() => exec("outline.toggle")}
           title={tooltip("outline.toggle")}
         >
@@ -155,7 +155,7 @@ function HeadingRow({
       {...rowProps}
       {...targetAttrs(targetOf(docId, h))}
       {...press}
-      className="flex cursor-default items-center gap-2 rounded-md py-1 pr-2 outline-none hover:bg-accent/50 focus-visible:ring-1 focus-visible:ring-ring"
+      className="flex cursor-default items-center gap-2 rounded-md py-1 pr-2 outline-none hover:bg-accent/50 focus-visible:ring-1 focus-visible:ring-ring touch:min-h-[44px]"
       style={{ paddingLeft: 8 + (h.level - 1) * 14 }}
     >
       <span

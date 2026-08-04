@@ -59,7 +59,12 @@ export function RenameField({
         if (e.key === "Enter") commit();
         else if (e.key === "Escape") abandon();
       }}
-      className="w-full rounded border bg-background px-1 py-0.5 text-sm outline-none"
+      // It opens focused and selected, so this is not a target to FIND; it is
+      // one to put a caret back into after the first thing you typed was wrong,
+      // and 22 points is not that. Taking §1a's 44 rather than a smaller number
+      // that would also do, so the sweep in phone.spec.ts has no exception to
+      // carry: the row it sits in grows to hold it and shrinks back after.
+      className="w-full rounded border bg-background px-1 py-0.5 text-sm outline-none touch:min-h-[44px]"
     />
   );
 }

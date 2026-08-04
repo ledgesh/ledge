@@ -214,7 +214,7 @@ function WorkspaceStrip() {
           hand-written title is allowed (interactions.md §5). */}
       <div className="flex border-t">
         <button
-          className="flex flex-1 items-center gap-2 px-3.5 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="flex flex-1 items-center gap-2 px-3.5 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground touch:min-h-[44px]"
           title={tooltip("workspace.new")}
           onClick={() => exec("workspace.new")}
         >
@@ -223,7 +223,9 @@ function WorkspaceStrip() {
         <button
           aria-label="Add workspace options"
           title="Add workspace options"
-          className="flex items-center border-l px-2.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+          // The narrow half of a split button, so its width is a target too:
+          // the two halves touch, and the miss opens a menu or creates a folder.
+          className="flex items-center border-l px-2.5 text-muted-foreground hover:bg-accent hover:text-foreground touch:min-w-[44px] touch:justify-center"
           onClick={(e) => {
             const r = e.currentTarget.getBoundingClientRect();
             setAddMenu({ x: Math.max(8, r.right - 200), y: r.bottom + 2 });
@@ -355,7 +357,9 @@ function WorkspaceRow({
       // Don't arm the drag while renaming, or the pointer can't reach the input.
       draggable={!renaming}
       className={cn(
-        "group relative flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 outline-none focus-visible:ring-1 focus-visible:ring-ring",
+        // NoteBrowser's ROW_CLASS carries the same 44 for the same reason: a
+        // stacked alternative with no gap to the row above it.
+        "group relative flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 outline-none focus-visible:ring-1 focus-visible:ring-ring touch:min-h-[44px]",
         selected ? "bg-accent" : "hover:bg-accent/50",
       )}
       onDoubleClick={onBeginRename}

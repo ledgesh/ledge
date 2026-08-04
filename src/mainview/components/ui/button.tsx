@@ -21,11 +21,24 @@ const buttonVariants = cva(
         ghost: "hover:bg-accent hover:text-accent-foreground",
         link: "text-primary underline-offset-4 hover:underline",
       },
+      // Every size is 44 points on a client with no pointer (interactions.md
+      // §1a), written here rather than at the dialogs, the same move MenuItem
+      // makes: `sm` is what every dialog's action pair uses — Cancel beside
+      // Unlock, beside Change Passphrase, beside Save — and at 28 points those
+      // are adjacent alternatives one of which discards what you typed. Fixing
+      // it at the control covers the next dialog too, which is the failure mode
+      // a list of remembered call sites has.
+      //
+      // Pixels, not `h-11`: this document's root is `font: 14px`, so a
+      // rem-based utility would quietly mean 38.5 (§1a, "write it in pixels").
+      // A caller that passes its own size in `className` still wins — twMerge
+      // resolves in the caller's favour — which is how the header's buttons
+      // stay square.
       size: {
-        default: "h-9 px-4 py-2",
-        sm: "h-8 rounded-md px-3 text-xs",
-        lg: "h-10 rounded-md px-8",
-        icon: "h-9 w-9",
+        default: "h-9 px-4 py-2 touch:h-[44px]",
+        sm: "h-8 rounded-md px-3 text-xs touch:h-[44px] touch:px-4",
+        lg: "h-10 rounded-md px-8 touch:h-[44px]",
+        icon: "h-9 w-9 touch:size-[44px]",
       },
     },
     defaultVariants: {

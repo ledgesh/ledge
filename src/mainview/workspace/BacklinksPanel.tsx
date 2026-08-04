@@ -84,7 +84,11 @@ export function BacklinksPanel() {
 
   return (
     <aside className="flex h-full min-h-0 flex-col border-l bg-background">
-      <div className="flex h-9 shrink-0 items-center gap-1.5 border-b px-3">
+      {/* 48 and 44 on touch, the same pair the app header takes and for the
+          same reason (§1a). The Outline and Tags panels are the other two faces
+          of this slot and carry it identically — on a phone the panel covers
+          the note, so its ✕ is the only way back. */}
+      <div className="flex h-9 shrink-0 items-center gap-1.5 border-b px-3 touch:h-[48px]">
         <Link2 className="size-3.5 shrink-0 text-muted-foreground" />
         <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
           Backlinks
@@ -94,7 +98,7 @@ export function BacklinksPanel() {
         <Button
           variant="ghost"
           size="icon"
-          className="size-6"
+          className="size-6 touch:size-[44px]"
           onClick={() => exec("backlinks.toggle")}
           title={tooltip("backlinks.toggle")}
         >
@@ -177,7 +181,7 @@ function BacklinkRow({
       {...rowProps}
       {...targetAttrs(targetOf(hit))}
       {...press}
-      className="group flex cursor-default flex-col gap-0.5 rounded-md px-2 py-1.5 outline-none hover:bg-accent/50 focus-visible:ring-1 focus-visible:ring-ring"
+      className="group flex cursor-default flex-col gap-0.5 rounded-md px-2 py-1.5 outline-none hover:bg-accent/50 focus-visible:ring-1 focus-visible:ring-ring touch:min-h-[44px]"
       title={hit.path}
     >
       <div className="flex min-w-0 items-center gap-2">

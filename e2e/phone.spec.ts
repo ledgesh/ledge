@@ -1413,3 +1413,129 @@ test.describe("running a block by finger", () => {
     await expect(page.getByRole("dialog", { name: "Profile petstore" })).toBeVisible();
   });
 });
+
+// --- every target, measured (interactions.md §1a) ----------------------------
+//
+// The rule is "a control a finger chooses BETWEEN is at least 44 points", and
+// the specs above assert it one named control at a time — the fence's ▶, the
+// run panel's Back to note. Naming them is how the app ended up with a 38-point
+// header of 25-point buttons, a 13-point Trash disclosure and a 21-point
+// machine switcher: nobody wrote a spec for the control they did not think of.
+//
+// So this one names nothing. It walks the states a phone can reach, asks the
+// DOM for every interactive element in each, and fails on any that is under 44
+// in either direction. A control added at 25 points fails here without anyone
+// having to remember it exists, which is the whole difference between a spec
+// that measures and a spec that remembers.
+test.describe("every target a finger chooses between", () => {
+  // Interactive by the browser's reckoning, plus the two kinds this app makes
+  // out of divs: a tab and a row. `[tabindex="-1"]` is excluded because it is
+  // how a roving list parks the rows it is NOT on — they are still tap targets,
+  // and they match `[data-target-kind]` above, so nothing is lost.
+  const SWEEP = `(() => {
+    const sel = [
+      'button', '[role=menuitem]', '[role=option]', '[role=button]', 'a[href]',
+      'input', 'select', 'textarea', '[tabindex]:not([tabindex="-1"])',
+      '[data-tab]', '[data-target-kind]', '.ledge-btn',
+    ].join(',');
+    const bad = [];
+    for (const el of document.querySelectorAll(sel)) {
+      const r = el.getBoundingClientRect();
+      // Zero-sized is not a small target, it is no target: a control the
+      // layout has not given a box to cannot be tapped by accident either.
+      if (r.width === 0 || r.height === 0) continue;
+      const cs = getComputedStyle(el);
+      if (cs.visibility === 'hidden' || cs.opacity === '0') continue;
+      if (r.width >= 44 && r.height >= 44) continue;
+      bad.push(
+        (el.getAttribute('aria-label') || el.getAttribute('title') || el.textContent || el.tagName)
+          .trim().slice(0, 40) + ' @ ' + Math.round(r.width) + 'x' + Math.round(r.height),
+      );
+    }
+    return bad;
+  })()`;
+
+  const sweep = (page: Page) => page.evaluate(SWEEP);
+
+  test.beforeEach(async ({ page }) => {
+    await page.goto("/harness.html?shell=ios");
+    await expect(
+      page.getByRole("button", { name: /Toggle Sidebar/ }),
+    ).toBeVisible();
+  });
+
+  test("the chrome, the tree and the strip", async ({ page }) => {
+    // The header at rest: seven lit buttons that do seven unrelated things,
+    // and the densest row of adjacent alternatives in the app.
+    expect(await sweep(page)).toEqual([]);
+
+    await openSidebar(page);
+    // The drawer is a phone's ONLY way to another note, so its rows, the
+    // machine switcher above them and the Trash disclosure below all count.
+    expect(await sweep(page)).toEqual([]);
+
+    await noteRow(page, "Alpha").tap();
+    await expect(page.locator(".cm-editor")).toBeVisible();
+    await openSidebar(page);
+    await noteRow(page, "Beta").first().tap();
+    await expect.poll(() => page.locator("[data-tab]").count()).toBeGreaterThan(1);
+    // The tab strip, whose tabs touch each other with no gap at all.
+    expect(await sweep(page)).toEqual([]);
+  });
+
+  test("the overlay, a row menu, and a row being renamed", async ({ page }) => {
+    await page.getByRole("button", { name: /Go to Note/ }).tap();
+    await expect(page.getByPlaceholder(/Search notes/)).toBeVisible();
+    await page.keyboard.type("a");
+    await expect(
+      page.locator("div.fixed.inset-0.z-50").getByText("Alpha", { exact: true }),
+    ).toBeVisible();
+    // The one surface that carries every command on a client with no chords.
+    expect(await sweep(page)).toEqual([]);
+    await page.keyboard.press("Escape");
+
+    await openSidebar(page);
+    await pressAndHold(noteRow(page, "Alpha"));
+    await expect(page.getByRole("menu")).toBeVisible();
+    expect(await sweep(page)).toEqual([]);
+    await page.keyboard.press("Escape");
+
+    // Rename is where a row stops being a row and becomes a text field, and
+    // the field is the only thing in the app that grows its own row to obey
+    // the rule (components/RenameField.tsx).
+    await pressAndHold(page.locator('[data-target-kind="workspace"]').first());
+    await page
+      .getByRole("menu")
+      .getByRole("menuitem", { name: "Rename Workspace…" })
+      .tap();
+    await expect(
+      page.locator('[data-target-kind="workspace"] input'),
+    ).toBeFocused();
+    expect(await sweep(page)).toEqual([]);
+  });
+
+  test("the three right-hand panels", async ({ page }) => {
+    await openSidebar(page);
+    await noteRow(page, "Alpha").tap();
+    await expect(page.locator(".cm-editor")).toBeVisible();
+
+    for (const name of [/Toggle Outline/, /Toggle Backlinks/, /Toggle Tags/]) {
+      // From the banner: each panel's own ✕ runs the same command and so
+      // carries the same tooltip, which is two matches for one name.
+      const button = page.getByRole("banner").getByRole("button", { name });
+      await button.tap();
+      // Each panel covers the note here, so its ✕ is the only way back.
+      expect(await sweep(page)).toEqual([]);
+      await button.tap();
+    }
+  });
+
+  test("the machine switcher, and the dialog it opens", async ({ page }) => {
+    await openSidebar(page);
+    await page.locator("[data-connection]").tap();
+    await expect(page.getByRole("dialog", { name: "Connections" })).toBeVisible();
+    // Three adjacent alternatives per row — switch, edit, remove — and the
+    // third is destructive (§4-1).
+    expect(await sweep(page)).toEqual([]);
+  });
+});

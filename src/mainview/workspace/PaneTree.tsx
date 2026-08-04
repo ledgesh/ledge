@@ -229,7 +229,15 @@ function TabBar({ leaf, focused }: { leaf: LeafNode; focused: boolean }) {
   };
 
   return (
-    <div className="flex h-8 shrink-0 items-stretch border-b bg-muted/30">
+    // 44 points on touch, and the tabs inherit it from `items-stretch`: they
+    // are adjacent alternatives with no gap at all between them, which is the
+    // shape §1a's rule was written for, and switching notes is what the strip
+    // is for.
+    //
+    // 45 and not 44, because the box is a border box and `items-stretch` fills
+    // the CONTENT box: at 44 the bottom rule eats a point and every tab
+    // measured 43. The one point is the border's, not a margin of comfort.
+    <div className="flex h-8 shrink-0 items-stretch border-b bg-muted/30 touch:h-[45px]">
       <div
         ref={stripRef}
         className={cn(
@@ -262,7 +270,7 @@ function TabBar({ leaf, focused }: { leaf: LeafNode; focused: boolean }) {
         {/* The + is New Note; the docs workspace has no such thing. */}
         {workspaceKind(selected.folder) !== "docs" && (
           <button
-            className="flex w-7 shrink-0 items-center justify-center text-muted-foreground hover:text-foreground"
+            className="flex w-7 shrink-0 items-center justify-center text-muted-foreground hover:text-foreground touch:w-[44px]"
             title={tooltip("note.new")}
             onClick={() => exec("note.new", { kind: "pane", paneId: leaf.id })}
           >
@@ -270,7 +278,15 @@ function TabBar({ leaf, focused }: { leaf: LeafNode; focused: boolean }) {
           </button>
         )}
       </div>
-      <div className="flex shrink-0 items-center gap-0.5 border-l px-1">
+      {/* Absent on touch, which is §1a's other answer and the one this group
+          earns. Three 21-point buttons half a point apart were the densest
+          thing in the app, and growing them would spend 132 of a phone's 390
+          points on a pane arrangement it cannot use: a split at this width is
+          two 195-point editors. All three verbs are in the palette and all
+          three are pane-scoped — they act on the FOCUSED pane, so the palette
+          entry needs nothing pointed at first, which is exactly the test the
+          frontmatter chip passed and the fence's ▶ failed. */}
+      <div className="flex shrink-0 items-center gap-0.5 border-l px-1 touch:hidden">
         <PaneAction
           title={tooltip("pane.splitRight")}
           onClick={() => exec("pane.splitRight", { kind: "pane", paneId: leaf.id })}
@@ -385,7 +401,10 @@ function TabItem({
       {...press}
       draggable
       className={cn(
-        "group relative flex min-w-0 max-w-[180px] shrink-0 cursor-default items-center gap-1.5 border-r px-2.5 text-xs",
+        // Wider on touch as well as taller: the strip's height comes from the
+        // row above, but a tab is only as wide as its title, and "Beta" came to
+        // 41 points against a neighbour with no gap in between.
+        "group relative flex min-w-0 max-w-[180px] shrink-0 cursor-default items-center gap-1.5 border-r px-2.5 text-xs touch:px-[14px]",
         active
           ? cn("bg-background", paneFocused ? "text-foreground" : "text-muted-foreground")
           : "text-muted-foreground hover:bg-background/60",

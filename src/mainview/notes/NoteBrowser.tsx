@@ -185,7 +185,7 @@ export function NoteBrowser() {
             Deleted “{undo.title}”
           </span>
           <button
-            className="shrink-0 font-medium text-primary hover:underline"
+            className="shrink-0 font-medium text-primary hover:underline touch:min-h-[44px] touch:px-2"
             onClick={() => restore(undo.trashed)}
           >
             Undo
@@ -195,7 +195,7 @@ export function NoteBrowser() {
 
       {!readOnly && (
         <button
-          className="flex items-center gap-2 border-t px-3.5 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="flex items-center gap-2 border-t px-3.5 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground touch:min-h-[44px]"
           title={tooltip("note.new")}
           onClick={() => exec("note.new")}
         >
@@ -325,9 +325,13 @@ function TrashSection({
 
   return (
     <div className="border-t">
+      {/* 13 points of disclosure, five above the New Note button — the smallest
+          target in the app before this, and the one whose neighbour creates a
+          file. Empty is destructive and sits at the far end of the same row, so
+          it is sized here too rather than only where it fits. */}
       <div className="flex items-center gap-1.5 px-3 py-1.5">
         <button
-          className="flex min-w-0 flex-1 items-center gap-1 text-left"
+          className="flex min-w-0 flex-1 items-center gap-1 text-left touch:min-h-[44px]"
           onClick={() => setOpen((o) => !o)}
           title="Deleted notes, kept in this workspace folder's .ledge-trash"
         >
@@ -341,7 +345,7 @@ function TrashSection({
         </button>
         {open && (
           <button
-            className="shrink-0 text-[11px] text-muted-foreground hover:text-destructive"
+            className="shrink-0 text-[11px] text-muted-foreground hover:text-destructive touch:min-h-[44px] touch:px-2"
             title={tooltip("trash.empty")}
             onClick={() => setConfirming(true)}
           >
@@ -469,8 +473,13 @@ function TrashRow({
 
 // Shared by both lists. The focus ring is not decoration: it is the only thing
 // telling you which row `d` is about to act on.
+//
+// 44 points on touch, for the same reason MenuItem carries it (§1a): these are
+// stacked alternatives with no gap between them, and on a phone the drawer is
+// the ONLY way to change notes — a miss here opens the wrong one. `min-h` and
+// not `h`, so a row whose content already exceeds it keeps its own height.
 const ROW_CLASS =
-  "group flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 outline-none hover:bg-accent/50 focus-visible:ring-1 focus-visible:ring-ring";
+  "group flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 outline-none hover:bg-accent/50 focus-visible:ring-1 focus-visible:ring-ring touch:min-h-[44px]";
 
 // `current` is the note in the focused pane's active tab; `open` is any note with
 // a tab somewhere. Clicking either way goes through openNote, which focuses the
