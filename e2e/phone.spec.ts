@@ -14,6 +14,12 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 const noteRow = (page: Page, title: string) =>
   page.locator('[data-target-kind="note"]', { hasText: title });
 
+// One of the overlay's three mode chips, scoped to the overlay so a command
+// named the same thing in a list below cannot answer for it. A prefix match,
+// because on a pointer client the chip also prints its sigil.
+const chip = (page: Page, name: string) =>
+  page.locator("div.fixed.inset-0.z-50").getByRole("button", { name: new RegExp(`^${name}`) });
+
 // The drawer itself: the <aside> App renders in place of the sidebar pane.
 const drawer = (page: Page) => page.locator("aside.absolute");
 const scrim = (page: Page) => page.locator("div.z-30.inset-0");
@@ -387,15 +393,41 @@ test.describe("with the tree on screen", () => {
     );
   });
 
-  test("and `>` inside it is the way to every command", async ({ page }) => {
-    // The chord ⇧⌘P does not exist here. The control opens the overlay and its
-    // own placeholder teaches the crossing, which is what keeps one button
-    // enough for all three modes.
+  test("and a chip inside it is the way to every command", async ({ page }) => {
+    // The chord ⇧⌘P does not exist here, and neither does the `>` that used to
+    // be the only other way across: both sigils are on the iPhone keyboard's
+    // THIRD plane (123, then #+=), so crossing cost two plane switches to reach
+    // one character and a third tap to get back to letters — to run a verb whose
+    // only other home is a chord. One button opens the overlay and three chips
+    // are what make it all three modes.
     await page.getByRole("button", { name: /Go to Note/ }).tap();
-    await expect(page.getByPlaceholder(/> commands/)).toBeVisible();
-    await page.keyboard.type(">toggle sidebar");
+    await chip(page, "Commands").tap();
+    await page.keyboard.type("toggle sidebar");
     await page.keyboard.press("Enter");
     await expect(page.getByText("Workspaces")).toBeHidden();
+  });
+
+  test("a chip carries the query across, because retyping is what costs here", async ({
+    page,
+  }) => {
+    await page.getByRole("button", { name: /Go to Note/ }).tap();
+    await page.keyboard.type("gam");
+    await chip(page, "Text").tap();
+    await expect(page.getByPlaceholder("Search inside notes")).toHaveValue("gam");
+  });
+
+  test("a title search that finds nothing offers the text search, in one tap", async ({
+    page,
+  }) => {
+    // The one crossing that needs no prior knowledge of a chip, a sigil or a
+    // chord: it appears in the list, where the answer was expected to be.
+    await page.getByRole("button", { name: /Go to Note/ }).tap();
+    await page.keyboard.type("beta body");
+    await page.locator("[data-crossing]").tap();
+    await expect(page.getByPlaceholder("Search inside notes")).toHaveValue("beta body");
+    await expect(page.locator("[data-active]")).toContainText("beta body");
+    await page.locator("[data-active]").tap();
+    await expect(page.locator(".cm-content").first()).toContainText("beta body");
   });
 
   test("a verb that only ever had a chord is reachable from the palette: Split Right", async ({
@@ -826,6 +858,22 @@ test.describe("the iOS client, and what it does not have", () => {
 
     await dialog.getByRole("button", { name: "Remove Shed" }).tap();
     await expect(dialog.getByRole("option")).toHaveCount(1);
+  });
+
+  test("no accelerator this keyboard cannot press: the chips drop their sigils", async ({
+    page,
+  }) => {
+    // Absent rather than muted, which is §1a's rule for a control a client
+    // cannot use — and what is absent here is the ADVICE, not the crossing: the
+    // chip beside it still does what the character would have. `>` and `#` are
+    // both on the third plane of an iPhone keyboard (123, then #+=), so printing
+    // them would be telling this client about someone else's keys.
+    await page.getByRole("button", { name: /Go to Note/ }).tap();
+    await expect(chip(page, "Commands")).not.toContainText(">");
+    await expect(chip(page, "Text")).not.toContainText("#");
+    // And the field is back to saying what it is for. It used to spend itself
+    // teaching the same two characters.
+    await expect(page.getByPlaceholder("Search notes")).toBeVisible();
   });
 
   test("the manual is not a text field: tapping it raises no keyboard", async ({
@@ -1425,7 +1473,7 @@ test.describe("the run's own keyboard", () => {
     // never wrong to offer — the one that puts the keyboard away, since nothing
     // else on this screen can (ios/Sources/AccessoryBar.swift).
     await page.getByRole("button", { name: /Go to Note/ }).tap();
-    await expect(page.getByPlaceholder(/> commands/)).toBeVisible();
+    await expect(page.getByPlaceholder(/Search notes/)).toBeVisible();
     expect(await page.evaluate(() => window.__harness.barFace())).toBe("none");
   });
 });

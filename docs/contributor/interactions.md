@@ -80,6 +80,7 @@ section.
 | ↑/↓ roving focus (R5) | a tap; the tapped row is the focused row |
 | Bare-key row verbs | the row's menu |
 | ⌘P / ⇧⌘P / ⌥⌘P | the magnifier in the header, which opens the overlay |
+| `>` / `#`, which cross between the overlay's three modes | the three mode chips under its field |
 | ⌘B / ⌘I / ⌘K, Tab / ⇧Tab, `[[`, ``` | the keyboard accessory bar, on the clients that have one (ios.md §7) |
 | ⌘V of a picture | Insert Image…, on the bar and in the palette: a phone has no ⌘V and nothing on its pasteboard got there by being copied |
 | Ctrl-C, Ctrl-D, Escape, the arrows, at a running block | the same bar wearing its other face, which is a keyboard rather than a menu (§6a) |
@@ -160,8 +161,38 @@ section.
 - **The overlay's control is chrome, not a menu item.** ⌘P, ⇧⌘P and ⌥⌘P are
   chords, and a client with no keyboard would otherwise have no way at all to
   the one surface that carries every command. One button for all three modes:
-  it opens quick-open, whose own placeholder teaches the `>` and `#` that cross
-  to the other two (§3).
+  it opens quick-open, and the chips below the field are how you get to the
+  other two (§3).
+- **A punctuation accelerator is a chord on a software keyboard, and needs the
+  same treatment.** The button above reached the overlay and stopped there:
+  crossing to commands or to full-text was typing `>` or `#`, and on the iPhone
+  keyboard BOTH are on the third plane (`123`, then `#+=`) — two plane switches
+  to reach one character, a third tap to get back to letters, for a grammar
+  whose only teacher was a placeholder you erase by typing. So the three modes
+  are three chips under the field (`commands/Overlay.tsx`), 44 points each,
+  which is the discoverable path R1 asks for; the sigils and the chords stay
+  exactly as they were, as the accelerator. Two things fell out that a Mac
+  wanted too. The mode had been INVISIBLE STATE — derived from the query and
+  shown nowhere — and a lit chip is the first thing on screen that says which
+  of three lists you are looking at. And a crossing now CARRIES THE QUERY,
+  because on a client where the keyboard is on screen retyping is the expensive
+  act; the sigil is stripped on the way back to notes, where it would be read as
+  a sigil again and bounce you straight out.
+- **Where a mode runs out, offer the next one instead of reporting the
+  emptiness.** A title search that matches nothing, with something typed to
+  search for, ends in a row rather than in "No notes match": *Search “…” in note
+  text*, which crosses on a tap or on Enter. It is the one path across that
+  needs no prior knowledge of a chip, a sigil or a chord, and it appears at the
+  moment the want does — in the list, where the answer was expected to be. The
+  test is whether the empty state knows what you would do next; if it does, it
+  should offer it rather than name what it did not find.
+- **An accelerator the client cannot press is not printed.** The chips name
+  their sigil on a pointer client and drop it where `softKeyboard()` is true
+  (`lib/shell.ts`) — absent, not muted, which is the same rule as the
+  hover-revealed control above. What is withheld is the ADVICE and never the
+  verb: the chip beside it does what the character would have. Same reason the
+  field stopped saying "(> commands · # in text)" and went back to saying what
+  it is for.
 - **The editor's chords go on the accessory bar, which is the keyboard's own
   chrome.** The palette can reach any of them, but a formatting verb used mid
   sentence should not cost a trip through a modal surface that covers the
@@ -390,9 +421,9 @@ CodeMirror and never at the window level.
 | New Workspace         | ⇧⌘N                       | creates a managed folder under ~/.ledge (Bun slugs the name) |
 | Attach Folder as Workspace… | — (palette, + menu) | native folder picker (Bun-side; the view never names a path); the chosen directory's .md files become the workspace's notes. Picking an already-attached folder switches to it. Also in the New Workspace split button's dropdown (the strip's + row) |
 | Switch to Workspace N | ⌘1…9                      | badge shows while ⌘ held |
-| Go to Note…           | ⌘P                        | |
-| Command Palette…      | ⇧⌘P                       | also: type `>` as the first character in ⌘P. A filtered query ranks by match quality with chorded commands one notch up (CHORD_BOOST, notes/fuzzy.ts): the §2 policy allocates chords to the frequent acts, so the chord doubles as the ranking signal — "daily" surfaces ⌘J's Open Today's Daily Note above the unchorded template verbs whose titles merely match earlier. The boost decides between comparable matches only; it never beats a tighter match ("edit daily" still leads with Edit Daily Template). An empty query keeps the registry's semantic order |
-| Search Notes…         | ⌥⌘P                       | full-text over note bodies (one case-insensitive substring — shared/search.ts owns the grammar); also: type `#` as the first character in ⌘P. Enter opens the note with the matched line revealed and selected. A `#`-leading query additionally surfaces the workspace's matching tags as rows ABOVE the text hits (a #tag is text too, so its occurrences still list below); Enter on a tag row lands in the Tags panel drilled into it |
+| Go to Note…           | ⌘P                        | the overlay's first mode, and the one every crossing is measured from. Three chips under the field switch between the three (Notes / Commands / Text): a chip carries the typed query across with it, strips the sigil on the way back to notes, and is lit for the mode showing — including the mode a SIGIL put you in, so the row doubles as the indicator the overlay never had. On a client with a software keyboard the chips are the only way across (§1a) and they stop printing the sigils they name |
+| Command Palette…      | ⇧⌘P                       | also: the Commands chip, or type `>` as the first character in ⌘P. A filtered query ranks by match quality with chorded commands one notch up (CHORD_BOOST, notes/fuzzy.ts): the §2 policy allocates chords to the frequent acts, so the chord doubles as the ranking signal — "daily" surfaces ⌘J's Open Today's Daily Note above the unchorded template verbs whose titles merely match earlier. The boost decides between comparable matches only; it never beats a tighter match ("edit daily" still leads with Edit Daily Template). An empty query keeps the registry's semantic order |
+| Search Notes…         | ⌥⌘P                       | full-text over note bodies (one case-insensitive substring — shared/search.ts owns the grammar); also: the Text chip, or type `#` as the first character in ⌘P. And from the other end: a ⌘P query that matches no TITLE offers *Search “…” in note text* as its only row, on a tap or on Enter, which is the crossing that needs no prior knowledge of any of the above. Enter opens the note with the matched line revealed and selected. A `#`-leading query additionally surfaces the workspace's matching tags as rows ABOVE the text hits (a #tag is text too, so its occurrences still list below); Enter on a tag row lands in the Tags panel drilled into it |
 | Toggle Terminal       | ⌃`                        | from terminal focus it closes the drawer |
 | Toggle Sidebar        | ⌥⌘B                       | |
 | Toggle Backlinks      | ⌥⌘L                       | right-hand panel: the notes whose `[[wikilinks]]` point at the current note (the same scan agents get from the MCP `backlinks` tool). Rows are the standard keyboard list; Enter/click opens the linking note with the link's line revealed and selected, the search overlay's open-at-the-hit |

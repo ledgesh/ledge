@@ -116,7 +116,7 @@ test("one right slot: tags and outline swap rather than stack", async ({ page })
 test("a #query in the overlay surfaces tag rows; Enter lands in the drill-in", async ({ page }) => {
   await createTagged(page);
   await page.keyboard.press("Meta+p");
-  const input = page.getByPlaceholder("Search notes  (> commands · # in text)");
+  const input = page.getByPlaceholder("Search notes");
   await input.fill("#led");
 
   // The tag row renders ABOVE the text hits and starts active; the hits below

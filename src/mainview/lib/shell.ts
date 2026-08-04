@@ -98,11 +98,16 @@ export function deviceKeyLine(): string {
  * Whether this client's keyboard is on screen, and therefore costs half the
  * page whenever anything takes focus.
  *
- * The one place it decides anything is the read-only (documentation) editor,
- * which stays focusable on a Mac on purpose — find, ⌘C and ⌘↩ on the manual's
- * own runnable blocks all need it (editor/setup.ts). On a phone none of those
- * three exist and the focus summons a keyboard over a page nothing can type
- * into, so there the same editor is not editable at all.
+ * It decides two things. The read-only (documentation) editor stays focusable
+ * on a Mac on purpose — find, ⌘C and ⌘↩ on the manual's own runnable blocks all
+ * need it (editor/setup.ts). On a phone none of those three exist and the focus
+ * summons a keyboard over a page nothing can type into, so there the same
+ * editor is not editable at all.
+ *
+ * And the overlay's mode chips drop the sigil they name (commands/Overlay.tsx).
+ * The same question one step along: a soft keyboard is one where punctuation is
+ * not a keystroke — both of ours are two plane switches deep on an iPhone — so
+ * an accelerator printed there would be advice a phone cannot take.
  */
 export function softKeyboard(): boolean {
   return shell.softKeyboard;

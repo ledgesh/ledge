@@ -1536,3 +1536,27 @@ which is the general form: before gating a hover, ask whether it was hiding a
 control or drawing one. The other thing a phone cannot ask for is a title, and
 two buttons here said "All" — one selects every match, one rewrites every match.
 The one that changes the note is "Replace All" now, on every client.
+
+The next one the audit had walked past is the overlay, and it is the same shape
+of miss one layer up: the surface was reachable and half of what it does was
+not. The magnifier opens quick-open, and crossing from there to the command
+palette or to full-text search meant typing `>` or `#` — both of which are on
+the iPhone keyboard's THIRD plane (`123`, then `#+=`), so each crossing cost two
+plane switches to reach one character and a third tap to get back to letters. A
+sweep cannot see that: the control is 44 points and the tap lands: what is
+expensive is the KEY, which is not a thing on the page at all. The audit had
+walked the overlay and typed into it with a hardware keyboard, so the cost never
+showed up. Punctuation on a software keyboard is a chord, and §1a's rule about
+chords already covered it — nobody had noticed it applied.
+
+The fix is three chips under the field, one per mode, and it is worth naming
+what it bought a Mac. The mode had been invisible state (`Overlay.tsx` derived
+it from the query and rendered nothing), so a lit chip is the first thing that
+says which of three lists is on screen — including when a SIGIL is what put you
+there. And crossing now carries the typed query, because retyping is what costs
+where the keyboard is on screen. The last piece is the one that needs nothing
+learned at all: a title search that matches nothing now ends in *Search “…” in
+note text* rather than in "No notes match", which is the crossing offered at the
+moment the want appears. The sigils and the chords are untouched; the chips
+simply stop being the only ones who know about them, and they drop the sigil
+they name where `softKeyboard()` says the character is not a keystroke.

@@ -62,7 +62,53 @@ test("⌥⌘P is the direct route to search mode, and Backspace over `#` returns
   await page.keyboard.type("#");
   await expect(page.getByPlaceholder("Search inside notes")).toBeVisible();
   await page.keyboard.press("Backspace");
-  await expect(page.getByPlaceholder(/> commands/)).toBeVisible();
+  await expect(page.getByPlaceholder("Search notes")).toBeVisible();
+});
+
+// --- the three modes as three controls --------------------------------------
+//
+// The sigils were the only way across that did not need a chord, and both of
+// them are on the third plane of an iPhone keyboard (123, then #+=). The chips
+// are the crossing a client with no keys can make, and they are here as well as
+// there for a reason a Mac cares about too: the mode used to be invisible state
+// (Overlay.tsx derived it and showed nothing), and the query used to be lost at
+// every crossing.
+const chip = (page: Page, name: string) =>
+  page.locator("div.fixed.inset-0.z-50").getByRole("button", { name: new RegExp(`^${name}`) });
+
+test("a chip crosses modes and carries the query with it", async ({ page }) => {
+  await page.keyboard.press("Meta+p");
+  await page.keyboard.type("gam");
+  await chip(page, "Text").click();
+  const field = page.getByPlaceholder("Search inside notes");
+  await expect(field).toBeVisible();
+  await expect(field).toHaveValue("gam");
+  // And back, with the field still holding it — and still focused, so the next
+  // keystroke lands where the caret looks like it is.
+  await chip(page, "Notes").click();
+  await expect(page.getByPlaceholder("Search notes")).toHaveValue("gam");
+  await expect(page.getByPlaceholder("Search notes")).toBeFocused();
+});
+
+test("the chip names its sigil, on a client where the sigil is one keystroke", async ({ page }) => {
+  await page.keyboard.press("Meta+p");
+  await expect(chip(page, "Commands")).toContainText(">");
+  await expect(chip(page, "Text")).toContainText("#");
+});
+
+test("a title search that matches nothing offers the text search, and Enter takes it", async ({
+  page,
+}) => {
+  await page.keyboard.press("Meta+p");
+  // A phrase no note is TITLED and one note contains: the empty state used to
+  // say "No notes match", which is true and is not where the answer was.
+  await page.keyboard.type("beta body");
+  await expect(page.locator("[data-crossing]")).toContainText("Search “beta body” in note text");
+  await page.keyboard.press("Enter");
+  await expect(page.getByPlaceholder("Search inside notes")).toHaveValue("beta body");
+  await expect(page.locator("[data-active]")).toContainText("beta body");
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".cm-content").first()).toContainText("beta body");
 });
 
 test("a search hit on an already-open note focuses its tab and reveals the line", async ({ page }) => {

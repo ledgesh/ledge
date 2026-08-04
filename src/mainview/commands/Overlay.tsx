@@ -11,6 +11,16 @@
 // switch, so a note whose title contains either character stays findable, and
 // the direct chords always land in their mode.
 //
+// The three are ALSO a row of chips under the field, and on a touch client that
+// row is the only way across. Both sigils live on the iPhone keyboard's third
+// plane (123, then #+=), so crossing cost two plane switches to reach one
+// character and a third tap to get back to letters — for a grammar whose only
+// teacher was a placeholder you erase by typing. A chip carries the query with
+// it, because retyping is the expensive act wherever the keyboard is on screen.
+// The sigils and the chords are untouched: they are the accelerator, and the
+// chip is the discoverable path that interactions.md §1a asks every verb to
+// have.
+//
 // A search whose query starts with "#" is also how tags surface here: rows
 // prefix-matching the workspace's tag directory render ABOVE the text hits
 // (a #tag is text too, so the hits below still find its occurrences), and
@@ -18,8 +28,9 @@
 // fourth mode and no second sigil — the "#" the search sigil already spends
 // is the one tags are written with.
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CalendarDays, Command as CommandIcon, FileText, Hash, LayoutTemplate, Lock, LockOpen, TextSearch } from "lucide-react";
+import { CalendarDays, Command as CommandIcon, FileText, Hash, LayoutTemplate, Lock, LockOpen, TextSearch, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { softKeyboard } from "@/lib/shell";
 import { notesOf, useWorkspace } from "@/workspace/store";
 import { useVaultState } from "@/vault/channel";
 import { CHORD_BOOST, filterNotes, fuzzyFilter } from "@/notes/fuzzy";
@@ -31,6 +42,20 @@ import { useCommands } from "./CommandProvider";
 import { paletteItems, type PaletteItem } from "./registry";
 
 export type OverlayMode = "notes" | "commands" | "search";
+
+// The chips, and the whole of what a mode is on screen. Each wears the icon its
+// own rows wear below — the picker and the results must agree on what kind of
+// thing is being looked for — and names the character that crosses to it, on
+// the clients where that character is one keystroke.
+//
+// "Text" rather than "Search": all three of these search, and what differs is
+// what they search THROUGH. It is also the shortest of the honest words, and
+// three chips share one 351-point panel on a phone.
+const MODES: { id: OverlayMode; label: string; sigil: string | null; Icon: LucideIcon }[] = [
+  { id: "notes", label: "Notes", sigil: null, Icon: FileText },
+  { id: "commands", label: "Commands", sigil: ">", Icon: CommandIcon },
+  { id: "search", label: "Text", sigil: "#", Icon: TextSearch },
+];
 
 // How long a keystroke burst can run before the RPC fires. Short enough that
 // results feel live, long enough that "shipping" is one scan, not eight.
@@ -57,10 +82,14 @@ export function Overlay({
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
+  // Which mode the overlay is IN when nothing is spelling one: what a chord
+  // opened it in, or what a chip last picked. The sigil below still overrides
+  // it, which is what keeps Backspace over the sigil a way back.
+  const [base, setBase] = useState(initialMode);
   // The sigils only fire as the first character of notes mode; the direct
   // chords are unconditional.
-  const sigil = initialMode === "notes" ? (query.startsWith(">") ? "commands" : query.startsWith("#") ? "search" : null) : null;
-  const mode: OverlayMode = sigil ?? initialMode;
+  const sigil = base === "notes" ? (query.startsWith(">") ? "commands" : query.startsWith("#") ? "search" : null) : null;
+  const mode: OverlayMode = sigil ?? base;
   const isCommands = mode === "commands";
   const isSearch = mode === "search";
   // Strip the mode-switch sigil before filtering; a direct chord open has none.
@@ -155,6 +184,13 @@ export function Overlay({
   // A stale index from a longer result set would point past the end.
   const active = Math.min(index, Math.max(count - 1, 0));
 
+  // The crossing offered where the want appears. A title search that matched
+  // nothing, with something typed to search FOR, is the exact moment the other
+  // mode becomes the point — and it is the one path across that needs no prior
+  // knowledge of a chip, a sigil or a chord. It stands in for "No notes match",
+  // which said the same thing and offered nothing.
+  const crossing = mode === "notes" && q.trim() !== "" && notes.length === 0;
+
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
@@ -169,6 +205,22 @@ export function Overlay({
   useEffect(() => {
     listRef.current?.querySelector("[data-active]")?.scrollIntoView({ block: "nearest" });
   }, [active, count]);
+
+  // Cross to another mode, keeping what was typed. The text survives even when
+  // the sigil spelling the crossing does not: what carries is what you were
+  // looking FOR, and on the way back to notes a leading ">" or "#" would be
+  // read as a sigil again and bounce you straight out.
+  //
+  // The focus never leaves the field — the mousedown below is what stops it —
+  // so on a phone the keyboard does not drop and come back, which would make
+  // one gesture look like two.
+  const pick = (m: OverlayMode) => {
+    if (m === mode) return;
+    setBase(m);
+    setQuery(m === "notes" ? q.replace(/^[>#]/, "") : q);
+    setIndex(0);
+    inputRef.current?.focus();
+  };
 
   const open = (i: number) => {
     if (isCommands) {
@@ -212,7 +264,11 @@ export function Overlay({
       setIndex(Math.max(active - 1, 0));
     } else if (e.key === "Enter") {
       e.preventDefault();
-      open(active);
+      // The crossing row is the only row there is when it shows, and it is
+      // highlighted like one, so Enter has to mean it. Enter on an empty list
+      // used to mean nothing at all.
+      if (crossing) pick("search");
+      else open(active);
     }
     // Escape is handled by the layer stack (layers.ts), not here.
   };
@@ -230,13 +286,12 @@ export function Overlay({
         <input
           ref={inputRef}
           value={query}
-          placeholder={
-            isCommands
-              ? "Run a command"
-              : isSearch
-                ? "Search inside notes"
-                : "Search notes  (> commands · # in text)"
-          }
+          // "Search notes  (> commands · # in text)" until the chips existed:
+          // the sigils were taught here because there was nowhere else to teach
+          // them. The chip is the better teacher — it sits on the control it
+          // describes, it is still there after you type, and it does not spend
+          // the field on instructions — so the field says what it is for again.
+          placeholder={isCommands ? "Run a command" : isSearch ? "Search inside notes" : "Search notes"}
           spellCheck={false}
           // WKWebView applies autocorrect/autocapitalize to a bare <input> and
           // mangles what you type ("sh" becomes "Sh"). `autocorrect` is WebKit-only
@@ -249,8 +304,56 @@ export function Overlay({
             setIndex(0);
           }}
           onKeyDown={onKeyDown}
-          className="shrink-0 border-b bg-transparent px-3.5 py-2.5 text-sm outline-none placeholder:text-muted-foreground touch:min-h-[44px]"
+          className="shrink-0 bg-transparent px-3.5 py-2.5 text-sm outline-none placeholder:text-muted-foreground touch:min-h-[44px]"
         />
+
+        {/* The three modes, as three controls a finger chooses between — so 44
+            points on touch (§1a), and the row that makes the sigils an
+            accelerator rather than the only grammar. Under the field rather
+            than over it: the field is what the overlay is for, and it keeps the
+            caret at the top of the panel where every client's chord puts it.
+
+            Tinted, so the strip reads as chrome rather than as the first row of
+            the list: the lit chip and the highlighted row are both a filled box
+            two lines apart, and in this theme `--secondary` and `--accent` are
+            the same value, so the separation has to come from what they sit
+            ON. */}
+        <div className="flex shrink-0 gap-1 border-y bg-muted/50 p-1">
+          {MODES.map(({ id, label, sigil: key, Icon }) => (
+            <button
+              key={id}
+              type="button"
+              aria-pressed={mode === id}
+              // Take the tap without taking the focus: a chip that blurred the
+              // field would drop the software keyboard and raise it again, and
+              // on a Mac it would strand the caret outside the input the next
+              // keystroke is meant for.
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => pick(id)}
+              className={cn(
+                "flex flex-1 items-center justify-center gap-1.5 rounded px-2 py-1 text-xs text-muted-foreground touch:min-h-[44px] touch:text-sm",
+                // `secondary` and not the `accent` the rows use, though the two
+                // tokens carry the same value today: this is a toggled control
+                // saying which of three it is, which is what the header's lit
+                // buttons already spell that way (App.tsx), and the rows are
+                // saying where the keyboard is. Two different sentences, so two
+                // names — the day one token moves, the right one moves with it.
+                mode === id && "bg-secondary text-secondary-foreground",
+              )}
+            >
+              <Icon className="size-3.5 shrink-0" />
+              {label}
+              {/* The chip's own accelerator, the palette row's key-chip move —
+                  and ABSENT rather than muted where the key is not a keystroke
+                  (§1a). `softKeyboard` is the predicate and not a media query:
+                  the question is what the keyboard costs, and this is the seam
+                  that already answers it (lib/shell.ts). */}
+              {key && !softKeyboard() && (
+                <span className="text-[11px] text-muted-foreground">{key}</span>
+              )}
+            </button>
+          ))}
+        </div>
 
         {/* Every row below carries `touch:min-h-[44px]` (§1a), and this list is
             where it matters most: on a client with no chords this overlay is
@@ -260,17 +363,34 @@ export function Overlay({
             hit, a note) rather than one component wearing four hats. */}
         <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto p-1">
           {count === 0 ? (
-            <p className="px-2.5 py-3 text-center text-[11px] text-muted-foreground">
-              {isCommands
-                ? "No matching commands"
-                : isSearch
-                  ? q.trim() === ""
-                    ? "Type to search every note's text"
-                    : "No matches"
-                  : folderNotes.length === 0
-                    ? "No notes yet"
-                    : "No notes match"}
-            </p>
+            crossing ? (
+              // A row, not a message: the same shape as the search hits it
+              // leads to, and highlighted because Enter runs it. It says what
+              // it will look for, in the words that were typed.
+              <div
+                data-active=""
+                data-crossing=""
+                className="flex cursor-default items-center gap-2 rounded bg-accent px-2.5 py-1.5 touch:min-h-[44px]"
+                onClick={() => pick("search")}
+              >
+                <TextSearch className="size-3.5 shrink-0 text-muted-foreground" />
+                <span className="min-w-0 flex-1 truncate text-sm">
+                  Search “{q.trim()}” in note text
+                </span>
+              </div>
+            ) : (
+              <p className="px-2.5 py-3 text-center text-[11px] text-muted-foreground">
+                {isCommands
+                  ? "No matching commands"
+                  : isSearch
+                    ? q.trim() === ""
+                      ? "Type to search every note's text"
+                      : "No matches"
+                    : folderNotes.length === 0
+                      ? "No notes yet"
+                      : "No notes match"}
+              </p>
+            )
           ) : isCommands ? (
             items.map((item, i) => {
               const Icon = item.icon ?? CommandIcon;

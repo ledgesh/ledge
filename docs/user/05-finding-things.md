@@ -6,7 +6,11 @@ Four ways back to what you wrote: quick open, full-text search, links, and tags.
 
 ⌘P opens a note by title, fuzzy matched. From there the first character you type switches modes: `#` for full-text search, `>` for the command palette. Two chords land in a mode directly: ⌥⌘P for search, ⇧⌘P for commands.
 
+Three chips under the field do the same thing without the punctuation: Notes, Commands, Text. The one you are in is lit, and switching keeps what you have typed, so a title that turns up nothing becomes a text search in one tap.
+
 The magnifier in the header opens the same thing, so all three modes are one click away when you would rather not reach for a chord.
+
+When a title search matches nothing, the list offers to search the text of every note for the same words. Tap it, or press Enter.
 
 A search hit opens the note with the matched line revealed and selected, so you land on the words rather than at the top of the file.
 
