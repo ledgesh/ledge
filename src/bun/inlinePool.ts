@@ -55,6 +55,15 @@ interface Slot {
   // lags it (the C marker has to echo back through the pty), and that gap is
   // exactly when a second run must NOT pick this shell.
   activeRun: string | null;
+  // Which client asked for that run. Set with activeRun and only read while
+  // one is set, so it is exactly as fresh as the id beside it. A persistent
+  // shell outlives any single run, so this is whose block it is carrying now
+  // rather than whose shell it is: two clients running blocks in one note take
+  // turns on the primary and get an overflow shell each when they overlap,
+  // which is the same rule that already applied to one client's two blocks.
+  // Empty is a client id like any other — the bucket clients with no id of
+  // their own share, as they share a layout key (bun/layout.ts).
+  client: string;
   // Whether activeRun's start marker has arrived. Everything the shell says
   // before it is the shell itself talking, not the block.
   began: boolean;
@@ -150,8 +159,19 @@ export class InlinePool {
     private readonly now: () => number = Date.now,
   ) {}
 
-  /** Start `runner` for run `id`, on the note's shell for `host` or a fresh overflow one. */
-  run(sessionId: string, id: string, runner: string, host: string = LOCAL_HOST): void {
+  /**
+   * Start `runner` for run `id`, on the note's shell for `by.host` or a fresh
+   * overflow one.
+   *
+   * `by.client` is required rather than defaulted because the unsafe value is
+   * the plausible one: a caller that forgot would file every run under one
+   * bucket, and `claim` would then find nothing of anyone's to collect. An
+   * options object rather than two more positional strings, since a client id
+   * and an ssh destination are both bare strings and nothing at a call site
+   * would catch them the wrong way round.
+   */
+  run(sessionId: string, id: string, runner: string, by: { client: string; host?: string }): void {
+    const host = by.host ?? LOCAL_HOST;
     let session = this.sessions.get(sessionId);
     if (!session) {
       session = { primaries: new Map(), overflow: new Map() };
@@ -167,6 +187,7 @@ export class InlinePool {
       session.overflow.set(id, slot);
     }
     slot.activeRun = id;
+    slot.client = by.client;
     slot.began = false;
     slot.spoke = false;
     slot.preamble = [];
@@ -210,16 +231,24 @@ export class InlinePool {
    * still has and this collects the difference — the same interrupt, for the
    * same reason, reaching the runs whose panel went away without a click.
    *
-   * One client at a time (bun/daemon.ts), so "every run this pool is executing"
-   * and "every run that client started" are the same set, and an unclaimed run
-   * is an orphan rather than somebody else's.
+   * Scoped to `client`, because an unclaimed run is an orphan only to the
+   * client that started it. Another client's runs are not this one's to
+   * collect: it cannot show them, cannot stop them, and was never told about
+   * them, so silence about them is the whole of what it has to say. Without
+   * the scope a phone finishing its boot interrupts the build a Mac is
+   * watching, and the only trace is a line in the server's log.
+   *
+   * What the scope does NOT do is collect a run whose client never comes back.
+   * That was never this method's job — nobody's boot arrives to ask — and it
+   * is the daemon's idle exit that ends it, which already waits on `running`.
    */
-  claim(keep: readonly string[]): { running: string[]; orphaned: string[] } {
+  claim(client: string, keep: readonly string[]): { running: string[]; orphaned: string[] } {
     const wanted = new Set(keep);
     const running: string[] = [];
     const orphaned: string[] = [];
     for (const session of this.sessions.values()) {
       for (const slot of this.slots(session)) {
+        if (slot.client !== client) continue;
         // activeRun first: it is set at write time, and the parser's view of
         // the same run lags it by one echo (see Slot).
         const id = slot.activeRun ?? slot.parser.openBlockId;
@@ -418,6 +447,7 @@ export class InlinePool {
       shell,
       parser: new MarkerParser(this.nonce),
       activeRun: null,
+      client: "",
       began: false,
       preamble: [],
       preambleLen: 0,

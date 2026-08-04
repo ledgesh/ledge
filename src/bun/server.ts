@@ -670,7 +670,7 @@ export async function createServer(deps: {
         target !== LOCAL_HOST,
       );
       if (!spec.remote) await Bun.write(spec.path, spec.contents);
-      inlinePool.run(sessionId, id, spec.command, target);
+      inlinePool.run(sessionId, id, spec.command, { client: deps.client(), host: target });
       return { accepted: true };
     },
     cancelRun: ({ sessionId, id }) => {
@@ -706,8 +706,10 @@ export async function createServer(deps: {
       // The client's runs, reconciled with this server's (see rpc-schema).
       // Nothing here is per session: a reloaded page has no sessions yet
       // either, and the orphans it is asking about are spread across every
-      // note it had open before.
-      const { running, orphaned } = inlinePool.claim(ids);
+      // note it had open before. It IS per client, though, and only this
+      // client's runs are in scope — the server may be carrying somebody
+      // else's (inlinePool.claim).
+      const { running, orphaned } = inlinePool.claim(deps.client(), ids);
       if (orphaned.length > 0) {
         console.warn(`[run] interrupted ${orphaned.length} run(s) no client can show:`, orphaned.join(", "));
       }

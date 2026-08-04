@@ -148,6 +148,8 @@ A block's output panel is the exception, and only across a restart. The panel li
 
 A Ledge that has relaunched has no panel, and no way to show that run or stop it. So blocks left running on a server are stopped the next time Ledge connects to it, which includes switching to another connection and back. A terminal is not affected, because reattaching finds its shell where you left it.
 
+This reaches only the blocks that device started. A server can be carrying runs for more than one of your devices, and a phone connecting does not stop what your Mac left running.
+
 A save that was in flight when the wire dropped is retried once the connection is back, and applied once, even if the first attempt had already landed.
 
 If the reconnect runs out, the bar reads "disconnected" and Ledge stops accepting work for a machine it cannot reach. Choose the connection again from the picker to start over.

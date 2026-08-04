@@ -214,10 +214,22 @@ function eachBlock(
 
 // --- Running ---------------------------------------------------------------
 
+// A run id has to be unique across every page a server is serving, not just
+// within this one. The pool keys its overflow shells and its stashed resizes by
+// it and now files each run under the client that asked (bun/inlinePool.ts), so
+// two pages that minted the same id would drive each other's shells. Two pages
+// means the obvious one — a Mac and a phone on one server — and also this page
+// before and after a reload, whose runs are still executing until the claim
+// that collects them.
+//
+// So: a nonce for the page, a counter within it. The clock cannot do this job.
+// Two pages first opened in the same millisecond both start their counter at 1,
+// and that is likelier than it sounds for two clients booting off one action.
+const PAGE = Math.random().toString(36).slice(2, 8);
 let idCounter = 0;
 function nextId(): string {
   idCounter += 1;
-  return `web-${idCounter}-${Date.now()}`;
+  return `web-${PAGE}-${idCounter}`;
 }
 
 // Whether one of THIS block's runs is still going. Inline concurrency is per

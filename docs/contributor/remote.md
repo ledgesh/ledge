@@ -281,7 +281,7 @@ splits again, by machine:
 | Profiles (`~/.config/ledge/profiles/`) | server | never transmitted, §10 |
 | PTYs, sessions, scrollback | server | §7, and they outlive a connection |
 | How long they outlive it | server, on the client's ask | §7, `Hello.hold` |
-| Which inline runs are still worth executing | server, on the client's claim | §7, `inlineClaim` |
+| Which inline runs are still worth executing | server, on each client's claim for its own | §7, `inlineClaim` |
 | The dedupe window for replayed writes | server | §7, spans reconnects |
 | The watcher | server | pushes `notesChanged` as today |
 | Behavior settings (shell, interpreters, trash TTL, daily workspace) | server | facts about that machine |
@@ -389,6 +389,19 @@ the daemon alive underneath. So the client sends `inlineClaim` at boot and after
 every reconnect, naming the runs it can still show, and the server interrupts
 the ones it did not name — the same interrupt dismissing a panel sends, so the
 note's shell keeps the cwd and the exports the block left it.
+
+**A claim reaches only the runs that client started.** The pool files each run
+under the client that asked for it (`bun/inlinePool.ts`), and `inlineClaim`
+answers within that scope. An unclaimed run is an orphan only to the client
+that started it: another client cannot show it, cannot stop it, and was never
+told it existed, so saying nothing about it is the whole of what that client
+has to say. Unscoped, a phone finishing its boot interrupts the build a Mac is
+watching, and the only trace is a line in the server's log. What the scope does
+not do is collect a run whose client never comes back — no boot arrives to ask
+— and it is the idle exit that ends that one, which already waits on
+`running()`. A run id is therefore unique per PAGE and not per run counter
+(`mainview/editor/blocks.ts`), since the pool keys shells by it and two clients
+that collided would drive each other's.
 
 The answer settles the other direction. A push with nowhere to go is dropped
 rather than queued, so the `ended` event for a run that finished while the wire

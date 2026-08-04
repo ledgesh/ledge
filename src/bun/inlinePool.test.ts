@@ -4,6 +4,12 @@ import { markerCommand, markerInit } from "./markers";
 
 const NONCE = "testnonce";
 
+// Who started a run. Most tests below have only one client and say so once;
+// the pair matters only where two of them share a server (see "runs belong to
+// the client that started them").
+const MAC = "mac";
+const PHONE = "phone";
+
 // The byte stream a real shell would echo back: OSC 133 C when a block starts,
 // D with the exit status when its prompt returns (see markers.ts).
 const began = (id: string) => `\x1b]133;C;ledge=${NONCE}:${id}\x07`;
@@ -67,14 +73,14 @@ const textOf = (events: InlineEvent[]): string =>
 describe("restartSession", () => {
   test("kills the shells and the next run gets a fresh one", () => {
     const { pool, shells, drained } = makePool();
-    pool.run("note", "a", "source /tmp/a.sh");
+    pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
     shells[0].emit(began("a") + ended("a"));
     drained();
 
     pool.restartSession("note", () => {});
     expect(shells[0].closed).toBe(true);
 
-    pool.run("note", "b", "source /tmp/b.sh");
+    pool.run("note", "b", "source /tmp/b.sh", { client: MAC });
     expect(shells.length).toBe(2);
     // A fresh shell, fully re-primed: the marker hook lives in the dead zsh.
     expect(shells[1].written.startsWith(markerInit(NONCE))).toBe(true);
@@ -84,10 +90,10 @@ describe("restartSession", () => {
     // The tab is still open and watching (unlike closeSession): a run left
     // un-ended would sit on "Running" with a dead run button forever.
     const { pool, shells, drained } = makePool();
-    pool.run("note", "a", "source /tmp/a.sh");
+    pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
     shells[0].emit(began("a"));
     drained();
-    pool.run("note", "b", "source /tmp/b.sh"); // overflow: a still running
+    pool.run("note", "b", "source /tmp/b.sh", { client: MAC }); // overflow: a still running
 
     const events: InlineEvent[] = [];
     pool.restartSession("note", (ev) => events.push(ev));
@@ -100,7 +106,7 @@ describe("restartSession", () => {
 
   test("an idle session restarts silently; an unknown one is a no-op", () => {
     const { pool, shells, drained } = makePool();
-    pool.run("note", "a", "source /tmp/a.sh");
+    pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
     shells[0].emit(began("a") + ended("a"));
     drained();
 
@@ -116,7 +122,7 @@ describe("restartSession", () => {
     const { pool, shells } = makePool();
     pool.resize("note", "x", 33, 7);
     pool.restartSession("note", () => {});
-    pool.run("note", "x", "source /tmp/x.sh");
+    pool.run("note", "x", "source /tmp/x.sh", { client: MAC });
     expect(shells[0].resizes).toEqual([]);
   });
 });
@@ -124,7 +130,7 @@ describe("restartSession", () => {
 describe("shell selection", () => {
   test("the first run goes to the note's persistent shell, primed with the marker hook", () => {
     const { pool, shells } = makePool();
-    pool.run("note", "a", "source /tmp/a.sh");
+    pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
     expect(shells.length).toBe(1);
     expect(shells[0].written.startsWith(markerInit(NONCE))).toBe(true);
     expect(shells[0].written).toContain("source /tmp/a.sh");
@@ -138,15 +144,15 @@ describe("shell selection", () => {
       spawnedFor.push(sessionId);
       return new FakeShell();
     }, NONCE);
-    pool.run("note-1", "a", "source /tmp/a.sh");
-    pool.run("note-1", "b", "source /tmp/b.sh"); // overflow: a is still running
+    pool.run("note-1", "a", "source /tmp/a.sh", { client: MAC });
+    pool.run("note-1", "b", "source /tmp/b.sh", { client: MAC }); // overflow: a is still running
     expect(spawnedFor).toEqual(["note-1", "note-1"]);
   });
 
   test("a second run while the first is still going gets an overflow shell of its own", () => {
     const { pool, shells } = makePool();
-    pool.run("note", "a", "source /tmp/a.sh");
-    pool.run("note", "b", "source /tmp/b.sh");
+    pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
+    pool.run("note", "b", "source /tmp/b.sh", { client: MAC });
     expect(shells.length).toBe(2);
     // Nothing of b's may reach the busy shell: its echo would land in a's output.
     expect(shells[0].written).not.toContain("b.sh");
@@ -157,26 +163,26 @@ describe("shell selection", () => {
     // The write happens now; the C marker echoes back later. The busy check must
     // not depend on the echo or two rapid runs would share the shell.
     const { pool, shells } = makePool();
-    pool.run("note", "a", "source /tmp/a.sh");
+    pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
     // No drain between the two runs: shell 0 has echoed nothing yet.
-    pool.run("note", "b", "source /tmp/b.sh");
+    pool.run("note", "b", "source /tmp/b.sh", { client: MAC });
     expect(shells.length).toBe(2);
   });
 
   test("sequential runs reuse the persistent shell, so cwd and env carry across blocks", () => {
     const { pool, shells, drained } = makePool();
-    pool.run("note", "a", "source /tmp/a.sh");
+    pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
     shells[0].emit(began("a") + ended("a"));
     drained();
-    pool.run("note", "b", "source /tmp/b.sh");
+    pool.run("note", "b", "source /tmp/b.sh", { client: MAC });
     expect(shells.length).toBe(1);
     expect(shells[0].written).toContain("source /tmp/b.sh");
   });
 
   test("runs in different notes never share a shell", () => {
     const { pool, shells } = makePool();
-    pool.run("note-1", "a", "source /tmp/a.sh");
-    pool.run("note-2", "b", "source /tmp/b.sh");
+    pool.run("note-1", "a", "source /tmp/a.sh", { client: MAC });
+    pool.run("note-2", "b", "source /tmp/b.sh", { client: MAC });
     expect(shells.length).toBe(2);
     expect(shells[0].written).not.toContain("b.sh");
     expect(shells[1].written).not.toContain("a.sh");
@@ -186,8 +192,8 @@ describe("shell selection", () => {
 describe("event routing", () => {
   test("each concurrent run's output is sliced to its own block", () => {
     const { pool, shells, drained } = makePool();
-    pool.run("note", "a", "source /tmp/a.sh");
-    pool.run("note", "b", "source /tmp/b.sh");
+    pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
+    pool.run("note", "b", "source /tmp/b.sh", { client: MAC });
     shells[0].emit(began("a") + "from-a");
     shells[1].emit(began("b") + "from-b");
     const events = drained();
@@ -199,8 +205,8 @@ describe("event routing", () => {
 
   test("a concurrent run can end while the first is still going", () => {
     const { pool, shells, drained } = makePool();
-    pool.run("note", "a", "source /tmp/a.sh");
-    pool.run("note", "b", "source /tmp/b.sh");
+    pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
+    pool.run("note", "b", "source /tmp/b.sh", { client: MAC });
     shells[0].emit(began("a"));
     shells[1].emit(began("b") + ended("b"));
     const events = drained();
@@ -212,8 +218,8 @@ describe("event routing", () => {
 describe("lifecycle", () => {
   test("an overflow shell is closed the moment its run ends; the persistent shell survives its own", () => {
     const { pool, shells, drained } = makePool();
-    pool.run("note", "a", "source /tmp/a.sh");
-    pool.run("note", "b", "source /tmp/b.sh");
+    pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
+    pool.run("note", "b", "source /tmp/b.sh", { client: MAC });
     shells[0].emit(began("a") + ended("a"));
     shells[1].emit(began("b") + ended("b"));
     drained();
@@ -223,11 +229,11 @@ describe("lifecycle", () => {
 
   test("the persistent shell is free for the next run once its run ends, even with overflow still going", () => {
     const { pool, shells, drained } = makePool();
-    pool.run("note", "a", "source /tmp/a.sh");
-    pool.run("note", "b", "source /tmp/b.sh");
+    pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
+    pool.run("note", "b", "source /tmp/b.sh", { client: MAC });
     shells[0].emit(began("a") + ended("a"));
     drained();
-    pool.run("note", "c", "source /tmp/c.sh");
+    pool.run("note", "c", "source /tmp/c.sh", { client: MAC });
     expect(shells.length).toBe(2);
     expect(shells[0].written).toContain("source /tmp/c.sh");
   });
@@ -241,7 +247,7 @@ describe("lifecycle", () => {
     expect(pool.running()).toBe(false);
     expect(pool.sessionsOpen()).toBe(false);
 
-    pool.run("note", "a", "source /tmp/a.sh");
+    pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
     shells[0].emit(began("a"));
     drained();
     expect(pool.running()).toBe(true);
@@ -255,7 +261,7 @@ describe("lifecycle", () => {
 
   test("closing the note's session leaves nothing to hold", () => {
     const { pool, shells, drained } = makePool();
-    pool.run("note", "a", "source /tmp/a.sh");
+    pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
     shells[0].emit(began("a") + ended("a"));
     drained();
     pool.closeSession("note");
@@ -264,20 +270,20 @@ describe("lifecycle", () => {
 
   test("a persistent shell dying mid-block ends its run with no exit code and respawns on the next run", () => {
     const { pool, shells, drained } = makePool();
-    pool.run("note", "a", "source /tmp/a.sh");
+    pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
     shells[0].emit(began("a"));
     drained();
     shells[0].exited = true;
     const events = drained();
     expect(events).toContainEqual({ type: "ended", blockId: "a", exitCode: null });
     expect(shells[0].closed).toBe(true);
-    pool.run("note", "b", "source /tmp/b.sh");
+    pool.run("note", "b", "source /tmp/b.sh", { client: MAC });
     expect(shells.length).toBe(2);
   });
 
   test("a shell dying before its begin marker echoed still ends the run it was written", () => {
     const { pool, shells, drained } = makePool();
-    pool.run("note", "a", "source /tmp/a.sh");
+    pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
     shells[0].exited = true;
     const events = drained();
     expect(events).toContainEqual({ type: "ended", blockId: "a", exitCode: null });
@@ -285,8 +291,8 @@ describe("lifecycle", () => {
 
   test("an overflow shell dying mid-block ends only its own run", () => {
     const { pool, shells, drained } = makePool();
-    pool.run("note", "a", "source /tmp/a.sh");
-    pool.run("note", "b", "source /tmp/b.sh");
+    pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
+    pool.run("note", "b", "source /tmp/b.sh", { client: MAC });
     shells[0].emit(began("a"));
     drained();
     shells[1].exited = true;
@@ -298,9 +304,9 @@ describe("lifecycle", () => {
 
   test("closeSession closes every one of the note's shells and no other note's", () => {
     const { pool, shells } = makePool();
-    pool.run("note-1", "a", "source /tmp/a.sh");
-    pool.run("note-1", "b", "source /tmp/b.sh");
-    pool.run("note-2", "c", "source /tmp/c.sh");
+    pool.run("note-1", "a", "source /tmp/a.sh", { client: MAC });
+    pool.run("note-1", "b", "source /tmp/b.sh", { client: MAC });
+    pool.run("note-2", "c", "source /tmp/c.sh", { client: MAC });
     pool.closeSession("note-1");
     expect(shells[0].closed).toBe(true);
     expect(shells[1].closed).toBe(true);
@@ -311,8 +317,8 @@ describe("lifecycle", () => {
 describe("run-addressed plumbing", () => {
   test("cancel reaches the shell running that block and no other", () => {
     const { pool, shells } = makePool();
-    pool.run("note", "a", "source /tmp/a.sh");
-    pool.run("note", "b", "source /tmp/b.sh");
+    pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
+    pool.run("note", "b", "source /tmp/b.sh", { client: MAC });
     pool.cancel("note", "b");
     expect(shells[0].interrupts).toBe(0);
     expect(shells[1].interrupts).toBe(1);
@@ -320,8 +326,8 @@ describe("run-addressed plumbing", () => {
 
   test("input reaches the shell running that block", () => {
     const { pool, shells } = makePool();
-    pool.run("note", "a", "source /tmp/a.sh");
-    pool.run("note", "b", "source /tmp/b.sh");
+    pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
+    pool.run("note", "b", "source /tmp/b.sh", { client: MAC });
     pool.input("note", "b", new TextEncoder().encode("q"));
     expect(shells[1].written.endsWith("q")).toBe(true);
     expect(shells[0].written.endsWith("q")).toBe(false);
@@ -329,8 +335,8 @@ describe("run-addressed plumbing", () => {
 
   test("a resize during a run reaches that run's shell", () => {
     const { pool, shells } = makePool();
-    pool.run("note", "a", "source /tmp/a.sh");
-    pool.run("note", "b", "source /tmp/b.sh");
+    pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
+    pool.run("note", "b", "source /tmp/b.sh", { client: MAC });
     pool.resize("note", "b", 100, 5);
     expect(shells[0].resizes).toEqual([]);
     expect(shells[1].resizes).toEqual([[100, 5]]);
@@ -341,17 +347,17 @@ describe("run-addressed plumbing", () => {
     // runBlock across the RPC.
     const { pool, shells } = makePool();
     pool.resize("note", "a", 120, 1);
-    pool.run("note", "a", "source /tmp/a.sh");
+    pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
     expect(shells[0].resizes).toEqual([[120, 1]]);
   });
 
   test("a stashed resize is dropped once used, not replayed on a later run of the same shell", () => {
     const { pool, shells, drained } = makePool();
     pool.resize("note", "a", 120, 1);
-    pool.run("note", "a", "source /tmp/a.sh");
+    pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
     shells[0].emit(began("a") + ended("a"));
     drained();
-    pool.run("note", "b", "source /tmp/b.sh");
+    pool.run("note", "b", "source /tmp/b.sh", { client: MAC });
     expect(shells[0].resizes).toEqual([[120, 1]]);
   });
 });
@@ -377,20 +383,20 @@ describe("per-host persistent shells", () => {
 
   test("a run with no host lands on the local shell, exactly as before hosts existed", () => {
     const { pool, shells } = makeHostPool();
-    pool.run("note", "a", "source /tmp/a.sh");
+    pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
     expect(shells.map((s) => s.host)).toEqual(["local"]);
   });
 
   test("each host gets its own persistent shell, and each is reused per host", () => {
     const { pool, shells, drained } = makeHostPool();
-    pool.run("note", "a", "cmd-a", "web1");
+    pool.run("note", "a", "cmd-a", { client: MAC, host: "web1" });
     shells[0].emit(began("a") + ended("a"));
     drained();
-    pool.run("note", "b", "cmd-b", "db2");
+    pool.run("note", "b", "cmd-b", { client: MAC, host: "db2" });
     shells[1].emit(began("b") + ended("b"));
     drained();
     // Back to web1: its shell (with its cwd/env) is the one that runs it.
-    pool.run("note", "c", "cmd-c", "web1");
+    pool.run("note", "c", "cmd-c", { client: MAC, host: "web1" });
     expect(shells.map((s) => s.host)).toEqual(["web1", "db2"]);
     expect(shells[0].written).toContain("cmd-c");
     expect(shells[1].written).not.toContain("cmd-c");
@@ -398,10 +404,10 @@ describe("per-host persistent shells", () => {
 
   test("a run while its host's shell is busy overflows onto that same host", () => {
     const { pool, shells, drained } = makeHostPool();
-    pool.run("note", "a", "cmd-a", "web1");
+    pool.run("note", "a", "cmd-a", { client: MAC, host: "web1" });
     shells[0].emit(began("a"));
     drained(); // a is mid-block on web1's persistent shell
-    pool.run("note", "b", "cmd-b", "web1");
+    pool.run("note", "b", "cmd-b", { client: MAC, host: "web1" });
     expect(shells.length).toBe(2);
     expect(shells[1].host).toBe("web1");
     // ...and the overflow dies with its run, as ever.
@@ -413,16 +419,16 @@ describe("per-host persistent shells", () => {
 
   test("one host's dead shell costs that host only; the other machines keep theirs", () => {
     const { pool, shells, drained } = makeHostPool();
-    pool.run("note", "a", "cmd-a", "web1");
+    pool.run("note", "a", "cmd-a", { client: MAC, host: "web1" });
     shells[0].emit(began("a") + ended("a"));
     drained();
-    pool.run("note", "b", "cmd-b", "db2");
+    pool.run("note", "b", "cmd-b", { client: MAC, host: "db2" });
     shells[1].emit(began("b") + ended("b"));
     drained();
     shells[0].exited = true; // web1's block ran `exit` (or ssh dropped)
     drained();
-    pool.run("note", "c", "cmd-c", "web1");
-    pool.run("note", "d", "cmd-d", "db2");
+    pool.run("note", "c", "cmd-c", { client: MAC, host: "web1" });
+    pool.run("note", "d", "cmd-d", { client: MAC, host: "db2" });
     // web1 respawned; db2 still on its original shell.
     expect(shells.length).toBe(3);
     expect(shells[2].host).toBe("web1");
@@ -431,10 +437,10 @@ describe("per-host persistent shells", () => {
 
   test("restartSession kills every host's shell", () => {
     const { pool, shells, drained } = makeHostPool();
-    pool.run("note", "a", "cmd-a", "web1");
+    pool.run("note", "a", "cmd-a", { client: MAC, host: "web1" });
     shells[0].emit(began("a") + ended("a"));
     drained();
-    pool.run("note", "b", "cmd-b", "db2");
+    pool.run("note", "b", "cmd-b", { client: MAC, host: "db2" });
     shells[1].emit(began("b") + ended("b"));
     drained();
     pool.restartSession("note", () => {});
@@ -451,7 +457,7 @@ describe("per-host persistent shells", () => {
 describe("a shell that never starts the block", () => {
   test("says nothing extra while it is merely starting up", () => {
     const { pool, shells, drained, clock } = makePool();
-    pool.run("note", "a", "cmd");
+    pool.run("note", "a", "cmd", { client: MAC });
     shells[0].emit("some prompt noise\r\n");
     expect(textOf(drained())).toBe("");
     clock.t += 1000; // still well inside the grace period
@@ -463,7 +469,7 @@ describe("a shell that never starts the block", () => {
 
   test("hands over what it said once it has been silent too long", () => {
     const { pool, shells, drained, clock } = makePool();
-    pool.run("note", "a", "cmd");
+    pool.run("note", "a", "cmd", { client: MAC });
     shells[0].emit("The authenticity of host 'prod' can't be established.\r\n");
     drained();
     clock.t += 5000;
@@ -474,7 +480,7 @@ describe("a shell that never starts the block", () => {
     // The panel takes keystrokes (pool.input), so a prompt surfaced there is
     // answerable — but only if what follows the answer is shown too.
     const { pool, shells, drained, clock } = makePool();
-    pool.run("note", "a", "cmd");
+    pool.run("note", "a", "cmd", { client: MAC });
     shells[0].emit("Are you sure you want to continue connecting? ");
     drained();
     clock.t += 5000;
@@ -486,7 +492,7 @@ describe("a shell that never starts the block", () => {
 
   test("a shell that dies first reports its reason without waiting", () => {
     const { pool, shells, drained } = makePool();
-    pool.run("note", "a", "cmd");
+    pool.run("note", "a", "cmd", { client: MAC });
     shells[0].emit("prod: Permission denied (publickey).\r\n");
     shells[0].exited = true;
     const events = drained();
@@ -497,12 +503,12 @@ describe("a shell that never starts the block", () => {
 
   test("the held output is per run, not carried into the next one", () => {
     const { pool, shells, drained, clock } = makePool();
-    pool.run("note", "a", "cmd-a");
+    pool.run("note", "a", "cmd-a", { client: MAC });
     shells[0].emit(began("a") + "a-out" + ended("a"));
     drained();
     shells[0].emit("prompt noise between blocks\r\n");
     drained();
-    pool.run("note", "b", "cmd-b");
+    pool.run("note", "b", "cmd-b", { client: MAC });
     clock.t += 5000;
     // The noise belonged to no run and was never held; block b's silence has
     // nothing to hand over.
@@ -513,7 +519,7 @@ describe("a shell that never starts the block", () => {
 describe("the shell's echo of what we typed", () => {
   test("is dropped from what a surfaced shell shows", () => {
     const { pool, shells, drained, clock } = makePool();
-    pool.run("note", "a", "source /tmp/a.sh");
+    pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
     // A tty echoes every byte written to it, with a CR before each LF, and the
     // pool wrote two lines before the shell ever spoke.
     const echo = (markerInit(NONCE) + markerCommand("source /tmp/a.sh", NONCE, "a")).replace(/\n/g, "\r\n");
@@ -528,7 +534,7 @@ describe("the shell's echo of what we typed", () => {
     // Half a match means the rest is still arriving or came back wrapped;
     // stripping there would eat the first line of the real message.
     const { pool, shells, drained, clock } = makePool();
-    pool.run("note", "a", "source /tmp/a.sh");
+    pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
     shells[0].emit(markerInit(NONCE).slice(0, 40) + "\r\nsomething went wrong\r\n");
     drained();
     clock.t += 5000;
@@ -542,20 +548,20 @@ describe("stopping a run that never began", () => {
     // question leaves a live shell that will never produce a marker. Nothing
     // else can close the run, so the block's button would stay dead.
     const { pool, shells, drained } = makePool();
-    pool.run("note", "a", "source /tmp/a.sh");
+    pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
     drained();
     pool.cancel("note", "a");
     const events = drained();
     expect(events).toEqual([{ type: "ended", blockId: "a", exitCode: null }]);
     expect(shells[0].closed).toBe(true);
     // The next run gets a clean shell rather than that one.
-    pool.run("note", "b", "source /tmp/b.sh");
+    pool.run("note", "b", "source /tmp/b.sh", { client: MAC });
     expect(shells.length).toBe(2);
   });
 
   test("a running block is only interrupted, and keeps its shell", () => {
     const { pool, shells, drained } = makePool();
-    pool.run("note", "a", "source /tmp/a.sh");
+    pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
     shells[0].emit(began("a"));
     drained();
     pool.cancel("note", "a");
@@ -571,24 +577,24 @@ describe("stopping a run that never began", () => {
 describe("claiming what a client can still show", () => {
   test("stops the runs the claim leaves out and reports the ones it keeps", () => {
     const { pool, shells, drained } = makePool();
-    pool.run("note", "a", "source /tmp/a.sh");
-    pool.run("other", "b", "source /tmp/b.sh");
+    pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
+    pool.run("other", "b", "source /tmp/b.sh", { client: MAC });
     shells[0].emit(began("a"));
     shells[1].emit(began("b"));
     drained();
 
-    expect(pool.claim(["a"])).toEqual({ running: ["a"], orphaned: ["b"] });
+    expect(pool.claim(MAC, ["a"])).toEqual({ running: ["a"], orphaned: ["b"] });
     expect(shells[0].interrupts).toBe(0);
     expect(shells[1].interrupts).toBe(1);
   });
 
   test("a page that reloaded claims nothing, and everything stops", () => {
     const { pool, shells, drained } = makePool();
-    pool.run("note", "a", "source /tmp/a.sh");
+    pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
     shells[0].emit(began("a"));
     drained();
 
-    expect(pool.claim([]).orphaned).toEqual(["a"]);
+    expect(pool.claim(MAC, []).orphaned).toEqual(["a"]);
     expect(shells[0].interrupts).toBe(1);
     // The interrupt, not a teardown: the shell keeps the cwd and the exports
     // the last block left it, which is the whole of what a session hold buys
@@ -602,10 +608,10 @@ describe("claiming what a client can still show", () => {
     // Same pair as cancel: no job to signal and no marker coming, so the pool
     // is the only thing that can end this run.
     const { pool, shells, drained } = makePool();
-    pool.run("note", "a", "source /tmp/a.sh");
+    pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
     drained();
 
-    expect(pool.claim([]).orphaned).toEqual(["a"]);
+    expect(pool.claim(MAC, []).orphaned).toEqual(["a"]);
     expect(drained()).toEqual([{ type: "ended", blockId: "a", exitCode: null }]);
     expect(shells[0].closed).toBe(true);
   });
@@ -615,34 +621,112 @@ describe("claiming what a client can still show", () => {
     // event was pushed at a wire that was down. Nothing here to stop — the
     // answer is what tells it so.
     const { pool, shells, drained } = makePool();
-    pool.run("note", "a", "source /tmp/a.sh");
+    pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
     shells[0].emit(began("a") + ended("a", 0));
     drained();
 
-    expect(pool.claim(["a"])).toEqual({ running: [], orphaned: [] });
+    expect(pool.claim(MAC, ["a"])).toEqual({ running: [], orphaned: [] });
     expect(shells[0].interrupts).toBe(0);
   });
 
   test("an idle pool answers a claim without stopping anything", () => {
     const { pool } = makePool();
-    expect(pool.claim([])).toEqual({ running: [], orphaned: [] });
+    expect(pool.claim(MAC, [])).toEqual({ running: [], orphaned: [] });
   });
 
   test("reaches the overflow shell a second concurrent run got", () => {
     const { pool, shells, drained } = makePool();
-    pool.run("note", "a", "source /tmp/a.sh");
+    pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
     shells[0].emit(began("a"));
     drained();
-    pool.run("note", "b", "source /tmp/b.sh");
+    pool.run("note", "b", "source /tmp/b.sh", { client: MAC });
     shells[1].emit(began("b"));
     drained();
 
-    expect(pool.claim(["a"]).orphaned).toEqual(["b"]);
+    expect(pool.claim(MAC, ["a"]).orphaned).toEqual(["b"]);
     expect(shells[0].interrupts).toBe(0);
     expect(shells[1].interrupts).toBe(1);
     // And the overflow shell goes with its run, as it does on any other end.
     shells[1].emit(ended("b", 130));
     drained();
     expect(shells[1].closed).toBe(true);
+  });
+});
+
+describe("runs belong to the client that started them", () => {
+  test("a claim does not collect another client's runs", () => {
+    // The whole of it: a phone finishing its boot must not interrupt the build
+    // a Mac is watching. It cannot show that run, cannot stop it, and was never
+    // told it existed.
+    const { pool, shells, drained } = makePool();
+    pool.run("note", "mac-build", "source /tmp/a.sh", { client: MAC });
+    shells[0].emit(began("mac-build"));
+    drained();
+
+    expect(pool.claim(PHONE, [])).toEqual({ running: [], orphaned: [] });
+    expect(shells[0].interrupts).toBe(0);
+  });
+
+  test("and does not report them as running either", () => {
+    // The other direction of the same silence. A phone asking about an id it
+    // does not have could only be a collision, and answering "yes, running"
+    // would hand it a panel over somebody else's shell.
+    const { pool, shells, drained } = makePool();
+    pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
+    shells[0].emit(began("a"));
+    drained();
+
+    expect(pool.claim(PHONE, ["a"])).toEqual({ running: [], orphaned: [] });
+    expect(shells[0].interrupts).toBe(0);
+  });
+
+  test("each client's own orphans are still collected, in the same note", () => {
+    // Scoping is not a truce: within a client nothing changes, and two clients
+    // running blocks in one note is two shells, not a shared one.
+    const { pool, shells, drained } = makePool();
+    pool.run("note", "mine", "source /tmp/a.sh", { client: MAC });
+    shells[0].emit(began("mine"));
+    drained();
+    pool.run("note", "theirs", "source /tmp/b.sh", { client: PHONE });
+    shells[1].emit(began("theirs"));
+    drained();
+
+    expect(pool.claim(MAC, [])).toEqual({ running: [], orphaned: ["mine"] });
+    expect(shells[0].interrupts).toBe(1);
+    expect(shells[1].interrupts).toBe(0);
+
+    expect(pool.claim(PHONE, [])).toEqual({ running: [], orphaned: ["theirs"] });
+    expect(shells[1].interrupts).toBe(1);
+  });
+
+  test("a persistent shell carries whoever's block it is running now", () => {
+    // The slot outlives the run, so its client is not a property of the shell.
+    // Sequential blocks from two clients reuse one shell, and each claim has to
+    // see the run that is actually in it.
+    const { pool, shells, drained } = makePool();
+    pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
+    shells[0].emit(began("a") + ended("a"));
+    drained();
+    pool.run("note", "b", "source /tmp/b.sh", { client: PHONE });
+    shells[0].emit(began("b"));
+    drained();
+    expect(shells.length).toBe(1);
+
+    expect(pool.claim(MAC, [])).toEqual({ running: [], orphaned: [] });
+    expect(shells[0].interrupts).toBe(0);
+    expect(pool.claim(PHONE, ["b"])).toEqual({ running: ["b"], orphaned: [] });
+  });
+
+  test("clients with no id of their own share one bucket", () => {
+    // As they share a layout key (bun/layout.ts). Two of them cannot be told
+    // apart, so they collect each other's runs — which is the same answer the
+    // pool gave everybody before it knew what a client was.
+    const { pool, shells, drained } = makePool();
+    pool.run("note", "a", "source /tmp/a.sh", { client: "" });
+    shells[0].emit(began("a"));
+    drained();
+
+    expect(pool.claim("", []).orphaned).toEqual(["a"]);
+    expect(shells[0].interrupts).toBe(1);
   });
 });

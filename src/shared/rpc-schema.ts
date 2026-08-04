@@ -418,6 +418,12 @@ export type LedgeRPC = {
       // to go is dropped; bun/daemon.ts) closes those panels out instead of
       // leaving them on "Running" for good. `orphaned` is how many unclaimed
       // runs were interrupted, for the log.
+      //
+      // Scoped to the calling client, both ways: it is told about none of
+      // another client's runs and interrupts none of them (remote.md §7). The
+      // server knows who is asking from the connection's handshake, which is
+      // why this takes no client parameter — one a client filled in would be
+      // one it could fill in with somebody else's.
       inlineClaim: { params: { ids: string[] }; response: { running: string[]; orphaned: number } };
       // Terminal drawer input and resize, targeting one note's terminal shell.
       // Keystrokes and pasted text go through terminalInput; the drawer's fit

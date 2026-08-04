@@ -326,6 +326,26 @@ try {
     armed.includes(wanted) ? wanted : armed.trim().split("\n").slice(-1)[0]?.slice(0, 70),
   );
 
+  step("[scope] another device walks past a run that is not its own");
+  // The same server, a different client id: a phone booting against the machine
+  // the Mac left a build on. Its claim names nothing, exactly as the Mac's boot
+  // below will, and the difference is whose runs are in scope (remote.md §7).
+  // Unscoped this interrupts the build, and the only trace is a line in a log
+  // nobody is reading.
+  const phone = clientConnection(spawnDuplex(argv), { push, build: BUILD_VERSION, client: "probe-phone", hold: ASK });
+  await phone.ready;
+  const passedBy = await phone.requests.inlineClaim({ ids: [] });
+  check(
+    "a claim from another client collects nothing",
+    passedBy.orphaned === 0 && passedBy.running.length === 0,
+    `${passedBy.orphaned} orphaned, ${passedBy.running.length} confirmed`,
+  );
+  // And it is told nothing either: an `ended` here would be the interrupt
+  // arriving, pushed at whoever is now live, which is this connection.
+  await Bun.sleep(1500);
+  check("and the run it is not watching is still running", !ranEvent("ended"));
+  phone.close();
+
   step("[orphan] a run the page that started it can no longer show");
   // What a phone whose webview was killed leaves behind: a run still executing
   // on the far machine, started by a connection that is gone, with no id left
