@@ -8,20 +8,23 @@
 // between stdio and that socket, and a connection is a thing the server has
 // rather than a thing it is.
 //
-// One client at a time, and a new one displaces the old. That is not a
-// limitation smuggled in as a policy: `attached` and the scrollback ring are
-// per SESSION, not per client (bun/server.ts), so two clients watching one
-// note's drawer would be one stream with two readers and no rule for who gets
-// what. Displacing is the honest version of one connection at a time
-// (remote.md §8), and it is also what makes a reconnect work — the new
-// connection takes over from the half-open one nobody has noticed is dead.
+// Several clients at once, and every push is addressed. A Mac and a phone
+// pointed at one machine is the ordinary shape of this rather than an exotic
+// one, and this daemon used to serve whichever dialled last and hang up on the
+// other, which cost a session to gain a session. What actually needed deciding
+// was far smaller: `attached` and the scrollback ring are per SESSION and not
+// per client (bun/server.ts), so the one thing two clients cannot share is a
+// drawer's keyboard. Notes, search, tags, the registry and the vault never
+// needed a rule at all.
 //
-// The other half of that rule is the displaced client's, and it is what makes
-// this a policy rather than a fight: the reason travels in the `bye`, and a
-// client told it was displaced stops instead of re-dialling
-// (shared/transport.ts). Two that re-dialled would kick each other off several
-// times a second for as long as both were running, which is what a Mac and a
-// phone pointed at one machine actually did.
+// So the connections live in a map keyed by client id, and every push names who
+// it is for (`Audience` in bun/server.ts). What is left of displacement is the
+// job it was always doing underneath: a connection is replaced by a later one
+// FROM THE SAME CLIENT, which is how a reconnect takes over from a half-open
+// wire nobody has noticed is dead. The reason still travels in the `bye`, and a
+// client told it stops instead of re-dialling (shared/transport.ts) — the same
+// rule as before, over the one case that cannot cost anybody else their
+// session.
 //
 // What the socket buys, precisely: a run keeps going when the wire drops, and
 // the op log (bun/opLog.ts) survives to make the client's replay of what was
@@ -31,7 +34,7 @@
 // never coming back (HOLD_MAX_MS).
 import { chmodSync, mkdirSync, openSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { createServer, type NativeDeps } from "./server";
+import { createServer, type Audience, type NativeDeps } from "./server";
 import { fedDuplex, type Duplex } from "../shared/transport";
 import { serverConnection, socketWriter, type ServerConnection } from "./transport";
 import { createOpLog } from "./opLog";
@@ -130,24 +133,52 @@ export async function startDaemon(opts: DaemonOpts = {}): Promise<Daemon> {
   mkdirSync(APP_HOME, { recursive: true });
   await clearStaleSocket(socketPath);
 
-  // The one connection being served, if any. Every push goes through this
-  // indirection rather than being bound at createServer time, because the
-  // server outlives the thing it pushes to — which is the whole change.
+  // Every client being served, keyed by the id from its hello. Keyed rather
+  // than a plain set because identity is what both routing questions turn on:
+  // which connection a push is addressed to, and which one a fresh connection
+  // replaces.
   //
-  // Nobody attached is the ORDINARY case here, not an edge: the watcher fires
+  // Nobody connected is the ORDINARY case here, not an edge: the watcher fires
   // whenever a file moves, a run keeps producing output, and both of those go
-  // on happily while the client is away. A push with nowhere to go is dropped,
-  // and the state it described is re-read at the next connection's boot.
-  let live: ServerConnection | null = null;
-  const push = Object.fromEntries(
-    PUSH_MESSAGES.map((m) => [
-      m,
-      (p: unknown) => {
-        const to = live;
-        if (to) (to.push as unknown as Record<string, (p: unknown) => void>)[m]!(p);
-      },
-    ]),
-  ) as unknown as ServerPush;
+  // on happily while every client is away. A push with nowhere to go is
+  // dropped, and the state it described is re-read at the next connection's
+  // boot.
+  const clients = new Map<string, ServerConnection>();
+
+  // A push object that writes to whoever `pick` names AT THE MOMENT it is
+  // called. That indirection is the whole reason this is not just `conn.push`:
+  // the server outlives every connection it was built with, so nothing may be
+  // captured when createServer runs.
+  const fanout = (pick: () => Iterable<ServerConnection>): ServerPush =>
+    Object.fromEntries(
+      PUSH_MESSAGES.map((m) => [
+        m,
+        (p: unknown) => {
+          for (const conn of pick()) (conn.push as unknown as Record<string, (p: unknown) => void>)[m]!(p);
+        },
+      ]),
+    ) as unknown as ServerPush;
+
+  // One object per audience rather than one per push. `to` is called on the
+  // hottest path the server has — a shell's bytes, per drawer, per coalescing
+  // window — and building eight closures to throw away each time is a cost
+  // with nothing to show for it. An entry holds the id and nothing else, so a
+  // client that leaves leaves eight dead functions rather than a connection.
+  const addressed = new Map<string, ServerPush>();
+  const push: Audience = {
+    all: fanout(() => clients.values()),
+    to(client) {
+      let one = addressed.get(client);
+      if (!one) {
+        one = fanout(() => {
+          const conn = clients.get(client);
+          return conn ? [conn] : [];
+        });
+        addressed.set(client, one);
+      }
+      return one;
+    },
+  };
 
   // Created once and handed to every connection: the window that makes a
   // replayed write apply once has to span the reconnect it exists for.
@@ -157,9 +188,14 @@ export async function startDaemon(opts: DaemonOpts = {}): Promise<Daemon> {
   // and apply the write a second time (wire.ts Hello.instance).
   const instance = crypto.randomUUID();
 
-  const server = await createServer({ push, native: HEADLESS, client: () => live?.client() ?? "" });
+  const server = await createServer({ push, native: HEADLESS });
 
   let idleTimer: ReturnType<typeof setTimeout> | null = null;
+  // The latest moment any departed client asked to still find its sessions
+  // here. A deadline rather than a duration, because it is set when a
+  // connection ends and read whenever the last one does, which are two
+  // different moments once there is more than one client.
+  let heldUntil = 0;
   let settleDone!: () => void;
   const done = new Promise<void>((resolve) => (settleDone = resolve));
   let stopped = false;
@@ -223,52 +259,70 @@ export async function startDaemon(opts: DaemonOpts = {}): Promise<Daemon> {
     // it is is not a client yet, and the difference is not hypothetical:
     // clearStaleSocket below decides whether a daemon is behind a socket file
     // by connecting to it and hanging up, and on the accept that probe would
-    // throw the person actually using this server off their session.
-    const takeOver = (): void => {
-      const previous = live;
-      live = conn;
-      // AFTER the new one is live, so the pushes a teardown emits go to the
-      // client that is still here rather than to the one being hung up on.
-      // The reason travels: a client that knows it was displaced stops rather
-      // than re-dialling, and two that re-dialled would displace each other
-      // for as long as both were running (shared/transport.ts).
-      previous?.close("another client connected to this server");
-    };
-    const conn = serverConnection(io, { build, ops, instance, greeted: takeOver, holdMax });
-    conn.serve(server.requests);
-    void conn.closed.then(() => {
-      if (live === conn) live = null;
-      // Whichever connection this was: a silent socket closing leaves an
-      // unattended daemon exactly as an attached client leaving does, and the
-      // timer was cleared when it arrived.
+    // be counted as somebody using this server.
+    const greet = (): void => {
+      const id = conn.client();
+      const previous = clients.get(id);
+      clients.set(id, conn);
+      // Bound to the id the handshake carried, which is why this cannot happen
+      // at accept time: until the hello lands there is nobody to answer as, and
+      // four of these handlers would answer for the wrong client
+      // (bun/server.ts forClient).
+      conn.serve(server.forClient(id));
+      // AFTER the new one is registered, so the pushes a teardown emits go to
+      // the connection that is still here rather than to the one being hung up
+      // on.
       //
-      // On the DEPARTING connection's own terms, and not the longest anything
-      // ever asked for. A client that was displaced has been told so and has
-      // stopped re-dialling (shared/transport.ts), so it is not coming back and
-      // its hold is not a claim on the client that took over.
-      if (!live) armIdleExit(conn.hold());
+      // The SAME client only. Two devices are two clients and both stay; one
+      // device dialling twice is a reconnect, and what it is reconnecting past
+      // is a wire nobody has noticed is dead — taking that over is the point.
+      // The reason travels: a client that knows it was replaced stops rather
+      // than re-dialling, and two that re-dialled would replace each other for
+      // as long as both were running (shared/transport.ts).
+      previous?.close("this client opened another connection to this server");
+    };
+    const conn = serverConnection(io, { build, ops, instance, greeted: greet, holdMax });
+    void conn.closed.then(() => {
+      // Only while it is still the registered one: a connection replaced by its
+      // own client's next one must not delete the replacement on its way out.
+      if (clients.get(conn.client()) === conn) clients.delete(conn.client());
+      // Recorded on the way out, whether or not anyone else is left: a hold
+      // runs from the moment THAT connection ended, and with several clients
+      // the last one to leave is not necessarily the one that asked. A phone
+      // backgrounding while a Mac stays connected is the ordinary case of
+      // exactly that, and its five minutes must not become the Mac's sixty
+      // seconds because the Mac happened to quit second.
+      const hold = conn.hold();
+      if (hold > 0) heldUntil = Math.max(heldUntil, Date.now() + hold);
+      // A silent socket closing leaves an unattended daemon exactly as the last
+      // client leaving does, and the timer was cleared when it arrived.
+      if (clients.size === 0) armIdleExit();
     });
   }
 
-  function armIdleExit(hold = 0): void {
+  function armIdleExit(): void {
     if (stopped || idleTimer || idleMs <= 0) return;
     // A hold applies only where there is something to hold: a client that asked
     // for one and opened no shell has nothing to come back TO, and keeping the
     // process for it is the "started by an ssh nobody remembers making" this
     // timer exists to end.
-    const wait = hold > 0 && server.sessionsOpen() ? hold : idleMs;
+    const held = server.sessionsOpen() ? heldUntil - Date.now() : 0;
+    // The longer of the two, never the shorter: a hold is a deadline a client
+    // asked to be given, and one that lands inside the ordinary window is
+    // already satisfied by it.
+    const wait = Math.max(idleMs, held);
     // Seconds once there are enough of them to round without lying. Every hold
     // in production is minutes; the ones that are not are a test's.
     if (wait !== idleMs) {
-      console.error(`[daemon] holding this client's sessions for ${wait >= 10_000 ? `${Math.round(wait / 1000)}s` : `${wait}ms`}`);
+      console.error(`[daemon] holding sessions for ${wait >= 10_000 ? `${Math.round(wait / 1000)}s` : `${wait}ms`}`);
     }
     idleTimer = setTimeout(() => {
       idleTimer = null;
-      if (live) return;
+      if (clients.size > 0) return;
       // Asked at the deadline rather than when the client left: a run that
       // finishes in the meantime should not hold the process, and one that
       // starts cannot (nobody is here to start it).
-      if (server.running()) return armIdleExit(hold);
+      if (server.running()) return armIdleExit();
       console.error(`[daemon] no client and nothing running; exiting (${socketPath})`);
       stop();
     }, wait);
@@ -278,8 +332,8 @@ export async function startDaemon(opts: DaemonOpts = {}): Promise<Daemon> {
     if (stopped) return;
     stopped = true;
     if (idleTimer) clearTimeout(idleTimer);
-    live?.close("this server is shutting down");
-    live = null;
+    for (const conn of clients.values()) conn.close("this server is shutting down");
+    clients.clear();
     listener.stop(true);
     server.shutdown();
     // Best-effort: a socket file left behind is swept by the next daemon, and

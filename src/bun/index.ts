@@ -22,7 +22,7 @@ import { fitFrame, readFrame, writeFrame, type Rect } from "./windowFrame";
 import { startLogging } from "./log";
 import { EXTRACTION_DIRNAME, pruneExtractionDir } from "./updateCache";
 import { APP_HOME } from "./workspaces";
-import { createServer, type NativeDeps } from "./server";
+import { createServer, type Audience, type NativeDeps } from "./server";
 import type { RequestHandlers, ServerPush } from "../shared/wire";
 import { clientOverlay, type ClientNative } from "./clientSeams";
 import { imageFromFile } from "./clipboard";
@@ -155,6 +155,13 @@ const push: ServerPush = {
   menuCommand: (p) => rpc?.send.menuCommand(p),
 };
 
+// The same window, addressed both ways (bun/server.ts Audience). A local server
+// has exactly one client and it is this one, so the only id that can reach `to`
+// is `me`: the runs were filed under it and the drawers were attached by it.
+// The routing that means something lives in the daemon, which is the only place
+// there is more than one client to route between.
+const audience: Audience = { all: push, to: () => push };
+
 // This side's own push, not a server's (wire.ts CLIENT_PUSHES). Whether the
 // wire is up is a fact the end holding it reports; the far end is by
 // definition unreachable at the moment it matters.
@@ -183,9 +190,9 @@ let manager: ConnectionManager | null = null;
 async function attach(conn: Connection): Promise<Attached> {
   const build = local?.version ?? BUILD_VERSION;
   if (conn.destination === "") {
-    const server = await createServer({ push, native, client: () => me });
+    const server = await createServer({ push: audience, native });
     return {
-      requests: await clientOverlay(server.requests, clientNative),
+      requests: await clientOverlay(server.forClient(me), clientNative),
       build,
       shutdown: () => server.shutdown(),
     };

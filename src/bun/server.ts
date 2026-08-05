@@ -90,6 +90,28 @@ export interface NativeDeps {
   pickFolder?(startingFolder: string): Promise<string | null>;
 }
 
+/**
+ * Who a push is for (remote.md §7).
+ *
+ * A server serves several clients at once, so "send this" is no longer a
+ * complete instruction: a drawer's bytes belong to whoever is watching that
+ * drawer, and a block's output to whoever ran the block. Every push site below
+ * therefore says which, and the two words are the whole vocabulary — there is
+ * no group, and nothing is addressed by anything but a client id.
+ *
+ * The routing itself is the caller's: bun/daemon.ts fans out over the
+ * connections it is holding, bun/index.ts hands both to the one window on this
+ * Mac. Neither can decide WHO, because who is a fact about a session or a run
+ * and this module is the only thing that knows it.
+ */
+export interface Audience {
+  /** Every client connected right now. */
+  all: ServerPush;
+  /** One client, by the id from its hello. Dropped if it is not here, the same
+   * as a push with nobody attached at all has always been. */
+  to(client: string): ServerPush;
+}
+
 // What the interpreter value "bun" means for a block that runs on THIS
 // machine: the app's own runtime under Electrobun, and nothing on a server,
 // whose binary is a compiled program rather than a bun (runner.ts). Resolved
@@ -145,7 +167,18 @@ function clientSeamRefusals(): Pick<RequestHandlers, ClientMethod> {
 }
 
 export interface LedgeServer {
-  requests: RequestHandlers;
+  /**
+   * The protocol's handlers, as they answer for one client.
+   *
+   * Almost none of them differ — a note is a note whoever asked for it — but
+   * the handful that do are the ones where answering for the wrong client is
+   * silent damage: which layout to load, which runs to collect, whose run this
+   * is, whose drawer that is. The id comes from the connection's handshake and
+   * is fixed for its life (remote.md §5), so it is bound once here rather than
+   * read at each call: a caller that has the wrong map cannot ask for the right
+   * answer, which is the point.
+   */
+  forClient(client: string): RequestHandlers;
   /** Whether anything is mid-job: a block running, or a drawer's shell inside
    * a command. Asked by the daemon when its last client goes away (remote.md
    * §7) — a run keeps going, an idle prompt is not worth a process. */
@@ -197,7 +230,18 @@ interface Term {
   // shows it. Moving means a restart — same contract as every other spawn
   // param.
   host: string;
-  attached: boolean;
+  // Which client has this drawer open, and null for nobody. A client id rather
+  // than the boolean it was, because a server with several clients has to know
+  // WHICH one to push a shell's bytes at; null rather than "" because the empty
+  // string is a client id like any other (the anonymous bucket, wire.ts
+  // `Hello.client`).
+  //
+  // One at a time, and the last to attach takes it. That is the same rule the
+  // whole server used to run on, narrowed to the drawer — and it is deliberately
+  // only half of an answer: the client it took the drawer from is not told, and
+  // is not stopped from typing into a shell it can no longer see. Both are #104,
+  // which turns this into an owner plus watchers and gives the taking a button.
+  attached: string | null;
   chunks: Uint8Array[];
   len: number;
   // Bracketed-paste sequencing: `promptReady` mirrors the shell's current mode
@@ -240,15 +284,7 @@ const fromB64 = (b64: string) => new Uint8Array(Buffer.from(b64, "base64"));
  * before the first noteList can arrive, and the vault's salt lands so
  * vaultState answers "locked" vs "none" from the first call.
  */
-export async function createServer(deps: {
-  push: ServerPush;
-  native: NativeDeps;
-  // Who is on the other end (remote.md §5). A function rather than a value
-  // because a server outlives a connection: the transport learns the id from
-  // the handshake, and this is read at the moment a layout call arrives, by
-  // which time there is always an answer.
-  client(): string;
-}): Promise<LedgeServer> {
+export async function createServer(deps: { push: Audience; native: NativeDeps }): Promise<LedgeServer> {
   const { push, native } = deps;
 
   // Read once, applied for the life of the process: the shell below, the trash
@@ -385,7 +421,7 @@ export async function createServer(deps: {
       t = {
         term: spawnShell(sessionId, host, "terminal"),
         host,
-        attached: false,
+        attached: null,
         chunks: [],
         len: 0,
         promptReady: false,
@@ -451,7 +487,9 @@ export async function createServer(deps: {
   // unavailable root simply is not watched until a sync finds it back
   // (bun/watch.ts owns the skip-and-warn).
   function refreshWatchers(): void {
-    syncWatchers(availableRoots(), (root) => push.notesChanged({ root }));
+    // To everyone: a file that moved moved for every client, and a note list
+    // nobody told about it is stale until something else happens to that root.
+    syncWatchers(availableRoots(), (root) => push.all.notesChanged({ root }));
   }
 
   // Watch the app home for the CLI's open request (`ledge <title>` with the
@@ -472,7 +510,13 @@ export async function createServer(deps: {
       watch(APP_HOME, (_event, filename) => {
         if (filename !== requestName) return;
         void takeOpenRequest().then((open) => {
-          if (open !== null) push.openExternal(open);
+          // To everyone, because the request names a note and not a screen: it
+          // was typed at that machine's own shell, which knows nothing about
+          // who is connected. Picking one client would be guessing which device
+          // the person is holding, and guessing wrong means `ledge notes` doing
+          // nothing visible at all. Guessing is also unnecessary — the cost of
+          // opening it everywhere is a tab on a device you are not looking at.
+          if (open !== null) push.all.openExternal(open);
         });
       });
     } catch (err) {
@@ -483,17 +527,28 @@ export async function createServer(deps: {
   // One pool event -> one runEvent message. Shared by the drain loop and
   // sessionRestart, which closes out open runs through the same path so the
   // view cannot tell a restart-killed run from a shell that died on its own.
-  function sendRunEvent(ev: InlineEvent): void {
+  //
+  // To the client that started the run and to nobody else: a run event is keyed
+  // by a run id, and the only thing that can do anything with that id is the
+  // panel that minted it. Anywhere else it is an event about a block that is
+  // not on screen.
+  function sendRunEvent(ev: InlineEvent, client: string): void {
+    const to = push.to(client);
     if (ev.type === "began") {
-      push.runEvent({ id: ev.blockId, kind: "began" });
+      to.runEvent({ id: ev.blockId, kind: "began" });
     } else if (ev.type === "output") {
-      push.runEvent({ id: ev.blockId, kind: "output", dataB64: toB64(ev.data) });
+      to.runEvent({ id: ev.blockId, kind: "output", dataB64: toB64(ev.data) });
     } else {
-      push.runEvent({ id: ev.blockId, kind: "ended", exitCode: ev.exitCode });
+      to.runEvent({ id: ev.blockId, kind: "ended", exitCode: ev.exitCode });
     }
   }
 
-  const requests: RequestHandlers = {
+  // Built per connection, so the client's id is simply in scope wherever a
+  // handler needs it. The alternative — one shared map plus a small second one
+  // for the handlers that differ — would move six handlers away from the
+  // neighbours that explain them, to save sixty closures per client on a path
+  // that runs once per connection.
+  const requestsFor = (client: string): RequestHandlers => ({
     // --- workspaces --------------------------------------------------------
     // The registry lives server-side (workspaces.ts): the view only ever passes
     // back roots it was handed, and the one way an arbitrary folder gets in
@@ -598,7 +653,7 @@ export async function createServer(deps: {
         console.warn("[vault] create refused:", err);
         return { ok: false };
       }
-      push.vaultChanged({ state: vaultState() });
+      push.all.vaultChanged({ state: vaultState() });
       return { ok: true };
     },
     vaultUnlock: async ({ passphrase }) => {
@@ -606,14 +661,14 @@ export async function createServer(deps: {
       // machine), a locked note's own self-contained header is the check.
       const probe = vaultState() === "none" ? await firstLockedHeader(availableRoots()) : undefined;
       const ok = await unlockVault(passphrase, probe);
-      if (ok) push.vaultChanged({ state: vaultState() });
+      if (ok) push.all.vaultChanged({ state: vaultState() });
       return { ok };
     },
     vaultLock: () => {
       // The view flushed dirty locked buffers before asking (⌘L's
       // contract); all the server drops here is keys.
       lockVault();
-      push.vaultChanged({ state: vaultState() });
+      push.all.vaultChanged({ state: vaultState() });
       return { ok: true };
     },
     noteLock: async ({ path }) => {
@@ -670,7 +725,7 @@ export async function createServer(deps: {
         target !== LOCAL_HOST,
       );
       if (!spec.remote) await Bun.write(spec.path, spec.contents);
-      inlinePool.run(sessionId, id, spec.command, { client: deps.client(), host: target });
+      inlinePool.run(sessionId, id, spec.command, { client, host: target });
       return { accepted: true };
     },
     cancelRun: ({ sessionId, id }) => {
@@ -709,7 +764,7 @@ export async function createServer(deps: {
       // note it had open before. It IS per client, though, and only this
       // client's runs are in scope — the server may be carrying somebody
       // else's (inlinePool.claim).
-      const { running, orphaned } = inlinePool.claim(deps.client(), ids);
+      const { running, orphaned } = inlinePool.claim(client, ids);
       if (orphaned.length > 0) {
         console.warn(`[run] interrupted ${orphaned.length} run(s) no client can show:`, orphaned.join(", "));
       }
@@ -768,12 +823,16 @@ export async function createServer(deps: {
     // terminal shell on first attach.
     terminalAttach: ({ sessionId, host }) => {
       const t = termFor(sessionId, host);
-      t.attached = true;
+      t.attached = client;
       return { dataB64: toB64(sbSnapshot(t)), host: t.host };
     },
     terminalDetach: ({ sessionId }) => {
       const t = terms.get(sessionId);
-      if (t) t.attached = false;
+      // Only this client's own attachment. Without the check, closing a drawer
+      // on the phone would stop the bytes reaching the Mac that has the same
+      // note open, and the Mac would have no way to know why its terminal went
+      // quiet.
+      if (t && t.attached === client) t.attached = null;
       return { ok: true };
     },
     terminalStatus: ({ sessionId }) => {
@@ -803,8 +862,8 @@ export async function createServer(deps: {
         // Mirror the shell-exited teardown below: the drawer closes, and a
         // busy flag the view still holds is cleared — a dead shell runs
         // nothing.
-        if (t.attached) push.terminalExit({ sessionId });
-        if (t.sentBusy) push.terminalBusy({ sessionId, busy: false });
+        if (t.attached !== null) push.to(t.attached).terminalExit({ sessionId });
+        if (t.sentBusy) push.all.terminalBusy({ sessionId, busy: false });
         t.term.close();
         terms.delete(sessionId);
       }
@@ -849,8 +908,8 @@ export async function createServer(deps: {
     // arrangement this is (bun/layout.ts). The id comes from the connection,
     // never from the call: the view has no idea it is one of several possible
     // screens, and should not have to.
-    layoutGet: async () => ({ text: await readLayout(deps.client()) }),
-    layoutSave: async ({ text }) => ({ ok: await writeLayout(deps.client(), text) }),
+    layoutGet: async () => ({ text: await readLayout(client) }),
+    layoutSave: async ({ text }) => ({ ok: await writeLayout(client, text) }),
     // Raw settings.jsonc text for the ⌘, editor dialog; the write is atomic
     // and ungated (rpc-schema.ts says why). Restart-applies still holds:
     // the running `settings` snapshot above is not touched by a save.
@@ -927,14 +986,14 @@ export async function createServer(deps: {
     // so a handler re-added up there surfaces as a refusal someone has to come
     // and delete, rather than as a server that quietly answers.
     ...clientSeamRefusals(),
-  };
+  });
 
   refreshWatchers();
 
   // Auto-relock (idle) pushes the same vaultChanged the explicit paths do —
   // the view cannot tell why the vault locked, only that it did, which is the
   // point: one eviction path.
-  configureVault({ onAutoLock: () => push.vaultChanged({ state: vaultState() }) });
+  configureVault({ onAutoLock: () => push.all.vaultChanged({ state: vaultState() }) });
 
   // Drain every live shell on a short interval. (poll()-gated reads never block;
   // see pty.ts.) Inline shells are sliced into per-block events (block ids are
@@ -951,7 +1010,7 @@ export async function createServer(deps: {
       if (termData) {
         t.lastOut = now;
         sbPush(t, termData);
-        if (t.attached) push.terminalOutput({ sessionId, dataB64: toB64(termData) });
+        if (t.attached !== null) push.to(t.attached).terminalOutput({ sessionId, dataB64: toB64(termData) });
         // Track the shell's bracketed-paste mode from its enable/disable sequences
         // and release a queued paste whenever a fresh prompt appears. The last
         // occurrence in the chunk wins (a chunk can carry a full prompt cycle). Carry
@@ -972,17 +1031,23 @@ export async function createServer(deps: {
       flushPaste(t, now);
       // Push busy on every tick, not just when bytes arrive: queueing a paste changes
       // it with no output at all, and the button has to gray out the moment it does.
+      //
+      // To everyone, unlike the two pushes around it. Busy is a fact about the
+      // NOTE's shell rather than about the drawer: it grays out the terminal
+      // button on any client with that note open, whether or not that client is
+      // the one watching the bytes. A client that has never heard of the session
+      // files it under an id it does not use (mainview/editor/bridge.ts).
       const busy = isBusy(t);
       if (busy !== t.sentBusy) {
         t.sentBusy = busy;
-        push.terminalBusy({ sessionId, busy });
+        push.all.terminalBusy({ sessionId, busy });
       }
       // The user typed `exit`: tear the shell down and tell the drawer to close.
       if (t.term.exited) {
-        if (t.attached) push.terminalExit({ sessionId });
+        if (t.attached !== null) push.to(t.attached).terminalExit({ sessionId });
         // The shell is gone, so nothing is running on it. Without this the note's
         // terminal button would stay grayed out forever on a shell that died mid-job.
-        if (busy) push.terminalBusy({ sessionId, busy: false });
+        if (busy) push.all.terminalBusy({ sessionId, busy: false });
         t.term.close();
         terms.delete(sessionId);
       }
@@ -1003,7 +1068,7 @@ export async function createServer(deps: {
     .catch((err) => console.error("[notes] trash purge failed", err));
 
   return {
-    requests,
+    forClient: requestsFor,
     // isBusy, not "a shell exists": a note's terminal drawer keeps its zsh
     // sitting at a prompt for as long as the tab is open, and that is not work
     // in progress.

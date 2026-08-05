@@ -221,17 +221,24 @@ try {
   check("with nothing offering to continue anyway", !/yes\/no|continue connecting/i.test(refused.err));
 
   step("[connect] the protocol over ssh");
-  const heard: Array<[string, unknown]> = [];
-  const push = Object.fromEntries(
-    PUSH_MESSAGES.map((m) => [m, (p: unknown) => heard.push([m, p])]),
-  ) as unknown as ServerPush;
+  // One record of pushes PER CONNECTION, because what a client was told is now
+  // half of what is being proven (remote.md §7): a shared record cannot tell
+  // "the phone was not told" from "nobody was".
+  const ears = () => {
+    const heard: Array<[string, unknown]> = [];
+    const push = Object.fromEntries(
+      PUSH_MESSAGES.map((m) => [m, (p: unknown) => heard.push([m, p])]),
+    ) as unknown as ServerPush;
+    return { heard, push };
+  };
+  const mac = ears();
   // Standing in for a phone: the same number mainview/ios.tsx sends
   // (SESSION_HOLD_MS), asked over a real ssh hop rather than a pipe, because a
   // hello field that survives a unix socket is not yet a hello field that
   // survived ssh.
   const ASK = 5 * 60_000;
   const client = clientConnection(spawnDuplex(argv), {
-    push,
+    push: mac.push,
     build: BUILD_VERSION,
     client: "probe-mac",
     hold: ASK,
@@ -272,7 +279,7 @@ try {
   const attach = await client.requests.terminalAttach({ sessionId: "s1", host: null });
   ok("terminalAttach", `host ${attach.host}`);
   const output = () =>
-    heard
+    mac.heard
       .filter(([m]) => m === "terminalOutput")
       .map(([, p]) => atob((p as { dataB64: string }).dataB64))
       .join("");
@@ -297,21 +304,76 @@ try {
   // something real to collect. `sleep` rather than anything that prints: what
   // has to be true is that it is still executing when its client goes away.
   const RUN = "probe-run-1";
-  const ranEvent = (kind: string) =>
-    heard.some(([m, p]) => m === "runEvent" && (p as { id: string; kind: string }).id === RUN && (p as { kind: string }).kind === kind);
+  const ranEvent = (kind: string, id = RUN) =>
+    mac.heard.some(([m, p]) => m === "runEvent" && (p as { id: string; kind: string }).id === id && (p as { kind: string }).kind === kind);
   await client.requests.runBlock({ sessionId: "s1", id: RUN, code: "sleep 300", language: "sh" });
   for (let i = 0; i < 100 && !ranEvent("began"); i++) await Bun.sleep(100);
   check("an inline block is running on the far machine", ranEvent("began"));
+
+  step("[two] a second device, alongside the first rather than instead of it");
+  // What this used to do was hang up on the Mac. The phone now joins a daemon
+  // that goes on serving both, and the checks are the two halves of that: what
+  // each is answered, and what each is told.
+  const phoneEars = ears();
+  const phone = clientConnection(spawnDuplex(argv), {
+    push: phoneEars.push,
+    build: BUILD_VERSION,
+    client: "probe-phone",
+    hold: ASK,
+  });
+  await phone.ready;
+  const onPhone = await phone.requests.noteList({ root });
+  check(
+    "the phone is served the same notes",
+    onPhone.notes.some((n) => n.title === "Over SSH"),
+    `${onPhone.notes.length} note(s)`,
+  );
+  const stillMac = await client.requests.noteList({ root });
+  check(
+    "and the Mac was not hung up on to make room",
+    stillMac.notes.length === onPhone.notes.length && client.farewell() === null,
+    client.farewell() ?? "no goodbye",
+  );
+
+  // The phone's boot claim, against a server carrying somebody else's build.
+  // Unscoped this interrupts it, and the only trace is a line in a log nobody
+  // is reading (remote.md §7).
+  const passedBy = await phone.requests.inlineClaim({ ids: [] });
+  check(
+    "a claim from another client collects nothing",
+    passedBy.orphaned === 0 && passedBy.running.length === 0,
+    `${passedBy.orphaned} orphaned, ${passedBy.running.length} confirmed`,
+  );
+  await Bun.sleep(1500);
+  check("and the Mac's run is still running", !ranEvent("ended"));
+
+  // Now the traffic, with both connections open, since the sleep above says
+  // nothing while it runs and silence proves nothing about where it went. A
+  // block and a drawer, both driven by the Mac: every byte of either has to
+  // land on one screen and not the other (remote.md §7).
+  const CHATTY = "probe-run-2";
+  await client.requests.runBlock({ sessionId: "s1", id: CHATTY, code: "echo two-clients-one-server", language: "sh" });
+  for (let i = 0; i < 100 && !ranEvent("ended", CHATTY); i++) await Bun.sleep(100);
+  check("a block the Mac ran is reported to the Mac", ranEvent("ended", CHATTY));
+  await client.requests.terminalInput({ sessionId: "s1", dataB64: btoa("echo DRAWER-42\n") });
+  for (let i = 0; i < 100 && !output().includes("DRAWER-42"); i++) await Bun.sleep(100);
+  check("and the drawer it is attached to answers it", output().includes("DRAWER-42"));
+  check(
+    "while the phone is told about neither",
+    phoneEars.heard.filter(([m]) => m === "runEvent" || m === "terminalOutput").length === 0,
+    `${phoneEars.heard.map(([m]) => m).join(", ") || "nothing"} heard`,
+  );
+  phone.close();
   client.close();
 
   step("[hold] a session hold, asked over ssh and answered by a real daemon");
   check("the server states a ceiling in its handshake", hello.hold > 0, `${Math.round(hello.hold / 1000)}s`);
   check("and this client's ask fits inside it", sessionHold(ASK, hello.hold) === ASK, `asked ${Math.round(ASK / 1000)}s`);
-  // The client that just left had a terminal session open, so the daemon it
-  // was talking to should have armed the hold rather than the ordinary minute
+  // Both clients that just left had a terminal session open between them, so
+  // the daemon should have armed the hold rather than the ordinary minute
   // (ios.md §5). Its own log is the only place that decision is visible from
   // out here, and the ssh teardown has to reach it first.
-  const wanted = `holding this client's sessions for ${Math.round(sessionHold(ASK, hello.hold) / 1000)}s`;
+  const wanted = `holding sessions for ${Math.round(sessionHold(ASK, hello.hold) / 1000)}s`;
   // The ssh user's own app home, which is not the image's `/data`: a daemon an
   // ssh conjured belongs to whoever the forced-command key authenticated as.
   const daemonLog = "/home/ledge/.ledge/logs/ledge-server.log";
@@ -326,32 +388,12 @@ try {
     armed.includes(wanted) ? wanted : armed.trim().split("\n").slice(-1)[0]?.slice(0, 70),
   );
 
-  step("[scope] another device walks past a run that is not its own");
-  // The same server, a different client id: a phone booting against the machine
-  // the Mac left a build on. Its claim names nothing, exactly as the Mac's boot
-  // below will, and the difference is whose runs are in scope (remote.md §7).
-  // Unscoped this interrupts the build, and the only trace is a line in a log
-  // nobody is reading.
-  const phone = clientConnection(spawnDuplex(argv), { push, build: BUILD_VERSION, client: "probe-phone", hold: ASK });
-  await phone.ready;
-  const passedBy = await phone.requests.inlineClaim({ ids: [] });
-  check(
-    "a claim from another client collects nothing",
-    passedBy.orphaned === 0 && passedBy.running.length === 0,
-    `${passedBy.orphaned} orphaned, ${passedBy.running.length} confirmed`,
-  );
-  // And it is told nothing either: an `ended` here would be the interrupt
-  // arriving, pushed at whoever is now live, which is this connection.
-  await Bun.sleep(1500);
-  check("and the run it is not watching is still running", !ranEvent("ended"));
-  phone.close();
-
   step("[orphan] a run the page that started it can no longer show");
   // What a phone whose webview was killed leaves behind: a run still executing
   // on the far machine, started by a connection that is gone, with no id left
   // on this side to stop it by. A fresh connection claims nothing and the
   // daemon collects the difference (rpc-schema inlineClaim).
-  const reboot = clientConnection(spawnDuplex(argv), { push, build: BUILD_VERSION, client: "probe-mac", hold: ASK });
+  const reboot = clientConnection(spawnDuplex(argv), { push: mac.push, build: BUILD_VERSION, client: "probe-mac", hold: ASK });
   const rebooted = await reboot.ready;
   // The claim only means anything against the server that still holds the run;
   // a restarted daemon would have taken the shells with it.
@@ -373,7 +415,7 @@ try {
   run(["docker", "run", "-d", "--name", `${NAME}-plain`, IMAGE]);
   await Bun.sleep(1500);
   const viaExec = clientConnection(spawnDuplex(["docker", "exec", "-i", `${NAME}-plain`, "ledge-server", "serve"]), {
-    push,
+    push: mac.push,
     build: BUILD_VERSION,
     client: "probe-mac",
   });

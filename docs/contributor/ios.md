@@ -389,15 +389,18 @@ Three consequences, in the order they bite:
   reloads the page. Without that the connection row is a dead label and the app
   waits to be force-quit, which is what a live server restart actually did
   before this was written down.
-- **A phone and a Mac on one server is a fight nobody wins**, until one of them
-  concedes. The daemon serves one client and hands the session to whoever
-  dialled last (remote.md §1), so each displaces the other; a phone that
-  re-dialled a displacement would loop against the Mac forever, several times a
-  second, and iOS would be paying for a full ssh handshake and a Secure Enclave
-  signature each turn. remote.md §7 is where the concession lives: the server's
-  goodbye ends the ladder, so the phone lands on `lost` naming the machine and
-  stays there until it is chosen again. Nothing about it is iOS-specific, which
-  is why none of it is in `ios/`.
+- **A phone and a Mac on one server used to be a fight nobody wins.** The daemon
+  served one client and handed the session to whoever dialled last, so each
+  displaced the other; a phone that re-dialled a displacement looped against the
+  Mac forever, several times a second, and iOS paid for a full ssh handshake and
+  a Secure Enclave signature each turn. The daemon now holds both (remote.md §1),
+  so the fight has no participants. What outlived it is the rule that ended it,
+  and the phone still meets that rule elsewhere: a server's goodbye stops the
+  ladder (remote.md §7), which is the answer to a server shutting down or
+  refusing the handshake. The phone lands on `lost` naming the machine and stays
+  there until it is chosen again, rather than climbing a ladder against an answer
+  it already has. Nothing about any of it is iOS-specific, which is why none of
+  it is in `ios/`.
 
 **The idle timeout stays at 60 seconds, and a client asks for longer.** Raising
 the constant for phones would leave a process running on someone's Mac for every

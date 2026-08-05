@@ -220,6 +220,18 @@ Two things worth doing deliberately: run it once with the host key *not* in
 exactly once, and it is the one where ssh needs an answer before a shell
 exists), and remove the entry afterwards with `ssh-keygen -R`.
 
+**A probe must never reach the app through `ledge <title>`.** That verb opens
+the app by BUNDLE ID (`open -b`, `bun/cli.ts`), and the dev build and an
+installed `/Applications/Ledge.app` share one identifier, so LaunchServices
+starts the installed one — which is a different build, and which `open` hands
+this shell's environment to, `LEDGE_NOTES_ROOT` included. Two Ledges then watch
+one scratch home, either may consume the open request, and the older one's
+writes are indistinguishable from the build under test unless something in the
+file format happens to differ. To exercise the open-request path against the
+build you are running, write `.open-request.json` into the scratch home
+yourself: the CLI's own half is three lines (`writeOpenRequest`), and the app's
+watcher cannot tell who wrote it.
+
 The transport is also where writing the probe against the real modules pays:
 `buildRemoteSpawn` → `PtyProcess` → `InlinePool` is everything under the RPC,
 so a script that drives those three answers most questions in seconds, and

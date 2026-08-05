@@ -63,19 +63,25 @@ comes back.
 Two rules fall out of it, and both are the honest version of something that
 would otherwise be vague:
 
-- **One client at a time, and a new connection displaces the old.** `attached`
-  and the ring are per SESSION, not per client, so two clients on one drawer
-  would be one stream with two readers and no rule for who gets what. Displacing
-  is also what lets a reconnect take over from a half-open connection nobody has
-  noticed is dead. Per-client attachment is where multi-client would have to
-  start, and nothing here promises it. The displaced client is told why and
-  STOPS; §7 is where that half lives, and it is what keeps a policy from
-  becoming a fight.
-- **A connection displaces on the hello, not on the socket.** A socket that has
+- **Several clients at once, held in a map keyed by client id.** A Mac and a
+  phone pointed at one machine is the ordinary shape of this, and the daemon
+  used to answer it by serving whoever dialled last and hanging up on the other.
+  What actually needed a rule was much smaller than that: `attached` and the
+  ring are per SESSION rather than per client, so the one thing two clients
+  cannot share is a drawer's keyboard (§7, and it is `bun/server.ts`'s `Term`
+  that owns it). Notes, search, tags, the registry and the vault never needed
+  one.
+- **A later connection from the SAME client replaces the earlier one.** That is
+  all that is left of displacing, and it is the job displacing was doing
+  underneath: what a reconnect reconnects past is a half-open wire nobody has
+  noticed is dead. The replaced connection is told why and STOPS; §7 is where
+  that half lives, and it is what keeps a policy from becoming a fight.
+- **A connection registers on the hello, not on the socket.** A socket that has
   not said who it is is not a client yet. The distinction is load-bearing
   because probing whether a daemon is behind a socket file is a connect and an
   immediate hangup (`clearStaleSocket`), and on the accept that probe would
-  throw whoever is using the server off their session.
+  count as somebody using the server — and, now, would be handed a set of
+  handlers with no client to answer as.
 - **An idle daemon exits after a minute**, unless something is running. A
   process per machine, started by an ssh nobody remembers making, is not a
   feature; a build that survives you closing the laptop is. `.server.pid` sits
@@ -282,6 +288,7 @@ splits again, by machine:
 | PTYs, sessions, scrollback | server | §7, and they outlive a connection |
 | How long they outlive it | server, on the client's ask | §7, `Hello.hold` |
 | Which inline runs are still worth executing | server, on each client's claim for its own | §7, `inlineClaim` |
+| Which client a drawer's bytes go to | server | §7, `Term.attached` |
 | The dedupe window for replayed writes | server | §7, spans reconnects |
 | The watcher | server | pushes `notesChanged` as today |
 | Behavior settings (shell, interpreters, trash TTL, daily workspace) | server | facts about that machine |
@@ -363,8 +370,8 @@ the note moves.
 
 Shells belong to the server and survive a client going away. This is already
 how `bun/index.ts` works: each session keeps a 256 KB rolling scrollback,
-`attached` gates whether output is pushed, and `terminalAttach` replays the
-buffer. Nothing about that design needed changing; what it needed was a server
+`attached` names which client that output is pushed to, and `terminalAttach`
+replays the buffer. Nothing about that design needed changing; what it needed was a server
 that outlives a connection, which is §1's socket.
 
 Three consequences to hold onto:
@@ -417,6 +424,35 @@ panels that are still there — but the boot that returns finds them unshowable
 and ends them. What the alternative preserves is a run nobody can watch, stop,
 or read, which is not a kept run.
 
+**Every push is addressed** (`Audience` in `bun/server.ts`). With more than one
+client, "send this" stopped being a complete instruction, and the answers are
+not uniform because the messages are not alike: what a note list needs everyone
+to know, a run event needs exactly one client to know. The daemon does the
+fanning out and decides nothing; `bun/server.ts` names the audience at each push
+site, because who is a fact about a session or a run and it is the only thing
+holding those.
+
+| Push | Goes to | Why |
+| ---- | ------- | --- |
+| `notesChanged` | everyone | a file that moved moved for every client |
+| `vaultChanged` | everyone | the vault is the server's, so unlocking on the Mac unlocks the phone's locked notes too |
+| `openExternal` | everyone | `ledge <title>` names a note rather than a screen (§8) |
+| `terminalBusy` | everyone | a fact about the note's shell, and it grays out a button on any client with that note open |
+| `terminalOutput`, `terminalExit` | the client attached to that drawer | one stream, one reader |
+| `runEvent` | the client that started the run | keyed by a run id that only that page's panel holds |
+| `menuCommand` | nobody | it is the Mac shell's own AppKit menu (`bun/index.ts`), never a server's |
+
+A push addressed to a client that is not connected is dropped, exactly as every
+push was while nobody was attached at all, and the state it described is re-read
+at that client's next boot.
+
+**The drawer is the one thing two clients cannot share.** `Term.attached` holds
+one client id and the bytes follow it, so today the last to attach takes it.
+That is deliberately half an answer: the client it was taken from is not told,
+and is not stopped from typing into a shell it can no longer see. The other half
+is an owner with watchers, a push that says the drawer was taken, and a button
+that does the taking.
+
 **A client that loses the wire re-dials rather than failing.** The ladder is
 250ms doubling to 8s and then holding there, eight attempts and 31.75 seconds
 in total, and that number is not arbitrary: it has to finish inside the
@@ -444,16 +480,17 @@ The handshake carries two numbers under one name (`wire.ts` `Hello.hold`): from
 a client, how long it wants its sessions after this connection ends; from a
 server, the longest it will grant. Both ends apply `sessionHold` to the pair,
 because the two hellos cross rather than answering each other, so no grant can
-travel back inside the handshake that asked. When the client goes, the daemon
-arms its idle timer for what that connection was granted instead of
-`IDLE_EXIT_MS`.
+travel back inside the handshake that asked. When the last client goes, the
+daemon arms its idle timer for the furthest deadline any departed connection was
+granted, or `IDLE_EXIT_MS` if that is further out.
 
 Three rules make it a policy rather than a lever:
 
-- **It is the departing connection's grant, never the largest one seen.** A
-  displaced client has been told so and has stopped re-dialling, so it is not
-  coming back and its ask is not a claim made on behalf of the client that took
-  the session over.
+- **A hold is a deadline set when its own connection ends, not a duration read
+  off whoever leaves last.** With several clients those are two different
+  moments: a phone backgrounds while a Mac stays connected, and the Mac quits a
+  minute later. Read off the Mac, the phone's five minutes would be sixty
+  seconds for no better reason than the order they quit in.
 - **A hold over nothing is no hold.** It applies only while a session is open
   to hold (`sessionsOpen()`: a note's inline shell or a drawer's, at a prompt or
   not). Keeping a process for a client that opened no shell is the "started by
@@ -476,19 +513,21 @@ well below any link a person would call working and well above a flap, which
 was measured at three a second.
 
 **A server that says goodbye is not dialled again.** A wire that broke cannot
-say anything, so a reason means the server decided: it handed the session to
-another client (§8), it is shutting down, or it refused the handshake. The
+say anything, so a reason means the server decided: this client replaced its own
+connection with a later one (§1), it is shutting down, or it refused the
+handshake. The
 ladder is for the wire, and running it against a decision is an argument with
 a server that has already answered. The state goes straight to `lost` in the
 server's own words. The difference is carried on the connection
 (`farewell()`) rather than by matching on the wording of an error, for the same
 reason `ConnectionLost` is a type.
 
-Two clients on one daemon are what makes this concrete, and it is the ordinary
-shape of a Mac and a phone pointed at the same machine rather than an exotic
-one. The server hands the session to whoever dialled last, so each displaces
-the other; if both re-dial, neither ever stops. Measured over real ssh into the
-Docker fixture, before and after:
+The measurement that produced this rule was two clients on one daemon, back when
+the server handed the session to whoever dialled last: each displaced the other,
+and since both re-dialled, neither ever stopped. That particular fight went with
+the rule that caused it (§1) — two devices are two clients now — but the shape
+did not, and a client replacing its own connection can still meet it. Measured
+over real ssh into the Docker fixture, before and after:
 
 | | Connections in 12s | Indicator changes | End state |
 | --- | --- | --- | --- |
@@ -574,7 +613,9 @@ and needs no new scoping rule.
 
 Explicit non-goals, so nobody assumes otherwise: no cross-server wikilinks,
 no federated search, no moving a note between servers from inside the app,
-and no simultaneous connections. Each is individually plausible and
+and no client connected to two servers at once. (Two clients connected to one
+server is the opposite arrangement and is supported; §1.) Each is individually
+plausible and
 collectively a different product. Moving notes between servers is what `rsync`
 and `git` are for, and the plain-files ethos is what makes that true.
 
@@ -591,10 +632,14 @@ flushes pending saves and starts the page over against the new machine. The
 alternative, tearing the same state down in place, would mean a second and
 less-tested teardown path for every module holding a `configureX` singleton.
 
-**`ledge <title>` on a server reaches the connected client.** The open-request
-file (`bun/openRequest.ts`) stays exactly as it is for the local case. When a
-client is attached, the server also pushes `openExternal` over the live
-connection, which is the message the view already handles. A request expires
+**`ledge <title>` on a server reaches every connected client.** The open-request
+file (`bun/openRequest.ts`) stays exactly as it is for the local case. When
+clients are attached, the server also pushes `openExternal` to all of them,
+which is the message the view already handles. Everyone rather than a guess at
+one: the request was typed at that machine's own shell and names a note, not a
+screen, so picking a client would be guessing which device the person is
+holding — and the cost of guessing wrong is a verb that does nothing visible,
+against a cost of one tab on a device you were not looking at. A request expires
 at 60 seconds either way.
 
 ## 9. Locking across the wire
@@ -807,11 +852,14 @@ Per `testing.md`'s categories:
   `"../../.ssh/id_rsa"` throws over the wire exactly as it throws today; a
   forced-command key cannot obtain a shell; a replayed write applies once.
 - **Filesystem, over a real socket** (`daemon.fs.test.ts`, `serve.fs.test.ts`):
-  a second connection displaces the first and is told why; a socket that never
-  says who it is displaces nobody; an idle daemon exits and a busy one does
-  not; a push with no client attached is dropped rather than thrown, which is a
-  bug this suite caught rather than prevented; and a whole `serve` process
-  killed and restarted, with the server's state still there.
+  two clients are both served and a client's second connection replaces its own
+  first and is told why; a socket that never says who it is replaces nobody;
+  each of the seven pushes reaches the clients §7's table says it does and no
+  others; an idle daemon exits, a busy one does not, and one client leaving does
+  not end the daemon another is using; a push with no client attached is dropped
+  rather than thrown, which is a bug this suite caught rather than prevented;
+  and a whole `serve` process killed and restarted, with the server's state
+  still there.
 - **The reconnect ladder, at both of its ends** (`transport.test.ts`): a bye
   is not dialled again; a connection that dies as soon as it is made does not
   buy a fresh ladder; and a connection that HELD gets the whole ladder back,

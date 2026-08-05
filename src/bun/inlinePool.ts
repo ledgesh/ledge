@@ -48,6 +48,17 @@ export type InlineEvent =
   | { type: "output"; blockId: string; data: Uint8Array }
   | { type: "ended"; blockId: string; exitCode: number | null };
 
+/**
+ * How the pool reports: what the shell did, and whose run it was.
+ *
+ * The client rides beside the event rather than inside it, because it is not
+ * something the shell said — it is who asked, which the slot has recorded since
+ * runs began belonging to clients. Beside it and REQUIRED, so a new emit site
+ * cannot forget: a `runEvent` addressed to nobody in particular would be one
+ * client's block output arriving on another client's screen (bun/server.ts).
+ */
+export type InlineEmit = (ev: InlineEvent, client: string) => void;
+
 interface Slot {
   shell: InlineShellIO;
   parser: MarkerParser;
@@ -283,7 +294,7 @@ export class InlinePool {
    * else can now, and a panel left on "Running" would disable that block's run
    * button for good.
    */
-  drain(emit: (ev: InlineEvent) => void): void {
+  drain(emit: InlineEmit): void {
     for (const [sessionId, session] of [...this.sessions]) {
       for (const slot of this.slots(session)) {
         const data = slot.shell.drain();
@@ -301,7 +312,7 @@ export class InlinePool {
               slot.preambleLen = 0;
               slot.echo = "";
             }
-            emit(ev);
+            emit(ev, slot.client);
             if (ev.type === "ended") this.runEnded(session, slot, ev.blockId);
           }
         }
@@ -316,7 +327,7 @@ export class InlinePool {
         // with it rather than serving the next block from an unknown state.
         if (slot.abandoned && !slot.began && slot.activeRun !== null) {
           this.flushPreamble(slot, emit);
-          emit({ type: "ended", blockId: slot.activeRun, exitCode: null });
+          emit({ type: "ended", blockId: slot.activeRun, exitCode: null }, slot.client);
           this.dropSlot(session, slot);
           continue;
         }
@@ -328,7 +339,7 @@ export class InlinePool {
           // ("Host key verification failed", "Permission denied"), so say it
           // even if the silence rule has not fired yet.
           if (open && !slot.began) this.flushPreamble(slot, emit);
-          if (open) emit({ type: "ended", blockId: open, exitCode: null });
+          if (open) emit({ type: "ended", blockId: open, exitCode: null }, slot.client);
           this.dropSlot(session, slot);
         }
       }
@@ -343,12 +354,12 @@ export class InlinePool {
    * sits on "Running" and its run button stays dead — the same debt the drain
    * loop pays when a shell dies on its own.
    */
-  restartSession(sessionId: string, emit: (ev: InlineEvent) => void): void {
+  restartSession(sessionId: string, emit: InlineEmit): void {
     const session = this.sessions.get(sessionId);
     if (session) {
       for (const slot of this.slots(session)) {
         const open = slot.parser.openBlockId ?? slot.activeRun;
-        if (open) emit({ type: "ended", blockId: open, exitCode: null });
+        if (open) emit({ type: "ended", blockId: open, exitCode: null }, slot.client);
         slot.shell.close();
       }
       this.sessions.delete(sessionId);
@@ -411,9 +422,9 @@ export class InlinePool {
   // cap is a bound on a shell that chatters forever without ever starting the
   // block; what matters in that stream is the last thing said, so the oldest
   // chunk goes first.
-  private holdOrShow(slot: Slot, data: Uint8Array, emit: (ev: InlineEvent) => void): void {
+  private holdOrShow(slot: Slot, data: Uint8Array, emit: InlineEmit): void {
     if (slot.spoke) {
-      emit({ type: "output", blockId: slot.activeRun!, data });
+      emit({ type: "output", blockId: slot.activeRun!, data }, slot.client);
       return;
     }
     slot.preamble.push(data);
@@ -423,7 +434,7 @@ export class InlinePool {
     }
   }
 
-  private flushPreamble(slot: Slot, emit: (ev: InlineEvent) => void): void {
+  private flushPreamble(slot: Slot, emit: InlineEmit): void {
     if (slot.activeRun === null || slot.preambleLen === 0) return;
     const joined = new Uint8Array(slot.preambleLen);
     let off = 0;
@@ -434,7 +445,7 @@ export class InlinePool {
     slot.preamble = [];
     slot.preambleLen = 0;
     const out = stripEcho(joined, slot.echo);
-    if (out.length > 0) emit({ type: "output", blockId: slot.activeRun, data: out });
+    if (out.length > 0) emit({ type: "output", blockId: slot.activeRun, data: out }, slot.client);
   }
 
   private newSlot(sessionId: string, host: string): Slot {

@@ -454,6 +454,12 @@ export type LedgeRPC = {
       // already live — its host is fixed at birth, restart to move it); the
       // response reports the host the shell is actually on, which is what the
       // drawer's badge shows. Validated like runBlock's (resolveHost).
+      //
+      // Attaching also names WHO, since a server can be serving several clients
+      // (remote.md §7): the shell's bytes go to the client that attached, a
+      // second client attaching takes them over, and a detach clears only its
+      // own attachment. The client comes from the connection's handshake, which
+      // is why neither call has a parameter for it.
       terminalAttach: { params: { sessionId: string; host?: string | null }; response: { dataB64: string; host: string } };
       terminalDetach: { params: { sessionId: string }; response: { ok: boolean } };
       // Whether the note's terminal shell is currently alive, and where. The
@@ -797,7 +803,9 @@ export type LedgeRPC = {
       // A CLI open request arrived while the app is running (the app-home
       // watcher saw the request file; bun/openRequest.ts validated it). Same
       // payload as openRequestTake's answer; the view selects the workspace
-      // showing `root` and opens the note's tab.
+      // showing `root` and opens the note's tab. Pushed to every connected
+      // client: the request names a note rather than a screen, and choosing one
+      // device would be guessing which one the person is holding (remote.md §7).
       openExternal: ExternalOpenInfo;
       // The vault's state changed on the Bun side — an unlock, a ⌘L, or the
       // 15-minute idle auto-relock. On "locked" the view swaps open locked
