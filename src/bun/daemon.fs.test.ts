@@ -219,14 +219,44 @@ describe("every push is addressed", () => {
     expect(got(phone.seen, "terminalOutput")).toEqual([]);
     expect(await until(() => got(phone.seen, "terminalBusy").length > 0)).toBe(true);
 
-    // The last to attach takes it. #104 turns this into an owner with watchers,
-    // gives the taking a button, and tells the client it was taken from; today
-    // the bytes simply follow the latest attach.
+    // Attaching takes it, and the taking is announced to exactly one client:
+    // the one that lost it. Nobody else's screen changed.
     await phone.conn.requests.terminalAttach({ sessionId: "note-1" });
+    expect(await until(() => got(mac.seen, "terminalDetached").length > 0)).toBe(true);
+    expect(got(phone.seen, "terminalDetached")).toEqual([]);
+
     const macSoFar = got(mac.seen, "terminalOutput").length;
     await phone.conn.requests.terminalInput({ sessionId: "note-1", dataB64: b64("echo from-the-phone\n") });
     expect(await until(() => decode(got(phone.seen, "terminalOutput")).includes("from-the-phone"))).toBe(true);
     expect(got(mac.seen, "terminalOutput").length).toBe(macSoFar);
+  });
+});
+
+// The drawer is the one thing two clients cannot share, so it has an owner:
+// where the bytes go, whose keystrokes the shell takes, and whose window sets
+// its size, all decided by the same field (bun/server.ts `Term.owner`).
+describe("one drawer, one owner", () => {
+  // The half that being told is not enough for. A window keeps its focus after
+  // the shell has moved on, so a Mac whose drawer was taken goes on producing
+  // keystrokes; those must not reach a shell whose output is now on the phone,
+  // because a command you cannot see the result of is the dangerous kind.
+  test("a client that lost the drawer can neither type into it nor resize it", async () => {
+    const { socketPath } = await daemonIn({ idleMs: 60_000 });
+    const mac = await joined(socketPath, "mac-1");
+    const phone = await joined(socketPath, "phone-1");
+
+    await mac.conn.requests.terminalAttach({ sessionId: "note-1" });
+    expect(await until(() => decode(got(mac.seen, "terminalOutput")).includes("\x1b[?2004h"))).toBe(true);
+    await phone.conn.requests.terminalAttach({ sessionId: "note-1" });
+
+    expect(await mac.conn.requests.terminalInput({ sessionId: "note-1", dataB64: b64("echo not-mine\n") })).toEqual({ ok: false });
+    expect(await mac.conn.requests.terminalResize({ sessionId: "note-1", cols: 20, rows: 5 })).toEqual({ ok: false });
+
+    // The owner's own still work, and the refused keystrokes never reached the
+    // shell at all: what it echoes is what the phone typed and nothing else.
+    expect(await phone.conn.requests.terminalInput({ sessionId: "note-1", dataB64: b64("echo from-the-phone\n") })).toEqual({ ok: true });
+    expect(await until(() => decode(got(phone.seen, "terminalOutput")).includes("from-the-phone"))).toBe(true);
+    expect(decode(got(phone.seen, "terminalOutput"))).not.toContain("not-mine");
   });
 
   // Closing a drawer says nothing about anybody else's. Without the check the
@@ -242,6 +272,35 @@ describe("every push is addressed", () => {
 
     await mac.conn.requests.terminalInput({ sessionId: "note-1", dataB64: b64("echo still-here\n") });
     expect(await until(() => decode(got(mac.seen, "terminalOutput")).includes("still-here"))).toBe(true);
+  });
+
+  // The owner's grid is not bookkeeping: it reaches the pty's own ioctl, and
+  // the only thing that can report that is the shell inside it. 20x100 because
+  // a pty this server spawns starts at 120x30 (bun/pty.ts), so an answer that
+  // matches is one the resize caused.
+  test("the owner's resize reaches the pty", async () => {
+    const { socketPath } = await daemonIn({ idleMs: 60_000 });
+    const mac = await joined(socketPath, "mac-1");
+
+    await mac.conn.requests.terminalAttach({ sessionId: "note-1" });
+    expect(await until(() => decode(got(mac.seen, "terminalOutput")).includes("\x1b[?2004h"))).toBe(true);
+    expect(await mac.conn.requests.terminalResize({ sessionId: "note-1", cols: 100, rows: 20 })).toEqual({ ok: true });
+
+    await mac.conn.requests.terminalInput({ sessionId: "note-1", dataB64: b64('echo SIZE-$(stty size | tr " " "-")\n') });
+    expect(await until(() => /SIZE-20-100/.test(decode(got(mac.seen, "terminalOutput"))))).toBe(true);
+  });
+
+  // Owner-only made these two the only calls with a sessionId that do not
+  // lazily spawn, which fixes something older than multi-client: the drawer's
+  // first resize goes out just ahead of its attach, so a resize that spawned
+  // would spawn before the attach could say which machine the picker chose.
+  test("a resize does not conjure a shell", async () => {
+    const { socketPath } = await daemonIn({ idleMs: 60_000 });
+    const mac = await joined(socketPath, "mac-1");
+
+    expect(await mac.conn.requests.terminalResize({ sessionId: "note-1", cols: 80, rows: 24 })).toEqual({ ok: false });
+    expect(await mac.conn.requests.terminalInput({ sessionId: "note-1", dataB64: b64("echo hello\n") })).toEqual({ ok: false });
+    expect(await mac.conn.requests.terminalStatus({ sessionId: "note-1" })).toEqual({ live: false, host: null });
   });
 });
 

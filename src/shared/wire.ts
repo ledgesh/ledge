@@ -208,6 +208,7 @@ export const PUSH_MESSAGES = [
   "terminalOutput",
   "terminalBusy",
   "terminalExit",
+  "terminalDetached",
   "notesChanged",
   "openExternal",
   "vaultChanged",

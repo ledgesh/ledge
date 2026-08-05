@@ -146,3 +146,20 @@ export function onTerminalExit(sink: (sessionId: string) => void): () => void {
 export function dispatchTerminalExit(sessionId: string): void {
   exitSink?.(sessionId);
 }
+
+// Bun -> webview: another client attached to this note's shell, so this one no
+// longer has it (rpc-schema terminalDetached). The mounted drawer subscribes and
+// shows its notice; nothing else in the view cares, since the shell is still
+// running and the note is otherwise unaffected.
+let detachedSink: ((sessionId: string) => void) | null = null;
+
+export function onTerminalDetached(sink: (sessionId: string) => void): () => void {
+  detachedSink = sink;
+  return () => {
+    if (detachedSink === sink) detachedSink = null;
+  };
+}
+
+export function dispatchTerminalDetached(sessionId: string): void {
+  detachedSink?.(sessionId);
+}

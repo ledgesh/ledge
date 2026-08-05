@@ -429,6 +429,13 @@ export type LedgeRPC = {
       // Keystrokes and pasted text go through terminalInput; the drawer's fit
       // computes cols/rows for terminalResize. This shell is separate from the
       // note's inline-run shell (the marker protocol stays isolated from raw xterm).
+      //
+      // BOTH ARE THE OWNER'S ALONE (terminalAttach below), and ok:false is a
+      // client that no longer holds this drawer: its keystrokes would land in a
+      // shell it cannot see, and its window's grid would reflow the screen the
+      // owner is reading. Neither call spawns a shell — for a session with no
+      // shell the answer is also ok:false, so a resize can no longer race a
+      // drawer's attach into spawning on the wrong host.
       terminalInput: { params: { sessionId: string; dataB64: string }; response: { ok: boolean } };
       // Run a (possibly multi-line) block in the terminal AS IF PASTED: the Bun
       // side wraps it in bracketed-paste markers and holds it until the shell has
@@ -455,11 +462,15 @@ export type LedgeRPC = {
       // response reports the host the shell is actually on, which is what the
       // drawer's badge shows. Validated like runBlock's (resolveHost).
       //
-      // Attaching also names WHO, since a server can be serving several clients
-      // (remote.md §7): the shell's bytes go to the client that attached, a
-      // second client attaching takes them over, and a detach clears only its
-      // own attachment. The client comes from the connection's handshake, which
-      // is why neither call has a parameter for it.
+      // Attaching also TAKES, since a server can be serving several clients
+      // (remote.md §7): the client that attached owns the drawer, which means
+      // the bytes, the keystrokes and the winsize all follow it, and a second
+      // client attaching takes all three. Taking never fails and never asks —
+      // the scrollback comes back with it, so the taker sees the whole session
+      // it just adopted — and the client it was taken from is pushed
+      // terminalDetached. A detach clears only the caller's own ownership. The
+      // client comes from the connection's handshake, which is why neither call
+      // has a parameter for it.
       terminalAttach: { params: { sessionId: string; host?: string | null }; response: { dataB64: string; host: string } };
       terminalDetach: { params: { sessionId: string }; response: { ok: boolean } };
       // Whether the note's terminal shell is currently alive, and where. The
@@ -788,6 +799,20 @@ export type LedgeRPC = {
       // side has already torn the shell down; the view closes the drawer if it is
       // showing that note. Reopening the drawer spawns a fresh shell.
       terminalExit: { sessionId: string };
+      // Another client took this note's drawer (terminalAttach above). Pushed to
+      // the client that had it, and only to that one: everyone else either never
+      // had this shell or is the one that just took it.
+      //
+      // The message exists so a drawer that stops printing says why. Without it
+      // the shell simply goes quiet mid-line and keeps taking keystrokes that
+      // the server then refuses, which reads as a hung app rather than as a
+      // shell that is somewhere else. The view swaps the terminal for a notice
+      // and a Take This Shell button, which is one more terminalAttach
+      // (interactions.md §4-2).
+      //
+      // Deliberately no "who": a client id is not a name, and naming the other
+      // device is presence, which arrives with the labels in Hello.
+      terminalDetached: { sessionId: string };
       // Something changed one workspace root's files behind the app's back — an
       // agent in the terminal drawer, git, a shell mv/rm. Pushed by the per-root
       // fs.watch (bun/watch.ts), debounced Bun-side, filtered to .md entries

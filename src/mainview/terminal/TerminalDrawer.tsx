@@ -1,15 +1,17 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import {
   b64ToBytes,
+  onTerminalDetached,
   onTerminalOutput,
   sendTerminalResize,
   sendTerminalText,
   terminalAttach,
   terminalDetach,
 } from "./channel";
+import { Button } from "@/components/ui/button";
 import { copyText, readClipboard } from "../lib/clipboard";
 import { settings } from "../lib/settings";
 import { isDarkAppearance, onAppearanceChange } from "../lib/theme";
@@ -33,6 +35,11 @@ function xtermTheme(dark: boolean) {
 // `spawnHost` is the machine picked for this open, consumed only if this
 // attach is what spawns the shell; `onHost` reports the host the shell is
 // actually on (from the attach response), which App shows as the badge.
+//
+// One shell has one drawer across the whole server, not one per client: another
+// client attaching takes this one's bytes, keystrokes and winsize with it, and
+// what arrives here is a `terminalDetached` push. That is the notice below, and
+// its button attaches again, which takes the shell back (remote.md §7).
 export function TerminalDrawer({
   sessionId,
   spawnHost,
@@ -51,6 +58,13 @@ export function TerminalDrawer({
   // mount effect (which builds the terminal once).
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
+  // Another client took this note's shell (rpc-schema terminalDetached): the
+  // xterm on screen is a still frame from the moment it left, and the notice
+  // covering it is the only thing that says so.
+  const [taken, setTaken] = useState(false);
+  // Attaching again, which is how the shell comes back — published by the mount
+  // effect, since that is where the terminal it writes into lives.
+  const takeBack = useRef<() => void>(() => {});
 
   useEffect(() => {
     const host = hostRef.current;
@@ -67,10 +81,17 @@ export function TerminalDrawer({
     term.loadAddon(fit);
     term.open(host);
     fit.fit();
-    sendTerminalResize(sessionId, term.cols, term.rows);
+
+    // Whether this client owns the shell right now (bun/server.ts `Term.owner`).
+    // False until the first attach answers, and false again from the moment
+    // another client takes it: input and resize are the owner's alone, and Bun
+    // refuses them either way — this is so the refused ones are never sent.
+    let mine = false;
 
     // Keystrokes / pasted text -> Bun.
-    const dataSub = term.onData((data) => sendTerminalText(sessionId, data));
+    const dataSub = term.onData((data) => {
+      if (mine) sendTerminalText(sessionId, data);
+    });
 
     // Clipboard, matching a normal terminal. xterm draws its own selection (not a
     // DOM selection the browser can copy) and the native paste event does not fire
@@ -131,20 +152,48 @@ export function TerminalDrawer({
       else queue.push(bytes);
     });
 
-    void terminalAttach(sessionId, spawnHost).then(({ snapshot, host }) => {
-      if (disposed) return;
-      onHost?.(host);
-      if (snapshot.length) term.write(snapshot);
-      for (const q of queue) term.write(q);
-      queue.length = 0;
-      ready = true;
-      onReady?.();
+    // Attach, and again for every take-back. `replace` is what makes the second
+    // one safe: the snapshot is the WHOLE scrollback, so writing it onto a
+    // terminal that already shows part of it would print the session twice.
+    // Reset first and the screen is rebuilt from the shell's history, including
+    // everything it printed while another client had it.
+    const attach = (replace: boolean): void => {
+      ready = false;
+      void terminalAttach(sessionId, spawnHost).then(({ snapshot, host }) => {
+        if (disposed) return;
+        onHost?.(host);
+        if (replace) term.reset();
+        if (snapshot.length) term.write(snapshot);
+        for (const q of queue) term.write(q);
+        queue.length = 0;
+        ready = true;
+        mine = true;
+        setTaken(false);
+        // The pty's grid is the OWNER's window, so it is set here rather than at
+        // mount: before the attach answers there is no shell to size, and after
+        // a take-back the shell has to be re-sized to this window (the client it
+        // came from may have had a different one).
+        sendTerminalResize(sessionId, term.cols, term.rows);
+        if (replace) term.focus();
+        else onReady?.();
+      });
+    };
+    takeBack.current = () => attach(true);
+    attach(false);
+
+    // Another client attached: the bytes go there now, so stop sending what Bun
+    // would refuse and let the notice explain the terminal that stopped moving.
+    const offDetached = onTerminalDetached((sid) => {
+      if (sid !== sessionId) return;
+      mine = false;
+      setTaken(true);
     });
 
-    // Keep the pty's winsize matched to the rendered grid.
+    // Keep the pty's winsize matched to the rendered grid — while this client is
+    // the one whose grid it should match.
     const ro = new ResizeObserver(() => {
       fit.fit();
-      sendTerminalResize(sessionId, term.cols, term.rows);
+      if (mine) sendTerminalResize(sessionId, term.cols, term.rows);
     });
     ro.observe(host);
 
@@ -160,6 +209,7 @@ export function TerminalDrawer({
       ro.disconnect();
       offAppearance();
       off();
+      offDetached();
       dataSub.dispose();
       term.dispose();
     };
@@ -169,5 +219,26 @@ export function TerminalDrawer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  return <div ref={hostRef} className="h-full w-full" />;
+  return (
+    <div className="relative h-full w-full">
+      <div ref={hostRef} className="h-full w-full" />
+      {taken && (
+        // Over the terminal rather than instead of it: what is underneath is
+        // the last thing this shell said here, and it stays readable while the
+        // notice explains why nothing has been added to it.
+        <div
+          className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background/85 px-4 text-center"
+          data-testid="terminal-taken"
+        >
+          <p className="text-[12px] font-medium">Another device took this shell.</p>
+          <p className="max-w-[42ch] text-[11px] text-muted-foreground">
+            Its output is going there now. Taking it back brings everything it printed while it was away.
+          </p>
+          <Button size="sm" onClick={() => takeBack.current()}>
+            Take This Shell
+          </Button>
+        </div>
+      )}
+    </div>
+  );
 }

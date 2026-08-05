@@ -183,7 +183,25 @@ nowhere.
 `localhost:5173` (`bun/index.ts`, `mainViewUrl`). Any other project's Vite
 holding that port is what the app will load — a foreign app in the window, or
 a blank one — and the probe's own code never runs. Check the port before
-concluding the probe is broken.
+concluding the probe is broken. `dev` also does not BUILD the view: only
+`bun run start` runs `vite build` first, so a probe edited into `main.tsx` and
+launched with `dev` runs the bundle from the last build, which is usually the
+one without the probe in it.
+
+**The window has to be frontmost, and a probe cannot make it so.** WebKit
+suspends an occluded page: about seven seconds after launch every `setTimeout`
+stops firing, so a probe's polling loop hangs forever with no error, and
+xterm's DOM (its renderer is `requestAnimationFrame`-driven) stops being
+written to even though the terminal's buffer has the bytes. A heartbeat logged
+every two seconds is what tells you that is what happened — three beats and
+then silence. Neither `open -a <the built .app>` nor System Events can raise
+the window from a background shell (`set frontmost` reports success and changes
+nothing, and reading a window list needs assistive access), so a probe that
+drives the UI needs the app in front of a person. Two things follow: report
+through `logAppend` rather than the clipboard, since the log is a file that can
+be read while it is being written and shows how far the probe got; and prefer
+a claim provable without the page rendering at all — `daemon.fs.test.ts` drives
+real PTYs over a real socket, and `probe:ssh` drives them over a real wire.
 
 **The ssh transport** needs a machine to connect to, and "I have a server"
 is not a test setup anyone else can repeat. Run one.

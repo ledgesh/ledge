@@ -21,7 +21,7 @@ import { normalizeTag, tagDirectoryOf, tagRefsOf, type TagInfo } from "../shared
 import { configureBridge, dispatchRunEvent, reconcileRuns } from "./editor/bridge";
 import { sendRunKey } from "./editor/inlineTerm";
 import { barFaceOf, type BarFace } from "./lib/nativeBridge";
-import { configureTerminal } from "./terminal/channel";
+import { configureTerminal, dispatchTerminalDetached } from "./terminal/channel";
 import { configureNotes, dispatchExternalOpen, dispatchNotesChanged, type ExternalOpenInfo, type NoteFile } from "./notes/channel";
 import { configureVault, recordVaultState } from "./vault/channel";
 import { configureWorkspaces, recordWorkspaceKinds } from "./workspace/channel";
@@ -740,12 +740,21 @@ configureBridge({
 // the block's run was sent to — so those sessionIds are recorded for specs.
 const termAttaches: { sessionId: string; host: string | null }[] = [];
 const termPastes: { sessionId: string; text: string; host: string | null }[] = [];
+const termInputs: { sessionId: string; dataB64: string }[] = [];
+// `afterAttach` is how many attaches had gone out when this resize did, which
+// is the only part of a resize a spec can check: the pty is inert here, but
+// whether the drawer sized a shell it does not yet own is view-side ordering.
+const termResizes: { sessionId: string; cols: number; rows: number; afterAttach: number }[] = [];
 configureTerminal({
-  sendInput: () => {},
+  sendInput: (sessionId, dataB64) => {
+    termInputs.push({ sessionId, dataB64 });
+  },
   sendPaste: (sessionId, text, _language, host) => {
     termPastes.push({ sessionId, text, host: host ?? null });
   },
-  sendResize: () => {},
+  sendResize: (sessionId, cols, rows) => {
+    termResizes.push({ sessionId, cols, rows, afterAttach: termAttaches.length });
+  },
   attach: async (sessionId, host) => {
     termAttaches.push({ sessionId, host: host ?? null });
     return { dataB64: "", host: host ?? "local" };
@@ -962,6 +971,18 @@ declare global {
       layout: () => string | null;
       termAttaches: () => { sessionId: string; host: string | null }[];
       termPastes: () => { sessionId: string; text: string; host: string | null }[];
+      // Every keystroke the drawer sent at its shell, in order. What it is for
+      // is the ABSENCE of them: a drawer another client has taken must stop
+      // typing into a shell it can no longer see.
+      termInputs: () => { sessionId: string; dataB64: string }[];
+      // Every grid the drawer reported for its shell, with how many attaches
+      // preceded it.
+      termResizes: () => { sessionId: string; cols: number; rows: number; afterAttach: number }[];
+      // Simulate Bun's terminalDetached push: another client attached to this
+      // note's shell and this one no longer has it. No user action can cause it
+      // here (the other client is the one acting), which is externalOpen's
+      // reason for being on this object too.
+      terminalTaken: (sessionId: string) => void;
       inlineRuns: () => { sessionId: string; id: string; host: string | null }[];
       // Every grid reported to a run's shell, in order.
       inlineResizes: () => { id: string; cols: number; rows: number }[];
@@ -1021,6 +1042,9 @@ window.__harness = {
   layout: () => layoutText,
   termAttaches: () => termAttaches.map((a) => ({ ...a })),
   termPastes: () => termPastes.map((p) => ({ ...p })),
+  termInputs: () => termInputs.map((i) => ({ ...i })),
+  termResizes: () => termResizes.map((r) => ({ ...r })),
+  terminalTaken: (sessionId) => dispatchTerminalDetached(sessionId),
   inlineRuns: () => inlineRuns.map((r) => ({ ...r })),
   inlineResizes: () => inlineResizes.map((r) => ({ ...r })),
   inlineInputs: () => inlineInputs.map((i) => ({ ...i })),

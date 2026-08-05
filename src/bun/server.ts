@@ -210,9 +210,10 @@ const NONCE = Math.random().toString(36).slice(2) + Date.now().toString(36);
 //
 // Scrollback: a note's terminal keeps printing (its prompt, background output)
 // while the drawer is closed or showing another note, so each keeps a capped
-// rolling buffer of its raw output that terminalAttach replays. `attached` gates
-// live streaming: bytes still accumulate while detached, so re-attaching replays
-// the full history.
+// rolling buffer of its raw output that terminalAttach replays. `owner` gates
+// live streaming: bytes still accumulate while nobody has the drawer, so
+// attaching replays the full history — which is also what makes taking a drawer
+// off another client harmless (the taker gets everything it missed).
 const SB_CAP = 256 * 1024;
 // zsh toggles bracketed-paste mode around every prompt cycle: it emits BP_ENABLE
 // (CSI ? 2004 h) when its line editor is ready for input, and BP_DISABLE (2004 l)
@@ -230,18 +231,23 @@ interface Term {
   // shows it. Moving means a restart — same contract as every other spawn
   // param.
   host: string;
-  // Which client has this drawer open, and null for nobody. A client id rather
-  // than the boolean it was, because a server with several clients has to know
-  // WHICH one to push a shell's bytes at; null rather than "" because the empty
-  // string is a client id like any other (the anonymous bucket, wire.ts
-  // `Hello.client`).
+  // Whose drawer this is, and null for nobody. A client id rather than the
+  // boolean it was, because a server with several clients has to know WHICH one
+  // to push a shell's bytes at; null rather than "" because the empty string is
+  // a client id like any other (the anonymous bucket, wire.ts `Hello.client`).
   //
-  // One at a time, and the last to attach takes it. That is the same rule the
-  // whole server used to run on, narrowed to the drawer — and it is deliberately
-  // only half of an answer: the client it took the drawer from is not told, and
-  // is not stopped from typing into a shell it can no longer see. Both are #104,
-  // which turns this into an owner plus watchers and gives the taking a button.
-  attached: string | null;
+  // ONE OWNER, and it decides three things at once: where the output goes, whose
+  // keystrokes the shell accepts, and whose window sets its winsize. They are one
+  // field because they are one question — a client typing into a shell whose
+  // bytes land on another screen is typing blind, and a second window sizing the
+  // pty reflows the first one's screen. Taking it is a client attaching, which is
+  // allowed from anywhere and always succeeds; what the loser gets is a
+  // `terminalDetached` push rather than silence (remote.md §7).
+  //
+  // It outlives connections, because a client id does: a phone that drops the
+  // wire and re-dials still owns the drawer it had, which is what makes the
+  // reconnect invisible rather than a fight over the shell.
+  owner: string | null;
   chunks: Uint8Array[];
   len: number;
   // Bracketed-paste sequencing: `promptReady` mirrors the shell's current mode
@@ -421,7 +427,7 @@ export async function createServer(deps: { push: Audience; native: NativeDeps })
       t = {
         term: spawnShell(sessionId, host, "terminal"),
         host,
-        attached: null,
+        owner: null,
         chunks: [],
         len: 0,
         promptReady: false,
@@ -770,10 +776,27 @@ export async function createServer(deps: { push: Audience; native: NativeDeps })
       }
       return { running, orphaned: orphaned.length };
     },
+    // Keystrokes, from the client that owns the drawer and no other. A client
+    // that lost the shell has a stale terminal on screen until it renders the
+    // notice it was pushed, and a window with focus in it goes on producing
+    // keystrokes the whole time; those must not reach a shell whose output the
+    // typist can no longer see. Refused rather than queued: the keystrokes were
+    // aimed at a screen that has moved on.
+    //
+    // Never spawns, unlike every other call that takes a sessionId: input for a
+    // shell that does not exist has nothing to be the continuation of.
     terminalInput: ({ sessionId, dataB64 }) => {
-      termFor(sessionId).term.write(fromB64(dataB64));
+      const t = terms.get(sessionId);
+      if (!t || t.owner !== client) return { ok: false };
+      t.term.write(fromB64(dataB64));
       return { ok: true };
     },
+    // Open to any client, unlike the input and resize around it: a paste says
+    // "run this block in the note's shell", which is a fact about the note, and
+    // it is the same shell every client's Run buttons already reach through
+    // runBlock. It is also all but unobservable — the view opens the drawer
+    // before it pastes, and opening the drawer is what makes that client the
+    // owner.
     terminalPaste: async ({ sessionId, text, language, host }) => {
       // The prompt-fence refusal, terminal direction (see runBlock): a
       // prompt block sent to the drawer is the same locked body reaching
@@ -813,8 +836,16 @@ export async function createServer(deps: { push: Audience; native: NativeDeps })
       flushPaste(t);
       return { ok: true };
     },
+    // The winsize follows the owner's window for the same reason the bytes do:
+    // one pty has one grid, and a second client's fit would reflow the screen
+    // the owner is reading. Owner-only, and never a spawn — the drawer's first
+    // resize used to arrive just ahead of its attach and spawn the shell itself,
+    // which quietly threw away the host the picker had chosen (resolveHost falls
+    // back to the note's first declared one).
     terminalResize: ({ sessionId, cols, rows }) => {
-      termFor(sessionId).term.resize(cols, rows);
+      const t = terms.get(sessionId);
+      if (!t || t.owner !== client) return { ok: false };
+      t.term.resize(cols, rows);
       return { ok: true };
     },
     // Synchronous so no drain tick can interleave between the snapshot and
@@ -823,22 +854,35 @@ export async function createServer(deps: { push: Audience; native: NativeDeps })
     // terminal shell on first attach.
     terminalAttach: ({ sessionId, host }) => {
       const t = termFor(sessionId, host);
-      t.attached = client;
+      // Attaching IS taking: it never fails and never asks, because the whole
+      // scrollback comes back with it, so the client doing the taking has the
+      // shell's history on screen the moment it arrives. The one obligation is
+      // to tell whoever had it — a drawer that stopped printing with no
+      // explanation is the failure this exists to prevent.
+      const lost = t.owner;
+      t.owner = client;
+      if (lost !== null && lost !== client) push.to(lost).terminalDetached({ sessionId });
       return { dataB64: toB64(sbSnapshot(t)), host: t.host };
     },
     terminalDetach: ({ sessionId }) => {
       const t = terms.get(sessionId);
-      // Only this client's own attachment. Without the check, closing a drawer
-      // on the phone would stop the bytes reaching the Mac that has the same
-      // note open, and the Mac would have no way to know why its terminal went
-      // quiet.
-      if (t && t.attached === client) t.attached = null;
+      // Only this client's own drawer. Without the check, closing a drawer on
+      // the phone would stop the bytes reaching the Mac that has the same note
+      // open, and the Mac would have no way to know why its terminal went
+      // quiet. Nobody is told: the owner left of its own accord, and there is
+      // no other client watching to tell.
+      if (t && t.owner === client) t.owner = null;
       return { ok: true };
     },
     terminalStatus: ({ sessionId }) => {
       const t = terms.get(sessionId);
       return { live: !!t, host: t?.host ?? null };
     },
+    // Also open to any client, and for the same reason: closing the tab or
+    // restarting the shells is about the NOTE, not about whose screen the
+    // drawer is on. A phone that closes a note it has open should not be
+    // refused because the Mac happens to hold that note's drawer, and Restart
+    // Note Shell exists to apply the frontmatter the person just edited.
     closeSession: ({ sessionId }) => {
       closeSession(sessionId);
       return { ok: true };
@@ -862,7 +906,7 @@ export async function createServer(deps: { push: Audience; native: NativeDeps })
         // Mirror the shell-exited teardown below: the drawer closes, and a
         // busy flag the view still holds is cleared — a dead shell runs
         // nothing.
-        if (t.attached !== null) push.to(t.attached).terminalExit({ sessionId });
+        if (t.owner !== null) push.to(t.owner).terminalExit({ sessionId });
         if (t.sentBusy) push.all.terminalBusy({ sessionId, busy: false });
         t.term.close();
         terms.delete(sessionId);
@@ -998,8 +1042,8 @@ export async function createServer(deps: { push: Audience; native: NativeDeps })
   // Drain every live shell on a short interval. (poll()-gated reads never block;
   // see pty.ts.) Inline shells are sliced into per-block events (block ids are
   // globally unique, so the view routes each event to the editor that owns it with
-  // no per-note bookkeeping here); terminal shells stream raw to whichever drawer
-  // is attached to that note. Inline lifecycle — overflow teardown on a run's end,
+  // no per-note bookkeeping here); terminal shells stream raw to the client that
+  // owns that note's drawer. Inline lifecycle — overflow teardown on a run's end,
   // closing out the run of a shell that died mid-block — lives in the pool.
   const drain = setInterval(() => {
     inlinePool.drain(sendRunEvent);
@@ -1010,7 +1054,7 @@ export async function createServer(deps: { push: Audience; native: NativeDeps })
       if (termData) {
         t.lastOut = now;
         sbPush(t, termData);
-        if (t.attached !== null) push.to(t.attached).terminalOutput({ sessionId, dataB64: toB64(termData) });
+        if (t.owner !== null) push.to(t.owner).terminalOutput({ sessionId, dataB64: toB64(termData) });
         // Track the shell's bracketed-paste mode from its enable/disable sequences
         // and release a queued paste whenever a fresh prompt appears. The last
         // occurrence in the chunk wins (a chunk can carry a full prompt cycle). Carry
@@ -1044,7 +1088,7 @@ export async function createServer(deps: { push: Audience; native: NativeDeps })
       }
       // The user typed `exit`: tear the shell down and tell the drawer to close.
       if (t.term.exited) {
-        if (t.attached !== null) push.to(t.attached).terminalExit({ sessionId });
+        if (t.owner !== null) push.to(t.owner).terminalExit({ sessionId });
         // The shell is gone, so nothing is running on it. Without this the note's
         // terminal button would stay grayed out forever on a shell that died mid-job.
         if (busy) push.all.terminalBusy({ sessionId, busy: false });

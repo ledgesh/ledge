@@ -149,6 +149,7 @@ const push: ServerPush = {
   terminalOutput: (p) => rpc?.send.terminalOutput(p),
   terminalBusy: (p) => rpc?.send.terminalBusy(p),
   terminalExit: (p) => rpc?.send.terminalExit(p),
+  terminalDetached: (p) => rpc?.send.terminalDetached(p),
   notesChanged: (p) => rpc?.send.notesChanged(p),
   openExternal: (p) => rpc?.send.openExternal(p),
   vaultChanged: (p) => rpc?.send.vaultChanged(p),

@@ -300,6 +300,23 @@ try {
   check("the shell ran and answered", seen.includes("PTY-42"));
   check("and it is a Linux one", /Linux[\s\S]*PTY-42/.test(seen), JSON.stringify(seen.slice(-120)));
 
+  // The other half of a drawer: its window's grid, which reaches the pty as an
+  // ioctl and nothing else can be checked from. It is the owner's call now, and
+  // the drawer sends it only after the attach that makes it one — so a shell
+  // that answers with the pty's own 120x30 means the resize never landed.
+  await client.requests.terminalResize({ sessionId: "s1", cols: 100, rows: 20 });
+  const SIZED = /SIZE-20-100/;
+  let winsize = "";
+  const sizeBy = Date.now() + 10_000;
+  while (Date.now() < sizeBy && !SIZED.test(winsize)) {
+    await client.requests.terminalInput({ sessionId: "s1", dataB64: btoa('echo SIZE-$(stty size | tr " " "-")\n') });
+    for (let i = 0; i < 12 && !SIZED.test(winsize); i++) {
+      await Bun.sleep(100);
+      winsize = output();
+    }
+  }
+  check("and a resize reached its winsize", SIZED.test(winsize), JSON.stringify(winsize.slice(-60)));
+
   // A block left running on the far machine, so the [orphan] step below has
   // something real to collect. `sleep` rather than anything that prints: what
   // has to be true is that it is still executing when its client goes away.
@@ -363,6 +380,33 @@ try {
     phoneEars.heard.filter(([m]) => m === "runEvent" || m === "terminalOutput").length === 0,
     `${phoneEars.heard.map(([m]) => m).join(", ") || "nothing"} heard`,
   );
+
+  // The drawer is the one thing the two cannot both have, so it changes hands
+  // rather than being shared: the phone attaches, and what has to be true is
+  // all three of the Mac being TOLD, the Mac's keystrokes being refused, and
+  // the phone's reaching the shell. Against a real pty, because the refusal
+  // that matters is the one where the bytes would otherwise have been written.
+  await phone.requests.terminalAttach({ sessionId: "s1", host: null });
+  check(
+    "the Mac is told when the phone takes its drawer",
+    phoneEars.heard.every(([m]) => m !== "terminalDetached") &&
+      mac.heard.some(([m, p]) => m === "terminalDetached" && (p as { sessionId: string }).sessionId === "s1"),
+  );
+  const typedOn = await client.requests.terminalInput({ sessionId: "s1", dataB64: btoa("echo MAC-AFTER\n") });
+  const sized = await client.requests.terminalResize({ sessionId: "s1", cols: 20, rows: 5 });
+  check("and can no longer type into it or resize it", !typedOn.ok && !sized.ok, `input ${typedOn.ok}, resize ${sized.ok}`);
+  const onPhoneNow = () =>
+    phoneEars.heard
+      .filter(([m]) => m === "terminalOutput")
+      .map(([, p]) => atob((p as { dataB64: string }).dataB64))
+      .join("");
+  await phone.requests.terminalInput({ sessionId: "s1", dataB64: btoa("echo DRAWER-43\n") });
+  for (let i = 0; i < 100 && !onPhoneNow().includes("DRAWER-43"); i++) await Bun.sleep(100);
+  check(
+    "while the phone's own reach the shell, and the Mac's never did",
+    onPhoneNow().includes("DRAWER-43") && !onPhoneNow().includes("MAC-AFTER"),
+  );
+
   phone.close();
   client.close();
 

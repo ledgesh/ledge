@@ -557,6 +557,45 @@ the failure it prevents, which is running a command on the wrong box.
   same failure falls back to the local server and the indicator says
   "not reachable" rather than silently naming the wrong machine.
 
+## 4-2. Two devices on one server
+
+One server serves every client at once (remote.md §7), and almost nothing about
+that needed a grammar: a note is a note whoever opened it, and both devices see
+the same lists because the lists are the server's. **The terminal drawer is the
+exception, because a shell has one keyboard and one screen size.** The rules
+below are that exception, and nothing else in the app has them.
+
+- **Attaching takes the drawer, and taking never asks.** Opening a note's
+  terminal on the second device moves the shell there: its output, its
+  keystrokes, its winsize. There is no confirmation, because the scrollback
+  arrives with the attach — the device doing the taking has the whole session on
+  screen the moment it opens — and because a prompt would be a dialog on the
+  device nobody is holding.
+- **The device it was taken from is told, in place of the shell.** A notice
+  covers the terminal ("Another device took this shell."), and what it covers
+  stays readable underneath: the last thing that shell said here is still the
+  useful thing on that screen. A terminal that simply stops mid-line, with no
+  explanation, is indistinguishable from a hung app.
+- **Take This Shell is a button on that notice, not a command.** The verb exists
+  only while the notice is on screen and only for the drawer it covers, which is
+  the class §4-1's row controls and the locked placeholder's Unlock are already
+  in: a palette entry gated on a condition that has already put a button in front
+  of you adds nothing to reach for. §1a is satisfied by the button itself, which
+  is lit and 44 points on touch. Pressing it attaches again, which is the same
+  taking seen from the other side, scrollback included.
+- **Typing stops before the notice explains anything.** The window keeps its
+  focus when the shell moves, so the keystrokes have to stop at the drawer, and
+  Bun refuses them as well (`ok: false`) because the client is the
+  least-trusted end of this rule as it is of every other.
+- **What is about the NOTE stays open to every device**: sending a block to the
+  drawer, closing the tab, and Restart Note Shell. None of them is about whose
+  screen the drawer is on, and refusing them would mean a phone could not close
+  a note because a Mac was holding its terminal.
+
+A phone has no drawer yet (ios.md §8), so today the two devices in this section
+are two desktops on one server. The rules are written for the client, not for
+the platform, so lifting that cut adds nothing here.
+
 ## 4a. The host picker (multi-host notes)
 
 A note whose frontmatter declares more than one `host:` must never execute a

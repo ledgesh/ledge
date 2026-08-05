@@ -19,7 +19,13 @@ import { createRoot } from "react-dom/client";
 import type { NoteMeta, TrashMeta, WorkspaceRootInfo } from "../shared/rpc-schema";
 import type { RequestClient, ViewPush } from "../shared/wire";
 import { configureBridge, dispatchRunEvent, reconcileRuns, setTerminalBusy } from "./editor/bridge";
-import { bytesToB64, configureTerminal, dispatchTerminalOutput, dispatchTerminalExit } from "./terminal/channel";
+import {
+  bytesToB64,
+  configureTerminal,
+  dispatchTerminalOutput,
+  dispatchTerminalExit,
+  dispatchTerminalDetached,
+} from "./terminal/channel";
 import { configureNotes, dispatchExternalOpen, dispatchNotesChanged } from "./notes/channel";
 import { configureVault, recordVaultState, refreshVaultState } from "./vault/channel";
 import { configureWorkspaces, recordDailyRoot, recordWorkspaceKinds } from "./workspace/channel";
@@ -57,6 +63,7 @@ export const viewPush: ViewPush = {
   terminalOutput: ({ sessionId, dataB64 }) => dispatchTerminalOutput(sessionId, dataB64),
   terminalBusy: ({ sessionId, busy }) => setTerminalBusy(sessionId, busy),
   terminalExit: ({ sessionId }) => dispatchTerminalExit(sessionId),
+  terminalDetached: ({ sessionId }) => dispatchTerminalDetached(sessionId),
   notesChanged: ({ root }) => dispatchNotesChanged(root),
   openExternal: (open) => dispatchExternalOpen(open),
   // The vault moved without the view driving it (idle auto-relock), or this is

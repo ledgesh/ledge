@@ -66,7 +66,7 @@ would otherwise be vague:
 - **Several clients at once, held in a map keyed by client id.** A Mac and a
   phone pointed at one machine is the ordinary shape of this, and the daemon
   used to answer it by serving whoever dialled last and hanging up on the other.
-  What actually needed a rule was much smaller than that: `attached` and the
+  What actually needed a rule was much smaller than that: the drawer and the
   ring are per SESSION rather than per client, so the one thing two clients
   cannot share is a drawer's keyboard (§7, and it is `bun/server.ts`'s `Term`
   that owns it). Notes, search, tags, the registry and the vault never needed
@@ -288,7 +288,7 @@ splits again, by machine:
 | PTYs, sessions, scrollback | server | §7, and they outlive a connection |
 | How long they outlive it | server, on the client's ask | §7, `Hello.hold` |
 | Which inline runs are still worth executing | server, on each client's claim for its own | §7, `inlineClaim` |
-| Which client a drawer's bytes go to | server | §7, `Term.attached` |
+| Which client owns a drawer (bytes, keystrokes, winsize) | server | §7, `Term.owner` |
 | The dedupe window for replayed writes | server | §7, spans reconnects |
 | The watcher | server | pushes `notesChanged` as today |
 | Behavior settings (shell, interpreters, trash TTL, daily workspace) | server | facts about that machine |
@@ -370,7 +370,7 @@ the note moves.
 
 Shells belong to the server and survive a client going away. This is already
 how `bun/index.ts` works: each session keeps a 256 KB rolling scrollback,
-`attached` names which client that output is pushed to, and `terminalAttach`
+`owner` names which client that output is pushed to, and `terminalAttach`
 replays the buffer. Nothing about that design needed changing; what it needed was a server
 that outlives a connection, which is §1's socket.
 
@@ -438,7 +438,8 @@ holding those.
 | `vaultChanged` | everyone | the vault is the server's, so unlocking on the Mac unlocks the phone's locked notes too |
 | `openExternal` | everyone | `ledge <title>` names a note rather than a screen (§8) |
 | `terminalBusy` | everyone | a fact about the note's shell, and it grays out a button on any client with that note open |
-| `terminalOutput`, `terminalExit` | the client attached to that drawer | one stream, one reader |
+| `terminalOutput`, `terminalExit` | the client that owns that drawer | one stream, one reader |
+| `terminalDetached` | the client that just lost the drawer | the only screen with a terminal on it that stopped |
 | `runEvent` | the client that started the run | keyed by a run id that only that page's panel holds |
 | `menuCommand` | nobody | it is the Mac shell's own AppKit menu (`bun/index.ts`), never a server's |
 
@@ -446,12 +447,31 @@ A push addressed to a client that is not connected is dropped, exactly as every
 push was while nobody was attached at all, and the state it described is re-read
 at that client's next boot.
 
-**The drawer is the one thing two clients cannot share.** `Term.attached` holds
-one client id and the bytes follow it, so today the last to attach takes it.
-That is deliberately half an answer: the client it was taken from is not told,
-and is not stopped from typing into a shell it can no longer see. The other half
-is an owner with watchers, a push that says the drawer was taken, and a button
-that does the taking.
+**The drawer is the one thing two clients cannot share, so it has an owner.**
+`Term.owner` holds one client id, and three things follow it at once: where the
+bytes go, whose keystrokes the shell accepts, and whose window sets its winsize.
+One field because it is one question. A client typing into a shell whose output
+is on another screen is typing blind, and a second window sizing the pty reflows
+the screen the first one is reading.
+
+Attaching is what takes it, and it never fails and never asks: the scrollback
+comes back with the attach, so the taker has the whole session on screen the
+moment it arrives, and a confirmation would be a dialog on the device nobody is
+holding. The one obligation is to tell the client that lost it —
+`terminalDetached`, which becomes a notice over its now-motionless terminal with
+a button that attaches again (`interactions.md` §4-2). Its `terminalInput` and
+`terminalResize` answer `ok: false` from the moment it loses the drawer, because
+a window keeps its focus after the shell has moved on.
+
+Ownership is by client id, so it outlives connections the way sessions do: a
+phone that drops the wire and re-dials still owns the drawer it had, which is
+what makes a reconnect invisible rather than a fight over a shell.
+
+What is about the NOTE rather than about the view stays open to every client:
+`terminalPaste` (running a block in the note's shell, which every client's Run
+buttons already reach through `runBlock`), `closeSession`, and `sessionRestart`.
+A phone closing a note it has open should not be refused because a Mac is
+holding that note's drawer.
 
 **A client that loses the wire re-dials rather than failing.** The ladder is
 250ms doubling to 8s and then holding there, eight attempts and 31.75 seconds
@@ -854,12 +874,15 @@ Per `testing.md`'s categories:
 - **Filesystem, over a real socket** (`daemon.fs.test.ts`, `serve.fs.test.ts`):
   two clients are both served and a client's second connection replaces its own
   first and is told why; a socket that never says who it is replaces nobody;
-  each of the seven pushes reaches the clients §7's table says it does and no
-  others; an idle daemon exits, a busy one does not, and one client leaving does
-  not end the daemon another is using; a push with no client attached is dropped
-  rather than thrown, which is a bug this suite caught rather than prevented;
-  and a whole `serve` process killed and restarted, with the server's state
-  still there.
+  every push reaches the clients §7's table says it does and no others; a
+  drawer has one owner, so the client that loses it is told, its keystrokes and
+  its resizes are refused, its detach leaves another client's drawer alone, and
+  the owner's resize reaches the pty's own winsize (the shell is asked, through
+  `stty`); an idle daemon exits, a busy one does not, and one client leaving
+  does not end the daemon another is using; a push with no client attached is
+  dropped rather than thrown, which is a bug this suite caught rather than
+  prevented; and a whole `serve` process killed and restarted, with the
+  server's state still there.
 - **The reconnect ladder, at both of its ends** (`transport.test.ts`): a bye
   is not dialled again; a connection that dies as soon as it is made does not
   buy a fresh ladder; and a connection that HELD gets the whole ladder back,
@@ -896,7 +919,12 @@ was a fact: a key carrying `command="ledge-server serve"` runs that and not
 `whoami`, and not a shell; a changed host key refuses the connection with
 nothing offering to continue anyway; a note round-trips; the same `op` twice
 makes one note; a Linux pty answers a command typed from macOS through ssh and
-a daemon; and `docker exec` reaches a container whose PID 1 is the daemon.
+a daemon; a second client joins that daemon without the first being hung up on,
+and each of the two is sent its own block output and its own drawer's bytes and
+neither is sent the other's; the drawer changes hands when the second client
+attaches, which the first is told and after which its keystrokes and its
+resizes are refused; and `docker exec` reaches a container whose PID 1 is the
+daemon.
 
 The gap that was worth naming through phases 2 to 4 is closed: the ssh hop is
 real, the sshd is real, and the forced command is enforced by sshd rather than
