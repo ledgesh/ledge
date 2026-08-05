@@ -861,7 +861,11 @@ export async function createServer(deps: { push: Audience; native: NativeDeps })
       // explanation is the failure this exists to prevent.
       const lost = t.owner;
       t.owner = client;
-      if (lost !== null && lost !== client) push.to(lost).terminalDetached({ sessionId });
+      // `by` is this client's id, which the loser turns into a name through the
+      // presence list it already has (rpc-schema `presence`). The server sends
+      // the id and not the label: the label is a fact about a DEVICE, and the
+      // one place it belongs is the list of who is connected.
+      if (lost !== null && lost !== client) push.to(lost).terminalDetached({ sessionId, by: client });
       return { dataB64: toB64(sbSnapshot(t)), host: t.host };
     },
     terminalDetach: ({ sessionId }) => {

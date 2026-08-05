@@ -6,7 +6,7 @@
 // connection is added, removed, or switched to, and the indicator in the
 // chrome has to follow. It is a small mirror rather than store state because
 // nothing about the notes depends on it: it is the frame around them.
-import type { ConnectionInfo } from "../../shared/rpc-schema";
+import type { ConnectionInfo, PeerInfo } from "../../shared/rpc-schema";
 
 export interface ConnectionStatus {
   connections: ConnectionInfo[];
@@ -88,6 +88,19 @@ export type LinkState = "live" | "reconnecting" | "lost";
 
 let link: { state: LinkState; detail: string } = { state: "live", detail: "" };
 
+/**
+ * Who ELSE is connected to this server (rpc-schema `presence`).
+ *
+ * Empty is the ordinary answer rather than an unknown one: a Mac talking to the
+ * server in its own process is alone by construction, and nothing is drawn
+ * until somebody else is actually there.
+ *
+ * Beside the link state for the same reason that is beside the connection: one
+ * fact at three grains — which machine, whether we can reach it, and who else
+ * is on it — and one piece of chrome draws all three.
+ */
+let others: PeerInfo[] = [];
+
 export function linkState(): { state: LinkState; detail: string } {
   return link;
 }
@@ -95,7 +108,28 @@ export function linkState(): { state: LinkState; detail: string } {
 export function recordLinkState(state: LinkState, detail: string): void {
   if (link.state === state && link.detail === detail) return;
   link = { state, detail };
+  // A wire that is down cannot tell us who else is up. Clearing rather than
+  // keeping the last list is what stops the bar naming a phone that left while
+  // we were not connected to hear it; the server announces to everybody on the
+  // next arrival, which is this client's own reconnect (bun/daemon.ts).
+  if (state !== "live") others = [];
   emit();
+}
+
+export function presence(): PeerInfo[] {
+  return others;
+}
+
+export function recordPresence(list: PeerInfo[]): void {
+  others = list;
+  emit();
+}
+
+/** What to call another client, by the id a push named it with. Empty when
+ * this client has never been told about it — a device that left between taking
+ * the shell and this being asked, or one that gave no name. */
+export function labelFor(client: string): string {
+  return others.find((p) => p.client === client)?.label ?? "";
 }
 
 export async function refreshConnections(): Promise<ConnectionStatus> {

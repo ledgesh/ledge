@@ -13,6 +13,7 @@ import {
 } from "./channel";
 import { Button } from "@/components/ui/button";
 import { copyText, readClipboard } from "../lib/clipboard";
+import { labelFor } from "../lib/connections";
 import { settings } from "../lib/settings";
 import { isDarkAppearance, onAppearanceChange } from "../lib/theme";
 import { eventToChord, matchesKey } from "../commands/keymap";
@@ -61,7 +62,12 @@ export function TerminalDrawer({
   // Another client took this note's shell (rpc-schema terminalDetached): the
   // xterm on screen is a still frame from the moment it left, and the notice
   // covering it is the only thing that says so.
-  const [taken, setTaken] = useState(false);
+  //
+  // null while this client has the shell; otherwise what took it — its label
+  // from the presence list, or "" for a device that gave no name. Resolved when
+  // the push arrives rather than at every render, so the notice does not change
+  // its wording later because the other device has since gone away.
+  const [takenBy, setTakenBy] = useState<string | null>(null);
   // Attaching again, which is how the shell comes back — published by the mount
   // effect, since that is where the terminal it writes into lives.
   const takeBack = useRef<() => void>(() => {});
@@ -168,7 +174,7 @@ export function TerminalDrawer({
         queue.length = 0;
         ready = true;
         mine = true;
-        setTaken(false);
+        setTakenBy(null);
         // The pty's grid is the OWNER's window, so it is set here rather than at
         // mount: before the attach answers there is no shell to size, and after
         // a take-back the shell has to be re-sized to this window (the client it
@@ -183,10 +189,10 @@ export function TerminalDrawer({
 
     // Another client attached: the bytes go there now, so stop sending what Bun
     // would refuse and let the notice explain the terminal that stopped moving.
-    const offDetached = onTerminalDetached((sid) => {
+    const offDetached = onTerminalDetached((sid, by) => {
       if (sid !== sessionId) return;
       mine = false;
-      setTaken(true);
+      setTakenBy(labelFor(by));
     });
 
     // Keep the pty's winsize matched to the rendered grid — while this client is
@@ -222,7 +228,7 @@ export function TerminalDrawer({
   return (
     <div className="relative h-full w-full">
       <div ref={hostRef} className="h-full w-full" />
-      {taken && (
+      {takenBy !== null && (
         // Over the terminal rather than instead of it: what is underneath is
         // the last thing this shell said here, and it stays readable while the
         // notice explains why nothing has been added to it.
@@ -230,7 +236,10 @@ export function TerminalDrawer({
           className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background/85 px-4 text-center"
           data-testid="terminal-taken"
         >
-          <p className="text-[12px] font-medium">Another device took this shell.</p>
+          {/* By name when there is one: which machine has the shell is the
+              first thing worth knowing about a shell that is somewhere else,
+              and "another device" is what is left when a client gave no name. */}
+          <p className="text-[12px] font-medium">{takenBy || "Another device"} took this shell.</p>
           <p className="max-w-[42ch] text-[11px] text-muted-foreground">
             Its output is going there now. Taking it back brings everything it printed while it was away.
           </p>

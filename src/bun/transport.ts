@@ -43,6 +43,10 @@ export interface ServerConnection {
    * correct at the only time anyone asks: no request is dispatched before the
    * handshake, so any handler reading this already has the answer. */
   client(): string;
+  /** What that client calls itself (wire.ts `Hello.label`), for the presence
+   * list every other client is pushed (remote.md §7). "" until the hello, and
+   * "" for a client that gave no name. */
+  label(): string;
   /** How long this client asked for its sessions to be held once this
    * connection ends, under `ServerOpts.holdMax` (wire.ts `Hello.hold`). 0 until
    * a hello has arrived, and 0 for a client that did not ask — which are the
@@ -108,6 +112,7 @@ export function serverConnection(duplex: Duplex, opts: ServerOpts): ServerConnec
   let handlers: RequestHandlers | null = null;
   let greeted = false;
   let peerClient = "";
+  let peerLabel = "";
   // What this connection's client asked for, under this server's ceiling. Read
   // after the connection ends, by whoever decides how long to stay (daemon.ts).
   let peerHold = 0;
@@ -242,6 +247,9 @@ export function serverConnection(duplex: Duplex, opts: ServerOpts): ServerConnec
       }
       greeted = true;
       peerClient = msg.client;
+      // Already bounded and stripped by parseControl (wire.ts cleanLabel), so
+      // what is kept here is displayable by construction.
+      peerLabel = msg.label;
       peerHold = sessionHold(msg.hold, holdMax);
       onGreet?.();
       return;
@@ -309,6 +317,7 @@ export function serverConnection(duplex: Duplex, opts: ServerOpts): ServerConnec
       for (const { id, m, p, op } of waiting.splice(0)) void dispatch(id, m, p, op);
     },
     client: () => peerClient,
+    label: () => peerLabel,
     hold: () => peerHold,
     closed,
     close,

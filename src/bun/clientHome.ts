@@ -15,6 +15,7 @@
 // scratch probe run without touching the real ones.
 import { mkdirSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { hostname } from "node:os";
 import { join } from "node:path";
 import { APP_HOME } from "./workspaces";
 
@@ -81,6 +82,23 @@ export async function clientId(): Promise<string> {
     await writeFile(CLIENT_ID_PATH, `${minted}\n`, "utf8").catch(() => {});
   }
   return (cached = minted);
+}
+
+/**
+ * What this Mac calls itself, for the presence list on every other client
+ * connected to the same server (wire.ts `Hello.label`).
+ *
+ * The hostname, because the machine already has a name and asking the user for
+ * a second one would be asking them to keep two in sync. `.local` comes off:
+ * it is what Bonjour appends to every Mac on the network and it says nothing
+ * about which one this is.
+ *
+ * Not cached and not written down. Unlike the id, this is allowed to change —
+ * rename the Mac and the next connection says so — and nothing is filed under
+ * it, so nothing is orphaned when it does.
+ */
+export function clientLabel(): string {
+  return hostname().replace(/\.local$/i, "");
 }
 
 async function readId(): Promise<string | null> {

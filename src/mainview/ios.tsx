@@ -61,7 +61,7 @@ async function start(): Promise<void> {
   // Before the first dial: the client id keys the saved layout, and a phone
   // restoring a desktop's three-pane tree onto a 390-point screen is the
   // failure that keying prevents (remote.md §5, ios.md §9).
-  const { client, destination, key } = await shell.hello();
+  const { client, label, destination, key } = await shell.hello();
   mark("hello");
 
   // A phone runs a note's blocks, and has no terminal drawer (ios.md §8). Set
@@ -104,6 +104,10 @@ async function start(): Promise<void> {
     push: viewPush,
     build: BUILD_VERSION,
     client,
+    // So the Mac that loses a drawer to this phone can say which phone
+    // (remote.md §7). Asked of Swift once, with the id, because the device name
+    // is UIKit's answer and not the page's.
+    label,
     hold: SESSION_HOLD_MS,
     onState: (state, detail) => {
       live = state === "live";

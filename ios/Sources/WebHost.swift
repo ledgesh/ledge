@@ -144,7 +144,11 @@ final class WebHost: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        print("[shell] ledge -> \(server.destination), client \(config.client)")
+        // The label is here because it is otherwise invisible from this device:
+        // what it names is what the OTHER clients on that server show
+        // (remote.md §7), so this console line is the only place a probe can
+        // read what this phone is about to call itself.
+        print("[shell] ledge -> \(server.destination), client \(config.client), as \"\(ShellConfig.label)\"")
         webView.load(URLRequest(url: BundleScheme.entry))
     }
 
@@ -407,7 +411,16 @@ extension WebHost: WKScriptMessageHandler {
             // adds a server, since installing it there is the step before any
             // new connection can work (ios.md §4).
             let line = (try? DeviceKey.load()).map { DeviceKey.authorizedKeysLine($0, client: config.client) } ?? ""
-            reply(id, ["client": config.client, "destination": server.destination, "key": line])
+            reply(id, [
+                "client": config.client,
+                // What the other clients on that server will call this phone
+                // (shared/wire.ts `Hello.label`). Asked here rather than pushed
+                // later because it travels in the handshake, and the handshake
+                // is the next thing that happens.
+                "label": ShellConfig.label,
+                "destination": server.destination,
+                "key": line,
+            ])
         case "@open":
             open(id)
         case "servers.list":

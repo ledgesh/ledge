@@ -293,6 +293,17 @@ the same fingerprint step — and the key line the pairing screen hands over is
 the same line that dialog's form shows, carried across on `@hello` because it
 is a fact about the device rather than about any connection to one.
 
+The same call carries what this phone calls itself, which every other client on
+the server it dials is pushed (remote.md §7): it is what a Mac's notice says when
+the phone takes its terminal drawer. `UIDevice.current.name` answers it, and
+since iOS 16 that is the MODEL name — "iPhone" — for an app without the
+user-assigned-device-name entitlement. That is the right answer to ship: the
+sentence it has to make is "iPhone took this shell", which needs a device and not
+a person. An app that later earns the entitlement gets the user's own name for it
+with no other change. A Simulator answers with its own name instead
+(`as "iPhone 16"` in the `[shell]` line at launch, which is where a probe reads
+it, since what it names is only ever visible on somebody else's screen).
+
 **A pin on a phone is a key and no hostname.** There is no `known_hosts` file
 here for a hostname to index (§3), so the record itself is the index, and
 nothing in the pin says which machine it came from. That is why editing an

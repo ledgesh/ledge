@@ -36,7 +36,7 @@ import { captureFailures, configureLog } from "./lib/log";
 import { configureAssets } from "./lib/assets";
 import { configureSettings } from "./lib/settings";
 import { recordServerCaps } from "./lib/shell";
-import { configureConnections, recordLinkState, type ConnectionStatus } from "./lib/connections";
+import { configureConnections, recordLinkState, recordPresence, type ConnectionStatus } from "./lib/connections";
 import { applyAppearance } from "./lib/theme";
 import { DEFAULT_SETTINGS, type Settings } from "../shared/settings";
 import { configureLayout, restoredState } from "./workspace/persist";
@@ -63,7 +63,10 @@ export const viewPush: ViewPush = {
   terminalOutput: ({ sessionId, dataB64 }) => dispatchTerminalOutput(sessionId, dataB64),
   terminalBusy: ({ sessionId, busy }) => setTerminalBusy(sessionId, busy),
   terminalExit: ({ sessionId }) => dispatchTerminalExit(sessionId),
-  terminalDetached: ({ sessionId }) => dispatchTerminalDetached(sessionId),
+  terminalDetached: ({ sessionId, by }) => dispatchTerminalDetached(sessionId, by),
+  // Who else is on this server, for the connection bar and for naming the
+  // device in the message above (remote.md §7).
+  presence: ({ others }) => recordPresence(others),
   notesChanged: ({ root }) => dispatchNotesChanged(root),
   openExternal: (open) => dispatchExternalOpen(open),
   // The vault moved without the view driving it (idle auto-relock), or this is

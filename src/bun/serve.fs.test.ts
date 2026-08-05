@@ -180,7 +180,10 @@ test("stdout carries frames and nothing else; the server's own logging is on std
     }
   }
 
-  await drain(() => heard.length >= 2);
+  // Until the ANSWER, not until a frame count: a connection also arrives to a
+  // presence push (bun/daemon.ts), and counting frames would close stdin
+  // between that and the response this test is here to read.
+  await drain(() => heard.some((m) => (m as { t: string }).t === "res"));
   // Only now: closing stdin is a hangup, and a server is right to drop the
   // answer it was about to write to a client that has gone.
   await proc.stdin.end();

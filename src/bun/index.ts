@@ -26,7 +26,7 @@ import { createServer, type Audience, type NativeDeps } from "./server";
 import type { RequestHandlers, ServerPush } from "../shared/wire";
 import { clientOverlay, type ClientNative } from "./clientSeams";
 import { imageFromFile } from "./clipboard";
-import { clientId } from "./clientHome";
+import { clientId, clientLabel } from "./clientHome";
 import { createConnectionManager, type Attached, type ConnectionManager } from "./connectionManager";
 import { KNOWN_HOSTS_PATH, sshCommand, userKnownHosts, type Connection } from "./connections";
 import { reconnectingClient } from "../shared/transport";
@@ -150,6 +150,10 @@ const push: ServerPush = {
   terminalBusy: (p) => rpc?.send.terminalBusy(p),
   terminalExit: (p) => rpc?.send.terminalExit(p),
   terminalDetached: (p) => rpc?.send.terminalDetached(p),
+  // Here because the type says every push has a method, not because a local
+  // server ever calls it: presence is announced by the daemon, which is the
+  // only thing with more than one client to announce (bun/daemon.ts).
+  presence: (p) => rpc?.send.presence(p),
   notesChanged: (p) => rpc?.send.notesChanged(p),
   openExternal: (p) => rpc?.send.openExternal(p),
   vaultChanged: (p) => rpc?.send.vaultChanged(p),
@@ -171,6 +175,10 @@ const sayConnectionState = (p: { state: "live" | "reconnecting" | "lost"; detail
 // The same id whether the server is in this process or across a connection:
 // the arrangement this Mac left behind is this Mac's either way (remote.md §5).
 const me = await clientId();
+// And what to call it on someone else's screen. Read once: a rename takes
+// effect at the next launch, which is when the hostname it is read from
+// generally settles anyway.
+const myLabel = clientLabel();
 
 // Null until the manager exists, and `attach` below closes over it: the FIRST
 // connection is opened by createConnectionManager itself, so nothing can hand
@@ -214,6 +222,7 @@ async function attach(conn: Connection): Promise<Attached> {
     push,
     build,
     client: me,
+    label: myLabel,
     onState: (state, detail) => {
       if (state !== "live") console.warn(`[connect] ${conn.name}: ${detail}`);
       // A ladder that ran out, or a server that said goodbye. The manager has

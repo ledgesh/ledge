@@ -79,7 +79,7 @@ interface Pending {
 
 export function clientConnection(
   duplex: Duplex,
-  opts: { push: ServerPush; build: string; client?: string; hold?: number },
+  opts: { push: ServerPush; build: string; client?: string; label?: string; hold?: number },
 ): ClientConnection {
   const decoder = new FrameDecoder();
   const incoming = new BinaryHolder();
@@ -218,7 +218,7 @@ export function clientConnection(
     REQUEST_METHODS.map((m) => [m, (p: unknown) => call(m, p)]),
   ) as unknown as RequestClient;
 
-  raw(encodeControl(hello("client", opts.build, opts.client ?? "", "", opts.hold ?? 0)));
+  raw(encodeControl(hello("client", opts.build, opts.client ?? "", "", opts.hold ?? 0, opts.label ?? "")));
 
   return {
     requests,
@@ -252,6 +252,10 @@ export interface ReconnectOpts {
   push: ServerPush;
   build: string;
   client?: string;
+  /** What this device calls itself, for the other clients on the same server
+   * (`Hello.label`). Omitted by a shell that has no name to give, which is then
+   * an unnamed device in their chrome rather than an absent one. */
+  label?: string;
   /**
    * How long to ask the server to keep this client's sessions after the wire
    * ends, in ms; omitted by a client that does not ask (`Hello.hold`).
@@ -341,6 +345,10 @@ export async function reconnectingClient(opts: ReconnectOpts): Promise<ClientCon
         push: opts.push,
         build: opts.build,
         ...(opts.client === undefined ? {} : { client: opts.client }),
+        // Every dial for the same reason the hold is: this names the DEVICE,
+        // and a reconnect that dropped it would leave this client unnamed in
+        // everyone else's chrome until the app was restarted.
+        ...(opts.label === undefined ? {} : { label: opts.label }),
         // Every dial, not only the first: the ask is a property of the client
         // rather than of one connection, and a reconnect that dropped it would
         // hold nothing for the app switch after this one.

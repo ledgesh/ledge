@@ -514,6 +514,12 @@ the failure it prevents, which is running a command on the wrong box.
   machine at all times. A fact you have to go looking for prevents nothing. It
   is deliberately distinct from the drawer's `host:` badge (§4a): that says
   where a *block* will run, this says where the *note lives*.
+- **It also says who else is on that machine, and only when somebody is.** One
+  other device is named; past that it counts, with the names in the hover
+  (remote.md §7). Nothing at all is drawn while you are alone, which is nearly
+  always — a strip that said "1 device" every time you opened the app would be
+  noise in the one place that has to stay readable at a glance. The device named
+  here is the one §4-2's rules are about.
 - **No chord.** Switching is a rare, deliberate act that closes every tab, so
   it earns no key: the bar is the everyday surface, and the palette and the
   File menu carry it. This is §2's "a chord is for what you do many times a
@@ -572,10 +578,18 @@ below are that exception, and nothing else in the app has them.
   screen the moment it opens — and because a prompt would be a dialog on the
   device nobody is holding.
 - **The device it was taken from is told, in place of the shell.** A notice
-  covers the terminal ("Another device took this shell."), and what it covers
-  stays readable underneath: the last thing that shell said here is still the
-  useful thing on that screen. A terminal that simply stops mid-line, with no
+  covers the terminal ("iPhone took this shell."), and what it covers stays
+  readable underneath: the last thing that shell said here is still the useful
+  thing on that screen. A terminal that simply stops mid-line, with no
   explanation, is indistinguishable from a hung app.
+- **It is named, when the device gave a name.** Each device tells the server what
+  it calls itself — a hostname on a Mac, a device name on a phone — and every
+  other client is pushed that list (remote.md §7). Which machine has your shell
+  is the first thing worth knowing about a shell that is somewhere else. The name
+  is fixed at the moment it was taken rather than re-read afterwards: a notice
+  that reworded itself because the other device has since disconnected would be
+  describing the wrong moment. "Another device" is what is left for a client that
+  gave no name.
 - **Take This Shell is a button on that notice, not a command.** The verb exists
   only while the notice is on screen and only for the drawer it covers, which is
   the class §4-1's row controls and the locked placeholder's Unlock are already

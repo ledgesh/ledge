@@ -10,10 +10,10 @@
 // Distinct from the `host:` badge a terminal drawer wears, which says where
 // one block will RUN. This says where the note lives.
 import { useEffect, useState } from "react";
-import { Laptop, PlugZap, Server, TriangleAlert } from "lucide-react";
+import { Laptop, PlugZap, Server, TriangleAlert, Users } from "lucide-react";
 import { useCommands } from "@/commands/CommandProvider";
 import { tooltip } from "@/commands/format";
-import { activeConnection, connectionStatus, linkState, subscribeConnections } from "@/lib/connections";
+import { activeConnection, connectionStatus, linkState, presence, subscribeConnections } from "@/lib/connections";
 
 export function ConnectionBar() {
   const { exec } = useCommands();
@@ -35,6 +35,15 @@ export function ConnectionBar() {
   const dropped = link.state !== "live";
   const Icon = fellBack || link.state === "lost" ? TriangleAlert : dropped ? PlugZap : local ? Laptop : Server;
   const trouble = fellBack || (dropped ? link.detail : "");
+  // Who else is on this machine (remote.md §7). Nothing at all when nobody is,
+  // which is nearly always: a count that says "1 device" while you are alone is
+  // noise in the one strip that must stay readable at a glance. One other is
+  // worth naming, since it is the device that can take a shell from under you;
+  // past that the names stop fitting and the number is the useful part, with the
+  // whole list a hover away.
+  const others = presence();
+  const company = others.length === 0 ? "" : others.length === 1 ? others[0]!.label || "another device" : `${others.length} devices`;
+  const names = others.map((o) => o.label || "an unnamed device").join(", ");
 
   return (
     <button
@@ -53,6 +62,15 @@ export function ConnectionBar() {
     >
       <Icon className={`size-3 shrink-0 ${trouble ? "text-destructive" : ""}`} />
       <span className="min-w-0 flex-1 truncate">{conn.name}</span>
+      {company && (
+        // Its own title rather than a clause in the button's: the full list is
+        // what a hover over this chip should say, and the button's tooltip is
+        // about switching machines.
+        <span className="flex max-w-[50%] shrink-0 items-center gap-1 truncate" title={`Also on this server: ${names}`} data-presence={others.length}>
+          <Users className="size-3 shrink-0" />
+          <span className="truncate">{company}</span>
+        </span>
+      )}
       {fellBack && <span className="shrink-0 text-destructive">not reachable</span>}
       {!fellBack && link.state === "reconnecting" && <span className="shrink-0">reconnecting…</span>}
       {!fellBack && link.state === "lost" && <span className="shrink-0 text-destructive">disconnected</span>}

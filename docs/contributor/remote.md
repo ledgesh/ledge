@@ -289,6 +289,8 @@ splits again, by machine:
 | How long they outlive it | server, on the client's ask | §7, `Hello.hold` |
 | Which inline runs are still worth executing | server, on each client's claim for its own | §7, `inlineClaim` |
 | Which client owns a drawer (bytes, keystrokes, winsize) | server | §7, `Term.owner` |
+| Which clients are connected | server | §7, `presence`, and only the daemon has more than one |
+| What a device calls itself | **client** | §7, `Hello.label`: a hostname, a device name |
 | The dedupe window for replayed writes | server | §7, spans reconnects |
 | The watcher | server | pushes `notesChanged` as today |
 | Behavior settings (shell, interpreters, trash TTL, daily workspace) | server | facts about that machine |
@@ -316,10 +318,12 @@ atomic write) and `workspace/persist.ts` still owns each value's shape.
 **The id rides the handshake, not the call.** Identity is a property of the
 connection: a client cannot forget to send it, no handler needs a parameter it
 would only ever fill one way, and the view never learns it is one of several
-possible screens. That is what `Hello.client` is for. The handshake carries the
-server's identity too — `Hello.instance`, which names the RUN rather than the
-machine, and which §7 uses to decide whether a replay is safe. The protocol
-version is 3.
+possible screens. That is what `Hello.client` is for. Beside it rides
+`Hello.label`, the readable half: the id keys files and stays opaque, while the
+label is what the OTHER clients on that server put on screen (§7). The handshake
+carries the server's identity too — `Hello.instance`, which names the RUN rather
+than the machine, and which §7 uses to decide whether a replay is safe. The
+protocol version is 3.
 
 **The client home is `.client` inside the app home**, not a second top-level
 directory: on every machine Ledge ships to, the client and its local server are
@@ -440,6 +444,7 @@ holding those.
 | `terminalBusy` | everyone | a fact about the note's shell, and it grays out a button on any client with that note open |
 | `terminalOutput`, `terminalExit` | the client that owns that drawer | one stream, one reader |
 | `terminalDetached` | the client that just lost the drawer | the only screen with a terminal on it that stopped |
+| `presence` | everyone, each told about the others | "who else is here" is a different list for every client |
 | `runEvent` | the client that started the run | keyed by a run id that only that page's panel holds |
 | `menuCommand` | nobody | it is the Mac shell's own AppKit menu (`bun/index.ts`), never a server's |
 
@@ -472,6 +477,43 @@ What is about the NOTE rather than about the view stays open to every client:
 buttons already reach through `runBlock`), `closeSession`, and `sessionRestart`.
 A phone closing a note it has open should not be refused because a Mac is
 holding that note's drawer.
+
+**Every client is told who else is here.** The `presence` push carries a list of
+`{client, label}`, and it is sent whenever the set changes: a client arriving, a
+client leaving, a client replacing its own connection. Two things need it. The
+connection bar names the company, because "who else is on this machine" is the
+same question as "which machine" one step further in, and the device it names is
+the one that can take a shell out from under you. And `terminalDetached` carries
+only the taker's ID, which the receiving client turns into a name through this
+list: the server sends ids because an id is what it has, and the label is a fact
+about a device that belongs in exactly one place.
+
+Four decisions inside that:
+
+- **Presence is the daemon's, not the server's.** It is a fact about
+  connections, and the daemon is the only thing that has more than one. A server
+  in the app's own process has exactly one client and nothing to say, so the
+  local case is empty by construction rather than by a special case.
+- **Each client is told about the OTHERS**, never about itself. The alternative
+  is every client knowing its own id in order to subtract itself before
+  rendering a sidebar, which is an id the view has no other reason to hold.
+- **The whole list each time, not a delta.** It is two or three entries; a delta
+  stream that misses one is wrong until the next reconnect.
+- **It arrives with the connection.** The push that announces a new client goes
+  to that client too, so nobody spends a round trip asking for a list the
+  arrival already changed (§12).
+
+The label is the one string in the handshake that a client chooses and another
+client's screen displays, so `wire.ts` bounds it at 64 characters and strips
+control characters on arrival — a newline in a sidebar row is a broken row, and
+an escape sequence in a line somebody tails from a server log is a terminal
+doing what the label said. It is cleaned rather than refused: hanging up on a
+phone over its device name would cost a session to gain nothing. A client that
+sends no label is simply "another device" on screen.
+
+On the client, presence is cleared whenever the link is not `live`. A wire that
+is down cannot report who else is up, and the reconnect that follows is itself
+an arrival, which announces the list to everybody.
 
 **A client that loses the wire re-dials rather than failing.** The ladder is
 250ms doubling to 8s and then holding there, eight attempts and 31.75 seconds
@@ -878,7 +920,11 @@ Per `testing.md`'s categories:
   drawer has one owner, so the client that loses it is told, its keystrokes and
   its resizes are refused, its detach leaves another client's drawer alone, and
   the owner's resize reaches the pty's own winsize (the shell is asked, through
-  `stty`); an idle daemon exits, a busy one does not, and one client leaving
+  `stty`); presence is announced on arrival and on departure, each client is
+  told about the others and not itself, a client with no name is still in the
+  list, a reconnect does not look like a device leaving, and the id in
+  `terminalDetached` is a key into the list that names it; an idle daemon exits,
+  a busy one does not, and one client leaving
   does not end the daemon another is using; a push with no client attached is
   dropped rather than thrown, which is a bug this suite caught rather than
   prevented; and a whole `serve` process killed and restarted, with the
@@ -921,10 +967,11 @@ nothing offering to continue anyway; a note round-trips; the same `op` twice
 makes one note; a Linux pty answers a command typed from macOS through ssh and
 a daemon; a second client joins that daemon without the first being hung up on,
 and each of the two is sent its own block output and its own drawer's bytes and
-neither is sent the other's; the drawer changes hands when the second client
-attaches, which the first is told and after which its keystrokes and its
-resizes are refused; and `docker exec` reaches a container whose PID 1 is the
-daemon.
+neither is sent the other's; each is told the other arrived and what it is
+called, and told about the other rather than about itself; the drawer changes
+hands when the second client attaches, which the first is told, by which client
+id, and after which its keystrokes and its resizes are refused; and `docker
+exec` reaches a container whose PID 1 is the daemon.
 
 The gap that was worth naming through phases 2 to 4 is closed: the ssh hop is
 real, the sshd is real, and the forced command is enforced by sshd rather than

@@ -144,6 +144,22 @@ export interface ConnectionInfo {
 }
 
 /**
+ * One other device connected to the same server (remote.md §7), as the view
+ * sees it. What a client is told about its company and the whole of it: what
+ * the OTHER client is doing there is its own business, and a list of open
+ * notes would be a second device's screen on this one.
+ */
+export interface PeerInfo {
+  /** The id from its handshake (wire.ts `Hello.client`). Opaque, and never
+   * shown: it is here so a push that names a client — `terminalDetached` — can
+   * be turned into a name. */
+  client: string;
+  /** What that device calls itself (`Hello.label`). Empty from one that gave
+   * no name, which the view renders as "another device" rather than as a gap. */
+  label: string;
+}
+
+/**
  * One item of the native menu bar. The view owns the shape — it derives the
  * whole menu from the command registry (commands/menu.ts) — and Bun owns the
  * native call, exactly as it owns the bytes of a layout the view shapes.
@@ -810,9 +826,28 @@ export type LedgeRPC = {
       // and a Take This Shell button, which is one more terminalAttach
       // (interactions.md §4-2).
       //
-      // Deliberately no "who": a client id is not a name, and naming the other
-      // device is presence, which arrives with the labels in Hello.
-      terminalDetached: { sessionId: string };
+      // `by` is the client that took it, named through `presence` below rather
+      // than in this payload: the id is what the server has, the label is what
+      // a person reads, and the list that maps one to the other is already on
+      // the client for the connection bar. A taker the list does not know (an
+      // unnamed device) is "Another device", which is what this said before
+      // there were labels at all.
+      terminalDetached: { sessionId: string; by: string };
+      // Who else is connected to this server, whenever that changes: a client
+      // arriving, leaving, or reconnecting (remote.md §7). Pushed rather than
+      // asked for, because the answer changes without anyone asking, and the
+      // arrival that changes it is the same event that would have to answer.
+      //
+      // Addressed, and never carrying the client it is sent to: "who else is
+      // here" is a different list for each of them, and the alternative is
+      // every client having to know its own id in order to subtract itself.
+      // The whole list each time, not a delta: it is two or three entries, and
+      // a delta stream that misses one is wrong until the next reconnect.
+      //
+      // The local server never sends it. One client cannot have company, and
+      // the view's list starts empty, so the bar says nothing about a machine
+      // nobody else is on.
+      presence: { others: PeerInfo[] };
       // Something changed one workspace root's files behind the app's back — an
       // agent in the terminal drawer, git, a shell mv/rm. Pushed by the per-root
       // fs.watch (bun/watch.ts), debounced Bun-side, filtered to .md entries

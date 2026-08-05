@@ -305,6 +305,48 @@ describe("the handshake", () => {
     const text = `{"t":"hello","role":"client","protocol":2,"schema":"a","build":"b","hold":${value}}`;
     expect(() => parseControl(text)).toThrow(WireError);
   });
+
+  // The readable half of who is connecting (remote.md §7). The id keys files;
+  // this is what another client's chrome shows, which is why it is the one
+  // string in the handshake that is cleaned rather than trusted or refused.
+  test("a device's name for itself rides the handshake, and survives the round trip", () => {
+    const sent = hello("client", "0.1.0", "abc-123", "", 0, "Studio");
+    expect(sent.label).toBe("Studio");
+    expect(parseControl(JSON.stringify(sent))).toEqual(sent);
+  });
+
+  test("a server names nobody, and a client may decline to", () => {
+    expect(hello("server", "0.1.0", "", "one-server").label).toBe("");
+    expect(hello("client", "0.1.0", "abc-123").label).toBe("");
+    expect(checkHello(hello("client", "0.1.0", "abc-123"), "client")).toBeNull();
+  });
+
+  // Cleaned, not refused: hanging up on a phone over its device name would cost
+  // a session to gain nothing, and every one of these reduces to something a
+  // sidebar can hold.
+  test.each([
+    ["absent", undefined, ""],
+    ["not a string", 7, ""],
+    ["newlines", "Mac\nmini", "Mac mini"],
+    ["escape sequences", "\u001b[31mred", "[31mred"],
+    ["padded", "  Studio  ", "Studio"],
+  ])("a label that is %s becomes %p", (_what, given, want) => {
+    const text = JSON.stringify({ t: "hello", role: "client", protocol: 2, schema: "a", build: "b", label: given });
+    expect(parseControl(text)).toMatchObject({ label: want });
+  });
+
+  // Bounded because the server keeps one per connection and pushes it to every
+  // other client: a peer that chooses the length chooses what that costs.
+  test("a label longer than the cap is cut, not refused", () => {
+    const long = "n".repeat(500);
+    const seen = parseControl(
+      JSON.stringify({ t: "hello", role: "client", protocol: 2, schema: "a", build: "b", label: long }),
+    ) as { label: string };
+    expect(seen.label.length).toBe(64);
+    // And the same rule on the way out, so a device with an unusable name
+    // cannot send one to a server that predates the check.
+    expect(hello("client", "0.1.0", "abc-123", "", 0, long).label.length).toBe(64);
+  });
 });
 
 // The client names what it wants, the server names what it will do, and the

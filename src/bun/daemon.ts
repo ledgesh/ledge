@@ -180,6 +180,25 @@ export async function startDaemon(opts: DaemonOpts = {}): Promise<Daemon> {
     },
   };
 
+  /**
+   * Tell every client who else is here (rpc-schema `presence`).
+   *
+   * The daemon's rather than the server's, because presence is a fact about
+   * CONNECTIONS and this is the only thing that has more than one of them: a
+   * server in the app's own process has exactly one client and nothing to say.
+   *
+   * A different list per client, since each is told about the others and never
+   * about itself. Cheap enough to build that way: this runs when somebody
+   * arrives or leaves, which is a human-scale event, over a map with two or
+   * three entries in it.
+   */
+  function announcePresence(): void {
+    const everyone = [...clients].map(([client, conn]) => ({ client, label: conn.label() }));
+    for (const [client, conn] of clients) {
+      conn.push.presence({ others: everyone.filter((p) => p.client !== client) });
+    }
+  }
+
   // Created once and handed to every connection: the window that makes a
   // replayed write apply once has to span the reconnect it exists for.
   const ops = createOpLog();
@@ -280,12 +299,25 @@ export async function startDaemon(opts: DaemonOpts = {}): Promise<Daemon> {
       // than re-dialling, and two that re-dialled would replace each other for
       // as long as both were running (shared/transport.ts).
       previous?.close("this client opened another connection to this server");
+      // After the replacement, so a reconnect is one announcement of the set as
+      // it now stands rather than two with a dead connection in the middle. The
+      // arriving client is told here too — the same push carries the list it
+      // would otherwise have to ask for, which is the round trip remote.md §12
+      // is counting.
+      announcePresence();
     };
     const conn = serverConnection(io, { build, ops, instance, greeted: greet, holdMax });
     void conn.closed.then(() => {
       // Only while it is still the registered one: a connection replaced by its
       // own client's next one must not delete the replacement on its way out.
-      if (clients.get(conn.client()) === conn) clients.delete(conn.client());
+      // The announcement is inside the same check for a smaller reason — a
+      // replaced connection's departure changes nothing, since its client is
+      // still here under the new one, and announcing anyway would push an
+      // identical list to every client on every reconnect.
+      if (clients.get(conn.client()) === conn) {
+        clients.delete(conn.client());
+        announcePresence();
+      }
       // Recorded on the way out, whether or not anyone else is left: a hold
       // runs from the moment THAT connection ended, and with several clients
       // the last one to leave is not necessarily the one that asked. A phone

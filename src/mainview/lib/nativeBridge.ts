@@ -137,6 +137,10 @@ export type ToPage =
  * (ios.md §4) — a fact about the device, like the client id, asked once. */
 export interface ShellHello {
   client: string;
+  /** What this phone calls itself, for the other clients on the same server
+   * (wire.ts `Hello.label`). Swift's, because the device name is UIKit's to
+   * answer; the page only forwards it into the handshake. */
+  label: string;
   destination: string;
   key: string;
 }

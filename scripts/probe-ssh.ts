@@ -39,6 +39,7 @@ const { spawnDuplex } = await import("../src/bun/transport");
 const { PUSH_MESSAGES, sessionHold } = await import("../src/shared/wire");
 const { BUILD_VERSION } = await import("../src/shared/version");
 type ServerPush = import("../src/shared/wire").ServerPush;
+type PeerInfo = import("../src/shared/rpc-schema").PeerInfo;
 
 const REPO = join(import.meta.dir, "..");
 const IMAGE = "ledge-server:probe";
@@ -241,6 +242,9 @@ try {
     push: mac.push,
     build: BUILD_VERSION,
     client: "probe-mac",
+    // What the other clients on this server will call it (remote.md §7). A
+    // string in the handshake that has to survive an ssh hop, like the hold.
+    label: "Probe Studio",
     hold: ASK,
   });
   const t0 = Date.now();
@@ -336,9 +340,31 @@ try {
     push: phoneEars.push,
     build: BUILD_VERSION,
     client: "probe-phone",
+    label: "Probe iPhone",
     hold: ASK,
   });
   await phone.ready;
+
+  // Presence, over the hop the labels had to cross (remote.md §7). The Mac was
+  // told it was alone when it arrived, and is told again the moment the phone
+  // does — which is what saves both of them a round trip asking.
+  const listFor = (heard: Array<[string, unknown]>): PeerInfo[] | null =>
+    heard
+      .filter(([m]) => m === "presence")
+      .map(([, p]) => (p as { others: PeerInfo[] }).others)
+      .at(-1) ?? null;
+  for (let i = 0; i < 100 && (listFor(mac.heard)?.length ?? 0) === 0; i++) await Bun.sleep(100);
+  check(
+    "the Mac is told the phone arrived, by name",
+    listFor(mac.heard)?.[0]?.client === "probe-phone" && listFor(mac.heard)?.[0]?.label === "Probe iPhone",
+    JSON.stringify(listFor(mac.heard)),
+  );
+  for (let i = 0; i < 100 && listFor(phoneEars.heard) === null; i++) await Bun.sleep(100);
+  check(
+    "and each is told about the other rather than about itself",
+    listFor(phoneEars.heard)?.length === 1 && listFor(phoneEars.heard)?.[0]?.label === "Probe Studio",
+    JSON.stringify(listFor(phoneEars.heard)),
+  );
   const onPhone = await phone.requests.noteList({ root });
   check(
     "the phone is served the same notes",
@@ -388,9 +414,15 @@ try {
   // that matters is the one where the bytes would otherwise have been written.
   await phone.requests.terminalAttach({ sessionId: "s1", host: null });
   check(
-    "the Mac is told when the phone takes its drawer",
+    "the Mac is told when the phone takes its drawer, and by whom",
     phoneEars.heard.every(([m]) => m !== "terminalDetached") &&
-      mac.heard.some(([m, p]) => m === "terminalDetached" && (p as { sessionId: string }).sessionId === "s1"),
+      mac.heard.some(
+        ([m, p]) =>
+          m === "terminalDetached" &&
+          (p as { sessionId: string }).sessionId === "s1" &&
+          // The id, which the list above turns into "Probe iPhone" on screen.
+          (p as { by: string }).by === "probe-phone",
+      ),
   );
   const typedOn = await client.requests.terminalInput({ sessionId: "s1", dataB64: btoa("echo MAC-AFTER\n") });
   const sized = await client.requests.terminalResize({ sessionId: "s1", cols: 20, rows: 5 });

@@ -1,4 +1,7 @@
 import Foundation
+// For `UIDevice`, which is the only thing here that is not Foundation's: the
+// device's name for itself is UIKit's to answer.
+import UIKit
 
 /// One server this phone can reach.
 ///
@@ -241,5 +244,17 @@ struct ShellConfig {
         UserDefaults.standard.string(forKey: "LedgeServer")
             ?? (Bundle.main.object(forInfoDictionaryKey: "LedgeServer") as? String)
             ?? ""
+    }
+
+    /// What this device calls itself, for the presence list every other client
+    /// on the same server is pushed (shared/wire.ts `Hello.label`).
+    ///
+    /// Since iOS 16 this is the MODEL name — "iPhone", "iPad" — for any app
+    /// without the user-assigned-device-name entitlement, and that is the right
+    /// answer to ship: the sentence it has to make is "iPhone took this shell",
+    /// which needs a device and not a person. An app that later earns the
+    /// entitlement gets the user's own name for it here with no other change.
+    static var label: String {
+        UIDevice.current.name
     }
 }

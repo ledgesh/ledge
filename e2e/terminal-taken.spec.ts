@@ -90,6 +90,37 @@ test("the drawer sizes a shell it owns, and sizes it again when it takes it back
   await expect.poll(async () => (await resizes()).length).toBeGreaterThan(before);
 });
 
+// The push names a client id; the presence list says what that client is called
+// (remote.md §7). Which machine has your shell is the first thing worth knowing
+// about a shell that is somewhere else.
+test("the notice names the device that took the shell", async ({ page }) => {
+  const sessionId = await page.evaluate(() => {
+    const seen = window.__harness.termAttaches();
+    return seen[seen.length - 1].sessionId;
+  });
+
+  await page.evaluate(() => window.__harness.presence([{ client: "phone-1", label: "iPhone" }]));
+  await page.evaluate((sid) => window.__harness.terminalTaken(sid, "phone-1"), sessionId);
+  await expect(page.getByText("iPhone took this shell.")).toBeVisible();
+
+  // And it stays named once the taker has disconnected. The notice describes a
+  // moment that has already happened, so its wording must not follow the list
+  // afterwards; the drawer resolves the name when the push arrives, which is
+  // what makes that true rather than merely usual.
+  await page.evaluate(() => window.__harness.presence([]));
+  await expect(page.getByText("iPhone took this shell.")).toBeVisible();
+});
+
+test("a taker nobody has a name for is still explained", async ({ page }) => {
+  const sessionId = await page.evaluate(() => {
+    const seen = window.__harness.termAttaches();
+    return seen[seen.length - 1].sessionId;
+  });
+
+  await page.evaluate((sid) => window.__harness.terminalTaken(sid, "who-1"), sessionId);
+  await expect(page.getByText("Another device took this shell.")).toBeVisible();
+});
+
 test("a note whose drawer was taken is not the note beside it", async ({ page }) => {
   // The push names a session, and a drawer showing another note must ignore it:
   // one stale sessionId would put the notice over a shell nobody touched.

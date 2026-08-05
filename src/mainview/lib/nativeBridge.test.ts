@@ -29,7 +29,12 @@ function recorder() {
   };
   const greeted = async (destination = "ledge@192.168.1.9") => {
     const asking = shell.hello();
-    answer("@hello", { client: "device-1", destination, key: "restrict,command=… ecdsa-sha2-nistp256 AAAA iphone" });
+    answer("@hello", {
+      client: "device-1",
+      label: "iPhone",
+      destination,
+      key: "restrict,command=… ecdsa-sha2-nistp256 AAAA iphone",
+    });
     return asking;
   };
   const opened = async (gen: number) => {
@@ -64,11 +69,13 @@ describe("the native call channel", () => {
   test("who we are and where we point is asked once, before any socket", async () => {
     const { sent, shell, greeted } = recorder();
     expect(shell.destination()).toBe("");
-    // The device's three facts together, because all three are needed before a
-    // connection exists: the id keys the layout, the destination names the
-    // machine, and the key line is what a NEW server has to be given (§4).
+    // The device's four facts together, because all four are needed before a
+    // connection exists: the id keys the layout, the label names this phone on
+    // the other clients' screens, the destination names the machine, and the key
+    // line is what a NEW server has to be given (§4).
     expect(await greeted("dev@mac.local")).toEqual({
       client: "device-1",
+      label: "iPhone",
       destination: "dev@mac.local",
       key: "restrict,command=… ecdsa-sha2-nistp256 AAAA iphone",
     });

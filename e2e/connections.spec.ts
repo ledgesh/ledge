@@ -179,3 +179,49 @@ test("a connection that will not come back is disconnected, not reconnecting", a
   await expect(bar(page)).toHaveText(/disconnected/);
   await expect(bar(page)).toHaveAttribute("title", /host is down/);
 });
+
+// Who else is on the machine (remote.md §7). It is in this bar because it is
+// the same question one step further in — which machine, whether it can be
+// reached, and who else is on it — and because the device named here is the one
+// that can take a shell out from under you.
+test("the bar names the other device on the server, and stops when it leaves", async ({ page }) => {
+  // Nothing at all while you are alone, which is nearly always: a strip that
+  // said "1 device" every time you opened the app would be noise in the one
+  // place that has to stay readable at a glance.
+  await expect(bar(page).locator("[data-presence]")).toHaveCount(0);
+
+  await page.evaluate(() => window.__harness.presence([{ client: "phone-1", label: "iPhone" }]));
+  await expect(bar(page).locator("[data-presence]")).toHaveText("iPhone");
+  await expect(bar(page).locator("[data-presence]")).toHaveAttribute("title", /Also on this server: iPhone/);
+  // Still the machine it always was: company is not a switch.
+  await expect(bar(page)).toHaveText(/This Mac/);
+
+  await page.evaluate(() => window.__harness.presence([]));
+  await expect(bar(page).locator("[data-presence]")).toHaveCount(0);
+});
+
+test("past one other device the bar counts, and the names are a hover away", async ({ page }) => {
+  await page.evaluate(() =>
+    window.__harness.presence([
+      { client: "phone-1", label: "iPhone" },
+      { client: "mac-2", label: "Studio" },
+      // A client that gave no name is still company: a script on the wire, or a
+      // shell pumping frames. It is counted, and named as best it can be.
+      { client: "script-1", label: "" },
+    ]),
+  );
+  await expect(bar(page).locator("[data-presence]")).toHaveText("3 devices");
+  await expect(bar(page).locator("[data-presence]")).toHaveAttribute("title", /iPhone, Studio, an unnamed device/);
+});
+
+// A wire that is down cannot report who else is up. Keeping the last list would
+// mean naming a device that may have left while we were not connected to hear
+// it; the server announces to everybody on the next arrival, which is this
+// client's own reconnect.
+test("a dropped connection stops claiming to know who else is here", async ({ page }) => {
+  await page.evaluate(() => window.__harness.presence([{ client: "phone-1", label: "iPhone" }]));
+  await expect(bar(page).locator("[data-presence]")).toHaveText("iPhone");
+
+  await page.evaluate(() => window.__harness.linkState("reconnecting", "The connection dropped. Reconnecting…"));
+  await expect(bar(page).locator("[data-presence]")).toHaveCount(0);
+});

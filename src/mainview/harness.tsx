@@ -29,7 +29,7 @@ import { configureClipboard } from "./lib/clipboard";
 import { configureCli } from "./lib/cli";
 import { configureAssets } from "./lib/assets";
 import { configureSettings } from "./lib/settings";
-import { configureConnections, recordLinkState } from "./lib/connections";
+import { configureConnections, recordLinkState, recordPresence } from "./lib/connections";
 import {
   clientSettingsTemplate,
   DEFAULT_SETTINGS,
@@ -981,8 +981,13 @@ declare global {
       // Simulate Bun's terminalDetached push: another client attached to this
       // note's shell and this one no longer has it. No user action can cause it
       // here (the other client is the one acting), which is externalOpen's
-      // reason for being on this object too.
-      terminalTaken: (sessionId: string) => void;
+      // reason for being on this object too. `by` is that client's id, which
+      // the notice turns into a name through the presence list below.
+      terminalTaken: (sessionId: string, by?: string) => void;
+      // Simulate the presence push: who else is connected to this server
+      // (remote.md §7). Same reason as the one above — the event is another
+      // device arriving or leaving, which nothing in this page can do.
+      presence: (others: { client: string; label: string }[]) => void;
       inlineRuns: () => { sessionId: string; id: string; host: string | null }[];
       // Every grid reported to a run's shell, in order.
       inlineResizes: () => { id: string; cols: number; rows: number }[];
@@ -1044,7 +1049,8 @@ window.__harness = {
   termPastes: () => termPastes.map((p) => ({ ...p })),
   termInputs: () => termInputs.map((i) => ({ ...i })),
   termResizes: () => termResizes.map((r) => ({ ...r })),
-  terminalTaken: (sessionId) => dispatchTerminalDetached(sessionId),
+  terminalTaken: (sessionId, by = "") => dispatchTerminalDetached(sessionId, by),
+  presence: (others) => recordPresence(others),
   inlineRuns: () => inlineRuns.map((r) => ({ ...r })),
   inlineResizes: () => inlineResizes.map((r) => ({ ...r })),
   inlineInputs: () => inlineInputs.map((i) => ({ ...i })),

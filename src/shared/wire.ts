@@ -71,6 +71,24 @@ export interface Hello {
   // no layout to keep simply has no id, and the server files it under a shared
   // key rather than refusing the connection over a preference.
   client: string;
+  // What that device calls itself: a Mac's hostname, a phone's device name.
+  // The id above is opaque and always will be, because it keys files; this is
+  // the half a person can read, and it exists because "another device took
+  // your shell" is a worse sentence than "iPhone took your shell" (remote.md
+  // §7, presence).
+  //
+  // The device's own name for itself rather than one the user types here: both
+  // ends already have one, and a name nobody set is a name nobody has to keep
+  // in sync with the machine it is about.
+  //
+  // Empty from a server — a server is named by the connection that reaches it,
+  // which is the user's own word for it (remote.md §8) — and empty is allowed
+  // from a client, which is then simply an unnamed device on screen.
+  //
+  // Bounded and stripped of control characters on arrival (`cleanLabel`): the
+  // client is the least-trusted end (remote.md §2), and this is the one string
+  // it chooses that another client's screen displays.
+  label: string;
   // Which RUN of the server this is: a nonce minted once per daemon process,
   // empty from a client. A reconnecting client replays what was in flight
   // under the same op ids, and the op log that makes that safe lives in the
@@ -209,6 +227,7 @@ export const PUSH_MESSAGES = [
   "terminalBusy",
   "terminalExit",
   "terminalDetached",
+  "presence",
   "notesChanged",
   "openExternal",
   "vaultChanged",
@@ -487,8 +506,19 @@ export const SCHEMA_VERSION = fingerprint([
   ...PUSH_MESSAGES.map((m) => `push:${m}`),
 ]);
 
-export function hello(role: "client" | "server", build: string, client = "", instance = "", hold = 0): Hello {
-  return { t: "hello", role, protocol: PROTOCOL_VERSION, schema: SCHEMA_VERSION, build, client, instance, hold };
+export function hello(
+  role: "client" | "server",
+  build: string,
+  client = "",
+  instance = "",
+  hold = 0,
+  label = "",
+): Hello {
+  // Cleaned on the way out as well as on the way in. The rule belongs to the
+  // wire rather than to whichever shell asked the operating system for a name,
+  // and a device whose name has a newline in it should not be able to send one
+  // to a server that predates the check.
+  return { t: "hello", role, protocol: PROTOCOL_VERSION, schema: SCHEMA_VERSION, build, client, label: cleanLabel(label), instance, hold };
 }
 
 /**
@@ -587,6 +617,10 @@ export function parseControl(text: string): WireMessage {
       // with both numbers named, which is a far better message than "a hello
       // with no client".
       if (m["client"] !== undefined && typeof m["client"] !== "string") return bad("a hello with a non-string client");
+      // The label is not checked, it is CLEANED: refusing a connection over a
+      // device name would be refusing to talk to a phone about a string nobody
+      // reads twice, and there is no shape it could have that this does not
+      // reduce to something displayable (`cleanLabel`).
       if (m["instance"] !== undefined && typeof m["instance"] !== "string") return bad("a hello with a non-string instance");
       // Structural, unlike the two above, because this one is arithmetic the
       // server does on a number the client chose: a NaN would make every
@@ -602,6 +636,7 @@ export function parseControl(text: string): WireMessage {
         schema: m["schema"],
         build: m["build"],
         client: typeof m["client"] === "string" ? m["client"] : "",
+        label: cleanLabel(m["label"]),
         instance: typeof m["instance"] === "string" ? m["instance"] : "",
         hold: typeof m["hold"] === "number" ? m["hold"] : 0,
       };
@@ -642,6 +677,25 @@ function isId(v: unknown): v is number {
  * is still a rounding error. The window that holds them is bounded by count
  * too; this bounds each entry. */
 const MAX_OP_CHARS = 128;
+
+/** Longer than any hostname a machine reports about itself, short enough to
+ * sit in a sidebar. A label past it is cut rather than refused: what is on
+ * screen is a name, and the first 64 characters of one still name something. */
+const MAX_LABEL_CHARS = 64;
+
+/**
+ * A device name, made safe to hold and to show.
+ *
+ * Two things a peer must not decide for us. How much memory this costs: the
+ * server keeps one per connection and pushes it to every other client, so an
+ * unbounded string is an unbounded push. And what it can DO on arrival: a
+ * newline in a sidebar is a broken row, and an escape sequence in a line
+ * somebody tails from a server log is a terminal doing what the label said.
+ * Neither is a reason to hang up on a phone, so both are simply removed.
+ */
+function cleanLabel(v: unknown): string {
+  return typeof v === "string" ? v.replace(/\p{Cc}/gu, " ").slice(0, MAX_LABEL_CHARS).trim() : "";
+}
 
 // Absent stays absent. Spreading `{op: undefined}` would put the key in the
 // object, and the encoder would put `"op":null` on the wire for every read.

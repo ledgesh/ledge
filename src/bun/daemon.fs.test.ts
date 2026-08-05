@@ -19,7 +19,7 @@ import { closeWatchers } from "./watch";
 import { clientConnection } from "../shared/transport";
 import { BUILD_VERSION } from "../shared/version";
 import { PUSH_MESSAGES, type ServerPush } from "../shared/wire";
-import type { RunEvent } from "../shared/rpc-schema";
+import type { PeerInfo, RunEvent } from "../shared/rpc-schema";
 
 const push = Object.fromEntries(PUSH_MESSAGES.map((m) => [m, () => {}])) as unknown as ServerPush;
 
@@ -70,23 +70,28 @@ async function daemonIn(opts: { idleMs?: number; holdMs?: number } = {}) {
   return { d, socketPath, pidPath };
 }
 
-const connect = async (socketPath: string, who: string, opts: { hold?: number; seen?: Seen } = {}) => {
+const connect = async (socketPath: string, who: string, opts: { hold?: number; seen?: Seen; label?: string } = {}) => {
   const duplex = await connectToDaemon({ socketPath, spawn: () => {}, timeoutMs: 2000 });
   return clientConnection(duplex, {
     push: opts.seen ? record(opts.seen) : push,
     build: BUILD_VERSION,
     client: who,
+    ...(opts.label === undefined ? {} : { label: opts.label }),
     ...(opts.hold === undefined ? {} : { hold: opts.hold }),
   });
 };
 
 /** A connected client and everything it has been pushed since. */
-const joined = async (socketPath: string, who: string) => {
+const joined = async (socketPath: string, who: string, label?: string) => {
   const seen: Seen = [];
-  const conn = await connect(socketPath, who, { seen });
+  const conn = await connect(socketPath, who, { seen, ...(label === undefined ? {} : { label }) });
   await conn.ready;
   return { conn, seen };
 };
+
+/** The latest list of others one client was pushed, or null before the first. */
+const company = (seen: Seen): PeerInfo[] | null =>
+  got<{ others: PeerInfo[] }>(seen, "presence").at(-1)?.others ?? null;
 
 describe("several clients at once", () => {
   // The ordinary shape of this is a Mac and a phone pointed at one machine, and
@@ -301,6 +306,91 @@ describe("one drawer, one owner", () => {
     expect(await mac.conn.requests.terminalResize({ sessionId: "note-1", cols: 80, rows: 24 })).toEqual({ ok: false });
     expect(await mac.conn.requests.terminalInput({ sessionId: "note-1", dataB64: b64("echo hello\n") })).toEqual({ ok: false });
     expect(await mac.conn.requests.terminalStatus({ sessionId: "note-1" })).toEqual({ live: false, host: null });
+  });
+});
+
+// Who else is on this server, and what to call them (rpc-schema `presence`).
+// The daemon's, because presence is a fact about connections and this is the
+// only thing that has more than one.
+describe("who else is here", () => {
+  test("a client already here is told when another arrives, by name", async () => {
+    const { socketPath } = await daemonIn({ idleMs: 60_000 });
+    const mac = await joined(socketPath, "mac-1", "Studio");
+    // Alone, and told so: the list is pushed on arrival, which is what saves
+    // every client a round trip asking for it (remote.md §12).
+    expect(await until(() => company(mac.seen) !== null)).toBe(true);
+    expect(company(mac.seen)).toEqual([]);
+
+    const phone = await joined(socketPath, "phone-1", "iPhone");
+
+    expect(await until(() => (company(mac.seen)?.length ?? 0) > 0)).toBe(true);
+    expect(company(mac.seen)).toEqual([{ client: "phone-1", label: "iPhone" }]);
+    // And each is told about the OTHERS: a list a client had to subtract itself
+    // from would mean every client knowing its own id to render a sidebar.
+    expect(await until(() => company(phone.seen) !== null)).toBe(true);
+    expect(company(phone.seen)).toEqual([{ client: "mac-1", label: "Studio" }]);
+  });
+
+  test("a client that leaves is announced too", async () => {
+    const { socketPath } = await daemonIn({ idleMs: 60_000 });
+    const mac = await joined(socketPath, "mac-1", "Studio");
+    const phone = await joined(socketPath, "phone-1", "iPhone");
+    expect(await until(() => (company(mac.seen)?.length ?? 0) > 0)).toBe(true);
+
+    phone.conn.close();
+
+    expect(await until(() => company(mac.seen)?.length === 0)).toBe(true);
+  });
+
+  // A client that gave no name is still company. The view renders it as "another
+  // device" rather than as a gap, which is what a `serve` pump or a script on
+  // the wire looks like.
+  test("a client with no name is still in the list", async () => {
+    const { socketPath } = await daemonIn({ idleMs: 60_000 });
+    const mac = await joined(socketPath, "mac-1", "Studio");
+    await joined(socketPath, "script-1");
+
+    expect(await until(() => (company(mac.seen)?.length ?? 0) > 0)).toBe(true);
+    expect(company(mac.seen)).toEqual([{ client: "script-1", label: "" }]);
+  });
+
+  // The reason the announcement hangs off registration rather than off the
+  // socket: a phone whose wire flapped re-dials, and its second connection
+  // replaces its first. If the replaced one announced its own departure, every
+  // other client would watch the phone leave and arrive on every reconnect.
+  test("a reconnect does not look like a device leaving", async () => {
+    const { socketPath } = await daemonIn({ idleMs: 60_000 });
+    const mac = await joined(socketPath, "mac-1", "Studio");
+    const phone = await joined(socketPath, "phone-1", "iPhone");
+    expect(await until(() => (company(mac.seen)?.length ?? 0) > 0)).toBe(true);
+    const before = got(mac.seen, "presence").length;
+
+    const again = await connect(socketPath, "phone-1", { label: "iPhone" });
+    await again.ready;
+    await phone.conn.closed;
+
+    // Whatever the Mac was told after the re-dial, the phone was in all of it.
+    expect(await until(() => got(mac.seen, "presence").length > before)).toBe(true);
+    for (const p of got<{ others: PeerInfo[] }>(mac.seen, "presence").slice(before)) {
+      expect(p.others).toEqual([{ client: "phone-1", label: "iPhone" }]);
+    }
+  });
+
+  // The two halves together: the server says which CLIENT took the drawer, the
+  // presence list says what that client is called, and the notice the loser
+  // shows is built from both (mainview/terminal/TerminalDrawer.tsx).
+  test("the client that takes a drawer is named by the list", async () => {
+    const { socketPath } = await daemonIn({ idleMs: 60_000 });
+    const mac = await joined(socketPath, "mac-1", "Studio");
+    const phone = await joined(socketPath, "phone-1", "iPhone");
+
+    await mac.conn.requests.terminalAttach({ sessionId: "note-1" });
+    await phone.conn.requests.terminalAttach({ sessionId: "note-1" });
+
+    expect(await until(() => got(mac.seen, "terminalDetached").length > 0)).toBe(true);
+    const [taken] = got<{ sessionId: string; by: string }>(mac.seen, "terminalDetached");
+    expect(taken).toEqual({ sessionId: "note-1", by: "phone-1" });
+    expect(company(mac.seen)?.find((p) => p.client === taken!.by)?.label).toBe("iPhone");
   });
 });
 

@@ -151,15 +151,20 @@ export function dispatchTerminalExit(sessionId: string): void {
 // longer has it (rpc-schema terminalDetached). The mounted drawer subscribes and
 // shows its notice; nothing else in the view cares, since the shell is still
 // running and the note is otherwise unaffected.
-let detachedSink: ((sessionId: string) => void) | null = null;
+//
+// `by` is the client id that took it, which the drawer turns into a name
+// through the presence list (lib/connections.ts). Passed through rather than
+// resolved here: this file moves messages, and what a client is called is the
+// connection chrome's business.
+let detachedSink: ((sessionId: string, by: string) => void) | null = null;
 
-export function onTerminalDetached(sink: (sessionId: string) => void): () => void {
+export function onTerminalDetached(sink: (sessionId: string, by: string) => void): () => void {
   detachedSink = sink;
   return () => {
     if (detachedSink === sink) detachedSink = null;
   };
 }
 
-export function dispatchTerminalDetached(sessionId: string): void {
-  detachedSink?.(sessionId);
+export function dispatchTerminalDetached(sessionId: string, by: string): void {
+  detachedSink?.(sessionId, by);
 }
