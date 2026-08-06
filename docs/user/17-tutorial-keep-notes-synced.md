@@ -28,7 +28,7 @@ Notes you write are files in the synced folder, and the service carries them.
 
 Ledge watches the folder and follows external changes live, so a note edited elsewhere updates on screen when the sync lands, even if you have it open.
 
-If a synced change arrives while you are editing the same note, your version wins the file and the other version is kept in the workspace trash. A conflict costs a visit to the trash, not a lost edit. When the service makes its own conflict copy, that copy appears as another note, which you can diff and merge by hand.
+If a synced change arrives while you are editing the same note, your version wins the file and the other version is kept in the workspace trash. Ledge names that note in a notice in the sidebar when it happens, so a conflict costs a visit to the trash rather than a lost edit. When the service makes its own conflict copy, that copy appears as another note, which you can diff and merge by hand.
 
 ## Setup two: git
 

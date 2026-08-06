@@ -967,8 +967,12 @@ nothing offering to continue anyway; a note round-trips; the same `op` twice
 makes one note; a Linux pty answers a command typed from macOS through ssh and
 a daemon; a second client joins that daemon without the first being hung up on,
 and each of the two is sent its own block output and its own drawer's bytes and
-neither is sent the other's; each is told the other arrived and what it is
-called, and told about the other rather than about itself; the drawer changes
+neither is sent the other's; a note one of them saves is pushed to the OTHER
+unasked and reads back there at the same mtime, and a note both of them edit is
+arbitrated on the second save, whose `divergedTo` crosses the wire and names a
+trash file that really holds the version that lost; each is told the other
+arrived and what it is called, and told about the other rather than about
+itself; the drawer changes
 hands when the second client attaches, which the first is told, by which client
 id, and after which its keystrokes and its resizes are refused; and `docker
 exec` reaches a container whose PID 1 is the daemon.

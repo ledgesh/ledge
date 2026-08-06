@@ -378,6 +378,67 @@ try {
     client.farewell() ?? "no goodbye",
   );
 
+  // Notes in the other direction, and pushed rather than asked for: the listing
+  // above only proves the phone can go and look. What makes a note open on the
+  // Mac follow a save made on the phone is `notesChanged` arriving unprompted
+  // (rpc-schema), and that watcher was written when the only writer to tell
+  // about was an agent on the same machine.
+  const macHeard = (m: string) => mac.heard.filter(([k]) => k === m).length;
+  const before = macHeard("notesChanged");
+  const { note: typed } = await phone.requests.noteCreate({
+    root,
+    text: "# From The Phone\n\ntyped on the small screen\n",
+  });
+  for (let i = 0; i < 100 && macHeard("notesChanged") === before; i++) await Bun.sleep(100);
+  check(
+    "a note the phone saves is pushed to the Mac unasked",
+    macHeard("notesChanged") > before,
+    `${macHeard("notesChanged") - before} notesChanged`,
+  );
+  // Deliberately NOT called "the reload that answers the push": this is a read,
+  // and it passes with the watcher torn out, which is how the wording was
+  // caught. Being TOLD is the check above; this is what is there to be read
+  // once you are, down to the version an unedited buffer adopts as its own.
+  const reload = await client.requests.noteRead({ path: typed.path });
+  check(
+    "and the Mac reads back the phone's text, at the phone's own mtime",
+    (reload.note?.text ?? "").includes("typed on the small screen") && reload.note?.mtimeMs === typed.mtimeMs,
+    `mtime ${reload.note?.mtimeMs} vs ${typed.mtimeMs}`,
+  );
+
+  // The one case that push cannot settle: both of them editing it, so neither
+  // buffer may be reloaded and the second save arbitrates instead. Over ssh
+  // because `divergedTo` is an answer the far client has to RECEIVE — one that
+  // never crosses is a notice the sidebar never shows (mainview/notes/store.ts).
+  const base = typed.mtimeMs;
+  // Before the write that has to differ from `base`, not after: a filesystem
+  // whose mtimes are coarse would otherwise hand back the same number and the
+  // guard would see no divergence at all.
+  await Bun.sleep(5);
+  await client.requests.noteWrite({
+    path: typed.path,
+    text: "# From The Phone\n\nwhat the mac saved\n",
+    baseMtimeMs: base,
+  });
+  const second = await phone.requests.noteWrite({
+    path: typed.path,
+    text: "# From The Phone\n\nwhat the phone saved\n",
+    baseMtimeMs: base,
+  });
+  check(
+    "the save that lands second is told where the version it displaced went",
+    !!second.divergedTo,
+    second.divergedTo ?? "nothing",
+  );
+  // No shell: the path is the server's own, and a cat through `sh -c` would be
+  // one more place a filename gets to mean something.
+  const displaced = run(["docker", "exec", NAME, "cat", second.divergedTo ?? "/nonexistent"], { quiet: true });
+  check(
+    "and the file it names holds the version that lost, whole",
+    displaced.out.includes("what the mac saved"),
+    displaced.out.split("\n").at(-1)?.slice(0, 40) ?? displaced.err.slice(0, 40),
+  );
+
   // The phone's boot claim, against a server carrying somebody else's build.
   // Unscoped this interrupts it, and the only trace is a line in a log nobody
   // is reading (remote.md §7).

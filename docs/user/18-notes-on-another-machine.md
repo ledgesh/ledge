@@ -2,7 +2,7 @@
 
 Ledge can keep your notes on a different machine and run this app as the window onto it. The other machine holds the notes, spawns the shells, and keeps them running; this one draws them. The transport is ssh, so there is no account to make and no service to sign up for.
 
-One machine at a time. The connection bar above the workspace strip always names the one you are typing into.
+One machine at a time from this app. The connection bar above the workspace strip always names the one you are typing into. A machine can serve several of your devices at once.
 
 This is a different feature from [[Remote Hosts]], and the difference matters. `host:` frontmatter says where a *block* runs. A connection says where the *note lives*. They compose: a note stored on your VPS can carry `host: prod`, and the VPS makes that outbound ssh connection, so this app never holds credentials for prod.
 
@@ -138,6 +138,38 @@ Profile values never cross the connection. A note names a profile and the server
 
 Unlocking a locked note sends the passphrase to the server, which is the only machine that can use it ([[Note Locking]]). The vault and its idle relock timer stay there.
 
+## Several devices on one server
+
+A server serves every device that connects to it. Your Mac and your phone can both be on the same server at once, reading the same notes and running commands.
+
+Each device keeps its own tabs and panes. The server files them under the device that arranged them, so a phone does not open into a Mac's three-pane layout.
+
+The connection bar shows who else is connected: one other device by name, more than one as a count. Hover it for the full list. Names come from the devices themselves, so a Mac uses its computer name, and a device that gives no name reads as "another device".
+
+Nothing appears there when you are the only one connected, and nothing ever appears while your notes are on this Mac.
+
+A note saved on one device appears on the other without a refresh. Everything else a server owns is shared the same way: the same workspaces, the same trash, the same tags and backlinks, the same vault.
+
+The one thing two devices cannot share is a note's terminal.
+
+## Take a shell from another device
+
+Opening a note's terminal on a second device moves the shell there, output and typing together. A shell has one keyboard: two devices typing into the same one would interleave their keystrokes on a single line.
+
+The device that had it keeps the last of the output on screen behind a notice, which names the device that took the shell and offers a Take This Shell button. Press it and the shell comes back, along with everything it printed while it was away.
+
+The shell is unaffected either way. It runs on the server throughout, so a build keeps building while the two devices take turns watching it.
+
+Blocks are different: a block runs for the device that started it, and only that device sees its output panel or can stop it ([[Running Code]]).
+
+## Edit the same note on two devices
+
+An open note you are not editing follows its file. Save that note on one device and the other device's copy updates on screen, with no refresh and no prompt.
+
+A note being edited on both devices is settled when they save. The second save wins the file and the version it displaced goes to the workspace trash, so nothing is overwritten. The device that displaced it shows a notice in the sidebar naming the note, and the other version is in the trash until you empty it.
+
+This is the same arbitration a note gets from any other writer, including an agent in the terminal, a `git checkout`, or a sync service ([[Tutorial: Keep Notes Synced]]).
+
 ## When the connection drops
 
 The bar reads "reconnecting…" and Ledge re-dials for about thirty seconds. Requests made in the meantime wait rather than fail.
@@ -154,11 +186,11 @@ A save that was in flight when the wire dropped is retried once the connection i
 
 If the reconnect runs out, the bar reads "disconnected" and Ledge stops accepting work for a machine it cannot reach. Choose the connection again from the picker to start over.
 
-Ledge also stops when the server hangs up on purpose rather than the wire failing. The commonest reason is another device connecting to the same server (see Limits below), and hovering the bar names it. Re-dialling something the server decided would only take the connection back off the device you just picked up, so Ledge waits for you to choose.
+Ledge also stops when the server hangs up on purpose rather than the wire failing, and hovering the bar says why. One reason is the server shutting down. The other is a second copy of Ledge on this same device connecting to it: the server keeps the newer connection and tells the older one, which stops instead of the two taking the server off each other in a loop. Another device connecting is not a reason (see above).
 
 ## Limits
 
 - One connection at a time. Search, tags, backlinks, and wikilinks all stay within the machine you are on.
-- One device at a time per server. A server serves whoever connected last, so opening Ledge on your phone against the same machine disconnects your Mac, and the Mac says so rather than fighting for it back. Both keep their own tabs and panes; picking the connection again on either one takes the server back.
+- One device at a time in a note's terminal. Everything else on a server is shared by every device connected to it (see above).
 - No moving a note between servers from inside the app. Use `rsync` or `git`; the notes are ordinary files ([[Tutorial: Keep Notes Synced]]).
 - No offline editing. The server has to be reachable to open a note.
