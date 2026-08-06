@@ -16,7 +16,7 @@ import { TagsPanel } from "@/workspace/TagsPanel";
 import { WorkspaceView } from "@/workspace/WorkspaceView";
 import { HostPicker } from "@/components/HostPicker";
 import { LOCAL_HOST } from "../shared/frontmatter";
-import { flushAll, folderOf, paramsOf } from "@/notes/store";
+import { configureStoreUi, flushAll, folderOf, paramsOf } from "@/notes/store";
 import { parseWikiTarget, resolveWikiTitle } from "@/editor/wikilinks";
 import { refreshWikilinks } from "@/editor/livePreview";
 import { refreshFolder } from "@/workspace/actions";
@@ -463,6 +463,10 @@ function Shell() {
       // lands where every tag click lands.
       openTag: (_docId, tag) => showTag(tag),
     });
+    // The autosave's one outcome a user has to be told about: a save that
+    // displaced somebody else's version of the note into the trash. Same
+    // strip, same neutral tone as the bridge's notices above.
+    configureStoreUi({ notice: (message) => uiHooks.showNotice?.(message) });
   }, [exec, runInTerminal, dispatch, showTag]);
 
   // The tag vocabulary the # completion reads (bridge workspaceTags above):

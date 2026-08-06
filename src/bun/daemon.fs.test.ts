@@ -172,6 +172,71 @@ describe("every push is addressed", () => {
     expect(await until(() => got(phone.seen, "notesChanged").length > 0)).toBe(true);
   });
 
+  // The same push for the write the multi-client case actually makes: another
+  // CLIENT's save, not an agent's or a git checkout's. Ledge's own writes are
+  // deliberately unfiltered by the watcher (rpc-schema notesChanged), and this
+  // is the case that needs them to be — on one machine the only client to tell
+  // was the one that had just saved, so a filter would have cost nothing and
+  // now it would cost the phone its reload.
+  test("a note one client saves reaches the other, the same as an edit from outside", async () => {
+    const { socketPath } = await daemonIn({ idleMs: 60_000 });
+    const mac = await joined(socketPath, "mac-1");
+    const phone = await joined(socketPath, "phone-1");
+    const { workspaces } = await mac.conn.requests.workspaceList({});
+    // A root a client may actually write to: the compiled-in manual is a
+    // workspace too, and it refuses (bun/workspaces.ts assertWritableRoot).
+    const root = workspaces.find((w) => w.kind !== "docs")!.root;
+
+    const { note } = await mac.conn.requests.noteCreate({ root, text: "# Shared\n\nthe mac typed this\n" });
+
+    expect(await until(() => got(phone.seen, "notesChanged").length > 0)).toBe(true);
+    // What the phone's reload reads when it answers that push: the Mac's text,
+    // at the version an unedited buffer adopts as its own (rpc-schema
+    // notesChanged, whose reload is what makes the common case converge with
+    // nobody arbitrating anything).
+    const read = await phone.conn.requests.noteRead({ path: note.path });
+    expect(read.note?.text).toContain("the mac typed this");
+    expect(read.note?.mtimeMs).toBe(note.mtimeMs);
+  });
+
+  // The uncommon case, over the wire: both buffers were dirty, so nobody's
+  // reload could converge them and the divergence guard arbitrates instead.
+  // notes.fs.test.ts proves what it does to the file; this proves the answer
+  // survives the trip, since a `divergedTo` the far client never receives is a
+  // notice it never shows (mainview/notes/store.ts).
+  test("the save that arrives second is told where the version it displaced went", async () => {
+    const { socketPath } = await daemonIn({ idleMs: 60_000 });
+    const mac = await joined(socketPath, "mac-1");
+    const phone = await joined(socketPath, "phone-1");
+    const { workspaces } = await mac.conn.requests.workspaceList({});
+    const root = workspaces.find((w) => w.kind !== "docs")!.root;
+
+    const { note } = await mac.conn.requests.noteCreate({ root, text: "# Contended\n\nthe first draft\n" });
+    // Both clients hold this version as their expectation; the phone goes on
+    // holding it while it is typed into. The pause is BEFORE the write that has
+    // to differ, not after it: what must separate is the file's timestamp from
+    // `base`, and on a filesystem with millisecond timestamps the create and
+    // the save otherwise land inside one and the guard correctly sees nothing.
+    const base = note.mtimeMs;
+    await new Promise((r) => setTimeout(r, 5)); // mtime granularity
+    await mac.conn.requests.noteWrite({
+      path: note.path,
+      text: "# Contended\n\nwhat the mac saved\n",
+      baseMtimeMs: base,
+    });
+
+    const res = await phone.conn.requests.noteWrite({
+      path: note.path,
+      text: "# Contended\n\nwhat the phone typed\n",
+      baseMtimeMs: base,
+    });
+
+    expect(res.divergedTo).not.toBe(null);
+    // And it names a file that is really there, holding the Mac's words: the
+    // phone's notice says the other version is in the Trash, and it is.
+    expect(await Bun.file(res.divergedTo!).text()).toContain("what the mac saved");
+  });
+
   // Broadcast, for the same reason and a sharper one: the vault is the
   // server's, so unlocking it on the Mac unlocks the phone's locked notes too.
   // A phone still drawing a padlock over a note it can now read would be

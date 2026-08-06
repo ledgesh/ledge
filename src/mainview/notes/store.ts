@@ -14,6 +14,24 @@ import { parseFrontmatter, type NoteParams } from "../../shared/frontmatter";
 // where a crash loses work is small. Matches PLAN P1-4.
 const SAVE_DELAY_MS = 500;
 
+// The one capability the save path needs from outside this module: the browser
+// owns the notice strip (NoteBrowser's configureUi), and importing it here
+// would drag React and the command layer into the store's unit tests. The
+// configureX pattern of architecture.md §5; App does the wiring.
+const ui: { notice?: (message: string) => void } = {};
+
+export function configureStoreUi(fns: { notice?: (message: string) => void }): void {
+  Object.assign(ui, fns);
+}
+
+// What a save that displaced another writer's version says. The note is NAMED
+// because the strip is in the sidebar rather than over the editor, and because
+// the diverged note is not always the one being looked at: a flushAll on window
+// blur saves every dirty tab at once.
+function divergedNotice(label: string): string {
+  return `“${label}” also changed elsewhere while you were editing. Your version was saved; the other one is in the Trash.`;
+}
+
 interface Entry {
   docId: string;
   // The workspace folder this note belongs to, captured when its tab opened.
@@ -226,12 +244,22 @@ async function flush(e: Entry): Promise<void> {
         if (e.path) {
           const res = await writeNote(e.path, text, e.mtimeMs);
           e.mtimeMs = res.mtimeMs;
-          // The save displaced an external edit (an agent, git, vim) into the
-          // trash. The buffer won the live path — the user is the one typing —
-          // and the loser is recoverable in the Trash section, whose count the
-          // watcher's refresh updates. A log, not a dialog: nothing was lost.
+          // The save displaced another writer's version into the trash: an
+          // agent, git, vim — or, with more than one client on a server
+          // (remote.md §7), this same user's other device. The buffer won the
+          // live path (the user is the one typing) and the loser is
+          // recoverable in the Trash section, whose count the watcher's
+          // refresh updates.
+          //
+          // A notice, not a dialog: nothing was lost and there is nothing to
+          // decide. But not a console line either, which is what this was while
+          // the other writer could only be a program on this machine — when it
+          // is your own phone, a silent trash-and-carry-on is the app losing
+          // half of what you wrote as far as anyone can see. The log stays for
+          // the exact trash path, which the strip has no room for.
           if (res.divergedTo) {
             console.warn("[notes] this note changed on disk mid-edit; that version is in the trash:", res.divergedTo);
+            ui.notice?.(divergedNotice(labelOf(headingOf(text), e.path)));
           }
         } else {
           // createNote names the file from this same text's H1, so a note titled

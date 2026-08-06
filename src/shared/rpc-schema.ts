@@ -269,11 +269,15 @@ export type LedgeRPC = {
       // this call's own response, or NoteMeta); null means no expectation
       // (a note edited before its first read landed) and writes blind, as
       // every write did before the guard existed. On a mismatch with genuinely
-      // different bytes — an agent or terminal edit landing while the note was
-      // being edited here — the buffer still wins the live path (the user is
-      // the one typing), but the disk version is first moved into the root's
-      // .ledge-trash, never overwritten in place: `divergedTo` says where, and
-      // the Trash section is where the losing version stays recoverable.
+      // different bytes — an agent or terminal edit, or another CLIENT's save
+      // (remote.md §7), landing while the note was being edited here — the
+      // buffer still wins the live path (the user is the one typing), but the
+      // disk version is first moved into the root's .ledge-trash, never
+      // overwritten in place: `divergedTo` says where, and the Trash section is
+      // where the losing version stays recoverable. The view surfaces a
+      // non-null `divergedTo` on the browser's notice strip (interactions.md
+      // §4-2): with two clients on one server the displaced writer is routinely
+      // the same person's other device.
       // A mismatch whose bytes are identical just adopts the disk mtime.
       noteWrite: {
         params: { path: string; text: string; baseMtimeMs: number | null };

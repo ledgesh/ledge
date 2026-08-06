@@ -82,3 +82,21 @@ test("a dirty editor holds its ground; the displaced disk version lands in the t
     .poll(() => page.evaluate((root) => window.__harness.store.listTrash(root).length, SCRATCH))
     .toBe(2);
 });
+
+test("the displaced version is announced, not just logged: the browser's notice strip names the note", async ({
+  page,
+}) => {
+  // Same setup as above, read from the front. The trash assertion proves
+  // nothing was destroyed; this one proves the user can find out, which is the
+  // half a console.warn never did. It matters more with two clients on one
+  // server (remote.md §7): the other writer is then routinely this same
+  // person's phone, and a silent trash-and-carry-on looks like the app
+  // dropping half of what they wrote.
+  await page.locator(".cm-content").click();
+  await page.keyboard.press("End");
+  await page.keyboard.type(" plus my half-typed thought");
+  await agentWrites(page, ALPHA, "# Alpha\n\nthe version from the other device\n");
+
+  await expect(page.getByText(/“Alpha” also changed elsewhere/)).toBeVisible();
+  await expect(page.getByText(/the other one is in the Trash/)).toBeVisible();
+});

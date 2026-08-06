@@ -569,7 +569,9 @@ One server serves every client at once (remote.md §7), and almost nothing about
 that needed a grammar: a note is a note whoever opened it, and both devices see
 the same lists because the lists are the server's. **The terminal drawer is the
 exception, because a shell has one keyboard and one screen size.** The rules
-below are that exception, and nothing else in the app has them.
+below are that exception; the one other thing two devices genuinely contend
+for, a note both of them are editing, needs no exception but does need
+reporting, and that is the last two bullets.
 
 - **Attaching takes the drawer, and taking never asks.** Opening a note's
   terminal on the second device moves the shell there: its output, its
@@ -605,6 +607,23 @@ below are that exception, and nothing else in the app has them.
   drawer, closing the tab, and Restart Note Shell. None of them is about whose
   screen the drawer is on, and refusing them would mean a phone could not close
   a note because a Mac was holding its terminal.
+- **A note both devices are editing converges on its own, or is arbitrated and
+  reported.** A note open but UNEDITED on the second device follows its file on
+  the `notesChanged` push (rpc-schema), which is what makes reading here and
+  writing there silent rather than contentious. Two DIRTY buffers cannot be
+  converged, so the divergence guard decides it exactly as it decides an agent's
+  write or a `git checkout`: the save that lands second keeps the live path and
+  the version it displaced moves to that workspace's trash, whoever wrote it.
+  Nothing is refused, nothing is lost, and there is nothing for the user to
+  answer.
+- **The displaced version is announced on the notice strip, not in the log.**
+  The strip names the note and says the other version is in the Trash
+  (`mainview/notes/store.ts`). It was a `console.warn` for as long as the other
+  writer had to be a program on this machine, which is defensible for a `git
+  checkout` once a month and wrong when the other writer is your own phone: a
+  save that silently trashes half of what you wrote cannot be told apart from
+  the app losing it. The notice expires like every other one, because the
+  Trash section is the durable half and the strip is only the pointer to it.
 
 A phone has no drawer yet (ios.md §8), so today the two devices in this section
 are two desktops on one server. The rules are written for the client, not for

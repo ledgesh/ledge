@@ -456,8 +456,9 @@ or the editor stack." The owner registers handlers into a module-level
 `Partial<Handlers>` (merged with `Object.assign`, so two owners can each
 register their own fields without clobbering the other); callers reach the
 capability through the module, which throws or no-ops when unconfigured.
-Five instances exist and new needs should look like them: `configureBridge`
+The view is full of them and a new need should look like them: `configureBridge`
 (editor ⇄ runs), `configureTerminal`, `configureNotes` (persistence ⇄ RPC),
+`configureStoreUi` (the autosave's one notice ⇄ the browser's strip),
 `configureClipboard`, `configureUi` (commands ⇄ component-owned UI).
 `main.tsx` and the owning components do all the wiring; that is what keeps
 `notes/store.ts` and `commands/registry.ts` testable without a webview.

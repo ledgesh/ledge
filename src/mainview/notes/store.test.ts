@@ -5,6 +5,7 @@ import { slugOf } from "../../shared/slug";
 import type { NoteParams } from "../../shared/frontmatter";
 import {
   bindDoc,
+  configureStoreUi,
   flushAll,
   forgetDoc,
   freezeDoc,
@@ -32,6 +33,8 @@ function fakeBridge() {
   const writes: Array<{ path: string; text: string }> = [];
   // The baseMtimeMs each write stated — the external-edit guard's expectation.
   const writeBases: Array<number | null> = [];
+  // Everything the save path asked the browser's notice strip to show.
+  const notices: string[] = [];
   const creates: string[] = [];
   const createFolders: string[] = [];
   const retitles: Array<{ path: string; text: string }> = [];
@@ -40,11 +43,16 @@ function fakeBridge() {
   const state = {
     writes,
     writeBases,
+    notices,
     creates,
     createFolders,
     retitles,
     configures,
     failNextRetitle: false,
+    // Where the NEXT write reports it displaced a competing version to, the
+    // way the real noteWrite answers when its baseMtimeMs guard fires. One
+    // write only: divergence is a single event, not a mode.
+    divergeNextTo: null as string | null,
     // When set, every write parks on this promise until it is resolved.
     gate: null as { promise: Promise<void>; open: () => void } | null,
     failNextWrite: false,
@@ -85,8 +93,10 @@ function fakeBridge() {
       }
       writes.push({ path, text });
       writeBases.push(baseMtimeMs);
+      const divergedTo = state.divergeNextTo;
+      state.divergeNextTo = null;
       // Successive writes get successive versions, like a real disk.
-      return { mtimeMs: 1000 + writes.length, divergedTo: null };
+      return { mtimeMs: 1000 + writes.length, divergedTo };
     },
     create: async (folder, text): Promise<NoteMeta> => {
       if (state.gate) await state.gate.promise;
@@ -120,6 +130,10 @@ function fakeBridge() {
       configures.push({ sessionId, params, notePath });
     },
   });
+
+  // The store's other seam: App wires this to the browser's notice strip, and
+  // a test reads what it was asked to show.
+  configureStoreUi({ notice: (message) => notices.push(message) });
 
   return state;
 }
@@ -890,6 +904,80 @@ describe("external-edit safety: the save's expectation", () => {
     noteChanged("doc-1", "# A\n\ntyped before the read came back\n");
     await saveNow("doc-1");
     expect(fs.writeBases).toEqual([null]);
+  });
+});
+
+// The other half of that guard, seen from the front: Bun trashing the competing
+// version is only safe to do silently if the user finds out it happened. It was
+// a console line while the other writer had to be a program on this machine;
+// with two clients on one server it is routinely the same person's phone.
+describe("external-edit safety: what the user is told", () => {
+  test("a save that displaced another version says so, and names the note", async () => {
+    const fs = fakeBridge();
+    bind("doc-1", "/notes/shipping-notes.md", noop());
+    seedSlug("doc-1", "# Shipping Notes\n", 10);
+    fs.divergeNextTo = "/notes/.ledge-trash/shipping-notes.md";
+    noteChanged("doc-1", "# Shipping Notes\n\nmy half of it\n");
+    await saveNow("doc-1");
+
+    expect(fs.notices).toHaveLength(1);
+    // Named, because the strip is in the sidebar and a blur-driven flushAll can
+    // save a tab the user is not looking at.
+    expect(fs.notices[0]).toContain("Shipping Notes");
+    // And where the other version went, since that is the whole reason this is
+    // an answer rather than a loss.
+    expect(fs.notices[0]).toContain("Trash");
+  });
+
+  test("an ordinary save says nothing: a notice per keystroke burst would be chrome", async () => {
+    const fs = fakeBridge();
+    bind("doc-1", "/notes/a.md", noop());
+    seedSlug("doc-1", "# A\n", 10);
+    noteChanged("doc-1", "# A\n\ntyping\n");
+    await saveNow("doc-1");
+    noteChanged("doc-1", "# A\n\ntyping more\n");
+    await saveNow("doc-1");
+
+    expect(fs.notices).toEqual([]);
+  });
+
+  test("the note is named as its heading now reads, not as the file is still called", async () => {
+    // The retitle lands after the write, so a divergence on the save that also
+    // renames the file must not report the name the file is about to lose.
+    const fs = fakeBridge();
+    bind("doc-1", "/notes/old-title.md", noop());
+    seedSlug("doc-1", "# Old Title\n", 10);
+    fs.divergeNextTo = "/notes/.ledge-trash/old-title.md";
+    noteChanged("doc-1", "# New Title\n");
+    await saveNow("doc-1");
+
+    expect(fs.notices[0]).toContain("New Title");
+    expect(fs.notices[0]).not.toContain("Old Title");
+  });
+
+  test("an untitled note is named by its file rather than going unnamed", async () => {
+    const fs = fakeBridge();
+    bind("doc-1", "/notes/scratch.md", noop());
+    seedSlug("doc-1", "no heading here\n", 10);
+    fs.divergeNextTo = "/notes/.ledge-trash/scratch.md";
+    noteChanged("doc-1", "no heading here, plus mine\n");
+    await saveNow("doc-1");
+
+    expect(fs.notices[0]).toContain("scratch");
+  });
+
+  test("each divergence is its own notice: a second one is not swallowed by the first", async () => {
+    const fs = fakeBridge();
+    bind("doc-1", "/notes/a.md", noop());
+    seedSlug("doc-1", "# A\n", 10);
+    fs.divergeNextTo = "/notes/.ledge-trash/a.md";
+    noteChanged("doc-1", "# A\n\none\n");
+    await saveNow("doc-1");
+    fs.divergeNextTo = "/notes/.ledge-trash/a-2.md";
+    noteChanged("doc-1", "# A\n\ntwo\n");
+    await saveNow("doc-1");
+
+    expect(fs.notices).toHaveLength(2);
   });
 });
 
