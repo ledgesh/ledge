@@ -170,8 +170,8 @@ already takes for `host:` shells: Ledge is ssh's client, never its
 replacement.
 
 **Framing.** A 4-byte big-endian length, a 1-byte type, then the payload.
-Type 0 is a JSON control frame (requests, responses, and the schema's push
-messages). Type 1 is a binary payload tagged with the id of the control
+Type 0 is a JSON control frame (requests, responses, the schema's push
+messages, and the heartbeat of §7). Type 1 is a binary payload tagged with the id of the control
 frame it belongs to. Assets and terminal output ride type 1: base64 was free
 in-process and costs 33% on a cell connection.
 
@@ -327,7 +327,7 @@ possible screens. That is what `Hello.client` is for. Beside it rides
 label is what the OTHER clients on that server put on screen (§7). The handshake
 carries the server's identity too — `Hello.instance`, which names the RUN rather
 than the machine, and which §7 uses to decide whether a replay is safe. The
-protocol version is 3.
+protocol version is 4.
 
 **The client home is `.client` inside the app home**, not a second top-level
 directory: on every machine Ledge ships to, the client and its local server are
@@ -588,20 +588,67 @@ On the client, presence is cleared whenever the link is not `live`. A wire that
 is down cannot report who else is up, and the reconnect that follows is itself
 an arrival, which announces the list to everybody.
 
-**A wire that stops carrying bytes is noticed in about twenty seconds.**
-Everything below is armed by a connection ENDING, and a network going away does
-not end one: no FIN, no RST, nothing exits, the socket simply stops carrying
-bytes. So the client is told to ask. `sshCommand` sets `ServerAliveInterval=5`
-with `ServerAliveCountMax=3`, and ssh hangs up once three keepalives in a row
-go unanswered. Both are off by default, and the default is what a black hole
-exploits: `TCPKeepAlive` is the only other candidate and macOS first probes an
-idle socket after two HOURS, so an app whose wifi went would go on reporting
-itself connected, with every request pending, until someone quit it.
-`ConnectTimeout=10` bounds the other half, because dialling into the same hole
-hangs the same way and a rung that never returns is a ladder with one rung.
-That does not lengthen the ladder against `IDLE_EXIT_MS` below: a dial costs
-the full timeout only when the network is a hole, and a server on the far side
-of a hole never saw its client leave, so its idle clock is not running.
+**A wire that stops carrying bytes is noticed in about twenty seconds, and the
+protocol is what notices.** Everything else here is armed by a connection
+ENDING, and a network going away does not end one: no FIN, no RST, nothing
+exits, the socket simply stops carrying bytes. So the client asks. A client that
+has heard nothing for five seconds sends a `ping`; the server answers `pong` the
+moment one arrives; three unanswered probes in a row end the connection, and the
+ladder below picks it up as it would any other drop
+(`shared/transport.ts`, `PROBE_EVERY_MS`). Measured end to end that is twenty to
+twenty-five seconds, because the beat that finds the silence is on its own
+cadence and not aligned with the moment the silence began. `ServerAliveInterval`
+has the same property for the same reason.
+
+Adding the two frames moved the protocol version to 4, which is what that number
+is for: an older server would meet its first `ping` at the default arm of its own
+`handle`, hang up on a client that "may not send ping", and be re-dialled into
+the same refusal. Refusing at the handshake instead names both versions and says
+what to do about it (§11).
+
+The probe is a frame rather than a request, and the server answers it in the
+transport rather than in a handler. Both follow from what it has to prove. A
+request would queue behind the handler map, which arrives only once the vault
+has loaded, so a probe sent during a slow boot would report a dead server that
+was merely starting. And what a pong proves is that the process holding the
+notes is reading its socket and writing to it — which is the question, and which
+no hop between the two ends can answer on that process's behalf.
+
+**A client speaks when it has been quiet in EITHER direction.** The two
+questions are asked for different ends: what ARRIVED is how this client knows
+the server is there, and what LEFT is how the server knows this client is. A
+phone watching a build scroll past is busy inbound and silent outbound, and a
+client sitting at a prompt is the reverse, so a rule that watched one direction
+would leave one of them looking dead to somebody.
+
+**Two mechanisms below the protocol do a smaller version of the same thing, and
+both stay.** `sshCommand` sets `ServerAliveInterval=5` with
+`ServerAliveCountMax=3`, and ssh hangs up once three keepalives go unanswered;
+the phone has no ssh to configure (NIOSSH ships no keepalive and no way to send
+one), so `ios/Sources/SSHTransport.swift` sets Darwin's per-socket options
+instead — probes on an idle wire, and a cap on the retransmit episode for a wire
+with a write outstanding, because TCP splits into two mechanisms what ssh does
+with one. All three carry the same numbers. What separates them is who answers:
+
+| Mechanism | Answered by | What only it covers |
+| --- | --- | --- |
+| `ping`/`pong`, both clients | the daemon itself | a server that stopped answering behind a wire that is perfectly healthy |
+| `ServerAliveInterval`, the Mac | sshd on the far machine | a wire that went away while this app's own timers are wedged |
+| `TCP_KEEPALIVE` and friends, the phone | the nearest TCP peer | a wire that went away while iOS has the app suspended, running no timers at all |
+
+The bottom two cannot see a stalled server, and a hop that terminates TCP (a
+published Docker port, a load balancer) answers the phone's keepalives itself
+and hides a drop from it entirely (`ios.md` §3). The top one cannot run while
+the operating system has the app suspended. That is why there are three and not
+one, and why the one in the protocol is the one that decides.
+
+`ConnectTimeout=10` bounds the other half of the same failure, because dialling
+INTO a hole hangs the same way and a rung that never returns is a ladder with
+one rung. The heartbeat closes the last of that: a dial that CONNECTS to a
+server which then says nothing had no bound at all before, since the dial
+succeeded and `ConnectTimeout` was already satisfied. Neither lengthens the
+ladder against `IDLE_EXIT_MS` below, because a server on the far side of a hole
+never saw its client leave and its idle clock is not running.
 
 Twenty seconds is chosen against what each mistake costs, and the two are not
 comparable. Hanging up on a link that was only stalled costs a reconnect: the
@@ -610,14 +657,22 @@ matches and the sessions are still there. Not hanging up costs the session.
 An ordinary blip is far shorter than twenty seconds and is never noticed at
 all, which is what TCP retransmission is for.
 
-**The phone reaches the same twenty seconds by asking TCP rather than ssh.**
-NIOSSH ships no keepalive and no way to send one, so
-`ios/Sources/SSHTransport.swift` sets Darwin's per-socket options instead:
-probes on an idle wire, and a cap on the retransmit episode for a wire with a
-write outstanding, because TCP splits into two mechanisms what ssh does with one.
-The numbers are the numbers above. What differs is who answers — a keepalive is
-answered by the nearest TCP peer and a `ServerAlive` by sshd itself — so a hop
-that terminates TCP hides a drop from the phone and not from the Mac (ios.md §3).
+**The server collects a client it has not heard from in forty seconds**
+(`bun/transport.ts`, `SILENT_MS`). It never probes, because it does not have to:
+a live client says something every five seconds on its own schedule, so silence
+for eight of those is a client that is gone. The connection is closed with no
+`bye`, since a farewell is a decision a client is meant to READ and stop
+re-dialling over, and this one is not reading anything.
+
+What that ends is the mirror of the bug above, on the machine that can least
+afford it. A wire that black-holes leaves the daemon a connection nobody will
+ever close: its sessions stay open, `clients` never empties, the idle exit is
+never armed, and a shell keeps running on somebody's server for as long as the
+machine is up. TCP will not end it either — a black hole has no FIN to send, and
+sshd probes its own clients only if somebody configured it to. Forty seconds is
+twice what a client allows itself, so a client that has already decided is
+always the one that decided first, and it is under `IDLE_EXIT_MS` so a ghost
+delays an unattended daemon by less than one idle window rather than forever.
 
 **A client that loses the wire re-dials rather than failing.** The ladder is
 250ms doubling to 8s and then holding there, eight attempts and 31.75 seconds
@@ -1075,6 +1130,16 @@ Per `testing.md`'s categories:
   reproducible instead of lucky: a write sent into the dark still reaches the
   far machine and runs, and only its answer is lost, which is the exact
   condition `opLog.ts` exists for.
+- **A server that stops answering while the wire stays perfect**, in the same
+  probe's `[stall]` step. SIGSTOP to the daemon leaves TCP established and its
+  keepalives answered, sshd answering `ServerAlive` from its own process, and
+  `serve` pumping bytes into a socket whose reader is not scheduled — so every
+  mechanism below the protocol reports a healthy connection, correctly, and only
+  the heartbeat can see it. It reads the VERDICT rather than the recovery,
+  because a held request never surfaces a reason: one plain connection, whose
+  request fails in the heartbeat's own words. `--serve` carries the same
+  instrument as a command, which is how a phone's twenty seconds became testable
+  from a Simulator (`ios.md` §13).
 
 What it establishes, and each of these was a claim in this document before it
 was a fact: a key carrying `command="ledge-server serve"` runs that and not
@@ -1102,6 +1167,13 @@ machine, with only its answer lost, applies once when it is replayed; and the
 drawer is still the same client's, on the same daemon, carrying what the shell
 printed while nobody was listening.
 
+And, from `[stall]`: a server that stops answering is given up on in 24.9
+seconds, in the heartbeat's own words, while sshd on that same machine
+goes on answering ssh-keyscan throughout — so what noticed was not the wire,
+and nothing under the protocol had anything to notice. The daemon that comes
+back is the same run of the same process, which is what makes it a stall rather
+than the crash the instance check is for.
+
 The gap that was worth naming through phases 2 to 4 is closed: the ssh hop is
 real, the sshd is real, and the forced command is enforced by sshd rather than
 asserted by a test. So is the one phase 5 named after it. The first thing a
@@ -1111,6 +1183,15 @@ own unit tests could never have surfaced, because they supply the ending the
 ladder is armed by. What a container on loopback still cannot supply is the
 clock: the round trip is sub-3ms, so latency, a slow kex, and a laptop that
 sleeps mid-build are modelled by nothing here.
+
+The unit tests caught up afterwards, and the way they did is worth copying. A
+pipe in `transport.test.ts` can be made to swallow bytes without closing, which
+is the black hole exactly, and both heartbeats take their timer as a parameter —
+so twenty seconds of silence, forty seconds of it on the server, and the ladder
+climbing out the other side all happen in one synchronous test with no clock
+anywhere in them. What still belongs to the probe is not the RULE but the
+topology: which hop answers a probe is a fact about a deployment, and no test
+can be written against it.
 
 ## 14. Phasing
 

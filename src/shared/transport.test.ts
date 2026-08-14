@@ -11,7 +11,7 @@
 // the split in phase 1 of ios.md has come undone, and portable.test.ts says so
 // in the general case.
 import { describe, expect, test } from "bun:test";
-import { clientConnection, fedDuplex, type Duplex } from "./transport";
+import { clientConnection, fedDuplex, type Duplex, type HeartbeatOpts } from "./transport";
 import {
   CONTROL_FRAME,
   encodeControl,
@@ -202,6 +202,154 @@ describe("a client facing a server that will not talk", () => {
     client.close();
     expect(server.isClosed()).toBe(true);
     await client.closed;
+  });
+});
+
+// --- the heartbeat (remote.md §7) ---------------------------------------------
+
+/** The heartbeat's timer, cranked by hand. Twenty seconds of silence costs a
+ * function call here, so nothing below waits for a clock — which is the reason
+ * the timer is injectable at all. */
+function ticker() {
+  const ticks = new Set<() => void>();
+  return {
+    repeat: (_ms: number, tick: () => void) => {
+      ticks.add(tick);
+      return () => void ticks.delete(tick);
+    },
+    beat(times = 1) {
+      for (let i = 0; i < times; i++) for (const tick of [...ticks]) tick();
+    },
+    /** How many timers are live, which is how a cancelled one is proved. */
+    running: () => ticks.size,
+  };
+}
+
+describe("a client whose wire has gone quiet", () => {
+  function connect(over: HeartbeatOpts = {}) {
+    const server = peer();
+    const beats = ticker();
+    const client = clientConnection(server.duplex, {
+      push: nowherePush(),
+      build: "0.1.0",
+      heartbeat: { everyMs: 5_000, allowed: 3, repeat: beats.repeat, ...over },
+    });
+    return { server, beats, client, probes: () => server.heard.filter((m) => m.t === "ping").length };
+  }
+
+  // The whole trace, once, because every count below is read off it. Beat 1
+  // has just heard the server's hello and said its own, so it asks nothing;
+  // beats 2, 3 and 4 each send a probe into the dark; beat 5 is the one that
+  // gives up, having asked three times and been ignored three times.
+  test("it is given up on after three probes go unanswered, and not before", async () => {
+    const { server, beats, client, probes } = connect();
+    server.greet();
+    await client.ready;
+
+    beats.beat();
+    expect(probes()).toBe(0);
+    beats.beat(3);
+    expect(probes()).toBe(3);
+    // Nothing has been decided yet: an answer to any of those three would
+    // still arrive in time.
+    expect(server.isClosed()).toBe(false);
+
+    // Both ways a request can meet the verdict: one already in the pending map
+    // when it lands, and one that reaches `call` a moment after. Each has to
+    // say why, or the app reports a wire that closed for a wire that was never
+    // closed at all.
+    const inFlight = client.requests.vaultState({});
+    await settle();
+    beats.beat();
+    expect(server.isClosed()).toBe(true);
+    await expect(inFlight).rejects.toThrow(/stopped answering/);
+    await expect(client.requests.vaultState({})).rejects.toThrow(/stopped answering/);
+    await client.closed;
+  });
+
+  test("an answer buys the whole budget again", async () => {
+    const { server, beats, client, probes } = connect();
+    server.greet();
+    await client.ready;
+    beats.beat(2);
+    expect(probes()).toBe(1);
+    server.say({ t: "pong" });
+    // Four more beats: three fresh probes, and then the beat that would have
+    // been fatal had that pong counted for nothing. Three beats here would
+    // survive either way, which is a test that proves nothing.
+    beats.beat(4);
+    expect(server.isClosed()).toBe(false);
+    beats.beat();
+    expect(server.isClosed()).toBe(true);
+  });
+
+  // The rule that exists for the far end rather than for this one: a client
+  // watching a build scroll past hears constantly and would otherwise say
+  // nothing for the length of the build, which is exactly what the server
+  // collects a connection for (bun/transport.ts silentMs).
+  test("a client that is only listening still speaks", async () => {
+    const { server, beats, client, probes } = connect();
+    server.greet();
+    await client.ready;
+    for (let i = 0; i < 5; i++) {
+      server.say({ t: "pong" });
+      beats.beat();
+    }
+    // One on every beat but the first, which still counts this client's own
+    // hello as having spoken.
+    expect(probes()).toBe(4);
+    expect(server.isClosed()).toBe(false);
+  });
+
+  test("a wire busy in both directions is never probed", async () => {
+    const { server, beats, client, probes } = connect();
+    server.greet();
+    await client.ready;
+    for (let i = 0; i < 5; i++) {
+      const pending = client.requests.vaultState({});
+      await settle();
+      const req = server.heard.at(-1) as { id: number };
+      server.say({ t: "res", id: req.id, r: { state: "locked" } });
+      await pending;
+      beats.beat();
+    }
+    expect(probes()).toBe(0);
+  });
+
+  // A bound the handshake never had. `ConnectTimeout` covers a dial that does
+  // not land; a server that accepts the connection and then says nothing at all
+  // left `ready` pending for as long as the app was open.
+  test("a server that accepts a connection and never greets is given up on", async () => {
+    const { beats, client, probes } = connect();
+    beats.beat(4);
+    expect(probes()).toBe(3);
+    await expect(client.ready).rejects.toThrow(/stopped answering/);
+  });
+
+  test("the heartbeat stops when the connection does", async () => {
+    const { server, beats, client } = connect();
+    server.greet();
+    await client.ready;
+    expect(beats.running()).toBe(1);
+    client.close();
+    expect(beats.running()).toBe(0);
+  });
+
+  test("everyMs 0 turns it off", () => {
+    const { beats } = connect({ everyMs: 0 });
+    expect(beats.running()).toBe(0);
+  });
+
+  // The other direction of the asymmetry in wire.ts: a server that probes its
+  // client is a server this client does not understand, and a frame arriving
+  // from the wrong side is never answered out of politeness.
+  test("a server that sends a probe of its own is refused", async () => {
+    const { server, client } = connect();
+    server.greet();
+    await client.ready;
+    server.say({ t: "ping" });
+    await expect(client.closed).resolves.toBeUndefined();
+    expect(server.isClosed()).toBe(true);
   });
 });
 

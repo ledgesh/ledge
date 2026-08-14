@@ -1,9 +1,10 @@
 // The client's half of a connection to a Ledge server (remote.md §3).
 //
-// Nothing in this file touches a runtime API. A connection is a `Duplex` —
-// write, close, onData, onClose — and everything above it is the protocol: the
-// handshake, the op ids, the reconnect ladder, the requests held across a drop,
-// and the difference between a wire that broke and a handler that said no.
+// Nothing in this file touches a runtime API except a timer. A connection is a
+// `Duplex` — write, close, onData, onClose — and everything above it is the
+// protocol: the handshake, the heartbeat, the op ids, the reconnect ladder, the
+// requests held across a drop, and the difference between a wire that broke and
+// a handler that said no.
 //
 // That is why this half is here and its sibling is not. bun/transport.ts holds
 // what a process can do (a child's pipes, this process's stdio) and what only a
@@ -75,11 +76,75 @@ interface Pending {
   method: string;
 }
 
+// --- the heartbeat -----------------------------------------------------------
+
+/**
+ * How long the wire may be quiet before this client asks whether anyone is
+ * still on the other end, and how many of those asks may go unanswered before
+ * it says the connection is dead.
+ *
+ * The two numbers are OpenSSH's `ServerAliveInterval=5` and
+ * `ServerAliveCountMax=3` (bun/connections.ts) because they are answers to the
+ * same question, and the answer should not depend on which client is asking.
+ * Twenty seconds is chosen against what each mistake costs (remote.md §7):
+ * hanging up on a link that was only stalled costs a reconnect, and not
+ * hanging up costs the session.
+ *
+ * What this buys over the two mechanisms already under it — ssh's own probes
+ * on the Mac, TCP's on the phone (ios.md §3) — is WHO ANSWERS. A TCP keepalive
+ * is answered by the nearest TCP peer and a `ServerAlive` by sshd; a pong comes
+ * from the process holding the notes, through every hop between here and it. So
+ * this is the only one of the three that cannot be answered on the server's
+ * behalf by something that is not the server, and it is the only one that
+ * ships to every client, because it is in the protocol rather than in a
+ * transport.
+ */
+export const PROBE_EVERY_MS = 5_000;
+export const PROBES_ALLOWED = 3;
+
+/** When a wire that stopped carrying anything is declared dead: the last probe
+ * is sent at `PROBE_EVERY_MS * PROBES_ALLOWED`, and the tick after it is the
+ * one that gives up. Exported because the server's own patience is measured
+ * against it (bun/transport.ts). */
+export const DEAD_AFTER_MS = PROBE_EVERY_MS * (PROBES_ALLOWED + 1);
+
+export interface HeartbeatOpts {
+  /** Quiet for this long and the client probes. 0 turns the heartbeat off
+   * entirely, which is for a test that is not about it. */
+  everyMs?: number;
+  /** Probes that may go unanswered before the connection is dead. */
+  allowed?: number;
+  /**
+   * The repeating timer. The only runtime API this file's core touches, and
+   * injectable for the same reason `sleep` is below: a test drives twenty
+   * seconds of silence in a microtask rather than waiting for it. Returns the
+   * canceller.
+   */
+  repeat?(ms: number, tick: () => void): () => void;
+}
+
+/** The default `repeat`, and the server's too (bun/transport.ts): both ends
+ * want a timer that ticks and never holds a process open by itself. */
+export function repeatEvery(ms: number, tick: () => void): () => void {
+  const id = setInterval(tick, ms);
+  // A watchdog is never a reason for a process to stay up. Bun has this and a
+  // webview does not, where there is no process to hold open either.
+  (id as unknown as { unref?: () => void }).unref?.();
+  return () => clearInterval(id);
+}
+
 // --- one connection ----------------------------------------------------------
 
 export function clientConnection(
   duplex: Duplex,
-  opts: { push: ServerPush; build: string; client?: string; label?: string; hold?: number },
+  opts: {
+    push: ServerPush;
+    build: string;
+    client?: string;
+    label?: string;
+    hold?: number;
+    heartbeat?: HeartbeatOpts;
+  },
 ): ClientConnection {
   const decoder = new FrameDecoder();
   const incoming = new BinaryHolder();
@@ -90,6 +155,26 @@ export function clientConnection(
   // indistinguishable from a broken pipe, and the difference is the whole
   // content of the error the user needs to see.
   let farewell: string | null = null;
+  // What killed this connection, whoever decided it. Unlike `farewell` this is
+  // set however it died, and it exists so that a request made a moment too late
+  // is told the same thing a request that was in flight is told: "the
+  // connection to the server closed" is what a caller can already see, and the
+  // heartbeat's verdict is the part it cannot.
+  let cause: string | null = null;
+
+  // The heartbeat's state (remote.md §7). Two flags rather than one, because
+  // the two directions are asked about for different reasons: what ARRIVED is
+  // how this end knows the server is there, and what LEFT is how the server
+  // knows this client is (bun/transport.ts drops one that has gone silent).
+  // A wire carrying a build's output is quiet outbound and busy inbound, and a
+  // client waiting at a prompt is the reverse.
+  const heartbeat = opts.heartbeat ?? {};
+  const probeEveryMs = heartbeat.everyMs ?? PROBE_EVERY_MS;
+  const probesAllowed = heartbeat.allowed ?? PROBES_ALLOWED;
+  let heard = false;
+  let sent = false;
+  let unanswered = 0;
+  let stopProbing: (() => void) | null = null;
 
   let settleClosed!: () => void;
   const closed = new Promise<void>((resolve) => (settleClosed = resolve));
@@ -105,6 +190,7 @@ export function clientConnection(
 
   function raw(bytes: Uint8Array): void {
     if (!open) return;
+    sent = true;
     try {
       duplex.write(bytes);
     } catch (err) {
@@ -115,6 +201,9 @@ export function clientConnection(
   function fail(err: Error): void {
     if (!open) return;
     open = false;
+    cause = err.message;
+    stopProbing?.();
+    stopProbing = null;
     refuseHello(err);
     // Typed, not just worded: reconnectingClient replays what a dropped wire
     // took with it and reports what a handler refused, and telling those apart
@@ -163,12 +252,52 @@ export function clientConnection(
         farewell = msg.why;
         return fail(new Error(msg.why));
       }
+      // Nothing to do with it. `heard` below was set by the bytes it arrived
+      // in, and that is the entire content of a pong; the case exists so that
+      // one is not mistaken for a frame sent in the wrong direction.
+      case "pong":
+        return;
       default:
         return fail(new Error(`the server sent ${msg.t}, which only a client sends`));
     }
   }
 
+  /**
+   * One beat. Sends a probe when the wire has been quiet in either direction,
+   * and gives up when enough probes in a row have gone unanswered.
+   *
+   * Counting TICKS rather than reading a clock is deliberate, and it is what
+   * makes this safe on a phone. A suspended app's timers do not fire and a
+   * backgrounded webview's are throttled, so elapsed time says nothing about
+   * whether the wire is dead — a client that woke after ten minutes would
+   * declare a perfectly good connection lost and drop the session it was
+   * holding. This never gives up on a connection it has not ASKED, three times,
+   * and been ignored.
+   */
+  function beat(): void {
+    const quietIn = !heard;
+    const quietOut = !sent;
+    heard = false;
+    if (!quietIn) {
+      unanswered = 0;
+    } else if (unanswered >= probesAllowed) {
+      const apart = probeEveryMs / 1000;
+      return fail(new Error(`the server stopped answering: ${probesAllowed} probes ${apart}s apart went unanswered`));
+    } else {
+      unanswered += 1;
+    }
+    if (quietIn || quietOut) raw(encodeControl({ t: "ping" }));
+    // After the probe, so this end's own heartbeat is not the traffic that
+    // convinces it the wire is busy. Only what the APP sends counts as a
+    // client with something to say.
+    sent = false;
+  }
+
   duplex.onData = (chunk) => {
+    // Any bytes at all, before anything tries to parse them: what a probe asks
+    // is whether the far end is still there, and half a frame answers that as
+    // well as a pong does.
+    heard = true;
     let frames;
     try {
       frames = decoder.push(chunk);
@@ -201,7 +330,7 @@ export function clientConnection(
     // map nothing will ever answer. It is the same failure a request in flight
     // gets, and reconnectingClient tells them apart from a refusal the same
     // way — which is what lets this one be replayed too.
-    if (!open) throw new ConnectionLost(farewell ?? "the connection to the server closed");
+    if (!open) throw new ConnectionLost(farewell ?? cause ?? "the connection to the server closed");
     const id = nextId++;
     return new Promise<unknown>((resolve, reject) => {
       pending.set(id, { resolve, reject, method });
@@ -219,6 +348,11 @@ export function clientConnection(
   ) as unknown as RequestClient;
 
   raw(encodeControl(hello("client", opts.build, opts.client ?? "", "", opts.hold ?? 0, opts.label ?? "")));
+  // From the hello rather than from the handshake, which gives the handshake a
+  // bound it never had: a server that accepts a connection and then says
+  // nothing at all used to leave `ready` pending forever, and the ssh
+  // `ConnectTimeout` does not cover it because the dial succeeded.
+  if (probeEveryMs > 0) stopProbing = (heartbeat.repeat ?? repeatEvery)(probeEveryMs, beat);
 
   return {
     requests,
@@ -282,6 +416,10 @@ export interface ReconnectOpts {
   /** The clock the steadiness rule below reads, injectable for the same reason
    * `sleep` is: a test drives both and waits for neither. */
   now?(): number;
+  /** Passed to every connection this opens. The heartbeat is what turns a wire
+   * that stopped carrying bytes into a `closed` the ladder below can act on, so
+   * the two are one mechanism described in two places. */
+  heartbeat?: HeartbeatOpts;
 }
 
 const RECONNECT_DELAYS = [250, 500, 1000, 2000, 4000, 8000, 8000, 8000] as const;
@@ -353,6 +491,7 @@ export async function reconnectingClient(opts: ReconnectOpts): Promise<ClientCon
         // rather than of one connection, and a reconnect that dropped it would
         // hold nothing for the app switch after this one.
         ...(opts.hold === undefined ? {} : { hold: opts.hold }),
+        ...(opts.heartbeat === undefined ? {} : { heartbeat: opts.heartbeat }),
       });
     return dialed instanceof Promise ? dialed.then(build) : build(dialed);
   }

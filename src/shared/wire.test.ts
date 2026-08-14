@@ -167,8 +167,16 @@ describe("control messages", () => {
       { t: "err", id: 2, e: "outside the workspace roots" },
       { t: "push", m: "vaultChanged", p: { state: "locked" } },
       { t: "bye", why: "protocol version 2 on the client, 1 here" },
+      { t: "ping" },
+      { t: "pong" },
     ];
     for (const msg of all) expect(parseControl(JSON.stringify(msg))).toEqual(msg);
+  });
+
+  // The heartbeat carries nothing, so there is nothing on it for a peer to lie
+  // about the size of — and whatever it does put there goes no further.
+  test("a probe arrives with nothing on it, whatever the peer attached", () => {
+    expect(parseControl('{"t":"ping","p":{"big":"payload"},"id":7}')).toEqual({ t: "ping" });
   });
 
   // The peer chose every byte of this, so the checks are at the boundary or

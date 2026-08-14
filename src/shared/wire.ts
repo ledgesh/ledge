@@ -8,9 +8,9 @@
 // rather than being reimplemented in Swift.
 //
 // A frame is a 4-byte big-endian length, a 1-byte type, then that many bytes
-// of payload. Type 0 is a JSON control frame: requests, responses, and the
-// schema's push messages. Type 1 is a binary payload whose first 4 bytes are
-// the id of the control frame it belongs to.
+// of payload. Type 0 is a JSON control frame: requests, responses, the
+// schema's push messages, and the heartbeat. Type 1 is a binary payload whose
+// first 4 bytes are the id of the control frame it belongs to.
 //
 // A binary frame is sent IMMEDIATELY BEFORE the control frame that claims it,
 // and a receiver holds at most one. Ordering on a stream is guaranteed, so
@@ -28,7 +28,7 @@ import type { LedgeRPC } from "./rpc-schema";
 
 /** Bumped when the framing or the message set changes shape. A peer speaking
  * a different one is refused, never partially understood. */
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 
 export const FRAME_HEADER_BYTES = 5;
 
@@ -133,6 +133,25 @@ export type WireMessage =
   | { t: "err"; id: number; e: string }
   // One of the schema's webview messages, server to client, unsolicited.
   | { t: "push"; m: string; p: unknown; bin?: number }
+  // The heartbeat (remote.md §7). A client that has heard nothing for a while
+  // asks whether the server is still on the other end, and a server answers
+  // the moment it is asked.
+  //
+  // One direction only, and that asymmetry is the design rather than a corner
+  // cut. The client is the end that has a ladder to climb, an indicator to
+  // draw, and a network under it that goes away; the server only has to LISTEN,
+  // because a client that is alive says so on its own schedule and one that has
+  // gone silent is a client that has gone. So `ping` is a client's to send and
+  // `pong` a server's, and either one arriving from the wrong side is a peer
+  // out of sync — refused there like every other frame sent in the wrong
+  // direction, rather than answered out of politeness.
+  //
+  // No fields, no id. What a client learns from a pong is not WHICH probe was
+  // answered but that the far end is still there, and the same is true of any
+  // other frame arriving — so nothing has to be correlated, and there is
+  // nothing here for a peer to lie about the size of.
+  | { t: "ping" }
+  | { t: "pong" }
   // The last frame before a deliberate hangup, carrying why. A refused
   // handshake has no request to answer, so without this the client would see
   // only a closed pipe and could not say what was wrong.
@@ -671,6 +690,12 @@ export function parseControl(text: string): WireMessage {
       return { t: "push", m: m["m"], p: m["p"], ...bin(m["bin"]) };
     case "bye":
       return { t: "bye", why: typeof m["why"] === "string" ? m["why"] : "no reason given" };
+    // Nothing to validate, because there is nothing on them. Whatever else the
+    // peer put in the object is dropped here rather than carried onwards.
+    case "ping":
+      return { t: "ping" };
+    case "pong":
+      return { t: "pong" };
     default:
       return bad(`a control frame of unknown type ${JSON.stringify(m["t"])}`);
   }

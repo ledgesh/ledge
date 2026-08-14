@@ -98,6 +98,22 @@ function pipePair(): { a: Endpoint; b: Endpoint } {
 /** Let every queued microtask and the promises behind them run out. */
 const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
 
+/** A timer cranked by hand, for the heartbeat at both ends: forty seconds of
+ * silence costs a function call, and no test below waits for a clock. */
+function ticker() {
+  const ticks = new Set<() => void>();
+  return {
+    repeat: (_ms: number, tick: () => void) => {
+      ticks.add(tick);
+      return () => void ticks.delete(tick);
+    },
+    beat(times = 1) {
+      for (let i = 0; i < times; i++) for (const tick of [...ticks]) tick();
+    },
+    running: () => ticks.size,
+  };
+}
+
 /** Refusals are logged server-side, and a test that provokes six of them
  * should not bury its own output in them. */
 async function quiet<T>(fn: () => Promise<T>): Promise<T> {
@@ -353,6 +369,18 @@ describe("a server facing a misbehaving client", () => {
       client.send({ t: "push", m: "notesChanged", p: { root: "/" } });
       await settle();
       expect(client.last()).toMatchObject({ t: "bye", why: "a client may not send push" });
+    });
+  });
+
+  // The heartbeat has a direction (wire.ts): a client asks and a server
+  // answers, so a client that answers is a client out of sync.
+  test("a client that answers a probe nobody sent is refused", async () => {
+    await quiet(async () => {
+      const { client } = listen();
+      client.send(hello("client", "0.1.0"));
+      client.send({ t: "pong" });
+      await settle();
+      expect(client.last()).toMatchObject({ t: "bye", why: "a client may not send pong" });
     });
   });
 
@@ -778,16 +806,130 @@ describe("a replayed request applies once (remote.md §7)", () => {
   });
 });
 
+// --- the heartbeat, from the server's side (remote.md §7) ---------------------
+
+describe("a server and the clients that probe it", () => {
+  function listen(opts: { silentMs?: number; repeat?: ReturnType<typeof ticker>["repeat"]; serve?: boolean } = {}) {
+    const pipe = pipePair();
+    const server = serverConnection(pipe.a, {
+      build: "0.1.0",
+      ...(opts.silentMs === undefined ? {} : { silentMs: opts.silentMs }),
+      ...(opts.repeat === undefined ? {} : { repeat: opts.repeat }),
+    });
+    if (opts.serve !== false) server.serve(handlers());
+    const client = rawClient(pipe.b);
+    client.send(hello("client", "0.1.0"));
+    return { server, client };
+  }
+
+  // Answered by the transport rather than dispatched into the handler map,
+  // which is the whole reason it is a frame and not a request: the map arrives
+  // once the vault has loaded, and a probe queued behind a slow boot would
+  // report a dead server that is merely starting.
+  test("a probe is answered before the server has a single handler", async () => {
+    const { client } = listen({ serve: false });
+    client.send({ t: "ping" });
+    await settle();
+    expect(client.last()).toMatchObject({ t: "pong" });
+  });
+
+  test("a client that keeps probing is left alone", async () => {
+    const beats = ticker();
+    const { client } = listen({ silentMs: 40_000, repeat: beats.repeat });
+    for (let i = 0; i < 5; i++) {
+      client.send({ t: "ping" });
+      await settle();
+      beats.beat();
+    }
+    expect(client.isClosed()).toBe(false);
+    expect(client.heard.filter((m) => m.t === "pong").length).toBe(5);
+  });
+
+  // The ghost this exists for: a wire that black-holes leaves the daemon a
+  // connection nobody will ever close, its sessions open and its idle exit
+  // never armed.
+  test("a client that says nothing is collected, and told nothing", async () => {
+    await quiet(async () => {
+      const beats = ticker();
+      const { client } = listen({ silentMs: 40_000, repeat: beats.repeat });
+      await settle();
+      beats.beat();
+      expect(client.isClosed()).toBe(false);
+      beats.beat();
+      await settle();
+      expect(client.isClosed()).toBe(true);
+      // No `bye`, and that is deliberate: a farewell is a decision the client
+      // is meant to read and stop re-dialling over (shared/transport.ts), and
+      // this one is not reading anything.
+      expect(client.heard.some((m) => m.t === "bye")).toBe(false);
+    });
+  });
+
+  // A socket that connects and never identifies itself used to sit there for
+  // as long as the process did.
+  test("a socket that never greets is collected too", async () => {
+    await quiet(async () => {
+      const beats = ticker();
+      const pipe = pipePair();
+      serverConnection(pipe.a, { build: "0.1.0", silentMs: 40_000, repeat: beats.repeat });
+      const client = rawClient(pipe.b);
+      beats.beat(2);
+      await settle();
+      expect(client.isClosed()).toBe(true);
+    });
+  });
+
+  // Both ways a connection ends, because they are different code paths and the
+  // second is the ordinary one: a client hanging up is not this server
+  // deciding to. A watchdog left behind by either is a timer per dropped
+  // connection, forever, on the process meant to outlive them all.
+  test("the watchdog stops when the server closes the connection", () => {
+    const beats = ticker();
+    // Over a duplex whose close() does not call back, because a pipe's does:
+    // closing one end of a pipe hangs up the other, which would clear this by
+    // the path the test below is about and prove nothing about this one.
+    // Duplex promises no such courtesy — fedDuplex gives none
+    // (shared/transport.ts), and that is what the iOS shell hands over.
+    const bare: Duplex = { write: () => {}, close: () => {} };
+    const server = serverConnection(bare, { build: "0.1.0", silentMs: 40_000, repeat: beats.repeat });
+    expect(beats.running()).toBe(1);
+    server.close();
+    expect(beats.running()).toBe(0);
+  });
+
+  test("the watchdog stops when the client hangs up", async () => {
+    const beats = ticker();
+    const pipe = pipePair();
+    serverConnection(pipe.a, { build: "0.1.0", silentMs: 40_000, repeat: beats.repeat });
+    expect(beats.running()).toBe(1);
+    pipe.b.close();
+    await settle();
+    expect(beats.running()).toBe(0);
+  });
+});
+
 describe("a client that reconnects", () => {
   /** A server behind a dial() that can be cut and rebuilt, which is what a
    * dropped ssh looks like from this side. */
   function reconnectable(handlerMap: RequestHandlers, opts: { instance?: () => string; holdMax?: number } = {}) {
     const ops = createOpLog();
-    let current: { server: ServerConnection; pipe: ReturnType<typeof pipePair> } | null = null;
+    let current: { server: ServerConnection; pipe: ReturnType<typeof pipePair>; blackHole: () => void } | null = null;
     let dials = 0;
     const dial = (): Duplex => {
       dials += 1;
       const pipe = pipePair();
+      // A wire that can stop carrying bytes without closing: no FIN, no RST,
+      // no exit, nothing for either end to notice. `cut` below is a wire that
+      // ENDED, which every test but one here is about; this is the one that
+      // only the heartbeat can end.
+      let carrying = true;
+      const onwards = { a: pipe.a.write, b: pipe.b.write };
+      pipe.a.write = (bytes) => {
+        if (carrying) onwards.a(bytes);
+      };
+      pipe.b.write = (bytes) => {
+        if (carrying) onwards.b(bytes);
+      };
       const server = serverConnection(pipe.a, {
         build: "0.1.0",
         ops,
@@ -795,12 +937,13 @@ describe("a client that reconnects", () => {
         ...(opts.holdMax === undefined ? {} : { holdMax: opts.holdMax }),
       });
       server.serve(handlerMap);
-      current = { server, pipe };
+      current = { server, pipe, blackHole: () => (carrying = false) };
       return pipe.b;
     };
     return {
       dial,
       cut: () => current?.pipe.a.close(),
+      blackHole: () => current?.blackHole(),
       bye: (why: string) => current?.server.close(why),
       dials: () => dials,
       hold: () => current?.server.hold() ?? -1,
@@ -856,6 +999,39 @@ describe("a client that reconnects", () => {
     await client.requests.vaultState({}); // held until the ladder lands
     expect(wire.dials()).toBe(2);
     expect(wire.hold()).toBe(300_000);
+  });
+
+  // The failure everything else in this file is unable to produce, and the one
+  // the heartbeat was written for. Every other test here drops a wire by
+  // CLOSING it, which tells this end immediately. A network that goes away
+  // does neither: no FIN, no RST, no exit, and until the probes went unanswered
+  // there was nothing to notice.
+  test("a wire that stops carrying bytes is noticed, and the ladder climbs back", async () => {
+    const beats = ticker();
+    const states: string[] = [];
+    const wire = reconnectable(handlers());
+    const client = await reconnectingClient({
+      dial: wire.dial,
+      push: recordingPush().push,
+      build: "0.1.0",
+      onState: (s) => states.push(s),
+      heartbeat: { everyMs: 5_000, allowed: 3, repeat: beats.repeat },
+      ...instant,
+    });
+    wire.blackHole();
+
+    // Four beats: one that heard the hello, then three probes into the dark.
+    // Nothing has been decided, and nothing has been said to anybody.
+    beats.beat(4);
+    expect(states).toEqual([]);
+    expect(wire.dials()).toBe(1);
+
+    beats.beat();
+    expect(await client.requests.vaultState({})).toEqual({ state: "locked" });
+    expect(wire.dials()).toBe(2);
+    expect(states).toEqual(["reconnecting", "live"]);
+    // The dead connection's timer went with it, and the new one has its own.
+    expect(beats.running()).toBe(1);
   });
 
   test("a request made mid-reconnect waits instead of failing", async () => {

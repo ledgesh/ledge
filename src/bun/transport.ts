@@ -30,7 +30,7 @@ import {
   type ServerPush,
   type WireMessage,
 } from "../shared/wire";
-import type { Duplex } from "../shared/transport";
+import { DEAD_AFTER_MS, repeatEvery, type Duplex, type HeartbeatOpts } from "../shared/transport";
 import type { OpLog } from "./opLog";
 
 /** The server's half: hand `push` to createServer, then `serve` it the
@@ -103,10 +103,47 @@ export interface ServerOpts {
    * own ceiling, because it is the thing being kept alive.
    */
   holdMax?: number;
+  /**
+   * How long a client may say nothing before this connection is collected, in
+   * ms. 0 turns it off, which is for a test that is not about it.
+   *
+   * The mirror of the client's heartbeat and not a second mechanism: a live
+   * client probes whenever it has sent nothing for five seconds
+   * (shared/transport.ts), so silence for eight times that is a client that is
+   * not there. Without this, a wire that black-holes leaves the daemon a
+   * connection nobody will ever close — its sessions open, its idle exit never
+   * armed, and a shell running on somebody's server for as long as the machine
+   * is up. TCP will not end it either: a black hole has no FIN to send, and
+   * sshd probes its clients only if somebody configured it to.
+   */
+  silentMs?: number;
+  /** The timer, injectable exactly as the client's is, so a test can be about
+   * the rule rather than about forty seconds. */
+  repeat?: NonNullable<HeartbeatOpts["repeat"]>;
 }
+
+/**
+ * How long a server waits before deciding a silent client has gone.
+ *
+ * Twice what the client allows itself (`DEAD_AFTER_MS`), because a client that
+ * decided its own wire was dead is already re-dialling and the connection here
+ * is a ghost by then; this only has to outlast that decision, generously, so
+ * that a client whose timer merely ran late is never hung up on. Under the
+ * daemon's `IDLE_EXIT_MS` for the other side of it: a ghost should delay an
+ * unattended daemon's exit by less than one idle window, not forever.
+ */
+export const SILENT_MS = DEAD_AFTER_MS * 2;
 
 export function serverConnection(duplex: Duplex, opts: ServerOpts): ServerConnection {
   const { build, ops, coalesce, instance = "", greeted: onGreet, holdMax = 0 } = opts;
+  const silentMs = opts.silentMs ?? SILENT_MS;
+  // Set by any bytes at all and cleared by the watchdog below, so one quiet
+  // window is what it takes. Inbound only: a server pushing to a client that
+  // has gone would otherwise keep resetting its own patience, and with two
+  // clients a broadcast would keep a ghost alive for as long as the other one
+  // was there.
+  let heardFromClient = false;
+  let stopWatching: (() => void) | null = null;
   const decoder = new FrameDecoder();
   const incoming = new BinaryHolder();
   let handlers: RequestHandlers | null = null;
@@ -150,6 +187,8 @@ export function serverConnection(duplex: Duplex, opts: ServerOpts): ServerConnec
     if (!open) return;
     if (why !== undefined) send({ t: "bye", why });
     open = false;
+    stopWatching?.();
+    stopWatching = null;
     stopCoalescing();
     try {
       duplex.close();
@@ -261,6 +300,16 @@ export function serverConnection(duplex: Duplex, opts: ServerOpts): ServerConnec
         else waiting.push({ id: msg.id, m: msg.m, p, ...(msg.op === undefined ? {} : { op: msg.op }) });
         return;
       }
+      case "ping":
+        // Answered here rather than dispatched, and that is the point of
+        // answering it in the transport at all: the handler map arrives after
+        // the vault has loaded (`waiting` above), and a heartbeat queued behind
+        // a slow boot would report a dead server that is merely starting.
+        //
+        // What a pong therefore proves is that this process is reading its
+        // socket and writing to it, which is exactly the question, and more
+        // than any hop between here and the client can answer on its behalf.
+        return send({ t: "pong" });
       case "bye":
         return close();
       default:
@@ -272,6 +321,7 @@ export function serverConnection(duplex: Duplex, opts: ServerOpts): ServerConnec
   }
 
   duplex.onData = (chunk) => {
+    heardFromClient = true;
     let frames;
     try {
       frames = decoder.push(chunk);
@@ -295,6 +345,8 @@ export function serverConnection(duplex: Duplex, opts: ServerOpts): ServerConnec
   };
   duplex.onClose = () => {
     open = false;
+    stopWatching?.();
+    stopWatching = null;
     stopCoalescing();
     settle();
   };
@@ -309,6 +361,22 @@ export function serverConnection(duplex: Duplex, opts: ServerOpts): ServerConnec
   ) as unknown as ServerPush;
 
   raw(encodeControl(hello("server", build, "", instance, holdMax)));
+  // Without a reason, because there is nobody to tell. A `bye` is a decision
+  // the client is meant to read and stop re-dialling over (shared/transport.ts
+  // farewell), and a client that has said nothing for this long is by
+  // definition not reading anything. It also covers a socket that connected and
+  // never greeted, which until now could sit there for as long as the process
+  // did.
+  if (silentMs > 0) {
+    stopWatching = (opts.repeat ?? repeatEvery)(silentMs, () => {
+      if (heardFromClient) {
+        heardFromClient = false;
+        return;
+      }
+      console.error(`[wire] a client said nothing for ${Math.round(silentMs / 1000)}s; hanging up on it`);
+      close();
+    });
+  }
 
   return {
     push,

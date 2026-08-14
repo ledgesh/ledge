@@ -89,6 +89,16 @@ final class SSHTransport {
     /// either direction restarts the idle timer. A suspended app is a separate
     /// question with a separate answer (§5): the ladder is not running then,
     /// and what keeps the sessions is the hold it asked for, not a probe.
+    ///
+    /// These are now the BACKSTOP rather than the whole answer. The protocol
+    /// carries its own heartbeat (remote.md §7) and it runs in the page, in the
+    /// same JavaScript the Mac runs, so it reached this client by being written
+    /// once: a `ping` after five seconds of quiet, a `pong` from the daemon
+    /// itself, three unanswered and the connection ends. That one cannot be
+    /// answered on the server's behalf by a proxy, a bastion or a healthy sshd
+    /// in front of a stalled daemon, which is what these four cannot say. What
+    /// these still cover is the half above — a suspended app runs no timers,
+    /// and the kernel does not need one to be scheduled.
     private static let probeAfterIdle: CInt = 5
     private static let probeEvery: CInt = 5
     private static let probeCount: CInt = 3

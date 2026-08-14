@@ -244,6 +244,15 @@ found the client did not notice a silent wire at all — for two hours, which
 is when macOS first probes an idle socket — and the fix is three ssh options
 (`remote.md` §7).
 
+It also stalls its own server, which is the opposite instrument and the one
+worth reaching for first. `[stall]` sends SIGSTOP to the daemon and leaves
+everything else running, so TCP, its keepalives, sshd and the `serve` pump are
+all healthy and answering while the process holding the notes is not. Nothing
+below the protocol can see that, which is why the protocol has a heartbeat of
+its own, and why this step is where that claim is settled. SIGSTOP rather than a
+kill for the cut's reason turned around: the point is a server that is still
+THERE, so the same run of the same process has to answer once it is resumed.
+
 For `host:` EXECUTION hosts, which is a different feature (`remote.md` §6),
 the container is still yours to build, and the shape is: `openssh-server`,
 published on `127.0.0.1:22` so a bare `host: 127.0.0.1` is a
@@ -322,6 +331,20 @@ paired to a key stored for somewhere else.
 carries on and that requests are held; it cannot prove the phone NOTICING,
 because a published port terminates TCP and answers keepalives on the container's
 behalf (`ios.md` §13).
+
+To watch a phone notice, stall the server instead of cutting the wire:
+
+```
+docker exec ledge-ios-probe sh -c 'kill -STOP $(cat /home/ledge/.ledge/.server.pid)'
+docker exec ledge-ios-probe sh -c 'kill -CONT $(cat /home/ledge/.ledge/.server.pid)'
+```
+
+Everything between the two ends stays healthy and answering, so the bar reaching
+"reconnecting" in about twenty seconds is the protocol's heartbeat and can be
+nothing else (`remote.md` §7). `--serve` has the same pair as `stall` and
+`resume` for the device variant below. The pid file is under the `ledge`
+account rather than under the image's `/data`, because an ssh session does not
+inherit a Dockerfile's `ENV`.
 
 **The device variant** — for the four things a Simulator cannot be (`ios.md`
 §13): the phone's own enclave, a suspension that really suspends, a finger, and

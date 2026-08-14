@@ -97,6 +97,44 @@ const cutWire = () => {
   iptables("-I");
 };
 
+/**
+ * A server that stops answering while the wire stays perfect, and the same
+ * server again.
+ *
+ * The instrument is SIGSTOP on the daemon, and it is the cut's opposite in
+ * every way that matters. Nothing between the two ends breaks: the TCP
+ * connection is established and its keepalives are answered, sshd answers
+ * `ServerAliveInterval` from its own process, and `ledge-server serve` goes on
+ * pumping bytes into a unix socket whose reader is not running. Every
+ * mechanism below the protocol therefore reports a healthy connection,
+ * correctly, because from where each of them sits it is one.
+ *
+ * So this is the failure only the heartbeat can see, and the reason it is in
+ * the protocol rather than in a transport: a pong comes from the process
+ * holding the notes, and no hop between here and it can send one on its behalf.
+ *
+ * The pid is the daemon's own record of itself, beside its socket
+ * (bun/daemon.ts). The path is spelled out because two different accounts are
+ * involved and neither `$HOME` names the right one: the daemon belongs to the
+ * `ledge` account, since an ssh session does not inherit a Dockerfile's `ENV`
+ * and `LEDGE_NOTES_ROOT` is therefore unset when the forced command runs,
+ * leaving the app home at `~ledge/.ledge` rather than at the image's `/data`;
+ * while `docker exec` on this fixture lands as root, because the fixture adds
+ * an sshd and switches back to run it. The [container] step reads `/data`
+ * instead, and that is the same difference from the other side.
+ *
+ * A failed signal throws rather than passing quietly. Silence here does not
+ * fail the step, it EMPTIES it: the server goes on answering and the claim
+ * below reads as a client that noticed nothing, which is indistinguishable
+ * from the bug it is looking for.
+ */
+const PID_FILE = "/home/ledge/.ledge/.server.pid";
+const daemonPid = () => run(["docker", "exec", NAME, "sh", "-c", `cat ${PID_FILE}`], { quiet: true }).out.trim();
+const signalDaemon = (sig: "STOP" | "CONT") => {
+  const sent = run(["docker", "exec", NAME, "sh", "-c", `kill -${sig} $(cat ${PID_FILE})`], { quiet: true });
+  if (sent.code !== 0) throw new Error(`could not send SIG${sig} to the daemon: ${sent.err || sent.out || "no such process"}`);
+};
+
 try {
   // Port 22 and not a high one: sshCommand takes a DESTINATION, and an ssh
   // destination has no port in it (the same constraint testing.md §6 records
@@ -157,14 +195,20 @@ try {
   command, which is the same posture remote.md §4 asks of a real server.
 
   Copy the line the phone's pairing screen shows, paste it here, press Enter.
-  Type  cut   to stop this end answering, without closing anything. Requests
-              from the phone hang; the daemon and its shells carry on. The bar
-              will NOT reach "reconnecting", because this cut is behind
-              Docker's published port and that proxy answers the phone's
-              keepalives itself (ios.md §13). For the detection itself, take
-              this Mac off the network instead.
-  Type  mend  to let the replies through again.
+  Type  cut     to stop this end answering, without closing anything. Requests
+                from the phone hang; the daemon and its shells carry on.
+  Type  mend    to let the replies through again.
+  Type  stall   to stop the DAEMON while the wire stays perfect. The phone's
+                bar reaches "reconnecting" in about twenty seconds, and this is
+                the case that proves it: sshd, TCP and Docker's published port
+                are all healthy and answering, so the only thing that can
+                notice is the protocol's own heartbeat (remote.md §7).
+  Type  resume  to start it answering again; the ladder climbs back.
   Ctrl-C takes the fixture down and removes it.
+
+  A cut alone will NOT reach "reconnecting" from a Simulator: it is behind
+  Docker's published port, and that proxy answers the phone's keepalives
+  itself (ios.md §13). Use stall, or take this Mac off the network.
 `);
 
     // `$1` rather than interpolation: the line is pasted from another device
@@ -195,6 +239,20 @@ try {
           const cut = text === "cut";
           (cut ? cutWire : mendWire)();
           console.log(cut ? "  cut: replies dropped, and nothing tells the phone" : "  mended: replies are getting out again");
+          continue;
+        }
+        // The half a harness CAN supply for a phone, and the one the cut above
+        // cannot: everything between the two ends stays healthy and the server
+        // stops answering, so what the bar reports is the heartbeat and nothing
+        // else (`signalDaemon`).
+        if (text === "stall" || text === "resume") {
+          const stall = text === "stall";
+          signalDaemon(stall ? "STOP" : "CONT");
+          console.log(
+            stall
+              ? `  stalled: daemon ${daemonPid()} is stopped, the wire is perfect, the bar should turn in about 20s`
+              : "  resumed: the daemon is answering again",
+          );
           continue;
         }
         // A bare public key is the easy mistake and the difference matters: a
@@ -811,6 +869,56 @@ try {
     !inTheDark().includes(DARK),
   );
   ladder.close();
+
+  step("[stall] a server that stops answering with nothing wrong below the protocol");
+  // The cut above proves a client notices a wire that went away. This proves
+  // the other half, and it is the half the phone had no answer to at all: a
+  // wire that is fine and a SERVER that is not. `signalDaemon` says why nothing
+  // underneath can see it.
+  //
+  // One connection rather than the ladder, because what is being read here is
+  // the VERDICT and not the recovery. A held request never surfaces a reason
+  // (that is the point of holding it), so the ladder can only ever show that
+  // something happened; a plain connection fails its requests with the words
+  // that say what.
+  const pid = daemonPid();
+  check("the far machine's daemon names its own pid beside its socket", /^\d+$/.test(pid), `pid ${pid || "none"}`);
+  const stallEars = ears();
+  const stalled = clientConnection(spawnDuplex(argv), { push: stallEars.push, build: BUILD_VERSION, client: "probe-mac" });
+  await stalled.ready;
+  await stalled.requests.noteList({ root });
+  ok("a connection that is answering");
+
+  signalDaemon("STOP");
+  const stalledAt = Date.now();
+  const verdict = await Promise.race([
+    stalled.requests.noteList({ root }).then(
+      () => "answered anyway",
+      (err: Error) => err.message,
+    ),
+    Bun.sleep(60_000).then(() => "nothing was said in 60s"),
+  ]);
+  const noticedAfter = ((Date.now() - stalledAt) / 1000).toFixed(1);
+  // Asked while the client is giving up rather than before it starts, because
+  // the claim is about that moment: sshd is answering on the very machine the
+  // client is about to hang up on.
+  const stillListening = pickHostKey(run(["ssh-keyscan", "-T", "2", "127.0.0.1"], { quiet: true }).out);
+  signalDaemon("CONT");
+  check("sshd on that machine answered throughout, so nothing under the protocol had anything to notice", stillListening === hostKey);
+  check("the client gives up on a server that stopped answering", /stopped answering/.test(verdict), `${noticedAfter}s: ${verdict}`);
+  stalled.close();
+
+  // And the daemon was only stopped, never killed: the same process is still
+  // there with the notes it had, which is what makes this a stall rather than
+  // the crash the instance check is for (remote.md §7).
+  const resumed = clientConnection(spawnDuplex(argv), { push: ears().push, build: BUILD_VERSION, client: "probe-mac" });
+  const resumedHello = await resumed.ready;
+  check(
+    "and it is the same run of the same daemon once it is running again",
+    resumedHello.instance === hello.instance,
+    `instance ${resumedHello.instance.slice(0, 8)}`,
+  );
+  resumed.close();
 
   step("[container] the other deployment: PID 1 is the daemon, docker exec is the pump");
   run(["docker", "rm", "-f", `${NAME}-plain`], { quiet: true });

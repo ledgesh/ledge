@@ -174,7 +174,7 @@ This is the same arbitration a note gets from any other writer, including an age
 
 The bar reads "reconnecting…" and Ledge re-dials for about thirty seconds. Requests made in the meantime wait rather than fail.
 
-A drop the network does not announce takes about twenty seconds to notice. A connection that closes tells Ledge straight away. A network that simply goes away, such as wifi dropping or a laptop moving between networks, sends nothing at all, so Ledge asks the server every 5 seconds and treats three unanswered asks as a lost wire. The bar still reads as connected for those twenty seconds, and anything you send in that window is held and sent again once the connection is back.
+A drop the network does not announce takes twenty to twenty-five seconds to notice. A connection that closes tells Ledge straight away. A network that simply goes away, such as wifi dropping or a laptop moving between networks, sends nothing at all, so Ledge asks the server every 5 seconds and treats three unanswered asks as a lost wire. The same goes for a server that stops answering while the network is fine. The bar still reads as connected until then, and anything you send in that window is held and sent again once the connection is back.
 
 Anything running keeps running. Shells belong to the server and survive a wire dropping, so a build carries on while you are on a train and its output is waiting when you come back.
 

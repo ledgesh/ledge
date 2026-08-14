@@ -234,8 +234,8 @@ remote.md §7 measures on the Mac, and `SO_KEEPALIVE` on its own — which is wh
 this asked for before — is the first of them at Darwin's default idle time of two
 hours.
 
-**What that buys is not quite what the Mac gets, and the difference is a hop that
-terminates TCP.** A keepalive proves the nearest TCP PEER is alive.
+**What that buys on its own is not what the Mac gets, and the difference is a hop
+that terminates TCP.** A keepalive proves the nearest TCP PEER is alive.
 `ServerAliveInterval` proves the SERVER answered, because the reply has to come
 from sshd. Anything in between that ends one TCP connection and begins another —
 a published Docker port, a bastion forwarding a port, a load balancer — answers
@@ -243,7 +243,21 @@ the probes out of its own kernel, and the client learns nothing about the machin
 behind it. The deployments remote.md §4 and `docs/user/` describe have no such
 hop: the machine's own sshd answers, and the Docker one reaches into the
 container with `docker exec` rather than publishing a port. The probe fixture is
-the exception, which is exactly why it cannot test this (§13).
+the exception, which is why a cut wire there proves nothing about a phone (§13).
+
+**What closes that gap is above ssh rather than under it.** The protocol carries
+its own heartbeat now (remote.md §7): the client sends a `ping` after five
+seconds of quiet and the daemon answers `pong`, three unanswered probes end the
+connection, and all of that is in `shared/transport.ts` — which is to say it
+runs in the webview and reached this client by being written once. A pong comes
+from the process holding the notes, so no proxy, bastion or load balancer can
+send one on the server's behalf, and neither can a healthy sshd in front of a
+daemon that has stopped answering.
+
+The four socket options stay, and the reason is §5. A suspended app runs no
+timers, so its heartbeat does not beat; the kernel's keepalives do not care
+whether anything is scheduled. The two mechanisms cover the two halves of a
+phone's life, which is why this client has both and the Mac has ssh's as well.
 
 **The key algorithms line up with the Mac's, by luck rather than by
 agreement.** NIOSSH offers `ssh-ed25519` first, which is also the first entry
@@ -1112,6 +1126,17 @@ ServerAlive needs an answer from sshd and no proxy can forge one. It is the same
 asymmetry §3 describes, arriving as a test that cannot be written rather than as
 a bug.
 
+**`--serve`'s `stall` is the way around it, and it is a better instrument than
+the cut.** It sends SIGSTOP to the daemon in the container and leaves everything
+else running: TCP is established, Docker's proxy is healthy, sshd answers its
+own keepalives, and `ledge-server serve` goes on pumping bytes into a socket
+whose reader is not scheduled. Every mechanism under the protocol therefore
+reports a working connection, correctly. The phone's bar reaches "reconnecting"
+in about twenty seconds anyway, because the heartbeat's pong has to come from
+the stopped process and cannot (§3). `resume` sends SIGCONT and the ladder
+climbs back. The assertion run does the same thing to itself in `[stall]`, so
+the Mac's version of this claim is not a manual one.
+
 What the cut does still prove on a phone is the other half: the daemon keeps
 running, the shells keep printing, and the requests made during the gap are held
 rather than failed. What proves the DETECTION is a black hole with nothing in the
@@ -1338,13 +1363,15 @@ inside the Mac app.
    what the ✕ did.
 
    And one more, which is a device's for a different reason: **the twenty
-   seconds §3's keepalive options are supposed to take.** The options are the
-   Mac's numbers and Darwin stores them, but nothing here can watch them fire,
-   because the only black hole a Simulator can be pointed at is behind a
-   published Docker port that answers the probes itself (§13). A phone holding a
-   connection to `--serve` while this Mac leaves the network is the one setup
-   with nothing in the middle. A radio has the real version of it anyway: a
-   tunnel, a lift, a dead zone.
+   seconds §3's keepalive OPTIONS are supposed to take.** The protocol's
+   heartbeat is provable in a Simulator and is proved there, with `--serve`'s
+   `stall` (§13). The socket options are not, and they are the half that covers
+   a suspended app: the options are the Mac's numbers and Darwin stores them,
+   but the only black hole a Simulator can be pointed at is behind a published
+   Docker port that answers the probes itself. A phone holding a connection to
+   `--serve` while this Mac leaves the network is the one setup with nothing in
+   the middle. A radio has the real version of it anyway: a tunnel, a lift, a
+   dead zone.
 
 Live command execution is the phase after v1, and it is in the client now:
 `ios.tsx` says `runsBlocks: true`. The two things §5 said it had to answer first
