@@ -610,6 +610,15 @@ matches and the sessions are still there. Not hanging up costs the session.
 An ordinary blip is far shorter than twenty seconds and is never noticed at
 all, which is what TCP retransmission is for.
 
+**The phone reaches the same twenty seconds by asking TCP rather than ssh.**
+NIOSSH ships no keepalive and no way to send one, so
+`ios/Sources/SSHTransport.swift` sets Darwin's per-socket options instead:
+probes on an idle wire, and a cap on the retransmit episode for a wire with a
+write outstanding, because TCP splits into two mechanisms what ssh does with one.
+The numbers are the numbers above. What differs is who answers — a keepalive is
+answered by the nearest TCP peer and a `ServerAlive` by sshd itself — so a hop
+that terminates TCP hides a drop from the phone and not from the Mac (ios.md §3).
+
 **A client that loses the wire re-dials rather than failing.** The ladder is
 250ms doubling to 8s and then holding there, eight attempts and 31.75 seconds
 in total, and that number is not arbitrary: it has to finish inside the

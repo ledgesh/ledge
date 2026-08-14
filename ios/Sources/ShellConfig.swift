@@ -119,11 +119,36 @@ enum ServerStore {
     /// pin is not: connecting to it would mean trusting whatever answers, which
     /// is the one thing remote.md §4 does not allow.
     static func selected() -> ServerRecord? {
+        if let launched = launched() { return launched }
         let stored = load()
         guard let record = stored.servers.first(where: { $0.id == stored.selected }), !record.hostKey.isEmpty else {
             return nil
         }
         return record
+    }
+
+    /// A pairing that came from the launch arguments, for one launch.
+    ///
+    /// `-LedgeServer ledge@127.0.0.1 -LedgeHostKey "ssh-ed25519 AAAA…"` is how
+    /// testing.md §6 points a Simulator at a scratch server without a human
+    /// tapping Trust. Both halves are read from the ARGUMENT domain and BOTH
+    /// are required, which is what makes it safe: an address and a pin that
+    /// named each other on one command line cannot be mismatched, and that
+    /// mismatch is the whole reason `migrated()` below reads the persistent
+    /// domain instead. Nothing is written, so this vanishes at the next launch
+    /// and shadows what is stored rather than replacing it.
+    ///
+    /// It is not a back door. Nothing on a device can set an argument domain,
+    /// and the pin here is compared on every connection like any other.
+    private static func launched() -> ServerRecord? {
+        let argv = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
+        guard let destination = argv[destinationKey] as? String,
+            let hostKey = argv[hostKeyKey] as? String,
+            !hostKey.isEmpty,
+            ServerRecord.problem(with: destination) == nil
+        else { return nil }
+        let host = String(destination.drop(while: { $0 != "@" }).dropFirst())
+        return ServerRecord(id: "launch-argument", name: host, destination: destination, hostKey: hostKey)
     }
 
     static func save(servers: [ServerRecord], selected: String) {

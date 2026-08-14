@@ -20,11 +20,18 @@ import NIOSSH
 /// | `UserKnownHostsFile`             | the stored record               |
 /// | `BatchMode=yes`                  | no prompt exists to suppress    |
 /// | no `-t`                          | an exec request, never a pty    |
+/// | `ServerAliveInterval=5`          | `TCP_KEEPALIVE`, `TCP_KEEPINTVL`|
+/// | `ServerAliveCountMax=3`          | `TCP_KEEPCNT`                   |
+/// | `ConnectTimeout=10`              | `dialTimeout` (a wider bound)   |
 ///
 /// The first row is the one that matters and it is the row that does not move.
 /// The restriction lives in the server's `authorized_keys`, so it is indifferent
 /// to what the client is written in: a client that speaks SSH badly gets a
 /// connection that fails, not a capability nobody granted it.
+///
+/// The last three rows are the only ones where the phone needs a different
+/// MECHANISM rather than a different implementation of the same one, and
+/// `probeAfterIdle` below says why.
 ///
 /// This class parses no frame and knows no method name.
 final class SSHTransport {
@@ -48,6 +55,51 @@ final class SSHTransport {
     /// One group for the process. A group per dial would be a thread pair per
     /// reconnect, and reconnecting is the ordinary path on a phone (§5).
     private static let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
+
+    /// What `ServerAliveInterval` and `ServerAliveCountMax` buy the Mac, in the
+    /// two forms TCP has for it (remote.md §7).
+    ///
+    /// A network that goes away does not end a connection. There is no FIN and
+    /// no RST; the socket stays open and the bytes stop. Everything the page
+    /// does about a lost server — the ladder, the held requests, the replay
+    /// under the same op ids — is armed by the connection ENDING, so on the
+    /// client that loses wires for a living, this is what has to end it.
+    ///
+    /// OpenSSH needs one mechanism for both cases because it counts at the
+    /// application layer: a SERVER_ALIVE that went unanswered went unanswered
+    /// whether or not there was data outstanding. The kernel has two, and which
+    /// one runs depends on exactly that.
+    ///
+    /// - **Nothing in flight.** Keepalive probes: the first after
+    ///   `probeAfterIdle` seconds of quiet, another every `probeEvery`, and the
+    ///   socket fails once `probeCount` go unanswered. `SO_KEEPALIVE` alone,
+    ///   which is all this asked for before, is this case at Darwin's default
+    ///   idle time of two HOURS.
+    /// - **A request in flight whose bytes were never acknowledged.** No
+    ///   keepalive fires at all — TCP only probes an idle connection — and the
+    ///   retransmit timer decides instead. Its own limit is TCP_MAXRXTSHIFT
+    ///   doublings, which is minutes. `dropAfterStall` caps the episode.
+    ///
+    /// Both land on the twenty seconds the Mac measures, and for the same
+    /// reason: hanging up on a link that was only stalled costs a reconnect,
+    /// and not hanging up costs the session.
+    ///
+    /// The cost while nothing is happening is one 40-byte segment every five
+    /// seconds, and only while the wire is genuinely idle — any traffic in
+    /// either direction restarts the idle timer. A suspended app is a separate
+    /// question with a separate answer (§5): the ladder is not running then,
+    /// and what keeps the sessions is the hold it asked for, not a probe.
+    private static let probeAfterIdle: CInt = 5
+    private static let probeEvery: CInt = 5
+    private static let probeCount: CInt = 3
+    private static let dropAfterStall: CInt = 20
+
+    /// A TCP-level option by its Darwin number. NIO gives names to the options
+    /// every platform shares (`.tcp_nodelay`) and all four of these are Darwin's
+    /// own, so the `netinet/tcp.h` name is what the call sites read.
+    private static func tcp(_ name: CInt) -> ChannelOptions.Types.SocketOption {
+        .tcpOption(.init(rawValue: name))
+    }
 
     private let server: ServerRecord
     private let key: DeviceKey.Held
@@ -114,11 +166,16 @@ final class SSHTransport {
         )
 
         ClientBootstrap(group: loop)
-            // The one thing this asks of TCP. A phone's connection dies in ways
-            // a socket does not notice (a NAT that forgets, a radio that
-            // changes), and a keepalive turns some of those into a hangup the
-            // page's ladder can act on rather than a write that hangs.
+            // What this asks of TCP, and the numbers above say why. A phone's
+            // connection dies in ways a socket does not notice (a NAT that
+            // forgets, a radio that changes, a tunnel that ends), and these turn
+            // those into a hangup the page's ladder can act on rather than a
+            // write that hangs and a UI that goes on claiming it is connected.
             .channelOption(ChannelOptions.socketOption(.so_keepalive), value: 1)
+            .channelOption(Self.tcp(TCP_KEEPALIVE), value: Self.probeAfterIdle)
+            .channelOption(Self.tcp(TCP_KEEPINTVL), value: Self.probeEvery)
+            .channelOption(Self.tcp(TCP_KEEPCNT), value: Self.probeCount)
+            .channelOption(Self.tcp(TCP_RXT_CONNDROPTIME), value: Self.dropAfterStall)
             .channelInitializer { channel in
                 // Synchronously, on the loop the channel already belongs to.
                 // The asynchronous `addHandlers` wants its handlers to be

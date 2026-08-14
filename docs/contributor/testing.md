@@ -300,7 +300,7 @@ filesystem is the scratch root, so nothing has to be pointed away from
 ```
 bun run ios -- --build                        # build; the app mints its key at first launch
 xcrun simctl launch --console-pty <dev> dev.ledge.ios     # read the [pair] line
-docker run -d --name ledge-ios-probe -p 127.0.0.1:22:22 \
+docker run -d --name ledge-ios-probe --cap-add=NET_ADMIN -p 127.0.0.1:22:22 \
   -e LEDGE_PUBKEY="<that key>" ledge-sshd:probe
 ssh-keyscan -t ed25519 127.0.0.1              # the line to pin
 xcrun simctl launch --console-pty <dev> dev.ledge.ios \
@@ -313,7 +313,15 @@ UserDefaults reads `-key value` pairs off the command line, which is how
 that considers itself paired without a human tapping Trust. Nothing on a device
 can set those, the pin is still compared on every connection, and the values
 live in the argument domain, so they vanish at the next launch and shadow
-anything the app stores.
+anything the app stores. BOTH are required: an address on its own lands on the
+pairing screen, because a launch argument that named no key would otherwise be
+paired to a key stored for somewhere else.
+
+`NET_ADMIN` is there so the container can cut its own wire, which is what
+`[drop]` does to itself in the Bun probe. On a phone a cut proves that the server
+carries on and that requests are held; it cannot prove the phone NOTICING,
+because a published port terminates TCP and answers keepalives on the container's
+behalf (`ios.md` §13).
 
 **The device variant** — for the four things a Simulator cannot be (`ios.md`
 §13): the phone's own enclave, a suspension that really suspends, a finger, and

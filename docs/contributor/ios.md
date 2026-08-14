@@ -221,6 +221,30 @@ events and expects an application around them.
   for the nil case and nothing in the library ever calls it, so answering nil
   sends no message and waits for the server's login grace period.
 
+**A keepalive is not one of those blocks; it is not there at all.** NIOSSH sends
+nothing periodically and exposes no way to make it:
+`sendTCPForwardingRequest` is the only global request on the handler, and the
+generic `sendGlobalRequestMessage` beside it is internal. There is no
+`ServerAliveInterval` to configure, so `SSHTransport.swift` asks TCP instead,
+with four socket options on the connection. `TCP_KEEPALIVE`, `TCP_KEEPINTVL` and
+`TCP_KEEPCNT` cover a wire with nothing in flight; `TCP_RXT_CONNDROPTIME` covers
+one with an unacknowledged write, because TCP probes only an idle connection and
+lets the retransmit timer decide otherwise. Both paths land on the twenty seconds
+remote.md §7 measures on the Mac, and `SO_KEEPALIVE` on its own — which is what
+this asked for before — is the first of them at Darwin's default idle time of two
+hours.
+
+**What that buys is not quite what the Mac gets, and the difference is a hop that
+terminates TCP.** A keepalive proves the nearest TCP PEER is alive.
+`ServerAliveInterval` proves the SERVER answered, because the reply has to come
+from sshd. Anything in between that ends one TCP connection and begins another —
+a published Docker port, a bastion forwarding a port, a load balancer — answers
+the probes out of its own kernel, and the client learns nothing about the machine
+behind it. The deployments remote.md §4 and `docs/user/` describe have no such
+hop: the machine's own sshd answers, and the Docker one reaches into the
+container with `docker exec` rather than publishing a port. The probe fixture is
+the exception, which is exactly why it cannot test this (§13).
+
 **The key algorithms line up with the Mac's, by luck rather than by
 agreement.** NIOSSH offers `ssh-ed25519` first, which is also the first entry
 in `connections.ts`'s `KEY_PREFERENCE`, so a pin taken by `ssh-keyscan` on a
@@ -1077,6 +1101,25 @@ Per `testing.md`'s categories:
   and "unprovable" — but the enclave a Simulator reaches is the host Mac's SEP,
   so the trap below stays untested until a phone runs this.
 
+One trap about the fixture rather than the Simulator: **the probe's cut wire is
+behind a hop that terminates TCP.** `scripts/probe-ssh.ts` publishes the
+container's port 22, and on Docker Desktop the client's connection therefore ends
+at a proxy process on this Mac. Cutting the container's egress — `[drop]`, and
+`--serve`'s `cut` — severs the inner connection and leaves the outer one
+perfectly healthy, so that proxy goes on acknowledging the phone's keepalive
+probes and the phone notices nothing. The Mac client is unaffected, because ssh's
+ServerAlive needs an answer from sshd and no proxy can forge one. It is the same
+asymmetry §3 describes, arriving as a test that cannot be written rather than as
+a bug.
+
+What the cut does still prove on a phone is the other half: the daemon keeps
+running, the shells keep printing, and the requests made during the gap are held
+rather than failed. What proves the DETECTION is a black hole with nothing in the
+middle to answer, and the cheapest one is taking this Mac off the network while
+the phone holds a connection to it. A Simulator has no equivalent: its server is
+on loopback, and loopback cannot be black-holed without a packet filter and a
+password.
+
 One trap to write down before it is stepped in: **the Simulator's Secure
 Enclave is not the device's.** A key-generation path that quietly falls back
 to a software key when the enclave is unavailable is a path that ships, and
@@ -1293,6 +1336,15 @@ inside the Mac app.
    `hoverOnlyWhenSupported` never gated it, and Playwright's touch emulation is
    not the ContentChangeObserver. It taps fine in the harness, which is exactly
    what the ✕ did.
+
+   And one more, which is a device's for a different reason: **the twenty
+   seconds §3's keepalive options are supposed to take.** The options are the
+   Mac's numbers and Darwin stores them, but nothing here can watch them fire,
+   because the only black hole a Simulator can be pointed at is behind a
+   published Docker port that answers the probes itself (§13). A phone holding a
+   connection to `--serve` while this Mac leaves the network is the one setup
+   with nothing in the middle. A radio has the real version of it anyway: a
+   tunnel, a lift, a dead zone.
 
 Live command execution is the phase after v1, and it is in the client now:
 `ios.tsx` says `runsBlocks: true`. The two things §5 said it had to answer first

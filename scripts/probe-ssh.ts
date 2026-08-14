@@ -71,6 +71,32 @@ async function teardown() {
   await rm(SCRATCH, { recursive: true, force: true });
 }
 
+/**
+ * A wire that stops carrying bytes, and the same wire again.
+ *
+ * The instrument is an iptables rule inside the container, on the way OUT.
+ * From a client's end that is a severed wire exactly: nothing arrives, and
+ * nothing says why — no FIN, no RST, no exit. What it buys over cutting both
+ * directions is that a request still REACHES the far machine and is executed,
+ * and only its answer is lost, which is the one condition bun/opLog.ts was
+ * written for.
+ *
+ * Not `docker pause` and not `docker kill`. Both take the far end down with the
+ * wire, and half of what is being claimed is that the daemon and its shells
+ * carry on while the client cannot see them.
+ *
+ * Both directions delete the rule first, so they are idempotent: a cut asked
+ * for twice leaves one rule rather than two for a mend to peel off one at a
+ * time.
+ */
+const RULE = ["OUTPUT", "-p", "tcp", "--sport", "22", "-j", "DROP"];
+const iptables = (flag: string) => run(["docker", "exec", NAME, "iptables", flag, ...RULE], { quiet: true });
+const mendWire = () => iptables("-D");
+const cutWire = () => {
+  iptables("-D");
+  iptables("-I");
+};
+
 try {
   // Port 22 and not a high one: sshCommand takes a DESTINATION, and an ssh
   // destination has no port in it (the same constraint testing.md §6 records
@@ -90,11 +116,14 @@ try {
   const keyPath = join(SCRATCH, "id_ed25519");
   run(["ssh-keygen", "-t", "ed25519", "-N", "", "-C", "ledge-probe", "-f", keyPath]);
   const pub = (await readFile(`${keyPath}.pub`, "utf8")).trim();
-  // NET_ADMIN only for the assertion run, which is the only one that cuts its
-  // own wire ([drop]). A fixture standing open on every interface for a phone
-  // has no business holding a capability it never uses.
-  const capability = SERVE ? [] : ["--cap-add=NET_ADMIN"];
-  run(["docker", "run", "-d", "--name", NAME, ...capability, "-p", SERVE ? "22:22" : "127.0.0.1:22:22", "-e", `LEDGE_PUBKEY=${pub}`, FIXTURE]);
+  // NET_ADMIN for both modes, because both cut the wire: the assertion run does
+  // it to itself in [drop], and --serve does it on command so a phone's own
+  // detection can be watched (ios.md §5). The capability reaches the container's
+  // network namespace and nothing outside it.
+  run([
+    ...["docker", "run", "-d", "--name", NAME, "--cap-add=NET_ADMIN"],
+    ...["-p", SERVE ? "22:22" : "127.0.0.1:22:22", "-e", `LEDGE_PUBKEY=${pub}`, FIXTURE],
+  ]);
   console.log(`  authorized_keys: restrict,command="ledge-server serve" ${pub.slice(0, 32)}…`);
 
   step("[pair] scan the host key and pin it, the way the app's pairing does");
@@ -128,6 +157,13 @@ try {
   command, which is the same posture remote.md §4 asks of a real server.
 
   Copy the line the phone's pairing screen shows, paste it here, press Enter.
+  Type  cut   to stop this end answering, without closing anything. Requests
+              from the phone hang; the daemon and its shells carry on. The bar
+              will NOT reach "reconnecting", because this cut is behind
+              Docker's published port and that proxy answers the phone's
+              keepalives itself (ios.md §13). For the detection itself, take
+              this Mac off the network instead.
+  Type  mend  to let the replies through again.
   Ctrl-C takes the fixture down and removes it.
 `);
 
@@ -150,6 +186,17 @@ try {
       for await (const raw of console) {
         const text = raw.trim();
         if (!text) continue;
+        // The wire, by hand. A phone cannot be driven from here, so the half of
+        // the claim a harness can supply is the cut itself: the server keeps
+        // running while the client cannot see it, and the requests made in the
+        // gap are held. The other half — noticing — is not testable through a
+        // published port at all (ios.md §13).
+        if (text === "cut" || text === "mend") {
+          const cut = text === "cut";
+          (cut ? cutWire : mendWire)();
+          console.log(cut ? "  cut: replies dropped, and nothing tells the phone" : "  mended: replies are getting out again");
+          continue;
+        }
         // A bare public key is the easy mistake and the difference matters: a
         // line with no restriction on it is a key that can open a shell. Wrap
         // it rather than refuse it, because the phone's own line already has
@@ -632,21 +679,16 @@ try {
   // that the client did not notice for two hours (connections.ts, the three
   // options above BatchMode).
   //
-  // The instrument is an iptables rule inside the container, on the way OUT.
-  // From this end that is a severed wire exactly: nothing arrives, and nothing
-  // says why. What it buys over cutting both directions is that the write below
-  // REACHES the far machine and is executed, and only its answer is lost —
-  // which is the one condition bun/opLog.ts was written for and the one the
-  // dedupe has never been asked about anywhere but on a connection that was
-  // working perfectly.
+  // The instrument is `cutWire` above, which drops the fixture's replies and
+  // nothing else — so the write below REACHES the far machine and is executed,
+  // and only its answer is lost. That is the one condition bun/opLog.ts was
+  // written for and the one the dedupe has never been asked about anywhere but
+  // on a connection that was working perfectly.
   //
   // It is also the first thing here to drive reconnectingClient rather than one
   // connection. The ladder, the held requests, the replay under the same op and
   // the instance check are all its, and they had only ever climbed against a
   // duplex a test wrote (transport.test.ts).
-  const wire = (flag: "-I" | "-D") =>
-    run(["docker", "exec", NAME, "iptables", flag, "OUTPUT", "-p", "tcp", "--sport", "22", "-j", "DROP"], { quiet: true });
-
   const states: string[] = [];
   const cutEars = ears();
   const ladder = await reconnectingClient({
@@ -686,7 +728,7 @@ try {
   const DARK = "PRINTED-INTO-THE-42";
   await ladder.requests.terminalInput({ sessionId: "s3", dataB64: btoa("sleep 5; echo PRINTED-INTO-THE-$((6*7))\n") });
 
-  wire("-I");
+  cutWire();
   const cutAt = Date.now();
   console.log("  the wire is cut: the server's replies are dropped, and nothing tells this end");
 
@@ -729,7 +771,7 @@ try {
   await Bun.sleep(500);
   check("a request made while it is down waits instead of failing", gapSettled === "", gapSettled || "held");
 
-  wire("-D");
+  mendWire();
   const mendedAt = Date.now();
   for (let i = 0; i < 400 && states.at(-1) !== "live"; i++) await Bun.sleep(100);
   check(
