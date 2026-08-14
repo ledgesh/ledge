@@ -29,7 +29,7 @@ import { VaultDialog } from "@/components/VaultDialog";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { lockNoteAndRefresh, removeLockAndRefresh } from "@/vault/channel";
 import type { VaultFollowUp } from "@/commands/types";
-import { listTags, onExternalOpen, onNotesChanged, takeOpenRequest, type ExternalOpenInfo } from "@/notes/channel";
+import { listTags, onExternalOpen, onNotesChanged, onNotesRelink, takeOpenRequest, type ExternalOpenInfo } from "@/notes/channel";
 import type { TagInfo } from "../shared/tags";
 import { CommandProvider, useCommands } from "@/commands/CommandProvider";
 import { ProfileEditor } from "@/components/ProfileEditor";
@@ -567,11 +567,21 @@ function Shell() {
       if (folders.includes(root)) void refreshFolder(root, dispatch);
       void reloadOpenNotes();
     });
+    // A wire coming back is the same staleness as a window coming forward, and
+    // it needs the same answer for every root at once: the pushes that would
+    // have named which ones moved were dropped while it was down
+    // (notes/channel.ts onNotesRelink), so nothing here knows. Focus is no
+    // substitute — watching the bar say "reconnecting…" never leaves the
+    // window, and a phone has no such event to wait for (ios.md §5). Concurrent
+    // like the focus refresh, so the whole sweep is one round trip (remote.md
+    // §12) however many folders and tabs are open.
+    const offRelink = onNotesRelink(refresh);
     return () => {
       window.removeEventListener("blur", flush);
       window.removeEventListener("pagehide", flush);
       window.removeEventListener("focus", refresh);
       offChanged();
+      offRelink();
     };
     // Keyed on the folder LIST (joined), not the array identity: workspaces
     // re-render often, their folder set changes rarely.

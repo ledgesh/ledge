@@ -188,6 +188,10 @@ This reaches only the blocks that device started. A server can be carrying runs 
 
 A save that was in flight when the wire dropped is retried once the connection is back, and applied once, even if the first attempt had already landed.
 
+Notes that changed on the server while you were away are re-read as soon as the connection is back. Another device saving, a checkout in a terminal, an agent writing to a note: none of that reaches you while the wire is down, so Ledge asks every open workspace for its list again and re-reads the notes you have open. A note somebody added appears in the sidebar, and an open note you had not touched pours in the newer text.
+
+A note you were editing keeps exactly what you typed. If that note also changed on the server, the two are settled on your next save the same way any two devices editing at once are (see above): your version is saved, and the one it displaced goes to the workspace trash with a notice naming the note.
+
 Locked notes relock while you are away, and Ledge catches up the moment the connection is back. The vault belongs to the server and shuts itself after 15 minutes with nothing to do ([[Note Locking]]), and a connection that is down is 15 quiet minutes. So a locked note you had open goes back to its placeholder on the reconnect, exactly as if you had pressed ⌘L, and unlocking again pours it back. Unlocking on another machine reaches you the same way: a note sitting behind its placeholder opens as soon as the connection is back.
 
 Anything you typed into a locked note during the outage goes with it. That text could not have reached the disk either way, because writing a locked note needs the vault open, so copy it somewhere else before you reconnect if you want to keep it.

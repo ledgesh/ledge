@@ -188,6 +188,37 @@ export function dispatchNotesChanged(root: string): void {
   for (const fn of changeSubs) fn(root);
 }
 
+// --- the wire coming back ----------------------------------------------------
+// Not Bun's, unlike everything above: this end raises it about its own
+// connection (wire.ts CLIENT_PUSHES) and boot.tsx feeds it in. It lives here
+// because what a dropped wire costs is precisely what `notesChanged` covers.
+//
+// A push with nowhere to go is dropped rather than queued (bun/daemon.ts), so
+// every `notesChanged` for every root that moved while the wire was down is
+// simply gone — another device's save, a git checkout, an agent working in a
+// drawer. Nothing re-sends them, and the lists and every open buffer go on
+// showing what was true when the wire went. Window focus is the belt that
+// catches this on a Mac, and it is no help at all where it matters most: the
+// window never left, or there is no window focus to have (ios.md §5).
+//
+// One sink, replaced not stacked, like the drawer's (terminal/channel.ts):
+// App owns the folder list and the open tabs and is the only thing that can
+// answer. The tags and backlinks panels need no subscription of their own —
+// they re-fetch when the store's note list for their folder changes, which is
+// what the refresh produces.
+let relinkSink: (() => void) | null = null;
+
+export function onNotesRelink(sink: () => void): () => void {
+  relinkSink = sink;
+  return () => {
+    if (relinkSink === sink) relinkSink = null;
+  };
+}
+
+export function dispatchNotesRelink(): void {
+  relinkSink?.();
+}
+
 // --- external open requests --------------------------------------------------
 // `ledge <title>` with the app already running (rpc openExternal): Bun has
 // resolved the title, guarded the path, and read the meta; the view's whole

@@ -27,7 +27,7 @@ import {
   dispatchTerminalDetached,
   dispatchTerminalRelink,
 } from "./terminal/channel";
-import { configureNotes, dispatchExternalOpen, dispatchNotesChanged } from "./notes/channel";
+import { configureNotes, dispatchExternalOpen, dispatchNotesChanged, dispatchNotesRelink } from "./notes/channel";
 import { configureVault, recordVaultState, refreshVaultState } from "./vault/channel";
 import { configureWorkspaces, recordDailyRoot, recordWorkspaceKinds } from "./workspace/channel";
 import { configureClipboard } from "./lib/clipboard";
@@ -86,7 +86,7 @@ export const viewPush: ViewPush = {
     //
     // And of the drawer's shell, for the same reason and in the same breath. A
     // reconnect is announced only for the SAME server (a restarted one is
-    // refused outright, shared/transport.ts), so all three questions are being
+    // refused outright, shared/transport.ts), so all four questions are being
     // asked of a machine that still has the answers.
     //
     // The third is the vault, whose `vaultChanged` was dropped with the rest.
@@ -97,10 +97,16 @@ export const viewPush: ViewPush = {
     // plaintext on screen for as long as the tab stays open, which is the thing
     // the relock exists to prevent. Asking costs nothing when nothing moved:
     // the mirror notifies only on a change.
+    //
+    // And the fourth is the note store, for the plainest version of the same
+    // reason: every `notesChanged` for every root that moved meanwhile was
+    // dropped, and no push names them afterwards, so the answer is to re-read
+    // the lot (notes/channel.ts onNotesRelink).
     if (state === "live") {
       void reconcileRuns();
       dispatchTerminalRelink();
       void refreshVaultState().catch(() => {});
+      dispatchNotesRelink();
     }
   },
 };

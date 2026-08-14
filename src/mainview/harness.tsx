@@ -22,7 +22,7 @@ import { configureBridge, dispatchRunEvent, reconcileRuns } from "./editor/bridg
 import { sendRunKey } from "./editor/inlineTerm";
 import { barFaceOf, type BarFace } from "./lib/nativeBridge";
 import { configureTerminal, dispatchTerminalDetached, dispatchTerminalRelink } from "./terminal/channel";
-import { configureNotes, dispatchExternalOpen, dispatchNotesChanged, type ExternalOpenInfo, type NoteFile } from "./notes/channel";
+import { configureNotes, dispatchExternalOpen, dispatchNotesChanged, dispatchNotesRelink, type ExternalOpenInfo, type NoteFile } from "./notes/channel";
 import { configureVault, recordVaultState, refreshVaultState } from "./vault/channel";
 import { configureWorkspaces, recordWorkspaceKinds } from "./workspace/channel";
 import { configureClipboard } from "./lib/clipboard";
@@ -1096,7 +1096,7 @@ window.__harness = {
   vaultMoved: (state) => {
     store.vault.state = state;
   },
-  // The same four things boot.tsx's connectionState push does, because a
+  // The same five things boot.tsx's connectionState push does, because a
   // reconnect that did not reconcile is not the reconnect the app performs.
   linkState: (state, detail) => {
     recordLinkState(state, detail);
@@ -1104,6 +1104,7 @@ window.__harness = {
       void reconcileRuns();
       dispatchTerminalRelink();
       void refreshVaultState().catch(() => {});
+      dispatchNotesRelink();
     }
   },
   store,

@@ -472,6 +472,31 @@ the reconnect instead of leaving it pending behind a save that will keep
 failing. Not evicting would trade it for plaintext left on screen by the relock
 that was supposed to clear it, which is the wrong side of that trade.
 
+**The note store is re-read too, and it is the one with a belt already on it.**
+Every `notesChanged` for every root that moved while the wire was down was
+dropped, and nothing re-sends them: the next push names the next change, never
+the backlog. So the lists and every open buffer go on showing what was true when
+the wire went. The client answers by running the refresh it already had — one
+`listNotes` per folder plus `reloadOpenNotes`, all issued concurrently, so the
+whole sweep is one round trip (§12) however many folders and tabs are open.
+
+The belt is window focus, which runs that same refresh, and it is worth being
+precise about why it is not enough. It never fires when the wire returns to a
+window that never left, which is the case whenever somebody is sitting there
+watching the bar say "reconnecting…". And a phone has no such event to wait for
+at all (`ios.md` §5) while being the client whose wire drops constantly, so on
+the client with the worst staleness the belt is not fastened.
+
+The refresh reloads CLEAN buffers only (`reloadCandidates` in
+`mainview/notes/store.ts`), which is why reusing it matters rather than writing a
+second one: a reconnect that reloaded unconditionally would take a half-typed
+paragraph away every time a phone changed cell. A buffer that IS dirty keeps
+what was typed and settles it the ordinary way, through the divergence guard on
+the next save. That is also the ceiling on this whole bug's severity, and why it
+was the second of the two to fix: a missed `vaultChanged` leaves plaintext on
+screen, while a missed `notesChanged` leaves a stale list and a save that
+displaces the other version into the Trash with a notice.
+
 **Every push is addressed** (`Audience` in `bun/server.ts`). With more than one
 client, "send this" stopped being a complete instruction, and the answers are
 not uniform because the messages are not alike: what a note list needs everyone
