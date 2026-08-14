@@ -443,6 +443,35 @@ panels that are still there — but the boot that returns finds them unshowable
 and ends them. What the alternative preserves is a run nobody can watch, stop,
 or read, which is not a kept run.
 
+**The vault is re-asked too, and it is the one where being stale is not
+cosmetic.** The vault belongs to the server and relocks itself after fifteen
+idle minutes (`bun/vault.ts`). That relock is a `vaultChanged` push, dropped at a
+dead wire like any other. Idleness is measured in note-RPC traffic, so a client
+that cannot send any is precisely the client the timer fires behind: it is both
+the likeliest to miss that push and the one certain to. The view's mirrored
+state is what evicts decrypted buffers (`mainview/workspace/editorPool.ts`), so a
+client that never asks goes on showing a locked note's plaintext for as long as
+the tab stays open, which is the thing the idle relock exists to prevent. The
+client therefore calls `vaultState` after every reconnect and feeds the answer
+through the same mirror the push feeds.
+
+No third mechanism was needed for it, unlike the drawer's claim and the runs'
+reconcile. `vaultState` already crossed the wire at boot, the mirror already
+notifies only on a change, and both the eviction and the reload that fills held
+faces back in already hang off it. A reconnect that finds the vault where it left
+it costs one round trip and moves nothing on screen.
+
+The cost, stated as plainly as the runs' above: this can evict an edit made
+during the outage. The idle relock's argument for evicting dirty buffers is that
+fifteen minutes of wire silence proves autosave has long since flushed, and a
+dropped wire breaks that proof — silence on the wire is not silence in the
+editor. What it does not break is the outcome: a locked note's save needs the
+vault open (`bun/notes.ts`), so from the moment the server relocked those
+keystrokes could not have been written anyway. Evicting makes a loss visible at
+the reconnect instead of leaving it pending behind a save that will keep
+failing. Not evicting would trade it for plaintext left on screen by the relock
+that was supposed to clear it, which is the wrong side of that trade.
+
 **Every push is addressed** (`Audience` in `bun/server.ts`). With more than one
 client, "send this" stopped being a complete instruction, and the answers are
 not uniform because the messages are not alike: what a note list needs everyone

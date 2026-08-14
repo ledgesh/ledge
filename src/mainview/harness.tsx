@@ -11,7 +11,7 @@
 // is index.html, so none of this ships.
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import type { BacklinkHit, NoteMeta, TagHit, TerminalClaim, TrashMeta, WorkspaceRootInfo } from "../shared/rpc-schema";
+import type { BacklinkHit, NoteMeta, TagHit, TerminalClaim, TrashMeta, VaultState, WorkspaceRootInfo } from "../shared/rpc-schema";
 import { headingOf, labelOf, slugify, slugOf } from "../shared/slug";
 import { frontmatterEnd, parseFrontmatter } from "../shared/frontmatter";
 import { instantiateTemplate, isoDateOf } from "../shared/template";
@@ -23,7 +23,7 @@ import { sendRunKey } from "./editor/inlineTerm";
 import { barFaceOf, type BarFace } from "./lib/nativeBridge";
 import { configureTerminal, dispatchTerminalDetached, dispatchTerminalRelink } from "./terminal/channel";
 import { configureNotes, dispatchExternalOpen, dispatchNotesChanged, type ExternalOpenInfo, type NoteFile } from "./notes/channel";
-import { configureVault, recordVaultState } from "./vault/channel";
+import { configureVault, recordVaultState, refreshVaultState } from "./vault/channel";
 import { configureWorkspaces, recordWorkspaceKinds } from "./workspace/channel";
 import { configureClipboard } from "./lib/clipboard";
 import { configureCli } from "./lib/cli";
@@ -1050,6 +1050,13 @@ declare global {
       // linkState("live") to choose which of the three answers a spec is
       // testing; an "attached" one carries the scrollback to replay.
       shellClaim: (claim: TerminalClaim) => void;
+      // The vault moving on the SERVER with nobody listening: its idle relock
+      // firing, or another device unlocking it. The state changes and no
+      // vaultChanged reaches the app, which is exactly what a push at a dropped
+      // wire is (bun/daemon.ts). Deliberately not the store's own vaultLock
+      // paired with recordVaultState — that pair is the CONNECTED path, and the
+      // question here is what the app does when it was never told.
+      vaultMoved: (state: VaultState) => void;
       store: FakeStore;
     };
   }
@@ -1086,13 +1093,17 @@ window.__harness = {
   shellClaim: (claim) => {
     claimAnswer = claim;
   },
-  // The same trio boot.tsx's connectionState push does, because a reconnect
-  // that did not reconcile is not the reconnect the app performs.
+  vaultMoved: (state) => {
+    store.vault.state = state;
+  },
+  // The same four things boot.tsx's connectionState push does, because a
+  // reconnect that did not reconcile is not the reconnect the app performs.
   linkState: (state, detail) => {
     recordLinkState(state, detail);
     if (state === "live") {
       void reconcileRuns();
       dispatchTerminalRelink();
+      void refreshVaultState().catch(() => {});
     }
   },
   store,

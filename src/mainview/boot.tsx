@@ -86,11 +86,21 @@ export const viewPush: ViewPush = {
     //
     // And of the drawer's shell, for the same reason and in the same breath. A
     // reconnect is announced only for the SAME server (a restarted one is
-    // refused outright, shared/transport.ts), so both questions are being asked
-    // of a machine that still has the answers.
+    // refused outright, shared/transport.ts), so all three questions are being
+    // asked of a machine that still has the answers.
+    //
+    // The third is the vault, whose `vaultChanged` was dropped with the rest.
+    // Not a rare corner: the idle relock's clock is note-RPC traffic
+    // (bun/vault.ts touchVault), so a client whose wire is down is the one it
+    // fires behind, and the mirrored state is what evicts decrypted buffers
+    // (workspace/editorPool.ts). A client that never asks keeps a locked note's
+    // plaintext on screen for as long as the tab stays open, which is the thing
+    // the relock exists to prevent. Asking costs nothing when nothing moved:
+    // the mirror notifies only on a change.
     if (state === "live") {
       void reconcileRuns();
       dispatchTerminalRelink();
+      void refreshVaultState().catch(() => {});
     }
   },
 };

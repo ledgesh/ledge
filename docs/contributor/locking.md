@@ -129,6 +129,12 @@ tags: finance
   data key, then push `vaultChanged` so the view swaps locked tabs to
   placeholders, evicts decrypted bodies, and evicts the asset data-URL
   cache (`lib/assets.ts` — RAM-only, but RAM the lock must also clear).
+  On a server that push can fail to arrive: a client whose wire is down is
+  not a connection to send to, and a client that cannot send note RPCs is
+  also why the timer got to fire. So the view re-asks `vaultState` on every
+  reconnect and feeds the answer through the same mirror — without that, a
+  remote client is the one client this eviction never reaches
+  (`remote.md` §7).
 - **Passphrase change** re-derives a new master key under a new salt and
   rewraps every locked note's data key and every encrypted asset's header —
   headers only, bodies untouched. It enumerates locked notes by the same

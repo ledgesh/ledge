@@ -188,6 +188,10 @@ This reaches only the blocks that device started. A server can be carrying runs 
 
 A save that was in flight when the wire dropped is retried once the connection is back, and applied once, even if the first attempt had already landed.
 
+Locked notes relock while you are away, and Ledge catches up the moment the connection is back. The vault belongs to the server and shuts itself after 15 minutes with nothing to do ([[Note Locking]]), and a connection that is down is 15 quiet minutes. So a locked note you had open goes back to its placeholder on the reconnect, exactly as if you had pressed ⌘L, and unlocking again pours it back. Unlocking on another machine reaches you the same way: a note sitting behind its placeholder opens as soon as the connection is back.
+
+Anything you typed into a locked note during the outage goes with it. That text could not have reached the disk either way, because writing a locked note needs the vault open, so copy it somewhere else before you reconnect if you want to keep it.
+
 If the reconnect runs out, the bar reads "disconnected" and Ledge stops accepting work for a machine it cannot reach. Choose the connection again from the picker to start over.
 
 Ledge also stops when the server hangs up on purpose rather than the wire failing, and hovering the bar says why. One reason is the server shutting down. The other is a second copy of Ledge on this same device connecting to it: the server keeps the newer connection and tells the older one, which stops instead of the two taking the server off each other in a loop. Another device connecting is not a reason (see above).
