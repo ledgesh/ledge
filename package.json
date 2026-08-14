@@ -20,7 +20,7 @@
     "cli": "bun src/bun/cli.ts",
     "test": "bun test",
     "test:watch": "bun test --watch",
-    "test:e2e": "playwright test",
+    "test:e2e": "caffeinate -dimsu playwright test",
     "probe:ssh": "bun scripts/probe-ssh.ts",
     "ios": "bun scripts/ios-build.ts",
     "licenses": "bun scripts/licenses.ts"

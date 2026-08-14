@@ -135,6 +135,17 @@ Rules:
   enumeration on collision, move-don't-unlink). If a spec needs behavior the
   fake lacks, extend the fake to match the real store — never the reverse.
 - No PTYs in the harness: run/terminal behavior belongs to the live probe.
+- **`test:e2e` runs under `caffeinate -dimsu`.** With the Mac's display off, a
+  navigation to `harness.html` can start and never be answered: the unified log
+  shows `didStartProvisionalLoadForFrame` and then thirty seconds of silence in
+  both the WebContent process and Playwright's own UI process, at 0% CPU, until
+  the timeout closes the page. It reads as a UI regression and is not one — it
+  moved between tests on the desktop project, stuck on one phone spec, and
+  reproduced on a clean tree. Ruled out: CPU load (the suite passes at a load
+  average of 32), the worker count, `node_modules/.vite`, a mid-run dep
+  re-optimization, and the timeout length (60s hangs identically); the display
+  is the only variable that tracked it. `caffeinate` propagates the child's
+  exit status, so a real failure still fails.
 - Every interaction rule that can be a spec should be one, same as §3: R5
   (click focuses the row, opening must not steal focus), §4 (irreversible
   confirms focus Cancel), the bare-key domain guard, all live in
