@@ -62,6 +62,22 @@ describe("the ssh command", () => {
     expect(argv).toContain("GlobalKnownHostsFile=/dev/null");
   });
 
+  // Both default to off, and off means a wire that stops carrying bytes without
+  // closing is never noticed: no FIN, no RST, and macOS does not probe an idle
+  // socket for two hours. Everything in shared/transport.ts hangs off the
+  // connection ending, so without these the reconnect ladder cannot run at all.
+  // A number here is a claim about how long that takes, so assert the numbers.
+  test("notices a wire that went silent without closing", () => {
+    expect(argv).toContain("ServerAliveInterval=5");
+    expect(argv).toContain("ServerAliveCountMax=3");
+  });
+
+  // Dialling into that same hole hangs on the SYN or on the banner, and a rung
+  // of the ladder that never returns leaves a ladder with one rung.
+  test("gives up on a dial that goes unanswered", () => {
+    expect(argv).toContain("ConnectTimeout=10");
+  });
+
   // Without -t there is no remote pty, and so no newline translation. A pty in
   // this path would corrupt a length-prefixed protocol rather than break it
   // visibly, which is the worst way for it to go wrong.

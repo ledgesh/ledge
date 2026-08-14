@@ -268,6 +268,10 @@ hang the connection forever or write a question mark into a frame header. So
 would a pty — there is no `-t`, because newline translation on a
 length-prefixed protocol corrupts rather than breaks.
 
+Three more options are on the argv and are not security at all:
+`ServerAliveInterval`, `ServerAliveCountMax` and `ConnectTimeout`. They are
+what makes a lost network an event rather than a hang, and §7 carries them.
+
 **Enabling Remote Login exposes sshd to everything that can reach the
 machine.** For a VPS that is the public internet, on a box whose purpose is
 to execute code from notes. The documented posture is binding sshd to the
@@ -583,6 +587,28 @@ sends no label is simply "another device" on screen.
 On the client, presence is cleared whenever the link is not `live`. A wire that
 is down cannot report who else is up, and the reconnect that follows is itself
 an arrival, which announces the list to everybody.
+
+**A wire that stops carrying bytes is noticed in about twenty seconds.**
+Everything below is armed by a connection ENDING, and a network going away does
+not end one: no FIN, no RST, nothing exits, the socket simply stops carrying
+bytes. So the client is told to ask. `sshCommand` sets `ServerAliveInterval=5`
+with `ServerAliveCountMax=3`, and ssh hangs up once three keepalives in a row
+go unanswered. Both are off by default, and the default is what a black hole
+exploits: `TCPKeepAlive` is the only other candidate and macOS first probes an
+idle socket after two HOURS, so an app whose wifi went would go on reporting
+itself connected, with every request pending, until someone quit it.
+`ConnectTimeout=10` bounds the other half, because dialling into the same hole
+hangs the same way and a rung that never returns is a ladder with one rung.
+That does not lengthen the ladder against `IDLE_EXIT_MS` below: a dial costs
+the full timeout only when the network is a hole, and a server on the far side
+of a hole never saw its client leave, so its idle clock is not running.
+
+Twenty seconds is chosen against what each mistake costs, and the two are not
+comparable. Hanging up on a link that was only stalled costs a reconnect: the
+ladder re-dials, what was in flight replays under its own op ids, the instance
+matches and the sessions are still there. Not hanging up costs the session.
+An ordinary blip is far shorter than twenty seconds and is never noticed at
+all, which is what TCP retransmission is for.
 
 **A client that loses the wire re-dials rather than failing.** The ladder is
 250ms doubling to 8s and then holding there, eight attempts and 31.75 seconds
@@ -1028,6 +1054,18 @@ Per `testing.md`'s categories:
   connects with the argv `connections.ts` actually builds. A probe that
   hand-wrote an ssh command line would prove that ssh works, which was never
   in doubt.
+- **A wire that actually drops**, in the same probe's `[drop]` step. The
+  fixture carries `iptables` and the probe runs it with `NET_ADMIN`, so the
+  container can cut its own wire: a rule dropping the server's replies leaves
+  the connection open, the daemon running and the shells printing, while
+  nothing reaches the client and nothing tells it why. It is the only step here
+  that drives `reconnectingClient` rather than one connection, and so the only
+  place the ladder, the held requests and the instance check have ever climbed
+  anything but a duplex a test wrote.
+  Dropping ONE direction rather than both is what makes the interesting case
+  reproducible instead of lucky: a write sent into the dark still reaches the
+  far machine and runs, and only its answer is lost, which is the exact
+  condition `opLog.ts` exists for.
 
 What it establishes, and each of these was a claim in this document before it
 was a fact: a key carrying `command="ledge-server serve"` runs that and not
@@ -1046,12 +1084,24 @@ hands when the second client attaches, which the first is told, by which client
 id, and after which its keystrokes and its resizes are refused; and `docker
 exec` reaches a container whose PID 1 is the daemon.
 
+And, from `[drop]`: a wire that goes silent without closing is noticed, in 19
+to 20 seconds against the argv `sshCommand` builds; a request made while it is
+down is held rather than failed; the ladder climbs back within a second of the
+wire returning and the requests it was holding are answered by the connection
+that replaced the one that died; a write that had ALREADY run on the far
+machine, with only its answer lost, applies once when it is replayed; and the
+drawer is still the same client's, on the same daemon, carrying what the shell
+printed while nobody was listening.
+
 The gap that was worth naming through phases 2 to 4 is closed: the ssh hop is
 real, the sshd is real, and the forced command is enforced by sshd rather than
-asserted by a test. What remains unexercised is the part a container on
-loopback cannot supply — the round trip is sub-3ms here, and a wire that drops
-mid-frame, a middlebox that idles a connection out, and a laptop that sleeps
-mid-build are what the reconnect ladder was written for.
+asserted by a test. So is the one phase 5 named after it. The first thing a
+real drop found was that there was nothing to find it with — the client did not
+notice at all, and would not have for two hours — which is a defect the ladder's
+own unit tests could never have surfaced, because they supply the ending the
+ladder is armed by. What a container on loopback still cannot supply is the
+clock: the round trip is sub-3ms, so latency, a slow kex, and a laptop that
+sleeps mid-build are modelled by nothing here.
 
 ## 14. Phasing
 
@@ -1097,9 +1147,15 @@ Each phase leaves the app shippable.
    forced-command key, real host-key pinning, and a Linux pty answering a
    command typed from macOS. Every §4 claim about what that key can and
    cannot do is now enforced rather than asserted.
-   What is still owed: a wire that actually drops. A container on loopback
-   answers in under 3ms and never sleeps, so the reconnect ladder is still
-   proved by killing a process rather than by losing a network.
+   The wire that actually drops, which this phase owed for a while, is the
+   probe's `[drop]` step (§13). Killing a process shuts a pipe and so tells the
+   client; a rule that drops the server's replies tells it nothing, which is
+   what losing a network looks like, and it found that the client did not
+   notice at all. `sshCommand` now asks for keepalives, and §7 carries the
+   numbers.
+   What is still owed: the clock. A container on loopback answers in under 3ms
+   and never sleeps, so latency, a slow key exchange, and a machine suspended
+   mid-session are still modelled by nothing.
 6. **The iOS client**, which is `docs/contributor/ios.md` and depends on
    nothing above being redone. That document is written and none of it is code
    yet; its own §14 phases the work, starting with a move of this transport's

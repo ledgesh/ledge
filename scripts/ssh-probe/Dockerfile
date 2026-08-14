@@ -14,9 +14,16 @@
 ARG BASE=ledge-server:probe
 FROM ${BASE}
 
+# iptables alongside the sshd, for the one failure a container on loopback
+# cannot otherwise supply: a wire that stops carrying bytes without closing.
+# Killing the server proves a different thing — the process is gone and the
+# pipes close, so the client is TOLD. A rule that drops port 22 tells it
+# nothing, and leaves the daemon and the shells running on the far side, which
+# is what losing a network actually looks like. The probe adds NET_ADMIN and
+# takes it away again; nothing in the shipped image has either.
 USER root
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends openssh-server \
+  && apt-get install -y --no-install-recommends openssh-server iptables \
   && rm -rf /var/lib/apt/lists/* \
   && mkdir -p /run/sshd /home/ledge/.ssh \
   && chown ledge:ledge /home/ledge/.ssh \

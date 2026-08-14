@@ -233,6 +233,17 @@ a real shell on a real kernel says out loud. It holds
 that same image (`docker build --target build`) runs the whole server suite on
 glibc, which is the Linux port's other half.
 
+It also cuts its own wire. The fixture carries `iptables` and the probe grants
+it `NET_ADMIN`, so the `[drop]` step can drop the server's replies while the
+daemon and the shells go on running: no FIN, no RST, nothing exits, which is
+what a network going away looks like and what killing a process cannot
+imitate. Do not swap it for `docker pause` or a `docker kill`. Both take the
+far end down with the wire, and the half of the claim worth having is that
+everything over there is still running and still remembers you. That step
+found the client did not notice a silent wire at all — for two hours, which
+is when macOS first probes an idle socket — and the fix is three ssh options
+(`remote.md` §7).
+
 For `host:` EXECUTION hosts, which is a different feature (`remote.md` §6),
 the container is still yours to build, and the shape is: `openssh-server`,
 published on `127.0.0.1:22` so a bare `host: 127.0.0.1` is a

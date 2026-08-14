@@ -34,7 +34,7 @@ process.env["LEDGE_NOTES_ROOT"] = join(SCRATCH, "home");
 
 const { sshCommand, pickHostKey, knownHostsText } = await import("../src/bun/connections");
 type Connection = import("../src/bun/connections").Connection;
-const { clientConnection } = await import("../src/shared/transport");
+const { clientConnection, reconnectingClient } = await import("../src/shared/transport");
 const { spawnDuplex } = await import("../src/bun/transport");
 const { PUSH_MESSAGES, sessionHold } = await import("../src/shared/wire");
 const { BUILD_VERSION } = await import("../src/shared/version");
@@ -90,7 +90,11 @@ try {
   const keyPath = join(SCRATCH, "id_ed25519");
   run(["ssh-keygen", "-t", "ed25519", "-N", "", "-C", "ledge-probe", "-f", keyPath]);
   const pub = (await readFile(`${keyPath}.pub`, "utf8")).trim();
-  run(["docker", "run", "-d", "--name", NAME, "-p", SERVE ? "22:22" : "127.0.0.1:22:22", "-e", `LEDGE_PUBKEY=${pub}`, FIXTURE]);
+  // NET_ADMIN only for the assertion run, which is the only one that cuts its
+  // own wire ([drop]). A fixture standing open on every interface for a phone
+  // has no business holding a capability it never uses.
+  const capability = SERVE ? [] : ["--cap-add=NET_ADMIN"];
+  run(["docker", "run", "-d", "--name", NAME, ...capability, "-p", SERVE ? "22:22" : "127.0.0.1:22:22", "-e", `LEDGE_PUBKEY=${pub}`, FIXTURE]);
   console.log(`  authorized_keys: restrict,command="ledge-server serve" ${pub.slice(0, 32)}…`);
 
   step("[pair] scan the host key and pin it, the way the app's pairing does");
@@ -618,6 +622,153 @@ try {
   check("and the device that took it still has it", stillTheirs.ok);
   third.close();
   took.close();
+
+  step("[drop] a wire that stops carrying bytes, and the ladder that climbs back");
+  // The debt phase 5 recorded. Everything above proves a connection that ENDED
+  // — a close, or a process killed — and both of those shut a pipe, which tells
+  // this end immediately. A network that goes away does neither. It stops
+  // carrying bytes and says nothing: no FIN, no RST, no exit. Until this step
+  // nothing here had ever met one, and the first thing meeting one found was
+  // that the client did not notice for two hours (connections.ts, the three
+  // options above BatchMode).
+  //
+  // The instrument is an iptables rule inside the container, on the way OUT.
+  // From this end that is a severed wire exactly: nothing arrives, and nothing
+  // says why. What it buys over cutting both directions is that the write below
+  // REACHES the far machine and is executed, and only its answer is lost —
+  // which is the one condition bun/opLog.ts was written for and the one the
+  // dedupe has never been asked about anywhere but on a connection that was
+  // working perfectly.
+  //
+  // It is also the first thing here to drive reconnectingClient rather than one
+  // connection. The ladder, the held requests, the replay under the same op and
+  // the instance check are all its, and they had only ever climbed against a
+  // duplex a test wrote (transport.test.ts).
+  const wire = (flag: "-I" | "-D") =>
+    run(["docker", "exec", NAME, "iptables", flag, "OUTPUT", "-p", "tcp", "--sport", "22", "-j", "DROP"], { quiet: true });
+
+  const states: string[] = [];
+  const cutEars = ears();
+  const ladder = await reconnectingClient({
+    dial: () => spawnDuplex(argv),
+    push: cutEars.push,
+    build: BUILD_VERSION,
+    client: "probe-mac",
+    label: "Probe Studio",
+    hold: ASK,
+    onState: (s) => states.push(s),
+  });
+  await ladder.requests.sessionConfigure({ sessionId: "s3", params: { cwd: root, env: {}, hosts: [] } as never, notePath: null });
+  await ladder.requests.terminalAttach({ sessionId: "s3", host: null });
+  const inTheDark = () =>
+    cutEars.heard
+      .filter(([m]) => m === "terminalOutput")
+      .map(([, p]) => atob((p as { dataB64: string }).dataB64))
+      .join("");
+  const answering = Date.now() + 15_000;
+  while (Date.now() < answering && !inTheDark().includes("THIRD-READY")) {
+    await ladder.requests.terminalInput({ sessionId: "s3", dataB64: btoa("echo THIRD-READY\n") });
+    for (let i = 0; i < 12 && !inTheDark().includes("THIRD-READY"); i++) await Bun.sleep(100);
+  }
+  check("a third drawer answered on the far machine", inTheDark().includes("THIRD-READY"));
+
+  // On a clock, and sent BEFORE the cut on purpose. What this line has to prove
+  // is the far machine going on RUNNING while the network is gone, which is the
+  // whole difference between losing a wire and losing a server; typing it into
+  // a wire that was already cut would prove the replay instead.
+  //
+  // Arithmetic rather than a literal, for the [terminal] step's reason turned
+  // to a new use: a pty ECHOES what is typed into it, so a token that appears in
+  // the command appears in the output twice over — once before the cut, from the
+  // echo. Both checks below passed on that echo the first time they were run,
+  // which is a test proving the shell can repeat itself. Only the shell can say
+  // 42.
+  const DARK = "PRINTED-INTO-THE-42";
+  await ladder.requests.terminalInput({ sessionId: "s3", dataB64: btoa("sleep 5; echo PRINTED-INTO-THE-$((6*7))\n") });
+
+  wire("-I");
+  const cutAt = Date.now();
+  console.log("  the wire is cut: the server's replies are dropped, and nothing tells this end");
+
+  // Executed there, unanswerable here.
+  const CUT_TITLE = "Cut Wire";
+  let settled = "";
+  const orphaned = ladder.requests.noteCreate({ root, text: `# ${CUT_TITLE}\n\nwritten with the answer thrown away\n` });
+  void orphaned.then(
+    () => (settled = "answered"),
+    (err: Error) => (settled = `rejected: ${err.message}`),
+  );
+  // Asked through docker and not over the connection, because the point of the
+  // question is that the connection cannot answer it. `ls` rather than a shell:
+  // the path is the server's own (the [displaced] read above, same reason).
+  const listing = () => run(["docker", "exec", NAME, "ls", root], { quiet: true }).out;
+  let landed = false;
+  for (let i = 0; i < 100 && !landed; i++) {
+    await Bun.sleep(100);
+    landed = /cut-wire/i.test(listing());
+  }
+  check("a write sent into the dark still runs on the far machine", landed, listing().split("\n").join(" ").slice(0, 60));
+  check("while this end is told nothing at all about it", settled === "", settled || "still waiting");
+
+  for (let i = 0; i < 400 && !states.includes("reconnecting"); i++) await Bun.sleep(100);
+  check(
+    "the client notices a wire that closed nothing",
+    states.includes("reconnecting"),
+    `${((Date.now() - cutAt) / 1000).toFixed(1)}s after the cut`,
+  );
+
+  // Held, not failed: a request made during the gap is what a person typing
+  // through a tunnel that just died is doing, and failing it would surface as
+  // an error for something that is about to work.
+  let gapSettled = "";
+  const duringTheGap = ladder.requests.noteList({ root });
+  void duringTheGap.then(
+    () => (gapSettled = "answered"),
+    (err: Error) => (gapSettled = `rejected: ${err.message}`),
+  );
+  await Bun.sleep(500);
+  check("a request made while it is down waits instead of failing", gapSettled === "", gapSettled || "held");
+
+  wire("-D");
+  const mendedAt = Date.now();
+  for (let i = 0; i < 400 && states.at(-1) !== "live"; i++) await Bun.sleep(100);
+  check(
+    "and the ladder climbs back when the wire returns",
+    states.at(-1) === "live",
+    `${((Date.now() - mendedAt) / 1000).toFixed(1)}s after mending, ${states.join(" → ")}`,
+  );
+
+  const carried = await Promise.race([
+    Promise.all([orphaned, duringTheGap]).then(
+      () => "both answered",
+      (err: Error) => `failed: ${err.message}`,
+    ),
+    Bun.sleep(20_000).then(() => "never answered"),
+  ]);
+  check("the requests it was holding are answered by the connection that replaced the one that died", carried === "both answered", carried);
+
+  // The payoff, and the thing a replay gets wrong if the op record is not
+  // consulted: this write ran before the drop, so running it again would leave
+  // two notes and the second one is the user's work duplicated.
+  const after = await ladder.requests.noteList({ root });
+  const made = after.notes.filter((n) => n.title === CUT_TITLE);
+  check(
+    "and the write replayed across the drop applied once, having already run before it",
+    made.length === 1,
+    `${made.length} notes named "${CUT_TITLE}"`,
+  );
+
+  const survived = await ladder.requests.terminalClaim({ sessionId: "s3" });
+  check("the drawer is still this client's, a lost network later", survived.state === "attached", survived.state);
+  check(
+    "and the shell kept printing into it with nobody on the other end",
+    survived.state === "attached" && atob(survived.dataB64).includes(DARK),
+  );
+  check(
+    "which no push delivered, because the wire that would have carried it was gone",
+    !inTheDark().includes(DARK),
+  );
+  ladder.close();
 
   step("[container] the other deployment: PID 1 is the daemon, docker exec is the pump");
   run(["docker", "rm", "-f", `${NAME}-plain`], { quiet: true });

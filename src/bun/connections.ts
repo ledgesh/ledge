@@ -120,6 +120,41 @@ function parseConnection(raw: unknown): Connection | null {
 }
 
 /**
+ * How long a silent wire stays undetected, and what bounds a dial into one.
+ *
+ * ssh sends a keepalive after `ALIVE_INTERVAL_S` with nothing received, and
+ * hangs up once `ALIVE_COUNT` of them go unanswered — about twenty seconds
+ * here. Both are off by default, and the default is what a black hole exploits:
+ * a wire that stops carrying bytes without closing (wifi gone, a laptop moved
+ * between networks, a middlebox that dropped the flow) sends no FIN and no RST,
+ * so the ssh process has nothing to notice. `TCPKeepAlive` does not save it —
+ * macOS first probes an idle socket after two HOURS — which leaves the whole
+ * reconnect apparatus in `shared/transport.ts` armed by an event that never
+ * arrives. The app goes on saying it is connected, and every request sits
+ * pending forever. `scripts/probe-ssh.ts` cuts a real wire and measures this.
+ *
+ * Twenty seconds is chosen against what each mistake costs, which is nothing
+ * like symmetric. Hanging up on a link that was merely stalled costs a
+ * reconnect: the ladder re-dials, the in-flight requests replay under their own
+ * op ids, the server is the same instance and the sessions are still there. Not
+ * hanging up costs the session entirely. So this is deliberately far more eager
+ * than ssh's own suggested 45s, and still long enough that an ordinary blip —
+ * which TCP rides out without help — is never noticed at all.
+ *
+ * `ConnectTimeout` bounds the other half. Dialling INTO a black hole hangs the
+ * same way: the SYN or the banner goes unanswered, and a rung of the ladder
+ * that never returns is a ladder with one rung. It covers the kex as well as
+ * the connect, which is why it is ten seconds and not two. Doing this does not
+ * break the ladder's rule about outrunning the daemon's IDLE_EXIT_MS: a dial
+ * only costs the full timeout when the network is a hole, and a server on the
+ * far side of a hole never saw its client leave, so its idle clock is not
+ * running.
+ */
+const ALIVE_INTERVAL_S = 5;
+const ALIVE_COUNT = 3;
+const CONNECT_TIMEOUT_S = 10;
+
+/**
  * The argv that starts a server on the other machine.
  *
  * The four options are the whole security posture of the transport, and none
@@ -138,12 +173,23 @@ function parseConnection(raw: unknown): Connection | null {
  * - `GlobalKnownHostsFile=/dev/null` because a system-wide file is a third
  *   party to the pin, and this is the one place worth being pedantic.
  *
+ * `ServerAliveInterval`, `ServerAliveCountMax` and `ConnectTimeout` sit ahead
+ * of those on the argv and are not security at all. They are the difference
+ * between the reconnect ladder running and merely existing; the block above
+ * says why.
+ *
  * No `-t`. A remote pty would translate newlines in the byte stream, which is
  * fine for a shell and fatal for a length-prefixed protocol.
  */
 export function sshCommand(conn: Connection, knownHosts: string, userKnownHosts: string): string[] {
   const argv = [
     SSH_PATH,
+    "-o",
+    `ServerAliveInterval=${ALIVE_INTERVAL_S}`,
+    "-o",
+    `ServerAliveCountMax=${ALIVE_COUNT}`,
+    "-o",
+    `ConnectTimeout=${CONNECT_TIMEOUT_S}`,
     "-o",
     "BatchMode=yes",
     "-o",
