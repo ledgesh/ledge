@@ -4,11 +4,14 @@ import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import {
   b64ToBytes,
+  dispatchTerminalExit,
   onTerminalDetached,
   onTerminalOutput,
+  onTerminalRelink,
   sendTerminalResize,
   sendTerminalText,
   terminalAttach,
+  terminalClaim,
   terminalDetach,
 } from "./channel";
 import { Button } from "@/components/ui/button";
@@ -41,6 +44,13 @@ function xtermTheme(dark: boolean) {
 // client attaching takes this one's bytes, keystrokes and winsize with it, and
 // what arrives here is a `terminalDetached` push. That is the notice below, and
 // its button attaches again, which takes the shell back (remote.md §7).
+//
+// A drawer that is already open also has to survive the WIRE going, which is a
+// third path into the same terminal: the shell keeps printing at a connection
+// that is not there and those pushes are dropped, so the reconnect claims the
+// session and replays the ring (rpc-schema terminalClaim). Mounting attaches,
+// reconnecting claims, and the difference is that one of them may take a shell
+// and spawn one while the other may do neither.
 export function TerminalDrawer({
   sessionId,
   spawnHost,
@@ -187,6 +197,66 @@ export function TerminalDrawer({
     takeBack.current = () => attach(true);
     attach(false);
 
+    // The wire dropped and came back. Ownership survived it (a client id
+    // outlives its connection, bun/server.ts `Term.owner`) so live bytes are
+    // already arriving again — but everything the shell printed while the wire
+    // was down was pushed at a connection that was not there and dropped, and
+    // the ring is the only place it still exists. Claiming is how it comes back,
+    // and how the two pushes that may also have been dropped arrive late.
+    //
+    // Only when this client believes the shell is its own. With the notice up,
+    // another device has it and taking it back is the button's job, not a
+    // reconnect's: the wire coming back is not somebody asking for the shell.
+    const offRelink = onTerminalRelink(() => {
+      if (!mine) return;
+      // Buffered from here, exactly as an attach buffers: this client is still
+      // the owner, so the shell's live bytes are already arriving again, and a
+      // push that lands while the claim is in flight would otherwise be written
+      // and then wiped by the reset below — while being too late to appear in a
+      // snapshot the server has already taken.
+      ready = false;
+      void terminalClaim(sessionId).then((claim) => {
+        if (disposed) return;
+        if (claim.state === "attached") {
+          // Everything the shell has said, over a reset screen, which is
+          // exactly what a take-back does and for the same reason: the snapshot
+          // is the WHOLE scrollback, so writing it onto what is already there
+          // would print the session twice. Without the focus a take-back takes
+          // — nobody pressed anything, and the caret may be in the note.
+          onHost?.(claim.host);
+          term.reset();
+          const snapshot = b64ToBytes(claim.dataB64);
+          if (snapshot.length) term.write(snapshot);
+          for (const q of queue) term.write(q);
+          queue.length = 0;
+          ready = true;
+          sendTerminalResize(sessionId, term.cols, term.rows);
+          return;
+        }
+        // Nothing is coming for either of these — the bytes go to the client
+        // that has the shell, or there is no shell — but the buffer is let go
+        // rather than left closed, so a take-back later starts from empty.
+        queue.length = 0;
+        ready = true;
+        // The shell moved, or ended, while this client was unreachable. Both
+        // are pushes that went nowhere, so they are delivered here by hand
+        // through the paths that would have carried them: the notice, and the
+        // exit App closes the drawer on.
+        mine = false;
+        if (claim.state === "held") setTakenBy(labelFor(claim.by));
+        else dispatchTerminalExit(sessionId);
+      }).catch(() => {
+        // The wire went again mid-question, which is likelier here than
+        // anywhere: this is asked the moment a reconnect lands. Nothing is
+        // decided from a question that was not answered — the terminal is left
+        // as it is, and the connection that replaces this one asks again
+        // (bridge.ts reconcileRuns does the same for a panel). Only the buffer
+        // has to be let go, or the output that comes back would queue behind an
+        // answer that is never coming.
+        ready = true;
+      });
+    });
+
     // Another client attached: the bytes go there now, so stop sending what Bun
     // would refuse and let the notice explain the terminal that stopped moving.
     const offDetached = onTerminalDetached((sid, by) => {
@@ -216,6 +286,7 @@ export function TerminalDrawer({
       offAppearance();
       off();
       offDetached();
+      offRelink();
       dataSub.dispose();
       term.dispose();
     };

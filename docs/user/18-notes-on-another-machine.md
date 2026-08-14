@@ -174,7 +174,11 @@ This is the same arbitration a note gets from any other writer, including an age
 
 The bar reads "reconnecting…" and Ledge re-dials for about thirty seconds. Requests made in the meantime wait rather than fail.
 
-Anything running keeps running. Shells belong to the server and survive a wire dropping, so a build carries on while you are on a train and its output is waiting when you come back. Reattaching replays the last 256 KB of each terminal.
+Anything running keeps running. Shells belong to the server and survive a wire dropping, so a build carries on while you are on a train and its output is waiting when you come back.
+
+A terminal that was open the whole time fills in its own gap. Ledge asks that shell for its history the moment the connection is back and redraws it, so what printed while you were away is on screen with everything that came before it. The last 256 KB is what a shell keeps, on a reconnect exactly as on any other reattach.
+
+Two other things can have become of that shell while you were away, and the terminal tells you which. Another device may have taken it, which reads the same as it always does: the notice, and the Take This Shell button. Or it may have ended, and the terminal closes rather than reopening on a fresh prompt with none of your work in it.
 
 A block's output panel is the exception, and only across a restart. The panel lives in the page rather than on the server, so a wire that drops and comes back finds it still there with the run still going.
 

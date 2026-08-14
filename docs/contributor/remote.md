@@ -381,7 +381,7 @@ that outlives a connection, which is §1's socket.
 Three consequences to hold onto:
 
 - **A dropped connection does not kill a run.** The PTY keeps running, the
-  ring keeps filling, and the next `terminalAttach` replays what was missed.
+  ring keeps filling, and the next attach or claim replays what was missed.
   A client that reconnects to a finished run sees its output.
 - **`docId` stays the session key** (`architecture.md` §4) and stays stable
   across reconnects. A client that reconnects with the same client id
@@ -390,9 +390,24 @@ Three consequences to hold onto:
   reconnect exactly as it is on pane switch. A client that needs more asks
   for a longer ring, not for a replay log.
 
-**Inline runs have no attach, so a client reconciles them instead.** All three
-bullets above are the drawer's: it has a ring and `terminalAttach` to replay it.
-An inline run has neither. It is a `runEvent` push keyed by a run id, and the
+**A drawer that is already open has to ask for the ring, not just have one.**
+The bullets above are the drawer's, but only a drawer that MOUNTS collects on
+them: attaching is what replays the buffer, and a wire dropping mounts nothing.
+An open drawer sits there while the shell prints into a connection that has
+gone, and comes back to a terminal with a hole in it, so the client sends
+`terminalClaim` for that session after every reconnect.
+
+Claiming is deliberately not attaching. Attaching takes the shell and spawns one
+if there is none, and a reconnect may do neither: the shell may have been taken
+by a device whose user deliberately opened that drawer, and it may have ended,
+in which case a spawn answers with a new shell's empty scrollback and the
+history on screen is the only copy of the old one's. So the claim has three
+answers, and each is a push that was dropped — the bytes, the `terminalDetached`,
+or the `terminalExit`. What arrives late is the same news, through the same
+paths in the view.
+
+**Inline runs have no attach at all, so a client reconciles them instead.** The
+drawer has a ring and two ways to replay it. An inline run has neither. It is a `runEvent` push keyed by a run id, and the
 only thing that knows that id is the panel the page is drawing. A page that
 reloaded knows none of them, which leaves the run executing with nothing on
 screen able to show it, no id anywhere able to stop it, and `running()` keeping

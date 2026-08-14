@@ -547,6 +547,78 @@ try {
   check("a second claim finds nothing", (await reboot.requests.inlineClaim({ ids: [] })).orphaned === 0);
   reboot.close();
 
+  step("[relink] a drawer whose wire dropped, and the shell that kept printing");
+  // The train case, against a wire that can really drop (rpc-schema
+  // terminalClaim): the shell goes on printing at a connection that is gone,
+  // every one of those bytes is pushed at nobody, and the ring on the server is
+  // the only place they still exist. A fresh session, since s1's drawer belongs
+  // to the phone by now.
+  const away = ears();
+  const held0 = clientConnection(spawnDuplex(argv), { push: away.push, build: BUILD_VERSION, client: "probe-mac", hold: ASK });
+  await held0.ready;
+  await held0.requests.sessionConfigure({ sessionId: "s2", params: { cwd: root, env: {}, hosts: [] } as never, notePath: null });
+  await held0.requests.terminalAttach({ sessionId: "s2", host: null });
+  const printed = () =>
+    away.heard
+      .filter(([m]) => m === "terminalOutput")
+      .map(([, p]) => atob((p as { dataB64: string }).dataB64))
+      .join("");
+  // Typed until it answers, for the [terminal] step's reason: zsh's line editor
+  // resets the terminal as it comes up and discards whatever was pending.
+  const ready = Date.now() + 15_000;
+  while (Date.now() < ready && !printed().includes("SHELL-READY")) {
+    await held0.requests.terminalInput({ sessionId: "s2", dataB64: btoa("echo SHELL-READY\n") });
+    for (let i = 0; i < 12 && !printed().includes("SHELL-READY"); i++) await Bun.sleep(100);
+  }
+  check("a second drawer answered on the far machine", printed().includes("SHELL-READY"));
+  // Printing AFTER the wire goes, which is the only way to produce output with
+  // nobody there to receive it: a disconnected client cannot type, and no other
+  // client may type into a drawer it does not own.
+  await held0.requests.terminalInput({ sessionId: "s2", dataB64: btoa("sleep 2; echo WHILE-YOU-WERE-OUT\n") });
+  held0.close();
+  await held0.closed;
+  await Bun.sleep(4000);
+
+  const backEars = ears();
+  const back = clientConnection(spawnDuplex(argv), { push: backEars.push, build: BUILD_VERSION, client: "probe-mac", hold: ASK });
+  const backHello = await back.ready;
+  check("the same daemon answered the new connection", backHello.instance === hello.instance, backHello.instance.slice(0, 8));
+  const claim = await back.requests.terminalClaim({ sessionId: "s2" });
+  check("the shell is still this client's, a dropped wire later", claim.state === "attached", claim.state);
+  check(
+    "and the claim carries what it printed while nobody was connected",
+    claim.state === "attached" && atob(claim.dataB64).includes("WHILE-YOU-WERE-OUT"),
+  );
+  check(
+    "which no push had delivered, because it was said at a connection that had gone",
+    !backEars.heard
+      .filter(([m]) => m === "terminalOutput")
+      .map(([, p]) => atob((p as { dataB64: string }).dataB64))
+      .join("")
+      .includes("WHILE-YOU-WERE-OUT"),
+  );
+
+  // The other answer, and the one a reconnect that simply re-attached would get
+  // wrong: a device that took the shell while this one was away keeps it.
+  const took = clientConnection(spawnDuplex(argv), { push: ears().push, build: BUILD_VERSION, client: "probe-phone", label: "Probe iPhone", hold: ASK });
+  await took.ready;
+  back.close();
+  await back.closed;
+  await took.requests.terminalAttach({ sessionId: "s2", host: null });
+
+  const third = clientConnection(spawnDuplex(argv), { push: ears().push, build: BUILD_VERSION, client: "probe-mac", hold: ASK });
+  await third.ready;
+  const moved = await third.requests.terminalClaim({ sessionId: "s2" });
+  check(
+    "a shell taken while the wire was down is reported, not taken back",
+    moved.state === "held" && moved.by === "probe-phone",
+    moved.state,
+  );
+  const stillTheirs = await took.requests.terminalInput({ sessionId: "s2", dataB64: btoa("echo STILL-THE-PHONES\n") });
+  check("and the device that took it still has it", stillTheirs.ok);
+  third.close();
+  took.close();
+
   step("[container] the other deployment: PID 1 is the daemon, docker exec is the pump");
   run(["docker", "rm", "-f", `${NAME}-plain`], { quiet: true });
   run(["docker", "run", "-d", "--name", `${NAME}-plain`, IMAGE]);

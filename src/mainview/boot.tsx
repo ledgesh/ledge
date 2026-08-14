@@ -25,6 +25,7 @@ import {
   dispatchTerminalOutput,
   dispatchTerminalExit,
   dispatchTerminalDetached,
+  dispatchTerminalRelink,
 } from "./terminal/channel";
 import { configureNotes, dispatchExternalOpen, dispatchNotesChanged } from "./notes/channel";
 import { configureVault, recordVaultState, refreshVaultState } from "./vault/channel";
@@ -82,7 +83,15 @@ export const viewPush: ViewPush = {
     // "live" is only ever announced for a RE-connection (the first one is the
     // caller's boot, not a state change), which makes it exactly the moment to
     // ask what became of the runs whose events were pushed at a dead wire.
-    if (state === "live") void reconcileRuns();
+    //
+    // And of the drawer's shell, for the same reason and in the same breath. A
+    // reconnect is announced only for the SAME server (a restarted one is
+    // refused outright, shared/transport.ts), so both questions are being asked
+    // of a machine that still has the answers.
+    if (state === "live") {
+      void reconcileRuns();
+      dispatchTerminalRelink();
+    }
   },
 };
 
@@ -140,6 +149,7 @@ export function bootView(requests: RequestClient): Promise<void> {
       void requests.terminalDetach({ sessionId });
     },
     status: (sessionId) => requests.terminalStatus({ sessionId }),
+    claim: (sessionId) => requests.terminalClaim({ sessionId }),
     closeSession: (sessionId) => {
       void requests.closeSession({ sessionId });
     },

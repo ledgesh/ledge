@@ -4,6 +4,8 @@
 // carries the note's `sessionId` (its docId): shells are per note, so the drawer
 // attaches to, types into, and resizes one note's terminal shell.
 
+import type { TerminalClaim } from "../../shared/rpc-schema";
+
 const encoder = new TextEncoder();
 
 // base64 <-> bytes, byte-exact (terminal I/O is UTF-8 bytes, RPC payloads JSON).
@@ -25,6 +27,7 @@ let sendResizeFn: ((sessionId: string, cols: number, rows: number) => void) | nu
 let attachFn: ((sessionId: string, host?: string | null) => Promise<{ dataB64: string; host: string }>) | null = null;
 let detachFn: ((sessionId: string) => void) | null = null;
 let statusFn: ((sessionId: string) => Promise<{ live: boolean; host: string | null }>) | null = null;
+let claimFn: ((sessionId: string) => Promise<TerminalClaim>) | null = null;
 let closeSessionFn: ((sessionId: string) => void) | null = null;
 let restartSessionFn: ((sessionId: string) => void) | null = null;
 
@@ -36,6 +39,7 @@ export function configureTerminal(fns: {
   attach: (sessionId: string, host?: string | null) => Promise<{ dataB64: string; host: string }>;
   detach: (sessionId: string) => void;
   status: (sessionId: string) => Promise<{ live: boolean; host: string | null }>;
+  claim: (sessionId: string) => Promise<TerminalClaim>;
   closeSession: (sessionId: string) => void;
   restartSession: (sessionId: string) => void;
 }): void {
@@ -45,6 +49,7 @@ export function configureTerminal(fns: {
   attachFn = fns.attach;
   detachFn = fns.detach;
   statusFn = fns.status;
+  claimFn = fns.claim;
   closeSessionFn = fns.closeSession;
   restartSessionFn = fns.restartSession;
 }
@@ -72,6 +77,20 @@ export async function terminalAttach(
 export async function terminalStatus(sessionId: string): Promise<{ live: boolean; host: string | null }> {
   if (!statusFn) return { live: false, host: null };
   return statusFn(sessionId);
+}
+
+/**
+ * What became of an open drawer's shell while the wire was down (rpc-schema
+ * terminalClaim). Sent by the drawer after a reconnect, never at boot: a drawer
+ * that is mounting attaches instead.
+ *
+ * "gone" when there is nothing to ask, which is what an unconfigured seam
+ * answers too — a claim with no RPC behind it has learned nothing, and the
+ * caller treats the shell as ended rather than as still its own.
+ */
+export async function terminalClaim(sessionId: string): Promise<TerminalClaim> {
+  if (!claimFn) return { state: "gone" };
+  return claimFn(sessionId);
 }
 
 export function terminalDetach(sessionId: string): void {
@@ -167,4 +186,26 @@ export function onTerminalDetached(sink: (sessionId: string, by: string) => void
 
 export function dispatchTerminalDetached(sessionId: string, by: string): void {
   detachedSink?.(sessionId, by);
+}
+
+// The wire came back (mainview/boot.tsx connectionState). Not a message from
+// Bun at all, unlike everything above it: this end raises it about its own
+// connection, and it is here because the only subscriber is the drawer, beside
+// the pushes it exists to recover.
+//
+// The mounted drawer answers by claiming its shell. Nothing else in the view
+// subscribes — a reconnect's other halves belong to the modules that own them
+// (editor/bridge.ts reconcileRuns for the panels, lib/connections.ts for the
+// bar).
+let relinkSink: (() => void) | null = null;
+
+export function onTerminalRelink(sink: () => void): () => void {
+  relinkSink = sink;
+  return () => {
+    if (relinkSink === sink) relinkSink = null;
+  };
+}
+
+export function dispatchTerminalRelink(): void {
+  relinkSink?.();
 }

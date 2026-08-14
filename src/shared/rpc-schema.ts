@@ -19,6 +19,26 @@ export type RunEvent =
   | { id: string; kind: "ended"; exitCode: number | null };
 
 /**
+ * What became of a note's terminal shell while a client could not be reached
+ * (`terminalClaim` below). One of the three things that can have happened to a
+ * drawer whose client was away, and each is a push that was dropped: the bytes
+ * it printed, the client that took it, or its own death.
+ */
+export type TerminalClaim =
+  // Still this client's, and `dataB64` is the whole scrollback to replay: the
+  // bytes pushed at the dead wire are in the ring like any others (remote.md
+  // §7). `host` for the badge, as terminalAttach reports it.
+  | { state: "attached"; dataB64: string; host: string }
+  // Another client attached while this one was away, so the `terminalDetached`
+  // it would have been pushed went nowhere. `by` is that client, named through
+  // the presence list exactly as the push's is.
+  | { state: "held"; by: string }
+  // No shell under this session at all: it exited, or another client restarted
+  // it (sessionRestart is open to anyone). The `terminalExit` that says so was
+  // dropped too, and claiming is how it arrives late.
+  | { state: "gone" };
+
+/**
  * One note on disk. `path` is the note's identity; `title` is what to call it on
  * screen (its first-line H1, or its filename if it has none).
  */
@@ -430,8 +450,9 @@ export type LedgeRPC = {
       // A reloaded page claims nothing, because a run event is a push keyed by
       // an id that page never learned: without this the run would keep going,
       // keep the server alive under it, and be both invisible and unstoppable.
-      // The drawer needs no equivalent — its shell is re-adopted by
-      // terminalAttach, which replays the scrollback with it.
+      // The drawer's equivalent is terminalClaim below: a page that RELOADED
+      // re-adopts its shell by mounting a drawer that attaches, but one whose
+      // WIRE dropped has a drawer already mounted and attaches nothing.
       //
       // The answer is which of `ids` the server is really running, so a client
       // that missed an ended event while the wire was down (a push with nowhere
@@ -499,6 +520,25 @@ export type LedgeRPC = {
       // only go where that shell already is — while a dead one means the
       // spawn is about to happen and the user must choose first.
       terminalStatus: { params: { sessionId: string }; response: { live: boolean; host: string | null } };
+      // What became of an OPEN drawer's shell while the wire was down, sent by
+      // the drawer itself after every reconnect (mainview/boot.tsx). The
+      // terminal half of inlineClaim above, and it exists for the same reason:
+      // a push with nowhere to go is dropped rather than queued (bun/daemon.ts),
+      // so everything the server said about this shell while the client was
+      // unreachable is simply gone. The three answers are those three lost
+      // pushes, delivered late (see TerminalClaim).
+      //
+      // Not terminalAttach, which is what a drawer OPENING sends. Attaching
+      // takes the shell and spawns one if there is none, and both are wrong
+      // here: a wire coming back is not a person opening a drawer, so it must
+      // not pull the shell off a device that deliberately took it, and it must
+      // not answer a shell that died with a brand new one whose scrollback is
+      // empty — the history on screen is the only copy left of the old one's.
+      // So this call takes nothing it does not already hold and spawns nothing.
+      //
+      // The client comes from the connection's handshake, like terminalAttach's:
+      // "still mine" is a question only the asker can ask about itself.
+      terminalClaim: { params: { sessionId: string }; response: TerminalClaim };
       // Tear down both of a note's shells; sent when its tab (or pane, or
       // workspace) closes and its docId drops out of the live set.
       closeSession: { params: { sessionId: string }; response: { ok: boolean } };

@@ -882,6 +882,25 @@ export async function createServer(deps: { push: Audience; native: NativeDeps })
       const t = terms.get(sessionId);
       return { live: !!t, host: t?.host ?? null };
     },
+    // What an already-open drawer missed while its client was unreachable
+    // (rpc-schema terminalClaim). Deliberately not termFor: this spawns
+    // nothing, because a session with no shell is the answer rather than a
+    // reason to make one.
+    terminalClaim: ({ sessionId }) => {
+      const t = terms.get(sessionId);
+      if (!t) return { state: "gone" };
+      // Another client attached while this one was away. Its `terminalDetached`
+      // was pushed at a connection that had already gone, so this answer is
+      // that push arriving late — and taking the shell back here instead would
+      // pull it off a device somebody deliberately moved it to.
+      if (t.owner !== null && t.owner !== client) return { state: "held", by: t.owner };
+      // Still this client's, since owner is a client id and outlives the
+      // connection it was set on. Null means nobody holds it, which for a
+      // drawer that is open and asking is the same answer: it is yours, and
+      // saying so without taking it would leave the bytes going nowhere.
+      t.owner = client;
+      return { state: "attached", dataB64: toB64(sbSnapshot(t)), host: t.host };
+    },
     // Also open to any client, and for the same reason: closing the tab or
     // restarting the shells is about the NOTE, not about whose screen the
     // drawer is on. A phone that closes a note it has open should not be

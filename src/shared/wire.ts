@@ -182,6 +182,7 @@ export const REQUEST_METHODS = [
   "terminalAttach",
   "terminalDetach",
   "terminalStatus",
+  "terminalClaim",
   "closeSession",
   "sessionConfigure",
   "sessionRestart",
@@ -385,6 +386,12 @@ export const READ_ONLY_METHODS = [
   "tagNotes",
   "trashList",
   "terminalStatus",
+  // The one entry here that is not simply a read, and it earns its place both
+  // ways. It writes at most `owner = the caller`, which is where a second
+  // attempt would leave it anyway. And it must be RE-ASKED rather than answered
+  // from the op record: a claim is a question about right now, and a recorded
+  // answer would tell a client it still holds a shell that has since moved.
+  "terminalClaim",
   "profileRead",
   "settingsGet",
   "settingsRead",
@@ -420,6 +427,10 @@ export const BINARY_FIELDS: Readonly<Record<string, readonly string[]>> = {
   "req:assetWrite": ["dataB64"],
   "res:assetRead": ["image", "dataB64"],
   "res:terminalAttach": ["dataB64"],
+  // The same scrollback by another name, and absent on the two answers that
+  // carry none: hoistBinary skips a field that is not there, so "held" and
+  // "gone" cost no frame.
+  "res:terminalClaim": ["dataB64"],
   "push:terminalOutput": ["dataB64"],
 };
 

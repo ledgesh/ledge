@@ -374,6 +374,90 @@ describe("one drawer, one owner", () => {
   });
 });
 
+// What an open drawer asks after its wire comes back (rpc-schema terminalClaim).
+// A push with nowhere to go is dropped rather than queued, so everything the
+// server said about this shell while the client was unreachable is gone: the
+// bytes, the client that took it, its own death. The three answers are those
+// three lost pushes, and each of these tests is one of them.
+describe("a drawer whose wire dropped", () => {
+  // The ordinary case, and the one the user is promised: a build carries on
+  // while you are on a train, and its output is waiting when you come back
+  // (docs/user/18-notes-on-another-machine.md). The ring is the only place
+  // those bytes still exist — they were pushed at a connection that had gone.
+  test("claims back everything the shell printed while it was away", async () => {
+    const { socketPath } = await daemonIn({ idleMs: 60_000 });
+    const mac = await joined(socketPath, "mac-1");
+
+    await mac.conn.requests.terminalAttach({ sessionId: "note-1" });
+    expect(await until(() => decode(got(mac.seen, "terminalOutput")).includes("\x1b[?2004h"))).toBe(true);
+    // Started before the wire goes and printing after it has, which is the only
+    // way to make output happen with nobody there to receive it: a disconnected
+    // client cannot type, and no other client may type into this shell.
+    await mac.conn.requests.terminalInput({ sessionId: "note-1", dataB64: b64("sleep 0.3; echo while-you-were-out\n") });
+    mac.conn.close();
+    await mac.conn.closed;
+    // Past the sleep, so the echo lands in the gap rather than racing the
+    // re-dial below.
+    await new Promise((r) => setTimeout(r, 900));
+
+    const back = await joined(socketPath, "mac-1");
+    const claim = await back.conn.requests.terminalClaim({ sessionId: "note-1" });
+
+    expect(claim.state).toBe("attached");
+    expect(Buffer.from(claim.state === "attached" ? claim.dataB64 : "", "base64").toString()).toContain("while-you-were-out");
+    // And it came from the claim rather than from a push: the new connection
+    // was never sent those bytes, because they were printed before it existed.
+    expect(decode(got(back.seen, "terminalOutput"))).not.toContain("while-you-were-out");
+  });
+
+  // The reconnect must not undo a deliberate act. Taking a shell is a person
+  // opening a drawer or pressing Take This Shell; a wire coming back is neither,
+  // and the `terminalDetached` that would have said so was dropped, so the claim
+  // is what tells this client its shell has moved.
+  test("does not take the shell back from a device that took it meanwhile", async () => {
+    const { socketPath } = await daemonIn({ idleMs: 60_000 });
+    const mac = await joined(socketPath, "mac-1");
+    const phone = await joined(socketPath, "phone-1");
+
+    await mac.conn.requests.terminalAttach({ sessionId: "note-1" });
+    mac.conn.close();
+    await mac.conn.closed;
+    await phone.conn.requests.terminalAttach({ sessionId: "note-1" });
+
+    const back = await joined(socketPath, "mac-1");
+    expect(await back.conn.requests.terminalClaim({ sessionId: "note-1" })).toEqual({ state: "held", by: "phone-1" });
+
+    // Not merely reported: the phone still has it. A claim that took the shell
+    // would refuse the phone's keystrokes here.
+    expect(await phone.conn.requests.terminalInput({ sessionId: "note-1", dataB64: b64("echo still-the-phones\n") })).toEqual({ ok: true });
+    expect(await until(() => decode(got(phone.seen, "terminalOutput")).includes("still-the-phones"))).toBe(true);
+  });
+
+  // A shell can end while its client is unreachable — it exited, or another
+  // client restarted it to apply edited frontmatter — and that `terminalExit`
+  // was dropped like everything else. Attaching here would lazily spawn a
+  // REPLACEMENT and answer with its empty scrollback, which reads as a terminal
+  // that wiped itself: the history on screen is the only copy left of the dead
+  // shell's, and the drawer closes instead.
+  test("does not conjure a replacement for a shell that ended", async () => {
+    const { socketPath } = await daemonIn({ idleMs: 60_000 });
+    const mac = await joined(socketPath, "mac-1");
+    const phone = await joined(socketPath, "phone-1");
+
+    await mac.conn.requests.terminalAttach({ sessionId: "note-1" });
+    expect(await until(() => decode(got(mac.seen, "terminalOutput")).includes("\x1b[?2004h"))).toBe(true);
+    mac.conn.close();
+    await mac.conn.closed;
+    await phone.conn.requests.sessionRestart({ sessionId: "note-1" });
+
+    const back = await joined(socketPath, "mac-1");
+    expect(await back.conn.requests.terminalClaim({ sessionId: "note-1" })).toEqual({ state: "gone" });
+    // And the claim itself spawned nothing, which is the half that separates
+    // this from terminalAttach.
+    expect(await back.conn.requests.terminalStatus({ sessionId: "note-1" })).toEqual({ live: false, host: null });
+  });
+});
+
 // Who else is on this server, and what to call them (rpc-schema `presence`).
 // The daemon's, because presence is a fact about connections and this is the
 // only thing that has more than one.

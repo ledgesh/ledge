@@ -11,7 +11,7 @@
 // is index.html, so none of this ships.
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import type { BacklinkHit, NoteMeta, TagHit, TrashMeta, WorkspaceRootInfo } from "../shared/rpc-schema";
+import type { BacklinkHit, NoteMeta, TagHit, TerminalClaim, TrashMeta, WorkspaceRootInfo } from "../shared/rpc-schema";
 import { headingOf, labelOf, slugify, slugOf } from "../shared/slug";
 import { frontmatterEnd, parseFrontmatter } from "../shared/frontmatter";
 import { instantiateTemplate, isoDateOf } from "../shared/template";
@@ -21,7 +21,7 @@ import { normalizeTag, tagDirectoryOf, tagRefsOf, type TagInfo } from "../shared
 import { configureBridge, dispatchRunEvent, reconcileRuns } from "./editor/bridge";
 import { sendRunKey } from "./editor/inlineTerm";
 import { barFaceOf, type BarFace } from "./lib/nativeBridge";
-import { configureTerminal, dispatchTerminalDetached } from "./terminal/channel";
+import { configureTerminal, dispatchTerminalDetached, dispatchTerminalRelink } from "./terminal/channel";
 import { configureNotes, dispatchExternalOpen, dispatchNotesChanged, type ExternalOpenInfo, type NoteFile } from "./notes/channel";
 import { configureVault, recordVaultState } from "./vault/channel";
 import { configureWorkspaces, recordWorkspaceKinds } from "./workspace/channel";
@@ -745,6 +745,13 @@ const termInputs: { sessionId: string; dataB64: string }[] = [];
 // is the only part of a resize a spec can check: the pty is inert here, but
 // whether the drawer sized a shell it does not yet own is view-side ordering.
 const termResizes: { sessionId: string; cols: number; rows: number; afterAttach: number }[] = [];
+// Claims sent, and what the fake server answers them with. The default is the
+// ordinary reconnect — the shell is still this client's — with an empty
+// scrollback, which is the inert terminal's version of "nothing was missed"; a
+// spec that wants one of the other two answers sets it before dropping the wire
+// (window.__harness.shellClaim).
+const termClaims: string[] = [];
+let claimAnswer: TerminalClaim = { state: "attached", dataB64: "", host: "local" };
 configureTerminal({
   sendInput: (sessionId, dataB64) => {
     termInputs.push({ sessionId, dataB64 });
@@ -761,6 +768,10 @@ configureTerminal({
   },
   detach: () => {},
   status: async () => ({ live: false, host: null }),
+  claim: async (sessionId) => {
+    termClaims.push(sessionId);
+    return claimAnswer;
+  },
   closeSession: () => {},
   restartSession: () => {},
 });
@@ -1032,6 +1043,13 @@ declare global {
       // the real thing, so there is no user action a spec could take to cause
       // it — the same reason externalOpen is here.
       linkState: (state: "live" | "reconnecting" | "lost", detail: string) => void;
+      // Every session a drawer has claimed, in order (one per reconnect;
+      // rpc-schema terminalClaim).
+      shellClaims: () => string[];
+      // What the fake server says became of a claimed shell. Set before driving
+      // linkState("live") to choose which of the three answers a spec is
+      // testing; an "attached" one carries the scrollback to replay.
+      shellClaim: (claim: TerminalClaim) => void;
       store: FakeStore;
     };
   }
@@ -1064,11 +1082,18 @@ window.__harness = {
   holdRuns: (ids) => {
     runsStillRunning = [...ids];
   },
-  // The same pair boot.tsx's connectionState push does, because a reconnect
+  shellClaims: () => [...termClaims],
+  shellClaim: (claim) => {
+    claimAnswer = claim;
+  },
+  // The same trio boot.tsx's connectionState push does, because a reconnect
   // that did not reconcile is not the reconnect the app performs.
   linkState: (state, detail) => {
     recordLinkState(state, detail);
-    if (state === "live") void reconcileRuns();
+    if (state === "live") {
+      void reconcileRuns();
+      dispatchTerminalRelink();
+    }
   },
   store,
 };
