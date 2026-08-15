@@ -89,7 +89,11 @@ export const MENU: readonly MenuSection[] = [
       "---",
       { command: "workspace.new" },
       { command: "workspace.attach" },
+      // Beside Switch Connection rather than with the other News: a window is a
+      // client of one server, so choosing a window is choosing a machine
+      // (remote.md §8a).
       { command: "connection.switch" },
+      { command: "window.new", hideWhenDisabled: true },
       "---",
       { command: "daily.open" },
       { command: "palette.notes" },

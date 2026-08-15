@@ -144,6 +144,13 @@ export const COMMANDS = {
   // the everyday surface, with this as the palette's and the menu's way in.
   // Ellipsis because it opens a chooser rather than switching to anything.
   "connection.switch": { title: "Notes On…" },
+  // Another window, which is another client of another server (remote.md §8a).
+  // No chord, because the N family is spent: ⌘N is New Note, ⇧⌘N New Workspace,
+  // ⌥⌘N New Note From Template. A window is a bigger scope than a workspace, so
+  // the shift rule would want ⇧⌘N and the scope below it has it. A notebook
+  // spending N on notes rather than on windows is the allocation, not an
+  // oversight (§2).
+  "window.new": { title: "New Window" },
   // Palette-only (a once-per-machine act earns no chord): writes the `ledge`
   // shim so the notes are reachable from any terminal (bun/cliShim.ts).
   "cli.install": { title: "Install Shell Command (ledge)" },

@@ -225,3 +225,46 @@ test("a dropped connection stops claiming to know who else is here", async ({ pa
   await page.evaluate(() => window.__harness.linkState("reconnecting", "The connection dropped. Reconnecting…"));
   await expect(bar(page).locator("[data-presence]")).toHaveCount(0);
 });
+
+// New Window (remote.md §8a). The second window is another client in another
+// webview, so nothing about it is visible from inside this page: what a spec
+// can assert is that the verb is offered, that it asks the shell, and that
+// asking twice asks twice — the rest belongs to the live probe (testing.md §6).
+test("New Window asks the shell, once per invocation", async ({ page }) => {
+  expect(await page.evaluate(() => window.__harness.windowOpens())).toBe(0);
+
+  await page.keyboard.press("Meta+Shift+p");
+  await page.keyboard.type("New Window");
+  await page.keyboard.press("Enter");
+  await expect.poll(() => page.evaluate(() => window.__harness.windowOpens())).toBe(1);
+
+  await page.keyboard.press("Meta+Shift+p");
+  await page.keyboard.type("New Window");
+  await page.keyboard.press("Enter");
+  await expect.poll(() => page.evaluate(() => window.__harness.windowOpens())).toBe(2);
+});
+
+// ⌘N is New Note and stays New Note: the N family is spent, and a window is a
+// bigger scope than the workspace holding ⇧⌘N (interactions.md §2).
+test("New Window takes no chord", async ({ page }) => {
+  await page.keyboard.press("Meta+Shift+n");
+  await page.keyboard.press("Meta+n");
+  await page.keyboard.press("Alt+Meta+n");
+  expect(await page.evaluate(() => window.__harness.windowOpens())).toBe(0);
+});
+
+// A phone shows one app at a time, so the verb is absent rather than present
+// and silent (ios.md §4, lib/shell.ts multiWindow). Both halves in one case:
+// the desktop assertion is what stops the phone one from passing because the
+// palette never had the row under any shell.
+test("a shell with one window does not offer it, and one with two does", async ({ page }) => {
+  await page.keyboard.press("Meta+Shift+p");
+  await page.keyboard.type("New Window");
+  await expect(page.getByText("New Window")).toHaveCount(1);
+
+  await page.goto("/harness.html?shell=ios");
+  await expect(page.locator('[data-target-kind="note"]', { hasText: "Alpha" })).toBeVisible();
+  await page.keyboard.press("Meta+Shift+p");
+  await page.keyboard.type("New Window");
+  await expect(page.getByText("New Window")).toHaveCount(0);
+});

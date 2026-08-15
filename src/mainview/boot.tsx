@@ -33,6 +33,7 @@ import { configureWorkspaces, recordDailyRoot, recordWorkspaceKinds } from "./wo
 import { configureClipboard } from "./lib/clipboard";
 import { configureMenu, dispatchNativeCommand } from "./lib/menu";
 import { configureCli } from "./lib/cli";
+import { configureWindows } from "./lib/windows";
 import { captureFailures, configureLog } from "./lib/log";
 import { configureAssets } from "./lib/assets";
 import { configureSettings } from "./lib/settings";
@@ -188,6 +189,17 @@ export function bootView(requests: RequestClient): Promise<void> {
   configureMenu({
     set: (items) => {
       void requests.menuSet({ items });
+    },
+  });
+
+  // Another window, which is another client of another server (remote.md §8a).
+  // Fire-and-forget for the same reason the menu is: the window either appears
+  // or the shell logged why, and there is nothing here that could act on the
+  // answer — a shell with no second window to give is one where the verb was
+  // never offered (lib/shell.ts multiWindow).
+  configureWindows({
+    open: () => {
+      void requests.windowNew({});
     },
   });
 

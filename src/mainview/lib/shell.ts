@@ -30,6 +30,8 @@ interface Shell {
   deviceKey: string;
   /** Whether focusing text puts a keyboard on screen, over the page. */
   softKeyboard: boolean;
+  /** Whether this client can open a second window. */
+  multiWindow: boolean;
 }
 
 let shell: Shell = {
@@ -37,6 +39,7 @@ let shell: Shell = {
   hasTerminal: true,
   deviceKey: "",
   softKeyboard: false,
+  multiWindow: true,
 };
 
 export function configureShell(next: Partial<Shell>): void {
@@ -111,6 +114,22 @@ export function deviceKeyLine(): string {
  */
 export function softKeyboard(): boolean {
   return shell.softKeyboard;
+}
+
+/**
+ * Whether New Window has anything to open (remote.md §8a).
+ *
+ * A window on the Mac is a CLIENT — its own connection, its own client id, its
+ * own row in presence — which is why the verb exists at all: two machines at
+ * once is two windows. A phone shows one app and has one window, so there the
+ * verb is absent rather than present and silent.
+ *
+ * Asked rather than probed. `windowNew` answers false on a shell with no second
+ * window to give, but a `when` predicate cannot await, and finding out by
+ * calling would mean opening a window to learn whether one can be opened.
+ */
+export function multiWindow(): boolean {
+  return shell.multiWindow;
 }
 
 // The server's half. Not part of `Shell` above because it arrives from a

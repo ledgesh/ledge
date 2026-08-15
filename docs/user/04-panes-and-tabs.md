@@ -90,9 +90,11 @@ Ledge saves the layout as you change it and restores it at the next launch. Two 
 
 ## The window
 
-Ledge reopens the window at the position and size you left it.
+Ledge reopens the windows you left open, each at the position and size you left it.
 
-If that position no longer exists, because you unplugged the display it was on or the display got smaller, Ledge keeps the size and centers the window on the display that best matches.
+If a position no longer exists, because you unplugged the display it was on or the display got smaller, Ledge keeps the size and centers the window on the display that best matches.
+
+New Window in the File menu opens another one. A window belongs to one machine, so a second window is how you have two machines open at once ([[Notes on Another Machine]]).
 
 Two more keys for the window itself:
 

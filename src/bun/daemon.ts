@@ -34,13 +34,13 @@
 // never coming back (HOLD_MAX_MS).
 import { chmodSync, mkdirSync, openSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { createServer, type Audience, type NativeDeps } from "./server";
+import { createServer, type NativeDeps } from "./server";
 import { fedDuplex, type Duplex } from "../shared/transport";
 import { serverConnection, socketWriter, type ServerConnection } from "./transport";
+import { audienceOf } from "./audience";
 import { createOpLog } from "./opLog";
 import { LOG_DIR } from "./log";
 import { APP_HOME } from "./workspaces";
-import { PUSH_MESSAGES, type ServerPush } from "../shared/wire";
 import { BUILD_VERSION } from "../shared/version";
 
 /** In the app home, so LEDGE_NOTES_ROOT moves it too and a scratch probe gets
@@ -145,40 +145,10 @@ export async function startDaemon(opts: DaemonOpts = {}): Promise<Daemon> {
   // boot.
   const clients = new Map<string, ServerConnection>();
 
-  // A push object that writes to whoever `pick` names AT THE MOMENT it is
-  // called. That indirection is the whole reason this is not just `conn.push`:
-  // the server outlives every connection it was built with, so nothing may be
-  // captured when createServer runs.
-  const fanout = (pick: () => Iterable<ServerConnection>): ServerPush =>
-    Object.fromEntries(
-      PUSH_MESSAGES.map((m) => [
-        m,
-        (p: unknown) => {
-          for (const conn of pick()) (conn.push as unknown as Record<string, (p: unknown) => void>)[m]!(p);
-        },
-      ]),
-    ) as unknown as ServerPush;
-
-  // One object per audience rather than one per push. `to` is called on the
-  // hottest path the server has — a shell's bytes, per drawer, per coalescing
-  // window — and building eight closures to throw away each time is a cost
-  // with nothing to show for it. An entry holds the id and nothing else, so a
-  // client that leaves leaves eight dead functions rather than a connection.
-  const addressed = new Map<string, ServerPush>();
-  const push: Audience = {
-    all: fanout(() => clients.values()),
-    to(client) {
-      let one = addressed.get(client);
-      if (!one) {
-        one = fanout(() => {
-          const conn = clients.get(client);
-          return conn ? [conn] : [];
-        });
-        addressed.set(client, one);
-      }
-      return one;
-    },
-  };
+  // The routing itself is bun/audience.ts, shared with the app's own shell:
+  // a window is a client too, and one local server under N windows has exactly
+  // this to do (remote.md §8a).
+  const push = audienceOf(clients, (conn) => conn.push);
 
   /**
    * Tell every client who else is here (rpc-schema `presence`).

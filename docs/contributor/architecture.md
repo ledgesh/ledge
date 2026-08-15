@@ -16,7 +16,8 @@ allowed to be a wire. `remote.md` is where that lives.)
   machine: the filesystem (`notes.ts`), the PTYs (`pty.ts` via bun:ffi), and
   the system clipboard. It has no UI.
 - **WKWebView** (`src/mainview/`) runs the React app. It owns everything the
-  user sees and no machine state at all.
+  user sees and no machine state at all. One per window, and a window is a
+  separate client of a possibly different server (`remote.md` §8a).
 - **`src/shared/`** is the contract between them — `rpc-schema.ts`, the pure
   helpers both sides need (`slug.ts`), the wire codec (`wire.ts`), and the
   client's half of a connection (`transport.ts`). It imports from neither
@@ -449,6 +450,11 @@ Three tiers, chosen by lifetime and by who needs to see the state:
   dispatcher reads them back off the focused element (`commands/target.ts`).
   Do not shadow focus in React state — the DOM already owns it, and a copy
   can only disagree.
+
+Two further splits live in `remote.md`, and both are about WHERE rather than
+about lifetime: §5 divides state between the server and the client, and §8a
+divides what is left between the process and each window. Everything in the
+three tiers above sits inside one webview and is untouched by either.
 
 **The `configureX` pattern** is the standing answer to "module A needs a
 capability that module B owns, and importing B would drag in React, the RPC,

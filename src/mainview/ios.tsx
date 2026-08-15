@@ -92,6 +92,7 @@ async function start(): Promise<void> {
     hasTerminal: false,
     deviceKey: key,
     softKeyboard: true,
+    multiWindow: false,
   });
 
   let live = true;

@@ -601,6 +601,18 @@ export type LedgeRPC = {
       // Bun sets a minimal fallback menu at boot (Quit and the edit roles),
       // which this replaces wholesale on the view's first push.
       menuSet: { params: { items: AppMenuItem[] }; response: { ok: boolean } };
+      // Open another window, which is another CLIENT: its own connection, its
+      // own client id, its own row in presence (remote.md §8a). It opens on the
+      // local server, the way a fresh launch does, and switching it somewhere
+      // else is the ordinary connectionSelect.
+      //
+      // `ok` is false where the shell has no second window to give — a phone
+      // has one and only one (ios.md §4). Whether the verb is OFFERED is
+      // decided without asking (mainview/lib/shell.ts), because a `when`
+      // predicate cannot await and a probe would have to open a window to
+      // learn the answer; this is the honest reply to anything that calls
+      // anyway.
+      windowNew: { params: {}; response: { ok: boolean } };
       // The validated settings snapshot (shared/settings.ts), fetched once at
       // boot. Bun owns the files, the parsing, and the fallbacks; the view only
       // ever sees a complete, valid Settings and never learns there were two of

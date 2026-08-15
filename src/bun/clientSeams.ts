@@ -29,6 +29,10 @@ export interface ClientNative {
   clipboardFormats?(): string[] | null;
   // Hand the view's menu description to the platform. A no-op off macOS.
   setMenu?(items: unknown[]): void;
+  // Open another window, which is another client of another server
+  // (remote.md §8a). Absent on a shell that has one window and can only ever
+  // have one, which is what makes the verb disappear rather than fail.
+  newWindow?(): void;
   // The pasteboard's image, as PNG bytes. Defaults to the osascript route
   // (bun/clipboard.ts). Injectable for two reasons that point the same way: a
   // client that is not a Mac reads its pasteboard some other way, and a test
@@ -95,7 +99,7 @@ export async function clientOverlay(base: RequestHandlers, native: ClientNative)
 }
 
 /**
- * The six themselves. `server` is where the one of them that produces a FILE
+ * The eight themselves. `server` is where the one of them that produces a FILE
  * sends its bytes: reading a pasteboard and naming a file in a workspace are
  * different machines' jobs, and this is the seam between them.
  */
@@ -154,6 +158,17 @@ export function clientSeams(
     // place a command is defined.
     menuSet: async ({ items }) => {
       native.setMenu?.(items);
+      return { ok: true };
+    },
+    // Another window, and so another client (remote.md §8a). The shell opens it
+    // on the local server the way a launch does; everything about which machine
+    // it ends up on is the ordinary connectionSelect from inside it.
+    //
+    // `ok: false` where there is no second window to give, which the view reads
+    // once at boot to decide whether to offer the verb at all.
+    windowNew: async () => {
+      if (!native.newWindow) return { ok: false };
+      native.newWindow();
       return { ok: true };
     },
     // openableUrl is the guard here, not a convenience: `open` treats a

@@ -32,6 +32,7 @@ import {
 import { copyText } from "@/lib/clipboard";
 import { installCli } from "@/lib/cli";
 import { revealLog } from "@/lib/log";
+import { openWindow } from "@/lib/windows";
 import { restartSession } from "@/terminal/channel";
 import { attachWorkspace, closeDocs, closeWorkspace, createWorkspace, moveWorkspace, openDocs } from "@/workspace/actions";
 import { dailyWorkspaceRoot, docsFolder, workspaceKind } from "@/workspace/channel";
@@ -62,6 +63,7 @@ export const registryDeps: RegistryDeps = {
   copyText,
   installCli,
   revealLog,
+  newWindow: openWindow,
   createWorkspace,
   attachWorkspace,
   closeWorkspace,

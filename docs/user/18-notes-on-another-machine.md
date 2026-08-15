@@ -48,6 +48,18 @@ Switching closes every tab and opens that machine's instead. Nothing is lost: th
 
 A connection that will not open costs you nothing. Ledge reaches the new machine before it lets go of the old one, so a typo or a sleeping laptop leaves you exactly where you were with the reason on screen. If the failure happens at launch, Ledge opens on this Mac and the bar reads "not reachable".
 
+## Two machines at once
+
+New Window in the File menu opens a second window, and each window is on its own machine. Switching moves one window; a second window is how you have a build box and a VPS open side by side.
+
+A new window opens on this Mac. Switch it wherever you like from inside it.
+
+Each window keeps its own tabs and panes, and the server remembers them: switch a window back to a machine you used before and its arrangement comes back. Ledge reopens every window you left open at the next launch, each on the machine it was pointed at.
+
+Two windows on the same machine are the exception. Only one of them can be that machine's arrangement, so the second opens empty and does not overwrite the first.
+
+Closing the last window quits Ledge.
+
 ## Install the server
 
 The other machine needs `ledge-server` on its PATH. Build it from a checkout of Ledge, on a machine of the same architecture as the one that will run it:
@@ -144,6 +156,8 @@ A server serves every device that connects to it. Your Mac and your phone can bo
 
 Each device keeps its own tabs and panes. The server files them under the device that arranged them, so a phone does not open into a Mac's three-pane layout.
 
+A second Ledge window counts as another device here. Point two windows at one server and each is listed in the other's connection bar, and a note's terminal has one owner between them, exactly as a Mac and a phone would.
+
 The connection bar shows who else is connected: one other device by name, more than one as a count. Hover it for the full list. Names come from the devices themselves, so a Mac uses its computer name, and a device that gives no name reads as "another device".
 
 Nothing appears there when you are the only one connected, and nothing ever appears while your notes are on this Mac.
@@ -204,7 +218,7 @@ Ledge also stops when the server hangs up on purpose rather than the wire failin
 
 ## Limits
 
-- One connection at a time. Search, tags, backlinks, and wikilinks all stay within the machine you are on.
+- One connection per window. Search, tags, backlinks, and wikilinks all stay within the machine that window is on. Open a second window for a second machine (see above).
 - One device at a time in a note's terminal. Everything else on a server is shared by every device connected to it (see above).
 - No moving a note between servers from inside the app. Use `rsync` or `git`; the notes are ordinary files ([[Tutorial: Keep Notes Synced]]).
 - No offline editing. The server has to be reachable to open a note.

@@ -134,6 +134,9 @@ export interface RegistryDeps {
   // Show the session log in Finder. Fire-and-forget: the outcome is a Finder
   // window, which is its own feedback.
   revealLog(): void;
+  // Open another window, which is another client of another server (remote.md
+  // §8a). Fire-and-forget: the outcome is a window, which is its own feedback.
+  newWindow(): void;
   // Workspace lifecycle (workspace/actions.ts): each needs a Bun round trip
   // (create a folder / open the native picker / detach the registry entry),
   // so the reducer cannot do it alone. Each resolves to an error message to

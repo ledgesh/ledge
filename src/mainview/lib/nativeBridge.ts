@@ -417,6 +417,11 @@ function clientSeams(
     // — the registry is the menu's source and knows nothing about shells — and
     // this is where it stops.
     menuSet: async () => ({ ok: true }),
+    // And no second window (ios.md §4): a phone shows one app at a time, so the
+    // client and the window are the same thing here in a way they stopped being
+    // on the Mac (remote.md §8a). False rather than a no-op, so the verb is
+    // absent from the palette instead of present and silent.
+    windowNew: async () => ({ ok: false }),
 
     // The connection list, which is the phone's own and not a server's — the
     // same claim remote.md §8 makes about a Mac's. Swift holds the file; every

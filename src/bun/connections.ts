@@ -20,14 +20,14 @@ import { readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { isHostName } from "../shared/frontmatter";
-import { hostPart } from "../shared/connections";
+import { hostPart, LOCAL_ID } from "../shared/connections";
 import { CLIENT_HOME, ensureClientHome } from "./clientHome";
 
 // The half of a connection that is a fact about ssh rather than about this
 // machine's files, re-exported so that "what a connection is" still has one
 // import path on this side. The phone reaches the same functions directly,
 // because it has no Bun to reach them through (shared/connections.ts).
-export { hostPart, pinFitsHost, pinnedHost, validateConnection } from "../shared/connections";
+export { hostPart, LOCAL_ID, pinFitsHost, pinnedHost, validateConnection } from "../shared/connections";
 
 export const CONNECTIONS_PATH = join(CLIENT_HOME, "connections.json");
 
@@ -41,9 +41,6 @@ export const KNOWN_HOSTS_PATH = join(CLIENT_HOME, "known_hosts");
 export const SSH_PATH = "/usr/bin/ssh";
 export const KEYSCAN_PATH = "/usr/bin/ssh-keyscan";
 export const KEYGEN_PATH = "/usr/bin/ssh-keygen";
-
-/** The id of the server in this process. Reserved, never minted, never stored. */
-export const LOCAL_ID = "local";
 
 export interface Connection {
   id: string;

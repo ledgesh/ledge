@@ -19,6 +19,7 @@ function stubDeps(over: Partial<RegistryDeps> = {}): RegistryDeps {
     copyText: noop,
     installCli: async () => ({ ok: true, message: "" }),
     revealLog: noop,
+    newWindow: noop,
     createWorkspace: async () => null,
     attachWorkspace: async () => null,
     closeWorkspace: noop,

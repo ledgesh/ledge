@@ -5,6 +5,7 @@ import {
   MIN_WIDTH,
   fitFrame,
   parseFrame,
+  parseWindows,
   roundFrame,
   type Rect,
 } from "./windowFrame";
@@ -45,6 +46,57 @@ describe("parseFrame", () => {
   test("a zero or negative size is refused, not clamped later", () => {
     expect(parseFrame('{"x":0,"y":0,"width":0,"height":600}')).toBeNull();
     expect(parseFrame('{"x":0,"y":0,"width":900,"height":-1}')).toBeNull();
+  });
+});
+
+// The window list is what makes a launch reopen the windows that were open,
+// each on the machine it was pointed at (remote.md §8a). Every failure below
+// costs geometry or a connection and none of them may throw: this is read
+// before any window exists.
+describe("parseWindows", () => {
+  const FRAME: Rect = { x: 10, y: 20, width: 900, height: 700 };
+
+  test("windows come back in order, with their connections", () => {
+    const text = JSON.stringify({
+      version: 2,
+      windows: [
+        { ...FRAME, connection: "local" },
+        { ...FRAME, x: 40, connection: "vps-1" },
+      ],
+    });
+    expect(parseWindows(text, "local")).toEqual([
+      { frame: FRAME, connection: "local" },
+      { frame: { ...FRAME, x: 40 }, connection: "vps-1" },
+    ]);
+  });
+
+  test("nothing saved yet is no windows, not an error", () => {
+    expect(parseWindows(null, "local")).toEqual([]);
+    expect(parseWindows("", "local")).toEqual([]);
+    expect(parseWindows("{ half a wri", "local")).toEqual([]);
+    expect(parseWindows("[1,2,3]", "local")).toEqual([]);
+    expect(parseWindows('{"version":2}', "local")).toEqual([]);
+  });
+
+  // The file held one bare frame before there could be more than one window.
+  // The only record of where that window was pointed is the stored selection.
+  test("the single frame an older install saved becomes one window on the fallback", () => {
+    expect(parseWindows(JSON.stringify(FRAME), "vps-1")).toEqual([{ frame: FRAME, connection: "vps-1" }]);
+  });
+
+  // Same rule as everywhere else in machine-written state: a bad entry costs
+  // exactly itself, and the windows either side of it still open.
+  test("an unusable entry is dropped and its neighbours survive", () => {
+    const text = JSON.stringify({
+      version: 2,
+      windows: [{ ...FRAME, connection: "local" }, { x: 1, y: 2 }, null, "nope", { ...FRAME, connection: "vps-1" }],
+    });
+    expect(parseWindows(text, "local").map((w) => w.connection)).toEqual(["local", "vps-1"]);
+  });
+
+  test("an entry with no usable connection opens where a window with nothing to go on opens", () => {
+    const text = JSON.stringify({ version: 2, windows: [FRAME, { ...FRAME, connection: 7 }, { ...FRAME, connection: "" }] });
+    expect(parseWindows(text, "vps-1").map((w) => w.connection)).toEqual(["vps-1", "vps-1", "vps-1"]);
   });
 });
 

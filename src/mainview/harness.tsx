@@ -27,6 +27,7 @@ import { configureVault, recordVaultState, refreshVaultState } from "./vault/cha
 import { configureWorkspaces, recordWorkspaceKinds } from "./workspace/channel";
 import { configureClipboard } from "./lib/clipboard";
 import { configureCli } from "./lib/cli";
+import { configureWindows } from "./lib/windows";
 import { configureAssets } from "./lib/assets";
 import { configureSettings } from "./lib/settings";
 import { configureConnections, recordLinkState, recordPresence } from "./lib/connections";
@@ -70,6 +71,9 @@ configureShell({
   // software keyboard would rise over.
   deviceKey: FAKING_IOS ? 'restrict,command="ledge-server serve" ecdsa-sha2-nistp256 AAAAharness ledge-iphone-abc123' : "",
   softKeyboard: FAKING_IOS,
+  // A phone shows one app at a time, so a window and a client are the same
+  // thing there in a way they stopped being on the Mac (remote.md §8a).
+  multiWindow: !FAKING_IOS,
 });
 // The SERVER's half of the same picture, and a different question: what the
 // machine holding the notes can do for itself. Set here rather than arriving
@@ -969,6 +973,16 @@ configureCli({
   install: async () => ({ ok: true, message: "ledge installed: ~/.local/bin/ledge" }),
 });
 
+// New Window is a native seam with no in-page consequence at all — the second
+// window is another client of another server, in another webview (remote.md
+// §8a) — so what a spec can see is that the ask left, and how many times.
+const windowOpens: number[] = [];
+configureWindows({
+  open: () => {
+    windowOpens.push(windowOpens.length + 1);
+  },
+});
+
 declare global {
   interface Window {
     __harness: {
@@ -979,6 +993,8 @@ declare global {
       // Keyed by home: the dialog has a tab per settings file.
       settingsText: (home: SettingsHome) => string;
       linkOpens: () => string[];
+      // How many windows New Window asked the shell for.
+      windowOpens: () => number;
       layout: () => string | null;
       termAttaches: () => { sessionId: string; host: string | null }[];
       termPastes: () => { sessionId: string; text: string; host: string | null }[];
@@ -1069,6 +1085,7 @@ window.__harness = {
   },
   settingsText: (home) => settingsFiles[home],
   linkOpens: () => [...linkOpens],
+  windowOpens: () => windowOpens.length,
   layout: () => layoutText,
   termAttaches: () => termAttaches.map((a) => ({ ...a })),
   termPastes: () => termPastes.map((p) => ({ ...p })),

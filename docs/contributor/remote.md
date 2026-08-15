@@ -317,7 +317,10 @@ connections). A phone must not inherit a three-pane desktop layout, and
 reconnecting from the same Mac must not lose one. Keying on the client
 satisfies both without a second storage location. The ownership line moves by
 exactly one step: `bun/layout.ts` now owns the MAP (which client, and the
-atomic write) and `workspace/persist.ts` still owns each value's shape.
+atomic write) and `workspace/persist.ts` still owns each value's shape. The
+key is per CLIENT and not per machine, which is what lets one Mac keep a
+different arrangement on every server it reaches: §8a mints a client id per
+connection, so selecting a server again restores what was left on it.
 
 **The id rides the handshake, not the call.** Identity is a property of the
 connection: a client cannot forget to send it, no handler needs a parameter it
@@ -333,7 +336,8 @@ protocol version is 4.
 directory: on every machine Ledge ships to, the client and its local server are
 the same user on the same disk, so one `~/.ledge` to back up beats two. It
 holds the id, the connection list, Ledge's own `known_hosts`, the client's
-`settings.jsonc`, and `window.json`. Deriving it from `APP_HOME` also means
+`settings.jsonc`, and `window.json` (one frame today; the window list and their
+frames under §8a). Deriving it from `APP_HOME` also means
 `LEDGE_NOTES_ROOT` moves the client's files too, which is what lets a scratch
 probe run without touching the real ones.
 
@@ -784,7 +788,8 @@ by matching on the wording of a message.
 ## 8. One connection at a time
 
 A client is bound to exactly one server. Switching tears the session down and
-rebuilds it.
+rebuilds it. A window is a client, so two servers at once is two windows and
+not two connections in one (§8a).
 
 **Connections are client-side configuration**: a display name, an ssh
 destination, a key reference, the pinned host key, and when it was last
@@ -835,8 +840,9 @@ and needs no new scoping rule.
 Explicit non-goals, so nobody assumes otherwise: no cross-server wikilinks,
 no federated search, no moving a note between servers from inside the app,
 and no client connected to two servers at once. (Two clients connected to one
-server is the opposite arrangement and is supported; §1.) Each is individually
-plausible and
+server is the opposite arrangement and is supported; §1. Two windows on two
+servers is that same arrangement rather than an exception to this one, because
+each window is a client; §8a.) Each is individually plausible and
 collectively a different product. Moving notes between servers is what `rsync`
 and `git` are for, and the plain-files ethos is what makes that true.
 
@@ -862,6 +868,162 @@ screen, so picking a client would be guessing which device the person is
 holding — and the cost of guessing wrong is a verb that does nothing visible,
 against a cost of one tab on a device you were not looking at. A request expires
 at 60 seconds either way.
+
+## 8a. New Window
+
+The fork this whole section turns on is a window is a client, not a second view
+of one. Everything below follows from that sentence. `bun/index.ts` is the
+shell that holds the windows, `bun/connectionStore.ts` is the list they share,
+`bun/connectionManager.ts` is one per window, and `bun/audience.ts` is the
+routing the local server needed once there was more than one of them.
+
+**A window is a client.** New Window opens a second window with its own
+connection, its own client id, and its own row in `presence`. Two windows can
+point at two servers at once, which is what the verb is for: a laptop, a build
+box and a VPS are three machines one person uses in the same hour, and reaching
+them by switching (§8) costs a full reload each way.
+
+§8's non-goal survives unchanged. A client is still bound to exactly one
+server, and no view ever holds two connections. What stops being true is that
+a Mac is one client. Two windows are the arrangement §1 already describes and
+`interactions.md` §4-2 already gives a grammar for — two clients, presence
+between them, one owner per drawer — now reachable without a second device.
+
+**What a window owns, and what the process owns:**
+
+| State | Owner |
+| ----- | ----- |
+| The connection, and which server it points at | window |
+| The client id, and so the layout it reads (§5) | the connection, held by whichever window points at it |
+| The label other clients display (`Hello.label`) | window |
+| The webview's RPC, and the pushes routed to it | window |
+| The window frame | window |
+| The connection list and its pinned host keys | process |
+| The client home: `known_hosts`, client settings, the window list, the connection-to-client-id map | process |
+| The local server, its watchers, its vault, its PTYs | process |
+| The menu bar | process, driven by the focused window |
+
+**The list is shared and the selection is not.** `connections.json` holds the
+list and the pins for the whole app, because a machine you have paired with is
+a fact about this Mac rather than about one of its windows. Which connection a
+window points at is stored with the window instead of in that file's `selected`
+key: two windows writing one selection would mean the last one to switch
+decided where the next launch opened. That key is still read and still written
+back unchanged, because it is the only record an install upgrading across this
+change has of where it was, and the only thing left if the window list cannot
+be read.
+
+**Two refusals about connections in use**, both of them the store's rather than
+one window's, since only the store can see every window. A connection a window
+is on cannot be removed, which is the old rule with "a window" where "the
+window" used to be. And a connection another window is on cannot be
+RE-ADDRESSED: that window's wire was built the old way and cannot be re-opened
+from here, so leaving it pointed at the old machine while the row names the new
+one would be the lie the indicator exists to prevent. A rename is never
+refused, because it changes nothing about how a connection is made.
+
+**One local server, however many windows.** `attach` builds a server in this
+process for the local connection (`bun/index.ts`), and a second one over the
+same notes root would give the machine two watchers, two vaults, two PTY maps,
+and two consumers of the open-request file. So it is built on the first local
+attach and each window takes an overlay of it through
+`createServer(...).forClient(id)`, which already took a client id. It is torn
+down when the last of those overlays is released, which is what keeps a window
+switching away from this Mac costing exactly what it always cost, its shells,
+while a second window on this Mac costs nothing. The audience that addresses
+those overlays is `bun/audience.ts`, shared with the daemon: routing between
+clients was the daemon's alone only while a Mac was one client.
+
+**Identity follows the connection, not the window.** `bun/clientHome.ts` keeps
+a map of connection id to client id, each minted the first time that connection
+is opened and kept until it is removed. The map is its own file beside the id,
+not a field in `connections.json`, for the reason `CLIENT_ID_PATH` already
+documents: a connections file that gets corrupted or hand-edited must not take
+the ids with it and orphan every saved arrangement. A window sends the id of
+whatever connection it points at. The arrangement a server has on file
+therefore comes back whenever that server is selected again, in whichever
+window selects it. That is the behavior worth having: a layout is three panes
+of THAT machine's notes, and it means nothing in front of another machine's.
+The existing machine id is the local connection's rather than an entry in the
+map, so an install upgrading across this change keeps the layout it has.
+
+**Switching a window's connection changes its id mid-session**, and §8 already
+does the work that makes that free. A switch is a reload, the id rides the
+handshake rather than the call (§5), so the new connection is greeted as the
+client that server knows and the view boots onto the arrangement it left there.
+
+**A new window is blank; a re-selected server is not.** New Window opens on the
+local connection, the way a fresh launch does, and gets whatever that server
+has on file. Selecting a server another window is already pointing at is the
+one case that cannot restore: two windows cannot both be the client a server
+files one layout under. The second gets a fresh id for as long as it is open,
+starts empty, and saves nothing over the first — its `layoutGet` answers null
+and its `layoutSave` is dropped by the client rather than filed under an id
+nothing will ask for again. One window per server is the ordinary arrangement
+and never reaches that rule.
+
+**The map is bounded by the connection list**, one entry per connection rather
+than one per window ever opened, and `connectionRemove` drops the id alongside
+the pin. A layout still filed on a server this Mac has forgotten is that
+server's to prune, and is the same orphan a phone that never comes back already
+leaves (§5).
+
+**Quitting saves the set of windows**, in `window.json` beside the frames it
+already held (`bun/windowFrame.ts`). Launch restores the windows that were
+open, each dialling the connection it was pointed at, and §8's boot rule
+applies per window: a server that will not open costs that window a fallback to
+the local server with the reason kept, and costs the others nothing. Closing a
+window retires no identity, because its arrangement was filed under the
+connection. Closing the last window quits, and that last close saves nothing:
+a list saying "no windows" would open the next launch onto a window it had to
+invent anyway, with the wrong connection and the wrong frame.
+
+The list is written whenever it changes rather than only at quit — a window
+opened, closed, switched, or dragged. A switch a crash swallowed would
+otherwise reopen that window on the machine it left. Windows are opened one at
+a time, since the id a window sends and the label it presents both depend on
+which connections the others are already on.
+
+**Two windows on one server send different labels.** `Hello.label` is the
+hostname, read once at launch, so the second window on a connection would send
+the string the first one sent, and `interactions.md` §4-2's "iPhone took this
+shell" notice would name the machine the user is already looking at. The second
+appends an ordinal. The rule stays the client's: a server displays what it is
+told (§5).
+
+**Pushes route to one window, except the ones that already describe a server.**
+`runEvent`, `terminalOutput`, `terminalExit` and `terminalDetached` are
+addressed to the client that asked for them, by id. `notesChanged`, `presence`,
+`vaultChanged` and `terminalBusy` reach every window on that server, because
+they describe the server's state and a second window is the second screen they
+exist for. A drawer is busy for everyone watching it, which is why that one is
+not addressed even though its four neighbours are. So does `openExternal`, for
+§8's reason unchanged: `ledge <title>` names a note, not a screen. None of this
+is new work in `bun/server.ts`: it already said which, for the daemon, and what
+changed is only that the app process now answers the question too.
+
+**Presence over the local server is the shell's**, for the daemon's reason
+(`announcePresence`): it is a fact about who is CONNECTED, and only the thing
+holding the connections knows. Two windows on one Mac need it as much as a Mac
+and a phone do, because without it the drawer the other window took was taken
+by nobody in particular (`interactions.md` §4-2).
+
+**The menu bar belongs to the focused window.** macOS gives an application one
+menu bar, the view owns its contents (`interactions.md` §10), and two views
+pushing into it would leave the menu describing whichever one last re-rendered.
+Bun remembers every window's last push, applies only the focused window's,
+re-applies it when focus moves, and routes `menuCommand` back to the focused
+window alone. It is the one place the process arbitrates between windows rather
+than routing between them. Focus is never handed back on blur, because macOS
+blurs the window you left before focusing the one you arrived at and a click
+landing in between would have nowhere to go.
+
+**Almost nothing here reaches the daemon or the phone.** A server already
+serves several clients and has no interest in whether two of them are windows
+on one Mac (§1); what it gained is a second caller for the routing it already
+had. iOS has one window and one connection list (`ios.md` §4), and gains one
+stub: `windowNew` answers false there, which is what keeps the verb out of the
+palette rather than in it and silent.
 
 ## 9. Locking across the wire
 
@@ -898,20 +1060,21 @@ timer already measures.
 - **Locked plaintext to an agent surface**, per §9.
 - **A path the client constructed.** Per §2.
 
-**Seven RPC entries are the client's outright** and never become frames
+**Eight RPC entries are the client's outright** and never become frames
 (`bun/clientSeams.ts`, whose `CLIENT_METHODS` is the list both ends read):
 `clipboardWrite`, `clipboardRead`, `clipboardReadRich`, `assetPaste`,
-`assetPick`, `linkOpen`, and `menuSet`. Opening a URL happens on the device the
-user is holding, not on the VPS; the picture you want to insert is in that
-device's photo library or on its disk (ios.md §11); and a headless server handed
-the view's menu would swallow ⌘Q with it. The six connection entries (§8) join
+`assetPick`, `linkOpen`, `menuSet`, and `windowNew`. Opening a URL happens on
+the device the user is holding, not on the VPS; the picture you want to insert
+is in that device's photo library or on its disk (ios.md §11); a headless
+server handed the view's menu would swallow ⌘Q with it; and a machine with no
+screen has nowhere to put a window (§8a). The six connection entries (§8) join
 them for a different reason: a server has no business knowing which servers this
 client can reach.
 
-The server implements all thirteen as REFUSALS rather than omitting them, because
-the handler map is total by construction; reaching one means a client forgot
-its overlay, and `{text: ""}` back from a clipboard read would look exactly
-like an empty clipboard until somebody went looking. `bun/server.ts` now has no
+The server implements all fourteen as REFUSALS rather than omitting them,
+because the handler map is total by construction; reaching one means a client
+forgot its overlay, and `{text: ""}` back from a clipboard read would look
+exactly like an empty clipboard until somebody went looking. `bun/server.ts` now has no
 `osascript` call site at all.
 
 **One push is the client's too**, for the mirror-image reason: `connectionState`

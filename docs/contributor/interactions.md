@@ -378,6 +378,14 @@ project (testing.md §5).
   (`locking.md` §7 owns the full lock-command grammar — unlock is
   interposed, the per-note pair is palette-only two-faces). L is the lock
   mnemonic, and ⌥⌘L backlinks is unrelated.
+- **New Window takes no chord**, because the N family is spent: ⌘N is New
+  Note, ⇧⌘N New Workspace, ⌥⌘N New Note From Template. A window is a bigger
+  scope than a workspace, so the shift rule would want ⇧⌘N, and it is taken by
+  the scope below it. `window.new` is a menu item and a palette entry only,
+  which R1 already satisfies, and it sits in File beside Switch Connection
+  rather than with the other News: choosing a window is choosing a machine.
+  A notebook spending N on notes rather than on windows is the allocation and
+  not an oversight; `remote.md` §8a is what the verb does.
 - **Bare keys** — the verbs of a focused list row, and *only* those. They live
   in `listKeys`, never `keys`, and the resolver consults them solely in the
   `list` focus domain: anywhere else an unmodified key is typing, and the one
@@ -627,7 +635,9 @@ reporting, and that is the last two bullets.
 
 A phone has no drawer yet (ios.md §8), so today the two devices in this section
 are two desktops on one server. The rules are written for the client, not for
-the platform, so lifting that cut adds nothing here.
+the platform, so lifting that cut adds nothing here. Two windows on one Mac are
+a third way to reach the same arrangement, and the cheapest to sit in front of
+(`remote.md` §8a).
 
 ## 4a. The host picker (multi-host notes)
 
@@ -1086,6 +1096,13 @@ through the same dispatcher the palette uses.
   moves. A `when` that reads the live note text (the template marker's two
   faces) therefore lags until autosave refreshes the note list — accepted, in
   exchange for not rebuilding the menu on every keystroke.
+- **One bar, and the focused window fills it.** macOS gives an application a
+  single menu bar, so with a second window open (`remote.md` §8a) two views
+  push into one bar and the pushes have to be arbitrated rather than merged.
+  Bun remembers every window's last push, applies only the focused window's,
+  re-applies it when focus moves, and routes `menuCommand` back to the focused
+  window alone. It is why New Window is more work than a second
+  `BrowserWindow`: the bar is the one piece of the app no window owns.
 - **Refused stays visible, paired hides.** A disabled command greys, because a
   bar that drops what it cannot do right now teaches nobody it exists. The
   exceptions are the two-faces pairs (Lock/Remove Lock, the template marker,

@@ -13,7 +13,8 @@ import { tmpdir } from "node:os";
 import { resolve, sep } from "node:path";
 import { APP_HOME } from "./workspaces";
 import { CONNECTIONS_PATH, KNOWN_HOSTS_PATH, LOCAL_ID, saveConnections, type Connection } from "./connections";
-import { createConnectionManager, type Attached } from "./connectionManager";
+import { createConnectionManager, type Attached, type ConnectionManager } from "./connectionManager";
+import { createConnectionStore } from "./connectionStore";
 import { CONNECTION_METHODS } from "../shared/wire";
 import type { RequestHandlers } from "../shared/wire";
 
@@ -134,12 +135,41 @@ describe("switching", () => {
     expect(fake.open.has(LOCAL_ID)).toBe(true);
   });
 
-  test("the choice survives the next launch", async () => {
+  // Where the next launch reads a window's server from is the window list, not
+  // this file (remote.md §8a): two windows writing one `selected` key would
+  // mean the last one to switch decided where the next launch opened. So a
+  // switch REPORTS, and the shell records.
+  test("a switch reports the new connection for the window list", async () => {
     await saveConnections([LAPTOP], LOCAL_ID);
-    const first = await createConnectionManager({ attach: fakeAttach().attach });
-    await first.requests.connectionSelect({ id: LAPTOP.id });
-    const second = await createConnectionManager({ attach: fakeAttach().attach });
-    expect(await served(second)).toBe(LAPTOP.id);
+    const chosen: string[] = [];
+    const m = await createConnectionManager({ attach: fakeAttach().attach, onSelect: (id) => chosen.push(id) });
+    await m.requests.connectionSelect({ id: LAPTOP.id });
+    await m.requests.connectionSelect({ id: LOCAL_ID });
+    expect(chosen).toEqual([LAPTOP.id, LOCAL_ID]);
+  });
+
+  // Nothing is reported for a switch that did not happen, or the shell would
+  // rewrite the window list on every no-op.
+  test("a refused switch reports nothing", async () => {
+    await saveConnections([LAPTOP], LOCAL_ID);
+    const chosen: string[] = [];
+    const m = await createConnectionManager({
+      attach: fakeAttach(new Set([LAPTOP.id])).attach,
+      onSelect: (id) => chosen.push(id),
+    });
+    await m.requests.connectionSelect({ id: LAPTOP.id });
+    await m.requests.connectionSelect({ id: "nope" });
+    await m.requests.connectionSelect({ id: LOCAL_ID });
+    expect(chosen).toEqual([]);
+  });
+
+  // The other half: a window opens where it is told, which is what the shell
+  // reads back out of the window list.
+  test("a window opens on the connection it is asked for", async () => {
+    await saveConnections([LAPTOP], LOCAL_ID);
+    const m = await createConnectionManager({ attach: fakeAttach().attach, want: LAPTOP.id });
+    expect(await served(m)).toBe(LAPTOP.id);
+    expect(m.active()).toBe(LAPTOP.id);
   });
 
   test("selecting the one already being served is a no-op, not a reconnect", async () => {
@@ -374,6 +404,98 @@ describe("editing", () => {
     await m.requests.connectionUpdate({ ...edit, name: "Studio" });
     expect(fake.log).toEqual([]);
     expect((await m.requests.connectionList({})).connections[1]!.name).toBe("Studio");
+  });
+});
+
+// Two windows, one list (remote.md §8a). What each of these proves is that the
+// split lands where the design puts it: the records are the app's and the
+// pointer is the window's.
+describe("two windows over one store", () => {
+  // Two managers over one store, each on its own connection.
+  async function pair(unreachable = new Set<string>()) {
+    const fake = fakeAttach(unreachable);
+    const store = await createConnectionStore({ inUse: () => [first, second].map((m) => m?.active() ?? "") });
+    let first: ConnectionManager | undefined;
+    let second: ConnectionManager | undefined;
+    first = await createConnectionManager({ attach: fake.attach, store, want: LOCAL_ID });
+    second = await createConnectionManager({ attach: fake.attach, store, want: LAPTOP.id });
+    return { first, second, fake, store };
+  }
+
+  test("each window points where it was told, at the same time", async () => {
+    await saveConnections([LAPTOP], LOCAL_ID);
+    const { first, second } = await pair();
+    expect(await served(first)).toBe(LOCAL_ID);
+    expect(await served(second)).toBe(LAPTOP.id);
+  });
+
+  // A machine you have paired with is a fact about this Mac, not about one of
+  // its windows.
+  test("a connection added in one window is listed in the other", async () => {
+    const { first, second } = await pair();
+    const { id } = await first.requests.connectionAdd({
+      name: "VPS",
+      destination: "ledge@vps",
+      keyPath: "",
+      hostKey: "vps ssh-ed25519 AAAA",
+    });
+    expect((await second.requests.connectionList({})).connections.map((c) => c.id)).toContain(id);
+  });
+
+  // Both refusals are about leaving every window somewhere it can work from.
+  test("a connection another window is on cannot be removed", async () => {
+    await saveConnections([LAPTOP], LOCAL_ID);
+    const { first, second } = await pair();
+    const res = await first.requests.connectionRemove({ id: LAPTOP.id });
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("Switch somewhere else");
+    expect(await served(second)).toBe(LAPTOP.id);
+  });
+
+  // The window that edits can re-open its own wire; the other window's cannot
+  // be re-opened from here, and leaving it on the old machine while the row
+  // names the new one is the lie the indicator exists to prevent.
+  test("re-addressing a connection another window is on waits for that window", async () => {
+    await saveConnections([LAPTOP], LOCAL_ID);
+    const { first, second } = await pair();
+    const res = await first.requests.connectionUpdate({
+      id: LAPTOP.id,
+      name: LAPTOP.name,
+      destination: "dev@studio",
+      keyPath: "",
+      hostKey: "studio ssh-ed25519 AAAAnew",
+    });
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("Another window");
+    expect((await second.requests.connectionList({})).connections[1]!.destination).toBe(LAPTOP.destination);
+  });
+
+  // A rename changes nothing about how a connection is made, so it is never
+  // refused — tearing a second window's session down for a string would be the
+  // cure being worse.
+  test("renaming a connection another window is on is allowed", async () => {
+    await saveConnections([LAPTOP], LOCAL_ID);
+    const { first, second } = await pair();
+    const res = await first.requests.connectionUpdate({
+      id: LAPTOP.id,
+      name: "Studio",
+      destination: LAPTOP.destination,
+      keyPath: "",
+      hostKey: null,
+    });
+    expect(res).toEqual({ ok: true, error: "" });
+    expect((await second.requests.connectionList({})).connections[1]!.name).toBe("Studio");
+  });
+
+  // A server that will not open costs its own window a fallback and costs the
+  // others nothing.
+  test("a window that cannot reach its server falls back alone", async () => {
+    await saveConnections([LAPTOP], LOCAL_ID);
+    const { first, second } = await pair(new Set([LAPTOP.id]));
+    expect(await served(second)).toBe(LOCAL_ID);
+    expect((await second.requests.connectionList({})).wanted).toBe(LAPTOP.id);
+    expect(await served(first)).toBe(LOCAL_ID);
+    expect((await first.requests.connectionList({})).error).toBe("");
   });
 });
 

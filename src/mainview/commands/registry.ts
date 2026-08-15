@@ -53,6 +53,7 @@ import {
   SquareCheck,
   SquareX,
   TableOfContents,
+  AppWindow,
   TerminalSquare,
   TextSearch,
   Trash2,
@@ -62,7 +63,7 @@ import { findLeaf, focusedDocId, focusedTab, leafIds } from "@/workspace/tree";
 import { notesOf, trashOf } from "@/workspace/store";
 import { parseFrontmatter } from "../../shared/frontmatter";
 import type { NoteMeta } from "../../shared/rpc-schema";
-import { canInstallCli, canPickFolder, hasTerminal, runsBlocks, spawnsSessions } from "../lib/shell";
+import { canInstallCli, canPickFolder, hasTerminal, multiWindow, runsBlocks, spawnsSessions } from "../lib/shell";
 import { keysOf, listKeysOf, tabSelectKey, titleOf, workspaceSelectKey, type CommandId } from "./keys";
 import { chipOf } from "./format";
 import type { Command, CommandCtx, RegistryDeps } from "./types";
@@ -664,6 +665,18 @@ export function buildCommands(deps: RegistryDeps): Command[] {
     cmd("connection.switch", {
       icon: ServerIcon,
       run: (ctx) => ctx.ui.openConnectionPicker?.(),
+    }),
+    // Two machines at once, which switching cannot give you: a window is a
+    // client of one server, so a second server is a second window (remote.md
+    // §8a). It opens on this Mac and is switched from inside itself, which is
+    // why this takes no argument and asks nothing.
+    //
+    // Absent where there is no second window to open, rather than present and
+    // silent: a phone shows one app (lib/shell.ts multiWindow).
+    cmd("window.new", {
+      icon: AppWindow,
+      when: () => multiWindow(),
+      run: () => deps.newWindow(),
     }),
     // Put `ledge` on the PATH. The outcome always surfaces — an install whose
     // result you have to go hunting for in a bin dir did not finish its job:

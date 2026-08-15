@@ -1,4 +1,6 @@
-// The client's own corner of disk, and the id it is known by.
+// The client's own corner of disk, and the ids it is known by — one per server
+// it connects to, because a window is a client and identity follows the
+// connection it points at (remote.md §8a).
 //
 // remote.md §5 splits state by machine as well as by lifetime: the notes, the
 // registry, the vault, and the shells belong to the server, while the window's
@@ -14,9 +16,10 @@
 // means LEDGE_NOTES_ROOT moves the client's files too, which is what lets a
 // scratch probe run without touching the real ones.
 import { mkdirSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { hostname } from "node:os";
 import { join } from "node:path";
+import { LOCAL_ID } from "../shared/connections";
 import { APP_HOME } from "./workspaces";
 
 export const CLIENT_HOME = join(APP_HOME, ".client");
@@ -25,7 +28,18 @@ export const CLIENT_HOME = join(APP_HOME, ".client");
 // it is the name the SERVER files this client's layout under (remote.md §5),
 // so a connections file that gets corrupted or hand-deleted must not take the
 // id with it and orphan a saved arrangement.
+//
+// It is the LOCAL connection's id now that a window is a client (remote.md
+// §8a), which is what carries an install across that change with the layout it
+// already has: the one id this file has always held keeps naming the one server
+// this app has always started on.
 export const CLIENT_ID_PATH = join(CLIENT_HOME, "id");
+
+// And the id used on each of the others, keyed by connection. Its own file for
+// CLIENT_ID_PATH's reason applied to the whole set: these are the names N
+// servers file N arrangements under, and a hand-edited connections file must
+// not be able to orphan them all at once.
+export const CLIENT_MAP_PATH = join(CLIENT_HOME, "clients.json");
 
 export async function ensureClientHome(): Promise<void> {
   await mkdir(CLIENT_HOME, { recursive: true });
@@ -69,8 +83,7 @@ export async function clientId(): Promise<string> {
   try {
     await ensureClientHome();
     // "wx" first: a second process that raced us to mint one wins, and we take
-    // its answer rather than overwriting it. Two windows on one machine are one
-    // client and must file their layout under one key.
+    // its answer rather than overwriting it.
     await writeFile(CLIENT_ID_PATH, `${minted}\n`, { encoding: "utf8", flag: "wx" });
   } catch {
     const raced = await readId();
@@ -82,6 +95,79 @@ export async function clientId(): Promise<string> {
     await writeFile(CLIENT_ID_PATH, `${minted}\n`, "utf8").catch(() => {});
   }
   return (cached = minted);
+}
+
+/**
+ * The id this client is known by ON `connection` (remote.md §8a).
+ *
+ * Identity follows the connection and not the window, which is the whole of
+ * what makes a re-selected server come back with the arrangement left on it: a
+ * layout is three panes of THAT machine's notes, and it means nothing in front
+ * of another machine's. Minted the first time a connection is opened and kept
+ * until `forgetClientId` drops it with the connection itself.
+ *
+ * The local server's is the machine id above rather than an entry here, so an
+ * install upgrading across §8a keeps the layout it has.
+ *
+ * Best-effort like the machine id, and for the same reason: a map that cannot
+ * be written costs the NEXT launch that server's arrangement, which is a far
+ * smaller failure than refusing to open the window over it.
+ */
+export async function clientIdFor(connection: string): Promise<string> {
+  if (connection === LOCAL_ID) return clientId();
+  const known = await clientMap();
+  const existing = known[connection];
+  if (existing !== undefined) return existing;
+  const minted = crypto.randomUUID();
+  known[connection] = minted;
+  await saveClientMap(known);
+  return minted;
+}
+
+/**
+ * Drop the id for a connection that is gone, which is what bounds this file:
+ * one entry per connection rather than one per window ever opened.
+ *
+ * The layout still filed under it on that server is that server's to prune, and
+ * is the same orphan a phone that never comes back already leaves (remote.md
+ * §5).
+ */
+export async function forgetClientId(connection: string): Promise<void> {
+  const known = await clientMap();
+  if (!(connection in known)) return;
+  delete known[connection];
+  await saveClientMap(known);
+}
+
+/**
+ * An id for a window that must not be filed under anything: the second window
+ * on a connection another window is already holding (remote.md §8a).
+ *
+ * Two windows cannot both be the client one server files one layout under, so
+ * the second is a client the server has never met, for as long as it is open.
+ * It is a real id — the drawer it takes and the row it gets in `presence` are
+ * as real as any other window's — and it is simply never written down.
+ */
+export function ephemeralClientId(): string {
+  return crypto.randomUUID();
+}
+
+/**
+ * The stored map, self-healing. Machine-written state (architecture.md §6):
+ * anything that is not a connection id against a well-formed client id is
+ * dropped, and a file that does not parse at all means "no ids yet", which
+ * costs saved arrangements and never the launch.
+ */
+export function parseClientMap(raw: unknown): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return out;
+  for (const [connection, id] of Object.entries(raw as Record<string, unknown>)) {
+    // The local server's id lives in its own file; an entry claiming that key
+    // could only shadow it.
+    if (connection === "" || connection === LOCAL_ID) continue;
+    if (typeof id === "string" && isClientId(id)) out[connection] = id;
+  }
+  return out;
 }
 
 /**
@@ -107,5 +193,34 @@ async function readId(): Promise<string | null> {
     return isClientId(text) ? text : null;
   } catch {
     return null;
+  }
+}
+
+// Cached for the process, like the id: every window reads it at boot and at
+// every switch, and it can only change through this module.
+let ids: Record<string, string> | null = null;
+
+async function clientMap(): Promise<Record<string, string>> {
+  if (ids !== null) return ids;
+  try {
+    return (ids = parseClientMap(JSON.parse(await readFile(CLIENT_MAP_PATH, "utf8"))));
+  } catch {
+    return (ids = {});
+  }
+}
+
+// Temp-plus-rename like every other write in the app home, so a crash leaves
+// the old map or the new one. The cache is updated either way: an id that could
+// not be saved still has to be the id this session uses, or two windows on one
+// connection would disagree about who they are.
+async function saveClientMap(next: Record<string, string>): Promise<void> {
+  ids = next;
+  try {
+    await ensureClientHome();
+    const tmp = `${CLIENT_MAP_PATH}.tmp-${process.pid}`;
+    await writeFile(tmp, `${JSON.stringify(next, null, 2)}\n`, "utf8");
+    await rename(tmp, CLIENT_MAP_PATH);
+  } catch (err) {
+    console.warn(`[client] could not save the connection ids (${err})`);
   }
 }

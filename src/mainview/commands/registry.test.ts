@@ -24,6 +24,7 @@ function stubDeps(
       return { ok: true, message: "installed" };
     },
     revealLog: () => calls.push("revealLog"),
+    newWindow: () => calls.push("newWindow"),
     createWorkspace: async () => {
       calls.push("createWorkspace");
       return null;

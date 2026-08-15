@@ -1,8 +1,15 @@
-// Where the window was last left: `window.json` in the client home, one frame.
+// Which windows were open and where: `window.json` in the client home, one
+// entry per window, each naming the connection it was pointed at.
 // A fourth ownership shape alongside the three in architecture.md §6 —
 // machine-written AND Bun-shaped like the registry, but not a trust artifact:
 // the view never has an opinion about the window it lives in, so this file
 // stays entirely on this side of the RPC and no schema entry exists for it.
+//
+// It holds the SET of windows now that a window is a client (remote.md §8a),
+// which also makes it the record of where each one opens: the connection is
+// stored here rather than in `connections.json`'s `selected` key, because two
+// windows writing one selection would mean the last one to switch decided where
+// the next launch opened.
 //
 // Its own file rather than a corner of `.layout.json` because that file's
 // SHAPE is the view's; Bun only moves its bytes. Folding a Bun-authored key
@@ -28,6 +35,15 @@ export const LEGACY_WINDOW_PATH = join(APP_HOME, ".window.json");
 
 export type Rect = { x: number; y: number; width: number; height: number };
 
+/** One window: where it was, and which server it was looking at. */
+export interface WindowState {
+  frame: Rect;
+  /** A connection id, `LOCAL_ID` included. Not validated against the list here
+   * — a connection removed since the last quit is one the manager's boot
+   * fallback already handles, with the reason on screen (connectionManager.ts). */
+  connection: string;
+}
+
 // First launch, and the fallback whenever nothing better can be computed.
 export const DEFAULT_FRAME: Rect = { x: 200, y: 120, width: 940, height: 700 };
 
@@ -50,18 +66,55 @@ const GRAB_HEIGHT = 44;
 // caller, so none of them are distinguished.
 export function parseFrame(text: string | null): Rect | null {
   if (!text) return null;
-  let raw: unknown;
   try {
-    raw = JSON.parse(text);
+    return frameOf(JSON.parse(text));
   } catch {
     return null;
   }
+}
+
+function frameOf(raw: unknown): Rect | null {
   if (!raw || typeof raw !== "object") return null;
   const { x, y, width, height } = raw as Record<string, unknown>;
   const nums = [x, y, width, height];
   if (nums.some((n) => typeof n !== "number" || !Number.isFinite(n))) return null;
   if ((width as number) <= 0 || (height as number) <= 0) return null;
   return { x: x as number, y: y as number, width: width as number, height: height as number };
+}
+
+/**
+ * The window list from disk, in the order the windows should be reopened.
+ *
+ * Two formats read, one written. The current one is `{version, windows}`; a
+ * bare frame is what the file held before there could be more than one window,
+ * and it becomes a single window pointed at `fallback` — the stored selection,
+ * which is the only place an upgrading install has recorded where it was
+ * (connectionStore.ts launchSelection).
+ *
+ * Empty for anything unreadable, which the caller turns into one window on the
+ * fallback: a client that cannot read its window list still gets a window.
+ */
+export function parseWindows(text: string | null, fallback: string): WindowState[] {
+  if (!text) return [];
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    return [];
+  }
+  if (!raw || typeof raw !== "object") return [];
+  const legacy = frameOf(raw);
+  if (legacy) return [{ frame: legacy, connection: fallback }];
+  const list = (raw as Record<string, unknown>)["windows"];
+  if (!Array.isArray(list)) return [];
+  const windows: WindowState[] = [];
+  for (const entry of list) {
+    const frame = frameOf(entry);
+    if (!frame) continue;
+    const connection = (entry as Record<string, unknown>)["connection"];
+    windows.push({ frame, connection: typeof connection === "string" && connection ? connection : fallback });
+  }
+  return windows;
 }
 
 function overlap(a: Rect, b: Rect): number {
@@ -129,9 +182,9 @@ export function roundFrame(frame: Rect): Rect {
 // before the window exists (nothing to overlap it with), and the write has to
 // be callable from `process.on("exit")`, where a promise never resolves.
 
-export function readFrame(): Rect | null {
+export function readWindows(fallback: string): WindowState[] {
   try {
-    return parseFrame(readFileSync(WINDOW_PATH, "utf8"));
+    return parseWindows(readFileSync(WINDOW_PATH, "utf8"), fallback);
   } catch {
     // Nothing there: an install that predates the client home may still have
     // the old file. Move it rather than copy it, so there is only ever one
@@ -140,21 +193,24 @@ export function readFrame(): Rect | null {
     try {
       ensureClientHomeSync();
       renameSync(LEGACY_WINDOW_PATH, WINDOW_PATH);
-      return parseFrame(readFileSync(WINDOW_PATH, "utf8"));
+      return parseWindows(readFileSync(WINDOW_PATH, "utf8"), fallback);
     } catch {
-      return null;
+      return [];
     }
   }
 }
 
 let lastWritten = "";
 
-// Best-effort: a frame that fails to save costs the next launch its position,
+// Best-effort: a list that fails to save costs the next launch its windows,
 // which is not worth a dialog or a crash. Temp-plus-rename anyway — a half
-// file would be discarded by parseFrame, but leaving one around invites
+// file would be discarded by parseWindows, but leaving one around invites
 // someone to trust it later.
-export function writeFrame(frame: Rect): void {
-  const text = JSON.stringify(roundFrame(frame));
+export function writeWindows(windows: readonly WindowState[]): void {
+  const text = JSON.stringify({
+    version: 2,
+    windows: windows.map((w) => ({ ...roundFrame(w.frame), connection: w.connection })),
+  });
   if (text === lastWritten) return;
   try {
     ensureClientHomeSync();
@@ -163,6 +219,6 @@ export function writeFrame(frame: Rect): void {
     renameSync(tmp, WINDOW_PATH);
     lastWritten = text;
   } catch (err) {
-    console.warn(`[window] could not save the window frame (${err})`);
+    console.warn(`[window] could not save the window list (${err})`);
   }
 }

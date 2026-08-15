@@ -64,7 +64,7 @@ against each other has invented a third version to mismatch.
 
 ## 2. The shell is Swift; the protocol stays in JavaScript
 
-**Swift owns the socket, the keys, and the six client-only RPC methods.
+**Swift owns the socket, the keys, and the client-only RPC methods.
 Everything else about being a client is TypeScript that already exists and is
 already tested.**
 
@@ -949,8 +949,12 @@ own:
   Mac is still PNG, because there the source really is one. Re-encoding also
   drops the EXIF, so the GPS a phone stamps on every picture does not travel to
   the server with it.
-- **`menuSet` is a no-op.** There is no menu bar. It is already a client-only
-  method the server refuses, so this costs nothing but a stub.
+- **`menuSet` is a no-op, and `windowNew` answers no.** There is no menu bar,
+  and a phone shows one app at a time, so a window and a client are the same
+  thing here in a way they stopped being on the Mac (remote.md §8a). Both are
+  already client-only methods the server refuses, so this costs nothing but two
+  stubs. `windowNew` returning false is what keeps New Window out of the
+  palette rather than in it and silent.
 - **`linkOpen` is `UIApplication.open`.** Opening a URL happens on the device
   in the user's hand, which is what made it a client method in the first
   place.

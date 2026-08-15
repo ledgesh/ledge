@@ -12,6 +12,18 @@
 import { isHostName } from "./frontmatter";
 
 /**
+ * The id of the server in the client's own process. Reserved, never minted,
+ * never stored.
+ *
+ * Here rather than beside the stored list because it is a fact about the
+ * NAMESPACE the list is keyed in, and both clients key things by connection id:
+ * the Mac files a client id per connection under it (bun/clientHome.ts), and a
+ * phone that has no local server still must not mint a record wearing the one
+ * id that names one.
+ */
+export const LOCAL_ID = "local";
+
+/**
  * What a user typed, refused with a reason or accepted as a connection. The
  * destination becomes argv for ssh, so it is checked with the same predicate a
  * note's `host:` frontmatter is (shared/frontmatter.ts): what it excludes is

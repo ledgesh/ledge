@@ -157,6 +157,7 @@ function clientSeamRefusals(): Pick<RequestHandlers, ClientMethod> {
     assetPick: refuse("assetPick"),
     linkOpen: refuse("linkOpen"),
     menuSet: refuse("menuSet"),
+    windowNew: refuse("windowNew"),
     connectionList: refuse("connectionList"),
     connectionSelect: refuse("connectionSelect"),
     connectionAdd: refuse("connectionAdd"),

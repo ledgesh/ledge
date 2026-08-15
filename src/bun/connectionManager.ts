@@ -1,28 +1,26 @@
-// Which server is being served right now, and how it changes (remote.md §8).
+// Which server one WINDOW is being served by, and how it changes (remote.md
+// §8, §8a).
 //
 // One connection at a time. This module owns that "one" — the mutable pointer
-// every request goes through, the boot-time fallback when the chosen server
-// will not open, and the five handlers the view drives it with. It is
-// deliberately ignorant of HOW a connection is made: bun/index.ts supplies
+// every request from that window goes through, the boot-time fallback when the
+// chosen server will not open, and the six handlers the view drives it with. It
+// is deliberately ignorant of HOW a connection is made: bun/index.ts supplies
 // `attach`, because building one means either createServer in this process or
 // an ssh child, and both of those are the shell's business. What is left here
 // is testable without a window, a socket, or an ssh binary.
 //
+// One of these per window, over one shared bun/connectionStore.ts. The LIST is
+// the app's and the SELECTION is the window's (§8a): two windows writing one
+// selection would mean the last one to switch decided where the next launch
+// opened, and two windows each holding a copy of the list would mean a
+// connection added in one is invisible in the other.
+//
 // The router is the point. Everything above it — the webview's RPC, and every
-// command in it — holds one handler map for the life of the process and never
+// command in it — holds one handler map for the life of the window and never
 // learns that the machine underneath it changed.
 import { REQUEST_METHODS, type ConnectionMethod, type RequestHandlers } from "../shared/wire";
-import {
-  loadConnections,
-  LOCAL_CONNECTION,
-  LOCAL_ID,
-  pinFitsHost,
-  probeHostKey,
-  saveConnections,
-  validateConnection,
-  type Connection,
-} from "./connections";
-import type { ConnectionInfo } from "../shared/rpc-schema";
+import { LOCAL_CONNECTION, LOCAL_ID, type Connection } from "./connections";
+import { connectionInfo, createConnectionStore, type ConnectionStore } from "./connectionStore";
 
 /** One live connection: the handlers it serves and the way to end it. */
 export interface Attached {
@@ -34,8 +32,11 @@ export interface Attached {
 }
 
 export interface ConnectionManager {
-  /** Stable for the life of the process, whatever it is pointed at. */
+  /** Stable for the life of the window, whatever it is pointed at. */
   requests: RequestHandlers;
+  /** The connection being served right now, for the shell's window list and for
+   * the store's "is anything using this" refusals. */
+  active(): string;
   /**
    * The wire to `id` gave up for good: its ladder ran out, or the server said
    * goodbye (shared/transport.ts).
@@ -54,43 +55,46 @@ export interface ConnectionManager {
 // a frame. This module is the Mac's implementation of it; the phone has its
 // own and the list has to outlive both (ios.md §2).
 
-export function connectionInfo(c: Connection): ConnectionInfo {
-  return {
-    id: c.id,
-    name: c.name,
-    destination: c.destination,
-    keyPath: c.keyPath,
-    pinned: c.hostKey !== "",
-    lastReached: c.lastReached,
-  };
-}
+export { connectionInfo } from "./connectionStore";
 
 /**
- * Open the configured connection and return the map to serve.
+ * Open one window's connection and return the map to serve.
  *
  * Boot never fails over a connection. If the chosen server will not open — the
  * laptop it lives on is asleep, the key was rotated, the address was a typo —
- * this falls back to the local server and remembers why, so the app opens onto
- * this machine's notes with an indicator saying that is what happened. An app
- * that does not open teaches nothing; one that opens on the wrong machine and
- * says so can be fixed from inside itself.
+ * this falls back to the local server and remembers why, so the window opens
+ * onto this machine's notes with an indicator saying that is what happened. An
+ * app that does not open teaches nothing; one that opens on the wrong machine
+ * and says so can be fixed from inside itself. It applies per window: a server
+ * that will not open costs that window a fallback and costs the others nothing
+ * (§8a).
  */
 export async function createConnectionManager(deps: {
   attach(conn: Connection): Promise<Attached>;
+  /** The app's one list. A private one is built when none is supplied, which is
+   * what a single-window process and every test both want. */
+  store?: ConnectionStore;
+  /** Where this window should open. The store's launch selection by default,
+   * which is the first window's answer and the migration path's. */
+  want?: string;
+  /** Told whenever this window's connection changes, so the shell can record it
+   * in the window list — that list is where the next launch reads it from, not
+   * `connections.json` (§8a). */
+  onSelect?(id: string): void;
   now?: () => number;
 }): Promise<ConnectionManager> {
-  const now = deps.now ?? (() => Date.now());
-  let { connections, selected } = await loadConnections();
-
-  const find = (id: string): Connection | null =>
-    id === LOCAL_ID ? LOCAL_CONNECTION : (connections.find((c) => c.id === id) ?? null);
-
+  // Declared before the store, which closes over it: a private store's "what is
+  // in use" is this one window, and the shell's shared one is told about every
+  // window (bun/index.ts).
   let active: Connection = LOCAL_CONNECTION;
+  const store = deps.store ?? (await createConnectionStore({ now: deps.now, inUse: () => [active.id] }));
+  let selected = deps.want ?? store.launchSelection();
+
   let live: Attached;
   let error = "";
   let wanted = selected;
 
-  const chosen = find(selected);
+  const chosen = store.find(selected);
   try {
     if (!chosen) throw new Error("that connection is gone");
     live = await deps.attach(chosen);
@@ -101,7 +105,8 @@ export async function createConnectionManager(deps: {
     live = await deps.attach(LOCAL_CONNECTION);
     active = LOCAL_CONNECTION;
   }
-  if (active.id !== LOCAL_ID) await touch(active.id);
+  selected = active.id;
+  if (active.id !== LOCAL_ID) await store.touch(active.id);
 
   // Built once from the schema's own list, so a method added there is routed
   // without anyone remembering to add it here. The cast is the same one the
@@ -111,24 +116,18 @@ export async function createConnectionManager(deps: {
     REQUEST_METHODS.map((m) => [m, (p: unknown) => (live.requests as unknown as Record<string, (p: unknown) => unknown>)[m]!(p)]),
   ) as unknown as RequestHandlers;
 
-  async function touch(id: string): Promise<void> {
-    connections = connections.map((c) => (c.id === id ? { ...c, lastReached: now() } : c));
-    await persist();
-  }
-
-  async function persist(): Promise<void> {
-    try {
-      await saveConnections(connections, selected);
-    } catch (err) {
-      // A list that cannot be written costs the NEXT launch its choice, not
-      // this session its connection.
-      console.error("[connect] could not save the connection list:", reason(err));
-    }
+  // Whether another window is pointed at `id` right now. The store tracks the
+  // set; what this adds is "another", since a window asking about the
+  // connection it is itself holding is asking about itself.
+  function heldElsewhere(id: string): boolean {
+    let seen = 0;
+    for (const held of store.inUse()) if (held === id) seen += 1;
+    return seen > (active.id === id ? 1 : 0);
   }
 
   const handlers: Pick<RequestHandlers, ConnectionMethod> = {
     connectionList: async () => ({
-      connections: [LOCAL_CONNECTION, ...connections].map(connectionInfo),
+      connections: store.all().map(connectionInfo),
       active: active.id,
       wanted,
       error,
@@ -136,7 +135,7 @@ export async function createConnectionManager(deps: {
     }),
 
     connectionSelect: async ({ id }) => {
-      const next = find(id);
+      const next = store.find(id);
       if (!next) return { ok: false, error: "There is no such connection." };
       if (next.id === active.id && !error) return { ok: true, error: "" };
       // The new one is opened BEFORE the old one is torn down. A destination
@@ -155,54 +154,30 @@ export async function createConnectionManager(deps: {
       wanted = next.id;
       error = "";
       previous.shutdown();
-      if (next.id === LOCAL_ID) await persist();
-      else await touch(next.id);
+      deps.onSelect?.(next.id);
+      if (next.id !== LOCAL_ID) await store.touch(next.id);
       return { ok: true, error: "" };
     },
 
-    connectionAdd: async ({ name, destination, keyPath, hostKey }) => {
-      const refusal = validateConnection({ name, destination, keyPath });
-      if (refusal) return { id: "", error: refusal };
-      const conn: Connection = {
-        id: crypto.randomUUID(),
-        name: name.trim(),
-        destination: destination.trim(),
-        keyPath: keyPath.trim(),
-        hostKey: hostKey.trim(),
-        lastReached: 0,
-      };
-      connections = [...connections, conn];
-      await persist();
-      return { id: conn.id, error: "" };
-    },
+    connectionAdd: async (fields) => store.add(fields),
 
-    connectionUpdate: async ({ id, name, destination, keyPath, hostKey }) => {
-      if (id === LOCAL_ID) return { ok: false, error: "This Mac is not a connection you can edit." };
-      const before = connections.find((c) => c.id === id);
-      if (!before) return { ok: false, error: "There is no such connection." };
-      const refusal = validateConnection({ name, destination, keyPath });
-      if (refusal) return { ok: false, error: refusal };
-      // Null keeps what is pinned; a line replaces it. Either way a pin is a
-      // claim about one machine, and carrying one to another address would
-      // refuse every later connection with a message about a CHANGED host key
-      // — so the caller reads the new machine's fingerprint instead
-      // (remote.md §4), and this is what makes forgetting to impossible.
-      const pin = hostKey === null ? before.hostKey : hostKey.trim();
-      if (!pinFitsHost(pin, destination)) {
-        return { ok: false, error: "That pinned key belongs to another host. Check the new host's fingerprint first." };
+    connectionUpdate: async (fields) => {
+      const { conn: next, error: refusal } = store.reviewUpdate(fields);
+      if (!next) return { ok: false, error: refusal };
+      const before = store.find(fields.id);
+      const readdressed = !before || next.destination !== before.destination || next.keyPath !== before.keyPath;
+      // How the connection is MADE changed, and some window's wire was made the
+      // old way. This one re-opens its own; another window's cannot be re-opened
+      // from here, and leaving it pointed at the old machine while the row names
+      // the new one is the lie the indicator exists to prevent — so the edit
+      // waits (§8a). A rename changes nothing about how a connection is made and
+      // is never refused.
+      if (readdressed && heldElsewhere(fields.id)) {
+        return { ok: false, error: "Another window is on that connection. Switch it somewhere else before changing the address." };
       }
-      const next: Connection = {
-        ...before,
-        name: name.trim(),
-        destination: destination.trim(),
-        keyPath: keyPath.trim(),
-        hostKey: pin,
-      };
-      // How the connection is MADE changed, and the wire in front of the user
-      // was made the old way. Re-opened before the old one is torn down, like a
-      // switch: an edited address that does not answer must cost no more than a
-      // typo in the add form does.
-      if (id === active.id && (next.destination !== before.destination || next.keyPath !== before.keyPath)) {
+      if (readdressed && fields.id === active.id) {
+        // Re-opened before the old one is torn down, like a switch: an edited
+        // address that does not answer must cost no more than a typo does.
         let opened: Attached;
         try {
           opened = await deps.attach(next);
@@ -214,35 +189,21 @@ export async function createConnectionManager(deps: {
         active = next;
         error = "";
         previous.shutdown();
-      } else if (id === active.id) {
+      } else if (fields.id === active.id) {
         active = next;
       }
-      connections = connections.map((c) => (c.id === id ? next : c));
-      await persist();
+      await store.write(next);
       return { ok: true, error: "" };
     },
 
-    connectionRemove: async ({ id }) => {
-      // Both refusals are about leaving the app somewhere it can work from.
-      if (id === LOCAL_ID) return { ok: false, error: "This Mac is always here; it cannot be removed." };
-      if (id === active.id) return { ok: false, error: "Switch somewhere else before removing this connection." };
-      if (!connections.some((c) => c.id === id)) return { ok: false, error: "There is no such connection." };
-      connections = connections.filter((c) => c.id !== id);
-      if (selected === id) selected = active.id;
-      // saveConnections re-renders the known_hosts file from what is left, so
-      // removing a connection removes its pin in the same breath.
-      await persist();
-      return { ok: true, error: "" };
-    },
+    connectionRemove: async ({ id }) => store.remove(id),
 
-    connectionProbe: async ({ destination }) => {
-      const probed = await probeHostKey(destination.trim());
-      return "error" in probed ? { hostKey: "", fingerprint: "", keyType: "", error: probed.error } : { ...probed, error: "" };
-    },
+    connectionProbe: async ({ destination }) => store.probe(destination),
   };
 
   return {
     requests: { ...router, ...handlers },
+    active: () => active.id,
     lost: (id, detail) => {
       // By id, because the connection being torn down on the way to another
       // one can report its own end after the switch has already happened, and

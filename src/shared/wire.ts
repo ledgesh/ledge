@@ -211,6 +211,7 @@ export const REQUEST_METHODS = [
   "clipboardRead",
   "clipboardReadRich",
   "menuSet",
+  "windowNew",
   "settingsGet",
   "settingsRead",
   "settingsWrite",
@@ -277,15 +278,16 @@ export type ClientPush = (typeof CLIENT_PUSHES)[number];
 // compile.
 
 /**
- * The native seven: the pasteboard, the picture library, the browser, and the
- * menu bar.
+ * The native eight: the pasteboard, the picture library, the browser, the menu
+ * bar, and the windows.
  *
  * The pasteboard you copied from, the photos you took, the browser that should
- * open a link, and the menu bar at the top of the screen all belong to the
- * device in front of the user. Answering them on the server reaches the wrong
- * machine — a VPS's empty pasteboard, a file dialog opened on a screen nobody
- * is looking at, a link opened in a browser nobody is looking at, a menu bar
- * that does not exist and takes ⌘Q with it (remote.md §10).
+ * open a link, the menu bar at the top of the screen and the windows on it all
+ * belong to the device in front of the user. Answering them on the server
+ * reaches the wrong machine — a VPS's empty pasteboard, a file dialog opened on
+ * a screen nobody is looking at, a link opened in a browser nobody is looking
+ * at, a menu bar that does not exist and takes ⌘Q with it (remote.md §10), a
+ * window on a machine with no screen.
  */
 export const NATIVE_METHODS = [
   "clipboardRead",
@@ -295,6 +297,7 @@ export const NATIVE_METHODS = [
   "assetPick",
   "linkOpen",
   "menuSet",
+  "windowNew",
 ] as const satisfies readonly RequestMethod[];
 
 export type NativeMethod = (typeof NATIVE_METHODS)[number];
