@@ -88,18 +88,55 @@ Closing the last window quits Ledge.
 
 ## Install the server
 
-The other machine needs `ledge-server` on its PATH. Build it from a checkout of Ledge, on a machine of the same architecture as the one that will run it:
+The other machine needs `ledge-server` on its PATH. It is a package, so two commands install it.
+
+The server runs on Bun, so install that first if the machine has none:
+
+```sh
+curl -fsSL https://bun.sh/install | bash
+```
+
+Then the server:
+
+```sh
+bun add -g ledge-server
+```
+
+macOS and Linux are supported, on arm64 or x64. On Linux the floor is glibc 2.29, which means Debian 11, Ubuntu 20.04, RHEL 9, or anything newer. Alpine and other musl systems are not supported.
+
+Nothing else has to be installed and no port is opened. Ledge speaks its protocol over ssh's stdin and stdout.
+
+## Check that ssh can find the server
+
+Worth doing once, because the failure it catches looks like a broken connection rather than a missing PATH entry.
+
+Ledge starts the server by running `ledge-server serve` over ssh. A command run that way gets a short PATH and no shell profile, so both `ledge-server` and the `bun` it runs on have to be on that PATH. From your Mac:
+
+```sh
+ssh you@machine 'command -v ledge-server; command -v bun'
+```
+
+Two paths printed means the machine is ready to add.
+
+Nothing printed means Bun was installed for one user rather than system-wide, so its commands went somewhere an incoming ssh does not look. Bun puts global commands beside itself, and `bun pm bin -g` on that machine says where. Linking both into a system directory fixes it:
+
+```sh
+sudo ln -s "$(bun pm bin -g)/ledge-server" /usr/local/bin/ledge-server
+sudo ln -s "$(command -v bun)" /usr/local/bin/bun
+```
+
+## Build the server from a checkout
+
+Only if you want a build of your own. The package is the ordinary way.
 
 ```sh
 bun run build:native
 bun build src/bun/serve.ts --compile --outfile ledge-server
 ```
 
-Copy `ledge-server` and `dist-native/libledge_pty.so` to the server, side by side, somewhere on the PATH. The `.so` holds two C functions the terminal needs, and without it beside the binary you get shells that run commands but ignore Ctrl-C.
+Copy `ledge-server` and `dist-native/libledge_pty.so` to the server, side by side, somewhere on the PATH. Build it on a machine of the same architecture as the one that will run it, since a compiled binary is one architecture and the package is the thing that carries all of them.
 
-macOS arm64 and Linux x64/arm64 are supported. On Linux the floor is glibc 2.29, which means Debian 11, Ubuntu 20.04, RHEL 9, or anything newer. Alpine and other musl systems are not supported.
-
-Nothing else has to be installed and no port is opened. Ledge speaks its protocol over ssh's stdin and stdout.
+The `.so` holds two C functions the terminal needs. Without it beside the binary, resizing a terminal does nothing and a shell that stops reading can stall the server.
 
 ## Run the server in Docker
 
@@ -133,8 +170,10 @@ Optional, and worth doing on a server you care about. Ledge connects with an ord
 Restricting gives the server a key that can speak Ledge's protocol and nothing else. In that machine's `~/.ssh/authorized_keys`:
 
 ```
-restrict,command="ledge-server serve" ssh-ed25519 AAAA... ledge@laptop
+restrict,command="/usr/local/bin/ledge-server serve" ssh-ed25519 AAAA... ledge@laptop
 ```
+
+Use the absolute path that `command -v ledge-server` printed above. sshd runs this line instead of whatever the client asked for, so naming the file outright settles where it is. It does not settle where Bun is, which is the other half of the check.
 
 For the Docker deployment, the forced command reaches into the container instead:
 

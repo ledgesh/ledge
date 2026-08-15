@@ -16,9 +16,39 @@
 // dependency off the user's.
 import type { FFIFunction } from "bun:ffi";
 
+/** The trampolines' filename on `platform`. Mach-O and ELF disagree about the
+ * extension and nothing else. */
+export function nativeLibName(platform: string): string {
+  return platform === "darwin" ? "libledge_pty.dylib" : "libledge_pty.so";
+}
+
 /** The trampolines' filename in `dist-native/`, and in the app bundle on the
  * platform that has one. */
-export const NATIVE_LIB = process.platform === "darwin" ? "libledge_pty.dylib" : "libledge_pty.so";
+export const NATIVE_LIB = nativeLibName(process.platform);
+
+/**
+ * The subdirectory one target's prebuilt trampolines sit in inside a published
+ * package (`lib/native/<this>/<NATIVE_LIB>`).
+ *
+ * A published package carries every target at once, because npm installs one
+ * tarball on whatever machine runs the install and the file is 33KB — the
+ * per-platform optional dependency that a bigger binary would earn here would
+ * be four more packages to publish in lockstep for no saving anyone can
+ * measure. So the loader has to pick, and the name is what it picks by.
+ *
+ * Both consumers are here for ptyNative.ts's reason: `scripts/build-npm.ts`
+ * writes these directories and `pty.ts` reads them, on different machines
+ * months apart, and a disagreement between them is not a crash. It is a server
+ * that falls through to the in-process compile, fails that too for want of
+ * headers, and runs shells with no controlling terminal — which reaches the
+ * user as Ctrl-C quietly doing nothing.
+ */
+export function nativeDir(platform: string, arch: string): string {
+  return `${platform}-${arch}`;
+}
+
+/** This machine's entry in that layout. */
+export const NATIVE_DIR = nativeDir(process.platform, process.arch);
 
 // What differs between the two libcs, in one place because the alternative is
 // a `process.platform` per call site in pty.ts.

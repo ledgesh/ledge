@@ -27,7 +27,7 @@
 # debian-slim and not alpine, per §11: the PTY layer is bun:ffi over
 # posix_spawn and forkpty, and musl has no posix_spawn_file_actions_addchdir_np
 # at all.
-FROM oven/bun:1-debian AS build
+FROM oven/bun:1-debian AS native
 
 # The one thing the build needs that the runtime must not have: a compiler.
 # `pty.ts` falls back to compiling the trampolines in-process, which needs the
@@ -47,8 +47,26 @@ COPY scripts ./scripts
 COPY docs/user ./docs/user
 COPY src ./src
 
-RUN bun scripts/build-native.ts \
-  && bun build src/bun/serve.ts --compile --outfile /out/ledge-server \
+RUN bun scripts/build-native.ts
+
+
+# The trampolines on their own, so `scripts/build-npm.ts` can take them without
+# the compiled binary it does not want:
+#
+#     docker build --platform linux/arm64 --target native-lib \
+#       --output type=local,dest=dist-npm/lib/native/linux-arm64 .
+#
+# A published package carries every target at once (src/bun/npmPackage.ts) and
+# ELF has no fat binary, so one container per architecture is how the Linux
+# slices get built. `scratch` is what keeps the export to the one file: a local
+# output writes the whole stage filesystem.
+FROM scratch AS native-lib
+COPY --from=native /src/dist-native/libledge_pty.so /
+
+
+FROM native AS build
+
+RUN bun build src/bun/serve.ts --compile --outfile /out/ledge-server \
   && cp dist-native/libledge_pty.so /out/
 
 

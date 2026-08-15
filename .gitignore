@@ -4,11 +4,14 @@
 node_modules/
 
 # Build output (Vite view build + Electrobun app bundle + bundled CLI +
-# the compiled PTY trampolines)
+# the compiled PTY trampolines + the assembled ledge-server package). The
+# package's hand-written half lives in npm/ and IS committed; dist-npm/ is
+# what scripts/build-npm.ts assembles out of it.
 dist/
 dist-cli/
 dist-native/
 dist-ios/
+dist-npm/
 build/
 
 # SwiftPM's checkouts and object files for the iOS client. Package.resolved is

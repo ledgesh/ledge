@@ -82,12 +82,22 @@ export async function daemon(autostart = false): Promise<void> {
   await d.done;
 }
 
-if (import.meta.main) {
+/**
+ * The command line, as something other than a side effect of importing this.
+ *
+ * A published package's `bin/ledge-server.js` (npmPackage.ts) is its own
+ * module and imports this one, which makes `import.meta.main` FALSE in here —
+ * so the guard that keeps `bun src/bun/serve.ts` honest is exactly what would
+ * make an installed `ledge-server` exit 0 having done nothing. `argv` is
+ * shaped like `process.argv` from either entry, since a launcher is the script
+ * in its own argv the same way this file is in its.
+ */
+export async function main(argv: readonly string[]): Promise<never> {
   console.log = console.error;
   console.info = console.error;
   console.debug = console.error;
 
-  const verb = process.argv[2] ?? "serve";
+  const verb = argv[2] ?? "serve";
   if (verb !== "serve" && verb !== "daemon") {
     console.error("usage: ledge-server [serve|daemon [--autostart]]");
     console.error("  serve   the protocol on stdin and stdout, attached to this machine's daemon");
@@ -101,7 +111,9 @@ if (import.meta.main) {
   // other's rotation.
   startLogging(verb === "daemon" ? DAEMON_LOG : "ledge-serve");
 
-  if (verb === "daemon") await daemon(process.argv.includes("--autostart"));
+  if (verb === "daemon") await daemon(argv.includes("--autostart"));
   else await serve();
   process.exit(0);
 }
+
+if (import.meta.main) await main(process.argv);

@@ -8,8 +8,10 @@ connection grammar §8 called for now lives in `interactions.md` §4-1, the
 state ownership §5 describes is the code's, and the resilience §7
 promises is real: the server is a process behind a unix socket, a dropped wire
 reconnects and replays, and terminal output rides binary frames. The server
-runs on Linux and ships as an image, and `bun run probe:ssh` connects to one
-over a real sshd with the §4 forced command enforcing itself.
+runs on Linux, installs as `bun add -g ledge-server` (§11), and ships as an
+image; `bun run probe:ssh` connects to one over a real sshd with the §4 forced
+command enforcing itself, and `bun run probe:npm` installs the published
+package on a machine with no toolchain and drives its terminal.
 This is a sibling standard beside `architecture.md` (whose process topology,
 trust boundary, and state-ownership rules it revises), `interactions.md`,
 `locking.md` (whose vault moves one hop away), and `testing.md` (whose
@@ -1280,13 +1282,28 @@ mistake waiting to be made.
 
 ## 11. Deployment and portability
 
-**The server ships as one binary** (`bun build --compile`) for macOS arm64
-and Linux x64/arm64, and as a Docker image for the hosts that want one. Build
-the image on debian-slim rather than alpine: the PTY layer is `bun:ffi` over
-`posix_spawn` and `forkpty`, and musl is a fight that buys nothing. musl also
-has no `posix_spawn_file_actions_addchdir_np` at all, which is the same rule
-seen from the other side. The floor is glibc 2.29 (Debian 11, Ubuntu 20.04,
-RHEL 9), set by that symbol.
+**The server ships three ways, and the package is the ordinary one.**
+`ledge-server` on npm carries a bundle and a prebuilt trampoline per target
+(`scripts/build-npm.ts`); `bun build --compile` still produces one binary per
+target for anyone who wants a build of their own; and a Docker image serves the
+hosts that want one. All three are the same `src/bun/`, and the targets are the
+same four: macOS and Linux, arm64 and x64.
+
+Build the image on debian-slim rather than alpine: the PTY layer is `bun:ffi`
+over `posix_spawn` and `forkpty`, and musl is a fight that buys nothing. musl
+also has no `posix_spawn_file_actions_addchdir_np` at all, which is the same
+rule seen from the other side. The floor is glibc 2.29 (Debian 11, Ubuntu
+20.04, RHEL 9), set by that symbol.
+
+**A complete package can only be assembled on a Mac**, and the asymmetry is
+Mach-O's rather than a limitation of the script. `cc -arch arm64 -arch x86_64`
+is a flag, so both Mach-O slices come from one build; ELF has no fat binary, so
+each Linux slice comes from its own container (`Dockerfile`'s `native-lib`
+stage, exported with `--output type=local`). `npmPackage.ts`'s `routeFor`
+states it and `build-npm.ts` refuses rather than shipping three targets out of
+four. The architecture each container produced is read back out of the ELF
+header before it is packaged, because `docker build --platform` is a request a
+daemon without that emulator can answer with the host's architecture.
 
 **The port is three names and one value.** `pty.ts` reaches libc by name, and
 almost nothing else about it differs: `O_RDWR`, `POLLIN` and `struct pollfd`
@@ -1353,24 +1370,45 @@ different piece of work than hiding a verb that cannot run — it needs the CLI
 compiled into the server binary behind a verb of its own, which is the same
 restructuring `serve.ts`'s argv guard would need to run a file.
 
-**Clients install and upgrade the server the way VS Code Remote does.** The
-client connects, reads the server's version from the handshake, and offers to
-push a matching binary when it is missing or mismatched. A user who prefers
-to manage it themselves runs the same binary from a package. Not built:
-today's answer is `docs/user/18-notes-on-another-machine.md`'s two commands,
-which is honest for this audience and does not stay honest at a download page.
+**The install is a package, and the reason is that npm already solves both
+problems the compiled binary had.** `bun add -g ledge-server` is what
+`docs/user/18-notes-on-another-machine.md` now says, and `src/bun/npmPackage.ts`
+is what makes it true.
 
-Two things have to be true before that install can be one step, and neither is
-about the wire. The release has to produce a server artifact at all: it builds
-the Mac app and nothing else today (`releasing.md` §1), so both the binary and
-the image begin with a git checkout. And the binary has to be ONE file: the
-`.so` beside it is an adjacency rule a copy can get wrong, and getting it wrong
-fails by dropping Ctrl-C rather than by refusing to start. `pty.ts` finds the
-trampoline through a list of real paths, so embedding it and extracting to a
-cache directory on first use is a contained change and removes the rule. §4's
-password door is what carries that file to a machine with nothing on it yet,
-which is the same thing VS Code Remote-SSH does and needs nothing prepared on
-the far side.
+The two things this section used to name as prerequisites were both real, and
+both were about the ARTIFACT rather than the wire: the release had to produce a
+server build at all, and that build had to be ONE file, because the `.so` beside
+it was an adjacency rule a copy could get wrong. A package answers them
+together. npm ships every architecture in one tarball, so "one artifact per
+target" stops being a matrix somebody has to assemble and pick from; and it
+installs a directory rather than two loose files, so adjacency is not something
+a user can get wrong. `pty.ts` gained one candidate for it
+(`native/<platform>-<arch>/`, `ptyNative.ts`'s `nativeDir`), which is the whole
+of the code change on the loading side.
+
+What it costs is a runtime on the far machine, and that is the honest trade:
+the compiled binary needed nothing over there and this needs Bun. For this
+audience it is one curl, and what it buys is the architecture matrix, the glibc
+floor as a user-facing rule, and the adjacency rule all leaving the manual at
+once. The compiled binary stays supported and stays documented; it is a build
+of your own rather than the ordinary path.
+
+**A published command is only reachable if an incoming ssh can find it**, and
+that is now the one thing the manual asks a user to check. `ssh host
+'command -v ledge-server'` is the check, and the reason it earns a section is
+that Bun places global commands beside ITSELF: a system-wide Bun puts them in
+`/usr/local/bin`, which every default sshd PATH contains, and a per-user Bun
+puts them in `~/.bun/bin`, which none does. Both were measured
+(`scripts/probe-npm.ts` asserts the first). The same PATH has to hold `bun`
+too, since the package's bin begins `#!/usr/bin/env bun`; a forced command with
+an absolute path settles the first half and not the second.
+
+**Clients that install the server themselves are still not built.** The design
+is VS Code's: connect, read the server's version from the handshake, offer to
+push a matching build when it is missing or mismatched. §4's password door is
+what would carry it to a machine with nothing on it yet. What changed is that
+the fallback is now two commands a user can actually run, rather than a git
+checkout and a compiler.
 
 **The handshake is the first frame in each direction** and carries the
 protocol version, the schema version, and the build. A schema mismatch
@@ -1479,6 +1517,21 @@ Per `testing.md`'s categories:
   `bun test src/bun src/shared` inside it. It found the two Linux bugs §11
   records, and a latent flake in `notes.fs.test.ts` that had put a pause
   AFTER the write it was meant to separate rather than before it.
+- **The published package, on a machine that could not have built it**
+  (`bun run probe:npm`). `npm pack` the assembled tree, install it with
+  `bun add -g` inside a container that has Bun and NO compiler and NO libc
+  headers, and drive the result with Ledge's own client over `docker exec`.
+  The fixture is chosen for what it lacks: `pty.ts` has two ways to get its
+  trampolines and only the prebuilt one can work there, so a terminal that
+  resizes proves the packaged library loaded. That is a claim `bun test`
+  cannot make from a checkout, because a checkout has a toolchain.
+  Its own negative control is `mv`ing one slice out of `dist-npm` and
+  re-running, and doing that is what corrected two things this repository had
+  wrong. The resize is the discriminator; Ctrl-C is NOT, because the fallback
+  spawn is a session leader that opens the slave without `O_NOCTTY` and
+  acquires a controlling terminal anyway. `pty.ts` had claimed the opposite in
+  two comments and a warning string, and the probe had a check that passed
+  either way.
 - **Live probe (`testing.md` §6, scratch `LEDGE_NOTES_ROOT`)**: a real ssh
   round trip, `bun run probe:ssh`, since ssh, the forced command, and
   host-key pinning are native seams the harness cannot fake. It builds the

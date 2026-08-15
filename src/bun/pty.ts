@@ -15,7 +15,7 @@ import { dlopen, ptr, CString, cc } from "bun:ffi";
 import { existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { NATIVE_C, NATIVE_LIB, NATIVE_SYMBOLS, PLATFORM } from "./ptyNative";
+import { NATIVE_C, NATIVE_DIR, NATIVE_LIB, NATIVE_SYMBOLS, PLATFORM } from "./ptyNative";
 
 // The first library that has all of `symbols`. Every candidate failing is
 // fatal and should be: there is no PTY without a libc, and the alternative is
@@ -122,19 +122,25 @@ interface Native {
 type NativeSymbols = ReturnType<typeof dlopen<typeof NATIVE_SYMBOLS>>["symbols"];
 
 // Where a prebuilt libledge_pty may sit. The entries are the SAME file at
-// three moments in its life: `scripts/build-native.ts` writes it to
+// four moments in its life: `scripts/build-native.ts` writes it to
 // dist-native/ in the checkout, the app bundle's copy map lands it beside this
 // module in Resources/app/bun (the cli.js placement, for the cli.js reason —
-// import.meta.dir is the one path that reads the same in both layouts), and a
-// `bun build --compile` server ships it beside the executable.
+// import.meta.dir is the one path that reads the same in both layouts), a
+// `bun build --compile` server ships it beside the executable, and an
+// installed `ledge-server` package holds all four targets at once under
+// native/ (ptyNative.ts, nativeDir).
 //
 // The compiled case needs its own entry because import.meta.dir inside such a
 // binary names a path in the embedded filesystem, where nothing was copied.
+// The package case does not: `bun build` leaves import.meta.dir alone, so in
+// the bundled lib/serve.js it resolves at runtime to that file's own
+// directory, which is what puts native/ within reach of a relative join.
 // Checked in this order so a checkout run exercises the artifact that will
 // actually ship rather than the fallback.
 function libCandidates(): string[] {
   return [
     join(import.meta.dir, NATIVE_LIB),
+    join(import.meta.dir, "native", NATIVE_DIR, NATIVE_LIB),
     join(import.meta.dir, "..", "..", "dist-native", NATIVE_LIB),
     join(dirname(process.execPath), NATIVE_LIB),
   ];
@@ -152,10 +158,19 @@ function libCandidates(): string[] {
 //      headers this needs are present by construction.
 //
 // null means neither worked: the shell still runs, spawned by plain
-// posix_spawn with no controlling terminal, so ^C is inert and resize is a
-// no-op. Losing Ctrl-C beats losing the terminal entirely, and the warning
-// says which of the two failure shapes it is, because "Ctrl-C does nothing" is
-// otherwise unattributable from the outside.
+// posix_spawn below. What that costs is narrower than it reads, and it was
+// measured rather than reasoned about — scripts/probe-npm.ts runs a whole
+// server with the library removed. Resize becomes a no-op, because TIOCSWINSZ
+// is variadic and the trampoline is the only way to reach it, and writes to a
+// shell that is not reading can stall for want of O_NONBLOCK. Job control
+// SURVIVES: the fallback spawns with SETSID and has the child open the slave
+// itself without O_NOCTTY, and a session leader that opens a tty that way
+// acquires it as its controlling terminal, so ^C still reaches the foreground
+// group. Measured on Linux; the acquisition rule is POSIX and macOS implements
+// it too.
+//
+// The warning below is still the only way to attribute a dead resize from the
+// outside, which is the whole reason it is worded as specifically as it is.
 let native: Native | null | undefined;
 function loadNative(): Native | null {
   if (native !== undefined) return native;
@@ -189,8 +204,8 @@ function loadNative(): Native | null {
     console.warn(
       "[pty] no native trampolines (no prebuilt dylib, and compiling in-process failed:",
       (err as Error).message,
-      "). Ctrl-C and terminal resize are unavailable, and writes to a shell that "
-        + "is not reading can stall the process.",
+      "). Terminal resize is a no-op, and writes to a shell that is not reading "
+        + "can stall the process.",
     );
     native = null;
   }
@@ -305,8 +320,11 @@ export class PtyProcess {
       return;
     }
 
-    // Fallback: no controlling terminal, so no job control and no Ctrl-C. See
-    // loadNative above for why this is the lesser evil rather than the design.
+    // Fallback. The controlling terminal survives it, and these two lines are
+    // why: SETSID makes the child a session leader, and it OPENS the slave
+    // itself rather than inheriting it — with no O_NOCTTY, which is what makes
+    // the kernel hand it over. What is actually lost is the winsize ioctl and
+    // O_NONBLOCK on the master; loadNative above has the measurement.
     const actions = new BigUint64Array(1);
     s.posix_spawn_file_actions_init(ptr(actions));
     s.posix_spawn_file_actions_addopen(ptr(actions), 0, ptr(cstr(slavePath)), O_RDWR, 0);

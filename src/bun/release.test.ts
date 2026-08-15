@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import config from "../../electrobun.config";
 import { BUILD_VERSION } from "../shared/version";
+import { manifest } from "./npmPackage";
 
 const ROOT = resolve(import.meta.dir, "..", "..");
 
@@ -28,6 +29,22 @@ describe("the release build config", () => {
   // builds against across an ssh connection.
   test("the server reports that version too", () => {
     expect(BUILD_VERSION).toBe(pkg.version);
+  });
+
+  // And a fourth, on npm. The handshake refuses a schema mismatch by naming
+  // both builds (remote.md §11), so the number a published `ledge-server`
+  // reports has to be the number it was published under — a package whose
+  // version is its own would make that message name a build nobody can
+  // install. Generated rather than checked in for exactly this reason;
+  // the test is what makes the generator's input the right one.
+  test("a published server is versioned as the app it belongs to", () => {
+    expect(manifest(pkg.version).version).toBe(BUILD_VERSION);
+  });
+
+  // npm's own grammar, which is stricter than Apple's above: a range or a
+  // leading v is accepted into package.json and rejected at publish.
+  test("the package version is a plain semver", () => {
+    expect(manifest(pkg.version).version).toMatch(/^\d+\.\d+\.\d+(-[\w.]+)?$/);
   });
 
   // CFBundleShortVersionString has a defined grammar: one to three

@@ -37,10 +37,17 @@ native seam untested, because there is no Intel Mac here to run it on.
 
 ## 2. Version numbers
 
-The version lives in two files and both must say the same thing:
+The version lives in three files and all of them must say the same thing:
 
 - `package.json` → `version`
 - `electrobun.config.ts` → `app.version`
+- `src/shared/version.ts` → `BUILD_VERSION`, which is what a server reports in
+  its handshake, since it has no Electrobun runtime to ask
+
+A fourth carries it and is not edited: the published `ledge-server` manifest is
+generated from `package.json` by `scripts/build-npm.ts`, which is what keeps a
+server's handshake naming a build somebody can actually install.
+`src/bun/release.test.ts` pins all four together.
 
 `electrobun.config.ts` is the one that reaches the bundle. It becomes
 `CFBundleVersion`, and `scripts/stamp-version.ts` copies it into
@@ -189,13 +196,62 @@ Verifying a release therefore means installing it the way the instructions
 say, in Finder. An install done with `ditto` from a terminal reproduces the
 failure rather than the release.
 
-## 6. What is not automated
+## 6. Publishing the server package
+
+The app is half of a release. `ledge-server` on npm is the other half, and it
+is what `docs/user/18-notes-on-another-machine.md` tells a user to install on
+the machine their notes live on. A release that ships the app without it leaves
+that page describing a package that does not exist.
+
+Assemble it on this Mac, and only on this Mac:
+
+```
+bun run build:npm
+```
+
+The Mach-O trampolines need a Mac and the ELF ones need a container per
+architecture, so a complete package cannot be assembled anywhere else
+(`remote.md` §11). Docker has to be running. The script refuses rather than
+shipping three targets out of four, and it writes `dist-npm/package.json` last
+so a half-assembled tree cannot be packed.
+
+Then prove the thing you are about to publish actually works:
+
+```
+bun run probe:npm
+```
+
+It packs the tarball, installs it on a container with no compiler and no libc
+headers, and drives a terminal on it. That fixture is the point: it is the
+machine a user has, and the one this checkout is least like.
+
+Publishing is deliberately not a script:
+
+```
+npm publish dist-npm
+```
+
+It is irreversible in the way signing is not. An npm version can be deprecated
+but never replaced, so the version has to be right before the command runs, and
+`src/bun/release.test.ts` is what checks that it matches the app's.
+
+Two things to know before the first publish. The name `ledge-server` has to be
+available or owned by the publishing account, and `npm publish` on a package
+that has never existed also decides the account that owns it forever. Neither
+is a step that can be rehearsed, so `npm publish --dry-run dist-npm` is the
+rehearsal: it prints the exact file list and the tarball size without uploading.
+
+## 7. What is not automated
 
 - **Auto-update.** `release.baseUrl` is unset, so no build offers an upgrade to
   the one before it, and no patch is generated. The artifacts are already the
   right shape for it: publishing them under a `baseUrl` and setting that key is
   what turns it on.
-- **Publishing.** Nothing uploads `artifacts/`. CI builds the app but does not
-  release it.
+- **Publishing.** Nothing uploads `artifacts/`, and nothing runs `npm publish`
+  (§6). CI builds the app but does not release it.
+- **The server package in `bun run release`.** The release script builds the Mac
+  app and stops; `bun run build:npm` is a second command, run by hand. Folding
+  it in means the release depends on Docker being up, which is a fair trade to
+  make later and not one to discover mid-release.
 - **The signed build in CI.** Signing needs the certificate and the credentials,
   and both live on this machine only.

@@ -80,6 +80,8 @@ bun run release      # the signed, notarized DMG (releasing.md)
 bun run cli <verb>   # the `ledge` CLI from the checkout (src/bun/cli.ts; interactions.md §9)
 bun run ios          # the iOS client in the Simulator (`-- --phone` for a device; ios.md §12)
 bun run probe:ssh    # the ssh hop against a real sshd in Docker (`-- --serve` for a phone)
+bun run build:npm    # assemble the publishable `ledge-server` package (Mac + Docker; remote.md §11)
+bun run probe:npm    # install that package on a toolchain-free container and drive it
 ```
 
 Done means: tsc clean, build clean, tests green (e2e too when UI behavior
