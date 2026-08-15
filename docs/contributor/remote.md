@@ -265,22 +265,63 @@ usually without a passphrase, which is a credential at rest carrying more
 authority than a password to one host. A keychain is a better home for a secret
 than a file with mode 600, not a worse one.
 
+**On the Mac the keychain is reached through `/usr/bin/security`, and the
+item's ACL names that binary rather than Ledge.** A keychain ACL trusts the
+program that created the item; both the write and the read go through Apple's
+`security`, so Ledge's own code signature never enters it. Measured in a real
+bundle: every read is silent with no `SecurityAgent` prompt, a relaunched app
+reads back what an earlier launch wrote, and a process with no relationship to
+Ledge reads the same item as easily as Ledge does.
+
+Two things follow. Re-signing Ledge cannot lock it out of its own secrets,
+which is the failure `locking.md` §3 warns about for items created with
+`SecItemAdd` inside the app. And any process running as that user can read the
+password with that one command, so the mode 600 comparison above is exact: a
+file that user can read, and an item that user can read. Narrowing the ACL with
+`-T /Applications/Ledge.app` would bring the signing problem back with it, so
+it is not used. What the measurement did not cover is a hardened-runtime
+release build making the same spawn, which is the one thing to re-confirm on
+the first signed build; that build already spawns `ssh`, `ssh-keyscan` and
+`ssh-keygen` from fixed paths.
+
+**The askpass helper reads the keychain itself.** `SSH_ASKPASS` names a script
+in the bundle, the connection id arrives in its environment, and the script
+answers with what `security find-generic-password -w` prints. The secret's path
+is keychain to helper stdout to ssh: it is never in Bun's memory and never on
+an argv.
+
 **A passphrase on an existing key already works through the agent.**
 `IdentitiesOnly=yes` restricts ssh to the identity named by `-i`, but that
 identity may be served by `ssh-agent`, so a loaded key authenticates with no
 prompt. An unloaded passphrased key fails, and fails with the agent's own
 message.
 
-**Two ssh options are not negotiable, whichever door is used**, because the
-protocol rides stdout. There is no `-t`: newline translation on a
-length-prefixed stream corrupts rather than breaks. And `BatchMode=yes`, so
-that a prompt can never hang the connection forever or write a question mark
-into a frame header.
+**One ssh option is not negotiable, whichever door is used.** There is no
+`-t`, because the protocol rides stdout and newline translation on a
+length-prefixed stream corrupts rather than breaks.
 
-A password cannot be typed under `BatchMode=yes`, which is the one place the
-two doors differ mechanically. OpenSSH's answer is `SSH_ASKPASS` with
-`SSH_ASKPASS_REQUIRE=force`, which supplies it from a helper and needs no
-terminal, so neither option above is relaxed to accommodate it.
+**`BatchMode=yes` is negotiable, and a password connection turns it off.**
+This section used to claim the opposite: that `SSH_ASKPASS` with
+`SSH_ASKPASS_REQUIRE=force` needs no terminal and therefore needs no
+relaxation. Measured against a password-only sshd, that is false. Under
+`BatchMode=yes` OpenSSH suppresses askpass entirely, `force` included; the
+helper is never spawned and the connection fails without a password ever being
+offered.
+
+Narrower options cover what `BatchMode` was there for, which is what makes
+turning it off affordable:
+
+| The hazard | What covers it instead |
+| ---------- | ---------------------- |
+| A host-key question that hangs forever | `StrictHostKeyChecking=yes`, which refuses outright and asks nothing, `BatchMode` or no |
+| Retrying up to sshd's `MaxAuthTries` | `NumberOfPasswordPrompts=1`. Three askpass answers produced exactly one attempt |
+| A prompt eating stdin, or an answer landing in a frame header | Neither occurs. askpass answers on its own descriptors, and protocol bytes written through the same connection reached the far end intact |
+
+So the argv is per-connection rather than one shape for every door. A key or
+agent connection keeps `BatchMode=yes` unchanged. A password connection sends
+`BatchMode=no`, `NumberOfPasswordPrompts=1`, and `PubkeyAuthentication=no`, the
+last so a running agent does not spend the auth budget offering keys before a
+password is tried.
 
 Three further options are on the argv and are not security at all:
 `ServerAliveInterval`, `ServerAliveCountMax` and `ConnectTimeout`. They are
