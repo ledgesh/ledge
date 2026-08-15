@@ -833,6 +833,8 @@ test.describe("the iOS client, and what it does not have", () => {
 
     await dialog.getByRole("button", { name: "Add Server…" }).tap();
     await expect(dialog).toContainText("authorized_keys");
+    await expect(dialog).toContainText("stops that key forwarding ports, copying files, or opening a shell");
+    await expect(dialog).not.toContainText("the only thing that key can do");
     await expect(dialog.getByText(/^restrict,command=/)).toBeVisible();
     await expect(dialog.getByLabel(/^Key/)).toHaveCount(0);
 

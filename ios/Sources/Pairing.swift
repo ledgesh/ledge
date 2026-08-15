@@ -135,7 +135,11 @@ final class PairingViewController: UIViewController {
 
         for view in [
             title, reason,
-            step("1. Add this line to ~/.ssh/authorized_keys on the server. It is the only thing that key can do."),
+            // Says what the restriction is good for rather than claiming the key
+            // is harmless: it narrows ssh's feature set around the protocol, and
+            // the protocol behind the forced command runs code by design
+            // (remote.md §4a).
+            step("1. Add this line to ~/.ssh/authorized_keys on the server. It stops that key forwarding ports, copying files, or opening a shell."),
             keyBox, copy,
             step("2. Then say which machine, and which account on it."),
             field, portField, connect, spinner, status,

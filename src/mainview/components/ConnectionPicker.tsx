@@ -411,9 +411,14 @@ function ConnectionForm({
     <div className="mt-3 flex flex-col gap-2">
       {ownKey && (
         <div className="flex flex-col gap-1">
+          {/* What the line narrows is ssh's feature set around the protocol, not
+              the protocol: what rides the forced command is terminalAttach and
+              runBlock, which is arbitrary code execution as that user by design
+              (remote.md §4a). So this says what the restriction is good for and
+              does not claim the key is harmless. */}
           <span className="text-[11px] text-muted-foreground">
-            Add this line to <code className="font-mono">~/.ssh/authorized_keys</code> on the server. It is the only
-            thing that key can do.
+            Add this line to <code className="font-mono">~/.ssh/authorized_keys</code> on the server. It stops that key
+            forwarding ports, copying files, or opening a shell.
           </span>
           <code className="select-text break-all rounded-md border border-input bg-muted/40 p-2 font-mono text-[11px]">
             {ownKey}
