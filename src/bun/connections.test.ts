@@ -16,6 +16,7 @@ import {
   parseConnections,
   parseFingerprint,
   pickHostKey,
+  PORT_UNSET,
   SSH_PATH,
   sshCommand,
   type Connection,
@@ -25,6 +26,7 @@ const CONN: Connection = {
   id: "c1",
   name: "Laptop",
   destination: "dev@laptop",
+  port: PORT_UNSET,
   keyPath: "",
   hostKey: "laptop ssh-ed25519 AAAAC3Nza",
   lastReached: 0,
@@ -39,6 +41,17 @@ describe("the ssh command", () => {
   test("runs the server on the other machine", () => {
     expect(argv[0]).toBe(SSH_PATH);
     expect(argv.slice(-3)).toEqual(["dev@laptop", "ledge-server", "serve"]);
+  });
+
+  // A connection that names no port passes none, so ssh's own configuration
+  // decides — which is what keeps a `~/.ssh/config` alias's `Port` working. A
+  // form defaulting to 22 and always sending it would override that silently.
+  test("a port is passed only when the connection names one", () => {
+    expect(argv).not.toContain("-p");
+    const moved = sshCommand({ ...CONN, port: 2222 }, KNOWN, USER);
+    expect(moved.join(" ")).toContain("-p 2222");
+    // Still ahead of the destination, which is where ssh takes its options.
+    expect(moved.indexOf("-p")).toBeLessThan(moved.indexOf("dev@laptop"));
   });
 
   // This ssh has no terminal: its stdout IS the protocol. A prompt would hang
@@ -118,6 +131,22 @@ describe("the stored list", () => {
     const { connections, selected } = parseConnections(undefined);
     expect(connections).toEqual([]);
     expect(selected).toBe(LOCAL_ID);
+  });
+
+  // A record written before the field existed, and one whose port is nonsense,
+  // are the same thing to a reader: a connection that opens wherever ssh
+  // decides, which is where it opened before.
+  test("a missing or unusable port costs itself and not the record", () => {
+    const read = (port: unknown) => parseConnections({ connections: [{ ...CONN, port }] }).connections[0]!;
+    expect(parseConnections({ connections: [{ ...CONN, port: undefined }] }).connections[0]!.port).toBe(PORT_UNSET);
+    expect(read(2222).port).toBe(2222);
+    expect(read("2222").port).toBe(PORT_UNSET);
+    expect(read(0).port).toBe(PORT_UNSET);
+    expect(read(-1).port).toBe(PORT_UNSET);
+    expect(read(70000).port).toBe(PORT_UNSET);
+    expect(read(22.5).port).toBe(PORT_UNSET);
+    // And the rest of the record is untouched by any of it.
+    expect(read("2222")).toEqual({ ...CONN, port: PORT_UNSET });
   });
 
   // Machine-written state self-heals (architecture.md §6): a bad entry costs

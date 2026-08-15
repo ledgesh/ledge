@@ -117,6 +117,55 @@ test("re-addressing a server onto another host asks for its fingerprint", async 
   await expect(dialog(page).getByRole("option").nth(1)).toHaveText(/ledge@frankfurt/);
 });
 
+// The port is its own field, not part of the address, and it is part of what
+// gets pinned: known_hosts indexes a non-default port as `[host]:port`
+// (shared/connections.ts).
+test("a port is a field of its own, and it travels into the pin", async ({ page }) => {
+  await bar(page).click();
+  await dialog(page).getByRole("button", { name: "Add Server…" }).click();
+  await dialog(page).getByLabel("Name").fill("Box");
+  await dialog(page).getByLabel("SSH destination").fill("ledge@box");
+  await dialog(page).getByLabel("Port (optional)").fill("2222");
+  await dialog(page).getByRole("button", { name: "Continue" }).click();
+  await expect(dialog(page).getByText("SHA256:harness+fake+key")).toBeVisible();
+  await dialog(page).getByRole("button", { name: "It Matches, Add" }).click();
+  await expect(dialog(page).getByRole("option", { name: /Box/ })).toBeVisible();
+});
+
+// A typo must not silently become 22 and connect to the wrong sshd.
+test("a port that is not a port is refused before anything is dialled", async ({ page }) => {
+  await bar(page).click();
+  await dialog(page).getByRole("button", { name: "Add Server…" }).click();
+  await dialog(page).getByLabel("Name").fill("Box");
+  await dialog(page).getByLabel("SSH destination").fill("ledge@box");
+  await dialog(page).getByLabel("Port (optional)").fill("22x");
+  await dialog(page).getByRole("button", { name: "Continue" }).click();
+  await expect(dialog(page).getByText(/1 to 65535/)).toBeVisible();
+  await expect(dialog(page).getByText("SHA256:harness+fake+key")).toHaveCount(0);
+});
+
+// Blank is the ordinary answer and means "ssh decides", so it is not a typo and
+// must not be treated as one.
+test("a blank port adds without complaint", async ({ page }) => {
+  await bar(page).click();
+  await dialog(page).getByRole("button", { name: "Add Server…" }).click();
+  await dialog(page).getByLabel("Name").fill("Plain");
+  await dialog(page).getByLabel("SSH destination").fill("ledge@plain");
+  await dialog(page).getByRole("button", { name: "Continue" }).click();
+  await expect(dialog(page).getByText("SHA256:harness+fake+key")).toBeVisible();
+});
+
+// Moving a connection to another port on the same machine is moving it to
+// another known_hosts entry, which can hold another key.
+test("changing only the port asks for the fingerprint again", async ({ page }) => {
+  await bar(page).click();
+  await dialog(page).getByRole("button", { name: "Edit VPS" }).click();
+  await expect(dialog(page).getByRole("button", { name: "Save" })).toBeVisible();
+  await dialog(page).getByLabel("Port (optional)").fill("2222");
+  await expect(dialog(page).getByRole("button", { name: "Save" })).toHaveCount(0);
+  await expect(dialog(page).getByRole("button", { name: "Continue" })).toBeVisible();
+});
+
 test("a host that does not answer is a sentence, not a spinner", async ({ page }) => {
   await bar(page).click();
   await dialog(page).getByRole("button", { name: "Add Server…" }).click();

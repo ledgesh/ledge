@@ -165,7 +165,8 @@ export async function createConnectionManager(deps: {
       const { conn: next, error: refusal } = store.reviewUpdate(fields);
       if (!next) return { ok: false, error: refusal };
       const before = store.find(fields.id);
-      const readdressed = !before || next.destination !== before.destination || next.keyPath !== before.keyPath;
+      const readdressed =
+        !before || next.destination !== before.destination || next.port !== before.port || next.keyPath !== before.keyPath;
       // How the connection is MADE changed, and some window's wire was made the
       // old way. This one re-opens its own; another window's cannot be re-opened
       // from here, and leaving it pointed at the old machine while the row names
@@ -198,7 +199,7 @@ export async function createConnectionManager(deps: {
 
     connectionRemove: async ({ id }) => store.remove(id),
 
-    connectionProbe: async ({ destination }) => store.probe(destination),
+    connectionProbe: async ({ destination, port }) => store.probe(destination, port),
   };
 
   return {

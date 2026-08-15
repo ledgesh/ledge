@@ -311,6 +311,8 @@ interface StoredServer {
   id: string;
   name: string;
   destination: string;
+  /** Where sshd listens, or 0 for the default (shared/connections.ts). */
+  port: number;
   hostKey: string;
 }
 
@@ -335,7 +337,8 @@ function withServers(servers: StoredServer[], selected = servers[0]?.id ?? "") {
       return { ok: true };
     }
     if (m === "servers.probe") {
-      probed.push((p as { destination: string }).destination);
+      const asked = p as { destination: string; port: number };
+      probed.push(asked.port ? `${asked.destination}:${asked.port}` : asked.destination);
       return { hostKey: "ssh-ed25519 AAAAnew", fingerprint: "SHA256:new+key", keyType: "ssh-ed25519", error: "" };
     }
     return null;
@@ -343,8 +346,8 @@ function withServers(servers: StoredServer[], selected = servers[0]?.id ?? "") {
   return { state, probed, o };
 }
 
-const VPS: StoredServer = { id: "s1", name: "VPS", destination: "ledge@vps", hostKey: "ssh-ed25519 AAAAvps" };
-const PI: StoredServer = { id: "s2", name: "Pi", destination: "dev@pi.local", hostKey: "ssh-ed25519 AAAApi" };
+const VPS: StoredServer = { id: "s1", name: "VPS", destination: "ledge@vps", port: 0, hostKey: "ssh-ed25519 AAAAvps" };
+const PI: StoredServer = { id: "s2", name: "Pi", destination: "dev@pi.local", port: 0, hostKey: "ssh-ed25519 AAAApi" };
 
 describe("the client overlay", () => {
   test("answers exactly the methods a server refuses", () => {
@@ -419,6 +422,7 @@ describe("the client overlay", () => {
     const { id, error } = await o.connectionAdd({
       name: "Pi",
       destination: "dev@pi.local",
+      port: 0,
       keyPath: "",
       hostKey: "ssh-ed25519 AAAApi",
     });
@@ -433,9 +437,11 @@ describe("the client overlay", () => {
   // becomes is ssh's argv, and a destination starting with "-" is an option.
   test("what could not be an ssh destination never reaches the store", async () => {
     const { state, o } = withServers([VPS]);
-    expect((await o.connectionAdd({ name: "X", destination: "-oProxyCommand=x", keyPath: "", hostKey: "" })).error)
+    expect((await o.connectionAdd({ name: "X", destination: "-oProxyCommand=x", port: 0,
+      keyPath: "", hostKey: "" })).error)
       .toContain("not an ssh destination");
-    expect((await o.connectionAdd({ name: " ", destination: "dev@pi", keyPath: "", hostKey: "" })).error)
+    expect((await o.connectionAdd({ name: " ", destination: "dev@pi", port: 0,
+      keyPath: "", hostKey: "" })).error)
       .toContain("name");
     expect(state.servers).toHaveLength(1);
   });
@@ -454,7 +460,8 @@ describe("the client overlay", () => {
 
   test("a rename keeps the pin and the address", async () => {
     const { state, o } = withServers([VPS]);
-    expect(await o.connectionUpdate({ ...VPS, name: "Frankfurt", keyPath: "", hostKey: null })).toEqual({
+    expect(await o.connectionUpdate({ ...VPS, name: "Frankfurt", port: 0,
+      keyPath: "", hostKey: null })).toEqual({
       ok: true,
       error: "",
     });
@@ -464,7 +471,8 @@ describe("the client overlay", () => {
   // The account is not what a host key belongs to, so this one saves in a step.
   test("changing only the account keeps the pin", async () => {
     const { state, o } = withServers([VPS]);
-    const res = await o.connectionUpdate({ ...VPS, destination: "dev@vps", keyPath: "", hostKey: null });
+    const res = await o.connectionUpdate({ ...VPS, destination: "dev@vps", port: 0,
+      keyPath: "", hostKey: null });
     expect(res).toEqual({ ok: true, error: "" });
     expect(state.servers[0]).toMatchObject({ destination: "dev@vps", hostKey: VPS.hostKey });
   });
@@ -475,7 +483,8 @@ describe("the client overlay", () => {
   // message about a CHANGED host key.
   test("an address that moved to another host has to be pinned again", async () => {
     const { state, o } = withServers([VPS]);
-    const refused = await o.connectionUpdate({ ...VPS, destination: "ledge@other", keyPath: "", hostKey: null });
+    const refused = await o.connectionUpdate({ ...VPS, destination: "ledge@other", port: 0,
+      keyPath: "", hostKey: null });
     expect(refused.ok).toBe(false);
     expect(refused.error).toContain("another host");
     expect(state.servers[0]).toEqual(VPS);
@@ -483,6 +492,7 @@ describe("the client overlay", () => {
     const pinned = await o.connectionUpdate({
       ...VPS,
       destination: "ledge@other",
+      port: 0,
       keyPath: "",
       hostKey: "ssh-ed25519 AAAAother",
     });
@@ -512,13 +522,16 @@ describe("the client overlay", () => {
 
   test("a fingerprint comes from the shell, which is the only end that can dial", async () => {
     const { probed, o } = withServers([VPS]);
-    expect(await o.connectionProbe({ destination: "ledge@new" })).toEqual({
+    expect(await o.connectionProbe({ destination: "ledge@new", port: 0 })).toEqual({
       hostKey: "ssh-ed25519 AAAAnew",
       fingerprint: "SHA256:new+key",
       keyType: "ssh-ed25519",
       error: "",
     });
-    expect(probed).toEqual(["ledge@new"]);
+    // And the port travels, because the line it comes back with is the line
+    // that gets pinned (shared/connections.ts knownHostsHost).
+    await o.connectionProbe({ destination: "ledge@new", port: 2222 });
+    expect(probed).toEqual(["ledge@new", "ledge@new:2222"]);
   });
 
   test("everything else is the server's", async () => {

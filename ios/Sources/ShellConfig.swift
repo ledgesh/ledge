@@ -22,6 +22,10 @@ struct ServerRecord: Codable, Equatable {
     /// ssh destination has none, and no options, because there is no argv here
     /// for one to be injected into.
     var destination: String
+    /// Where sshd listens, or 0 for the default. Its own field for the Mac's
+    /// reason (shared/connections.ts): a destination is not a `host:port`, and
+    /// every other ssh client's form asks for the two separately.
+    var port: Int = 0
     /// `ssh-ed25519 AAAA…`, pinned at pairing. The bytes, not a fingerprint:
     /// the comparison is on these and the fingerprint is for a human to read.
     /// Empty for a record whose pin was dropped because the server offered a
@@ -48,7 +52,7 @@ struct ServerRecord: Codable, Equatable {
             return "Write it as user@host: Ledge signs in as an account on that machine."
         }
         if text.hasPrefix("-") { return "An ssh destination cannot start with a dash." }
-        if text.contains(":") { return "Leave the port out: Ledge connects on 22, like ssh." }
+        if text.contains(":") { return "Leave the port out of the address: it has a field of its own." }
         return nil
     }
 
@@ -60,13 +64,17 @@ struct ServerRecord: Codable, Equatable {
         id = try fields.decodeIfPresent(String.self, forKey: .id) ?? ""
         name = try fields.decodeIfPresent(String.self, forKey: .name) ?? ""
         destination = try fields.decodeIfPresent(String.self, forKey: .destination) ?? ""
+        // A record written before this field existed dials where ssh's default
+        // is, which is where it has always dialled.
+        port = try fields.decodeIfPresent(Int.self, forKey: .port) ?? 0
         hostKey = try fields.decodeIfPresent(String.self, forKey: .hostKey) ?? ""
     }
 
-    init(id: String = "", name: String = "", destination: String, hostKey: String) {
+    init(id: String = "", name: String = "", destination: String, port: Int = 0, hostKey: String) {
         self.id = id
         self.name = name
         self.destination = destination
+        self.port = port
         self.hostKey = hostKey
     }
 }
@@ -164,9 +172,12 @@ enum ServerStore {
     /// changed under a record that still exists. Matching on the address keeps
     /// that record's name and id rather than leaving a duplicate beside it.
     @discardableResult
-    static func pair(destination: String, hostKey: String) -> ServerRecord {
+    static func pair(destination: String, port: Int, hostKey: String) -> ServerRecord {
         var stored = load()
-        if let at = stored.servers.firstIndex(where: { $0.destination == destination }) {
+        // By address AND port, because that pair is what a host key belongs to:
+        // two sshd instances on one machine really can offer different keys
+        // (shared/connections.ts).
+        if let at = stored.servers.firstIndex(where: { $0.destination == destination && $0.port == port }) {
             stored.servers[at].hostKey = hostKey
             stored.selected = stored.servers[at].id
             save(servers: stored.servers, selected: stored.selected)
@@ -180,6 +191,7 @@ enum ServerStore {
             id: UUID().uuidString,
             name: host.isEmpty ? destination : host,
             destination: destination,
+            port: port,
             hostKey: hostKey
         )
         stored.servers.append(record)
@@ -219,6 +231,8 @@ enum ServerStore {
         let hostKey = persistent[hostKeyKey] as? String ?? ""
         guard !destination.isEmpty, !hostKey.isEmpty else { return Stored(version: 1, selected: "", servers: []) }
         let host = String(destination.drop(while: { $0 != "@" }).dropFirst())
+        // No port: what is being migrated is a single-server build that
+        // predates the field, and it dialled where ssh's default is.
         let record = ServerRecord(
             id: UUID().uuidString,
             name: host.isEmpty ? destination : host,

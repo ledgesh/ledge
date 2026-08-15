@@ -314,13 +314,25 @@ which is a posture to name in `docs/user/` rather than debug in the field.
 of the enclave rather than being a policy: a key that cannot be exported
 cannot be shared.
 
-**Pairing is a line the user copies.** The app shows its public key and the
-whole `authorized_keys` line, forced command included, exactly as remote.md
-§4 writes it. Getting that line onto the server is the user's problem in v1,
-which is the same problem the Mac client has today and the same one
-`docs/user/18-notes-on-another-machine.md` already documents. A Mac running
-Ledge could append it for a phone on the same network, and that is a good v2
-and an unnecessary v1.
+**Pairing is a line the user copies, and that is the part of v1 that does not
+survive contact.** The app shows its public key and the whole
+`authorized_keys` line, forced command included, exactly as remote.md §4a
+writes it. Getting that line onto the server is the user's problem, which is
+the same problem the Mac client has and the same one
+`docs/user/18-notes-on-another-machine.md` documents — except that it is not
+the same difficulty. On a Mac the line is copied between two windows on one
+screen; on a phone it is base64 retyped, or emailed to yourself to finish the
+job somewhere else, which is a pairing screen that works by telling you to go
+use a computer.
+
+The answer is that it stops being the only door. remote.md §4 takes a password
+or a key like every other ssh client, and on a phone that is three fields and
+no other device. That is what phone ssh clients have always offered, and it
+makes this screen's copy step optional rather than load-bearing. The enclave
+key stays, because a key that cannot be exported is worth more than a stored
+password and the phone is the one client that has to generate its own (§4). It
+is the hardening a user accepts once they are already working, and the line
+below is how they install it.
 
 **The native pairing screen is the empty case, and only that.** It exists
 because a phone with no server has no page to render a dialog in, and it is

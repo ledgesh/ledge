@@ -20,14 +20,24 @@ import { readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { isHostName } from "../shared/frontmatter";
-import { hostPart, LOCAL_ID } from "../shared/connections";
+import { hostPart, isPort, LOCAL_ID, PORT_UNSET } from "../shared/connections";
 import { CLIENT_HOME, ensureClientHome } from "./clientHome";
 
 // The half of a connection that is a fact about ssh rather than about this
 // machine's files, re-exported so that "what a connection is" still has one
 // import path on this side. The phone reaches the same functions directly,
 // because it has no Bun to reach them through (shared/connections.ts).
-export { hostPart, LOCAL_ID, pinFitsHost, pinnedHost, validateConnection } from "../shared/connections";
+export {
+  DEFAULT_PORT,
+  hostPart,
+  knownHostsHost,
+  LOCAL_ID,
+  parsePort,
+  pinFitsHost,
+  pinnedHost,
+  PORT_UNSET,
+  validateConnection,
+} from "../shared/connections";
 
 export const CONNECTIONS_PATH = join(CLIENT_HOME, "connections.json");
 
@@ -46,8 +56,13 @@ export interface Connection {
   id: string;
   name: string;
   /** An ssh destination (`host`, `user@host`, a ~/.ssh/config alias), or "" for
-   * the server in this process. */
+   * the server in this process. Never a `host:port` — the port is its own
+   * field, because that is what ssh takes and what every other client's form
+   * asks for separately. */
   destination: string;
+  /** Where sshd listens, or PORT_UNSET to let ssh decide — which is what keeps
+   * a `~/.ssh/config` alias's own `Port` working (shared/connections.ts). */
+  port: number;
   /** A private key to offer, or "" to let ssh's own configuration decide. */
   keyPath: string;
   /** The known_hosts line pinned when this connection was added, or "" when
@@ -62,6 +77,7 @@ export const LOCAL_CONNECTION: Connection = Object.freeze({
   id: LOCAL_ID,
   name: "This Mac",
   destination: "",
+  port: PORT_UNSET,
   keyPath: "",
   hostKey: "",
   lastReached: 0,
@@ -106,10 +122,15 @@ function parseConnection(raw: unknown): Connection | null {
   const name = str(raw["name"]);
   const destination = str(raw["destination"]);
   if (!id || !name || !isHostName(destination)) return null;
+  const port = raw["port"];
   return {
     id,
     name,
     destination,
+    // A port that is not one costs itself and not the record: the connection
+    // still opens, on whatever ssh decides, which is where every record written
+    // before this field existed already opens.
+    port: typeof port === "number" && isPort(port) ? port : PORT_UNSET,
     keyPath: str(raw["keyPath"]),
     hostKey: str(raw["hostKey"]),
     lastReached: typeof raw["lastReached"] === "number" && raw["lastReached"] > 0 ? raw["lastReached"] : 0,
@@ -196,6 +217,10 @@ export function sshCommand(conn: Connection, knownHosts: string, userKnownHosts:
     "-o",
     "GlobalKnownHostsFile=/dev/null",
   ];
+  // Only when the connection names one. An unset port leaves ssh to its own
+  // configuration, which is what lets a `~/.ssh/config` alias carry its own
+  // `Port` (shared/connections.ts PORT_UNSET).
+  if (conn.port !== PORT_UNSET) argv.push("-p", String(conn.port));
   if (conn.keyPath) {
     // IdentitiesOnly with it: without that, ssh offers every key the agent
     // holds before the one that was named, which on a server with
@@ -308,13 +333,23 @@ async function atomically(path: string, text: string): Promise<void> {
  */
 export async function probeHostKey(
   destination: string,
+  port: number = PORT_UNSET,
 ): Promise<{ hostKey: string; fingerprint: string; keyType: string } | { error: string }> {
   if (!isHostName(destination)) return { error: `"${destination}" is not an ssh destination.` };
+  if (port !== PORT_UNSET && !isPort(port)) return { error: `${port} is not a port.` };
   let scanned: string;
   try {
     // -T bounds the wait: a host that is merely firewalled otherwise leaves
     // the dialog spinning with nothing to say.
-    const p = Bun.spawn([KEYSCAN_PATH, "-T", "5", hostPart(destination)], { stdout: "pipe", stderr: "ignore" });
+    //
+    // -p when the connection names one, because the line keyscan prints is the
+    // line that gets pinned: with a port it comes back as `[host]:port`, which
+    // is the shape ssh will look for at connect time (shared/connections.ts
+    // knownHostsHost).
+    const argv = [KEYSCAN_PATH, "-T", "5"];
+    if (port !== PORT_UNSET) argv.push("-p", String(port));
+    argv.push(hostPart(destination));
+    const p = Bun.spawn(argv, { stdout: "pipe", stderr: "ignore" });
     scanned = await new Response(p.stdout).text();
     await p.exited;
   } catch (err) {
@@ -322,7 +357,10 @@ export async function probeHostKey(
   }
   const hostKey = pickHostKey(scanned);
   if (!hostKey) {
-    return { error: `No answer from ${hostPart(destination)}. Check the address, and that ssh is running there.` };
+    // The port is named when there is one: "no answer from vps" and "no answer
+    // from vps on 2222" send someone to two different places to look.
+    const where = port === PORT_UNSET ? hostPart(destination) : `${hostPart(destination)} on port ${port}`;
+    return { error: `No answer from ${where}. Check the address, and that ssh is running there.` };
   }
   try {
     const p = Bun.spawn([KEYGEN_PATH, "-lf", "-"], { stdin: "pipe", stdout: "pipe", stderr: "ignore" });

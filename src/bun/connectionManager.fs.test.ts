@@ -12,7 +12,7 @@ import { mkdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve, sep } from "node:path";
 import { APP_HOME } from "./workspaces";
-import { CONNECTIONS_PATH, KNOWN_HOSTS_PATH, LOCAL_ID, saveConnections, type Connection } from "./connections";
+import { CONNECTIONS_PATH, KNOWN_HOSTS_PATH, LOCAL_ID, PORT_UNSET, saveConnections, type Connection } from "./connections";
 import { createConnectionManager, type Attached, type ConnectionManager } from "./connectionManager";
 import { createConnectionStore } from "./connectionStore";
 import { CONNECTION_METHODS } from "../shared/wire";
@@ -26,6 +26,7 @@ const LAPTOP: Connection = {
   id: "laptop-1",
   name: "Laptop",
   destination: "dev@laptop",
+  port: PORT_UNSET,
   keyPath: "",
   hostKey: "laptop ssh-ed25519 AAAAC3Nza",
   lastReached: 0,
@@ -219,6 +220,7 @@ describe("adding and removing", () => {
     const { id, error } = await m.requests.connectionAdd({
       name: "VPS",
       destination: "ledge@vps",
+      port: PORT_UNSET,
       keyPath: "",
       hostKey: "vps ssh-ed25519 AAAA",
     });
@@ -230,13 +232,13 @@ describe("adding and removing", () => {
 
   test("what was pinned is what ssh will check", async () => {
     const m = await createConnectionManager({ attach: fakeAttach().attach });
-    await m.requests.connectionAdd({ name: "VPS", destination: "ledge@vps", keyPath: "", hostKey: "vps ssh-ed25519 AAAA" });
+    await m.requests.connectionAdd({ name: "VPS", destination: "ledge@vps", port: PORT_UNSET, keyPath: "", hostKey: "vps ssh-ed25519 AAAA" });
     expect(await readFile(KNOWN_HOSTS_PATH, "utf8")).toBe("vps ssh-ed25519 AAAA\n");
   });
 
   test("a bad destination is refused with a reason and nothing is stored", async () => {
     const m = await createConnectionManager({ attach: fakeAttach().attach });
-    const res = await m.requests.connectionAdd({ name: "VPS", destination: "-oProxyCommand=x", keyPath: "", hostKey: "" });
+    const res = await m.requests.connectionAdd({ name: "VPS", destination: "-oProxyCommand=x", port: PORT_UNSET, keyPath: "", hostKey: "" });
     expect(res.id).toBe("");
     expect(res.error).toContain("ssh destination");
     expect((await m.requests.connectionList({})).connections).toHaveLength(1);
@@ -244,7 +246,7 @@ describe("adding and removing", () => {
 
   test("only what the user was shown is pinned: no host key means no line", async () => {
     const m = await createConnectionManager({ attach: fakeAttach().attach });
-    await m.requests.connectionAdd({ name: "VPS", destination: "ledge@vps", keyPath: "", hostKey: "" });
+    await m.requests.connectionAdd({ name: "VPS", destination: "ledge@vps", port: PORT_UNSET, keyPath: "", hostKey: "" });
     expect(await readFile(KNOWN_HOSTS_PATH, "utf8")).toBe("");
     expect((await m.requests.connectionList({})).connections.find((c) => c.name === "VPS")!.pinned).toBe(false);
   });
@@ -276,7 +278,7 @@ describe("adding and removing", () => {
 });
 
 describe("editing", () => {
-  const edit = { id: LAPTOP.id, name: LAPTOP.name, destination: LAPTOP.destination, keyPath: "", hostKey: null };
+  const edit = { id: LAPTOP.id, name: LAPTOP.name, destination: LAPTOP.destination, port: PORT_UNSET, keyPath: "", hostKey: null };
 
   test("a rename keeps everything else, pin included", async () => {
     await saveConnections([LAPTOP], LOCAL_ID);
@@ -436,6 +438,7 @@ describe("two windows over one store", () => {
     const { id } = await first.requests.connectionAdd({
       name: "VPS",
       destination: "ledge@vps",
+      port: PORT_UNSET,
       keyPath: "",
       hostKey: "vps ssh-ed25519 AAAA",
     });
@@ -462,6 +465,7 @@ describe("two windows over one store", () => {
       id: LAPTOP.id,
       name: LAPTOP.name,
       destination: "dev@studio",
+      port: PORT_UNSET,
       keyPath: "",
       hostKey: "studio ssh-ed25519 AAAAnew",
     });
@@ -480,6 +484,7 @@ describe("two windows over one store", () => {
       id: LAPTOP.id,
       name: "Studio",
       destination: LAPTOP.destination,
+      port: PORT_UNSET,
       keyPath: "",
       hostKey: null,
     });

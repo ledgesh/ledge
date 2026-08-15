@@ -40,11 +40,11 @@ final class SSHTransport {
     /// from a generation it has moved on from (nativeBridge.ts).
     let generation: Int
 
-    /// An ssh destination has no port in it, and neither does this. The Mac
-    /// client has the same constraint (`sshCommand` takes a destination), and
-    /// the fixture testing.md §6 describes holds 127.0.0.1:22 for exactly that
-    /// reason.
-    static let port = 22
+    /// Where ssh looks when a connection names no port. A destination has none
+    /// in it on either client — the Mac passes `-p` and this passes a number —
+    /// and the fixture testing.md §6 describes holds 127.0.0.1:22 so that a
+    /// record with nothing set still reaches it.
+    static let defaultPort = 22
 
     /// The whole dial: TCP, key exchange, host key, user auth, and the exec
     /// request. Bounded because a server that accepts a connection and then
@@ -215,7 +215,7 @@ final class SSHTransport {
                     ])
                 }
             }
-            .connect(host: server.host, port: Self.port)
+            .connect(host: server.host, port: server.port == 0 ? Self.defaultPort : server.port)
             .flatMap { [weak self] channel -> EventLoopFuture<Channel> in
                 guard let self else {
                     return channel.close().flatMapThrowing { () -> Channel in throw SSHFailure.cancelled }

@@ -22,24 +22,35 @@ export interface ConnectionStatus {
 interface ConnectionHandlers {
   list: () => Promise<ConnectionStatus>;
   select: (id: string) => Promise<{ ok: boolean; error: string }>;
-  add: (fields: { name: string; destination: string; keyPath: string; hostKey: string }) => Promise<{ id: string; error: string }>;
+  add: (fields: {
+    name: string;
+    destination: string;
+    /** Where sshd listens, or 0 to let ssh decide (shared/connections.ts). */
+    port: number;
+    keyPath: string;
+    hostKey: string;
+  }) => Promise<{ id: string; error: string }>;
   update: (fields: {
     id: string;
     name: string;
     destination: string;
+    port: number;
     keyPath: string;
     /** Null keeps whatever is pinned; a line replaces it; "" pins nothing. */
     hostKey: string | null;
   }) => Promise<{ ok: boolean; error: string }>;
   remove: (id: string) => Promise<{ ok: boolean; error: string }>;
-  probe: (destination: string) => Promise<{ hostKey: string; fingerprint: string; keyType: string; error: string }>;
+  probe: (
+    destination: string,
+    port: number,
+  ) => Promise<{ hostKey: string; fingerprint: string; keyType: string; error: string }>;
 }
 
 // Until configured: one connection, this machine, no trouble. A boot that
 // failed to reach Bun still renders chrome that says something true — the app
 // it is drawing is running on this Mac either way.
 const ALONE: ConnectionStatus = {
-  connections: [{ id: "local", name: "This Mac", destination: "", keyPath: "", pinned: false, lastReached: 0 }],
+  connections: [{ id: "local", name: "This Mac", destination: "", port: 0, keyPath: "", pinned: false, lastReached: 0 }],
   active: "local",
   wanted: "local",
   error: "",
@@ -164,6 +175,7 @@ export async function selectConnection(id: string, flush: () => Promise<void>): 
 export async function addConnection(fields: {
   name: string;
   destination: string;
+  port: number;
   keyPath: string;
   hostKey: string;
 }): Promise<{ id: string; error: string }> {
@@ -183,7 +195,7 @@ export async function addConnection(fields: {
  * why the caller says which kind of edit this was rather than this guessing.
  */
 export async function updateConnection(
-  fields: { id: string; name: string; destination: string; keyPath: string; hostKey: string | null },
+  fields: { id: string; name: string; destination: string; port: number; keyPath: string; hostKey: string | null },
   opts: { reconnected: boolean; flush: () => Promise<void> },
 ): Promise<string | null> {
   if (!handlers) return "Not connected to Ledge's own process.";
@@ -208,7 +220,8 @@ export async function removeConnection(id: string): Promise<string | null> {
 
 export function probeConnection(
   destination: string,
+  port: number,
 ): Promise<{ hostKey: string; fingerprint: string; keyType: string; error: string }> {
   if (!handlers) return Promise.resolve({ hostKey: "", fingerprint: "", keyType: "", error: "Not connected." });
-  return handlers.probe(destination);
+  return handlers.probe(destination, port);
 }

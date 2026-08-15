@@ -18,6 +18,7 @@ import { instantiateTemplate, isoDateOf } from "../shared/template";
 import { collectHits, type SearchHit } from "../shared/search";
 import { resolveWikiTitle, wikiRefsOf } from "../shared/wikilinks";
 import { normalizeTag, tagDirectoryOf, tagRefsOf, type TagInfo } from "../shared/tags";
+import { knownHostsHost } from "../shared/connections";
 import { configureBridge, dispatchRunEvent, reconcileRuns } from "./editor/bridge";
 import { sendRunKey } from "./editor/inlineTerm";
 import { barFaceOf, type BarFace } from "./lib/nativeBridge";
@@ -908,12 +909,20 @@ configureSettings(
 // reason its remove rule differs, so the fake has to have it too.
 let connections = FAKING_IOS
   ? [
-      { id: "vps-1", name: "VPS", destination: "ledge@vps", keyPath: "", pinned: true, lastReached: 0 },
-      { id: "pi-1", name: "Pi", destination: "dev@pi.local", keyPath: "", pinned: true, lastReached: 0 },
+      { id: "vps-1", name: "VPS", destination: "ledge@vps", port: 0, keyPath: "", pinned: true, lastReached: 0 },
+      { id: "pi-1", name: "Pi", destination: "dev@pi.local", port: 0, keyPath: "", pinned: true, lastReached: 0 },
     ]
   : [
-      { id: "local", name: "This Mac", destination: "", keyPath: "", pinned: false, lastReached: 0 },
-      { id: "vps-1", name: "VPS", destination: "ledge@vps", keyPath: "", pinned: true, lastReached: 1_700_000_000_000 },
+      { id: "local", name: "This Mac", destination: "", port: 0, keyPath: "", pinned: false, lastReached: 0 },
+      {
+        id: "vps-1",
+        name: "VPS",
+        destination: "ledge@vps",
+        port: 0,
+        keyPath: "",
+        pinned: true,
+        lastReached: 1_700_000_000_000,
+      },
     ];
 let activeConn = FAKING_IOS ? "vps-1" : "local";
 // Destinations the fake server refuses, so a spec can drive the refusal path.
@@ -929,12 +938,12 @@ configureConnections(
       activeConn = id;
       return { ok: true, error: "" };
     },
-    add: async ({ name, destination, hostKey }) => {
+    add: async ({ name, destination, port, hostKey }) => {
       const id = `conn-${connections.length}`;
-      connections = [...connections, { id, name, destination, keyPath: "", pinned: hostKey !== "", lastReached: 0 }];
+      connections = [...connections, { id, name, destination, port, keyPath: "", pinned: hostKey !== "", lastReached: 0 }];
       return { id, error: "" };
     },
-    update: async ({ id, name, destination, keyPath, hostKey }) => {
+    update: async ({ id, name, destination, port, keyPath, hostKey }) => {
       const before = connections.find((c) => c.id === id);
       if (!before) return { ok: false, error: "There is no such connection." };
       if (id === "local") return { ok: false, error: "This Mac is not a connection you can edit." };
@@ -942,7 +951,7 @@ configureConnections(
         return { ok: false, error: `Could not reach ${name}: host is down` };
       }
       connections = connections.map((c) =>
-        c.id === id ? { ...c, name, destination, keyPath, pinned: hostKey === null ? c.pinned : hostKey !== "" } : c,
+        c.id === id ? { ...c, name, destination, port, keyPath, pinned: hostKey === null ? c.pinned : hostKey !== "" } : c,
       );
       return { ok: true, error: "" };
     },
@@ -957,10 +966,18 @@ configureConnections(
       connections = connections.filter((c) => c.id !== id);
       return { ok: true, error: "" };
     },
-    probe: async (destination) =>
+    // The pinned line carries the port the way keyscan's does, so a spec can
+    // see that a non-default port becomes part of what is pinned
+    // (shared/connections.ts knownHostsHost).
+    probe: async (destination, port) =>
       destination.includes("nowhere")
         ? { hostKey: "", fingerprint: "", keyType: "", error: `No answer from ${destination}.` }
-        : { hostKey: `${destination} ssh-ed25519 AAAA`, fingerprint: "SHA256:harness+fake+key", keyType: "ED25519", error: "" },
+        : {
+            hostKey: `${knownHostsHost(destination, port)} ssh-ed25519 AAAA`,
+            fingerprint: "SHA256:harness+fake+key",
+            keyType: "ED25519",
+            error: "",
+          },
   },
 );
 

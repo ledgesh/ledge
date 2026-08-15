@@ -40,7 +40,13 @@ export interface ConnectionStore {
   launchSelection(): string;
   /** Record that a connection answered, for the list's "last reached". */
   touch(id: string): Promise<void>;
-  add(fields: { name: string; destination: string; keyPath: string; hostKey: string }): Promise<{ id: string; error: string }>;
+  add(fields: {
+    name: string;
+    destination: string;
+    port: number;
+    keyPath: string;
+    hostKey: string;
+  }): Promise<{ id: string; error: string }>;
   /**
    * An edit, checked but NOT stored: the record it would become, or the reason
    * it may not.
@@ -54,13 +60,14 @@ export interface ConnectionStore {
     id: string;
     name: string;
     destination: string;
+    port: number;
     keyPath: string;
     hostKey: string | null;
   }): { conn: Connection | null; error: string };
   /** Store an edit that `reviewUpdate` passed and the caller has committed to. */
   write(conn: Connection): Promise<void>;
   remove(id: string): Promise<{ ok: boolean; error: string }>;
-  probe(destination: string): Promise<{ hostKey: string; fingerprint: string; keyType: string; error: string }>;
+  probe(destination: string, port: number): Promise<{ hostKey: string; fingerprint: string; keyType: string; error: string }>;
   /**
    * Which connections a window is pointed at right now, so `remove` can refuse
    * one that is in use by ANY window rather than only by the one asking.
@@ -77,6 +84,7 @@ export function connectionInfo(c: Connection): ConnectionInfo {
     id: c.id,
     name: c.name,
     destination: c.destination,
+    port: c.port,
     keyPath: c.keyPath,
     pinned: c.hostKey !== "",
     lastReached: c.lastReached,
@@ -120,13 +128,14 @@ export async function createConnectionStore(deps: {
       await persist();
     },
 
-    add: async ({ name, destination, keyPath, hostKey }) => {
-      const refusal = validateConnection({ name, destination, keyPath });
+    add: async ({ name, destination, port, keyPath, hostKey }) => {
+      const refusal = validateConnection({ name, destination, keyPath, port });
       if (refusal) return { id: "", error: refusal };
       const conn: Connection = {
         id: crypto.randomUUID(),
         name: name.trim(),
         destination: destination.trim(),
+        port,
         keyPath: keyPath.trim(),
         hostKey: hostKey.trim(),
         lastReached: 0,
@@ -136,11 +145,11 @@ export async function createConnectionStore(deps: {
       return { id: conn.id, error: "" };
     },
 
-    reviewUpdate: ({ id, name, destination, keyPath, hostKey }) => {
+    reviewUpdate: ({ id, name, destination, port, keyPath, hostKey }) => {
       if (id === LOCAL_ID) return { conn: null, error: "This Mac is not a connection you can edit." };
       const before = connections.find((c) => c.id === id);
       if (!before) return { conn: null, error: "There is no such connection." };
-      const refusal = validateConnection({ name, destination, keyPath });
+      const refusal = validateConnection({ name, destination, keyPath, port });
       if (refusal) return { conn: null, error: refusal };
       // Null keeps what is pinned; a line replaces it. Either way a pin is a
       // claim about one machine, and carrying one to another address would
@@ -148,13 +157,17 @@ export async function createConnectionStore(deps: {
       // — so the caller reads the new machine's fingerprint instead
       // (remote.md §4), and this is what makes forgetting to impossible.
       const pin = hostKey === null ? before.hostKey : hostKey.trim();
-      if (!pinFitsHost(pin, destination)) {
+      // The port is part of the claim: a pin is indexed by `[host]:port` in
+      // known_hosts, so moving a connection to a different port on the same
+      // machine invalidates it exactly as moving it to another machine does.
+      if (!pinFitsHost(pin, destination, port)) {
         return { conn: null, error: "That pinned key belongs to another host. Check the new host's fingerprint first." };
       }
       const next: Connection = {
         ...before,
         name: name.trim(),
         destination: destination.trim(),
+        port,
         keyPath: keyPath.trim(),
         hostKey: pin,
       };
@@ -183,8 +196,8 @@ export async function createConnectionStore(deps: {
       return { ok: true, error: "" };
     },
 
-    probe: async (destination) => {
-      const probed = await probeHostKey(destination.trim());
+    probe: async (destination, port) => {
+      const probed = await probeHostKey(destination.trim(), port);
       return "error" in probed ? { hostKey: "", fingerprint: "", keyType: "", error: probed.error } : { ...probed, error: "" };
     },
   };

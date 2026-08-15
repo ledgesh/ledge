@@ -262,7 +262,7 @@ final class WebHost: UIViewController {
     ///
     /// Generation 0, like pairing's: a page socket's generation is always
     /// positive, so a `@close` for one can never reach this.
-    private func probe(_ id: Int, _ destination: String) {
+    private func probe(_ id: Int, _ destination: String, _ port: Int) {
         let answer: (String, String, String, String) -> Void = { [weak self] key, print_, type, error in
             self?.reply(id, ["hostKey": key, "fingerprint": print_, "keyType": type, "error": error])
         }
@@ -276,7 +276,7 @@ final class WebHost: UIViewController {
         let capture = CapturingHostKey()
         let transport = SSHTransport(
             generation: 0,
-            server: ServerRecord(destination: destination, hostKey: ""),
+            server: ServerRecord(destination: destination, port: port, hostKey: ""),
             key: key,
             hostKey: capture,
             log: { print("[probe] \($0)") }
@@ -320,6 +320,7 @@ final class WebHost: UIViewController {
                 id: $0["id"] as? String ?? "",
                 name: $0["name"] as? String ?? "",
                 destination: $0["destination"] as? String ?? "",
+                port: $0["port"] as? Int ?? 0,
                 hostKey: $0["hostKey"] as? String ?? ""
             )
         }
@@ -427,14 +428,18 @@ extension WebHost: WKScriptMessageHandler {
             let stored = ServerStore.load()
             reply(id, [
                 "servers": stored.servers.map {
-                    ["id": $0.id, "name": $0.name, "destination": $0.destination, "hostKey": $0.hostKey]
+                    ["id": $0.id, "name": $0.name, "destination": $0.destination, "port": $0.port, "hostKey": $0.hostKey]
                 },
                 "selected": stored.selected,
             ])
         case "servers.save":
             saveServers(id, params)
         case "servers.probe":
-            probe(id, (params["destination"] as? String ?? "").trimmingCharacters(in: .whitespaces))
+            probe(
+                id,
+                (params["destination"] as? String ?? "").trimmingCharacters(in: .whitespaces),
+                params["port"] as? Int ?? 0
+            )
         case "@close":
             // By generation: a close for a socket that has already been
             // replaced must not take the live one with it.

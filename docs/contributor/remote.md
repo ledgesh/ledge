@@ -215,32 +215,81 @@ instant, and output held back from before it would be painted on top of a
 snapshot that already contains it. The ring (§7) remains the authority for
 anything a client missed.
 
-## 4. Authentication is ssh keys, and the notes key is not a shell
+## 4. Authentication is the user's own ssh credentials
 
-Auth is the user's ssh keys. Ledge holds no credentials, stores no
-passwords, and runs no account system.
+Ledge issues no identity, runs no account system, and invents no credential
+model. What authenticates a connection is whatever already authenticates that
+user to that machine: a password, a private key file, or a key their agent is
+holding.
 
-**A client gets two keys, and the second one is opt-in.** The notes key is
-restricted to the protocol:
+**That set is the convention and is chosen for being the convention.** Every
+app of this shape offers exactly it — a database client tunnelling to a
+Postgres box, an editor's remote-file browser, VS Code Remote-SSH — and none
+of them ask the user to prepare the server first. A notes app is not where a
+person should meet a new way of proving who they are, and being the odd one out
+here buys nothing that §4a cannot buy as an option.
 
-```
-restrict,command="ledge-server serve" ssh-ed25519 AAAA... ledge@laptop
-```
+**Ledge mints no keys**, for the same reason. The clients above do not, and a
+key the app generated is a key the user has to be taught about, back up, and
+find again after a reinstall. `keyPath` names a file they already have and can
+already point every other tool at.
 
-That key cannot open a shell, forward a port, or run `scp`. It can speak the
-protocol and nothing else. A user who wants a client to also run arbitrary
-commands beyond the notes protocol adds a second, unrestricted key as a
-separate act. Most clients never need one: fences run through the protocol,
-which the forced command already permits.
+The one exception is a phone, and it is the phone's convention rather than an
+exception to the rule. There is no `~/.ssh` on iOS for a user-managed key to
+live in, so phone ssh clients generate in-app as a matter of course; Ledge's is
+generated in the Secure Enclave and cannot be exported (`ios.md` §4). With a
+password door beside it, that key stops being the only way onto a server and
+becomes the better one.
 
-Restricting the key moves the security boundary onto the server's frame
-parser, which is then the only new attack surface in the design. It stays
-small: fixed frames, no dynamic paths, and the §2 guards behind it.
+**A connection carries a port, and unset is not 22.** It is its own field on
+both clients rather than a `host:port` destination, because that is what ssh
+takes (`-p`) and what every other client's form asks for separately. Unset
+means no `-p` on the argv and the phone's own default, so ssh's configuration
+decides: a destination may be a `~/.ssh/config` alias carrying its own `Port`,
+and a form that defaulted to 22 and always sent it would override the user's
+configuration with our guess.
 
-**The host key is pinned at pairing.** A client records the server's host key
-when the connection is first configured and refuses a changed one with the
-fingerprint shown. There is no blind accept and no "continue anyway" that
-remembers.
+The port is part of a PIN, which is the half that is easy to get silently
+wrong. `known_hosts` indexes a non-default port as `[host]:port`, so
+`ssh-keyscan -p` is what takes a pin in the shape ssh will look for at connect
+time, and moving a connection to a different port on the same machine
+invalidates its pin exactly as moving it to another machine does. Two sshd
+instances on one box really can offer different keys.
+
+**Secrets at rest go in the platform keychain**, macOS's on the Mac and iOS's
+on the phone. A password has to survive the reconnect ladder, which re-dials
+from scratch on every rung (§7) and which a closed laptop lid is enough to
+start, so "ask the user each time" is not an option that exists. This is a
+smaller change than it sounds: `keyPath` already names a private key on disk,
+usually without a passphrase, which is a credential at rest carrying more
+authority than a password to one host. A keychain is a better home for a secret
+than a file with mode 600, not a worse one.
+
+**A passphrase on an existing key already works through the agent.**
+`IdentitiesOnly=yes` restricts ssh to the identity named by `-i`, but that
+identity may be served by `ssh-agent`, so a loaded key authenticates with no
+prompt. An unloaded passphrased key fails, and fails with the agent's own
+message.
+
+**Two ssh options are not negotiable, whichever door is used**, because the
+protocol rides stdout. There is no `-t`: newline translation on a
+length-prefixed stream corrupts rather than breaks. And `BatchMode=yes`, so
+that a prompt can never hang the connection forever or write a question mark
+into a frame header.
+
+A password cannot be typed under `BatchMode=yes`, which is the one place the
+two doors differ mechanically. OpenSSH's answer is `SSH_ASKPASS` with
+`SSH_ASKPASS_REQUIRE=force`, which supplies it from a helper and needs no
+terminal, so neither option above is relaxed to accommodate it.
+
+Three further options are on the argv and are not security at all:
+`ServerAliveInterval`, `ServerAliveCountMax` and `ConnectTimeout`. They are
+what makes a lost network an event rather than a hang, and §7 carries them.
+
+**The host key is pinned on first connect**, which is also the convention: every
+ssh client asks once and remembers, and Ledge's version of asking shows the
+fingerprint. A changed key is refused with the fingerprint shown, and there is
+no blind accept and no "continue anyway" that remembers.
 
 The enforcement is ssh's own, which is the point of being ssh's client rather
 than its replacement (§3). Pairing runs `ssh-keyscan`, describes the key with
@@ -258,25 +307,80 @@ breath.
 **That last claim is about a client that spawns OpenSSH, and it does not
 generalize.** A client with no subprocesses has to link an SSH library and
 compare the offered host key itself, which is what `ios.md` §3 does and what
-makes it the only end of this design with new cryptographic surface. The
-forced command is unaffected either way: it is enforced by the server's sshd,
-which does not care what dialled it.
-
-`BatchMode=yes` belongs to the same list, for a different reason: this ssh has
-no terminal, its stdout IS the protocol, and a passphrase prompt would either
-hang the connection forever or write a question mark into a frame header. So
-would a pty — there is no `-t`, because newline translation on a
-length-prefixed protocol corrupts rather than breaks.
-
-Three more options are on the argv and are not security at all:
-`ServerAliveInterval`, `ServerAliveCountMax` and `ConnectTimeout`. They are
-what makes a lost network an event rather than a hang, and §7 carries them.
+makes it the only end of this design with new cryptographic surface.
 
 **Enabling Remote Login exposes sshd to everything that can reach the
 machine.** For a VPS that is the public internet, on a box whose purpose is
 to execute code from notes. The documented posture is binding sshd to the
 tailnet interface, not `0.0.0.0`, and it belongs in `docs/user/` rather than
 in a footnote.
+
+## 4a. Restricting the key is the user's move
+
+A connection can be narrowed to the protocol and nothing else, with an
+`authorized_keys` option on the key it authenticates with:
+
+```
+restrict,command="ledge-server serve" ssh-ed25519 AAAA... ledge@laptop
+```
+
+**Ledge documents that line and never writes it.** Two reasons, and either
+would be enough. `authorized_keys` is the file that decides who may log into a
+machine, so a client that rewrites it is a client that can lock its user out of
+their own server; the blast radius of a bug there is not proportional to the
+convenience. And no comparable client does it — the database clients, the
+remote-file browsers and VS Code Remote-SSH all connect with what they are
+given and edit nothing on the far side. A verb that prepares somebody's server
+is a paradigm this app has no specific need to invent.
+
+**It is hardening and not a gate, which is a fact about sshd rather than a
+policy.** A forced command OVERRIDES what the client asked to run; it does not
+enable it. `sshCommand` already ends with `ledge-server serve`
+(`bun/connections.ts`), so sshd runs the requested command when there is no
+forced one and the forced one when there is, and the connection works either
+way. Nothing in `src/` reads or requires the option.
+
+**What it buys, stated accurately.** No port forwarding, which is the one that
+matters most: it is what stops a stolen client key from becoming a route into
+whatever private network the server can see. No agent forwarding. No `scp` and
+no sftp subsystem. And a credential scoped to Ledge, so a client compromise
+does not hand over a key that was also the user's general-purpose one.
+
+**What it does not buy, which this section used to overstate.** "That key
+cannot open a shell" is true at the ssh layer and much weaker than it reads.
+The protocol behind the forced command carries `terminalAttach`,
+`terminalInput` and `runBlock`: it is arbitrary code execution as that user, by
+design, because that is the product. The restriction narrows the ssh feature
+set around the protocol. It does not narrow the protocol, and a document that
+implies otherwise is selling a guarantee the design does not make.
+
+What survives of the older claim is the part about surface area: restricting
+the key leaves the server's frame parser as the only new attack surface, and it
+stays small — fixed frames, no dynamic paths, and the §2 guards behind it.
+
+**A password cannot carry it.** `restrict,command=` is an `authorized_keys`
+option and attaches to a key; password authentication has no entry there, so it
+has no restriction and no forced command. An administrator who wants the same
+shape uses `Match User` with `ForceCommand` in `sshd_config`, which is a fact
+about how they run their servers and not something this app should be steering.
+Both belong in `docs/user/` as optional hardening for somebody who wants it.
+
+**The Docker deployment needs a different line**, `docker exec -i ledge
+ledge-server serve`, because the forced command reaches into the container
+(§11). Since the only thing Ledge does with the line is show it, the whole cost
+of that difference is showing the right one.
+
+**Considered and dropped: a pairing flow that wrote the file itself.** The
+server would open a short enrollment window, hand out a QR carrying the
+destination, its own host key line and a one-shot credential, and write the
+real key when the client presented it. It reads well, it deletes every typed
+character, and it fails both tests above at once: it is Ledge writing somebody's
+`authorized_keys`, and under Docker it additionally needs that file bind-mounted
+into the container, which widens what a container compromise reaches. The two
+problems it was really solving are answered elsewhere and more cheaply — a
+fingerprint nobody wants to compare is the ordinary first-connect prompt every
+ssh client shows (§4), and a server binary that is not installed yet is §11's
+one-step install, which a password door reaches without touching the file.
 
 ## 5. State ownership: server or client
 
@@ -1165,6 +1269,18 @@ push a matching binary when it is missing or mismatched. A user who prefers
 to manage it themselves runs the same binary from a package. Not built:
 today's answer is `docs/user/18-notes-on-another-machine.md`'s two commands,
 which is honest for this audience and does not stay honest at a download page.
+
+Two things have to be true before that install can be one step, and neither is
+about the wire. The release has to produce a server artifact at all: it builds
+the Mac app and nothing else today (`releasing.md` §1), so both the binary and
+the image begin with a git checkout. And the binary has to be ONE file: the
+`.so` beside it is an adjacency rule a copy can get wrong, and getting it wrong
+fails by dropping Ctrl-C rather than by refusing to start. `pty.ts` finds the
+trampoline through a list of real paths, so embedding it and extracting to a
+cache directory on first use is a contained change and removes the rule. §4's
+password door is what carries that file to a machine with nothing on it yet,
+which is the same thing VS Code Remote-SSH does and needs nothing prepared on
+the far side.
 
 **The handshake is the first frame in each direction** and carries the
 protocol version, the schema version, and the build. A schema mismatch

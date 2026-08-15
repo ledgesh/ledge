@@ -341,6 +341,9 @@ interface ShellServer {
   id: string;
   name: string;
   destination: string;
+  /** Where sshd listens, or 0 for the default. Its own field for the Mac's
+   * reason (shared/connections.ts): a destination is not a `host:port`. */
+  port: number;
   /** The pinned key's two fields, and no hostname: there is no known_hosts
    * file here for a hostname to index. "" for a record whose pin was dropped
    * because the server offered a different key. */
@@ -445,6 +448,7 @@ function clientSeams(
           id: s.id,
           name: s.name,
           destination: s.destination,
+          port: s.port,
           keyPath: "",
           pinned: s.hostKey !== "",
           lastReached: 0,
@@ -468,34 +472,38 @@ function clientSeams(
       return { ok: true, error: "" };
     },
 
-    connectionAdd: async ({ name, destination, hostKey }) => {
-      const refusal = validateConnection({ name, destination, keyPath: "" });
+    connectionAdd: async ({ name, destination, port, hostKey }) => {
+      const refusal = validateConnection({ name, destination, keyPath: "", port });
       if (refusal) return { id: "", error: refusal };
       const { servers, selected } = await stored();
       const server: ShellServer = {
         id: newServerId(),
         name: name.trim(),
         destination: destination.trim(),
+        port,
         hostKey: hostKey.trim(),
       };
       await store([...servers, server], selected);
       return { id: server.id, error: "" };
     },
 
-    connectionUpdate: async ({ id, name, destination, hostKey }) => {
-      const refusal = validateConnection({ name, destination, keyPath: "" });
+    connectionUpdate: async ({ id, name, destination, port, hostKey }) => {
+      const refusal = validateConnection({ name, destination, keyPath: "", port });
       if (refusal) return { ok: false, error: refusal };
       const { servers, selected } = await stored();
       const before = servers.find((s) => s.id === id);
       if (!before) return { ok: false, error: NO_SUCH };
       // By the HOST half, because the user half is not what a host key belongs
-      // to: `dev@box` to `ledge@box` is the same machine and the same key.
-      const moved = hostPart(destination.trim()) !== hostPart(before.destination);
+      // to: `dev@box` to `ledge@box` is the same machine and the same key. The
+      // PORT is part of it though: two sshd instances on one machine really can
+      // offer different keys (shared/connections.ts).
+      const moved = hostPart(destination.trim()) !== hostPart(before.destination) || port !== before.port;
       if (moved && hostKey === null) return { ok: false, error: PIN_MOVED };
       const after: ShellServer = {
         ...before,
         name: name.trim(),
         destination: destination.trim(),
+        port,
         hostKey: hostKey === null ? before.hostKey : hostKey.trim(),
       };
       await store(
@@ -521,8 +529,8 @@ function clientSeams(
       return { ok: true, error: "" };
     },
 
-    connectionProbe: async ({ destination }) =>
-      (await shell.call("servers.probe", { destination })) as {
+    connectionProbe: async ({ destination, port }) =>
+      (await shell.call("servers.probe", { destination, port })) as {
         hostKey: string;
         fingerprint: string;
         keyType: string;

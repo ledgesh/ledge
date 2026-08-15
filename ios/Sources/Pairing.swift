@@ -23,6 +23,7 @@ final class PairingViewController: UIViewController {
     private let reason = UILabel()
     private let keyBox = UITextView()
     private let field = UITextField()
+    private let portField = UITextField()
     private let connect = UIButton(type: .system)
     private let status = UILabel()
     private let spinner = UIActivityIndicatorView(style: .medium)
@@ -116,6 +117,14 @@ final class PairingViewController: UIViewController {
         field.returnKeyType = .go
         field.delegate = self
 
+        // Its own field for the Mac's reason (shared/connections.ts): a
+        // destination is not a `host:port`. Blank is the ordinary answer.
+        portField.placeholder = "Port (leave blank for 22)"
+        portField.borderStyle = .roundedRect
+        portField.font = .monospacedSystemFont(ofSize: 15, weight: .regular)
+        portField.keyboardType = .numberPad
+        portField.delegate = self
+
         connect.setTitle("Connect", for: .normal)
         connect.titleLabel?.font = .preferredFont(forTextStyle: .headline)
         connect.addTarget(self, action: #selector(start), for: .touchUpInside)
@@ -129,7 +138,7 @@ final class PairingViewController: UIViewController {
             step("1. Add this line to ~/.ssh/authorized_keys on the server. It is the only thing that key can do."),
             keyBox, copy,
             step("2. Then say which machine, and which account on it."),
-            field, connect, spinner, status,
+            field, portField, connect, spinner, status,
         ] {
             stack.addArrangedSubview(view)
         }
@@ -178,6 +187,11 @@ final class PairingViewController: UIViewController {
         view.endEditing(true)
         let destination = (field.text ?? "").trimmingCharacters(in: .whitespaces)
         if let problem = ServerRecord.problem(with: destination) { return say(problem) }
+        let typed = (portField.text ?? "").trimmingCharacters(in: .whitespaces)
+        // Blank means "ssh decides" and is not a failure; anything else has to
+        // be a port rather than quietly becoming one.
+        let port = typed.isEmpty ? 0 : Int(typed) ?? -1
+        if port < 0 || port > 65535 { return say("A port is a whole number from 1 to 65535.") }
         guard let key = held else { return }
 
         busy(true)
@@ -188,7 +202,7 @@ final class PairingViewController: UIViewController {
         }
         // A record with no pin: this dial is the one that finds out what the
         // pin should be.
-        let candidate = ServerRecord(destination: destination, hostKey: "")
+        let candidate = ServerRecord(destination: destination, port: port, hostKey: "")
         let transport = SSHTransport(
             generation: 0,
             server: candidate,
@@ -216,7 +230,9 @@ final class PairingViewController: UIViewController {
                         // By address, so re-pairing a server whose host key
                         // changed re-pins the record that is already there
                         // rather than leaving a duplicate beside it.
-                        self.onPaired(ServerStore.pair(destination: destination, hostKey: accepted.openSSHLine))
+                        self.onPaired(
+                            ServerStore.pair(destination: destination, port: port, hostKey: accepted.openSSHLine)
+                        )
                     }
                 }
             },

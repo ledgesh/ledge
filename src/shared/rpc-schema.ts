@@ -157,6 +157,9 @@ export interface ConnectionInfo {
   id: string;
   name: string;
   destination: string;
+  /** Where sshd listens, or 0 for "ssh decides" — which is what keeps a
+   * `~/.ssh/config` alias's own `Port` working (shared/connections.ts). */
+  port: number;
   keyPath: string;
   pinned: boolean;
   /** ms epoch, 0 for never reached. */
@@ -750,7 +753,7 @@ export type LedgeRPC = {
       // fingerprint of and accepted (connectionProbe below) — the client pins
       // only what a person confirmed, never what a host happened to answer.
       connectionAdd: {
-        params: { name: string; destination: string; keyPath: string; hostKey: string };
+        params: { name: string; destination: string; port: number; keyPath: string; hostKey: string };
         response: { id: string; error: string };
       };
       // Change one: its name, its address, or the key it offers.
@@ -769,7 +772,7 @@ export type LedgeRPC = {
       // exists to prevent. The caller reloads on ok for exactly that case, as
       // it does for connectionSelect.
       connectionUpdate: {
-        params: { id: string; name: string; destination: string; keyPath: string; hostKey: string | null };
+        params: { id: string; name: string; destination: string; port: number; keyPath: string; hostKey: string | null };
         response: { ok: boolean; error: string };
       };
       // Remove one, and its pin with it. The local server and the connection
@@ -779,8 +782,11 @@ export type LedgeRPC = {
       // can be compared against what the server said before anything is
       // pinned. Failure is data — an unreachable host is the most ordinary
       // outcome of typing an address.
+      // The port travels because the line that comes back is the line that
+      // gets pinned: known_hosts indexes a non-default port as `[host]:port`,
+      // and a pin taken on the wrong shape matches nothing at connect time.
       connectionProbe: {
-        params: { destination: string };
+        params: { destination: string; port: number };
         response: { hostKey: string; fingerprint: string; keyType: string; error: string };
       };
       // The persisted session layout (.layout.json in the app home): which

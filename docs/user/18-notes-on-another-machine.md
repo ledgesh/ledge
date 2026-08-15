@@ -8,13 +8,18 @@ This is a different feature from [[Remote Hosts]], and the difference matters. `
 
 ## Add a server
 
-Click the connection bar, or run "Notes On…" from the palette or the File menu. Choose Add, then fill in three fields.
+Click the connection bar, or run "Notes On…" from the palette or the File menu. Choose Add, then fill in the fields.
 
 | Field | What it takes |
 | --- | --- |
 | Name | Anything you want to see in the bar. |
 | SSH destination | `user@host`, a bare hostname, or a name from your `~/.ssh/config`. |
+| Port | Blank unless sshd listens somewhere other than 22. |
 | Key | A private key to offer, or blank to let your ssh config decide. |
+
+The port goes in its own field, not in the address: write `ledge@vps`, not `ledge@vps:2222`.
+
+Leave it blank whenever you can. Blank means your ssh config decides, so an alias from `~/.ssh/config` keeps whatever `Port` it already sets.
 
 Ledge then fetches that machine's host key and shows you its fingerprint. Compare it against what the machine reports for itself:
 
@@ -25,6 +30,8 @@ ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
 Choose "It Matches, Add" only when the two agree. Ledge pins the key and refuses any future connection that presents a different one. There is no "connect anyway".
 
 The pinned keys live in `~/.ledge/.client/known_hosts`, separate from your own `~/.ssh/known_hosts` so you can read and revoke them on their own. Your existing entries still work: a host you already trust needs no second pin.
+
+A pinned key belongs to one address and one port. Change either and Ledge asks for the fingerprint again, because two sshd instances on one machine can offer different keys.
 
 Add as many as you like. The list is this app's own and lives on this machine, so nothing about it is stored on any server.
 
@@ -102,7 +109,9 @@ The `bun` line is there for `ts` blocks. The app carries its own copy of that ru
 
 ## Restrict the key to Ledge
 
-Give the server a key that can speak Ledge's protocol and nothing else. In that machine's `~/.ssh/authorized_keys`:
+Optional, and worth doing on a server you care about. Ledge connects with an ordinary key either way and never edits this file for you.
+
+Restricting gives the server a key that can speak Ledge's protocol and nothing else. In that machine's `~/.ssh/authorized_keys`:
 
 ```
 restrict,command="ledge-server serve" ssh-ed25519 AAAA... ledge@laptop
@@ -114,9 +123,11 @@ For the Docker deployment, the forced command reaches into the container instead
 restrict,command="docker exec -i ledge ledge-server serve" ssh-ed25519 AAAA... ledge@laptop
 ```
 
-That key cannot open a shell, forward a port, or run `scp`. Blocks in your notes still run, because they run through the protocol the forced command already permits.
+That key cannot forward a port, run `scp`, or open a shell over ssh. What it limits is what the key is good for if it is ever stolen: no route into the network behind that server, and no file copying.
 
-If you also want a client to run arbitrary commands on that machine, add a second unrestricted key as a separate act. Most connections never need one.
+It does not limit Ledge. Blocks in your notes still run, because running them is what the protocol does, so anyone holding that key can run code on that machine. Restricting narrows what else they could do with it.
+
+If you also want to use ssh directly to that machine from a terminal, keep your usual key there as well. The restricted line is for Ledge alone.
 
 ## Expose ssh carefully
 

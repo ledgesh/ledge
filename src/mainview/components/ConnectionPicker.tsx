@@ -28,7 +28,7 @@ import {
 import { flushAllNow } from "@/notes/store";
 import { copyText } from "@/lib/clipboard";
 import { deviceKeyLine } from "@/lib/shell";
-import { hostPart } from "../../shared/connections";
+import { hostPart, parsePort } from "../../shared/connections";
 import type { ConnectionInfo } from "../../shared/rpc-schema";
 
 // What a host answered, waiting to be confirmed. Held rather than pinned: the
@@ -319,6 +319,9 @@ function ConnectionForm({
 }) {
   const [name, setName] = useState(existing?.name ?? "");
   const [destination, setDestination] = useState(existing?.destination ?? "");
+  // Text, not a number: an empty field is "let ssh decide" and has to stay
+  // distinguishable from a half-typed one (shared/connections.ts parsePort).
+  const [portText, setPortText] = useState(existing?.port ? String(existing.port) : "");
   const [keyPath, setKeyPath] = useState(existing?.keyPath ?? "");
   const [probed, setProbed] = useState<Probed | null>(null);
   const [error, setError] = useState("");
@@ -332,32 +335,47 @@ function ConnectionForm({
 
   useEffect(() => firstRef.current?.focus(), []);
 
-  // A pin belongs to one machine. Moving an address to another one leaves
-  // nothing to keep, so the fingerprint step comes back; staying on the same
-  // host keeps whatever was pinned, which is what `hostKey: null` says below.
-  const moved = existing !== null && hostPart(destination.trim()) !== hostPart(existing.destination);
+  // Null while the field holds something that is not a port. Every action below
+  // refuses on it rather than falling back to 22, because a typo that silently
+  // becomes the default connects to the wrong sshd and says nothing.
+  const port = parsePort(portText);
+  const BAD_PORT = "A port is a whole number from 1 to 65535.";
+
+  // A pin belongs to one machine, and known_hosts counts a non-default port as
+  // part of which machine (shared/connections.ts). Moving an address or a port
+  // leaves nothing to keep, so the fingerprint step comes back; staying put
+  // keeps whatever was pinned, which is what `hostKey: null` says below.
+  const moved =
+    existing !== null &&
+    (hostPart(destination.trim()) !== hostPart(existing.destination) || (port !== null && port !== existing.port));
   const mustPin = existing === null || moved;
 
   const probe = async () => {
+    if (port === null) return setError(BAD_PORT);
     setBusy(true);
     setError("");
-    const res = await probeConnection(destination);
+    const res = await probeConnection(destination, port);
     setBusy(false);
     if (res.error) return setError(res.error);
     setProbed({ hostKey: res.hostKey, fingerprint: res.fingerprint, keyType: res.keyType });
   };
 
   const save = async (hostKey: string | null) => {
+    if (port === null) return setError(BAD_PORT);
     setBusy(true);
     setError("");
     const refusal = existing
       ? await updateConnection(
-          { id: existing.id, name, destination, keyPath, hostKey },
+          { id: existing.id, name, destination, port, keyPath, hostKey },
           // A changed address means the shell re-opened the wire, so this page
-          // is now looking at the previous machine's session.
-          { reconnected: serving && destination.trim() !== existing.destination, flush: flushAllNow },
+          // is now looking at the previous machine's session. A changed port is
+          // the same re-open for the same reason.
+          {
+            reconnected: serving && (destination.trim() !== existing.destination || port !== existing.port),
+            flush: flushAllNow,
+          },
         )
-      : (await addConnection({ name, destination, keyPath, hostKey: hostKey ?? "" })).error || null;
+      : (await addConnection({ name, destination, port, keyPath, hostKey: hostKey ?? "" })).error || null;
     setBusy(false);
     if (refusal) return setError(refusal);
     onDone();
@@ -416,13 +434,18 @@ function ConnectionForm({
       )}
       <Field label="Name" value={name} onChange={setName} placeholder="Laptop" inputRef={firstRef} />
       <Field label="SSH destination" value={destination} onChange={setDestination} placeholder="dev@laptop" mono />
+      {/* Its own field rather than a `host:port` destination, because that is
+          what ssh takes and what every other client's form asks for. Empty is
+          the ordinary answer and means ssh decides. */}
+      <Field label="Port (optional)" value={portText} onChange={setPortText} placeholder="22" mono />
       {/* Absent where there is no path to give: a Secure Enclave key cannot be
           read out of the enclave, let alone named by a file (ios.md §4). */}
       {!ownKey && <Field label="Key (optional)" value={keyPath} onChange={setKeyPath} placeholder="~/.ssh/ledge" mono />}
       <p className="text-[11px] leading-snug text-muted-foreground">
         Any address ssh understands
-        {ownKey ? "" : ", including a name from your ~/.ssh/config"}. That machine needs Ledge&apos;s server on its
-        PATH as <code className="font-mono">ledge-server</code>.
+        {ownKey ? "" : ", including a name from your ~/.ssh/config"}. Leave the port blank unless sshd listens somewhere
+        other than 22. That machine needs Ledge&apos;s server on its PATH as{" "}
+        <code className="font-mono">ledge-server</code>.
       </p>
       {error && <p className="text-[12px] leading-snug text-destructive">{error}</p>}
       <div className="mt-1 flex justify-end gap-2">

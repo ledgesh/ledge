@@ -6,7 +6,16 @@
 // webview, and a rule that only one of the two enforced would be a rule the
 // other one could be talked out of.
 import { describe, expect, test } from "bun:test";
-import { hostPart, pinFitsHost, pinnedHost, validateConnection } from "./connections";
+import {
+  DEFAULT_PORT,
+  hostPart,
+  knownHostsHost,
+  parsePort,
+  pinFitsHost,
+  pinnedHost,
+  PORT_UNSET,
+  validateConnection,
+} from "./connections";
 
 describe("validating what someone typed", () => {
   const ok = { name: "Laptop", destination: "dev@laptop", keyPath: "" };
@@ -75,5 +84,50 @@ describe("a pin belongs to one host", () => {
   test("no pin of Ledge's own fits anywhere", () => {
     expect(pinFitsHost("", "dev@anywhere")).toBe(true);
     expect(pinFitsHost("ssh-ed25519 AAAA", "dev@anywhere")).toBe(true);
+  });
+
+  // known_hosts indexes a non-default port as `[host]:port`, so the pin is
+  // taken and compared in that shape or it matches nothing at connect time.
+  test("a port is part of which host a pin belongs to", () => {
+    expect(pinFitsHost("[laptop]:2222 ssh-ed25519 AAAA", "dev@laptop", 2222)).toBe(true);
+    // The same machine on another port is another entry, and really can offer
+    // another key.
+    expect(pinFitsHost("[laptop]:2222 ssh-ed25519 AAAA", "dev@laptop", 2022)).toBe(false);
+    expect(pinFitsHost("[laptop]:2222 ssh-ed25519 AAAA", "dev@laptop", PORT_UNSET)).toBe(false);
+    expect(pinFitsHost("laptop ssh-ed25519 AAAA", "dev@laptop", 2222)).toBe(false);
+  });
+});
+
+describe("ports", () => {
+  // 22 is not written down: ssh writes the bare host for the default port, and
+  // an unset port means "ssh decides" and never reaches known_hosts at all.
+  test("known_hosts spells a non-default port and only that", () => {
+    expect(knownHostsHost("dev@laptop", PORT_UNSET)).toBe("laptop");
+    expect(knownHostsHost("dev@laptop", DEFAULT_PORT)).toBe("laptop");
+    expect(knownHostsHost("dev@laptop", 2222)).toBe("[laptop]:2222");
+    expect(knownHostsHost("laptop", 2222)).toBe("[laptop]:2222");
+  });
+
+  // An empty field and a typo are different answers: the first is the ordinary
+  // case, the second has to reach the user rather than silently become 22.
+  test("an empty port is unset; anything that is not a port is null", () => {
+    expect(parsePort("")).toBe(PORT_UNSET);
+    expect(parsePort("  ")).toBe(PORT_UNSET);
+    expect(parsePort("2222")).toBe(2222);
+    expect(parsePort(" 22 ")).toBe(22);
+    expect(parsePort("22x")).toBeNull();
+    expect(parsePort("-1")).toBeNull();
+    expect(parsePort("0")).toBeNull();
+    expect(parsePort("65536")).toBeNull();
+    expect(parsePort("1e3")).toBeNull();
+  });
+
+  test("a port a form could not have produced is refused with a reason", () => {
+    const fields = { name: "VPS", destination: "ledge@vps", keyPath: "" };
+    expect(validateConnection({ ...fields, port: 2222 })).toBeNull();
+    // Unset passes: it means ssh decides, not that something is missing.
+    expect(validateConnection({ ...fields, port: PORT_UNSET })).toBeNull();
+    expect(validateConnection({ ...fields, port: 70000 })).toContain("1 to 65535");
+    expect(validateConnection({ ...fields, port: 22.5 })).toContain("1 to 65535");
   });
 });
