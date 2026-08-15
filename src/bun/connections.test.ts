@@ -18,9 +18,10 @@ import {
   pickHostKey,
   PORT_UNSET,
   SSH_PATH,
-  sshCommand,
+  sshDial,
   type Connection,
 } from "./connections";
+import { ASKPASS_ACCOUNT_ENV } from "./secrets";
 
 const CONN: Connection = {
   id: "c1",
@@ -28,15 +29,19 @@ const CONN: Connection = {
   destination: "dev@laptop",
   port: PORT_UNSET,
   keyPath: "",
+  auth: "key",
   hostKey: "laptop ssh-ed25519 AAAAC3Nza",
   lastReached: 0,
 };
 
 const KNOWN = "/home/dev/.ledge/.client/known_hosts";
 const USER = "/home/dev/.ssh/known_hosts";
+const ASKPASS = "/home/dev/.ledge/.client/askpass.sh";
+const FILES = { knownHosts: KNOWN, userKnownHosts: USER, askpass: ASKPASS };
+const dial = (conn: Connection) => sshDial(conn, FILES);
 
 describe("the ssh command", () => {
-  const argv = sshCommand(CONN, KNOWN, USER);
+  const { argv } = dial(CONN);
 
   test("runs the server on the other machine", () => {
     expect(argv[0]).toBe(SSH_PATH);
@@ -48,7 +53,7 @@ describe("the ssh command", () => {
   // form defaulting to 22 and always sending it would override that silently.
   test("a port is passed only when the connection names one", () => {
     expect(argv).not.toContain("-p");
-    const moved = sshCommand({ ...CONN, port: 2222 }, KNOWN, USER);
+    const { argv: moved } = dial({ ...CONN, port: 2222 });
     expect(moved.join(" ")).toContain("-p 2222");
     // Still ahead of the destination, which is where ssh takes its options.
     expect(moved.indexOf("-p")).toBeLessThan(moved.indexOf("dev@laptop"));
@@ -99,7 +104,7 @@ describe("the ssh command", () => {
   });
 
   test("a named key is offered, and only it", () => {
-    const withKey = sshCommand({ ...CONN, keyPath: "/home/dev/.ssh/ledge" }, KNOWN, USER);
+    const { argv: withKey } = dial({ ...CONN, keyPath: "/home/dev/.ssh/ledge" });
     expect(withKey).toContain("/home/dev/.ssh/ledge");
     // Without IdentitiesOnly, ssh offers every key the agent holds first, and
     // a server with MaxAuthTries can refuse before reaching the named one.
@@ -117,6 +122,75 @@ describe("the ssh command", () => {
   test("the destination appears exactly once, and after every option", () => {
     expect(argv.filter((a) => a === "dev@laptop")).toHaveLength(1);
     expect(argv.indexOf("dev@laptop")).toBe(argv.lastIndexOf("-o") + 2);
+  });
+
+  // Nothing about the key door needs one, and an environment set here would be
+  // an environment ssh passes to every child it forks.
+  test("a key connection asks for no environment", () => {
+    expect(dial(CONN).env).toEqual({});
+  });
+});
+
+// The other door (remote.md §4). Every claim here was measured against a real
+// password-only sshd before it was written down, and the one that reversed this
+// section is the first: BatchMode=yes suppresses SSH_ASKPASS entirely, force
+// included, so the helper is never spawned and no password is ever offered.
+describe("the ssh command for a password connection", () => {
+  const PASS: Connection = { ...CONN, auth: "password" };
+  const { argv, env } = dial(PASS);
+
+  test("turns batch mode off, because it is what blocks the helper", () => {
+    expect(argv).toContain("BatchMode=no");
+    expect(argv).not.toContain("BatchMode=yes");
+  });
+
+  // What BatchMode was buying, bought by narrower options. Without this one an
+  // askpass that answers wrongly is retried up to the server's MaxAuthTries,
+  // which is the unbounded prompting a batch mode exists to prevent.
+  test("asks once and gives up", () => {
+    expect(argv).toContain("NumberOfPasswordPrompts=1");
+  });
+
+  // The other half is unchanged, and has to be: it is what makes turning
+  // BatchMode off affordable, since a host key question is refused outright
+  // rather than asked.
+  test("still refuses an unknown or changed host key", () => {
+    expect(argv).toContain("StrictHostKeyChecking=yes");
+    expect(argv).toContain(`UserKnownHostsFile=${KNOWN} ${USER}`);
+    expect(argv).toContain("GlobalKnownHostsFile=/dev/null");
+  });
+
+  // A loaded agent otherwise offers every key it holds before the password is
+  // tried, and each refusal counts against the server's MaxAuthTries.
+  test("offers no key at all", () => {
+    expect(argv).toContain("PubkeyAuthentication=no");
+    expect(argv).not.toContain("-i");
+    expect(argv).not.toContain("IdentitiesOnly=yes");
+    // Even when the record still carries a path from before it was switched.
+    expect(dial({ ...PASS, keyPath: "/home/dev/.ssh/ledge" }).argv).not.toContain("/home/dev/.ssh/ledge");
+  });
+
+  // Both, because a great many sshd configurations answer with
+  // keyboard-interactive where this one would say password, and askpass serves
+  // both.
+  test("names both of the methods a password can arrive by", () => {
+    expect(argv).toContain("PreferredAuthentications=password,keyboard-interactive");
+  });
+
+  // force rather than a bare SSH_ASKPASS, which OpenSSH ignores when there is
+  // no DISPLAY set — and there never is one here.
+  test("points ssh at the helper and names which connection it is for", () => {
+    expect(env["SSH_ASKPASS"]).toBe(ASKPASS);
+    expect(env["SSH_ASKPASS_REQUIRE"]).toBe("force");
+    expect(env[ASKPASS_ACCOUNT_ENV]).toBe(PASS.id);
+  });
+
+  // The helper reads the password out of the keychain, so nothing here has one
+  // to leak. Pinned as an exact set rather than as three lookups: a fourth
+  // variable added here is inherited by every process ssh forks, and this is
+  // what makes adding one a decision instead of an accident.
+  test("passes exactly three variables, and no secret among them", () => {
+    expect(Object.keys(env).sort()).toEqual(["SSH_ASKPASS", "SSH_ASKPASS_REQUIRE", ASKPASS_ACCOUNT_ENV].sort());
   });
 });
 

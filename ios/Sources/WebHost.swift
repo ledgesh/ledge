@@ -217,6 +217,12 @@ final class WebHost: UIViewController {
             // to trust a new key: that question belongs to pairing, where a
             // person is looking at the screen.
             hostKey: PinnedHostKey(openSSHLine: server.hostKey),
+            // Read here and not held between connections: a password is in the
+            // keychain, and this is the moment it is needed (`ServerPassword`).
+            // Nil for a record on the key door, and nil for one that says
+            // password and has none — which fails as a refusal naming the
+            // server rather than as a dial that offers an empty string.
+            password: server.usesPassword ? ServerPassword.read(server.id) : nil,
             log: { print("[shell] \($0)") }
         )
         socket = next
@@ -321,7 +327,8 @@ final class WebHost: UIViewController {
                 name: $0["name"] as? String ?? "",
                 destination: $0["destination"] as? String ?? "",
                 port: $0["port"] as? Int ?? 0,
-                hostKey: $0["hostKey"] as? String ?? ""
+                hostKey: $0["hostKey"] as? String ?? "",
+                auth: $0["auth"] as? String ?? "key"
             )
         }
         ServerStore.save(servers: servers, selected: params["selected"] as? String ?? "")
@@ -428,12 +435,27 @@ extension WebHost: WKScriptMessageHandler {
             let stored = ServerStore.load()
             reply(id, [
                 "servers": stored.servers.map {
-                    ["id": $0.id, "name": $0.name, "destination": $0.destination, "port": $0.port, "hostKey": $0.hostKey]
+                    [
+                        "id": $0.id, "name": $0.name, "destination": $0.destination, "port": $0.port,
+                        "hostKey": $0.hostKey, "auth": $0.auth,
+                    ]
                 },
                 "selected": stored.selected,
             ])
         case "servers.save":
             saveServers(id, params)
+        // Its own call rather than a field on `servers.save`, so that the list
+        // the page hands back on every rename does not carry a password through
+        // the bridge every time. A string stores one and null forgets it; there
+        // is no call that reads one back (`ServerPassword`).
+        case "servers.password":
+            let server = params["id"] as? String ?? ""
+            if let password = params["password"] as? String {
+                reply(id, ["ok": ServerPassword.write(server, password)])
+            } else {
+                ServerPassword.forget(server)
+                reply(id, ["ok": true])
+            }
         case "servers.probe":
             probe(
                 id,

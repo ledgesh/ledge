@@ -162,11 +162,19 @@ export async function createConnectionManager(deps: {
     connectionAdd: async (fields) => store.add(fields),
 
     connectionUpdate: async (fields) => {
-      const { conn: next, error: refusal } = store.reviewUpdate(fields);
+      const { conn: next, error: refusal } = await store.reviewUpdate(fields);
       if (!next) return { ok: false, error: refusal };
       const before = store.find(fields.id);
+      // The credential changed when the door changed, or when the form handed
+      // over a new password. A null password is the form saying it did not ask,
+      // which is what every rename is (rpc-schema.ts).
+      const recredentialed = !before || next.auth !== before.auth || fields.password !== null;
       const readdressed =
-        !before || next.destination !== before.destination || next.port !== before.port || next.keyPath !== before.keyPath;
+        !before ||
+        next.destination !== before.destination ||
+        next.port !== before.port ||
+        next.keyPath !== before.keyPath ||
+        recredentialed;
       // How the connection is MADE changed, and some window's wire was made the
       // old way. This one re-opens its own; another window's cannot be re-opened
       // from here, and leaving it pointed at the old machine while the row names
@@ -174,8 +182,14 @@ export async function createConnectionManager(deps: {
       // waits (§8a). A rename changes nothing about how a connection is made and
       // is never refused.
       if (readdressed && heldElsewhere(fields.id)) {
-        return { ok: false, error: "Another window is on that connection. Switch it somewhere else before changing the address." };
+        return { ok: false, error: "Another window is on that connection. Switch it somewhere else before changing how it connects." };
       }
+      // The credential goes in before the dial, because the dial is what proves
+      // a password: ssh's askpass helper reads the keychain, so the new value
+      // has to be there for the attempt below to be an attempt at the new one.
+      // Everything after this point that returns an error puts it back.
+      const swap = await store.swapPassword(fields.id, fields.auth, fields.password);
+      if (swap.error) return { ok: false, error: swap.error };
       if (readdressed && fields.id === active.id) {
         // Re-opened before the old one is torn down, like a switch: an edited
         // address that does not answer must cost no more than a typo does.
@@ -183,6 +197,7 @@ export async function createConnectionManager(deps: {
         try {
           opened = await deps.attach(next);
         } catch (err) {
+          await swap.restore();
           return { ok: false, error: `Could not reach ${next.name}: ${reason(err)}` };
         }
         const previous = live;

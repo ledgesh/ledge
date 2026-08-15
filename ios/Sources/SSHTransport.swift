@@ -13,12 +13,13 @@ import NIOSSH
 ///
 /// What `bun/connections.ts` says with argv, this says with objects:
 ///
-/// | `sshCommand`                     | here                            |
+/// | `sshDial`                        | here                            |
 /// | -------------------------------- | ------------------------------- |
 /// | `command="ledge-server serve"`   | the server's sshd, unchanged    |
 /// | `StrictHostKeyChecking=yes`      | `PinnedHostKey`                 |
 /// | `UserKnownHostsFile`             | the stored record               |
 /// | `BatchMode=yes`                  | no prompt exists to suppress    |
+/// | `SSH_ASKPASS`                    | `PasswordAuth`, from `ServerPassword` |
 /// | no `-t`                          | an exec request, never a pty    |
 /// | `ServerAliveInterval=5`          | `TCP_KEEPALIVE`, `TCP_KEEPINTVL`|
 /// | `ServerAliveCountMax=3`          | `TCP_KEEPCNT`                   |
@@ -115,18 +116,25 @@ final class SSHTransport {
     private let key: DeviceKey.Held
     private let hostKeyDelegate: NIOSSHClientServerAuthenticationDelegate
     private let log: (String) -> Void
-    private let auth: PublicKeyAuth
+    private let auth: ClientAuth
+    /// Which door this dial went through, for the sentence a refusal makes.
+    private let byPassword: Bool
 
     private let lock = NSLock()
     private var parent: Channel?
     private var child: Channel?
     private var ended = false
 
+    /// `password` chooses the door: a string offers it, nil offers the device
+    /// key. Passed in rather than read from the keychain here, because the
+    /// pairing screen dials a record that does not exist yet and so has no id
+    /// to look one up by (`ServerPassword`).
     init(
         generation: Int,
         server: ServerRecord,
         key: DeviceKey.Held,
         hostKey: NIOSSHClientServerAuthenticationDelegate,
+        password: String? = nil,
         log: @escaping (String) -> Void
     ) {
         self.generation = generation
@@ -134,7 +142,12 @@ final class SSHTransport {
         self.key = key
         self.hostKeyDelegate = hostKey
         self.log = log
-        self.auth = PublicKeyAuth(username: server.user, key: key.sshKey)
+        self.byPassword = password != nil
+        if let password {
+            self.auth = PasswordAuth(username: server.user, password: password)
+        } else {
+            self.auth = PublicKeyAuth(username: server.user, key: key.sshKey)
+        }
     }
 
     /// Connect, authenticate, ask for the server, and read until the far end
@@ -323,8 +336,12 @@ final class SSHTransport {
         // The raw failure as well as the sentence, because the sentence is for
         // the person holding the phone and this is for whoever has to work out
         // why an ssh handshake did not finish.
-        log("[ssh] dial failed: \(error) (offered a key: \(auth.offered), out of keys: \(auth.exhausted))")
-        if auth.exhausted { return SSHFailure.rejected(server.destination, key.isEnclave) }
+        log("[ssh] dial failed: \(error) (offered: \(auth.offered), nothing left: \(auth.exhausted))")
+        if auth.exhausted {
+            return byPassword
+                ? SSHFailure.refusedPassword(server.destination)
+                : SSHFailure.rejected(server.destination, key.isEnclave)
+        }
         if error is HostKeyError { return error }
         return SSHFailure.unreachable(server.destination, error)
     }
@@ -339,6 +356,7 @@ enum SSHFailure: Error, LocalizedError {
     case timedOut(String)
     case unreachable(String, Error)
     case rejected(String, Bool)
+    case refusedPassword(String)
     case outOfKeys
     case wrongChannel
     case commandRefused
@@ -359,6 +377,15 @@ enum SSHFailure: Error, LocalizedError {
                 \(enclave ? "" : " (this build is using a software key, which a Simulator has to)")\
                 .
                 """
+        case .refusedPassword(let where_):
+            // Both halves, because from here they are indistinguishable and
+            // the second one is the one people forget: a server can also be
+            // configured to ask for a password in a way this client cannot
+            // answer (`PasswordAuth`).
+            return """
+                \(where_) refused that password. Check it, and that the server allows signing in with a \
+                password at all.
+                """
         case .outOfKeys:
             // Reworded by `explain` into the destination's own sentence; this
             // is what it says if it ever escapes on its own.
@@ -376,7 +403,10 @@ enum SSHFailure: Error, LocalizedError {
     static func needsPairing(_ error: Error) -> Bool {
         if error is HostKeyError { return true }
         switch error as? SSHFailure {
-        case .rejected, .outOfKeys, .notPaired: return true
+        // A refused password goes back to pairing for the same reason a refused
+        // key does: on a phone with one server there is no page to edit it
+        // from, and pairing is the only screen that can ask for another one.
+        case .rejected, .refusedPassword, .outOfKeys, .notPaired: return true
         default: return false
         }
     }
@@ -402,6 +432,19 @@ private final class FailOnError: ChannelInboundHandler {
     }
 }
 
+/// One credential, offered once, whichever door it is.
+///
+/// `explain` reads these two to turn a NIOSSH error into a sentence, and it has
+/// to work the same way for both doors: what this client offered is a more
+/// stable fact than the shape of the failure NIOSSH reports afterwards.
+private protocol ClientAuth: NIOSSHClientUserAuthenticationDelegate {
+    /// Whether the credential was ever put on the wire.
+    var offered: Bool { get }
+    /// Set once the server has asked for another method, which it only does
+    /// after refusing the first.
+    var exhausted: Bool { get }
+}
+
 /// One key, offered once.
 ///
 /// The phone has exactly one identity and no agent to enumerate, so this is the
@@ -409,15 +452,11 @@ private final class FailOnError: ChannelInboundHandler {
 /// asking for more, there is nothing more. Saying so by completing the promise
 /// with `nil` is what turns a rejection into a failed connection with a reason,
 /// instead of a loop.
-private final class PublicKeyAuth: NIOSSHClientUserAuthenticationDelegate {
+private final class PublicKeyAuth: ClientAuth {
     private let username: String
     private let key: NIOSSHPrivateKey
 
-    /// Whether the key was ever put on the wire.
     private(set) var offered = false
-
-    /// Set once the server has asked for another method, which it only does
-    /// after refusing the first.
     private(set) var exhausted = false
 
     init(username: String, key: NIOSSHPrivateKey) {
@@ -448,6 +487,50 @@ private final class PublicKeyAuth: NIOSSHClientUserAuthenticationDelegate {
                 username: username,
                 serviceName: "",
                 offer: .privateKey(.init(privateKey: key))
+            )
+        )
+    }
+}
+
+/// One password, offered once (remote.md §4).
+///
+/// The same shape as the key above, and the same reason for failing rather than
+/// answering nil when there is nothing left. What it does NOT do is retry: a
+/// password that was refused is refused, and a delegate that offered it again
+/// would spend the server's `MaxAuthTries` proving it.
+///
+/// **Only the `password` method.** NIOSSH has no keyboard-interactive, so a
+/// server configured to answer with that alone refuses this client with
+/// "no supported authentication methods" while the same account works from a
+/// Mac (`PreferredAuthentications` there names both). ios.md §3 records it: the
+/// building blocks are not a client, and this is one of the places that shows.
+private final class PasswordAuth: ClientAuth {
+    private let username: String
+    private let password: String
+
+    private(set) var offered = false
+    private(set) var exhausted = false
+
+    init(username: String, password: String) {
+        self.username = username
+        self.password = password
+    }
+
+    func nextAuthenticationType(
+        availableMethods: NIOSSHAvailableUserAuthenticationMethods,
+        nextChallengePromise: EventLoopPromise<NIOSSHUserAuthenticationOffer?>
+    ) {
+        guard availableMethods.contains(.password), !offered else {
+            exhausted = true
+            nextChallengePromise.fail(SSHFailure.outOfKeys)
+            return
+        }
+        offered = true
+        nextChallengePromise.succeed(
+            NIOSSHUserAuthenticationOffer(
+                username: username,
+                serviceName: "",
+                offer: .password(.init(password: password))
             )
         )
     }

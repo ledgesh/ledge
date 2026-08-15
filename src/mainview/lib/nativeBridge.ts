@@ -27,7 +27,7 @@
 //
 // Nothing in this file touches WebKit. `attachShell` at the bottom is the
 // three lines that do, and everything above it is testable in Bun.
-import { hostPart, validateConnection } from "../../shared/connections";
+import { hostPart, validateConnection, validatePassword, type AuthMode } from "../../shared/connections";
 import { fedDuplex, type Duplex } from "../../shared/transport";
 import {
   CLIENT_METHODS,
@@ -81,6 +81,12 @@ export const SHELL_CALLS = [
   // written twice in two languages.
   "servers.list",
   "servers.save",
+  // Store or forget one server's password (remote.md §4). Its own call rather
+  // than a field on `servers.save`, which carries the whole list on every
+  // rename: a secret should cross this bridge when it changes and never
+  // otherwise. Nothing reads one back — the page has no call for it, and Swift
+  // has no reply that carries one.
+  "servers.password",
   // A dial as far as key exchange, which is where the host key is offered. What
   // `ssh-keyscan` is on a Mac: a fingerprint, before this phone's key goes on
   // the wire and before the server has been asked to accept it (ios.md §3).
@@ -348,6 +354,10 @@ interface ShellServer {
    * file here for a hostname to index. "" for a record whose pin was dropped
    * because the server offered a different key. */
   hostKey: string;
+  /** Which door (shared/connections.ts). The password itself is not here and
+   * never comes back over the bridge: it is in the phone's keychain under the
+   * id, put there by `servers.password` (ios/Sources/ServerPassword.swift). */
+  auth: AuthMode;
 }
 
 const NO_SUCH = "There is no such connection.";
@@ -356,6 +366,7 @@ const NO_SUCH = "There is no such connection.";
 // fingerprint again (remote.md §4). The dialog's own form sends one, so this
 // is the backstop rather than the path.
 const PIN_MOVED = "That pinned key belongs to another host. Check the new host's fingerprint first.";
+const KEYCHAIN_REFUSED = "This device's keychain would not store that password.";
 
 /**
  * A fresh record's id.
@@ -389,6 +400,11 @@ function clientSeams(
   const store = async (servers: ShellServer[], selected: string): Promise<void> => {
     await shell.call("servers.save", { servers, selected });
   };
+  // A string stores, null forgets. Swift sweeps the keychain on every save, so
+  // a removal needs nothing here: what this exists for is the two changes a
+  // list cannot express, setting a password and moving off the password door.
+  const keepPassword = async (id: string, password: string | null): Promise<boolean> =>
+    ((await shell.call("servers.password", { id, password })) as { ok: boolean }).ok;
   return {
     clipboardWrite: async ({ text }) => {
       await shell.call("clipboard.write", { text });
@@ -450,6 +466,7 @@ function clientSeams(
           destination: s.destination,
           port: s.port,
           keyPath: "",
+          auth: s.auth,
           pinned: s.hostKey !== "",
           lastReached: 0,
         })),
@@ -472,9 +489,13 @@ function clientSeams(
       return { ok: true, error: "" };
     },
 
-    connectionAdd: async ({ name, destination, port, hostKey }) => {
+    connectionAdd: async ({ name, destination, port, auth, password, hostKey }) => {
       const refusal = validateConnection({ name, destination, keyPath: "", port });
       if (refusal) return { id: "", error: refusal };
+      if (auth === "password") {
+        const unusable = validatePassword(password);
+        if (unusable) return { id: "", error: unusable };
+      }
       const { servers, selected } = await stored();
       const server: ShellServer = {
         id: newServerId(),
@@ -482,17 +503,38 @@ function clientSeams(
         destination: destination.trim(),
         port,
         hostKey: hostKey.trim(),
+        auth,
       };
+      // The secret before the record, so a saved list never names a password
+      // door with nothing behind it — the Mac's order, for the Mac's reason
+      // (bun/connectionStore.ts).
+      if (auth === "password" && !(await keepPassword(server.id, password))) {
+        return { id: "", error: KEYCHAIN_REFUSED };
+      }
       await store([...servers, server], selected);
       return { id: server.id, error: "" };
     },
 
-    connectionUpdate: async ({ id, name, destination, port, hostKey }) => {
+    connectionUpdate: async ({ id, name, destination, port, auth, password, hostKey }) => {
       const refusal = validateConnection({ name, destination, keyPath: "", port });
       if (refusal) return { ok: false, error: refusal };
       const { servers, selected } = await stored();
       const before = servers.find((s) => s.id === id);
       if (!before) return { ok: false, error: NO_SUCH };
+      if (auth === "password") {
+        // Null means keep the stored one, which is only an answer for a record
+        // that was already on this door. There is no call that reads a password
+        // back, so "is there one" is answered by the record and not the
+        // keychain — which is the same answer, since the two are written
+        // together.
+        if (password === null && before.auth !== "password") {
+          return { ok: false, error: "That connection has no password stored. Enter one." };
+        }
+        if (password !== null) {
+          const unusable = validatePassword(password);
+          if (unusable) return { ok: false, error: unusable };
+        }
+      }
       // By the HOST half, because the user half is not what a host key belongs
       // to: `dev@box` to `ledge@box` is the same machine and the same key. The
       // PORT is part of it though: two sshd instances on one machine really can
@@ -505,7 +547,17 @@ function clientSeams(
         destination: destination.trim(),
         port,
         hostKey: hostKey === null ? before.hostKey : hostKey.trim(),
+        auth,
       };
+      // A new password, or a move off the password door that takes the stored
+      // one with it. Neither is expressible in the list, which is why the
+      // credential is its own call — and neither is a rename, which is why
+      // this is not one call on every edit.
+      if (auth === "key") {
+        if (before.auth === "password") await keepPassword(id, null);
+      } else if (password !== null && !(await keepPassword(id, password))) {
+        return { ok: false, error: KEYCHAIN_REFUSED };
+      }
       await store(
         servers.map((s) => (s.id === id ? after : s)),
         selected,

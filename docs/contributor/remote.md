@@ -237,9 +237,16 @@ already point every other tool at.
 The one exception is a phone, and it is the phone's convention rather than an
 exception to the rule. There is no `~/.ssh` on iOS for a user-managed key to
 live in, so phone ssh clients generate in-app as a matter of course; Ledge's is
-generated in the Secure Enclave and cannot be exported (`ios.md` §4). With a
-password door beside it, that key stops being the only way onto a server and
-becomes the better one.
+generated in the Secure Enclave and cannot be exported (`ios.md` §4). With the
+password door beside it, that key stopped being the only way onto a server and
+became the better one.
+
+**All three doors are built, on both clients.** A connection carries an `auth`
+of `key` or `password` (`shared/connections.ts`); `key` covers the key file and
+the agent, which need no secret from Ledge, and `password` is the one that does.
+The record says which door the user chose rather than inferring it from whether
+a secret happens to exist, so a credential that has gone missing fails with a
+reason instead of silently becoming a connection that offers nothing.
 
 **A connection carries a port, and unset is not 22.** It is its own field on
 both clients rather than a `host:port` destination, because that is what ssh
@@ -285,10 +292,40 @@ the first signed build; that build already spawns `ssh`, `ssh-keyscan` and
 `ssh-keygen` from fixed paths.
 
 **The askpass helper reads the keychain itself.** `SSH_ASKPASS` names a script
-in the bundle, the connection id arrives in its environment, and the script
-answers with what `security find-generic-password -w` prints. The secret's path
-is keychain to helper stdout to ssh: it is never in Bun's memory and never on
-an argv.
+written into the client home at 0700, the connection id arrives in its
+environment, and the script answers with what `security find-generic-password
+-w` prints. The secret's path is keychain to helper stdout to ssh: it is never
+in Bun's memory and never on an argv. A helper handed the password instead
+would need it in both.
+
+**The stored value is the hex of the password's UTF-8 bytes**, which is one
+decoding rule instead of a guess. `security find-generic-password -w` prints
+its value as text when the bytes are printable ASCII and as hex when they are
+not, with nothing in the output saying which happened: `pässwörd` comes back as
+`70c3a4737377c3b67264`, and so does a password that IS that string. Storing hex
+makes the stored value printable always, so the read is always hex and the
+helper always decodes. Getting this wrong would not error, it would send the
+wrong password.
+
+**The write goes in on stdin, not on an argv.** `security`'s own usage text
+calls `-w <password>` insecure and it is right, for the reason §10 gives about
+profiles. `-w` as the last option makes it prompt, it prompts twice to confirm,
+and it reads both from a pipe. It also stores an EMPTY password and still exits
+0 when the two do not match, so the write is read back before it is called a
+success.
+
+**Changing a password puts the new one in before the dial and the old one back
+after a failed one.** The dial is what PROVES a password, and proving it means
+the new value has to be in the keychain when ssh runs, so an edit that mistypes
+one would otherwise destroy the working one on its way to reporting the failure.
+`connectionStore.swapPassword` returns the way to undo itself and
+`connectionManager` calls it on any error after the swap; the record is written
+only once the wire is up. A key connection reaches the same safety for free,
+because the credential is a file the user owns and Ledge does not move it.
+
+Reading the old password back to be able to restore it is the ONE place in the
+app that reads a stored password into memory, and it is bounded by how long one
+ssh takes to fail.
 
 **A passphrase on an existing key already works through the agent.**
 `IdentitiesOnly=yes` restricts ssh to the identity named by `-i`, but that
@@ -314,14 +351,26 @@ turning it off affordable:
 | The hazard | What covers it instead |
 | ---------- | ---------------------- |
 | A host-key question that hangs forever | `StrictHostKeyChecking=yes`, which refuses outright and asks nothing, `BatchMode` or no |
-| Retrying up to sshd's `MaxAuthTries` | `NumberOfPasswordPrompts=1`. Three askpass answers produced exactly one attempt |
-| A prompt eating stdin, or an answer landing in a frame header | Neither occurs. askpass answers on its own descriptors, and protocol bytes written through the same connection reached the far end intact |
+| Retrying up to sshd's `MaxAuthTries` | `NumberOfPasswordPrompts=1`. A wrong password ends the dial in about three seconds |
+| A prompt eating stdin, or an answer landing in a frame header | Neither occurs. askpass answers on its own descriptors, and the protocol comes up over the same connection |
 
-So the argv is per-connection rather than one shape for every door. A key or
-agent connection keeps `BatchMode=yes` unchanged. A password connection sends
-`BatchMode=no`, `NumberOfPasswordPrompts=1`, and `PubkeyAuthentication=no`, the
-last so a running agent does not spend the auth budget offering keys before a
-password is tried.
+So the argv is per-connection rather than one shape for every door
+(`sshDial`, which returns the environment with it so that a caller cannot build
+one and forget the other). A key or agent connection keeps `BatchMode=yes`
+unchanged. A password connection sends `BatchMode=no`,
+`NumberOfPasswordPrompts=1`, `PubkeyAuthentication=no` so a running agent does
+not spend the auth budget offering keys before a password is tried, and
+`PreferredAuthentications=password,keyboard-interactive`.
+
+**Both of those methods, because a password reaches OpenSSH by two code paths
+and many servers use the second.** `password` is the ssh protocol's own method;
+`keyboard-interactive` is the one PAM answers with, and a Debian sshd with
+`KbdInteractiveAuthentication yes` and `PasswordAuthentication no` accepts the
+same password by a route that naming only `password` would exclude.
+`SSH_ASKPASS` serves both, and `NumberOfPasswordPrompts` bounds both, because
+ssh counts kbdint attempts against it too. `probe:ssh`'s `[password]` step
+stands up one sshd per method, each offering that method alone and no public key
+at all, so a connection that comes up has proved which route carried it (§13).
 
 Three further options are on the argv and are not security at all:
 `ServerAliveInterval`, `ServerAliveCountMax` and `ConnectTimeout`. They are
@@ -1450,6 +1499,20 @@ Per `testing.md`'s categories:
   reproducible instead of lucky: a write sent into the dark still reaches the
   far machine and runs, and only its answer is lost, which is the exact
   condition `opLog.ts` exists for.
+- **The password door, against sshd instances that take no keys at all**, in
+  the same probe's `[password]` step. Two containers, one offering `password`
+  and one offering `keyboard-interactive`, both with `PubkeyAuthentication no`,
+  so a connection that comes up has proved which method carried it rather than
+  merely that something did. It writes a real item to the login keychain with
+  `security`, spawns the real helper through `SSH_ASKPASS`, and sweeps the item
+  in teardown: it is the one thing a probe here touches that is not under the
+  scratch `LEDGE_NOTES_ROOT`.
+  It exists because §4 was WRONG about this and no test in the repository could
+  have said so. The claim was that `SSH_ASKPASS_REQUIRE=force` needs no terminal
+  and therefore needs no relaxation of `BatchMode`; the truth is that
+  `BatchMode=yes` suppresses askpass outright. Both directions are asserted now:
+  the argv the app builds connects, and the same argv with that one option back
+  fails with the helper never spawned.
 - **A server that stops answering while the wire stays perfect**, in the same
   probe's `[stall]` step. SIGSTOP to the daemon leaves TCP established and its
   keepalives answered, sshd answering `ServerAlive` from its own process, and
@@ -1493,6 +1556,15 @@ goes on answering ssh-keyscan throughout — so what noticed was not the wire,
 and nothing under the protocol had anything to notice. The daemon that comes
 back is the same run of the same process, which is what makes it a stall rather
 than the crash the instance check is for.
+
+And, from `[password]`: a password stored with `security` and read back by the
+helper brings the protocol up over `password` and over `keyboard-interactive`,
+against sshd instances that accept no public key at all; the same argv with
+`BatchMode=yes` fails on both, with the helper never spawned; and a wrong
+password ends the dial in about three seconds rather than in as many attempts as
+the server allows. The password carries quotes, spaces, a `$` and a non-ASCII
+character, which is the shape that breaks a `/bin/sh` helper and the shape
+`security` prints back as hex.
 
 The gap that was worth naming through phases 2 to 4 is closed: the ssh hop is
 real, the sshd is real, and the forced command is enforced by sshd rather than

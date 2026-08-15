@@ -14,7 +14,7 @@ import { resolve, sep } from "node:path";
 import { APP_HOME } from "./workspaces";
 import { CONNECTIONS_PATH, KNOWN_HOSTS_PATH, LOCAL_ID, PORT_UNSET, saveConnections, type Connection } from "./connections";
 import { createConnectionManager, type Attached, type ConnectionManager } from "./connectionManager";
-import { createConnectionStore } from "./connectionStore";
+import { createConnectionStore, type Secrets } from "./connectionStore";
 import { CONNECTION_METHODS } from "../shared/wire";
 import type { RequestHandlers } from "../shared/wire";
 
@@ -28,6 +28,7 @@ const LAPTOP: Connection = {
   destination: "dev@laptop",
   port: PORT_UNSET,
   keyPath: "",
+  auth: "key",
   hostKey: "laptop ssh-ed25519 AAAAC3Nza",
   lastReached: 0,
 };
@@ -222,6 +223,8 @@ describe("adding and removing", () => {
       destination: "ledge@vps",
       port: PORT_UNSET,
       keyPath: "",
+      auth: "key",
+      password: "",
       hostKey: "vps ssh-ed25519 AAAA",
     });
     expect(error).toBe("");
@@ -232,13 +235,13 @@ describe("adding and removing", () => {
 
   test("what was pinned is what ssh will check", async () => {
     const m = await createConnectionManager({ attach: fakeAttach().attach });
-    await m.requests.connectionAdd({ name: "VPS", destination: "ledge@vps", port: PORT_UNSET, keyPath: "", hostKey: "vps ssh-ed25519 AAAA" });
+    await m.requests.connectionAdd({ name: "VPS", destination: "ledge@vps", port: PORT_UNSET, keyPath: "", auth: "key", password: "", hostKey: "vps ssh-ed25519 AAAA" });
     expect(await readFile(KNOWN_HOSTS_PATH, "utf8")).toBe("vps ssh-ed25519 AAAA\n");
   });
 
   test("a bad destination is refused with a reason and nothing is stored", async () => {
     const m = await createConnectionManager({ attach: fakeAttach().attach });
-    const res = await m.requests.connectionAdd({ name: "VPS", destination: "-oProxyCommand=x", port: PORT_UNSET, keyPath: "", hostKey: "" });
+    const res = await m.requests.connectionAdd({ name: "VPS", destination: "-oProxyCommand=x", port: PORT_UNSET, keyPath: "", auth: "key", password: "", hostKey: "" });
     expect(res.id).toBe("");
     expect(res.error).toContain("ssh destination");
     expect((await m.requests.connectionList({})).connections).toHaveLength(1);
@@ -246,7 +249,7 @@ describe("adding and removing", () => {
 
   test("only what the user was shown is pinned: no host key means no line", async () => {
     const m = await createConnectionManager({ attach: fakeAttach().attach });
-    await m.requests.connectionAdd({ name: "VPS", destination: "ledge@vps", port: PORT_UNSET, keyPath: "", hostKey: "" });
+    await m.requests.connectionAdd({ name: "VPS", destination: "ledge@vps", port: PORT_UNSET, keyPath: "", auth: "key", password: "", hostKey: "" });
     expect(await readFile(KNOWN_HOSTS_PATH, "utf8")).toBe("");
     expect((await m.requests.connectionList({})).connections.find((c) => c.name === "VPS")!.pinned).toBe(false);
   });
@@ -278,7 +281,18 @@ describe("adding and removing", () => {
 });
 
 describe("editing", () => {
-  const edit = { id: LAPTOP.id, name: LAPTOP.name, destination: LAPTOP.destination, port: PORT_UNSET, keyPath: "", hostKey: null };
+  const edit = {
+  id: LAPTOP.id,
+  name: LAPTOP.name,
+  destination: LAPTOP.destination,
+  port: PORT_UNSET,
+  keyPath: "",
+  auth: "key" as const,
+  // Null is the form saying it did not ask for one, which is every case here
+  // that is not about the password door.
+  password: null,
+  hostKey: null,
+};
 
   test("a rename keeps everything else, pin included", async () => {
     await saveConnections([LAPTOP], LOCAL_ID);
@@ -440,6 +454,8 @@ describe("two windows over one store", () => {
       destination: "ledge@vps",
       port: PORT_UNSET,
       keyPath: "",
+      auth: "key",
+      password: "",
       hostKey: "vps ssh-ed25519 AAAA",
     });
     expect((await second.requests.connectionList({})).connections.map((c) => c.id)).toContain(id);
@@ -467,6 +483,8 @@ describe("two windows over one store", () => {
       destination: "dev@studio",
       port: PORT_UNSET,
       keyPath: "",
+      auth: "key",
+      password: null,
       hostKey: "studio ssh-ed25519 AAAAnew",
     });
     expect(res.ok).toBe(false);
@@ -486,6 +504,8 @@ describe("two windows over one store", () => {
       destination: LAPTOP.destination,
       port: PORT_UNSET,
       keyPath: "",
+      auth: "key",
+      password: null,
       hostKey: null,
     });
     expect(res).toEqual({ ok: true, error: "" });
@@ -513,4 +533,231 @@ test("the listed connection methods are the ones implemented", async () => {
   // And they are served by the manager rather than forwarded: the fake server
   // above implements only vaultState, so a forwarded call would throw.
   expect((await m.requests.connectionList({})).active).toBe(LOCAL_ID);
+});
+
+// The password door (remote.md §4). What is proved here is the ORDER, which is
+// where the interesting failures live: the credential has to be in the keychain
+// before the dial, because the dial is what proves it, and a dial that then
+// fails has to leave the connection exactly as it was.
+//
+// The keychain itself is a native seam and belongs to the live probe (testing.md
+// §6). This one records instead, so a suite that runs hundreds of times a day
+// never writes to the login keychain.
+function fakeSecrets(refuse = false) {
+  const items = new Map<string, string>();
+  const log: string[] = [];
+  const secrets: Secrets = {
+    store: async (id, password) => {
+      log.push(`store ${id}`);
+      if (refuse) return { ok: false, error: REFUSED };
+      items.set(id, password);
+      return { ok: true, error: "" };
+    },
+    has: async (id) => items.has(id),
+    forget: async (id) => {
+      log.push(`forget ${id}`);
+      items.delete(id);
+    },
+    swap: async (id, next) => {
+      log.push(`swap ${id}`);
+      if (refuse) return { error: REFUSED, restore: async () => {} };
+      const before = items.get(id) ?? null;
+      if (next === null) items.delete(id);
+      else items.set(id, next);
+      return {
+        error: "",
+        restore: async () => {
+          log.push(`restore ${id}`);
+          if (before === null) items.delete(id);
+          else items.set(id, before);
+        },
+      };
+    },
+  };
+  return { items, log, secrets };
+}
+
+const REFUSED = "The keychain would not store that password.";
+const PASSWORD_ADD = {
+  name: "VPS",
+  destination: "ledge@vps",
+  port: PORT_UNSET,
+  keyPath: "",
+  auth: "password" as const,
+  password: "hunter2",
+  hostKey: "vps ssh-ed25519 AAAA",
+};
+
+describe("the password door", () => {
+  beforeEach(async () => {
+    await rm(APP_HOME, { recursive: true, force: true });
+    await mkdir(APP_HOME, { recursive: true });
+  });
+
+  // The record says which door; the keychain holds the secret. Nothing in
+  // connections.json is a credential, which is the claim that makes the file
+  // safe to read, back up and hand-edit.
+  test("stores the password in the keychain and not in the file", async () => {
+    const { items, secrets } = fakeSecrets();
+    const store = await createConnectionStore({ secrets });
+    const { id, error } = await store.add(PASSWORD_ADD);
+    expect(error).toBe("");
+    expect(items.get(id)).toBe("hunter2");
+    const written = await readFile(CONNECTIONS_PATH, "utf8");
+    expect(written).not.toContain("hunter2");
+    expect(JSON.parse(written).connections[0]).toMatchObject({ auth: "password", keyPath: "" });
+  });
+
+  // No key is offered on this door (PubkeyAuthentication=no), so a path left
+  // behind in the form is dropped rather than stored as a field with no effect.
+  test("drops a key path that came with it", async () => {
+    const { secrets } = fakeSecrets();
+    const store = await createConnectionStore({ secrets });
+    const { id } = await store.add({ ...PASSWORD_ADD, keyPath: "/home/dev/.ssh/ledge" });
+    expect(store.find(id)!.keyPath).toBe("");
+  });
+
+  // A password askpass cannot deliver is refused where the user can see it,
+  // rather than stored and turned into a server that refuses to talk to them.
+  test("refuses a password ssh could not deliver, and stores nothing", async () => {
+    const { items, secrets } = fakeSecrets();
+    const store = await createConnectionStore({ secrets });
+    for (const password of ["", "two\nlines", "with\ttab"]) {
+      const res = await store.add({ ...PASSWORD_ADD, password });
+      expect(res.id).toBe("");
+      expect(res.error).not.toBe("");
+    }
+    expect(items.size).toBe(0);
+    expect(store.all()).toHaveLength(1);
+  });
+
+  // A keychain that will not take the password leaves no record behind either:
+  // the alternative is a connection naming a door with nothing behind it.
+  test("a keychain that refuses costs the whole connection", async () => {
+    const { secrets } = fakeSecrets(true);
+    const store = await createConnectionStore({ secrets });
+    const res = await store.add(PASSWORD_ADD);
+    expect(res.id).toBe("");
+    expect(res.error).toBe(REFUSED);
+    expect(store.all()).toHaveLength(1);
+  });
+
+  test("removing the connection forgets its password", async () => {
+    const { items, log, secrets } = fakeSecrets();
+    const store = await createConnectionStore({ secrets });
+    const { id } = await store.add(PASSWORD_ADD);
+    expect(await store.remove(id)).toEqual({ ok: true, error: "" });
+    expect(items.size).toBe(0);
+    expect(log).toContain(`forget ${id}`);
+  });
+
+  // Every connection that has no password should cost no keychain call at all.
+  test("an ordinary connection never touches the keychain", async () => {
+    const { log, secrets } = fakeSecrets();
+    const store = await createConnectionStore({ secrets });
+    const { id } = await store.add({ ...PASSWORD_ADD, auth: "key", password: "" });
+    await store.reviewUpdate({ ...PASSWORD_ADD, id, auth: "key", password: null, hostKey: null });
+    await store.swapPassword(id, "key", null);
+    await store.remove(id);
+    expect(log).toEqual([]);
+  });
+
+  // A rename is not a re-credential. Asking for the password again to change a
+  // name would teach the user to type it into dialogs for no reason.
+  test("a rename keeps the stored password and asks the keychain nothing", async () => {
+    const { items, log, secrets } = fakeSecrets();
+    const store = await createConnectionStore({ secrets });
+    const { id } = await store.add(PASSWORD_ADD);
+    log.length = 0;
+    const { conn, error } = await store.reviewUpdate({
+      ...PASSWORD_ADD,
+      id,
+      name: "Frankfurt",
+      password: null,
+      hostKey: null,
+    });
+    expect(error).toBe("");
+    await store.swapPassword(id, "password", null);
+    expect(log).toEqual([]);
+    expect(items.get(id)).toBe("hunter2");
+    expect(conn!.name).toBe("Frankfurt");
+  });
+
+  // Null means "keep the stored one", which is only an answer when there is one
+  // to keep. A connection moved onto this door with nothing behind it would
+  // dial, find no secret, and be refused for a reason that is on this Mac.
+  test("moving onto the door with nothing stored is refused", async () => {
+    const { secrets } = fakeSecrets();
+    const store = await createConnectionStore({ secrets });
+    const { id } = await store.add({ ...PASSWORD_ADD, auth: "key", password: "" });
+    const { conn, error } = await store.reviewUpdate({ ...PASSWORD_ADD, id, password: null, hostKey: null });
+    expect(conn).toBeNull();
+    expect(error).toContain("no password stored");
+  });
+
+  test("moving off the door forgets the password", async () => {
+    const { items, secrets } = fakeSecrets();
+    const store = await createConnectionStore({ secrets });
+    const { id } = await store.add(PASSWORD_ADD);
+    await store.swapPassword(id, "key", null);
+    expect(items.size).toBe(0);
+  });
+
+  // The one that decides whether an edit is safe to try. The new password has
+  // to be in the keychain for the dial to be a dial of the NEW one, and a dial
+  // that fails has to put the old one back: otherwise mistyping a password
+  // destroys the working one on the way to reporting the failure.
+  test("a new password is in place before the dial, and back out after a failed one", async () => {
+    const { items, log, secrets } = fakeSecrets();
+    const store = await createConnectionStore({ secrets });
+    const { id } = await store.add(PASSWORD_ADD);
+    // Reachable at boot and not afterwards, which is what an edit that
+    // mistypes the password looks like from here: the connection worked, and
+    // the dial made with the new credential is the one that fails.
+    let refuse = false;
+    const attach = async (): Promise<Attached> => {
+      if (refuse) throw new Error("host is down");
+      return { requests: {} as RequestHandlers, build: "b", shutdown: () => {} };
+    };
+    const m = await createConnectionManager({ attach, store, want: id });
+    refuse = true;
+    log.length = 0;
+
+    const res = await m.requests.connectionUpdate({
+      id,
+      name: "VPS",
+      destination: "ledge@vps",
+      port: PORT_UNSET,
+      keyPath: "",
+      auth: "password",
+      password: "wrong-one",
+      hostKey: null,
+    });
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("Could not reach");
+    // Swapped in first, then put back — and in that order, which is the whole
+    // claim. The keychain ends where it started.
+    expect(log).toEqual([`swap ${id}`, `restore ${id}`]);
+    expect(items.get(id)).toBe("hunter2");
+  });
+
+  // And the same edit against a machine that answers keeps the new one.
+  test("a new password that dials survives", async () => {
+    const { items, secrets } = fakeSecrets();
+    const store = await createConnectionStore({ secrets });
+    const { id } = await store.add(PASSWORD_ADD);
+    const m = await createConnectionManager({ attach: fakeAttach().attach, store, want: id });
+    const res = await m.requests.connectionUpdate({
+      id,
+      name: "VPS",
+      destination: "ledge@vps",
+      port: PORT_UNSET,
+      keyPath: "",
+      auth: "password",
+      password: "the-new-one",
+      hostKey: null,
+    });
+    expect(res).toEqual({ ok: true, error: "" });
+    expect(items.get(id)).toBe("the-new-one");
+  });
 });

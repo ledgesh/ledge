@@ -24,6 +24,48 @@ import { isHostName } from "./frontmatter";
 export const LOCAL_ID = "local";
 
 /**
+ * Which door a connection goes through (remote.md §4).
+ *
+ * `key` covers the two that need no secret from Ledge: a key file named by
+ * `keyPath`, and a key the user's `ssh-agent` is holding. `password` is the
+ * third, and the only one where this app holds a credential of the user's.
+ *
+ * A stored field rather than something inferred from whether a secret happens
+ * to exist. A record says which door the user chose, so a secret that has gone
+ * missing fails with a reason instead of silently becoming a key connection
+ * that offers nothing.
+ */
+export type AuthMode = "key" | "password";
+
+/** The stored value, self-healing: anything that is not the password door is
+ * the key door, which is where every record written before this field existed
+ * already opens. */
+export function parseAuth(raw: unknown): AuthMode {
+  return raw === "password" ? "password" : "key";
+}
+
+/**
+ * A password Ledge can actually deliver, or the reason it cannot.
+ *
+ * The constraint is `SSH_ASKPASS` rather than storage. ssh reads ONE LINE from
+ * the helper and truncates at the first newline (remote.md §4), so a password
+ * carrying one would be sent in part, to a server that would refuse it, with
+ * nothing anywhere saying why. Every other control character is refused with
+ * it: none can be typed at the password prompt this is standing in for, so
+ * accepting one here would store a credential the user could never use by hand.
+ */
+export function validatePassword(password: string): string | null {
+  if (password === "") return "A password connection needs a password.";
+  for (const ch of password) {
+    const code = ch.codePointAt(0) ?? 0;
+    if (code < 0x20 || code === 0x7f) {
+      return "A password cannot contain tabs, newlines, or other control characters.";
+    }
+  }
+  return null;
+}
+
+/**
  * What a user typed, refused with a reason or accepted as a connection. The
  * destination becomes argv for ssh, so it is checked with the same predicate a
  * note's `host:` frontmatter is (shared/frontmatter.ts): what it excludes is

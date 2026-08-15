@@ -15,6 +15,7 @@ Click the connection bar, or run "Notes On…" from the palette or the File menu
 | Name | Anything you want to see in the bar. |
 | SSH destination | `user@host`, a bare hostname, or a name from your `~/.ssh/config`. |
 | Port | Blank unless sshd listens somewhere other than 22. |
+| Sign in with | A key or a password. |
 | Key | A private key to offer, or blank to let your ssh config decide. |
 
 The port goes in its own field, not in the address: write `ledge@vps`, not `ledge@vps:2222`.
@@ -46,6 +47,24 @@ Changing the address to a different machine does not. The button reads "Continue
 Use "Check Key Again" when a server you already have has legitimately rotated its host key. It is the same fingerprint step, on a connection you keep.
 
 This Mac cannot be removed or edited, and neither can the connection you are currently using: switch somewhere else first.
+
+## Sign in with a password
+
+Choose "A password" in the form and type the password for that account on that machine. Ledge stores it and offers it on every connection, including the reconnects it makes by itself.
+
+Use it when the machine has no key on it yet. A fresh VPS with a password is a machine you can reach today, and setting up a key afterwards is a change you make once. Keys are the better long-term answer, and switching a connection over to one later is one edit.
+
+Ledge keeps the password in your Mac's keychain and never in `~/.ledge`. When ssh asks for it, ssh reads it from the keychain itself, so the password does not pass through Ledge on its way out.
+
+Anything running as you on this Mac can read that keychain item. That is the same reach a private key file in `~/.ssh` gives, so a password here is neither safer nor less safe than the key it stands in for.
+
+Removing the connection removes the password with it. So does switching that connection back to a key.
+
+The password field is blank when you edit an existing connection, and blank means keep the one that is stored. Type a new one only when you want to replace it. If the new one does not work, Ledge puts the old one back and tells you the connection could not be reached.
+
+Some servers do not allow passwords at all. If the machine reports "Permission denied", check `PasswordAuthentication` in its `/etc/ssh/sshd_config` before checking what you typed.
+
+Restricting a key to Ledge does not apply to a password. That restriction is a line in `authorized_keys`, which is a file about keys.
 
 ## Switch servers
 
@@ -142,6 +161,8 @@ PasswordAuthentication no
 
 Use the address your VPN or tailnet gives the machine. A Ledge server on `0.0.0.0` is a box on the public internet whose purpose is running code.
 
+`PasswordAuthentication no` and Ledge's password sign-in are the same setting seen from two ends, and the order to do them in is: use a password to reach the machine, put your key on it, then turn passwords off. A box reachable from the internet should not be answering password attempts from it.
+
 On a Mac, the server needs Remote Login turned on in System Settings, under General then Sharing. Restrict it to specific users while you are there.
 
 ## What lives on the server
@@ -151,7 +172,7 @@ On a Mac, the server needs Remote Login turned on in System Settings, under Gene
 | Notes, images, and the trash | Theme, font sizes, and live preview |
 | Workspaces | Window size and position |
 | The vault and locked notes | The clipboard |
-| Profiles and their secrets | Which connections exist, and their pinned keys |
+| Profiles and their secrets | Which connections exist, their pinned keys, and any stored passwords |
 | Shells, running blocks, and scrollback | |
 | The shell, interpreter, and trash settings | |
 

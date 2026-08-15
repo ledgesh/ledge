@@ -314,6 +314,9 @@ interface StoredServer {
   /** Where sshd listens, or 0 for the default (shared/connections.ts). */
   port: number;
   hostKey: string;
+  /** Which door (remote.md §4). The password is never in the list: it goes to
+   * the phone's keychain by its own call, which `withServers` records below. */
+  auth: "key" | "password";
 }
 
 /**
@@ -326,10 +329,19 @@ interface StoredServer {
  * bun/connectionManager.ts rather than a second time in Swift.
  */
 function withServers(servers: StoredServer[], selected = servers[0]?.id ?? "") {
-  const state = { servers, selected };
+  // `passwords` is the phone's keychain, which no reply ever reads back: what
+  // a test can see is what was PUT there, which is the same thing the page can
+  // see (remote.md §4).
+  const state = { servers, selected, passwords: new Map<string, string>() };
   const probed: string[] = [];
   const o = overlay(async (m, p) => {
     if (m === "servers.list") return { servers: state.servers, selected: state.selected };
+    if (m === "servers.password") {
+      const { id, password } = p as { id: string; password: string | null };
+      if (password === null) state.passwords.delete(id);
+      else state.passwords.set(id, password);
+      return { ok: true };
+    }
     if (m === "servers.save") {
       const saved = p as { servers: StoredServer[]; selected: string };
       state.servers = saved.servers;
@@ -346,8 +358,8 @@ function withServers(servers: StoredServer[], selected = servers[0]?.id ?? "") {
   return { state, probed, o };
 }
 
-const VPS: StoredServer = { id: "s1", name: "VPS", destination: "ledge@vps", port: 0, hostKey: "ssh-ed25519 AAAAvps" };
-const PI: StoredServer = { id: "s2", name: "Pi", destination: "dev@pi.local", port: 0, hostKey: "ssh-ed25519 AAAApi" };
+const VPS: StoredServer = { id: "s1", name: "VPS", destination: "ledge@vps", port: 0, hostKey: "ssh-ed25519 AAAAvps", auth: "key" };
+const PI: StoredServer = { id: "s2", name: "Pi", destination: "dev@pi.local", port: 0, hostKey: "ssh-ed25519 AAAApi", auth: "key" };
 
 describe("the client overlay", () => {
   test("answers exactly the methods a server refuses", () => {
@@ -424,6 +436,8 @@ describe("the client overlay", () => {
       destination: "dev@pi.local",
       port: 0,
       keyPath: "",
+      auth: "key",
+      password: "",
       hostKey: "ssh-ed25519 AAAApi",
     });
     expect(error).toBe("");
@@ -438,10 +452,10 @@ describe("the client overlay", () => {
   test("what could not be an ssh destination never reaches the store", async () => {
     const { state, o } = withServers([VPS]);
     expect((await o.connectionAdd({ name: "X", destination: "-oProxyCommand=x", port: 0,
-      keyPath: "", hostKey: "" })).error)
+      keyPath: "", auth: "key", password: "", hostKey: "" })).error)
       .toContain("not an ssh destination");
     expect((await o.connectionAdd({ name: " ", destination: "dev@pi", port: 0,
-      keyPath: "", hostKey: "" })).error)
+      keyPath: "", auth: "key", password: "", hostKey: "" })).error)
       .toContain("name");
     expect(state.servers).toHaveLength(1);
   });
@@ -461,7 +475,7 @@ describe("the client overlay", () => {
   test("a rename keeps the pin and the address", async () => {
     const { state, o } = withServers([VPS]);
     expect(await o.connectionUpdate({ ...VPS, name: "Frankfurt", port: 0,
-      keyPath: "", hostKey: null })).toEqual({
+      keyPath: "", auth: "key", password: null, hostKey: null })).toEqual({
       ok: true,
       error: "",
     });
@@ -472,9 +486,88 @@ describe("the client overlay", () => {
   test("changing only the account keeps the pin", async () => {
     const { state, o } = withServers([VPS]);
     const res = await o.connectionUpdate({ ...VPS, destination: "dev@vps", port: 0,
-      keyPath: "", hostKey: null });
+      keyPath: "", auth: "key", password: null, hostKey: null });
     expect(res).toEqual({ ok: true, error: "" });
     expect(state.servers[0]).toMatchObject({ destination: "dev@vps", hostKey: VPS.hostKey });
+  });
+
+  // The password door (remote.md §4). The rules are this file's, beside the
+  // Mac's in bun/connectionStore.ts: there is one right answer to "may this be
+  // stored" and it should not be written twice in two languages.
+  test("a password goes to the keychain by its own call, and never into the list", async () => {
+    const { state, o } = withServers([VPS]);
+    const { id, error } = await o.connectionAdd({
+      name: "Pi",
+      destination: "dev@pi.local",
+      port: 0,
+      keyPath: "",
+      auth: "password",
+      password: "hunter2",
+      hostKey: "ssh-ed25519 AAAApi",
+    });
+    expect(error).toBe("");
+    expect(state.passwords.get(id)).toBe("hunter2");
+    // The record says which door and nothing more: the list is handed back to
+    // Swift on every rename, and a credential in it would cross the bridge
+    // every time.
+    expect(JSON.stringify(state.servers)).not.toContain("hunter2");
+    expect(state.servers.find((server) => server.id === id)).toMatchObject({ auth: "password" });
+  });
+
+  // askpass on a Mac and NIOSSH on a phone both take one line, so both refuse
+  // the same passwords.
+  test("a password neither client could deliver is refused", async () => {
+    const { state, o } = withServers([VPS]);
+    for (const password of ["", "two\nlines"]) {
+      const res = await o.connectionAdd({
+        name: "Pi",
+        destination: "dev@pi.local",
+        port: 0,
+        keyPath: "",
+        auth: "password",
+        password,
+        hostKey: "ssh-ed25519 AAAApi",
+      });
+      expect(res.id).toBe("");
+      expect(res.error).not.toBe("");
+    }
+    expect(state.servers).toHaveLength(1);
+    expect(state.passwords.size).toBe(0);
+  });
+
+  test("a rename keeps the stored password and sends nothing", async () => {
+    const { state, o } = withServers([{ ...VPS, auth: "password" }]);
+    state.passwords.set(VPS.id, "hunter2");
+    const res = await o.connectionUpdate({
+      ...VPS,
+      name: "Frankfurt",
+      port: 0,
+      keyPath: "",
+      auth: "password",
+      password: null,
+      hostKey: null,
+    });
+    expect(res).toEqual({ ok: true, error: "" });
+    expect(state.passwords.get(VPS.id)).toBe("hunter2");
+  });
+
+  test("moving onto the door with nothing stored is refused, and onto it with one is not", async () => {
+    const { state, o } = withServers([VPS]);
+    const fields = { ...VPS, port: 0, keyPath: "", auth: "password" as const, hostKey: null };
+    expect((await o.connectionUpdate({ ...fields, password: null })).error).toContain("no password stored");
+    expect(state.servers[0]!.auth).toBe("key");
+    expect(await o.connectionUpdate({ ...fields, password: "hunter2" })).toEqual({ ok: true, error: "" });
+    expect(state.servers[0]!.auth).toBe("password");
+    expect(state.passwords.get(VPS.id)).toBe("hunter2");
+  });
+
+  test("moving off the door forgets the password", async () => {
+    const { state, o } = withServers([{ ...VPS, auth: "password" }]);
+    state.passwords.set(VPS.id, "hunter2");
+    const res = await o.connectionUpdate({ ...VPS, port: 0, keyPath: "", auth: "key", password: null, hostKey: null });
+    expect(res).toEqual({ ok: true, error: "" });
+    expect(state.passwords.size).toBe(0);
+    expect(state.servers[0]!.auth).toBe("key");
   });
 
   // The pin here is a key and no hostname — there is no known_hosts file on a
@@ -484,7 +577,7 @@ describe("the client overlay", () => {
   test("an address that moved to another host has to be pinned again", async () => {
     const { state, o } = withServers([VPS]);
     const refused = await o.connectionUpdate({ ...VPS, destination: "ledge@other", port: 0,
-      keyPath: "", hostKey: null });
+      keyPath: "", auth: "key", password: null, hostKey: null });
     expect(refused.ok).toBe(false);
     expect(refused.error).toContain("another host");
     expect(state.servers[0]).toEqual(VPS);
@@ -494,6 +587,8 @@ describe("the client overlay", () => {
       destination: "ledge@other",
       port: 0,
       keyPath: "",
+      auth: "key",
+      password: null,
       hostKey: "ssh-ed25519 AAAAother",
     });
     expect(pinned).toEqual({ ok: true, error: "" });

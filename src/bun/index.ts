@@ -33,7 +33,8 @@ import { imageFromFile } from "./clipboard";
 import { clientIdFor, clientLabel, ephemeralClientId } from "./clientHome";
 import { createConnectionManager, type Attached, type ConnectionManager } from "./connectionManager";
 import { createConnectionStore } from "./connectionStore";
-import { KNOWN_HOSTS_PATH, LOCAL_ID, sshCommand, userKnownHosts, type Connection } from "./connections";
+import { KNOWN_HOSTS_PATH, LOCAL_ID, sshDial, userKnownHosts, type Connection } from "./connections";
+import { ASKPASS_PATH, ensureAskpass, hasPassword } from "./secrets";
 import { reconnectingClient } from "../shared/transport";
 import { spawnDuplex } from "./transport";
 import { BUILD_VERSION } from "../shared/version";
@@ -306,7 +307,25 @@ async function attachFor(win: Win, conn: Connection): Promise<Attached> {
     };
   }
 
-  const argv = sshCommand(conn, KNOWN_HOSTS_PATH, userKnownHosts());
+  if (conn.auth === "password") {
+    // Asked here rather than left to ssh. A missing item reaches the user as
+    // "Permission denied (password)", which sends them to check a password
+    // that is right on a server that is fine — the fault is on this Mac, and
+    // this is the only place that can say so.
+    if (!(await hasPassword(conn.id))) {
+      throw new Error(`no password is stored for ${conn.name} on this Mac. Edit the connection and enter it again`);
+    }
+    // Written here rather than at boot, because only a password connection
+    // needs it: a Mac that never uses one never grows the file, and a
+    // connection that starts using one cannot find a script an older version
+    // left behind.
+    await ensureAskpass();
+  }
+  const { argv, env } = sshDial(conn, {
+    knownHosts: KNOWN_HOSTS_PATH,
+    userKnownHosts: userKnownHosts(),
+    askpass: ASKPASS_PATH,
+  });
   // Reconnecting, because an ssh over a real network dies for reasons that
   // have nothing to do with either end: a laptop lid, a changed network, an
   // idle timeout on a middlebox. The dial is re-run each attempt, so a fresh
@@ -318,7 +337,10 @@ async function attachFor(win: Win, conn: Connection): Promise<Attached> {
   // that is already working and reports this one, so the throw is the whole
   // error handling: nothing here has to decide what to do about it.
   const wire = await reconnectingClient({
-    dial: () => spawnDuplex(argv),
+    // The environment goes with every rung of the ladder, not just the first:
+    // a reconnect is a fresh ssh, and it needs the same helper the first one
+    // was pointed at (bun/secrets.ts).
+    dial: () => spawnDuplex(argv, { env }),
     push: win.push,
     build,
     client,

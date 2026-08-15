@@ -8,8 +8,9 @@
 // §4 describes, the host-key pin, and a length-prefixed protocol surviving a
 // transport that was designed for terminals.
 //
-// It uses Ledge's OWN modules for everything it is testing: sshCommand builds
-// the argv, pickHostKey chooses what to pin, knownHostsText writes the file,
+// It uses Ledge's OWN modules for everything it is testing: sshDial builds the
+// argv and the environment, secrets.ts writes the keychain item and the askpass
+// helper, pickHostKey chooses what to pin, knownHostsText writes the file,
 // clientConnection speaks the protocol. A probe that hand-wrote an ssh command
 // line would prove that ssh works, which was never in doubt.
 //
@@ -32,7 +33,8 @@ const SCRATCH = await mkdtemp(join(tmpdir(), "ledge-ssh-probe-"));
 // (testing.md §6).
 process.env["LEDGE_NOTES_ROOT"] = join(SCRATCH, "home");
 
-const { sshCommand, pickHostKey, knownHostsText } = await import("../src/bun/connections");
+const { sshDial, pickHostKey, knownHostsText, PORT_UNSET } = await import("../src/bun/connections");
+const { ensureAskpass, forgetPassword, storePassword } = await import("../src/bun/secrets");
 type Connection = import("../src/bun/connections").Connection;
 const { clientConnection, reconnectingClient } = await import("../src/shared/transport");
 const { spawnDuplex } = await import("../src/bun/transport");
@@ -66,8 +68,17 @@ function run(cmd: string[], opts: { quiet?: boolean; env?: Record<string, string
   return { code: p.exitCode, out, err };
 }
 
+// The keychain items this run writes, swept even when a claim throws. The
+// login keychain is the one thing a probe touches that is not under SCRATCH
+// (testing.md §6), so it is cleaned unconditionally rather than at the end of
+// the step that made it.
+const secrets: string[] = [];
+
 async function teardown() {
-  run(["docker", "rm", "-f", NAME], { quiet: true });
+  for (const name of [NAME, `${NAME}-pw`, `${NAME}-kbd`, `${NAME}-plain`]) {
+    run(["docker", "rm", "-f", name], { quiet: true });
+  }
+  for (const id of secrets) await forgetPassword(id);
   await rm(SCRATCH, { recursive: true, force: true });
 }
 
@@ -136,7 +147,8 @@ const signalDaemon = (sig: "STOP" | "CONT") => {
 };
 
 try {
-  // Port 22 and not a high one: sshCommand takes a DESTINATION, and an ssh
+  // Port 22 and not a high one for the key fixture: it predates the port field
+  // and the [password] step below is what exercises a high one. An ssh
   // destination has no port in it (the same constraint testing.md §6 records
   // for `host:` shells). Loopback only, and gone at teardown — except under
   // --serve, where the whole point is a client that is not on this machine, so
@@ -289,7 +301,9 @@ try {
     // this wrong is a plain "Permission denied (publickey)", which is also
     // what a wrong key looks like — worth knowing before it happens to a user.
     destination: "ledge@127.0.0.1",
+    port: PORT_UNSET,
     keyPath,
+    auth: "key",
     hostKey,
     lastReached: 0,
   };
@@ -297,7 +311,8 @@ try {
   await writeFile(knownHosts, knownHostsText([conn]));
   // /dev/null for the user's own file: this probe has no business reading, and
   // certainly none writing, the developer's ~/.ssh/known_hosts.
-  const argv = sshCommand(conn, knownHosts, "/dev/null");
+  // No askpass: this connection is a key, and `sshDial` asks for none.
+  const { argv } = sshDial(conn, { knownHosts, userKnownHosts: "/dev/null", askpass: "" });
   console.log(`  ${argv.join(" ")}`);
 
   step("[forced command] the key cannot ask for anything else");
@@ -324,7 +339,7 @@ try {
   void other;
   const otherPub = (await readFile(join(SCRATCH, "other.pub"), "utf8")).trim().split(/\s+/);
   await writeFile(badPin, `${parts[0]} ${otherPub[0]} ${otherPub[1]}\n`);
-  const refused = run(sshCommand(conn, badPin, "/dev/null"), { quiet: true });
+  const refused = run(sshDial(conn, { knownHosts: badPin, userKnownHosts: "/dev/null", askpass: "" }).argv, { quiet: true });
   check("a wrong pin refuses the connection", refused.code !== 0, `exit ${refused.code}`);
   const said = refused.err.split("\n").find((l) => /host key|verification failed/i.test(l)) ?? "";
   check("and says why", said.length > 0, said.slice(0, 66));
@@ -919,6 +934,121 @@ try {
     `instance ${resumedHello.instance.slice(0, 8)}`,
   );
   resumed.close();
+
+  /**
+   * The password door, against sshd instances that take no keys at all
+   * (remote.md §4).
+   *
+   * This is the step the section was rewritten for. Everything else about the
+   * door is a string comparison in connections.test.ts, and one clause of §4
+   * was a string comparison that agreed with itself and was WRONG about
+   * OpenSSH: `BatchMode=yes` suppresses `SSH_ASKPASS` entirely, `force`
+   * included, so the helper is never spawned and no password is ever offered.
+   * The claim can only be settled here, so it is asserted here in both
+   * directions — the argv the app builds connects, and the same argv with
+   * BatchMode back on does not.
+   *
+   * Two sshd instances, because a password reaches OpenSSH by two different
+   * code paths and a great many real servers use the second one. Each container
+   * offers exactly one of them and no public key at all, so a connection that
+   * comes up has proved which method carried it rather than merely that
+   * something did.
+   *
+   * The password itself is realistic rather than convenient: shell-hostile
+   * ASCII for the helper, which is a `/bin/sh` script, and one non-ASCII
+   * character for the hex encoding `security` would otherwise mangle
+   * (bun/secrets.ts).
+   */
+  step("[password] the other door, against sshd instances that take no keys");
+  const PASSWORD = `pr0be "pass" $with 'quotes' und ümlaut`;
+  const WRONG = "not-the-password";
+  const right = `probe-password-${process.pid}`;
+  const wrong = `probe-wrong-${process.pid}`;
+  secrets.push(right, wrong);
+  // Straight into the real keychain, because that is the seam under test: the
+  // helper reads it with `security` and nothing in this process hands it over.
+  const storedRight = await storePassword(right, PASSWORD);
+  const storedWrong = await storePassword(wrong, WRONG);
+  check("a password with quotes, spaces and a non-ascii character round-trips the keychain", storedRight.ok && storedWrong.ok, storedRight.error || storedWrong.error);
+  const askpass = await ensureAskpass();
+  ok("the askpass helper was written", askpass);
+
+  for (const [method, port, suffix] of [
+    ["password", 22022, "pw"],
+    ["keyboard-interactive", 22023, "kbd"],
+  ] as const) {
+    const box = `${NAME}-${suffix}`;
+    run(["docker", "rm", "-f", box], { quiet: true });
+    run([
+      ...["docker", "run", "-d", "--name", box, "-p", `127.0.0.1:${port}:22`],
+      ...["-e", `LEDGE_PASSWORD=${PASSWORD}`, "-e", `LEDGE_AUTH=${method}`, FIXTURE],
+    ]);
+
+    // -p, because known_hosts indexes a non-default port as `[host]:port` and
+    // a pin taken on the wrong shape matches nothing at connect time
+    // (shared/connections.ts).
+    let scanned = "";
+    for (let i = 0; i < 40 && !pickHostKey(scanned); i++) {
+      await Bun.sleep(250);
+      scanned = run(["ssh-keyscan", "-T", "2", "-p", String(port), "127.0.0.1"], { quiet: true }).out;
+    }
+    const pinned = pickHostKey(scanned);
+    if (!pinned) throw new Error(`the ${method} fixture's sshd never answered ssh-keyscan on ${port}`);
+
+    const pwConn: Connection = {
+      id: right,
+      name: `Probe (${method})`,
+      destination: "ledge@127.0.0.1",
+      port,
+      keyPath: "",
+      auth: "password",
+      hostKey: pinned,
+      lastReached: 0,
+    };
+    const pwKnownHosts = join(SCRATCH, `known_hosts.${suffix}`);
+    await writeFile(pwKnownHosts, knownHostsText([pwConn]));
+    const dialed = sshDial(pwConn, { knownHosts: pwKnownHosts, userKnownHosts: "/dev/null", askpass });
+    console.log(`  ${method}: ${dialed.argv.join(" ")}`);
+
+    // The whole claim, in one handshake: askpass was spawned, it read the
+    // keychain, the password crossed, sshd took it, and the command the CLIENT
+    // asked for ran — there is no forced command on this door to run it for us
+    // (§4a).
+    const pwEars = ears();
+    const viaPassword = clientConnection(spawnDuplex(dialed.argv, { env: dialed.env }), {
+      push: pwEars.push,
+      build: BUILD_VERSION,
+      client: "probe-mac",
+    });
+    const pwHello = await viaPassword.ready;
+    ok(`the protocol comes up over ${method}`, `instance ${pwHello.instance.slice(0, 8)}`);
+    viaPassword.close();
+
+    // And the measurement that reversed §4. Same argv, same environment, one
+    // option back to what this document used to say was not negotiable.
+    const batched = dialed.argv.map((a) => (a === "BatchMode=no" ? "BatchMode=yes" : a));
+    const suppressed = run(batched, { quiet: true, env: dialed.env });
+    check(`BatchMode=yes blocks the helper on ${method}`, suppressed.code !== 0, `exit ${suppressed.code}`);
+    check(
+      "and blocks it by never running it, rather than by refusing the answer",
+      /permission denied|no supported authentication|authentication failed/i.test(suppressed.err),
+      suppressed.err.split("\n").find((l) => /denied|authentication/i.test(l))?.slice(0, 60) ?? suppressed.err.slice(0, 60),
+    );
+
+    // A wrong password fails, and fails once. Without NumberOfPasswordPrompts
+    // the helper is asked again for every attempt the server allows, which is
+    // the unbounded prompting BatchMode used to be doing.
+    const wrongDial = sshDial(
+      { ...pwConn, id: wrong },
+      { knownHosts: pwKnownHosts, userKnownHosts: "/dev/null", askpass },
+    );
+    const began = Date.now();
+    const rejected = run(wrongDial.argv, { quiet: true, env: wrongDial.env });
+    check(`a wrong password is refused on ${method}`, rejected.code !== 0, `exit ${rejected.code}`);
+    check("and is not retried until the server gives up", Date.now() - began < 10_000, `${Date.now() - began}ms`);
+
+    run(["docker", "rm", "-f", box], { quiet: true });
+  }
 
   step("[container] the other deployment: PID 1 is the daemon, docker exec is the pump");
   run(["docker", "rm", "-f", `${NAME}-plain`], { quiet: true });

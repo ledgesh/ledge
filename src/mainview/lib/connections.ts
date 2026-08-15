@@ -6,6 +6,7 @@
 // connection is added, removed, or switched to, and the indicator in the
 // chrome has to follow. It is a small mirror rather than store state because
 // nothing about the notes depends on it: it is the frame around them.
+import type { AuthMode } from "../../shared/connections";
 import type { ConnectionInfo, PeerInfo } from "../../shared/rpc-schema";
 
 export interface ConnectionStatus {
@@ -28,6 +29,10 @@ interface ConnectionHandlers {
     /** Where sshd listens, or 0 to let ssh decide (shared/connections.ts). */
     port: number;
     keyPath: string;
+    auth: AuthMode;
+    /** On its way to the keychain and nowhere else, and only when `auth` says
+     * password. It never comes back: nothing in this file can read one. */
+    password: string;
     hostKey: string;
   }) => Promise<{ id: string; error: string }>;
   update: (fields: {
@@ -36,6 +41,9 @@ interface ConnectionHandlers {
     destination: string;
     port: number;
     keyPath: string;
+    auth: AuthMode;
+    /** Null keeps whatever is stored, which is what a rename sends. */
+    password: string | null;
     /** Null keeps whatever is pinned; a line replaces it; "" pins nothing. */
     hostKey: string | null;
   }) => Promise<{ ok: boolean; error: string }>;
@@ -50,7 +58,9 @@ interface ConnectionHandlers {
 // failed to reach Bun still renders chrome that says something true — the app
 // it is drawing is running on this Mac either way.
 const ALONE: ConnectionStatus = {
-  connections: [{ id: "local", name: "This Mac", destination: "", port: 0, keyPath: "", pinned: false, lastReached: 0 }],
+  connections: [
+    { id: "local", name: "This Mac", destination: "", port: 0, keyPath: "", auth: "key", pinned: false, lastReached: 0 },
+  ],
   active: "local",
   wanted: "local",
   error: "",
@@ -177,6 +187,8 @@ export async function addConnection(fields: {
   destination: string;
   port: number;
   keyPath: string;
+  auth: AuthMode;
+  password: string;
   hostKey: string;
 }): Promise<{ id: string; error: string }> {
   if (!handlers) return { id: "", error: "Not connected to Ledge's own process." };
@@ -195,7 +207,16 @@ export async function addConnection(fields: {
  * why the caller says which kind of edit this was rather than this guessing.
  */
 export async function updateConnection(
-  fields: { id: string; name: string; destination: string; port: number; keyPath: string; hostKey: string | null },
+  fields: {
+    id: string;
+    name: string;
+    destination: string;
+    port: number;
+    keyPath: string;
+    auth: AuthMode;
+    password: string | null;
+    hostKey: string | null;
+  },
   opts: { reconnected: boolean; flush: () => Promise<void> },
 ): Promise<string | null> {
   if (!handlers) return "Not connected to Ledge's own process.";

@@ -158,14 +158,25 @@ asks a transport to do.
 Every flag in it becomes a question about who enforces the thing it asked
 for:
 
-| `sshCommand` | Enforced on the Mac by | On iOS |
-| ------------ | ---------------------- | ------ |
+| `sshDial` | Enforced on the Mac by | On iOS |
+| --------- | ---------------------- | ------ |
 | `command="ledge-server serve"` | the server's sshd | the server's sshd, unchanged |
 | `StrictHostKeyChecking=yes` | OpenSSH | the app's host-key delegate |
 | `UserKnownHostsFile` | OpenSSH | the app's own store |
 | `GlobalKnownHostsFile=/dev/null` | OpenSSH | nothing to exclude |
 | `BatchMode=yes` | OpenSSH | no prompt exists to suppress |
+| `SSH_ASKPASS` and the password door | OpenSSH, from the keychain | `PasswordAuth`, from the keychain |
+| `PreferredAuthentications=password,keyboard-interactive` | OpenSSH | only the first of the two exists here |
 | no `-t` | OpenSSH | no pty is requested |
+
+**The second-to-last row is a real gap and not a translation.** NIOSSH offers
+`password` and public keys and has no keyboard-interactive at all, so a server
+configured to answer with that alone refuses this client while the same account
+works from a Mac, which names both methods because askpass serves both
+(remote.md §4). Nothing in `ios/` can close it without implementing the method
+against NIOSSH's user-auth delegate. It reaches the user as "refused that
+password", with the second half of that sentence saying the server may not allow
+one at all: from here the two are indistinguishable.
 
 The first row is the one that matters and it is the row that does not move.
 remote.md §4's restriction lives in the server's `authorized_keys`, so it is
@@ -278,6 +289,27 @@ call into the enclave, gated by the device passcode or biometrics.
 That gives a property the Mac client does not have. A lost phone hands over
 no key material at all, because there is none to hand over, and revoking it
 is deleting one line from `authorized_keys` on the server.
+
+**A password is the other door here too, and it is where the two clients'
+keychains genuinely differ.** `ServerPassword` stores one item per server with
+`SecItem` and no access group, so it belongs to this app alone and no other app
+on the phone can ask for it. A Mac's item is reached through `/usr/bin/security`
+and is readable by anything running as that user (remote.md §4), which is the
+price of keeping the item's ACL off a code signature that changes when the app
+is re-signed. iOS has no such problem: the owner is the application identifier
+and that does not move.
+
+`WhenUnlockedThisDeviceOnly` like the key, for the key's reasons. It is read at
+dial time and held for the length of the handshake, so a stored password is not
+sitting in the process between connections, and it is passed INTO `SSHTransport`
+rather than looked up there: the pairing screen dials a record that does not
+exist yet and so has no id to look one up by.
+
+The list is the page's and the keychain is Swift's, which leaves a way for the
+two to disagree. `ServerStore.save` sweeps every item whose record has gone,
+rather than deleting one by id at each call site: a record can leave that list by
+being removed, by failing to decode, or by an install being restored over
+another, and only the survivors are knowable from here.
 
 **The enclave is not gated per signature, and that is deliberate.** CryptoKit's
 default access control for an enclave key is "this device, while unlocked",

@@ -20,8 +20,9 @@ import { readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { isHostName } from "../shared/frontmatter";
-import { hostPart, isPort, LOCAL_ID, PORT_UNSET } from "../shared/connections";
+import { hostPart, isPort, LOCAL_ID, parseAuth, PORT_UNSET, type AuthMode } from "../shared/connections";
 import { CLIENT_HOME, ensureClientHome } from "./clientHome";
+import { ASKPASS_ACCOUNT_ENV } from "./secrets";
 
 // The half of a connection that is a fact about ssh rather than about this
 // machine's files, re-exported so that "what a connection is" still has one
@@ -32,11 +33,14 @@ export {
   hostPart,
   knownHostsHost,
   LOCAL_ID,
+  parseAuth,
   parsePort,
   pinFitsHost,
   pinnedHost,
   PORT_UNSET,
   validateConnection,
+  validatePassword,
+  type AuthMode,
 } from "../shared/connections";
 
 export const CONNECTIONS_PATH = join(CLIENT_HOME, "connections.json");
@@ -63,8 +67,13 @@ export interface Connection {
   /** Where sshd listens, or PORT_UNSET to let ssh decide — which is what keeps
    * a `~/.ssh/config` alias's own `Port` working (shared/connections.ts). */
   port: number;
-  /** A private key to offer, or "" to let ssh's own configuration decide. */
+  /** A private key to offer, or "" to let ssh's own configuration decide.
+   * Always "" when `auth` is "password", where no key is offered at all. */
   keyPath: string;
+  /** Which door this connection goes through (shared/connections.ts). The
+   * password itself is never here: it is in the keychain, and only the askpass
+   * helper reads it (bun/secrets.ts). */
+  auth: AuthMode;
   /** The known_hosts line pinned when this connection was added, or "" when
    * the host was already trusted by the user's own ssh. Either way ssh refuses
    * a changed key; the difference is only whose file recorded it. */
@@ -79,6 +88,7 @@ export const LOCAL_CONNECTION: Connection = Object.freeze({
   destination: "",
   port: PORT_UNSET,
   keyPath: "",
+  auth: "key",
   hostKey: "",
   lastReached: 0,
 });
@@ -132,6 +142,9 @@ function parseConnection(raw: unknown): Connection | null {
     // before this field existed already opens.
     port: typeof port === "number" && isPort(port) ? port : PORT_UNSET,
     keyPath: str(raw["keyPath"]),
+    // Anything that is not the password door is the key door, which is where
+    // every record written before this field existed already opens.
+    auth: parseAuth(raw["auth"]),
     hostKey: str(raw["hostKey"]),
     lastReached: typeof raw["lastReached"] === "number" && raw["lastReached"] > 0 ? raw["lastReached"] : 0,
   };
@@ -173,17 +186,21 @@ const ALIVE_COUNT = 3;
 const CONNECT_TIMEOUT_S = 10;
 
 /**
- * The argv that starts a server on the other machine.
+ * How to start a server on the other machine: the argv, and the environment
+ * that argv needs.
  *
- * The four options are the whole security posture of the transport, and none
- * of them is a default worth inheriting:
+ * Both together because the password door is half of each, and a caller that
+ * built the argv and forgot the environment would produce an ssh that asks a
+ * helper that is not there.
  *
- * - `BatchMode=yes` because this ssh has no terminal. Its stdout IS the
- *   protocol, so a passphrase or a "continue?" prompt would either hang the
- *   connection forever or write a question mark into a frame header.
+ * These options are the whole security posture of the transport, and none of
+ * them is a default worth inheriting:
+ *
  * - `StrictHostKeyChecking=yes` because the alternative is the blind accept
  *   remote.md §4 rules out. An unknown host is refused, a changed one is
- *   refused, and neither is remembered.
+ *   refused, and neither is remembered. It is also what makes the password
+ *   door affordable below: it refuses OUTRIGHT rather than asking, so there is
+ *   no host-key question left for `BatchMode` to have to suppress.
  * - Ledge's own known_hosts FIRST, then the user's. What Ledge pinned lives in
  *   a file that can be inspected and revoked on its own; what the user already
  *   trusts keeps working, because their known_hosts entry is a pin too and
@@ -198,8 +215,36 @@ const CONNECT_TIMEOUT_S = 10;
  *
  * No `-t`. A remote pty would translate newlines in the byte stream, which is
  * fine for a shell and fatal for a length-prefixed protocol.
+ *
+ * **The two doors differ from here down.**
+ *
+ * A key or agent connection keeps `BatchMode=yes`: this ssh has no terminal,
+ * its stdout IS the protocol, and a passphrase prompt would either hang the
+ * connection forever or write a question mark into a frame header.
+ *
+ * A password connection cannot. `BatchMode=yes` suppresses `SSH_ASKPASS`
+ * entirely, `SSH_ASKPASS_REQUIRE=force` included, so the helper is never
+ * spawned and the connection fails without a password ever being offered
+ * (measured; remote.md §4). What `BatchMode` was buying is bought by narrower
+ * options instead, which is what makes turning it off affordable:
+ *
+ * - The host-key question is already refused rather than asked, above.
+ * - `NumberOfPasswordPrompts=1` bounds the retries, which is the other half of
+ *   what a batch mode is for. It covers keyboard-interactive as well as
+ *   password, because ssh counts both attempts against it.
+ * - Nothing can eat stdin. The helper answers on its own descriptors, and the
+ *   protocol's bytes pass through untouched.
+ *
+ * `PubkeyAuthentication=no` so that a running agent does not spend the
+ * server's `MaxAuthTries` offering keys before a password is tried, and
+ * `PreferredAuthentications` naming both interactive methods because a great
+ * many sshd configurations answer with keyboard-interactive where this one
+ * would say password.
  */
-export function sshCommand(conn: Connection, knownHosts: string, userKnownHosts: string): string[] {
+export function sshDial(
+  conn: Connection,
+  files: { knownHosts: string; userKnownHosts: string; askpass: string },
+): { argv: string[]; env: Record<string, string> } {
   const argv = [
     SSH_PATH,
     "-o",
@@ -209,11 +254,9 @@ export function sshCommand(conn: Connection, knownHosts: string, userKnownHosts:
     "-o",
     `ConnectTimeout=${CONNECT_TIMEOUT_S}`,
     "-o",
-    "BatchMode=yes",
-    "-o",
     "StrictHostKeyChecking=yes",
     "-o",
-    `UserKnownHostsFile=${knownHosts} ${userKnownHosts}`,
+    `UserKnownHostsFile=${files.knownHosts} ${files.userKnownHosts}`,
     "-o",
     "GlobalKnownHostsFile=/dev/null",
   ];
@@ -221,14 +264,38 @@ export function sshCommand(conn: Connection, knownHosts: string, userKnownHosts:
   // configuration, which is what lets a `~/.ssh/config` alias carry its own
   // `Port` (shared/connections.ts PORT_UNSET).
   if (conn.port !== PORT_UNSET) argv.push("-p", String(conn.port));
-  if (conn.keyPath) {
-    // IdentitiesOnly with it: without that, ssh offers every key the agent
-    // holds before the one that was named, which on a server with
-    // MaxAuthTries can fail before it ever gets to the right one.
-    argv.push("-i", conn.keyPath, "-o", "IdentitiesOnly=yes");
+
+  const env: Record<string, string> = {};
+  if (conn.auth === "password") {
+    argv.push(
+      "-o",
+      "BatchMode=no",
+      "-o",
+      "NumberOfPasswordPrompts=1",
+      "-o",
+      "PubkeyAuthentication=no",
+      "-o",
+      "PreferredAuthentications=password,keyboard-interactive",
+    );
+    // `force` rather than a bare SSH_ASKPASS, which OpenSSH would ignore
+    // without a DISPLAY set. The account is a connection id and not a secret;
+    // what it names is read by the helper and never by this process
+    // (bun/secrets.ts).
+    env["SSH_ASKPASS"] = files.askpass;
+    env["SSH_ASKPASS_REQUIRE"] = "force";
+    env[ASKPASS_ACCOUNT_ENV] = conn.id;
+  } else {
+    argv.push("-o", "BatchMode=yes");
+    if (conn.keyPath) {
+      // IdentitiesOnly with it: without that, ssh offers every key the agent
+      // holds before the one that was named, which on a server with
+      // MaxAuthTries can fail before it ever gets to the right one.
+      argv.push("-i", conn.keyPath, "-o", "IdentitiesOnly=yes");
+    }
   }
+
   argv.push(conn.destination, "ledge-server", "serve");
-  return argv;
+  return { argv, env };
 }
 
 /** Ledge's known_hosts: the pinned lines, one per connection that has one. */

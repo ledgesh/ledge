@@ -164,6 +164,13 @@ the clipboard):
    seed it with throwaway notes. A probe must never run against the real
    `~/.ledge`. Anything touching profiles sets `LEDGE_PROFILES_DIR` the same
    way — a probe must never read or seed `~/.config/ledge/profiles` either.
+   **The login keychain is the exception that cannot be redirected.** It has no
+   environment variable and `security` writes to the default keychain or to
+   nothing, so a probe that exercises the password door (remote.md §4) writes a
+   real item there. Two rules make that safe: the ACCOUNT is a per-run scratch
+   id that no real connection could wear, and the sweep runs in a `finally`
+   rather than at the end of the step, so a claim that throws still takes its
+   items with it. `scripts/probe-ssh.ts` is the worked example.
 2. **Temp probe in `main.tsx`**: a self-contained block that waits for boot,
    drives the app with synthetic events, and reports via the `clipboardWrite`
    RPC as one `PROBE: key=value ...` line behind a unique sentinel.

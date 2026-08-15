@@ -18,7 +18,8 @@ import { instantiateTemplate, isoDateOf } from "../shared/template";
 import { collectHits, type SearchHit } from "../shared/search";
 import { resolveWikiTitle, wikiRefsOf } from "../shared/wikilinks";
 import { normalizeTag, tagDirectoryOf, tagRefsOf, type TagInfo } from "../shared/tags";
-import { knownHostsHost } from "../shared/connections";
+import { knownHostsHost, validatePassword } from "../shared/connections";
+import type { ConnectionInfo } from "../shared/rpc-schema";
 import { configureBridge, dispatchRunEvent, reconcileRuns } from "./editor/bridge";
 import { sendRunKey } from "./editor/inlineTerm";
 import { barFaceOf, type BarFace } from "./lib/nativeBridge";
@@ -907,23 +908,38 @@ configureSettings(
 // A phone's list has no local row and cannot have one — there is no server in
 // that process to fall back to (remote.md §8) — and that absence is the whole
 // reason its remove rule differs, so the fake has to have it too.
-let connections = FAKING_IOS
+let connections: ConnectionInfo[] = FAKING_IOS
   ? [
-      { id: "vps-1", name: "VPS", destination: "ledge@vps", port: 0, keyPath: "", pinned: true, lastReached: 0 },
-      { id: "pi-1", name: "Pi", destination: "dev@pi.local", port: 0, keyPath: "", pinned: true, lastReached: 0 },
+      { id: "vps-1", name: "VPS", destination: "ledge@vps", port: 0, keyPath: "", auth: "key", pinned: true, lastReached: 0 },
+      {
+        id: "pi-1",
+        name: "Pi",
+        destination: "dev@pi.local",
+        port: 0,
+        keyPath: "",
+        // One row already on the password door, so a spec can drive the edit
+        // case where the field may be left blank (ConnectionPicker.tsx).
+        auth: "password",
+        pinned: true,
+        lastReached: 0,
+      },
     ]
   : [
-      { id: "local", name: "This Mac", destination: "", port: 0, keyPath: "", pinned: false, lastReached: 0 },
+      { id: "local", name: "This Mac", destination: "", port: 0, keyPath: "", auth: "key", pinned: false, lastReached: 0 },
       {
         id: "vps-1",
         name: "VPS",
         destination: "ledge@vps",
         port: 0,
         keyPath: "",
+        auth: "key",
         pinned: true,
         lastReached: 1_700_000_000_000,
       },
     ];
+// What the fake keychain was told, so a spec can assert that a password reached
+// the shell and that a rename did not send one (remote.md §4).
+const passwords = new Map<string, string>();
 let activeConn = FAKING_IOS ? "vps-1" : "local";
 // Destinations the fake server refuses, so a spec can drive the refusal path.
 const unreachable = FAKING_IOS ? new Set<string>() : new Set(["ledge@vps"]);
@@ -938,20 +954,37 @@ configureConnections(
       activeConn = id;
       return { ok: true, error: "" };
     },
-    add: async ({ name, destination, port, hostKey }) => {
+    add: async ({ name, destination, port, auth, password, hostKey }) => {
+      const refusal = auth === "password" ? validatePassword(password) : null;
+      if (refusal) return { id: "", error: refusal };
       const id = `conn-${connections.length}`;
-      connections = [...connections, { id, name, destination, port, keyPath: "", pinned: hostKey !== "", lastReached: 0 }];
+      if (auth === "password") passwords.set(id, password);
+      connections = [
+        ...connections,
+        { id, name, destination, port, keyPath: "", auth, pinned: hostKey !== "", lastReached: 0 },
+      ];
       return { id, error: "" };
     },
-    update: async ({ id, name, destination, port, keyPath, hostKey }) => {
+    update: async ({ id, name, destination, port, keyPath, auth, password, hostKey }) => {
       const before = connections.find((c) => c.id === id);
       if (!before) return { ok: false, error: "There is no such connection." };
       if (id === "local") return { ok: false, error: "This Mac is not a connection you can edit." };
+      if (auth === "password" && password === null && before.auth !== "password") {
+        return { ok: false, error: "That connection has no password stored. Enter one." };
+      }
+      if (auth === "password" && password !== null) {
+        const refusal = validatePassword(password);
+        if (refusal) return { ok: false, error: refusal };
+      }
       if (unreachable.has(destination) && id === activeConn) {
         return { ok: false, error: `Could not reach ${name}: host is down` };
       }
+      if (auth === "key") passwords.delete(id);
+      else if (password !== null) passwords.set(id, password);
       connections = connections.map((c) =>
-        c.id === id ? { ...c, name, destination, port, keyPath, pinned: hostKey === null ? c.pinned : hostKey !== "" } : c,
+        c.id === id
+          ? { ...c, name, destination, port, keyPath, auth, pinned: hostKey === null ? c.pinned : hostKey !== "" }
+          : c,
       );
       return { ok: true, error: "" };
     },
@@ -964,6 +997,7 @@ configureConnections(
         return { ok: false, error: FAKING_IOS ? "Switch to another server before removing this one." : "Switch somewhere else before removing this connection." };
       }
       connections = connections.filter((c) => c.id !== id);
+      passwords.delete(id);
       return { ok: true, error: "" };
     },
     // The pinned line carries the port the way keyscan's does, so a spec can

@@ -32,9 +32,18 @@ struct ServerRecord: Codable, Equatable {
     /// different key, which is a record that needs pairing again rather than
     /// one that can be dialled.
     var hostKey: String
+    /// Which door this server is reached through: "password", or anything else
+    /// for the device key (shared/connections.ts `AuthMode`). A string rather
+    /// than an enum because that is what self-healing wants — a value this
+    /// build does not recognise is the key door, which is where every record
+    /// written before this field existed already opens.
+    var auth: String = "key"
 
     var user: String { String(destination.prefix(while: { $0 != "@" })) }
     var host: String { String(destination.drop(while: { $0 != "@" }).dropFirst()) }
+    /// The password is never in this record. It is in the keychain under the
+    /// id, and only `ServerPassword` reads it.
+    var usesPassword: Bool { auth == "password" }
 
     /// What a user typed, refused with a reason or accepted.
     ///
@@ -68,14 +77,16 @@ struct ServerRecord: Codable, Equatable {
         // is, which is where it has always dialled.
         port = try fields.decodeIfPresent(Int.self, forKey: .port) ?? 0
         hostKey = try fields.decodeIfPresent(String.self, forKey: .hostKey) ?? ""
+        auth = try fields.decodeIfPresent(String.self, forKey: .auth) ?? "key"
     }
 
-    init(id: String = "", name: String = "", destination: String, port: Int = 0, hostKey: String) {
+    init(id: String = "", name: String = "", destination: String, port: Int = 0, hostKey: String, auth: String = "key") {
         self.id = id
         self.name = name
         self.destination = destination
         self.port = port
         self.hostKey = hostKey
+        self.auth = auth
     }
 }
 
@@ -163,6 +174,11 @@ enum ServerStore {
         let stored = Stored(version: 1, selected: selected, servers: servers)
         guard let data = try? JSONEncoder().encode(stored), let text = String(data: data, encoding: .utf8) else { return }
         UserDefaults.standard.set(text, forKey: listKey)
+        // A record that has left the list takes its password with it, the way a
+        // removed connection takes its pin on a Mac (bun/connectionStore.ts).
+        // Here rather than at the remove call site because a record can leave
+        // this list in more ways than one, and only what survived is knowable.
+        ServerPassword.keepOnly(servers.map(\.id))
     }
 
     /// Add a freshly pinned server, or re-pin the one already at that address.
@@ -172,14 +188,18 @@ enum ServerStore {
     /// changed under a record that still exists. Matching on the address keeps
     /// that record's name and id rather than leaving a duplicate beside it.
     @discardableResult
-    static func pair(destination: String, port: Int, hostKey: String) -> ServerRecord {
+    static func pair(destination: String, port: Int, hostKey: String, auth: String = "key", password: String = "") -> ServerRecord {
         var stored = load()
         // By address AND port, because that pair is what a host key belongs to:
         // two sshd instances on one machine really can offer different keys
         // (shared/connections.ts).
         if let at = stored.servers.firstIndex(where: { $0.destination == destination && $0.port == port }) {
             stored.servers[at].hostKey = hostKey
+            stored.servers[at].auth = auth
             stored.selected = stored.servers[at].id
+            // The credential before the record, so a list that has been saved
+            // never names a password door with nothing behind it.
+            if auth == "password" { ServerPassword.write(stored.servers[at].id, password) }
             save(servers: stored.servers, selected: stored.selected)
             return stored.servers[at]
         }
@@ -192,8 +212,10 @@ enum ServerStore {
             name: host.isEmpty ? destination : host,
             destination: destination,
             port: port,
-            hostKey: hostKey
+            hostKey: hostKey,
+            auth: auth
         )
+        if auth == "password" { ServerPassword.write(record.id, password) }
         stored.servers.append(record)
         save(servers: stored.servers, selected: record.id)
         return record

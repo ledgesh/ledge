@@ -24,9 +24,20 @@ final class PairingViewController: UIViewController {
     private let keyBox = UITextView()
     private let field = UITextField()
     private let portField = UITextField()
+    private let authPicker = UISegmentedControl(items: ["A key", "A password"])
+    private let passwordField = UITextField()
+    private let keyStep = UILabel()
+    private let copy = UIButton(type: .system)
+    private let passwordNote = UILabel()
     private let connect = UIButton(type: .system)
     private let status = UILabel()
     private let spinner = UIActivityIndicatorView(style: .medium)
+
+    /// Which door the form is currently offering. The key is the default
+    /// because it is the one this app can set up by itself: the enclave key
+    /// already exists by the time this screen is drawn, and the password door
+    /// needs a server that has been configured to allow one.
+    private var byPassword: Bool { authPicker.selectedSegmentIndex == 1 }
 
     private var held: DeviceKey.Held?
     private var dialing: SSHTransport?
@@ -99,9 +110,29 @@ final class PairingViewController: UIViewController {
         keyBox.layer.cornerRadius = 8
         keyBox.textContainerInset = UIEdgeInsets(top: 10, left: 8, bottom: 10, right: 8)
 
-        let copy = UIButton(type: .system)
         copy.setTitle("Copy line", for: .normal)
         copy.addTarget(self, action: #selector(copyLine), for: .touchUpInside)
+
+        authPicker.selectedSegmentIndex = 0
+        authPicker.addTarget(self, action: #selector(authChanged), for: .valueChanged)
+
+        passwordField.placeholder = "Password for that account"
+        passwordField.borderStyle = .roundedRect
+        passwordField.isSecureTextEntry = true
+        passwordField.autocapitalizationType = .none
+        passwordField.autocorrectionType = .no
+        passwordField.spellCheckingType = .no
+        // Off rather than .password: this field is a credential for somebody
+        // else's machine, and the strong-password and saved-logins flows both
+        // offer the wrong secret from a convincing list.
+        passwordField.textContentType = .none
+        passwordField.returnKeyType = .go
+        passwordField.delegate = self
+
+        passwordNote.text = "Kept in this device's keychain, where only Ledge can read it."
+        passwordNote.font = .preferredFont(forTextStyle: .footnote)
+        passwordNote.textColor = .secondaryLabel
+        passwordNote.numberOfLines = 0
 
         field.placeholder = "user@host"
         field.borderStyle = .roundedRect
@@ -133,19 +164,32 @@ final class PairingViewController: UIViewController {
         status.textColor = .secondaryLabel
         status.numberOfLines = 0
 
+        // Says what the restriction is good for rather than claiming the key is
+        // harmless: it narrows ssh's feature set around the protocol, and the
+        // protocol behind the forced command runs code by design (remote.md
+        // §4a).
+        keyStep.text =
+            "2. Add this line to ~/.ssh/authorized_keys on the server. It stops that key forwarding ports, copying files, or opening a shell."
+        keyStep.font = .preferredFont(forTextStyle: .body)
+        keyStep.adjustsFontForContentSizeCategory = true
+        keyStep.numberOfLines = 0
+
+        // The machine first and the credential second, which is the order the
+        // Mac's form asks in and the order the sentences read in: "the password
+        // for that account" needs the account to have been named.
         for view in [
             title, reason,
-            // Says what the restriction is good for rather than claiming the key
-            // is harmless: it narrows ssh's feature set around the protocol, and
-            // the protocol behind the forced command runs code by design
-            // (remote.md §4a).
-            step("1. Add this line to ~/.ssh/authorized_keys on the server. It stops that key forwarding ports, copying files, or opening a shell."),
-            keyBox, copy,
-            step("2. Then say which machine, and which account on it."),
-            field, portField, connect, spinner, status,
+            step("1. Which machine, and which account on it."),
+            field, portField,
+            step("Sign in with"),
+            authPicker,
+            keyStep, keyBox, copy,
+            passwordField, passwordNote,
+            connect, spinner, status,
         ] {
             stack.addArrangedSubview(view)
         }
+        showAuthFields()
 
         scroll.addSubview(stack)
         view.addSubview(scroll)
@@ -185,6 +229,19 @@ final class PairingViewController: UIViewController {
         say("Copied. Paste it on the server, then connect.")
     }
 
+    @objc private func authChanged() {
+        say("")
+        showAuthFields()
+    }
+
+    /// One door's fields at a time. Hidden rather than removed, because a
+    /// stack view collapses a hidden arranged subview and this way the order
+    /// is declared once, above.
+    private func showAuthFields() {
+        for view in [keyStep, keyBox, copy] { view.isHidden = byPassword }
+        for view in [passwordField, passwordNote] { view.isHidden = !byPassword }
+    }
+
     // --- the dial -------------------------------------------------------------
 
     @objc private func start() {
@@ -197,6 +254,10 @@ final class PairingViewController: UIViewController {
         let port = typed.isEmpty ? 0 : Int(typed) ?? -1
         if port < 0 || port > 65535 { return say("A port is a whole number from 1 to 65535.") }
         guard let key = held else { return }
+        // Empty here rather than at the far end: a blank password reaches a
+        // server as a refusal, and the refusal it makes is about the server.
+        let password = byPassword ? (passwordField.text ?? "") : nil
+        if let password, password.isEmpty { return say("Enter the password for that account.") }
 
         busy(true)
         say("Connecting to \(destination)…")
@@ -212,6 +273,7 @@ final class PairingViewController: UIViewController {
             server: candidate,
             key: key,
             hostKey: confirming,
+            password: password,
             log: { print("[pair] \($0)") }
         )
         dialing = transport
@@ -235,7 +297,13 @@ final class PairingViewController: UIViewController {
                         // changed re-pins the record that is already there
                         // rather than leaving a duplicate beside it.
                         self.onPaired(
-                            ServerStore.pair(destination: destination, port: port, hostKey: accepted.openSSHLine)
+                            ServerStore.pair(
+                                destination: destination,
+                                port: port,
+                                hostKey: accepted.openSSHLine,
+                                auth: password == nil ? "key" : "password",
+                                password: password ?? ""
+                            )
                         )
                     }
                 }
@@ -265,6 +333,8 @@ final class PairingViewController: UIViewController {
     private func busy(_ on: Bool) {
         connect.isEnabled = !on
         field.isEnabled = !on
+        passwordField.isEnabled = !on
+        authPicker.isEnabled = !on
         on ? spinner.startAnimating() : spinner.stopAnimating()
     }
 }

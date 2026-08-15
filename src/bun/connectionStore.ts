@@ -19,9 +19,12 @@ import {
   probeHostKey,
   saveConnections,
   validateConnection,
+  validatePassword,
+  type AuthMode,
   type Connection,
 } from "./connections";
 import { forgetClientId } from "./clientHome";
+import { forgetPassword, hasPassword, storePassword, swapPassword as swapStoredPassword } from "./secrets";
 import type { ConnectionInfo } from "../shared/rpc-schema";
 
 export interface ConnectionStore {
@@ -45,6 +48,10 @@ export interface ConnectionStore {
     destination: string;
     port: number;
     keyPath: string;
+    auth: AuthMode;
+    /** The plaintext, on its way to the keychain and nowhere else. Ignored
+     * unless `auth` is "password". */
+    password: string;
     hostKey: string;
   }): Promise<{ id: string; error: string }>;
   /**
@@ -62,8 +69,28 @@ export interface ConnectionStore {
     destination: string;
     port: number;
     keyPath: string;
+    auth: AuthMode;
+    /** Null keeps the stored password, a string replaces it. Refused as null
+     * when the connection is switching to the password door and has none. */
+    password: string | null;
     hostKey: string | null;
-  }): { conn: Connection | null; error: string };
+  }): Promise<{ conn: Connection | null; error: string }>;
+  /**
+   * Put the credential where the next dial will look for it, and hand back the
+   * way to put it back.
+   *
+   * The caller re-opens the wire between the two, so this cannot be folded into
+   * `write`: the dial is what PROVES a password, and proving it means the new
+   * one has to be in the keychain before ssh runs. A dial that then fails must
+   * leave the connection exactly as it was, which is what `restore` is for.
+   *
+   * Reading the old password back to be able to restore it is the one place in
+   * the app that reads a stored password into memory. It is the user's own
+   * secret, in the user's own process, for as long as one ssh takes to fail,
+   * and the alternative is an edit that mistypes a password and destroys the
+   * working one on its way to reporting the failure.
+   */
+  swapPassword(id: string, auth: AuthMode, password: string | null): Promise<{ error: string; restore: () => Promise<void> }>;
   /** Store an edit that `reviewUpdate` passed and the caller has committed to. */
   write(conn: Connection): Promise<void>;
   remove(id: string): Promise<{ ok: boolean; error: string }>;
@@ -79,6 +106,29 @@ export interface ConnectionStore {
   inUse(): Iterable<string>;
 }
 
+/**
+ * The keychain, as four functions (bun/secrets.ts).
+ *
+ * A seam rather than a direct import so that a test suite can exercise the
+ * password door without writing to the login keychain hundreds of times a day.
+ * The real thing is a native seam and is proved by the live probe (testing.md
+ * §6); what is worth testing here is the ORDER — which of the write, the dial
+ * and the record happens first, and what is put back when one of them fails.
+ */
+export interface Secrets {
+  store(id: string, password: string): Promise<{ ok: boolean; error: string }>;
+  has(id: string): Promise<boolean>;
+  forget(id: string): Promise<void>;
+  swap(id: string, next: string | null): Promise<{ error: string; restore: () => Promise<void> }>;
+}
+
+const REAL_SECRETS: Secrets = {
+  store: storePassword,
+  has: hasPassword,
+  forget: forgetPassword,
+  swap: swapStoredPassword,
+};
+
 export function connectionInfo(c: Connection): ConnectionInfo {
   return {
     id: c.id,
@@ -86,6 +136,7 @@ export function connectionInfo(c: Connection): ConnectionInfo {
     destination: c.destination,
     port: c.port,
     keyPath: c.keyPath,
+    auth: c.auth,
     pinned: c.hostKey !== "",
     lastReached: c.lastReached,
   };
@@ -96,9 +147,12 @@ export async function createConnectionStore(deps: {
   /** Defaults to nothing in use, which is what every test and the first moment
    * of boot both want. */
   inUse?: () => Iterable<string>;
+  /** Defaults to the real keychain. */
+  secrets?: Secrets;
 } = {}): Promise<ConnectionStore> {
   const now = deps.now ?? (() => Date.now());
   const inUse = deps.inUse ?? (() => []);
+  const secrets = deps.secrets ?? REAL_SECRETS;
   const loaded = await loadConnections();
   let connections = loaded.connections;
   // Loaded once and written back unchanged. The window list is the authority on
@@ -128,29 +182,56 @@ export async function createConnectionStore(deps: {
       await persist();
     },
 
-    add: async ({ name, destination, port, keyPath, hostKey }) => {
+    add: async ({ name, destination, port, keyPath, auth, password, hostKey }) => {
       const refusal = validateConnection({ name, destination, keyPath, port });
       if (refusal) return { id: "", error: refusal };
+      if (auth === "password") {
+        const unusable = validatePassword(password);
+        if (unusable) return { id: "", error: unusable };
+      }
       const conn: Connection = {
         id: crypto.randomUUID(),
         name: name.trim(),
         destination: destination.trim(),
         port,
-        keyPath: keyPath.trim(),
+        // No key is offered on the password door (`PubkeyAuthentication=no`),
+        // so a path left behind in the form is dropped rather than stored as a
+        // field with no effect that a later reader would have to explain.
+        keyPath: auth === "password" ? "" : keyPath.trim(),
+        auth,
         hostKey: hostKey.trim(),
         lastReached: 0,
       };
+      // The secret first: a record naming a password door that has no password
+      // behind it is a connection that can only fail, and it would fail with
+      // ssh's words rather than with the keychain's.
+      if (auth === "password") {
+        const stored = await secrets.store(conn.id, password);
+        if (!stored.ok) return { id: "", error: stored.error };
+      }
       connections = [...connections, conn];
       await persist();
       return { id: conn.id, error: "" };
     },
 
-    reviewUpdate: ({ id, name, destination, port, keyPath, hostKey }) => {
+    reviewUpdate: async ({ id, name, destination, port, keyPath, auth, password, hostKey }) => {
       if (id === LOCAL_ID) return { conn: null, error: "This Mac is not a connection you can edit." };
       const before = connections.find((c) => c.id === id);
       if (!before) return { conn: null, error: "There is no such connection." };
       const refusal = validateConnection({ name, destination, keyPath, port });
       if (refusal) return { conn: null, error: refusal };
+      if (auth === "password") {
+        // Null means "keep what is stored", which is only an answer when there
+        // is something stored. A connection moved onto the password door with
+        // nothing behind it would dial, find no secret, and be refused by the
+        // far end for a reason that is on this machine.
+        if (password === null) {
+          if (!(await secrets.has(id))) return { conn: null, error: "That connection has no password stored. Enter one." };
+        } else {
+          const unusable = validatePassword(password);
+          if (unusable) return { conn: null, error: unusable };
+        }
+      }
       // Null keeps what is pinned; a line replaces it. Either way a pin is a
       // claim about one machine, and carrying one to another address would
       // refuse every later connection with a message about a CHANGED host key
@@ -168,10 +249,23 @@ export async function createConnectionStore(deps: {
         name: name.trim(),
         destination: destination.trim(),
         port,
-        keyPath: keyPath.trim(),
+        keyPath: auth === "password" ? "" : keyPath.trim(),
+        auth,
         hostKey: pin,
       };
       return { conn: next, error: "" };
+    },
+
+    swapPassword: async (id, auth, password) => {
+      const before = connections.find((c) => c.id === id);
+      // Two ways there is nothing to swap, and between them they are every
+      // rename and every re-address: a connection that was on the key door and
+      // stays there has no secret to move, and one on the password door whose
+      // form did not ask for a new password keeps the one it has. Neither
+      // should cost a keychain spawn.
+      if (auth === "key" && before?.auth === "key") return NOTHING_SWAPPED;
+      if (auth === "password" && password === null) return NOTHING_SWAPPED;
+      return secrets.swap(id, auth === "password" ? password : null);
     },
 
     write: async (conn) => {
@@ -185,7 +279,8 @@ export async function createConnectionStore(deps: {
       for (const held of inUse()) {
         if (held === id) return { ok: false, error: "Switch somewhere else before removing this connection." };
       }
-      if (!connections.some((c) => c.id === id)) return { ok: false, error: "There is no such connection." };
+      const gone = connections.find((c) => c.id === id);
+      if (!gone) return { ok: false, error: "There is no such connection." };
       connections = connections.filter((c) => c.id !== id);
       // saveConnections re-renders the known_hosts file from what is left, so
       // removing a connection removes its pin in the same breath — and the id
@@ -193,6 +288,11 @@ export async function createConnectionStore(deps: {
       // map bounded by the list (remote.md §8a).
       await persist();
       await forgetClientId(id);
+      // And its password, for the same reason the pin goes: a credential that
+      // outlived the connection it belonged to is one nothing in the app can
+      // show, edit, or delete. Only when the record used one, so removing an
+      // ordinary connection costs no keychain call at all.
+      if (gone.auth === "password") await secrets.forget(id);
       return { ok: true, error: "" };
     },
 
@@ -202,6 +302,9 @@ export async function createConnectionStore(deps: {
     },
   };
 }
+
+/** A swap that moved nothing, so undoing it is also nothing. */
+const NOTHING_SWAPPED = { error: "", restore: async (): Promise<void> => {} };
 
 function reason(err: unknown): string {
   return err instanceof Error ? err.message : String(err);

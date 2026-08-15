@@ -28,7 +28,7 @@ import {
 import { flushAllNow } from "@/notes/store";
 import { copyText } from "@/lib/clipboard";
 import { deviceKeyLine } from "@/lib/shell";
-import { hostPart, parsePort } from "../../shared/connections";
+import { hostPart, parsePort, type AuthMode } from "../../shared/connections";
 import type { ConnectionInfo } from "../../shared/rpc-schema";
 
 // What a host answered, waiting to be confirmed. Held rather than pinned: the
@@ -239,6 +239,11 @@ function ConnectionRow({
             <span className="block truncate font-mono text-[11px] text-muted-foreground">
               {conn.destination}
               {conn.pinned ? " · pinned" : ""}
+              {/* Which door, on the row, because it is the thing about a
+                  connection that is otherwise invisible until it fails: a
+                  password connection whose secret is gone looks exactly like a
+                  key connection until it is dialled. */}
+              {conn.auth === "password" ? " · password" : ""}
             </span>
           )}
           {failed && <span className="block truncate text-[11px] text-destructive">{failed}</span>}
@@ -323,6 +328,11 @@ function ConnectionForm({
   // distinguishable from a half-typed one (shared/connections.ts parsePort).
   const [portText, setPortText] = useState(existing?.port ? String(existing.port) : "");
   const [keyPath, setKeyPath] = useState(existing?.keyPath ?? "");
+  const [auth, setAuth] = useState<AuthMode>(existing?.auth ?? "key");
+  // Never filled in from the record, because a stored password cannot be read
+  // back and should not be (lib/connections.ts). Empty on an edit means "keep
+  // the one that is stored", which is what every rename sends.
+  const [password, setPassword] = useState("");
   const [probed, setProbed] = useState<Probed | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -360,22 +370,52 @@ function ConnectionForm({
     setProbed({ hostKey: res.hostKey, fingerprint: res.fingerprint, keyType: res.keyType });
   };
 
+  // Never trimmed: a leading or trailing space is a legal part of a password,
+  // and "" has to keep meaning the field was left alone. Null on the key door
+  // says "there is nothing to store", which is also what forgets a password
+  // when a connection moves off it (bun/connectionStore.ts).
+  const typedPassword = auth === "password" && password !== "" ? password : null;
+
+  // Whether leaving the field blank has anything to fall back on. Only true for
+  // a connection that was ALREADY on the password door: switching one onto it
+  // has nothing stored yet, and so has to be told a password now.
+  const storedPassword = existing?.auth === "password";
+  const needsPassword = auth === "password" && !storedPassword && password === "";
+
   const save = async (hostKey: string | null) => {
     if (port === null) return setError(BAD_PORT);
     setBusy(true);
     setError("");
     const refusal = existing
       ? await updateConnection(
-          { id: existing.id, name, destination, port, keyPath, hostKey },
+          { id: existing.id, name, destination, port, keyPath, auth, password: typedPassword, hostKey },
           // A changed address means the shell re-opened the wire, so this page
-          // is now looking at the previous machine's session. A changed port is
-          // the same re-open for the same reason.
+          // is now looking at the previous machine's session. Every other way
+          // of changing HOW the connection is made re-opens it too, and the
+          // list has to be the same one bun/connectionManager.ts re-attaches
+          // on: a port, a key, a door, or a new password.
           {
-            reconnected: serving && (destination.trim() !== existing.destination || port !== existing.port),
+            reconnected:
+              serving &&
+              (destination.trim() !== existing.destination ||
+                port !== existing.port ||
+                keyPath.trim() !== existing.keyPath ||
+                auth !== existing.auth ||
+                typedPassword !== null),
             flush: flushAllNow,
           },
         )
-      : (await addConnection({ name, destination, port, keyPath, hostKey: hostKey ?? "" })).error || null;
+      : (
+          await addConnection({
+            name,
+            destination,
+            port,
+            keyPath,
+            auth,
+            password: auth === "password" ? password : "",
+            hostKey: hostKey ?? "",
+          })
+        ).error || null;
     setBusy(false);
     if (refusal) return setError(refusal);
     onDone();
@@ -409,7 +449,11 @@ function ConnectionForm({
 
   return (
     <div className="mt-3 flex flex-col gap-2">
-      {ownKey && (
+      {/* Only on the key door. The line installs a key, and a password
+          connection offers none: ssh is sent with PubkeyAuthentication=no, so
+          showing it here would be asking the user to prepare their server for
+          a credential this connection will never present. */}
+      {ownKey && auth === "key" && (
         <div className="flex flex-col gap-1">
           {/* What the line narrows is ssh's feature set around the protocol, not
               the protocol: what rides the forced command is terminalAttach and
@@ -443,15 +487,40 @@ function ConnectionForm({
           what ssh takes and what every other client's form asks for. Empty is
           the ordinary answer and means ssh decides. */}
       <Field label="Port (optional)" value={portText} onChange={setPortText} placeholder="22" mono />
-      {/* Absent where there is no path to give: a Secure Enclave key cannot be
-          read out of the enclave, let alone named by a file (ios.md §4). */}
-      {!ownKey && <Field label="Key (optional)" value={keyPath} onChange={setKeyPath} placeholder="~/.ssh/ledge" mono />}
+      <AuthChoice auth={auth} onChange={setAuth} />
+      {auth === "password" ? (
+        <Field
+          label={storedPassword ? "Password (leave blank to keep the stored one)" : "Password"}
+          value={password}
+          onChange={setPassword}
+          placeholder={storedPassword ? "Stored" : "The password for that account"}
+          secret
+        />
+      ) : (
+        /* Absent where there is no path to give: a Secure Enclave key cannot be
+           read out of the enclave, let alone named by a file (ios.md §4). */
+        !ownKey && <Field label="Key (optional)" value={keyPath} onChange={setKeyPath} placeholder="~/.ssh/ledge" mono />
+      )}
       <p className="text-[11px] leading-snug text-muted-foreground">
         Any address ssh understands
         {ownKey ? "" : ", including a name from your ~/.ssh/config"}. Leave the port blank unless sshd listens somewhere
         other than 22. That machine needs Ledge&apos;s server on its PATH as{" "}
         <code className="font-mono">ledge-server</code>.
       </p>
+      {/* Says where it goes and who else can reach it, because the two clients
+          answer that differently: a Mac's item is readable by anything running
+          as this user, and a phone's is Ledge's alone (remote.md §4). */}
+      {auth === "password" &&
+        (ownKey ? (
+          <p className="text-[11px] leading-snug text-muted-foreground">
+            Kept in this device&apos;s keychain, where only Ledge can read it.
+          </p>
+        ) : (
+          <p className="text-[11px] leading-snug text-muted-foreground">
+            Kept in your Mac&apos;s keychain, and read from there by ssh when it connects. Anything running as you can
+            read it too, the same as a key file in <code className="font-mono">~/.ssh</code>.
+          </p>
+        ))}
       {error && <p className="text-[12px] leading-snug text-destructive">{error}</p>}
       <div className="mt-1 flex justify-end gap-2">
         <Button size="sm" variant="ghost" onClick={onCancel}>
@@ -467,7 +536,7 @@ function ConnectionForm({
         )}
         <Button
           size="sm"
-          disabled={busy || !name.trim() || !destination.trim()}
+          disabled={busy || !name.trim() || !destination.trim() || needsPassword}
           onClick={() => void (mustPin ? probe() : save(null))}
         >
           {busy && <Loader2 className="mr-1 size-3.5 animate-spin" />}
@@ -478,12 +547,49 @@ function ConnectionForm({
   );
 }
 
+/**
+ * Which door this connection goes through (remote.md §4).
+ *
+ * Radios rather than a segmented control or a select: it is a two-way exclusive
+ * choice that changes which field comes next, and radios are the one control
+ * that arrows between its options and reads as a choice to a screen reader
+ * without any of it being written here.
+ */
+function AuthChoice({ auth, onChange }: { auth: AuthMode; onChange: (a: AuthMode) => void }) {
+  return (
+    <fieldset className="flex flex-col gap-1">
+      <legend className="text-[11px] text-muted-foreground">Sign in with</legend>
+      <div className="flex items-center gap-4">
+        {(
+          [
+            ["key", "A key"],
+            ["password", "A password"],
+          ] as const
+        ).map(([value, label]) => (
+          <label key={value} className="flex items-center gap-1.5 text-[13px] touch:min-h-[44px]">
+            <input
+              type="radio"
+              name="ledge-connection-auth"
+              value={value}
+              checked={auth === value}
+              onChange={() => onChange(value)}
+              className="accent-current"
+            />
+            {label}
+          </label>
+        ))}
+      </div>
+    </fieldset>
+  );
+}
+
 function Field({
   label,
   value,
   onChange,
   placeholder,
   mono,
+  secret,
   inputRef,
 }: {
   label: string;
@@ -491,6 +597,9 @@ function Field({
   onChange: (v: string) => void;
   placeholder: string;
   mono?: boolean;
+  /** A password field: masked, and kept away from every autofill and
+   * autocorrect heuristic that would otherwise treat it as prose. */
+  secret?: boolean;
   inputRef?: RefObject<HTMLInputElement>;
 }) {
   return (
@@ -498,6 +607,11 @@ function Field({
       <span className="text-[11px] text-muted-foreground">{label}</span>
       <input
         ref={inputRef}
+        type={secret ? "password" : "text"}
+        // Off rather than "current-password": this is a field for somebody
+        // else's machine, and offering the keychain's saved logins for this app
+        // would be offering the wrong secret from the right-looking list.
+        autoComplete={secret ? "off" : undefined}
         value={value}
         placeholder={placeholder}
         spellCheck={false}

@@ -2,6 +2,7 @@
 // This replaces the hand-rolled window.webkit.messageHandlers bridge from the
 // Swift build: the webview requests a block run, Bun streams run events back.
 
+import type { AuthMode } from "./connections";
 import type { Settings, SettingsHome } from "./settings";
 import type { NoteParams } from "./frontmatter";
 import type { SearchHit } from "./search";
@@ -161,6 +162,11 @@ export interface ConnectionInfo {
    * `~/.ssh/config` alias's own `Port` working (shared/connections.ts). */
   port: number;
   keyPath: string;
+  /** Which door this connection goes through (shared/connections.ts). The
+   * password itself is never in this shape and never crosses this schema in
+   * this direction: it goes to the keychain on the way in and is read from
+   * there by ssh's askpass helper, so nothing ever reads one back out. */
+  auth: AuthMode;
   pinned: boolean;
   /** ms epoch, 0 for never reached. */
   lastReached: number;
@@ -752,8 +758,24 @@ export type LedgeRPC = {
       // Add one. `hostKey` is the known_hosts line the user was shown the
       // fingerprint of and accepted (connectionProbe below) — the client pins
       // only what a person confirmed, never what a host happened to answer.
+      //
+      // `password` is the one credential that travels on this schema, and it
+      // travels exactly once and in one direction: from the form to the
+      // keychain (bun/secrets.ts). It is safe to carry here because these six
+      // are CLIENT_METHODS (wire.ts) — the client shell answers them and a
+      // server refuses them, so a password cannot reach the machine it is for
+      // by this route, let alone any other. Ignored unless `auth` is
+      // "password".
       connectionAdd: {
-        params: { name: string; destination: string; port: number; keyPath: string; hostKey: string };
+        params: {
+          name: string;
+          destination: string;
+          port: number;
+          keyPath: string;
+          auth: AuthMode;
+          password: string;
+          hostKey: string;
+        };
         response: { id: string; error: string };
       };
       // Change one: its name, its address, or the key it offers.
@@ -771,8 +793,26 @@ export type LedgeRPC = {
       // machine over a session talking to another is the lie the indicator
       // exists to prevent. The caller reloads on ok for exactly that case, as
       // it does for connectionSelect.
+      //
+      // `password` is null to keep whatever is stored and a string to replace
+      // it, which is the same three-state shape `hostKey` has and for the same
+      // reason: an edit form that asked for the password again to change a name
+      // would be teaching the user to type their password into a dialog for no
+      // reason. Switching `auth` to "key" forgets the stored one; switching to
+      // "password" with null and nothing stored is refused, because a
+      // connection that cannot answer its own prompt is one that will fail at
+      // the next dial with ssh's words rather than ours.
       connectionUpdate: {
-        params: { id: string; name: string; destination: string; port: number; keyPath: string; hostKey: string | null };
+        params: {
+          id: string;
+          name: string;
+          destination: string;
+          port: number;
+          keyPath: string;
+          auth: AuthMode;
+          password: string | null;
+          hostKey: string | null;
+        };
         response: { ok: boolean; error: string };
       };
       // Remove one, and its pin with it. The local server and the connection

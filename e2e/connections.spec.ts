@@ -83,6 +83,79 @@ test("adding a server shows the host key's fingerprint before anything is pinned
   await expect(options.nth(2)).toHaveText(/pinned/);
 });
 
+// The password door (remote.md §4). The form's job is to ask for the secret
+// once: a stored password cannot be read back on either client, so everything
+// after the first save has to work with a field that is empty on purpose.
+async function addWithPassword(page: Page, name = "Box") {
+  await dialog(page).getByRole("button", { name: "Add Server…" }).click();
+  await dialog(page).getByLabel("Name").fill(name);
+  await dialog(page).getByLabel("SSH destination").fill("ledge@box");
+  await dialog(page).getByRole("radio", { name: "A password" }).check();
+  await dialog(page).getByLabel("Password", { exact: true }).fill("hunter2");
+  await dialog(page).getByRole("button", { name: "Continue" }).click();
+  await dialog(page).getByRole("button", { name: "It Matches, Add" }).click();
+}
+
+test("a server can be added with a password instead of a key", async ({ page }) => {
+  await bar(page).click();
+  await dialog(page).getByRole("button", { name: "Add Server…" }).click();
+  await dialog(page).getByLabel("Name").fill("Box");
+  await dialog(page).getByLabel("SSH destination").fill("ledge@box");
+
+  // One door's field at a time: no key is offered on a password connection, so
+  // asking for a path would be asking for something with no effect.
+  await expect(dialog(page).getByLabel("Key (optional)")).toBeVisible();
+  await dialog(page).getByRole("radio", { name: "A password" }).check();
+  await expect(dialog(page).getByLabel("Key (optional)")).toBeHidden();
+
+  // Nothing to go on with until there is one, since a new connection has
+  // nothing stored to fall back to.
+  await expect(dialog(page).getByRole("button", { name: "Continue" })).toBeDisabled();
+  await dialog(page).getByLabel("Password", { exact: true }).fill("hunter2");
+  await expect(dialog(page).getByRole("button", { name: "Continue" })).toBeEnabled();
+  await dialog(page).getByRole("button", { name: "Continue" }).click();
+
+  // Still two steps. The host key is read and confirmed whichever door is used.
+  await expect(dialog(page).getByText("SHA256:harness+fake+key")).toBeVisible();
+  await dialog(page).getByRole("button", { name: "It Matches, Add" }).click();
+
+  const options = dialog(page).getByRole("option");
+  await expect(options).toHaveCount(3);
+  await expect(options.nth(2)).toHaveText(/Box/);
+  // Which door, on the row: it is otherwise invisible until a dial fails.
+  await expect(options.nth(2)).toHaveText(/password/);
+});
+
+// Typed once. The field comes back empty and says what empty means, because
+// the alternative is a form that cannot tell "leave it alone" from "erase it".
+test("editing a password server does not ask for the password again", async ({ page }) => {
+  await bar(page).click();
+  await addWithPassword(page);
+  await dialog(page).getByRole("button", { name: "Edit Box" }).click();
+  const field = dialog(page).getByLabel(/^Password \(leave blank/);
+  await expect(field).toBeVisible();
+  await expect(field).toHaveValue("");
+  // And a rename saves in one step, with the field left alone.
+  await dialog(page).getByLabel("Name").fill("Crate");
+  await dialog(page).getByRole("button", { name: "Save" }).click();
+  const options = dialog(page).getByRole("option");
+  await expect(options.nth(2)).toHaveText(/Crate/);
+  await expect(options.nth(2)).toHaveText(/password/);
+});
+
+// A connection that has never had one has nothing to keep, so the blank field
+// is not an answer here and the form says so by refusing to save.
+test("moving a server onto the password door has to be given a password", async ({ page }) => {
+  await bar(page).click();
+  await dialog(page).getByRole("button", { name: "Edit VPS" }).click();
+  await dialog(page).getByRole("radio", { name: "A password" }).check();
+  await expect(dialog(page).getByLabel("Password", { exact: true })).toBeVisible();
+  await expect(dialog(page).getByRole("button", { name: "Save" })).toBeDisabled();
+  await dialog(page).getByLabel("Password", { exact: true }).fill("hunter2");
+  await dialog(page).getByRole("button", { name: "Save" }).click();
+  await expect(dialog(page).getByRole("option").nth(1)).toHaveText(/password/);
+});
+
 // A rename touches nothing about how the connection is made, so it saves in
 // one step and the pin it already has stays its own.
 test("a server can be renamed without being asked about its key again", async ({ page }) => {
