@@ -40,7 +40,13 @@ export default {
           foreground: "hsl(var(--secondary-foreground))",
         },
         destructive: {
+          // `text-destructive` is the common one and is the DEFAULT for that
+          // reason; `bg-destructive-fill` is the filled button, and index.css
+          // says why the two cannot be one value. Anything that writes rather
+          // than fills — prose, an icon, a border, a 10% tint behind text —
+          // wants the DEFAULT.
           DEFAULT: "hsl(var(--destructive))",
+          fill: "hsl(var(--destructive-fill))",
           foreground: "hsl(var(--destructive-foreground))",
         },
         muted: {

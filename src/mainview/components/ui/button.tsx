@@ -12,8 +12,12 @@ const buttonVariants = cva(
     variants: {
       variant: {
         default: "bg-primary text-primary-foreground shadow hover:bg-primary/90",
+        // `-fill`, and the only place in the app that wants it: this is the one
+        // control that PAINTS the colour rather than writing in it, so it takes
+        // the dark fill that near-white text reads on (index.css). Unchanged
+        // from what shadcn ships — the token split moved the value, not this.
         destructive:
-          "bg-destructive text-destructive-foreground shadow-sm hover:bg-destructive/90",
+          "bg-destructive-fill text-destructive-foreground shadow-sm hover:bg-destructive-fill/90",
         outline:
           "border border-input bg-background shadow-sm hover:bg-accent hover:text-accent-foreground",
         secondary:

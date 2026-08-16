@@ -24,7 +24,15 @@
     --muted-foreground: 240 3.8% 46.1%;
     --accent: 240 4.8% 95.9%;
     --accent-foreground: 240 5.9% 10%;
-    --destructive: 0 84.2% 60.2%;
+    /* Text, not fill — the note in the dark palette below says why the two are
+       separate tokens. They are the same red HERE, and that is the point: red-600
+       on white is 4.83:1 to write with and 4.62:1 under the near-white label of a
+       filled button, so against a light background one value does both jobs. It is
+       dark mode that forces them apart. (Stock shadcn fills with red-500, which
+       carries that label at 3.60:1 — under AA for a 12px `text-sm` string, and it
+       is the same defect as the dark one, a step smaller.) */
+    --destructive: 0 72.2% 50.6%;
+    --destructive-fill: 0 72.2% 50.6%;
     --destructive-foreground: 0 0% 98%;
     --border: 240 5.9% 90%;
     --input: 240 5.9% 90%;
@@ -46,7 +54,30 @@
     --muted-foreground: 240 5% 64.9%;
     --accent: 240 3.7% 15.9%;
     --accent-foreground: 0 0% 98%;
-    --destructive: 0 62.8% 30.6%;
+    /* The one token in this file that is READ more often than it is painted on,
+       and the one place shadcn's defaults are wrong for this app.
+
+       Upstream ships a single `--destructive` per mode and darkens it here to
+       red-900, because upstream's destructive thing is a BUTTON: a filled
+       rectangle carrying `--destructive-foreground` on top, where a dark fill
+       under near-white text is exactly right (9.59:1). Ledge is the other way
+       round. It writes with this colour — every dial failure, every settings
+       complaint, every refused rename is `text-destructive` prose, 18 sites
+       against the one button that fills with it — and red-900 on this
+       background is 1.99:1. That is below the 3:1 floor for LARGE text, and
+       these messages are 11 and 12 pixels. "Could not reach v1: Ledge's server
+       is not installed on that machine" was the report; it is dark red on near
+       black.
+
+       So the token means the text colour, tuned per mode against that mode's
+       background: red-400 here (7.20:1), red-600 in light (4.83:1). Both were
+       measured against the backgrounds above rather than picked by eye, and
+       e2e/appearance.spec.ts re-measures them in WebKit. The button keeps its
+       own fill at the value it has always had, because the colour you WRITE
+       with and the colour you fill a rectangle with cannot be one value once
+       the background stops being white. */
+    --destructive: 0 90.6% 70.8%;
+    --destructive-fill: 0 62.8% 30.6%;
     --destructive-foreground: 0 0% 98%;
     --border: 240 3.7% 15.9%;
     --input: 240 3.7% 15.9%;
