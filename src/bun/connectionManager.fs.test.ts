@@ -215,6 +215,85 @@ describe("switching", () => {
   });
 });
 
+// What the shell puts in the title bar (remote.md §8a). Every window said
+// "Ledge" before this, which told a person with three of them open nothing at
+// all: the one thing a second window is for is being on a second machine.
+describe("naming the window", () => {
+  const named = async (deps: Parameters<typeof createConnectionManager>[0]) => {
+    const names: string[] = [];
+    const m = await createConnectionManager({ ...deps, onName: (name) => names.push(name) });
+    return { m, names };
+  };
+
+  // Reported before the manager returns, because the shell builds the window
+  // after that and a window is titled at birth.
+  test("a window is named as it boots", async () => {
+    await saveConnections([LAPTOP], LAPTOP.id);
+    const { names } = await named({ attach: fakeAttach().attach });
+    expect(names).toEqual(["Laptop"]);
+  });
+
+  // The title says where the window IS, not where it was asked to go: the
+  // indicator is what explains the difference.
+  test("a window that fell back is named for the machine it landed on", async () => {
+    await saveConnections([LAPTOP], LAPTOP.id);
+    const { names } = await named({ attach: fakeAttach(new Set([LAPTOP.id])).attach });
+    expect(names).toEqual(["This Mac"]);
+  });
+
+  test("switching renames the window", async () => {
+    await saveConnections([LAPTOP], LOCAL_ID);
+    const { m, names } = await named({ attach: fakeAttach().attach });
+    await m.requests.connectionSelect({ id: LAPTOP.id });
+    await m.requests.connectionSelect({ id: LOCAL_ID });
+    expect(names).toEqual(["This Mac", "Laptop", "This Mac"]);
+  });
+
+  test("a switch that did not happen renames nothing", async () => {
+    await saveConnections([LAPTOP], LOCAL_ID);
+    const { m, names } = await named({ attach: fakeAttach(new Set([LAPTOP.id])).attach });
+    await m.requests.connectionSelect({ id: LAPTOP.id });
+    await m.requests.connectionSelect({ id: "nope" });
+    expect(names).toEqual(["This Mac"]);
+  });
+
+  // The one case `onSelect` cannot carry: the window went nowhere, and the
+  // string on it is the one that changed.
+  test("renaming the connection being served renames the window", async () => {
+    await saveConnections([LAPTOP], LAPTOP.id);
+    const { m, names } = await named({ attach: fakeAttach().attach });
+    await m.requests.connectionUpdate({
+      id: LAPTOP.id,
+      name: "Studio",
+      destination: LAPTOP.destination,
+      port: PORT_UNSET,
+      keyPath: "",
+      auth: "key",
+      password: null,
+      hostKey: null,
+    });
+    expect(names).toEqual(["Laptop", "Studio"]);
+  });
+
+  // A window on this Mac while another connection is edited keeps its title:
+  // the edit is about a machine it is not looking at.
+  test("renaming a connection this window is not on renames nothing", async () => {
+    await saveConnections([LAPTOP], LOCAL_ID);
+    const { m, names } = await named({ attach: fakeAttach().attach });
+    await m.requests.connectionUpdate({
+      id: LAPTOP.id,
+      name: "Studio",
+      destination: LAPTOP.destination,
+      port: PORT_UNSET,
+      keyPath: "",
+      auth: "key",
+      password: null,
+      hostKey: null,
+    });
+    expect(names).toEqual(["This Mac"]);
+  });
+});
+
 describe("adding and removing", () => {
   test("an added connection is listed, stored, and switchable", async () => {
     const m = await createConnectionManager({ attach: fakeAttach().attach });

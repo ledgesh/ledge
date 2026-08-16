@@ -80,6 +80,8 @@ New Window in the File menu opens a second window, and each window is on its own
 
 A new window opens on this Mac. Switch it wherever you like from inside it.
 
+Each window is titled after the machine it is on, so the title bar reads "This Mac" or the name you gave the connection. That is the name in the Window menu too, and on a window's tab when macOS merges your windows into tabs.
+
 Each window keeps its own tabs and panes, and the server remembers them: switch a window back to a machine you used before and its arrangement comes back. Ledge reopens every window you left open at the next launch, each on the machine it was pointed at.
 
 Two windows on the same machine are the exception. Only one of them can be that machine's arrangement, so the second opens empty and does not overwrite the first.

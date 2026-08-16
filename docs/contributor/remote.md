@@ -1117,12 +1117,25 @@ between them, one owner per drawer — now reachable without a second device.
 | The connection, and which server it points at | window |
 | The client id, and so the layout it reads (§5) | the connection, held by whichever window points at it |
 | The label other clients display (`Hello.label`) | window |
+| The window title | window, and it is the connection's name |
 | The webview's RPC, and the pushes routed to it | window |
 | The window frame | window |
 | The connection list and its pinned host keys | process |
 | The client home: `known_hosts`, client settings, the window list, the connection-to-client-id map | process |
 | The local server, its watchers, its vault, its PTYs | process |
 | The menu bar | process, driven by the focused window |
+
+**A window is titled by the connection it is on**, so a title bar says "This
+Mac" or "v1" rather than "Ledge". Three windows all called after the app tell a
+person nothing in the Window menu, in App Exposé, or in a tabbed window's tab
+bar, and the one thing a second window exists for is being on a second machine.
+The manager reports the name through its `onName` seam and `bun/index.ts` puts
+it on the window: at boot, before the window is built, so no window is ever
+titled for a machine it is not on; on a switch; and on a rename of the
+connection being served, which is the one case `onSelect` cannot carry, since
+the window went nowhere and the string on it is what changed. A window that
+fell back is titled for the machine it landed on, not the one it wanted — the
+indicator is what explains the difference.
 
 **The list is shared and the selection is not.** `connections.json` holds the
 list and the pins for the whole app, because a machine you have paired with is

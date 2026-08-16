@@ -81,6 +81,13 @@ export async function createConnectionManager(deps: {
    * in the window list — that list is where the next launch reads it from, not
    * `connections.json` (§8a). */
   onSelect?(id: string): void;
+  /** Told what this window's connection is CALLED, whenever that answer
+   * changes: a switch, a boot that fell back, or a rename of the connection
+   * being served. The shell puts it in the window's title, which is the only
+   * label that says which machine a window is showing once there is more than
+   * one of them (§8a). Separate from `onSelect` because a rename moves no
+   * window anywhere and must not rewrite the window list. */
+  onName?(name: string): void;
   now?: () => number;
 }): Promise<ConnectionManager> {
   // Declared before the store, which closes over it: a private store's "what is
@@ -106,6 +113,10 @@ export async function createConnectionManager(deps: {
     active = LOCAL_CONNECTION;
   }
   selected = active.id;
+  // Before the window exists, which is the point: the shell holds the name and
+  // hands it to the window it is about to build, so no window is ever titled
+  // for a machine it is not on.
+  deps.onName?.(active.name);
   if (active.id !== LOCAL_ID) await store.touch(active.id);
 
   // Built once from the schema's own list, so a method added there is routed
@@ -155,6 +166,7 @@ export async function createConnectionManager(deps: {
       error = "";
       previous.shutdown();
       deps.onSelect?.(next.id);
+      deps.onName?.(next.name);
       if (next.id !== LOCAL_ID) await store.touch(next.id);
       return { ok: true, error: "" };
     },
@@ -208,6 +220,9 @@ export async function createConnectionManager(deps: {
       } else if (fields.id === active.id) {
         active = next;
       }
+      // A rename of the connection this window is on: nothing about the wire
+      // changed, but the window's title named the old string a moment ago.
+      if (fields.id === active.id) deps.onName?.(active.name);
       await store.write(next);
       return { ok: true, error: "" };
     },
