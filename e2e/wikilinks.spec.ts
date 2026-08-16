@@ -125,3 +125,38 @@ test("[[title#heading]] opens the note with that heading revealed", async ({ pag
   );
   expect(focusInEditor).toBe(true);
 });
+
+// The hotspot layer is parented to <body>, not to the pane (livePreview.ts
+// says why), so it does not leave the screen when its editor's host does. A
+// background tab that keeps its hotspots leaves invisible pointer-events
+// targets parked in viewport coordinates over whichever editor is now in
+// front — and they are not inert, they carry that other note's links.
+test("a background tab's hotspots leave the screen with it", async ({ page }) => {
+  await page.keyboard.press("Meta+a");
+  await page.keyboard.type("go [[Alpha]]");
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".ledge-hotspot")).toHaveCount(1);
+  const spot = await page.locator(".ledge-hotspot").boundingBox();
+
+  // A second tab, with nothing clickable anywhere in it.
+  await page.keyboard.press("Meta+n");
+  await page.keyboard.press("Meta+a");
+  await page.keyboard.type("nothing here is a link");
+  await expect(page.locator(".cm-line").first()).toHaveText("nothing here is a link");
+
+  await expect(page.locator(".ledge-hotspot")).toHaveCount(0);
+
+  // And the consequence, which is the whole reason it matters: a click landing
+  // where the other tab's link used to be is a caret move in THIS note, not a
+  // trip to Alpha.
+  await page.mouse.click(spot!.x + spot!.width / 2, spot!.y + spot!.height / 2);
+  await expect(page.locator("[data-tab]", { hasText: "Alpha" })).toHaveCount(0);
+  await expect(page.locator(".cm-line").first()).toHaveText("nothing here is a link");
+
+  // Collapsed, not destroyed: coming back to the first tab has to bring its
+  // link back with it, or a layer that never returns is the same bug with the
+  // sign flipped.
+  await page.locator("[data-tab]", { hasText: "Untitled" }).first().click();
+  await expect(page.locator(".cm-line").first()).toHaveText("go Alpha");
+  await expect(page.locator(".ledge-hotspot")).toHaveCount(1);
+});

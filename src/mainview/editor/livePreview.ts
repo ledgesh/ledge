@@ -693,7 +693,19 @@ const hotspotPlugin = ViewPlugin.fromClass(
     }
 
     update(u: ViewUpdate) {
-      if (u.docChanged || u.viewportChanged || u.geometryChanged || u.selectionSet) {
+      // Any effect counts, which is how a detach reaches this layer at all.
+      // The pool dispatches a bare effect when it parents an editor into a
+      // pane or takes it out of one (editorPool.ts pingOverlay), and that
+      // transaction changes no document, no selection, no viewport and no
+      // geometry — a detached view has none of the last to change. Without
+      // this clause the measure never ran, so the layer stayed in <body> with
+      // the hotspots it last read, in viewport coordinates, over whichever
+      // editor came to the front. They are invisible and they are not inert:
+      // a click meant for the caret opened a background tab's note. The same
+      // clause is in blocks.ts's overlay, which is why that one collapsed and
+      // this one did not.
+      const pinged = u.transactions.some((t) => t.effects.length > 0);
+      if (u.docChanged || u.viewportChanged || u.geometryChanged || u.selectionSet || pinged) {
         this.schedule();
       }
     }

@@ -74,13 +74,21 @@ const removeRun = StateEffect.define<string>();
 // any still-running runs first (see the dismiss button) or it will orphan their
 // programs in the note's shells.
 export const clearRunsEffect = StateEffect.define<null>();
-// A no-op effect whose only purpose is to nudge the overlay plugin to re-measure
-// (it treats any effect as a trigger). Dispatched when a pooled editor is
-// re-parented between panes/tabs, so its overlay re-pins or collapses at once.
+// A no-op effect whose only purpose is to nudge the body-parented layers to
+// re-measure. Dispatched when a pooled editor is re-parented between panes or
+// tabs, so they re-pin or collapse at once.
 const pingOverlayEffect = StateEffect.define<null>();
 
-// Force the block-chrome overlay to re-measure now. Used by the editor pool when
-// an editor's DOM host is attached to (or detached from) a visible pane.
+// Force BOTH body-parented layers to re-measure now: this one and the hotspot
+// layer in livePreview.ts. Used by the editor pool when an editor's DOM host is
+// attached to, or detached from, a visible pane.
+//
+// Neither plugin reads this effect by name — each treats any transaction
+// carrying effects as a trigger, which is the clause that has to exist in both.
+// The hotspot layer was missing it and therefore never heard a detach, so a
+// background tab's links stayed clickable over the tab in front
+// (interactions.md §5, "an obligation to leave"). A new body-parented layer
+// needs the same clause, and there is nothing here that can enforce that for it.
 export function pingOverlay(view: EditorView): void {
   view.dispatch({ effects: pingOverlayEffect.of(null) });
 }

@@ -835,6 +835,23 @@ this ladder, named in that comment. `e2e/phone.spec.ts` proves it by asking
 `elementFromPoint` what a tap would actually hit, not by reading the numbers
 back.
 
+**Being parented to `<body>` is also an obligation to leave.** Neither layer is
+a child of the pane it covers, so neither goes away when its editor's host is
+unparented — a background tab's editor is detached and kept alive
+(`workspace/editorPool.ts`), and its layer stays in `<body>` holding the
+rectangles it last measured, in viewport coordinates, over whatever editor came
+to the front. The pool dispatches a bare effect on every attach and detach
+(`pingOverlay`), and **both** plugins have to count a transaction carrying
+effects as a reason to re-measure: that transaction changes no document, no
+selection, no viewport and no geometry, so a plugin watching only those four
+never hears it, and a detached view has none of them left to change on its own.
+The block chrome had that clause and the hotspots did not, which left invisible
+`pointer-events: auto` targets carrying another note's links parked over the
+note in front — a click meant to place the caret opened somebody else's note.
+Collapsing is not destroying: the same ping on re-attach is what brings the
+layer back, so a fix that only removes is the same bug with the sign flipped,
+and `e2e/wikilinks.spec.ts` asserts both directions.
+
 ## 6a. Who owns the keyboard while a block runs
 
 An inline run is answerable: `sudo` asks for a password, an installer asks
