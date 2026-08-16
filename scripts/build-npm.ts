@@ -181,4 +181,7 @@ if (missing.length > 0) {
   console.warn("[npm] this tree is for local testing. Do not publish it.");
   process.exit(wanted ? 0 : 1);
 }
-console.log("[npm] complete. `npm pack dist-npm` to build the tarball; releasing.md publishes it.");
+// `./dist-npm` and not `dist-npm`: npm reads a bare word as a name to look up
+// in the registry, and answers a directory that happens to look like one with
+// a 404 for a package nobody has published.
+console.log("[npm] complete. `npm pack ./dist-npm` to build the tarball; releasing.md publishes it.");

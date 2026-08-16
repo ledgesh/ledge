@@ -228,8 +228,12 @@ machine a user has, and the one this checkout is least like.
 Publishing is deliberately not a script:
 
 ```
-npm publish dist-npm
+npm publish ./dist-npm
 ```
+
+The `./` is not decoration. npm reads a bare `dist-npm` as a package name to
+resolve against the registry and fails with a 404 for a package nobody has
+published, which is a confusing way to learn that an argument was a path.
 
 It is irreversible in the way signing is not. An npm version can be deprecated
 but never replaced, so the version has to be right before the command runs, and
@@ -238,7 +242,7 @@ but never replaced, so the version has to be right before the command runs, and
 Two things to know before the first publish. The name `ledge-server` has to be
 available or owned by the publishing account, and `npm publish` on a package
 that has never existed also decides the account that owns it forever. Neither
-is a step that can be rehearsed, so `npm publish --dry-run dist-npm` is the
+is a step that can be rehearsed, so `npm publish --dry-run ./dist-npm` is the
 rehearsal: it prints the exact file list and the tarball size without uploading.
 
 ## 7. What is not automated
