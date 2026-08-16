@@ -2,10 +2,10 @@
 // The published package, on a machine that could not have built it.
 //
 // This is the claim `scripts/build-npm.ts` exists to make and the one no unit
-// test can reach: that `bun add -g ledge-server` on a bare Linux box produces a
-// working server, PTY trampolines included. The container is chosen for what it
-// does NOT have — no compiler, no libc headers — because that is what makes the
-// result unambiguous. pty.ts has two ways to get its trampolines (a prebuilt
+// test can reach: that the two commands the README gives, run on a bare Linux
+// box, produce a server an incoming ssh can start, PTY trampolines included.
+// The container is chosen for what it does NOT have — no compiler, no libc
+// headers, and no Bun — because that is what makes the result unambiguous. pty.ts has two ways to get its trampolines (a prebuilt
 // library, or compiling the same source in-process with TinyCC), and only the
 // first can possibly work here. A shell that gets a controlling terminal in
 // this container therefore proves the packaged library loaded, which is exactly
@@ -37,9 +37,14 @@ type ServerPush = import("../src/shared/wire").ServerPush;
 const REPO = join(import.meta.dir, "..");
 const OUT = join(REPO, "dist-npm");
 const NAME = "ledge-npm-probe";
-// Bun's own image: a runtime, deliberately. It carries bun and the shared
-// libraries bun needs, and no toolchain — which is the whole fixture.
-const IMAGE = "oven/bun:1-debian";
+// Debian and not Bun's own image, which is what this used to be. `oven/bun`
+// carries Bun in `/usr/local/bin` with `BUN_INSTALL=/usr/local` already set,
+// so it satisfies the PATH claims below by construction and could never catch
+// an install line that puts the package somewhere an incoming ssh cannot see.
+// That failure reached a user (remote.md §11), so the fixture now starts from
+// a machine with no Bun on it and runs the README's own commands. It needs
+// network for bun.sh, as the Docker build already did.
+const IMAGE = "debian:12";
 
 let failures = 0;
 const ok = (claim: string, detail = "") => console.log(`  ok    ${claim}${detail && `  (${detail})`}`);
@@ -77,19 +82,24 @@ try {
   const tarball = join(SCRATCH, packed);
   ok("npm pack", packed);
 
-  step("[fixture] a Linux machine with bun and no way to compile anything");
+  step("[fixture] a Linux machine with no bun and no way to compile anything");
   run(["docker", "rm", "-f", NAME], { quiet: true });
   run([
     "docker", "run", "-d", "--name", NAME,
     "-e", "LEDGE_NOTES_ROOT=/data",
     IMAGE, "sleep", "infinity",
   ]);
-  // zsh because settings.jsonc's default shell is zsh and this image has none,
-  // which is the same reason the real `Dockerfile` installs it. Without it the
-  // terminal claims below fail for a reason that has nothing to do with the
-  // package.
-  const zsh = inside("sh", "-c", "apt-get update -qq && apt-get install -y -qq --no-install-recommends zsh 2>&1 | tail -1");
-  check("zsh installed, since that is the default shell", inside("sh", "-c", "command -v zsh").out !== "", zsh.out.slice(0, 60));
+  // curl and unzip are what Bun's installer needs. zsh because settings.jsonc's
+  // default shell is zsh and this image has none, which is the same reason the
+  // real `Dockerfile` installs it. Without it the terminal claims below fail
+  // for a reason that has nothing to do with the package.
+  const apt = inside(
+    "sh", "-c",
+    "apt-get update -qq && apt-get install -y -qq --no-install-recommends curl unzip ca-certificates zsh 2>&1 | tail -1",
+  );
+  check("zsh installed, since that is the default shell", inside("sh", "-c", "command -v zsh").out !== "", apt.out.slice(0, 60));
+  const preexisting = inside("sh", "-c", "command -v bun").out;
+  check("and no bun on it yet, which is what the install line is for", preexisting === "", preexisting || "none");
 
   // Asserted rather than assumed, and asserted AFTER the apt-get above so it
   // is the fixture's real final state. If a compiler or the headers were
@@ -101,19 +111,40 @@ try {
   check("no libc headers either", hdr.out === "absent", hdr.out);
   ok("so the in-process fallback cannot rescue this", "only a prebuilt library can work here");
 
-  step("[install] the one command the README gives");
+  step("[install] the two commands the README gives");
+  // The container's shell is root's, so the README's `sudo` drops out and
+  // BUN_INSTALL is what is actually under test here.
+  const installBun = inside("sh", "-c", "curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash 2>&1 | tail -1");
+  check(
+    "bun installed into /usr/local",
+    inside("sh", "-c", "test -x /usr/local/bin/bun && echo yes").out === "yes",
+    installBun.out.slice(0, 80),
+  );
   run(["docker", "cp", tarball, `${NAME}:/tmp/pkg.tgz`]);
-  const add = inside("bun", "add", "-g", "/tmp/pkg.tgz");
+  // An absolute path, because `bun add -g` resolves a relative one against its
+  // own global directory rather than the cwd and reports the miss as a tarball
+  // it could not extract.
+  const add = inside("sh", "-c", "BUN_INSTALL=/usr/local bun add -g /tmp/pkg.tgz");
   check(`bun add -g ${PACKAGE_NAME}`, add.code === 0, add.err.split("\n").slice(-1)[0] ?? "");
 
   // Bun puts global commands beside itself, so where they land is decided by
-  // how Bun was installed rather than by anything in the package. This image is
-  // the system-wide shape (bun in /usr/local/bin), which is the one where the
-  // install needs no second step. The user-local shape puts BOTH bun and
-  // ledge-server under ~/.bun/bin, which an incoming ssh will not find, and
-  // that is what the manual's `command -v` check is for.
-  const globalBin = inside("bun", "pm", "bin", "-g").out;
-  ok("bun's global bin", globalBin);
+  // how Bun was installed rather than by anything in the package. That makes
+  // BUN_INSTALL the whole of the reachability question, and both halves are
+  // asserted: the documented commands put the package on an sshd PATH, and the
+  // same command without the variable does not.
+  const globalBin = inside("sh", "-c", "BUN_INSTALL=/usr/local bun pm bin -g").out;
+  check("the package's commands went to /usr/local/bin", globalBin === "/usr/local/bin", globalBin);
+  //
+  // stderr as well as stdout, because `bun pm bin -g` names the directory
+  // either way: it prints it when something is installed there and refuses
+  // with it in the message when nothing is, and the second is what an
+  // untouched `~/.bun` looks like.
+  const withoutVar = inside("sh", "-c", "bun pm bin -g 2>&1").out;
+  check(
+    "and without the variable they would have gone under ~/.bun, which ssh cannot see",
+    withoutVar.includes("/root/.bun") && !withoutVar.includes("/usr/local"),
+    withoutVar.split("\n")[0]?.slice(0, 90) ?? "nothing",
+  );
 
   // THE condition the manual states, checked the way the manual says to check
   // it: an ssh command runs with a minimal PATH and no profile, so both names

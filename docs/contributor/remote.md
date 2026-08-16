@@ -8,10 +8,11 @@ connection grammar §8 called for now lives in `interactions.md` §4-1, the
 state ownership §5 describes is the code's, and the resilience §7
 promises is real: the server is a process behind a unix socket, a dropped wire
 reconnects and replays, and terminal output rides binary frames. The server
-runs on Linux, installs as `bun add -g ledge-server` (§11), and ships as an
-image; `bun run probe:ssh` connects to one over a real sshd with the §4 forced
-command enforcing itself, and `bun run probe:npm` installs the published
-package on a machine with no toolchain and drives its terminal.
+runs on Linux, installs as `BUN_INSTALL=/usr/local bun add -g ledge-server`
+(§11), and ships as an image; `bun run probe:ssh` connects to one over a real
+sshd with the §4 forced command enforcing itself, and `bun run probe:npm`
+installs the published package on a machine with no toolchain and no Bun, then
+drives its terminal.
 This is a sibling standard beside `architecture.md` (whose process topology,
 trust boundary, and state-ownership rules it revises), `interactions.md`,
 `locking.md` (whose vault moves one hop away), and `testing.md` (whose
@@ -1396,9 +1397,9 @@ compiled into the server binary behind a verb of its own, which is the same
 restructuring `serve.ts`'s argv guard would need to run a file.
 
 **The install is a package, and the reason is that npm already solves both
-problems the compiled binary had.** `bun add -g ledge-server` is what
-`docs/user/18-notes-on-another-machine.md` now says, and `src/bun/npmPackage.ts`
-is what makes it true.
+problems the compiled binary had.** Two commands ending in `bun add -g
+ledge-server` are what `docs/user/18-notes-on-another-machine.md` now says, and
+`src/bun/npmPackage.ts` is what makes it true.
 
 The two things this section used to name as prerequisites were both real, and
 both were about the ARTIFACT rather than the wire: the release had to produce a
@@ -1418,15 +1419,32 @@ floor as a user-facing rule, and the adjacency rule all leaving the manual at
 once. The compiled binary stays supported and stays documented; it is a build
 of your own rather than the ordinary path.
 
-**A published command is only reachable if an incoming ssh can find it**, and
-that is now the one thing the manual asks a user to check. `ssh host
-'command -v ledge-server'` is the check, and the reason it earns a section is
-that Bun places global commands beside ITSELF: a system-wide Bun puts them in
-`/usr/local/bin`, which every default sshd PATH contains, and a per-user Bun
-puts them in `~/.bun/bin`, which none does. Both were measured
-(`scripts/probe-npm.ts` asserts the first). The same PATH has to hold `bun`
-too, since the package's bin begins `#!/usr/bin/env bun`; a forced command with
-an absolute path settles the first half and not the second.
+**A published command is only reachable if an incoming ssh can find it**, so
+the install line is what decides that and not a step after it. Bun places
+global commands beside ITSELF, which makes `BUN_INSTALL` the whole of the
+question: `curl … | sudo BUN_INSTALL=/usr/local bash` followed by `sudo
+BUN_INSTALL=/usr/local bun add -g ledge-server` puts both names in
+`/usr/local/bin`, and the same two commands without the variable put them in
+the running user's `~/.bun/bin`, which no default sshd PATH contains. The
+variable is needed on BOTH commands: `bun add -g` reads it rather than
+deriving anything from where the `bun` running it lives, so under `sudo`
+alone the package lands in `/root/.bun/bin`. All three shapes were measured on
+a bare `debian:12` with the documented commands, and `scripts/probe-npm.ts`
+now runs those commands rather than an image that came with Bun in the right
+place. The same PATH has to hold `bun` too, since the package's bin begins
+`#!/usr/bin/env bun`; a forced command with an absolute path settles the first
+half and not the second.
+
+**The `command -v` check stays in the manual** because the install line cannot
+reach a machine that already had a per-user Bun on it, which is the field
+report this rule came from: an install that was completely fine, reported by
+the app as a server that is not installed. `explainDial` is right that the
+remote shell said `command not found` and right that a user who has not
+installed the server needs that sentence; what it cannot see from one line of
+stderr is that the binary is sitting in `~/.bun/bin`. Diagnosing that from the
+client was considered and rejected — a probe that goes looking for an install
+the PATH denies is scaffolding around a broken install line, and the install
+line was the thing to fix.
 
 **Clients that install the server themselves are still not built.** The design
 is VS Code's: connect, read the server's version from the handshake, offer to
@@ -1543,12 +1561,15 @@ Per `testing.md`'s categories:
   records, and a latent flake in `notes.fs.test.ts` that had put a pause
   AFTER the write it was meant to separate rather than before it.
 - **The published package, on a machine that could not have built it**
-  (`bun run probe:npm`). `npm pack` the assembled tree, install it with
-  `bun add -g` inside a container that has Bun and NO compiler and NO libc
-  headers, and drive the result with Ledge's own client over `docker exec`.
-  The fixture is chosen for what it lacks: `pty.ts` has two ways to get its
-  trampolines and only the prebuilt one can work there, so a terminal that
-  resizes proves the packaged library loaded. That is a claim `bun test`
+  (`bun run probe:npm`). `npm pack` the assembled tree, install it with the
+  README's own two commands inside a container that has NO Bun, NO compiler
+  and NO libc headers, and drive the result with Ledge's own client over
+  `docker exec`. The fixture is chosen for what it lacks: `pty.ts` has two
+  ways to get its trampolines and only the prebuilt one can work there, so a
+  terminal that resizes proves the packaged library loaded. Bun is absent for
+  a second reason — an image that ships Bun in `/usr/local/bin` passes the
+  PATH claims whatever the manual says, which is how a per-user install
+  reached a user. That is a claim `bun test`
   cannot make from a checkout, because a checkout has a toolchain.
   Its own negative control is `mv`ing one slice out of `dist-npm` and
   re-running, and doing that is what corrected two things this repository had

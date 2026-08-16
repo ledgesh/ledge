@@ -88,19 +88,21 @@ Closing the last window quits Ledge.
 
 ## Install the server
 
-The other machine needs `ledge-server` on its PATH. It is a package, so two commands install it.
+The other machine needs `ledge-server` on the PATH an incoming ssh gets. It is a package, so two commands install it.
 
-The server runs on Bun, so install that first if the machine has none:
-
-```sh
-curl -fsSL https://bun.sh/install | bash
-```
-
-Then the server:
+The server runs on Bun, and where Bun goes decides where the server goes, because Bun puts global commands beside itself. Install Bun into `/usr/local` and both names land in `/usr/local/bin`, which is where the short PATH of an ssh command looks:
 
 ```sh
-bun add -g ledge-server
+curl -fsSL https://bun.sh/install | sudo BUN_INSTALL=/usr/local bash
 ```
+
+Then the server, into the same place:
+
+```sh
+sudo BUN_INSTALL=/usr/local bun add -g ledge-server
+```
+
+The variable on the second command is not optional. Without it the package installs into the home directory of whoever ran it, which is not a directory an incoming ssh searches.
 
 macOS and Linux are supported, on arm64 or x64. On Linux the floor is glibc 2.29, which means Debian 11, Ubuntu 20.04, RHEL 9, or anything newer. Alpine and other musl systems are not supported.
 
@@ -108,9 +110,9 @@ Nothing else has to be installed and no port is opened. Ledge speaks its protoco
 
 ## Check that ssh can find the server
 
-Worth doing once, because the failure it catches looks like a broken connection rather than a missing PATH entry.
+Worth doing once, because Ledge reports the failure it catches as a server that is not installed. A remote shell that cannot find a command says only that, so that is all the app has to go on.
 
-Ledge starts the server by running `ledge-server serve` over ssh. A command run that way gets a short PATH and no shell profile, so both `ledge-server` and the `bun` it runs on have to be on that PATH. From your Mac:
+Ledge starts the server by running `ledge-server serve` over ssh. A command run that way gets a short PATH and reads no shell profile, so both `ledge-server` and the `bun` its first line names have to be on that PATH already. From your Mac:
 
 ```sh
 ssh you@machine 'command -v ledge-server; command -v bun'
@@ -118,7 +120,7 @@ ssh you@machine 'command -v ledge-server; command -v bun'
 
 Two paths printed means the machine is ready to add.
 
-Nothing printed means Bun was installed for one user rather than system-wide, so its commands went somewhere an incoming ssh does not look. Bun puts global commands beside itself, and `bun pm bin -g` on that machine says where. Linking both into a system directory fixes it:
+Nothing printed means Bun is installed for one user rather than system-wide, which is what a machine that already had Bun before you started usually has. Its global commands are then in `~/.bun/bin`, which an incoming ssh does not search, and `bun pm bin -g` on that machine confirms where they went. Linking both names into a system directory fixes it without reinstalling anything:
 
 ```sh
 sudo ln -s "$(bun pm bin -g)/ledge-server" /usr/local/bin/ledge-server
