@@ -311,10 +311,21 @@ wrong password.
 
 **The write goes in on stdin, not on an argv.** `security`'s own usage text
 calls `-w <password>` insecure and it is right, for the reason §10 gives about
-profiles. `-w` as the last option makes it prompt, it prompts twice to confirm,
-and it reads both from a pipe. It also stores an EMPTY password and still exits
-0 when the two do not match, so the write is read back before it is called a
-success.
+profiles. What goes down the pipe is the whole command rather than the value
+alone: `security -i` reads `add-generic-password … -w <hex>` as one line, and
+the secret is still in no process's argv — `ps` shows `security -i`.
+
+**The prompting form of `-w` cannot be used, and this is measured rather than
+reasoned.** `-w` last, with no value, makes `security` prompt — and a prompt is
+not read from a pipe. With a controlling terminal it opens `/dev/tty`, prints
+`password data for new item:` there and waits forever, so the value written to
+its stdin is never read, the write never returns, and the user sees an app that
+stopped and a stray prompt in whatever terminal launched it. Only a process with
+NO controlling terminal falls back to stdin. That is every `.app` launched from
+Finder, which is why the prompting form worked in the shipping shape and hung
+under `bun run start` — and why it passed the probe below every time, since a
+probe driven over ssh has no tty either. `security` also exits 0 for failures it
+merely prints, so the write is read back before it is called a success.
 
 **Changing a password puts the new one in before the dial and the old one back
 after a failed one.** The dial is what PROVES a password, and proving it means

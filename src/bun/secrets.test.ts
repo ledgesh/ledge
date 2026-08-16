@@ -18,6 +18,7 @@ import {
   fromHex,
   KEYCHAIN_SERVICE,
   SECURITY_PATH,
+  storeCommand,
   toHex,
   XXD_PATH,
 } from "./secrets";
@@ -54,6 +55,53 @@ describe("the stored form", () => {
     // Two bytes in UTF-8, four hex characters, and not the code point.
     expect(toHex("ä")).toBe("c3a4");
     expect(toHex("")).toBe("");
+  });
+});
+
+describe("the store command", () => {
+  const ID = "0f8fad5b-d9cb-469f-a165-70867728950e";
+  const HEX = "70c3a4";
+  const line = storeCommand(ID, HEX);
+
+  // The one this function exists for. `-w` with no value makes `security`
+  // prompt, and a prompt is not read from a pipe: with a controlling terminal
+  // it opens /dev/tty, asks there, and waits forever, which reaches the user as
+  // an app that stopped and a stray "password data for new item:" in whatever
+  // terminal launched it. The value has to be IN the line.
+  test("carries the password inline, so nothing can prompt for it", () => {
+    expect(line).toContain(`-w "${HEX}"`);
+    expect(line.trimEnd().endsWith("-w")).toBe(false);
+  });
+
+  // One command, because storePassword writes it to `security -i` as one line
+  // and a second line would be a second command run against the keychain.
+  test("is a single line", () => {
+    expect(line).not.toContain("\n");
+  });
+
+  test("files the item under the service, against the connection's id", () => {
+    expect(line).toContain(`-s "${KEYCHAIN_SERVICE}"`);
+    expect(line).toContain(`-a "${ID}"`);
+  });
+
+  // -U, or a connection whose password is being changed hits an item that is
+  // already there and the write fails instead of replacing it.
+  test("updates an existing item rather than refusing", () => {
+    expect(line.startsWith("add-generic-password -U ")).toBe(true);
+  });
+
+  // The label and comment Keychain Access shows both have spaces in them, and
+  // an unquoted one would arrive as the first word plus some stray arguments.
+  test("keeps a value with spaces as one token", () => {
+    expect(line).toMatch(/-l "[^"]* [^"]*"/);
+    expect(line).toMatch(/-j "[^"]* [^"]*"/);
+  });
+
+  // Measured against the real parser, not assumed: `security -i` reads \" as a
+  // quote and \\ as a backslash, and stores exactly those characters.
+  test("escapes a quote and a backslash", () => {
+    expect(storeCommand('a"b', HEX)).toContain(String.raw`-a "a\"b"`);
+    expect(storeCommand("a\\b", HEX)).toContain(String.raw`-a "a\\b"`);
   });
 });
 

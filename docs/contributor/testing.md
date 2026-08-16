@@ -206,6 +206,20 @@ concluding the probe is broken. `dev` also does not BUILD the view: only
 launched with `dev` runs the bundle from the last build, which is usually the
 one without the probe in it.
 
+**A probe has no controlling terminal, and the app it stands in for usually
+does.** Everything here is driven over ssh or from a tool that hands its child a
+socket, so `/dev/tty` does not exist for anything a probe spawns — and a child
+that WANTS a terminal changes its behavior rather than failing, which makes this
+a green probe rather than a red one. `security add-generic-password -w` is the
+worked example (remote.md §4): with no tty it reads the password off its pipe
+and the probe passes, and with one it prompts on the terminal and never returns,
+so the password door hung for anyone running the app from a shell while the
+probe covering that exact call stayed green. When a probe spawns something that
+could ask a human for anything, run it once under a real pty before believing
+the pass — `python3 -c 'import pty,sys; pty.spawn(sys.argv[1:])' bun probe.ts`
+is enough to tell the two apart — and put the rule the fix depends on in a unit
+test, since the probe cannot hold it.
+
 **The window has to be frontmost, and a probe cannot make it so.** WebKit
 suspends an occluded page: about seven seconds after launch every `setTimeout`
 stops firing, so a probe's polling loop hangs forever with no error, and

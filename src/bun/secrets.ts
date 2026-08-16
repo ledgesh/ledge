@@ -100,31 +100,75 @@ printf '%s' "\$hex" | ${XXD_PATH} -r -p
 `;
 }
 
+// What Keychain Access shows for these items. The label is the row, the comment
+// is the answer to "why is this one gibberish" for anyone who opens it.
+const LABEL = "Ledge server password";
+const COMMENT = "Stored by Ledge for one server connection, as the hex of the password's UTF-8 bytes.";
+
+/**
+ * The whole `add-generic-password` command, as the one line `security -i` reads
+ * off its stdin.
+ *
+ * Interactive mode, and the tty is the entire reason. `security
+ * add-generic-password -w` with no value does NOT read its stdin when the
+ * process has a controlling terminal: it opens `/dev/tty`, prints `password
+ * data for new item:` there and waits, so the value written to its pipe is
+ * never read and the write never returns. The prompt lands in whatever terminal
+ * the app was launched from, which is the only visible symptom — the dialog
+ * upstream just stops. A `.app` launched from Finder has no controlling
+ * terminal, `security` falls back to the pipe, and the prompting form works
+ * perfectly, which is why it survived every probe: none of them ran under a tty.
+ *
+ * Interactive mode takes the value inline instead, so there is no prompt to
+ * route anywhere, and the secret is still not in any argv — `ps` shows
+ * `security -i` and nothing more.
+ */
+export function storeCommand(id: string, hex: string): string {
+  // -U so an existing item is updated rather than refused.
+  return `add-generic-password -U -s ${quoted(KEYCHAIN_SERVICE)} -a ${quoted(id)} -l ${quoted(LABEL)} -j ${quoted(COMMENT)} -w ${quoted(hex)}`;
+}
+
+/**
+ * One value as one token of that line.
+ *
+ * `security`'s interactive parser takes double quotes and backslash escapes,
+ * measured rather than assumed. Nothing that reaches here needs the escaping
+ * today — the service and the label are ours, an id is a UUID and the value is
+ * hex — which is why it belongs here rather than in a caller that would have to
+ * keep remembering it. A newline is the one thing it does not handle, for the
+ * same reason: none of those four can contain one, the command is a LINE, and
+ * `security` offers no escape that would keep it one.
+ */
+function quoted(value: string): string {
+  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
 // --- the keychain, and the file ----------------------------------------------
 
 /**
  * Store one connection's password, replacing whatever was there.
  *
- * Fed on stdin rather than passed as `-w <password>`: `security`'s own usage
- * text calls the argument form insecure, and it is right that an argv is the
- * wrong place for a secret even when the kernel keeps other users out of it
- * (the same rule §10 applies to profiles). `-w` LAST makes it prompt, and it
- * prompts twice to confirm, so the value goes in twice.
+ * Fed on stdin rather than passed in the argv: `security`'s own usage text
+ * calls the argument form insecure, and it is right that an argv is the wrong
+ * place for a secret even when the kernel keeps other users out of it (the same
+ * rule §10 applies to profiles). What goes down the pipe is the entire command
+ * rather than the value alone, for the reason `storeCommand` gives.
  *
- * Read back before this returns true. A mismatched confirmation makes
- * `security` store an EMPTY password and still exit 0, so its exit code is not
- * evidence on its own, and a silently empty password would reach the user as a
- * server that rejects a password they can see is right.
+ * Read back before this returns true, and that read is load-bearing: `security`
+ * exits 0 for failures it merely prints — a keychain it could not open is one —
+ * so its exit code is not evidence on its own, and a password that was never
+ * written would reach the user as a server that rejects a credential they can
+ * see is right.
  */
 export async function storePassword(id: string, password: string): Promise<{ ok: boolean; error: string }> {
   const hex = toHex(password);
   try {
-    const write = Bun.spawn([SECURITY_PATH, "add-generic-password", "-U", "-s", KEYCHAIN_SERVICE, "-a", id, "-l", LABEL, "-j", COMMENT, "-w"], {
+    const write = Bun.spawn([SECURITY_PATH, "-i"], {
       stdin: "pipe",
       stdout: "ignore",
       stderr: "ignore",
     });
-    write.stdin.write(`${hex}\n${hex}\n`);
+    write.stdin.write(`${storeCommand(id, hex)}\n`);
     await write.stdin.end();
     if ((await write.exited) !== 0) return { ok: false, error: KEYCHAIN_REFUSED };
   } catch (err) {
@@ -229,11 +273,6 @@ export async function ensureAskpass(): Promise<string> {
 }
 
 // --- inside -------------------------------------------------------------------
-
-// What Keychain Access shows for these items. The label is the row, the comment
-// is the answer to "why is this one gibberish" for anyone who opens it.
-const LABEL = "Ledge server password";
-const COMMENT = "Stored by Ledge for one server connection, as the hex of the password's UTF-8 bytes.";
 
 const KEYCHAIN_REFUSED = "The keychain would not store that password.";
 
