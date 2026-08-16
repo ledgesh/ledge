@@ -31,6 +31,15 @@ import { deviceKeyLine } from "@/lib/shell";
 import { hostPart, parsePort, type AuthMode } from "../../shared/connections";
 import type { ConnectionInfo } from "../../shared/rpc-schema";
 
+// A thrown thing, as a sentence. Every action in this dialog is an RPC, and an
+// RPC can reject as well as refuse — Bun taking longer than the view's
+// maxRequestTime is the ordinary way (main.tsx). Both have to reach the same
+// line of red text, because the state that gates these buttons is cleared on
+// the way there.
+function reasonOf(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
 // What a host answered, waiting to be confirmed. Held rather than pinned: the
 // whole point of the step is that a person looks at `fingerprint` first.
 interface Probed {
@@ -52,13 +61,24 @@ export function ConnectionPicker({ onClose }: { onClose: () => void }) {
     if (busy) return;
     setBusy(true);
     setError("");
-    // On success this never returns: selectConnection reloads the page, which
-    // is how everything server-scoped gets rebuilt.
-    const refusal = await selectConnection(id, flushAllNow);
-    if (refusal) {
+    try {
+      // On success this never returns: selectConnection reloads the page, which
+      // is how everything server-scoped gets rebuilt. Staying busy through it
+      // is deliberate — the list must not become clickable again in the moment
+      // between the switch landing and the page going away.
+      const refusal = await selectConnection(id, flushAllNow);
+      if (!refusal) return;
       setError(refusal);
-      setBusy(false);
+    } catch (err) {
+      // A rejected RPC rather than a refusal — Bun took longer than the view's
+      // maxRequestTime, or died. It has to reach the same line a refusal does,
+      // because the alternative is this dialog going quiet: `busy` gates every
+      // row AND the guard at the top of this function, so one swallowed
+      // rejection disables the whole list permanently and eats every click
+      // after it without ever saying why.
+      setError(reasonOf(err));
     }
+    setBusy(false);
   };
 
   const remove = async (id: string) => {
@@ -80,10 +100,7 @@ export function ConnectionPicker({ onClose }: { onClose: () => void }) {
         aria-label="Connections"
         className="flex w-full max-w-lg flex-col rounded-lg border bg-background p-4 shadow-xl"
       >
-        <div className="flex items-baseline justify-between">
-          <h2 className="text-sm font-semibold">Notes on</h2>
-          <span className="text-[11px] text-muted-foreground">One machine at a time</span>
-        </div>
+        <h2 className="text-sm font-semibold">Notes on</h2>
 
         {form ? (
           <ConnectionForm
@@ -364,8 +381,17 @@ function ConnectionForm({
     if (port === null) return setError(BAD_PORT);
     setBusy(true);
     setError("");
-    const res = await probeConnection(destination, port);
-    setBusy(false);
+    let res;
+    try {
+      res = await probeConnection(destination, port);
+    } catch (err) {
+      // Same rule as switchTo: a rejection has to end up on screen, or the
+      // button it disabled stays disabled and the form is stuck.
+      setError(reasonOf(err));
+      return;
+    } finally {
+      setBusy(false);
+    }
     if (res.error) return setError(res.error);
     setProbed({ hostKey: res.hostKey, fingerprint: res.fingerprint, keyType: res.keyType });
   };
@@ -386,37 +412,47 @@ function ConnectionForm({
     if (port === null) return setError(BAD_PORT);
     setBusy(true);
     setError("");
-    const refusal = existing
-      ? await updateConnection(
-          { id: existing.id, name, destination, port, keyPath, auth, password: typedPassword, hostKey },
-          // A changed address means the shell re-opened the wire, so this page
-          // is now looking at the previous machine's session. Every other way
-          // of changing HOW the connection is made re-opens it too, and the
-          // list has to be the same one bun/connectionManager.ts re-attaches
-          // on: a port, a key, a door, or a new password.
-          {
-            reconnected:
-              serving &&
-              (destination.trim() !== existing.destination ||
-                port !== existing.port ||
-                keyPath.trim() !== existing.keyPath ||
-                auth !== existing.auth ||
-                typedPassword !== null),
-            flush: flushAllNow,
-          },
-        )
-      : (
-          await addConnection({
-            name,
-            destination,
-            port,
-            keyPath,
-            auth,
-            password: auth === "password" ? password : "",
-            hostKey: hostKey ?? "",
-          })
-        ).error || null;
-    setBusy(false);
+    let refusal: string | null;
+    try {
+      refusal = existing
+        ? await updateConnection(
+            { id: existing.id, name, destination, port, keyPath, auth, password: typedPassword, hostKey },
+            // A changed address means the shell re-opened the wire, so this page
+            // is now looking at the previous machine's session. Every other way
+            // of changing HOW the connection is made re-opens it too, and the
+            // list has to be the same one bun/connectionManager.ts re-attaches
+            // on: a port, a key, a door, or a new password.
+            {
+              reconnected:
+                serving &&
+                (destination.trim() !== existing.destination ||
+                  port !== existing.port ||
+                  keyPath.trim() !== existing.keyPath ||
+                  auth !== existing.auth ||
+                  typedPassword !== null),
+              flush: flushAllNow,
+            },
+          )
+        : (
+            await addConnection({
+              name,
+              destination,
+              port,
+              keyPath,
+              auth,
+              password: auth === "password" ? password : "",
+              hostKey: hostKey ?? "",
+            })
+          ).error || null;
+    } catch (err) {
+      // Same rule as switchTo: a rejection has to end up on screen. An edit
+      // that re-dials reaches all the way to ssh, so this is the button most
+      // able to outlive the view's patience for an answer.
+      setError(reasonOf(err));
+      return;
+    } finally {
+      setBusy(false);
+    }
     if (refusal) return setError(refusal);
     onDone();
   };
@@ -501,26 +537,14 @@ function ConnectionForm({
            read out of the enclave, let alone named by a file (ios.md §4). */
         !ownKey && <Field label="Key (optional)" value={keyPath} onChange={setKeyPath} placeholder="~/.ssh/ledge" mono />
       )}
-      <p className="text-[11px] leading-snug text-muted-foreground">
-        Any address ssh understands
-        {ownKey ? "" : ", including a name from your ~/.ssh/config"}. Leave the port blank unless sshd listens somewhere
-        other than 22. That machine needs Ledge&apos;s server on its PATH as{" "}
-        <code className="font-mono">ledge-server</code>.
-      </p>
-      {/* Says where it goes and who else can reach it, because the two clients
-          answer that differently: a Mac's item is readable by anything running
-          as this user, and a phone's is Ledge's alone (remote.md §4). */}
-      {auth === "password" &&
-        (ownKey ? (
-          <p className="text-[11px] leading-snug text-muted-foreground">
-            Kept in this device&apos;s keychain, where only Ledge can read it.
-          </p>
-        ) : (
-          <p className="text-[11px] leading-snug text-muted-foreground">
-            Kept in your Mac&apos;s keychain, and read from there by ssh when it connects. Anything running as you can
-            read it too, the same as a key file in <code className="font-mono">~/.ssh</code>.
-          </p>
-        ))}
+      {/* No prose under the fields. What it used to say — which addresses ssh
+          takes, that a blank port means 22, that the far machine needs
+          ledge-server on its PATH, where a password is kept — was read by
+          everyone every time to be useful to somebody once. The first two the
+          labels already carry; the third is a failure the connection now
+          reports in the words of the machine that refused it (connections.ts
+          explainDial), which is where it is actually wanted; the fourth is
+          docs/user/18. */}
       {error && <p className="text-[12px] leading-snug text-destructive">{error}</p>}
       <div className="mt-1 flex justify-end gap-2">
         <Button size="sm" variant="ghost" onClick={onCancel}>

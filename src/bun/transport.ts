@@ -521,19 +521,47 @@ export function socketWriter(socket: { write(bytes: Uint8Array): number }): {
  * stderr is inherited, so the server's log lines land on this process's
  * terminal (and, over ssh, on ssh's). stdout is the protocol and carries
  * nothing else.
+ *
+ * `onStderr` is for the one caller that needs those lines rather than merely
+ * logging them: a dial that fails does so before any frame arrives, so ssh's
+ * stderr is the only account of what went wrong that exists (bun/index.ts,
+ * connections.ts explainDial). Passing it switches stderr to a pipe, which is
+ * why it is opt-in — a pipe nobody drains is a child that blocks once the
+ * buffer fills, and the callback is what guarantees somebody is draining.
  */
-export function spawnDuplex(cmd: readonly string[], opts?: { cwd?: string; env?: Record<string, string> }): Duplex {
+export function spawnDuplex(
+  cmd: readonly string[],
+  opts?: { cwd?: string; env?: Record<string, string>; onStderr?: (text: string) => void },
+): Duplex {
   if (cmd.length === 0) throw new Error("a server command cannot be empty");
   const proc = Bun.spawn({
     cmd: [...cmd],
     stdin: "pipe",
     stdout: "pipe",
-    stderr: "inherit",
+    stderr: opts?.onStderr ? "pipe" : "inherit",
     ...(opts?.cwd ? { cwd: opts.cwd } : {}),
     // Inherited unless the caller says otherwise: a local server needs the
     // user's PATH and SSH_AUTH_SOCK, and `ssh` needs them more.
     ...(opts?.env ? { env: { ...process.env, ...opts.env } } : {}),
   });
+  if (opts?.onStderr) {
+    const report = opts.onStderr;
+    // Drained to the end and never awaited: this is a diagnosis, and a dial
+    // that fails must not wait on the child's last byte before saying so.
+    void (async () => {
+      const decoder = new TextDecoder();
+      const reader = (proc.stderr as ReadableStream<Uint8Array>).getReader();
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (value) report(decoder.decode(value, { stream: true }));
+        }
+      } catch {
+        // The child went away mid-read. Whatever it had already said stands.
+      }
+    })();
+  }
   return duplexOver({
     write(bytes) {
       proc.stdin.write(bytes);

@@ -390,3 +390,43 @@ test("a shell with one window does not offer it, and one with two does", async (
   await page.keyboard.type("New Window");
   await expect(page.getByText("New Window")).toHaveCount(0);
 });
+
+// The freeze this dialog used to have, from both doors onto it.
+//
+// A refusal and a rejection are different failures: Bun answering "no" is a
+// sentence, and Bun not answering at all — outliving the view's
+// maxRequestTime, or dying — is a thrown thing. Every action here sets `busy`
+// before it asks and used to clear it only on the way back from an answer, so
+// a rejection left the flag set forever. That disabled every control in the
+// dialog AND the guard at the top of switchTo, which swallows further clicks
+// without a trace: from the outside, an app that hung on this window.
+test("a request that never comes back is a sentence too, and the dialog stays usable", async ({ page }) => {
+  await bar(page).click();
+  await dialog(page).getByRole("button", { name: "Add Server…" }).click();
+  await dialog(page).getByLabel("Name").fill("Wedged");
+  await dialog(page).getByLabel("SSH destination").fill("ledge@wedged");
+  await dialog(page).getByRole("button", { name: "Continue" }).click();
+  await expect(dialog(page).getByText(/RPC request timed out/)).toBeVisible();
+  // The whole claim: the button that started it is live again, so this is
+  // recoverable by the person looking at it rather than by relaunching.
+  await expect(dialog(page).getByRole("button", { name: "Continue" })).toBeEnabled();
+});
+
+test("a switch whose answer never arrives leaves the list clickable", async ({ page }) => {
+  await bar(page).click();
+  await dialog(page).getByRole("button", { name: "Add Server…" }).click();
+  await dialog(page).getByLabel("Name").fill("Wedged");
+  await dialog(page).getByLabel("SSH destination").fill("ledge@wedged-later");
+  await dialog(page).getByRole("button", { name: "Continue" }).click();
+  await dialog(page).getByRole("button", { name: "It Matches, Add" }).click();
+
+  const row = dialog(page).getByRole("option", { name: /Wedged/ });
+  await row.click();
+  await expect(dialog(page).getByText(/RPC request timed out/)).toBeVisible();
+  await expect(row).toBeEnabled();
+  // And the guard clears with it: a second click is dispatched rather than
+  // dropped, which is what "usable" has to mean for a row whose whole verb is
+  // being clicked.
+  await row.click();
+  await expect(dialog(page).getByText(/RPC request timed out/)).toBeVisible();
+});

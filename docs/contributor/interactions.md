@@ -570,6 +570,21 @@ the failure it prevents, which is running a command on the wrong box.
   session exactly where it was, with the reason in the dialog. At boot the
   same failure falls back to the local server and the indicator says
   "not reachable" rather than silently naming the wrong machine.
+- **A refusal and a rejection both end as a sentence.** Every action here sets
+  a busy flag before it asks, and Bun can fail to answer as well as answer no:
+  the view gives a request thirty seconds (`maxRequestTime`, `main.tsx`) and
+  then rejects it. That flag gates every control in the dialog *and* the guard
+  that drops repeat clicks, so a rejection that nothing catches is an app hung
+  on this window with nothing on screen to explain it — which is what it did.
+  Both paths clear the flag and write to the same line of red text. The one
+  case that stays busy is a switch that SUCCEEDED, because the page is about to
+  reload and the list must not become clickable in between.
+- **No explanatory prose under the form's fields.** The labels carry what a
+  destination and a port are, and what the far machine needs installed on it is
+  reported by the connection that failed, in the words of the machine that
+  refused it (remote.md §8). A paragraph under the fields is read by everyone
+  every time to be useful to somebody once, and it crowds the fields it sits
+  under. Where a password is kept is `docs/user/18`.
 
 ## 4-2. Two devices on one server
 

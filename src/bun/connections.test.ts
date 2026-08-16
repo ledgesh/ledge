@@ -10,6 +10,7 @@
 // and is tested in shared/connections.test.ts.
 import { describe, expect, test } from "bun:test";
 import {
+  explainDial,
   knownHostsText,
   LOCAL_CONNECTION,
   LOCAL_ID,
@@ -316,5 +317,58 @@ describe("reading what a host answered", () => {
   test("output ssh-keygen could not describe is null, not a guess", () => {
     expect(parseFingerprint("")).toBeNull();
     expect(parseFingerprint("laptop is not a key file")).toBeNull();
+  });
+});
+
+// Every string below was taken from a real ssh, against a real sshd in Docker,
+// by pointing the client at a machine that had each fault in turn. The point of
+// the function is that the transport cannot tell these apart — all four reach
+// it as "the connection to the server closed" — so a paraphrase would be
+// testing the paraphrase.
+describe("why the dial failed", () => {
+  test("the shell's word for a server that was never installed becomes the sentence that says so", () => {
+    const said = explainDial("bash: line 1: ledge-server: command not found\n");
+    expect(said).toBe("Ledge's server is not installed on that machine. Install it there, then try again.");
+  });
+
+  test("every login shell's way of saying it, because the far machine's shell is not ours to choose", () => {
+    for (const line of [
+      "bash: line 1: ledge-server: command not found",
+      "sh: 1: ledge-server: not found",
+      "zsh:1: command not found: ledge-server",
+      "ksh: ledge-server: not found",
+    ]) {
+      expect(explainDial(line)).toContain("is not installed on that machine");
+    }
+  });
+
+  test("ssh's own diagnoses are passed through, not rewritten", () => {
+    expect(explainDial("linuxuser@10.0.0.4: Permission denied (publickey,password).")).toBe(
+      "linuxuser@10.0.0.4: Permission denied (publickey,password).",
+    );
+    expect(explainDial("ssh: connect to host 10.0.0.4 port 22: Operation timed out")).toBe(
+      "ssh: connect to host 10.0.0.4 port 22: Operation timed out",
+    );
+    expect(explainDial("Connection timed out during banner exchange")).toBe(
+      "Connection timed out during banner exchange",
+    );
+  });
+
+  test("the last line wins, because ssh narrates before it fails", () => {
+    const noisy = [
+      "Warning: Identity file /Users/dev/.ssh/ledge not accessible: No such file or directory.",
+      "linuxuser@10.0.0.4: Permission denied (publickey).",
+    ].join("\n");
+    expect(explainDial(noisy)).toBe("linuxuser@10.0.0.4: Permission denied (publickey).");
+  });
+
+  test("lines that are also true of connections that worked are not a diagnosis", () => {
+    expect(explainDial("Warning: Permanently added '10.0.0.4' to the list of known hosts.\n")).toBeNull();
+    expect(explainDial("Pseudo-terminal will not be allocated because stdin is not a terminal.\n")).toBeNull();
+  });
+
+  test("a server that accepted the connection and then went quiet has nothing to add", () => {
+    expect(explainDial("")).toBeNull();
+    expect(explainDial("   \n\n  \n")).toBeNull();
   });
 });

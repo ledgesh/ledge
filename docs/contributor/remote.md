@@ -1055,6 +1055,20 @@ flushes pending saves and starts the page over against the new machine. The
 alternative, tearing the same state down in place, would mean a second and
 less-tested teardown path for every module holding a `configureX` singleton.
 
+**A dial that fails reports what ssh said, not what the transport saw.** Every
+way of failing to reach a server happens before the first frame arrives, so all
+the protocol can report is that a wire it never had is gone — one sentence, and
+it is equally true of a missing binary, a refused key, a firewall and a typo.
+ssh knows which, and writes it to stderr, so `spawnDuplex` captures stderr when
+a caller asks for it and `explainDial` (`bun/connections.ts`) puts the last line
+in front of the transport's. Exactly one case is rewritten rather than passed
+through: `command not found` is the remote login shell reporting a package
+nobody installed there, and that is a sentence about §11 rather than about the
+shell. Everything else goes through as ssh wrote it, because "Permission denied
+(publickey)" and "No route to host" are already the diagnosis and a table of
+guesses would only be a worse one. The capture is opt-in because a piped stderr
+nobody drains is a child that blocks once the buffer fills.
+
 **`ledge <title>` on a server reaches every connected client.** The open-request
 file (`bun/openRequest.ts`) stays exactly as it is for the local case. When
 clients are attached, the server also pushes `openExternal` to all of them,

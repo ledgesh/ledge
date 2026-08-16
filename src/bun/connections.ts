@@ -298,6 +298,53 @@ export function sshDial(
   return { argv, env };
 }
 
+/**
+ * Why the dial failed, out of what ssh and the remote shell said about it.
+ *
+ * The protocol cannot answer this. Every one of these failures happens before
+ * a single frame arrives, so all the transport can report is that a wire it
+ * never had is gone — "the connection to the server closed", which is true of
+ * a missing binary, a refused key, a firewall and a typo alike, and tells
+ * somebody looking at a fresh server none of the four apart.
+ *
+ * ssh does know, and says so on stderr. So this reads that, and the ONLY case
+ * it rewrites is the one where ssh's own words point at the wrong machine:
+ * `command not found` is the remote shell reporting a local mistake, and a
+ * user who has not installed the server yet needs the sentence that says so
+ * rather than a shell's name for it. Everything else is passed through as ssh
+ * wrote it, because ssh is better at this than a table of guesses would be —
+ * "Permission denied (publickey)" and "No route to host" are the diagnoses,
+ * not the raw material for one.
+ *
+ * Null when there is nothing to add, which is what a server that accepted the
+ * connection and then went quiet looks like from here.
+ */
+export function explainDial(stderr: string): string | null {
+  // Last first: ssh narrates (`Warning: Identity file … not accessible`) and
+  // then fails, and the failure is the last thing it says. Banners and the
+  // pseudo-terminal notice are dropped for the same reason — they are true of
+  // connections that went on to work.
+  const lines = stderr
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0 && !/^(Warning: Permanently added|Pseudo-terminal|Shared connection to)/.test(l));
+
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i]!;
+    // Every shell's way of saying it, because the remote's login shell is the
+    // one thing about a server this app never chose: bash and zsh say "command
+    // not found", dash and ash say "not found", and zsh puts the name last.
+    if (/(^|[: ])ledge-server: (command )?not found|command not found: ledge-server/.test(line)) {
+      // No name in it: every caller of this already names the connection, on
+      // the row or in front of the sentence, and a message that repeats it
+      // reads as two machines rather than one.
+      return "Ledge's server is not installed on that machine. Install it there, then try again.";
+    }
+    return line;
+  }
+  return null;
+}
+
 /** Ledge's known_hosts: the pinned lines, one per connection that has one. */
 export function knownHostsText(connections: readonly Connection[]): string {
   const lines = connections.map((c) => c.hostKey.trim()).filter((line) => line.length > 0);

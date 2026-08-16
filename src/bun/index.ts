@@ -33,7 +33,7 @@ import { imageFromFile } from "./clipboard";
 import { clientIdFor, clientLabel, ephemeralClientId } from "./clientHome";
 import { createConnectionManager, type Attached, type ConnectionManager } from "./connectionManager";
 import { createConnectionStore } from "./connectionStore";
-import { KNOWN_HOSTS_PATH, LOCAL_ID, sshDial, userKnownHosts, type Connection } from "./connections";
+import { explainDial, KNOWN_HOSTS_PATH, LOCAL_ID, sshDial, userKnownHosts, type Connection } from "./connections";
 import { ASKPASS_PATH, ensureAskpass, hasPassword } from "./secrets";
 import { reconnectingClient } from "../shared/transport";
 import { spawnDuplex } from "./transport";
@@ -326,6 +326,21 @@ async function attachFor(win: Win, conn: Connection): Promise<Attached> {
     userKnownHosts: userKnownHosts(),
     askpass: ASKPASS_PATH,
   });
+  // What ssh said on its way out, kept because it is the only account of a
+  // failure that happens before the protocol starts (connections.ts
+  // explainDial). Bounded: ssh is not chatty, but a login shell on the far end
+  // can be, and this is a diagnosis rather than a log.
+  let said = "";
+  const listen = (text: string): void => {
+    // Logged as it arrives as well as kept, and this is a second thing the
+    // capture buys: ssh's stderr also carries the REMOTE server's own log
+    // lines, which under an inherited stderr went straight to a descriptor and
+    // never reached startLogging. They are in the log file now, named by the
+    // machine they came from. console.log rather than warn because most of
+    // what comes through is a server talking, not a failure.
+    for (const line of text.split("\n")) if (line.trim()) console.log(`[ssh] ${conn.name}: ${line.trim()}`);
+    said = (said + text).slice(-4096);
+  };
   // Reconnecting, because an ssh over a real network dies for reasons that
   // have nothing to do with either end: a laptop lid, a changed network, an
   // idle timeout on a middlebox. The dial is re-run each attempt, so a fresh
@@ -335,12 +350,14 @@ async function attachFor(win: Win, conn: Connection): Promise<Attached> {
   // named, and when the ssh child dies before saying anything (a refused key,
   // an unknown host, no route). Either way the manager keeps the connection
   // that is already working and reports this one, so the throw is the whole
-  // error handling: nothing here has to decide what to do about it.
+  // error handling: nothing here has to decide what to do about it — except to
+  // put ssh's words in front of the transport's, since the transport was never
+  // there to see it.
   const wire = await reconnectingClient({
     // The environment goes with every rung of the ladder, not just the first:
     // a reconnect is a fresh ssh, and it needs the same helper the first one
     // was pointed at (bun/secrets.ts).
-    dial: () => spawnDuplex(argv, { env }),
+    dial: () => spawnDuplex(argv, { env, onStderr: listen }),
     push: win.push,
     build,
     client,
@@ -354,6 +371,10 @@ async function attachFor(win: Win, conn: Connection): Promise<Attached> {
       if (state === "lost") win.manager?.lost(conn.id, detail);
       win.say({ state, detail });
     },
+    // Only the first dial reaches this: reconnectingClient resolves once the
+    // wire is up, so everything after that is the ladder's business.
+  }).catch((err: unknown) => {
+    throw new Error(explainDial(said) ?? (err instanceof Error ? err.message : String(err)));
   });
   const peer = await wire.ready;
   arrived();

@@ -943,6 +943,19 @@ const passwords = new Map<string, string>();
 let activeConn = FAKING_IOS ? "vps-1" : "local";
 // Destinations the fake server refuses, so a spec can drive the refusal path.
 const unreachable = FAKING_IOS ? new Set<string>() : new Set(["ledge@vps"]);
+// A destination whose RPC REJECTS rather than refusing, which is a different
+// failure and used to be a much worse one: Bun outliving the view's
+// maxRequestTime, or dying mid-request (mainview/main.tsx). A refusal comes
+// back as a sentence and a rejection comes back as a thrown thing, and the
+// dialog has to survive both — the `busy` flag it sets before either one gates
+// every control in it.
+// Two sentinels, because the dialog has two doors onto the same hazard: the
+// form's Continue button, which probes, and a row in the list, which selects.
+// The message is electrobun's own, verbatim, since it is the one a user
+// actually gets when this happens.
+const WEDGED_PROBE = "ledge@wedged";
+const WEDGED_SELECT = "ledge@wedged-later";
+const RPC_GAVE_UP = "RPC request timed out.";
 configureConnections(
   { connections, active: activeConn, wanted: activeConn, error: "", build: "0.1.0-harness" },
   {
@@ -950,6 +963,7 @@ configureConnections(
     select: async (id) => {
       const conn = connections.find((c) => c.id === id);
       if (!conn) return { ok: false, error: "There is no such connection." };
+      if (conn.destination === WEDGED_SELECT) throw new Error(RPC_GAVE_UP);
       if (unreachable.has(conn.destination)) return { ok: false, error: `Could not reach ${conn.name}: host is down` };
       activeConn = id;
       return { ok: true, error: "" };
@@ -1004,7 +1018,9 @@ configureConnections(
     // see that a non-default port becomes part of what is pinned
     // (shared/connections.ts knownHostsHost).
     probe: async (destination, port) =>
-      destination.includes("nowhere")
+      destination === WEDGED_PROBE
+        ? Promise.reject(new Error(RPC_GAVE_UP))
+        : destination.includes("nowhere")
         ? { hostKey: "", fingerprint: "", keyType: "", error: `No answer from ${destination}.` }
         : {
             hostKey: `${knownHostsHost(destination, port)} ssh-ed25519 AAAA`,
