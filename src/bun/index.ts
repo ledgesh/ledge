@@ -169,6 +169,10 @@ interface Win {
   connection: string;
   /** The id this window is known by on that connection. */
   client: string;
+  /** What the title bar says: the name of the connection this window is on.
+   * Kept here as well as on the window because the manager settles it before
+   * there is a window to put it on. */
+  title: string;
   /** Where the window was last seen NOT fullscreen: a fullscreen frame is the
    * screen's geometry rather than a choice, and restoring it would open a
    * windowed app at exactly screen size. */
@@ -441,6 +445,23 @@ function workAreas(): Rect[] {
 // coordinates look like one window.
 const CASCADE = 28;
 
+/**
+ * Title a window after the connection it is on (remote.md §8a).
+ *
+ * The app's name is not in it. Two windows both saying "Ledge" is what the
+ * title bar, the Window menu and the App Exposé grid all showed before this,
+ * and the one thing a person needs from them is which machine they are looking
+ * at — the app they can see. It follows the connection rather than the note in
+ * front of it because a window is a client: what changes underneath it is the
+ * machine, and the notes are named by their own tabs.
+ */
+function nameWindow(win: Win, name: string): void {
+  win.title = name;
+  // Null before the window is built, which is where the first report lands;
+  // `buildWindow` reads win.title back when it constructs one.
+  win.window?.setTitle(name);
+}
+
 function snapshot(): WindowState[] {
   return windows.map((w) => ({ frame: w.frame, connection: w.connection || LOCAL_ID }));
 }
@@ -513,6 +534,9 @@ async function buildWindow(want: string, frame?: Rect): Promise<void> {
     manager: null,
     connection: "",
     client: "",
+    // Replaced by the manager's first report, which lands before the window
+    // below is built. It stands only if a window ever opens without one.
+    title: "Ledge",
     frame: start,
     reported: start,
     menu: null,
@@ -530,6 +554,7 @@ async function buildWindow(want: string, frame?: Rect): Promise<void> {
       // moment it changes rather than at quit: a switch that a crash swallowed
       // would otherwise reopen the window on the machine it left.
       onSelect: () => saveWindows(),
+      onName: (name) => nameWindow(win, name),
     });
   } catch (err) {
     // Nothing to put a webview on. One window failing to open must not take
@@ -540,7 +565,7 @@ async function buildWindow(want: string, frame?: Rect): Promise<void> {
   }
 
   rpc = defineLedgeRPC(win.manager.requests);
-  const browser = new BrowserWindow({ title: "Ledge", url: await mainViewUrl(), rpc, frame: start });
+  const browser = new BrowserWindow({ title: win.title, url: await mainViewUrl(), rpc, frame: start });
   win.window = browser;
   win.id = browser.id;
 
