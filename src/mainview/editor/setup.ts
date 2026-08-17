@@ -12,7 +12,7 @@ import { ledgeBlocks } from "./blocks";
 import { ledgeFrontmatter } from "./frontmatter";
 import { livePreview } from "./livePreview";
 import { tableRendering } from "./tables";
-import { embedImage, imageRendering } from "./images";
+import { imageRendering } from "./images";
 import { fenceClose } from "./fences";
 import { quoteExit } from "./quotes";
 import { listContinuation, tightLists } from "./lists";
@@ -23,10 +23,8 @@ import { wrapping } from "./wrap";
 import { formatting } from "./formatting";
 import { findReplace } from "./find";
 import { fromDisk, sessionIdFacet } from "./session";
-import { folderOf, noteChanged, pathOf, saveNow } from "../notes/store";
-import { copyText, readClipboard, readRichClipboard } from "../lib/clipboard";
-import { blockPasteInsert, parsePasteHtml, richPasteMarkdown, verbatimPaste } from "./htmlPaste";
-import { pasteImageAsset } from "../lib/assets";
+import { noteChanged, saveNow } from "../notes/store";
+import { copySelection, cutSelection, pasteHere, pastePlain } from "./clipboard";
 import { settings } from "../lib/settings";
 import { softKeyboard } from "../lib/shell";
 import { keyOf } from "../commands/keys";
@@ -130,95 +128,20 @@ const appKeymap = Prec.highest(
 
 // Clipboard, routed through the native bridge (pbcopy/pbpaste). CodeMirror's
 // built-in copy/cut/paste rely on the browser's clipboard events, which do not
-// work in this non-secure views:// WebView, so we handle the shortcuts ourselves.
-// Each command returns true so CodeMirror consumes the key event: that both
-// blocks the broken native path and stops the unhandled Cmd-key from reaching
-// AppKit, which would otherwise ring the system alert. High precedence so these
-// win over the default copy/cut/paste bindings.
-function selectedText(view: EditorView): string {
-  return view.state.selection.ranges.map((r) => view.state.sliceDoc(r.from, r.to)).join("\n");
-}
-
-/**
- * Paste the pasteboard's text, as Markdown when it also carried formatted HTML
- * that says more than the text does — editor/htmlPaste.ts owns that whole
- * decision, including declining it, so what lands here is either the
- * translation or the text exactly as it arrived.
- */
-function pasteText(view: EditorView, text: string, html: string): void {
-  const sel = view.state.selection.main;
-  const md = verbatimPaste(view.state, sel.from)
-    ? null
-    : richPasteMarkdown(text, parsePasteHtml(html));
-  if (md === null) {
-    view.dispatch(view.state.replaceSelection(text));
-    return;
-  }
-  const before = view.state.sliceDoc(view.state.doc.lineAt(sel.from).from, sel.from);
-  view.dispatch({
-    ...view.state.replaceSelection(blockPasteInsert(before, md)),
-    userEvent: "input.paste",
-  });
-}
-
+// work in this non-secure views:// WebView, so we handle the shortcuts
+// ourselves. The commands themselves live in editor/clipboard.ts, because the
+// editor's context menu runs the same four (interactions.md §11); the keys
+// come from the command table like every other advertised binding. High
+// precedence so these win over the default copy/cut/paste bindings.
+//
+// ⌘A is absent deliberately: `editor.selectAll` exists for the menu, but the
+// key it advertises is the one CodeMirror's own defaultKeymap already binds.
 const clipboardKeymap = Prec.highest(
   keymap.of([
-    {
-      key: "Mod-c",
-      run: (view) => {
-        const text = selectedText(view);
-        if (text) copyText(text);
-        return true;
-      },
-    },
-    {
-      key: "Mod-x",
-      run: (view) => {
-        const text = selectedText(view);
-        if (text) {
-          copyText(text);
-          view.dispatch(view.state.replaceSelection(""));
-        }
-        return true;
-      },
-    },
-    {
-      key: "Mod-v",
-      run: (view) => {
-        // Text first, image as the fallback: a pasteboard carrying text is a
-        // text paste, and a pasteboard with an image but no text — a screenshot,
-        // a copied picture — embeds the image: Bun saves it under
-        // .ledge-assets/ and hands back the reference to insert. The insert
-        // parks the caret on the line below the markdown, so the image renders
-        // the moment it lands (editor/images.ts).
-        void readRichClipboard().then(async ({ text, html }) => {
-          if (text) {
-            pasteText(view, text, html);
-            return;
-          }
-          // The pasted image belongs to this note's workspace: its reference
-          // will resolve against that folder. The rest — where the caret ends
-          // up, what a null answer means — is shared with Insert Image…, which
-          // differs from this only in where the bytes come from.
-          await embedImage(view, pasteImageAsset);
-        });
-        return true;
-      },
-    },
-    {
-      // Paste without the translation. Formatted text converts by default (that
-      // is what a Markdown editor is for), so the escape hatch is the shifted
-      // chord — the same key macOS gives "Paste and Match Style" and Obsidian
-      // gives "paste as plain text", for the same act. This reads the text
-      // flavor alone, which is also the cheaper of the two calls.
-      key: "Mod-Shift-v",
-      run: (view) => {
-        void readClipboard().then((text) => {
-          if (text) view.dispatch(view.state.replaceSelection(text));
-        });
-        return true;
-      },
-    },
+    { key: keyOf("editor.copy")!, run: copySelection },
+    { key: keyOf("editor.cut")!, run: cutSelection },
+    { key: keyOf("editor.paste")!, run: pasteHere },
+    { key: keyOf("editor.pastePlain")!, run: pastePlain },
   ]),
 );
 

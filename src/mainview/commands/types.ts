@@ -211,6 +211,10 @@ export interface RegistryDeps {
   // runs on every menu/palette render, and a note carrying a pasted blob
   // should not be serialized just to ask whether it names a profile.
   noteHead(docId: string): string | null;
+  // Whether that editor holds a non-empty selection — what greys Cut and Copy
+  // in the editor's context menu. A range comparison rather than a doc read,
+  // so unlike noteHead above this costs nothing to ask on every menu render.
+  hasSelection(docId: string): boolean;
   // The vault (note locking, locking.md). State is the view's mirrored
   // copy (vault/channel.ts) — cheap enough for `when` to read per render.
   // The two note ops resolve to an error message to surface, or null (the
@@ -262,6 +266,18 @@ export interface RegistryDeps {
     // fences at the top when there is none (editor/frontmatterEdit.ts) —
     // the same ordinary-undoable-edit stance as toggleTemplate.
     editFrontmatter(docId: string): void;
+    // The clipboard (editor/clipboard.ts), which goes through the Bun process
+    // because views:// is not a secure context. The same four the chords run,
+    // so a menu item and a chord are one act with one undo entry. Cut and Copy
+    // do nothing with an empty selection; paste translates formatted HTML to
+    // Markdown, and pastePlain is that paste with the translation left out.
+    cut(docId: string): void;
+    copy(docId: string): void;
+    paste(docId: string): void;
+    pastePlain(docId: string): void;
+    // CodeMirror's own selectAll — the ⌘A its defaultKeymap already binds,
+    // named here so the context menu has something to render.
+    selectAll(docId: string): void;
   };
 }
 

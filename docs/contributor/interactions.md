@@ -22,7 +22,7 @@ blank is optional. A finger has four of these six columns unavailable to it;
 | Object-scoped ops (rename/close workspace, delete note, close tab) | focused object only      | hover-revealed       | ✓ *canonical home* | ✓ on current     | rename accelerator | reorder |
 | **Row verbs** (open/delete a note, restore/purge a trashed one, rename/close a workspace) | ✓ bare key on the focused row | hover-revealed | ✓ *canonical home* | ✓ on current, if one exists | rename accelerator | reorder |
 | Destructive-irreversible (empty trash, delete permanently)      | – never a chord; ✓ row verb behind a confirm | button in owning section | ✓ | ✓ (confirmed) | – | – |
-| Editor-internal (find, run block, save)                         | ✓ CodeMirror keymap         | hover block buttons  | –                  | ✓ (refocuses editor) | –             | –      |
+| Editor-internal (find, run block, save)                         | ✓ CodeMirror keymap         | hover block buttons  | the note's own menu, §11 | ✓ (refocuses editor) | –       | –      |
 | Pointer gestures (resize, drag-reorder)                         | –                           | –                    | –                  | not commands     | –                 | ✓      |
 
 Rules:
@@ -51,6 +51,12 @@ Rules:
   double up for either. A row kind with a verb missing from its context menu is
   a bug: the menu is the canonical home (R2) and the only place the verb is
   discoverable.
+- **R6a.** A right-click has a canonical home too, and for a long time the
+  editor was the one object in the app without one: every row kind had a menu
+  and the document you spend the day inside had nothing. The row menus carry a
+  row's verbs, which is why they are per row kind; the editor's carries what
+  the POINTER landed on, which is why it is decided per click rather than
+  listed (§11).
 - **R7.** Lists select exactly one row, and a verb acts on the focused row —
   deliberately, not for want of the feature. Multi-select would force every row
   verb to answer "focused row, or the selection?", and answering it wrong once
@@ -95,6 +101,13 @@ section.
   loses to is the list's own scroll. It opens the same menu the right-click
   opens, at the same point, from the same callback — two inputs, one
   implementation, and no second place for a row kind's verbs to be forgotten.
+- **The editor's own menu (§11) is the exception, and takes no long press.**
+  Inside text, the gesture a finger would spend here is the one iOS spends on
+  selecting, and the callout it raises already carries cut, copy, paste, and
+  define — a press that opened ours instead would take the selection gesture
+  away and hand back less. Nothing is stranded: the menu names no verb that is
+  not also in the palette or on the accessory bar (§1a's table), which is
+  exactly the test the row menus fail and why they get the press.
 - **The press focuses its row first.** Focus stops being invisible state when
   no hover ever hinted at it: the ring is the whole answer to "what is this menu
   about", and it is what R5's verbs address afterwards.
@@ -441,7 +454,7 @@ CodeMirror and never at the window level.
 | Documentation         | — (palette; the header's help button) | opens the built-in docs as a HIDDEN READ-ONLY workspace (architecture.md §3b): never a strip row, absent from ⌘1…9 (the numbers index what the strip shows — and stay the way back), landing on Getting Started. Pages are ordinary notes to every read surface — browser, ⌘P, ⌥⌘P, outline, wikilinks — and their fenced blocks still run (the docs' shell demos are live); everything mutating is gated view-side (New Note hidden, Delete/lock absent from the row menu, the editor drops keystrokes) and refused Bun-side regardless. The header button is lit while the docs workspace is selected, since no row can show that, and it TOGGLES: pressing it again selects the workspace the manual was opened from, leaving its tabs where they were. Being no strip row is exactly what leaves the manual without a row to click away from, and on a phone the strip is inside the drawer the manual covers, so the lit button is the only door. Closing the workspace (palette) is arrangement only; the button reopens it. No chord: docs are a sometimes destination |
 | Restart Note Shell    | — (palette)               | kills the current note's shells; its frontmatter params apply at respawn (architecture.md §6a) |
 | Add / Edit Frontmatter | ⌥⌘,                      | one command with a live title (a keyed command cannot be a two-faces pair — the dispatcher ignores `when`): with no block it inserts empty fences at the top with the caret on the body line between (Add); with one it moves the caret into the block (Edit). The block is still hand-edited text — the command only spares the scroll-up-and-type-fences gesture. A line the parser REFUSES says so where it sits: the message drawn after the line's text, the line marked down its left edge (`editor/frontmatter.ts`, from `parseFrontmatter`'s own per-line problems, so what is reported and what is ignored cannot drift). The settings dialog's stance in the place frontmatter is actually edited (architecture.md §6): advisory only — nothing blocks a keystroke, gates the save, or refuses to spawn, and the message clears the moment the line parses. A widget rather than a hover tooltip, because this is news rather than a label on an affordance, and a touch client has no hover to spend. Inside the block, completion teaches the grammar (editor/frontmatterComplete.ts, part of the one appCompletion): the seven params keys with one-line hints at line start (accepting writes the colon too; keys already declared are not re-offered), `template:` values (true / daily / false, explained), `tags:` values (the workspace's tags, the `#` picker's vocabulary), `host:` offers the reserved "local" |
-| Paste / Paste as Plain Text | ⌘V / ⇧⌘V (editor-internal, not commands) | ⌘V pastes the pasteboard's text — translated to Markdown when the pasteboard ALSO carries formatted HTML that says more than its text flavor does (editor/htmlPaste.ts): headings, emphasis, links, lists and tasks, tables, quotes, code blocks with their language, and images whose URL a note can resolve. Formatting spelled as a style declaration counts too (`font-weight: 700` is how Google Docs and Apple Notes ship bold, with no `<b>` anywhere). ⇧⌘V is the same paste with the translation left out — macOS's own "Paste and Match Style" slot, and where every other Markdown editor puts it. THE PLAIN TEXT WINS BY DEFAULT: HTML holding no formatting element at all is span-and-div soup, which is what a copy out of a terminal, VS Code, or DevTools puts up beside its text — converting it would double-space a copied stack of lines and gain nothing, so `hasFormatting` declines, as does a conversion that comes out saying what the text already said. A paste into a fenced block, a code span, or the frontmatter is verbatim regardless: there the bytes are the point. Inside the app the question never arises — the copy path is pbcopy, which writes text alone. Not registry commands for the reason ⌘C/⌘X are not: the chords are bound at `Prec.highest` inside CodeMirror because the views:// scheme is not a secure context and the clipboard has to go through Bun (§10 lists both as inner-owned, so the menu bar cannot claim them) |
+| Cut / Copy / Paste / Paste as Plain Text / Select All | ⌘X / ⌘C / ⌘V / ⇧⌘V / ⌘A | ⌘V pastes the pasteboard's text — translated to Markdown when the pasteboard ALSO carries formatted HTML that says more than its text flavor does (editor/htmlPaste.ts): headings, emphasis, links, lists and tasks, tables, quotes, code blocks with their language, and images whose URL a note can resolve. Formatting spelled as a style declaration counts too (`font-weight: 700` is how Google Docs and Apple Notes ship bold, with no `<b>` anywhere). ⇧⌘V is the same paste with the translation left out — macOS's own "Paste and Match Style" slot, and where every other Markdown editor puts it. THE PLAIN TEXT WINS BY DEFAULT: HTML holding no formatting element at all is span-and-div soup, which is what a copy out of a terminal, VS Code, or DevTools puts up beside its text — converting it would double-space a copied stack of lines and gain nothing, so `hasFormatting` declines, as does a conversion that comes out saying what the text already said. A paste into a fenced block, a code span, or the frontmatter is verbatim regardless: there the bytes are the point. Inside the app the question never arises — the copy path is pbcopy, which writes text alone. All five are registry commands with `domains: []` and `palette: false` — the chords stay bound at `Prec.highest` inside CodeMirror (⌘A is CodeMirror's own selectAll) because the views:// scheme is not a secure context and the clipboard has to go through Bun, so the window dispatcher fires none of them and §10 still lists them as inner-owned, keeping them off the menu BAR's key equivalents. They are commands so the editor's context menu can render them from the registry like every other menu item (§11); the bar keeps AppKit `role` items for the same five, because a role goes through the responder chain and therefore means the TERMINAL's clipboard while the terminal has focus, which a bar installed from Bun cannot know. Same verb, two mechanisms, two scopes: the role means "whatever has focus", the command means "the focused note's editor", and a menu opened by right-clicking that editor wants the second |
 | Indent / Outdent      | ⇥ / ⇧⇥ (typed, not a command) | indents the caret's line, or every line the selection touches (setup.ts's `indentKeymap` over CodeMirror's `indentMore`/`indentLess`). On a list item the marker moves with the line, which is what nests it; in prose it is the ordinary indent. Bound because WKWebView's default for an unclaimed Tab is to move focus OUT of the editor — never what the key means in a document you type Markdown into. The tradeoff is the standard one (Tab no longer walks focus), affordable here because every destination in Ledge is a chord: ⌥⌘B, ⌃\`, ⌘1…9, ⌃Tab. While the `[[`/`#`/frontmatter picker is open, Tab takes its highlighted row first — `acceptCompletion` declines with no popup up, so indent is the fallthrough, not a special case |
 | List continuation     | ⇧↩ (typed, not a command) | Shift+Enter inside a list item opens a line indented to the item's CONTENT column — past the bullet or number, but NOT past a `[ ]`: the checkbox is the item's content, not its marker, and the rendered box is pinned to the same 1ch advance as the `- ` it stands in for (index.css `.ledge-task`), so column 2 is where a bullet's text, a task's label, and both their continuations all line up (editor/lists.ts). CodeMirror's own soft newline reindents to the line's indentation, which for `- foo` is column 0: the new line falls outside the item, so the list stops continuing on the next Enter and an ordered item's continuation is deleted outright. Outside a list item, in a fenced block, and in a quote or table nested inside an item, ⇧↩ stays the ordinary soft newline. Enter is bound on the item's continuation lines only — its first line stays upstream's, since that Enter means "next item" and owes you the marker. On an indent-only line it clears the line and stays on it, the one-press exit editor/quotes.ts gives an empty `> ` line (upstream would push the whitespace below the caret instead); on a continuation line with text it adds another at the same indent, which upstream gets right for every item EXCEPT a task, where it measures emptiness from past the `[ ]` and so deletes the item's text |
 | Tight lists           | ↩ (typed, not a command)  | Enter never inserts a blank line between items — `tightLists()` rebinds upstream's own Enter with both of its looseness rules off (editor/lists.ts). One is config (`nonTightLists: false`): Enter on an empty `- ` always LEAVES the list, where upstream instead pushes the marker down to make a two-item tight list loose — the shape the end of a note gives you, which is why that stray blank line appeared only there. The other has no config, so the command's own output is trimmed: given an already-loose list it prefixes each new item with a blank line, so one blank line (how you leave a list and start a new one) makes every list written under an earlier one double-spaced forever. The insertion is always `\n` + blank line + `\n` + marker, so keeping it from its LAST break drops the blank and leaves marker choice, nesting indent, and ordered renumbering upstream's. Costs nothing that renders: looseness is a property of the whole list, so the HTML is unchanged either way and live preview draws neither differently. Sits behind `fenceClose()` in the extension order and ahead of `markdown()`: a ``` opener inside a list item is the fence's Enter, and this command would otherwise answer it first |
@@ -1144,3 +1157,76 @@ through the same dispatcher the palette uses.
 - Bun sets a **minimal fallback menu at boot** (Quit, the edit roles) so a
   view that fails to load still leaves a way out. The first push replaces it
   wholesale.
+
+## 11. The note editor's context menu
+
+Every object in Ledge has had a right-click menu except the one the user is
+inside all day. A note row, a tab, a workspace, an outline heading, a backlink,
+a tag: all of them answer the second button, and the document answered nothing
+at all, because `App.tsx` suppresses the WebView's native menu app-wide (it
+offers Reload and Inspect Element) and nothing replaced it. R2 and R6a say the
+menu is a verb's canonical home; this is the surface that makes that true of
+the editor's verbs too.
+
+- **The menu is a function of the click, not a list.** A row menu carries its
+  row kind's verbs and can be written as JSX with its conditionals inline. This
+  one carries what the POINTER landed on — a link, a task, a runnable fence —
+  so which verbs it holds is decided per click, and a decision belongs
+  somewhere a unit test can call it: `commands/editorMenu.ts` is the spec and
+  the builder, `commands/editorMenu.test.ts` is the proof, and
+  `workspace/EditorMenu.tsx` renders whatever it is handed through the same
+  `CommandMenuItem` every other menu uses. The component decides nothing. This
+  is `menu.ts`'s move for the menu bar, with the difference that the bar is one
+  fixed list (it has no pointer and nothing to point at) and this is one fixed
+  list per click.
+- **Three groups, in the order a pointer meets them.** What you clicked on
+  (Open Link, Toggle Checkbox, the two run verbs), the clipboard (Cut, Copy,
+  Paste, Paste as Plain Text, Select All), then the writing verbs (Bold,
+  Italic, Insert Link, Link to Note, Code Block, Insert Image…). The first
+  group is usually empty, so ordinary prose reads as a macOS text menu, and
+  when it is not empty the item the click was about sits nearest the pointer.
+  A group that comes back empty takes its separator with it — `buildMenu`'s
+  rule, for `buildMenu`'s reason.
+- **The contextual group is contextual, or it teaches that menus lie.**
+  `link.open` and `task.toggle` are always visible in the palette and no-op off
+  target, which is the right contract there: the palette cannot see the caret
+  and a hidden entry would be a search that fails. A menu can see it — it was
+  opened AT a point — so it withholds instead. The probe asks the same
+  functions the verbs use (`followableAt`, `taskMarkerAt`, `runnableBlockAt`),
+  never a copy of their logic, so a menu that offers a verb cannot then find
+  nothing to do. An unterminated fence is offered no run, for §4c's reason.
+- **The click places the caret first, unless it lands in the selection.** The
+  platform's rule, and load-bearing rather than polite: Cut, Bold and Paste act
+  on the selection, so a menu opened somewhere the caret is not would act
+  somewhere the user is not looking. Both edges of a selection count as inside
+  it, an empty selection is not a selection, and every range counts, not just
+  the main one — Find's "All" selects a dozen and right-clicking one of them
+  must not collapse the rest (`keepsSelection`, pure and tested).
+- **The listener is on the window, and that is forced.** The hotspots that give
+  rendered links and checkboxes their hand cursor are `pointer-events: auto`
+  divs parented to the BODY (`livePreview.ts`, because the WKWebView will not
+  honour `cursor` inside the editing context). So a right-click on a link, a
+  wikilink, a tag or a checkbox has a target outside the editor's subtree
+  entirely, and a React `onContextMenu` on the pane would never hear the four
+  clicks the menu has the most to say about. Each pane hears every right-click
+  and answers only the ones inside its own host, looking through the link layer
+  with `elementsFromPoint` to find what the pointer is really over; the same
+  handler focuses the pane, because that body-parented target means
+  `LeafView`'s `onMouseDownCapture` did not fire either and the verbs act on
+  the focused pane's note.
+- **In the editor is not the same question as in the note.** A run's output
+  panel is a block widget inside `.cm-content`, so it passes every "is this the
+  editor" test and is not the document: a Copy there would copy the note's
+  selection while the user was looking at a terminal. `barFaceOf`
+  (`lib/nativeBridge.ts`) already draws exactly this line for the accessory bar
+  and draws it here, which is one rule with two callers rather than two rules
+  that agree today. A block's own run and copy buttons are aimed at
+  deliberately and keep their own gesture; the link layer is the only thing
+  looked through.
+- **A read-only page loses the writing verbs rather than greying them.** In the
+  built-in manual the menu is Copy and Select All, which is the note row menu's
+  stance in the same workspace: a verb that can never apply to anything here is
+  noise, not discoverability. Its runnable blocks still offer their runs — the
+  docs' shell demos are live (§3, Documentation).
+- **No touch form** (§1a): a long press in text is the selection gesture, and
+  every verb in this menu is in the palette or on the accessory bar already.

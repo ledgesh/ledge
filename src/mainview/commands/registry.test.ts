@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { initialState, reducer, type Action, type AppState } from "@/workspace/store";
 import { buildCommands, paletteItems } from "./registry";
+import { EDITOR_MENU_COMMANDS } from "./editorMenu";
 import { parseKey, resolveChord, DEFAULT_DOMAINS, type FocusDomain } from "./keymap";
 import type { Command, CommandCtx, RegistryDeps } from "./types";
 import { configureShell, recordServerCaps } from "@/lib/shell";
@@ -15,6 +16,7 @@ function stubDeps(
   calls: string[] = [],
   noteHead: string | null = null,
   dailyRoot: string | null = null,
+  hasSelection = true,
 ): RegistryDeps {
   const record = (name: string) => (arg: string) => calls.push(`${name}:${arg}`);
   return {
@@ -76,10 +78,16 @@ function stubDeps(
     revealBacklink: (path, line, raw) => calls.push(`revealBacklink:${path}:${line}:${raw}`),
     jumpToHeading: (docId, line, text) => calls.push(`jumpToHeading:${docId}:${line}:${text}`),
     noteHead: () => noteHead,
+    hasSelection: () => hasSelection,
     editor: {
       find: record("find"),
       replace: record("replace"),
       save: record("save"),
+      cut: record("cut"),
+      copy: record("copy"),
+      paste: record("paste"),
+      pastePlain: record("pastePlain"),
+      selectAll: record("selectAll"),
       runInline: record("runInline"),
       runInTerminal: record("runInTerminal"),
       openLink: record("openLink"),
@@ -189,8 +197,11 @@ describe("registry", () => {
 
   test("every command is reachable without a keyboard", () => {
     // Which commands a menu carries, read off the components that render them
-    // — the registry cannot know, since a menu is JSX.
-    const inAMenu = new Set<string>();
+    // — the registry cannot know, since a menu is JSX. Except the editor's,
+    // which is decided per click and so is data (commands/editorMenu.ts): its
+    // ids come from the spec itself, where a regex over JSX would find only
+    // the `{item}` the component maps over.
+    const inAMenu = new Set<string>(EDITOR_MENU_COMMANDS);
     for (const file of readdirSync("src/mainview", { recursive: true })) {
       if (typeof file !== "string" || !file.endsWith(".tsx")) continue;
       const source = readFileSync(`src/mainview/${file}`, "utf8");

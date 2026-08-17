@@ -235,6 +235,25 @@ export const COMMANDS = {
   // but cmux swallows it as a system-global hotkey; ⇧⌘F is the working
   // fallback (see editor/find.ts).
   "editor.save": { title: "Save", keys: ["Mod-s"] },
+  // The clipboard, and the selection it acts on. Editor-internal like the rest
+  // of this group: ⌘C/⌘X/⌘V/⇧⌘V are bound inside CodeMirror at Prec.highest
+  // (the views:// scheme is not a secure context, so the pasteboard goes
+  // through Bun — editor/clipboard.ts), ⌘A is CodeMirror's own selectAll, and
+  // the window dispatcher fires none of them (domains: []).
+  //
+  // They are commands at all because the editor's context menu renders from
+  // the registry like every other menu (interactions.md §11), and a menu item
+  // may not advertise a chip nobody derived. The menu BAR keeps AppKit `role`
+  // items for the same four verbs on purpose (§10): a role goes through the
+  // responder chain, so it means the terminal's clipboard while the terminal
+  // has focus, and a bar installed from Bun cannot know where focus is. These
+  // mean the focused NOTE's editor, always, which is exactly right for a menu
+  // opened by right-clicking that editor.
+  "editor.cut": { title: "Cut", keys: ["Mod-x"] },
+  "editor.copy": { title: "Copy", keys: ["Mod-c"] },
+  "editor.paste": { title: "Paste", keys: ["Mod-v"] },
+  "editor.pastePlain": { title: "Paste as Plain Text", keys: ["Mod-Shift-v"] },
+  "editor.selectAll": { title: "Select All", keys: ["Mod-a"] },
   "editor.find": { title: "Find", keys: ["Mod-f"] },
   "editor.replace": { title: "Find and Replace", keys: ["Mod-Alt-f", "Mod-Shift-f"] },
   "editor.findNext": { title: "Find Next", keys: ["Mod-g", "F3"] },

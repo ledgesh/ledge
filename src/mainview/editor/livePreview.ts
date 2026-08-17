@@ -503,22 +503,35 @@ class EntityWidget extends WidgetType {
 }
 
 /**
+ * The `[ ]` / `[x]` marker on `pos`'s line, or null. Read by the toggle below
+ * and by the editor's context menu, which offers Toggle Checkbox only where
+ * there is a box to toggle (interactions.md §11).
+ *
+ * The result rides on an object property rather than a bare local: the
+ * assignment happens inside the iterate() callback, and TS control-flow
+ * analysis cannot see a closure run (blocks.ts blockAt does the same).
+ */
+export function taskMarkerAt(state: EditorState, pos: number): Span | null {
+  const line = state.doc.lineAt(pos);
+  const box: { marker: Span | null } = { marker: null };
+  syntaxTree(state).iterate({
+    from: line.from,
+    to: line.to,
+    enter(n) {
+      if (n.name === "TaskMarker") box.marker = { from: n.from, to: n.to };
+    },
+  });
+  return box.marker;
+}
+
+/**
  * Toggle the task marker on `pos`'s line between `[ ]` and `[x]`. False when
  * the line has none. Serves the widget click, and the "Toggle Checkbox"
  * command at the caret.
  */
 export function toggleTaskAt(view: EditorView, pos: number): boolean {
-  const line = view.state.doc.lineAt(pos);
-  let marker: Span | null = null;
-  syntaxTree(view.state).iterate({
-    from: line.from,
-    to: line.to,
-    enter(n) {
-      if (n.name === "TaskMarker") marker = { from: n.from, to: n.to };
-    },
-  });
-  if (!marker) return false;
-  const m: Span = marker;
+  const m = taskMarkerAt(view.state, pos);
+  if (!m) return false;
   const done = /x/i.test(view.state.sliceDoc(m.from, m.to));
   view.dispatch({
     changes: { from: m.from, to: m.to, insert: done ? "[ ]" : "[x]" },
@@ -822,24 +835,33 @@ const hotspotPlugin = ViewPlugin.fromClass(
   },
 );
 
-/** The keyboard/palette path to ⌘-click (the "Open Link" command). Covers
- * every kind of link a caret can sit on: a wikilink opens its note, a #tag
- * opens the Tags panel, a URL leaves the app. */
+/** What a follow-the-link gesture at `pos` would open, or null. Every kind a
+ * caret can sit on: a wikilink names a note, a #tag the Tags panel, a URL
+ * something outside the app. One lookup with two callers — the Open Link
+ * command below, and the editor's context menu deciding whether to offer it
+ * (interactions.md §11) — so a menu that offers the verb cannot then find
+ * nothing to do. */
+export function followableAt(
+  state: EditorState,
+  pos: number,
+): { kind: "wiki" | "tag" | "url"; target: string } | null {
+  const tree = syntaxTree(state);
+  const wiki = wikiTargetAt(state.doc, tree, pos);
+  if (wiki) return { kind: "wiki", target: wiki.target };
+  const tag = tagAt(state.doc, tree, pos);
+  if (tag) return { kind: "tag", target: tag.tag };
+  const url = linkTargetAt(state.doc, tree, pos);
+  return url ? { kind: "url", target: url } : null;
+}
+
+/** The keyboard/palette path to ⌘-click (the "Open Link" command). */
 export function openLinkAtCursor(view: EditorView): boolean {
-  const head = view.state.selection.main.head;
-  const wiki = wikiTargetAt(view.state.doc, syntaxTree(view.state), head);
-  if (wiki) {
-    openWikiNote(view.state.facet(sessionIdFacet), wiki.target);
-    return true;
-  }
-  const tag = tagAt(view.state.doc, syntaxTree(view.state), head);
-  if (tag) {
-    openTag(view.state.facet(sessionIdFacet), tag.tag);
-    return true;
-  }
-  const url = linkTargetAt(view.state.doc, syntaxTree(view.state), head);
-  if (!url) return false;
-  openExternal(url);
+  const hit = followableAt(view.state, view.state.selection.main.head);
+  if (!hit) return false;
+  const session = view.state.facet(sessionIdFacet);
+  if (hit.kind === "wiki") openWikiNote(session, hit.target);
+  else if (hit.kind === "tag") openTag(session, hit.target);
+  else openExternal(hit.target);
   return true;
 }
 

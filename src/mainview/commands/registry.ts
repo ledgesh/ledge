@@ -14,6 +14,8 @@ import {
   CircleHelp,
   Braces,
   CalendarDays,
+  ClipboardPaste,
+  ClipboardType,
   Code,
   Columns2,
   Command as CommandIcon,
@@ -45,6 +47,7 @@ import {
   Rows2,
   Save,
   Scale,
+  Scissors,
   ScrollText,
   Search,
   Server as ServerIcon,
@@ -56,6 +59,7 @@ import {
   AppWindow,
   TerminalSquare,
   TextSearch,
+  TextSelect,
   Trash2,
   X,
 } from "lucide-react";
@@ -919,6 +923,19 @@ export function buildCommands(deps: RegistryDeps): Command[] {
     }),
 
     // --- editor-internal (keys owned by CodeMirror; palette refocuses) -------
+    // The clipboard trio, its shifted variant, and the selection they act on.
+    // `palette: false` on all five: nobody reaches for Copy by typing its
+    // name, and in a ranked list "copy" has to surface Copy Path and Copy
+    // Link, which people do reach for. The editor's context menu is their home
+    // (interactions.md §11), which is what registry.test.ts checks instead.
+    cmd("editor.cut", menuOnly(needsSelection(deps, editorCommand(deps, Scissors, (ed, docId) => ed.cut(docId))))),
+    cmd("editor.copy", menuOnly(needsSelection(deps, editorCommand(deps, Copy, (ed, docId) => ed.copy(docId))))),
+    // Paste is never greyed: whether the pasteboard holds anything is an async
+    // round trip to Bun, and `when` runs on every menu render. A paste with
+    // nothing to paste inserts nothing, which is the cheaper wrong answer.
+    cmd("editor.paste", menuOnly(editorCommand(deps, ClipboardPaste, (ed, docId) => ed.paste(docId)))),
+    cmd("editor.pastePlain", menuOnly(editorCommand(deps, ClipboardType, (ed, docId) => ed.pastePlain(docId)))),
+    cmd("editor.selectAll", menuOnly(editorCommand(deps, TextSelect, (ed, docId) => ed.selectAll(docId)))),
     cmd("editor.find", editorCommand(deps, Search, (ed, docId) => ed.find(docId))),
     cmd("editor.replace", editorCommand(deps, Replace, (ed, docId) => ed.replace(docId))),
     cmd("editor.save", editorCommand(deps, Save, (ed, docId) => ed.save(docId))),
@@ -1090,6 +1107,28 @@ function onClient(
 ): Omit<Command, "id" | "title" | "keys"> {
   const already = spec.when;
   return { ...spec, when: (ctx) => can() && (already?.(ctx) ?? true) };
+}
+
+/** The same command, additionally withheld with nothing selected — what greys
+ * Cut and Copy. Wraps rather than replaces `when`, like onClient above. */
+function needsSelection(
+  deps: RegistryDeps,
+  spec: Omit<Command, "id" | "title" | "keys">,
+): Omit<Command, "id" | "title" | "keys"> {
+  const already = spec.when;
+  return {
+    ...spec,
+    when: (ctx) => {
+      const docId = focusedDocId(ctx.selected);
+      return docId !== null && deps.hasSelection(docId) && (already?.(ctx) ?? true);
+    },
+  };
+}
+
+/** Out of the palette, into a menu. The reachability rule still holds — a
+ * `palette: false` command needs a menu item, which registry.test.ts checks. */
+function menuOnly(spec: Omit<Command, "id" | "title" | "keys">): Omit<Command, "id" | "title" | "keys"> {
+  return { ...spec, palette: false };
 }
 
 function editorCommand(

@@ -37,6 +37,18 @@ Set `editor.livePreview` to `false` under This app in Settings (⌘,) and relaun
 
 Everything else is unaffected: ⌘B, the `[[` picker, and fence completion work the same either way.
 
+## Right-clicking in a note
+
+Right-click anywhere in a note to get a menu of what you can do there.
+
+Cut, Copy, Paste, Paste as Plain Text and Select All are always in it, followed by Bold, Italic, Insert Link, Link to Note, Code Block and Insert Image.
+Above those sits whatever you clicked on: Open Link on a link, a `[[wikilink]]` or a `#tag`, Toggle Checkbox on a task, and both run verbs inside a runnable code block.
+
+The click moves the cursor to where you clicked, so the menu acts on that spot.
+Right-clicking inside a selection keeps the selection, which is how you cut, copy or bold the text you just selected.
+
+Every item shows its keyboard shortcut beside it, so the menu is also where you find them.
+
 ## Pasting formatted text
 
 ⌘V converts formatted text to Markdown. Copy a section of a web page, an email, a Slack thread, or a Google Doc, and the structure survives the paste:

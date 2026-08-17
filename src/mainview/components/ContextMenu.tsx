@@ -75,6 +75,16 @@ export function ContextMenu({
   );
 }
 
+/** A group break. Only the editor's menu has groups so far (its verbs come
+ * from three different places — what you clicked on, the clipboard, the
+ * writing verbs); the spec that decides where these fall is
+ * commands/editorMenu.ts, and it never emits a leading, trailing or doubled
+ * one. Negative margins because the menu's own `p-1` would otherwise leave
+ * the rule floating short of both edges. */
+export function MenuDivider() {
+  return <div role="separator" className="-mx-1 my-1 h-px bg-border" />;
+}
+
 export function MenuItem({
   onSelect,
   destructive,

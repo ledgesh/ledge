@@ -1,4 +1,4 @@
-import { Fragment, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Columns2, FilePlus, Plus, Rows2, SquareX, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useCmdHeld, useCtrlHeld } from "@/lib/useCmdHeld";
@@ -10,6 +10,7 @@ import { CommandMenuItem } from "@/commands/CommandMenuItem";
 import { tooltip } from "@/commands/format";
 import { workspaceKind } from "./channel";
 import { useWorkspace } from "./store";
+import { EditorMenu, editorMenuAt, type EditorMenuAnchor } from "./EditorMenu";
 import { attachEditor, detachEditor, focusEditor } from "./editorPool";
 import { leafIds, type LeafNode, type PaneNode, type SplitNode, type TabState } from "./tree";
 import { clippedEdges, wheelTravel } from "./tabStrip";
@@ -79,6 +80,10 @@ function PaneBody({ leaf, focused }: { leaf: LeafNode; focused: boolean }) {
   const { dispatch, selected } = useWorkspace();
   const { exec } = useCommands();
   const hostRef = useRef<HTMLDivElement>(null);
+  // The editor's own right-click menu. Null when closed; the anchor carries
+  // what the click landed on, so the menu is decided once and not re-probed
+  // on every render (workspace/EditorMenu.tsx).
+  const [menu, setMenu] = useState<EditorMenuAnchor | null>(null);
   const active = leaf.tabs.find((t) => t.id === leaf.activeTabId) ?? null;
   const docId = active?.docId ?? null;
   // PaneTree only ever renders the selected workspace, so the selected
@@ -107,6 +112,29 @@ function PaneBody({ leaf, focused }: { leaf: LeafNode; focused: boolean }) {
     // Re-parent only when the active doc changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docId]);
+
+  // The editor's own context menu (interactions.md §11). On the WINDOW, not on
+  // the host: the hotspots over rendered links and checkboxes are parented to
+  // the body (editor/livePreview.ts), so a right-click on one never passes
+  // through this subtree at all and a React handler here would never see it —
+  // which is the half of the editor the menu has the most to say about. Each
+  // pane hears every right-click and answers only its own (editorMenuAt's
+  // host check), and the pane takes focus first, because that same body-
+  // parented target means LeafView's onMouseDownCapture did not fire either
+  // and the menu's verbs act on the FOCUSED pane's note.
+  useEffect(() => {
+    const onCtx = (e: MouseEvent) => {
+      const at = editorMenuAt(e, hostRef.current, docId, workspaceKind(folder) === "docs");
+      if (!at) return;
+      // App.tsx suppresses the WebView's own menu window-wide; this handler is
+      // the one consuming the gesture, and a consumer says so (§7).
+      e.preventDefault();
+      dispatch({ type: "focusPane", paneId: leaf.id });
+      setMenu(at);
+    };
+    window.addEventListener("contextmenu", onCtx);
+    return () => window.removeEventListener("contextmenu", onCtx);
+  }, [dispatch, docId, folder, leaf.id]);
 
   // Put the caret in this editor when its pane gains focus or its tab changes.
   //
@@ -139,7 +167,12 @@ function PaneBody({ leaf, focused }: { leaf: LeafNode; focused: boolean }) {
       </div>
     );
   }
-  return <div ref={hostRef} className="h-full w-full" />;
+  return (
+    <>
+      <div ref={hostRef} className="h-full w-full" />
+      {menu && <EditorMenu at={menu} onClose={() => setMenu(null)} />}
+    </>
+  );
 }
 
 // --- tab bar ---------------------------------------------------------------

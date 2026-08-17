@@ -253,6 +253,16 @@ export function isBlockRunning(state: EditorState, from: number, to: number): bo
   return state.field(runsField).some((r) => r.state === "running" && r.pos >= from && r.pos <= end);
 }
 
+// Whether `pos` sits in a block the run verbs would accept: a fenced block
+// whose language is runnable and whose closing fence is there. Asked by the
+// editor's context menu before it offers Run Block Inline (interactions.md
+// §11) — an unterminated fence has no agreed body (§4c), so the menu leaves
+// the pair out rather than offering a run that answers with a notice.
+export function runnableBlockAt(state: EditorState, pos: number): boolean {
+  const block = blockAt(state, pos);
+  return !!block && block.closed && isRunnable(block.lang);
+}
+
 // Whether a block can be sent to `destination` right now. The terminal drawer is
 // one serial shell per note — a block sent while it is busy queues invisibly, so
 // that gate is note-wide. Inline runs gate per block (above).

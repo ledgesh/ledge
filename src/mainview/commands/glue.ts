@@ -8,7 +8,7 @@
 // importing any component.
 import { openSearchPanel } from "@codemirror/search";
 import { startCompletion } from "@codemirror/autocomplete";
-import { indentLess, indentMore } from "@codemirror/commands";
+import { indentLess, indentMore, selectAll } from "@codemirror/commands";
 import { EditorView } from "@codemirror/view";
 import { focusEditor, getEditorView, requestReveal } from "@/workspace/editorPool";
 import { revealSelection } from "@/workspace/reveal";
@@ -20,6 +20,13 @@ import { insertLink, toggleBold, toggleItalic } from "@/editor/formatting";
 import { editFrontmatter } from "@/editor/frontmatterEdit";
 import { toggleTemplateFlag } from "@/editor/templateFlag";
 import { embedImage } from "@/editor/images";
+import {
+  copySelection,
+  cutSelection,
+  hasSelection,
+  pasteHere,
+  pastePlain,
+} from "@/editor/clipboard";
 import { pickImageAsset } from "@/lib/assets";
 import { flushAllNow, saveNow } from "@/notes/store";
 import { lockNoteAndRefresh, lockVault, removeLockAndRefresh, vaultState } from "@/vault/channel";
@@ -118,6 +125,12 @@ export const registryDeps: RegistryDeps = {
     if (!view) return null;
     return view.state.sliceDoc(0, Math.min(HEAD_BYTES, view.state.doc.length));
   },
+  // No withView: this only asks a question, and focusing the editor to answer
+  // one would move the caret out of whatever surface is doing the asking.
+  hasSelection: (docId) => {
+    const view = getEditorView(docId);
+    return !!view && hasSelection(view);
+  },
   vaultState,
   // Flush THEN drop, awaited in that order (locking.md §3): a dirty
   // locked buffer must reach disk encrypted while Bun still holds the key.
@@ -167,5 +180,15 @@ export const registryDeps: RegistryDeps = {
     insertImage: (docId) => withView(docId, (view) => void embedImage(view, pickImageAsset)),
     toggleTemplate: (docId) => withView(docId, (view) => toggleTemplateFlag(view)),
     editFrontmatter: (docId) => withView(docId, (view) => editFrontmatter(view)),
+    // The clipboard: the very commands the chords run (editor/clipboard.ts),
+    // so a menu item and ⌘C cannot come to differ. withView focuses first, as
+    // it does for every editor command — the menu took the focus when its item
+    // was clicked, and an edit that lands in an unfocused editor leaves the
+    // caret invisible.
+    cut: (docId) => withView(docId, (view) => void cutSelection(view)),
+    copy: (docId) => withView(docId, (view) => void copySelection(view)),
+    paste: (docId) => withView(docId, (view) => void pasteHere(view)),
+    pastePlain: (docId) => withView(docId, (view) => void pastePlain(view)),
+    selectAll: (docId) => withView(docId, (view) => void selectAll(view)),
   },
 };
