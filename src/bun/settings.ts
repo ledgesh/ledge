@@ -18,8 +18,9 @@
 // only ever one file being the user's file.
 import { join } from "node:path";
 import { readFile, rename, writeFile } from "node:fs/promises";
-import { DEFAULT_SETTINGS, parseSettings, SETTINGS_TEMPLATE, type Settings } from "../shared/settings";
+import { DEFAULT_SETTINGS, parseSettings, settingsTemplate, type Settings } from "../shared/settings";
 import { stripJsonc } from "../shared/jsonc";
+import { defaultShellPath, isExecutableFile, shellCaveat, shellRefusal } from "./spawnParams";
 import { APP_HOME, ensureAppHome } from "./workspaces";
 
 export const SETTINGS_PATH = join(APP_HOME, "settings.jsonc");
@@ -33,21 +34,66 @@ export const LEGACY_SETTINGS_PATH = join(APP_HOME, "settings.json");
 // rewriting it would destroy their work to fix a comma); bad values → each
 // falls back alone, reported by parseSettings.
 export async function loadSettings(): Promise<Settings> {
+  const settings = await readSettings();
+  warnAboutShell(settings.shell.path);
+  return settings;
+}
+
+async function readSettings(): Promise<Settings> {
   const raw = await readSettingsText();
   if (raw === null) {
     await seedDefaultFile();
-    return DEFAULT_SETTINGS;
+    return withDefaultShell(DEFAULT_SETTINGS);
   }
   let json: unknown;
   try {
     json = JSON.parse(stripJsonc(raw));
   } catch (err) {
     console.warn(`[settings] ${SETTINGS_PATH} is not valid JSONC (${err}); running on defaults`);
-    return DEFAULT_SETTINGS;
+    return withDefaultShell(DEFAULT_SETTINGS);
   }
   const { settings, problems } = parseSettings(json, "server");
   for (const p of problems) console.warn(`[settings] ${p}; using the default`);
-  return settings;
+  return namesShellPath(json) ? settings : withDefaultShell(settings);
+}
+
+// The shell this machine gets when the file does not name one: its own login
+// shell where Ledge supports it (bun/spawnParams.ts). DEFAULT_SETTINGS carries
+// a macOS literal because shared/ cannot look at a filesystem to know better,
+// and on a Linux server that literal names nothing — which used to spawn a pty
+// whose child died at execve, reporting no output, no error and no exit code.
+//
+// The literal survives only as the last resort, for a machine with no supported
+// shell at all. Seeding SOMETHING keeps the file honest about what was tried,
+// and the spawn refuses with a sentence rather than forking into that silence.
+export function seededShellPath(): string {
+  return defaultShellPath() ?? DEFAULT_SETTINGS.shell.path;
+}
+
+function withDefaultShell(settings: Settings): Settings {
+  return { ...settings, shell: { ...settings.shell, path: seededShellPath() } };
+}
+
+// Whether the file named a shell itself. One the user wrote stays theirs even
+// when this machine cannot run it: it earns the warning below, never a silent
+// substitution, because the file IS the settings UI and a value it shows that
+// is not the value that spawned would be the worse bug of the two.
+function namesShellPath(json: unknown): boolean {
+  const shell = (json as { shell?: { path?: unknown } } | null | undefined)?.shell;
+  return typeof shell?.path === "string" && shell.path.length > 0;
+}
+
+// Said once at launch, which on a server is the first thing in
+// logs/ledge-server.log. The alternative is finding out at the first Run, and
+// both of these fail in the shape that reads as nothing happening at all.
+function warnAboutShell(path: string): void {
+  const refusal = shellRefusal(path, isExecutableFile);
+  if (refusal) {
+    console.warn(`[settings] ${refusal}; no shell can start until that is fixed`);
+    return;
+  }
+  const caveat = shellCaveat(path);
+  if (caveat) console.warn(`[settings] ${caveat}`);
 }
 
 // The file's text, migrating a legacy settings.json into place if that is
@@ -83,7 +129,7 @@ async function readSettingsText(): Promise<string | null> {
 // read it, leave it be.
 async function seedDefaultFile(): Promise<void> {
   await ensureAppHome();
-  await writeFile(SETTINGS_PATH, SETTINGS_TEMPLATE, { encoding: "utf8", flag: "wx" }).catch(() => {});
+  await writeFile(SETTINGS_PATH, settingsTemplate(seededShellPath()), { encoding: "utf8", flag: "wx" }).catch(() => {});
 }
 
 // The settings editor's load half (settingsRead): the raw text, with first
@@ -98,7 +144,7 @@ export async function readSettingsFile(): Promise<string> {
   } catch {
     // Unreadable even after seeding (permissions): the editor still opens on
     // the template — a save may fail, but viewing the knobs always works.
-    return SETTINGS_TEMPLATE;
+    return settingsTemplate(seededShellPath());
   }
 }
 

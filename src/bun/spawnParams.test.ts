@@ -1,5 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { resolveShellArgs, resolveSpawn, stampSessionFacts, type SpawnDeps } from "./spawnParams";
+import {
+  isSupportedShell,
+  resolveShellArgs,
+  resolveShellPath,
+  resolveSpawn,
+  shellCaveat,
+  shellRefusal,
+  stampSessionFacts,
+  type SpawnDeps,
+} from "./spawnParams";
 import type { NoteParams } from "../shared/frontmatter";
 
 const HOME = "/home/u";
@@ -210,6 +219,82 @@ describe("resolveSpawn degrades, never throws", () => {
     const r = resolveSpawn(params({ profile: "p" }), BASE, deps, HOME, PROFILES);
     expect(r.env["GOOD"]).toBe("1");
     expect(warns.length).toBe(1);
+  });
+});
+
+// Which shell binary, as opposed to which argv. The ladder is pure so a Mac
+// can test what a Linux box resolves to and back: `installed` IS the machine.
+describe("resolveShellPath", () => {
+  const installed = (...paths: string[]) => (p: string) => paths.includes(p);
+
+  test("the account's own login shell wins, because -i sources its rc files", () => {
+    // The whole point on a server: a box whose owner lives in .bashrc must not
+    // be handed a zsh with none of their PATH, aliases or functions.
+    expect(resolveShellPath("/bin/bash", installed("/bin/bash", "/bin/zsh"))).toBe("/bin/bash");
+    expect(resolveShellPath("/bin/zsh", installed("/bin/bash", "/bin/zsh"))).toBe("/bin/zsh");
+  });
+
+  test("a login shell Ledge cannot read markers from is passed over, not spawned", () => {
+    // dash IS /bin/sh on Debian, and it has neither precmd_functions nor
+    // PROMPT_COMMAND: taking it would move the silent failure, not fix it.
+    expect(resolveShellPath("/bin/dash", installed("/bin/dash", "/bin/bash"))).toBe("/bin/bash");
+    expect(resolveShellPath("/usr/bin/fish", installed("/usr/bin/fish", "/bin/bash"))).toBe("/bin/bash");
+  });
+
+  test("a login shell that names nothing on disk is passed over", () => {
+    expect(resolveShellPath("/bin/zsh", installed("/bin/bash"))).toBe("/bin/bash");
+  });
+
+  test("one fixed fallback order picks each platform's own shell, with no platform test", () => {
+    // A Mac always has /bin/zsh and a plain Linux box rarely does, so asking
+    // the filesystem answers the platform question on its own.
+    expect(resolveShellPath(undefined, installed("/bin/zsh", "/bin/bash"))).toBe("/bin/zsh");
+    expect(resolveShellPath(undefined, installed("/bin/bash"))).toBe("/bin/bash");
+    expect(resolveShellPath(undefined, installed("/usr/bin/bash"))).toBe("/usr/bin/bash");
+  });
+
+  test("a relative $SHELL is not trusted as a path", () => {
+    expect(resolveShellPath("zsh", installed("/bin/bash"))).toBe("/bin/bash");
+  });
+
+  test("null when nothing supported is installed, so the caller refuses instead of guessing", () => {
+    expect(resolveShellPath("/bin/dash", installed("/bin/dash", "/bin/sh"))).toBe(null);
+  });
+});
+
+describe("shellRefusal and shellCaveat", () => {
+  const installed = (...paths: string[]) => (p: string) => paths.includes(p);
+
+  test("a shell that is not there is refused, by name", () => {
+    // The failure being prevented: fork succeeds, execve does not, and the
+    // block ends with no output, no error and no exit code.
+    const why = shellRefusal("/bin/zsh", installed("/bin/bash"));
+    expect(why).toContain("/bin/zsh");
+    expect(why).toContain("does not exist");
+  });
+
+  test("a shell that is there is not refused", () => {
+    expect(shellRefusal("/bin/bash", installed("/bin/bash"))).toBe(null);
+  });
+
+  test("an empty or relative path is refused before it reaches a fork", () => {
+    expect(shellRefusal("", installed("/bin/bash"))).toContain("no shell is configured");
+    expect(shellRefusal("bash", installed("/bin/bash"))).toContain("absolute");
+  });
+
+  test("an unsupported shell that EXISTS is a caveat, never a refusal", () => {
+    // It runs the drawer perfectly well; only block slicing is lost. Refusing
+    // would take the working half away from someone who chose it.
+    expect(shellRefusal("/usr/bin/fish", installed("/usr/bin/fish"))).toBe(null);
+    expect(shellCaveat("/usr/bin/fish")).toContain("inline runs");
+    expect(shellCaveat("/bin/zsh")).toBe(null);
+    expect(shellCaveat("/bin/bash")).toBe(null);
+  });
+
+  test("support is by binary name, so a homebrew or nix path still counts", () => {
+    expect(isSupportedShell("/opt/homebrew/bin/bash")).toBe(true);
+    expect(isSupportedShell("/nix/store/abc123/bin/zsh")).toBe(true);
+    expect(isSupportedShell("/bin/sh")).toBe(false);
   });
 });
 

@@ -15,6 +15,7 @@
 // The filesystem is injected (`SpawnDeps`) so the whole policy is
 // unit-testable without touching disk, same move as InlinePool's injected
 // spawn; index.ts passes the real fs.
+import { accessSync, constants } from "node:fs";
 import { homedir } from "node:os";
 import { basename, isAbsolute, join, resolve } from "node:path";
 import { isEnvName, isProfileName, type NoteParams } from "../shared/frontmatter";
@@ -107,6 +108,111 @@ export function resolveSpawn(
   // Pinned last, whatever any layer said (see the header).
   if (baseEnv["TERM"]) env["TERM"] = baseEnv["TERM"];
   return { cwd, env };
+}
+
+// --- which shell binary ------------------------------------------------------
+
+/**
+ * The shells whose block output Ledge can slice.
+ *
+ * Not a taste. `markerInit` (bun/markers.ts) installs its OSC 133 end-marker
+ * hook as `precmd_functions` under zsh and as `PROMPT_COMMAND` under anything
+ * else, and PROMPT_COMMAND is bash's. A shell with neither — dash, which IS
+ * `/bin/sh` on Debian, or fish, whose syntax the init line is not even valid
+ * in — runs commands perfectly well and never ends a block: every inline run
+ * begins, none finishes, and the panel shows no output and no exit code. So
+ * the set of shells that work is exactly two, and one outside it has to be a
+ * warning rather than a silent default.
+ */
+export const SUPPORTED_SHELLS = ["zsh", "bash"] as const;
+
+// Tried in order when the login shell is not one of them. zsh first is not a
+// preference between the two: /bin/zsh is always present on macOS and rarely
+// on Linux, so one fixed order picks the platform's own shell on both without
+// this having to ask which platform it is on.
+const SHELL_FALLBACKS = [
+  "/bin/zsh",
+  "/bin/bash",
+  "/usr/bin/zsh",
+  "/usr/bin/bash",
+  "/usr/local/bin/zsh",
+  "/usr/local/bin/bash",
+] as const;
+
+/** Whether a path names a shell whose block markers Ledge implements. */
+export function isSupportedShell(path: string): boolean {
+  return (SUPPORTED_SHELLS as readonly string[]).includes(basename(path));
+}
+
+/**
+ * The shell to spawn on a machine nobody has configured: this account's own
+ * login shell when Ledge supports it, else the first supported one installed.
+ *
+ * The login shell first because `shell.args` is `-i`, so the shell sources the
+ * user's rc files. Spawning zsh on a box whose owner lives in `.bashrc` hands
+ * them a prompt with none of their PATH, aliases or functions — running, but
+ * not theirs. Following $SHELL is what makes a block behave like the terminal
+ * they would have got by logging in, which on a server is the whole promise.
+ *
+ * null when nothing supported is installed: a refusal for the caller to report,
+ * never a guess to spawn. Pure, so the ladder is testable without a filesystem;
+ * `defaultShellPath` is the one-line wrapper that supplies the real probe.
+ */
+export function resolveShellPath(
+  loginShell: string | undefined,
+  isExecutable: (path: string) => boolean,
+): string | null {
+  if (loginShell && isAbsolute(loginShell) && isSupportedShell(loginShell) && isExecutable(loginShell)) {
+    return loginShell;
+  }
+  return SHELL_FALLBACKS.find(isExecutable) ?? null;
+}
+
+/**
+ * Why this shell cannot be spawned at all, or null if it can.
+ *
+ * It gets its own check because the failure it prevents is invisible. The C
+ * trampoline (`dist-native/ledge_pty.c`) forks and THEN execs, so a missing
+ * binary is the child's error: `fork` succeeds, pty.ts sees a valid pid and
+ * reports a healthy spawn, and the only thing the master fd ever carries is
+ * the tty echoing the input back. Refusing before the fork is what turns that
+ * into a sentence somebody can act on.
+ */
+export function shellRefusal(path: string, isExecutable: (path: string) => boolean): string | null {
+  if (!path) return `no shell is configured: set "shell": { "path": ... } in settings.jsonc`;
+  if (!isAbsolute(path)) return `the configured shell (${path}) is not an absolute path`;
+  if (!isExecutable(path)) return `the configured shell (${path}) does not exist, or is not executable`;
+  return null;
+}
+
+/**
+ * What is wrong with a shell that will still spawn, or null.
+ *
+ * Separate from the refusal above because the damage is partial: an unsupported
+ * shell gives a working terminal drawer and broken inline runs, and refusing to
+ * spawn it would take the half that works away from someone who chose it.
+ */
+export function shellCaveat(path: string): string | null {
+  if (isSupportedShell(path)) return null;
+  return (
+    `${path} is not ${SUPPORTED_SHELLS.join(" or ")}: the terminal will work, ` +
+    `but inline runs cannot report their output or exit codes`
+  );
+}
+
+/** Executable by this process. The real probe behind the two pure checks. */
+export function isExecutableFile(path: string): boolean {
+  try {
+    accessSync(path, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** `resolveShellPath` against this machine and this account. */
+export function defaultShellPath(): string | null {
+  return resolveShellPath(process.env["SHELL"], isExecutableFile);
 }
 
 /**

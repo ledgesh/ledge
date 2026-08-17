@@ -6,7 +6,7 @@ import {
   mergeSettings,
   parseSettings,
   SETTINGS_HOMES,
-  SETTINGS_TEMPLATE,
+  settingsTemplate,
   type Settings,
   type SettingsHome,
 } from "./settings";
@@ -336,7 +336,7 @@ describe("the two homes", () => {
 // disagrees with itself.
 describe("the seeded templates", () => {
   test.each([
-    ["server", SETTINGS_TEMPLATE],
+    ["server", settingsTemplate(DEFAULT_SETTINGS.shell.path)],
     ["client", clientSettingsTemplate(DEFAULT_SETTINGS)],
   ] as Array<[SettingsHome, string]>)("the %s template strips to the defaults, problem-free", (home, template) => {
     const { settings, problems } = parseSettings(JSON.parse(stripJsonc(template)), home);
@@ -347,7 +347,7 @@ describe("the seeded templates", () => {
   // Literally, not through a validator fallback: a template that omitted a
   // field would pass the test above on the default it was missing.
   test.each([
-    ["server", SETTINGS_TEMPLATE],
+    ["server", settingsTemplate(DEFAULT_SETTINGS.shell.path)],
     ["client", clientSettingsTemplate(DEFAULT_SETTINGS)],
   ] as Array<[SettingsHome, string]>)("the %s template names exactly its own sections", (home, template) => {
     const raw = JSON.parse(stripJsonc(template)) as Record<string, unknown>;

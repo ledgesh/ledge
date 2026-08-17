@@ -72,8 +72,12 @@ RUN bun build src/bun/serve.ts --compile --outfile /out/ledge-server \
 
 FROM debian:trixie-slim
 
-# zsh because that is the default shell in settings.jsonc and a default that
-# needs a settings file to work is not a default. openssh-client for `host:`
+# zsh because the image gets to choose, and `useradd --shell` below is how it
+# says so: the seeded default is this account's login shell where Ledge can
+# read block output from it (bun/spawnParams.ts), which is zsh or bash and
+# nothing else. Debian would otherwise give the account /bin/sh, which is dash,
+# which has no hook to end a block with — so this line and that flag are one
+# decision and have to move together. openssh-client for `host:`
 # frontmatter, where the SERVER makes the outbound connection (§6). Everything
 # a user's notes actually run — git, a language, a cloud CLI — is theirs to add
 # in a `FROM ledge-server` of their own; guessing at that list here would be a

@@ -221,7 +221,16 @@ export const DEFAULT_SETTINGS: Settings = Object.freeze({
 // change without this file changing with it — but remember the seed only
 // reaches NEW installs (an existing file is never rewritten): announce default
 // changes, don't just edit them here.
-export const SETTINGS_TEMPLATE = `// Ledge settings, for the machine holding the notes. The file is the settings
+//
+// `shellPath` is substituted rather than written in because the right answer
+// differs per machine and this file cannot ask: `shared/` reaches for nothing
+// only Bun has (shared/portable.test.ts), and the default is the account's own
+// login shell where Ledge supports it (bun/spawnParams.ts `resolveShellPath`).
+// The seeded file gets that CONCRETE path, never a sentinel like "auto": the
+// file is the settings UI, so it has to say what will actually run and stay
+// editable to something else on one line.
+export function settingsTemplate(shellPath: string): string {
+  return `// Ledge settings, for the machine holding the notes. The file is the settings
 // UI: edit it here (⌘,), relaunch to apply; no setting applies live. This is
 // JSONC: comments (and trailing commas) are fine. A bad value falls back to
 // its default with a warning in the launch log; it never takes the rest of
@@ -232,9 +241,10 @@ export const SETTINGS_TEMPLATE = `// Ledge settings, for the machine holding the
 // stored on, so they live in this app's own settings file — the other tab
 // in the ⌘, dialog.
 {
-  // The login shell every terminal drawer and inline run spawns.
+  // The login shell every terminal drawer and inline run spawns. Seeded with
+  // this machine's own, if that is zsh or bash: the shells Ledge can read.
   "shell": {
-    "path": "/bin/zsh",
+    "path": "${shellPath}",
     "args": ["-i"]
   },
 
@@ -319,13 +329,15 @@ export const SETTINGS_TEMPLATE = `// Ledge settings, for the machine holding the
   }
 }
 `;
+}
 
-// The client's half of the file, and the only template that is generated
-// rather than a constant. It has two jobs the server's has one of: seeding a
-// fresh install with the defaults, AND carrying an existing install's values
-// across when the split happens (bun/clientSettings.ts). Substituting the
-// values keeps one set of comments doing both, where a constant template plus
-// a patcher would mean either losing the comments or editing JSONC text.
+// The client's half of the file. Both templates are generated, but this one
+// substitutes every value rather than the one the server's cannot know: it has
+// two jobs the server's has one of, seeding a fresh install with the defaults
+// AND carrying an existing install's values across when the split happens
+// (bun/clientSettings.ts). Substituting the values keeps one set of comments
+// doing both, where a constant template plus a patcher would mean either
+// losing the comments or editing JSONC text.
 //
 // A drift test round-trips this through parseSettings, so a knob added to a
 // client section without a line here fails.

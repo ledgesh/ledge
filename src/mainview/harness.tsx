@@ -36,7 +36,7 @@ import { configureConnections, recordLinkState, recordPresence } from "./lib/con
 import {
   clientSettingsTemplate,
   DEFAULT_SETTINGS,
-  SETTINGS_TEMPLATE,
+  settingsTemplate,
   THEMES,
   type SettingsHome,
   type Theme,
@@ -883,7 +883,7 @@ const HARNESS_SETTINGS = {
 // has a tab per home: a spec that edited one and asserted on the other would
 // pass on a bridge that ignored the argument entirely.
 const settingsFiles: Record<SettingsHome, string> = {
-  server: SETTINGS_TEMPLATE,
+  server: settingsTemplate(DEFAULT_SETTINGS.shell.path),
   client: clientSettingsTemplate(HARNESS_SETTINGS),
 };
 const profiles = new Map<string, string>();

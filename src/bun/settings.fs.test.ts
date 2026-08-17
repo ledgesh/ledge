@@ -7,16 +7,31 @@ import { beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve, sep } from "node:path";
-import { DEFAULT_SETTINGS, SETTINGS_TEMPLATE } from "../shared/settings";
+import { DEFAULT_SETTINGS, settingsTemplate } from "../shared/settings";
 import { APP_HOME } from "./workspaces";
 import {
   inspectSettings,
   LEGACY_SETTINGS_PATH,
   loadSettings,
   readSettingsFile,
+  seededShellPath,
   SETTINGS_PATH,
   writeSettingsFile,
 } from "./settings";
+
+// What the seed writes on THIS machine. The shell path in it is resolved per
+// machine (bun/spawnParams.ts), so these tests name it the way the seed does
+// and leave the ladder itself to spawnParams.test.ts, which can vary the
+// filesystem without owning one.
+const SEEDED_TEMPLATE = settingsTemplate(seededShellPath());
+
+// The defaults as THIS machine gets them. Only the shell differs: everything
+// else in DEFAULT_SETTINGS is portable, and that one field is resolved against
+// the filesystem so a Linux box is not handed a macOS path.
+const SEEDED_DEFAULTS = {
+  ...DEFAULT_SETTINGS,
+  shell: { ...DEFAULT_SETTINGS.shell, path: seededShellPath() },
+};
 
 if (!resolve(APP_HOME).startsWith(resolve(tmpdir()) + sep)) {
   throw new Error(`refusing to run filesystem tests against ${APP_HOME} — is the preload configured?`);
@@ -35,11 +50,29 @@ beforeEach(async () => {
 
 describe("loadSettings", () => {
   test("first launch: returns defaults and seeds the commented template", async () => {
-    expect(await loadSettings()).toEqual(DEFAULT_SETTINGS);
+    expect(await loadSettings()).toEqual(SEEDED_DEFAULTS);
     // The seeded file is the template verbatim — the knobs documented in
     // comments — and the template ↔ defaults agreement is pinned in
     // shared/settings.test.ts.
-    expect(await readFile(SETTINGS_PATH, "utf8")).toBe(SETTINGS_TEMPLATE);
+    expect(await readFile(SETTINGS_PATH, "utf8")).toBe(SEEDED_TEMPLATE);
+  });
+
+  // The bug this whole seam exists for: a settings.jsonc with no shell section
+  // used to hand a Linux server the macOS literal in DEFAULT_SETTINGS, and the
+  // pty forked into a child that died at execve with nothing to show for it.
+  test("a file that names no shell gets this machine's, not the portable literal", async () => {
+    await writeFile(SETTINGS_PATH, '{ "trash": { "ttlDays": 7 } }');
+    const s = await loadSettings();
+    expect(s.shell.path).toBe(seededShellPath());
+    expect(s.trash.ttlDays).toBe(7);
+  });
+
+  // The other side of it: a path the user wrote is theirs. Substituting one
+  // that works would leave the file showing a shell that is not the one that
+  // spawned, and the file is the settings UI.
+  test("a shell the user named is kept even when this machine cannot run it", async () => {
+    await writeFile(SETTINGS_PATH, JSON.stringify({ shell: { path: "/bin/nope" } }));
+    expect((await loadSettings()).shell.path).toBe("/bin/nope");
   });
 
   test("a valid file wins over the defaults, comments and trailing commas welcome", async () => {
@@ -60,7 +93,7 @@ describe("loadSettings", () => {
   test("unparseable JSONC runs on defaults and leaves the file untouched", async () => {
     const broken = '{ "editor": { "fontSize": } }';
     await writeFile(SETTINGS_PATH, broken);
-    expect(await loadSettings()).toEqual(DEFAULT_SETTINGS);
+    expect(await loadSettings()).toEqual(SEEDED_DEFAULTS);
     // Byte-for-byte: the file is the user's, mid-edit; fixing it is theirs to do.
     expect(await readFile(SETTINGS_PATH, "utf8")).toBe(broken);
   });
@@ -110,8 +143,8 @@ describe("loadSettings", () => {
 
 describe("readSettingsFile / writeSettingsFile", () => {
   test("first read seeds and returns the template — ⌘, on a fresh install opens documented knobs", async () => {
-    expect(await readSettingsFile()).toBe(SETTINGS_TEMPLATE);
-    expect(await readFile(SETTINGS_PATH, "utf8")).toBe(SETTINGS_TEMPLATE);
+    expect(await readSettingsFile()).toBe(SEEDED_TEMPLATE);
+    expect(await readFile(SETTINGS_PATH, "utf8")).toBe(SEEDED_TEMPLATE);
   });
 
   test("write persists exactly the given text; the next read returns it", async () => {
@@ -150,7 +183,7 @@ describe("inspectSettings", () => {
   test("a fresh install reads as the documented template", async () => {
     // The seeded template is the whole reference: an agent asked about a knob
     // on an install nobody has customized still gets every knob's comment.
-    expect((await inspectSettings()).text).toBe(SETTINGS_TEMPLATE);
+    expect((await inspectSettings()).text).toBe(SEEDED_TEMPLATE);
   });
 
   test("a bad value is reported, not corrected", async () => {

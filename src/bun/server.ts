@@ -70,7 +70,15 @@ import { syncWatchers } from "./watch";
 import { readAsset, writePastedImage } from "./assets";
 import { bundledBun, interpretersFor, runnerFor } from "./runner";
 import { loadSettings, readSettingsFile, writeSettingsFile } from "./settings";
-import { resolveShellArgs, resolveSpawn, stampSessionFacts, type SessionFacts, type SpawnDeps } from "./spawnParams";
+import {
+  isExecutableFile,
+  resolveShellArgs,
+  resolveSpawn,
+  shellRefusal,
+  stampSessionFacts,
+  type SessionFacts,
+  type SpawnDeps,
+} from "./spawnParams";
 import { buildRemoteSpawn } from "./remoteSpawn";
 import { readFileSync, statSync } from "node:fs";
 import { isHostName, LOCAL_HOST, type NoteParams } from "../shared/frontmatter";
@@ -399,6 +407,15 @@ export async function createServer(deps: { push: Audience; native: NativeDeps })
     const { cwd, env } = resolveSpawn(sessionParams.get(sessionId), shellEnv, spawnDeps);
     // Local spawns only: on a remote host the note's local path names nothing.
     stampSessionFacts(env, sessionFacts.get(sessionId) ?? null);
+    // Before the fork, because after it there is nobody to tell: the trampoline
+    // execs in the CHILD (dist-native/ledge_pty.c), so a shell that is not there
+    // returns a healthy pid and then dies at `_exit(127)`, and the block ends
+    // with no output, no error and no exit code. Throwing here reaches the
+    // client as an `err` frame the block can show instead (bun/transport.ts
+    // dispatch). Unlike a missing cwd, which resolveSpawn degrades to $HOME,
+    // there is nothing to degrade TO: a different shell is not this one.
+    const refusal = shellRefusal(settings.shell.path, isExecutableFile);
+    if (refusal) throw new Error(refusal);
     return new PtyProcess({
       executable: settings.shell.path,
       // Not the configured args verbatim: a zsh spawns with comments enabled so

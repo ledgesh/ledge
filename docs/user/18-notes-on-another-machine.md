@@ -112,6 +112,8 @@ macOS and Linux are supported, on arm64 or x64. On Linux the floor is glibc 2.29
 
 Nothing else has to be installed and no port is opened. Ledge speaks its protocol over ssh's stdin and stdout.
 
+Blocks need zsh or bash on that machine. Ledge spawns the account's login shell when it is one of those, and otherwise the first of the two it finds, so an ordinary Linux install needs nothing extra. Where neither exists, a run refuses and names the shell it looked for instead of appearing to do nothing.
+
 ## Check that ssh can find the server
 
 Worth doing once, because Ledge reports the failure it catches as a server that is not installed. A remote shell that cannot find a command says only that, so that is all the app has to go on.

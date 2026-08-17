@@ -94,20 +94,24 @@ Frontmatter applies to newly spawned shells, so after editing it run "Restart No
 
 ## Change the shell
 
-Ledge spawns `/bin/zsh -i` for every inline shell and every terminal drawer. Set `shell.path` and `shell.args` in Settings (⌘,) to use a different one:
+Ledge spawns your own login shell with `-i` for every inline shell and every terminal drawer, as long as that shell is zsh or bash. Set `shell.path` and `shell.args` in Settings (⌘,) to use a different one:
 
 ```json
 "shell": {
-  "path": "/opt/homebrew/bin/fish",
+  "path": "/opt/homebrew/bin/bash",
   "args": ["-i"]
 }
 ```
 
 Relaunch to apply. Keep an interactive flag in `args`, usually `-i`, so your rc files run and blocks get the aliases and PATH you expect.
 
+zsh and bash are the two shells Ledge can read block output from. It marks where a block's output starts and stops with a hook that only those two provide. Any other shell runs the terminal drawer normally, and its inline runs show no output and no exit code. Ledge warns about that in the launch log rather than overriding what you set.
+
+A shell that is not installed refuses the run and names the path it could not find. Nothing quietly falls back to a different shell, because a different shell is not the one you asked for.
+
 When the shell is zsh, Ledge spawns it with `-o interactive_comments` on top of your `args`. That is what makes a `#` line a comment in the terminal drawer, where the block is typed into the shell rather than sourced from a file. zsh leaves the option off by default, so without it the drawer answers a comment line with `command not found: #`. Put `+o interactive_comments` in `args` to keep zsh's own behavior.
 
-This setting is about shells on this Mac. A note with a `host:` line runs its blocks in the host's own shell instead ([[Remote Hosts]]).
+This setting is about shells on the machine holding the notes, so a remote workspace reads the copy on its own server. A note with a `host:` line runs its blocks in the host's own shell instead ([[Remote Hosts]]).
 
 ## Interpreted languages
 

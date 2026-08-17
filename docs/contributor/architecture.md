@@ -502,6 +502,25 @@ consumers (editor and
 terminal font sizes, the appearance, the runnable-fence set) read that
 snapshot at construction time through `lib/settings.ts`.
 
+- **A default that cannot be a constant.** `shell.path` is resolved per
+  machine rather than written down. `shared/` reaches for nothing only Bun has
+  (`portable.test.ts`), so `DEFAULT_SETTINGS` can carry only a macOS literal,
+  and on a Linux server that literal names nothing. `bun/spawnParams.ts`
+  `resolveShellPath` takes the account's own login shell when Ledge supports it
+  — zsh or bash, which is exactly the pair `markers.ts` installs an OSC 133
+  end-marker hook for, pinned by a test in `markers.test.ts` — and otherwise
+  the first supported shell installed. The login shell first because `args` is
+  `-i`: a box whose owner lives in `.bashrc` must not be handed a zsh with none
+  of their PATH. `bun/settings.ts` seeds that CONCRETE path into
+  settings.jsonc and substitutes it for a file naming none; a path the USER
+  wrote is never substituted, only warned about, because the file is the
+  settings UI and must not show a shell other than the one that spawned. No
+  `"auto"` sentinel, for the same reason. What makes this worth the machinery:
+  the pty forks before it execs (`dist-native/ledge_pty.c`), so a shell that is
+  not there hands back a healthy pid and dies in the child, and the block ends
+  with no output, no error and no exit code — hence the pre-fork refusal in
+  `bun/server.ts` and the launch warning in `bun/settings.ts`.
+
 - **What earns a setting.** The same shape of bar as the dependency policy
   (§8): every setting is a behavioral fork the app tests and maintains
   forever, so one exists only where the hardcoded default demonstrably fails

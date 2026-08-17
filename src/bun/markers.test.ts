@@ -1,5 +1,6 @@
 import { test, expect, describe } from "bun:test";
 import { MarkerParser, markerCommand, markerInit } from "./markers";
+import { SUPPORTED_SHELLS } from "./spawnParams";
 
 const NONCE = "testnonce";
 const enc = new TextEncoder();
@@ -104,6 +105,21 @@ describe("markerCommand / markerInit", () => {
     // the end-marker hook.
     const zshBranch = init.slice(init.indexOf('if [ -n "$ZSH_VERSION" ]'), init.indexOf("else "));
     expect(zshBranch).toContain("unsetopt PROMPT_SP");
+  });
+
+  // The invariant behind SUPPORTED_SHELLS (bun/spawnParams.ts): the set of
+  // shells Ledge will resolve to is exactly the set this init has a hook for.
+  // A shell added to that list without a branch here spawns happily and never
+  // ends a block — no output, no exit code — which is the failure the list
+  // exists to prevent, so the pairing is pinned rather than remembered.
+  test("the supported shells are exactly the ones this init installs a hook for", () => {
+    const init = markerInit(NONCE);
+    expect([...SUPPORTED_SHELLS]).toEqual(["zsh", "bash"]);
+    // zsh by its own hook array...
+    expect(init).toContain("precmd_functions+=(__ledge_precmd)");
+    // ...and bash by the variable only it runs before each prompt. dash and
+    // fish have neither, which is why neither is on the list.
+    expect(init).toContain("PROMPT_COMMAND=");
   });
 });
 
