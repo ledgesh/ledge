@@ -15,6 +15,8 @@
 import {
   BinaryHolder,
   checkHello,
+  CLIENT_METHODS,
+  declared,
   encodeControl,
   FrameDecoder,
   hello,
@@ -22,6 +24,7 @@ import {
   parseControl,
   PUSH_MESSAGES,
   REQUEST_METHODS,
+  WIRE_METHODS,
   WireError,
   writeMessage,
   type Hello,
@@ -54,6 +57,21 @@ export interface ClientConnection {
    * ends disagree about the protocol, and when the server dies before saying
    * anything at all. */
   ready: Promise<Hello>;
+  /**
+   * Whether this server answers a method (remote.md §11). False only once the
+   * server has SAID what it answers and left this one out; a server that
+   * declared nothing supports everything as far as anyone here knows, which is
+   * how it behaved before it was asked.
+   *
+   * Answered from the hello, so it costs nothing and is available before the
+   * call. That is what it is for: a command that needs a method this server
+   * lacks should be absent from the palette, not present and then apologetic
+   * (interactions.md §8).
+   *
+   * Always false for a CLIENT_METHOD, whoever is on the far end. The question
+   * is what the SERVER answers, and those are answered at home.
+   */
+  supports(method: string): boolean;
   closed: Promise<void>;
   /**
    * Why the server said it was hanging up, once `closed` has settled. Null for
@@ -123,6 +141,10 @@ export interface HeartbeatOpts {
   repeat?(ms: number, tick: () => void): () => void;
 }
 
+/** The names a client shell answers at home, which therefore never become a
+ * frame (wire.ts CLIENT_METHODS). A set, because `call` asks on every request. */
+const CLIENT_SEAM = new Set<string>(CLIENT_METHODS);
+
 /** The default `repeat`, and the server's too (bun/transport.ts): both ends
  * want a timer that ticks and never holds a process open by itself. */
 export function repeatEvery(ms: number, tick: () => void): () => void {
@@ -176,6 +198,13 @@ export function clientConnection(
   let unanswered = 0;
   let stopProbing: (() => void) | null = null;
 
+  // What the server said it answers, narrowed to names this client knows
+  // (wire.ts `declared`). Null until the hello arrives, and null after it for a
+  // server that declared nothing — both mean "no reason to think it cannot",
+  // which is what makes an older server degrade one call at a time instead of
+  // failing at the door.
+  let serverMethods: Set<string> | null = null;
+
   let settleClosed!: () => void;
   const closed = new Promise<void>((resolve) => (settleClosed = resolve));
   let acceptHello!: (h: Hello) => void;
@@ -224,6 +253,7 @@ export function clientConnection(
       case "hello": {
         const refusal = checkHello(msg, "server");
         if (refusal) return fail(new Error(`the server refused this client: ${refusal}`));
+        serverMethods = declared(msg.methods, WIRE_METHODS);
         acceptHello(msg);
         return;
       }
@@ -325,12 +355,28 @@ export function clientConnection(
     // The handshake gates the first call and nothing after it: `ready` is
     // already settled by the time a second request is made, so this costs one
     // microtask, not a round trip (remote.md §12).
-    await ready;
+    const peer = await ready;
     // A call made after this connection died must REJECT, not sit in a pending
     // map nothing will ever answer. It is the same failure a request in flight
     // gets, and reconnectingClient tells them apart from a refusal the same
     // way — which is what lets this one be replayed too.
     if (!open) throw new ConnectionLost(farewell ?? cause ?? "the connection to the server closed");
+    // Two ways a call can be one this server will not answer, and they are not
+    // the same fact about the world, so they must not be the same sentence.
+    //
+    // The first is a method that is nobody's business but the client's
+    // (remote.md §10) — a clipboard, a window, a connection list. No server has
+    // ever answered one and no upgrade will change that; a call reaching here
+    // means the shell's own overlay was not in place, which is a bug in this
+    // app and not a fact about the far end. Worded exactly as bun/server.ts
+    // words it, because it is the same refusal arriving a round trip earlier.
+    if (CLIENT_SEAM.has(method)) throw new Error(`${method} is the client's, not the server's (remote.md §10)`);
+    // The second is an ordinary method this particular server is too old to
+    // have (remote.md §11). Refused here rather than on the server, though the
+    // server would refuse it too (`unknown method:`): having declined to hang
+    // up over it, we owe the caller the better of the two answers — no round
+    // trip, and a message that names the build and says what to do about it.
+    if (serverMethods && !serverMethods.has(method)) throw new Unsupported(method, peer.build);
     const id = nextId++;
     return new Promise<unknown>((resolve, reject) => {
       pending.set(id, { resolve, reject, method });
@@ -359,6 +405,8 @@ export function clientConnection(
     call,
     ready,
     closed,
+    supports: (method: string) =>
+      !CLIENT_SEAM.has(method) && (serverMethods === null || serverMethods.has(method)),
     farewell: () => farewell,
     close: () => fail(new Error("this client closed the connection")),
   };
@@ -627,6 +675,11 @@ export async function reconnectingClient(opts: ReconnectOpts): Promise<ClientCon
     call: (m, p) => call(m, p),
     ready: Promise.resolve(first),
     closed,
+    // Asked of the CURRENT connection rather than of the one that opened this
+    // ladder. A reconnect can land on a different server (`instance` in the
+    // handshake is how we know), and if it did, what it answers is its own
+    // business and not its predecessor's.
+    supports: (method: string) => conn.supports(method),
     farewell: () => goodbye,
     close() {
       shut = true;
@@ -658,6 +711,29 @@ interface Held {
  * than a string match on a message. */
 export class ConnectionLost extends Error {
   override readonly name = "ConnectionLost";
+}
+
+/**
+ * This server does not have the method that was just called (remote.md §11).
+ *
+ * Deliberately NOT a ConnectionLost: the wire is fine, and replaying this on a
+ * reconnect would re-ask a server that has already answered as clearly as it
+ * ever will. It is a refusal, and it is reported like any other one.
+ *
+ * It carries the method rather than only wording it, so a caller that wants to
+ * fall back can branch on the name instead of parsing English.
+ */
+export class Unsupported extends Error {
+  override readonly name = "Unsupported";
+  constructor(
+    readonly method: string,
+    build: string,
+  ) {
+    super(
+      `this server has no ${method}: it is running ${build || "an older build"}, which predates it. ` +
+        `Upgrading the server adds it; the rest of this connection is unaffected.`,
+    );
+  }
 }
 
 function reasonOf(err: unknown): string {

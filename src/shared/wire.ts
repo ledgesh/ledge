@@ -26,9 +26,23 @@
 // it sent is the least-trusted thing it sends.
 import type { LedgeRPC } from "./rpc-schema";
 
-/** Bumped when the framing or the message set changes shape. A peer speaking
- * a different one is refused, never partially understood. */
-export const PROTOCOL_VERSION = 4;
+/**
+ * Bumped when the framing changes, when the control messages change shape, or
+ * when a PAYLOAD changes shape under a name that stays the same. A peer
+ * speaking a different one is refused, never partially understood.
+ *
+ * This is now the ONLY thing that refuses a peer, and the list above is the
+ * whole of what it covers: incompatibilities a caller cannot see coming, where
+ * carrying on means one end reading the other's bytes as something they are
+ * not. A method one end has and the other does not is NOT on that list — it is
+ * loud, local, and survivable, and §11 has how it is handled instead.
+ *
+ * The cost of that split is that this number is bumped by a person rather than
+ * derived, so `rpc-schema.shape.test.ts` is the tripwire: it fails when the
+ * schema's types change without this line changing, and the fix is to answer
+ * the question it asks.
+ */
+export const PROTOCOL_VERSION = 5;
 
 export const FRAME_HEADER_BYTES = 5;
 
@@ -59,8 +73,29 @@ export interface Hello {
   t: "hello";
   role: "client" | "server";
   protocol: number;
-  schema: string;
   build: string;
+  // What this end can actually be asked to do, and what it may push: the
+  // server's WIRE_METHODS and PUSH_MESSAGES, sent as the names themselves
+  // rather than as a hash of them.
+  //
+  // A hash could only ever answer "same or different", and the two ends being
+  // different is not the same as their being incompatible — which is the whole
+  // reason these are here (§11). A LIST answers the question a client actually
+  // has, which is "can this server do the thing I am about to ask for", and it
+  // answers it before the ask rather than after.
+  //
+  // Empty from a client, which serves nothing over this wire: CLIENT_METHODS
+  // are answered at home and CLIENT_PUSHES are raised at home. Empty from a
+  // server too if it predates the fields, and empty is read as "says nothing,
+  // so assume it can do anything" — which is exactly the behavior a client had
+  // before it was told, and it fails at the one call rather than at the
+  // connection.
+  //
+  // Both are intersected with this end's own lists on arrival, so a peer
+  // cannot grow this client's memory by sending a million names: what is kept
+  // is bounded by our own surface, not by the peer's.
+  methods: string[];
+  pushes: string[];
   // Who is connecting. The server files this client's saved layout under it
   // (remote.md §5), so a phone does not inherit a desktop's three-pane
   // arrangement and the same Mac gets its own back. Identity belongs to the
@@ -325,6 +360,24 @@ export const CLIENT_METHODS = [...NATIVE_METHODS, ...CONNECTION_METHODS] as cons
 
 export type ClientMethod = (typeof CLIENT_METHODS)[number];
 
+const CLIENT_ONLY = new Set<string>(CLIENT_METHODS);
+
+/**
+ * The requests that actually become frames: every name a SERVER answers.
+ *
+ * CLIENT_METHODS are subtracted because no frame ever carries one — the client
+ * shell answers them at home and bun/server.ts refuses them by name — so what a
+ * server would have to change to match a new one is nothing. This is the list
+ * the fingerprint below is taken over, and subtracting them there is the point:
+ * a window verb, a clipboard flavor or a sixth way to edit a connection is a
+ * fact about a client, and it must not refuse a server that is running the same
+ * protocol perfectly well.
+ *
+ * PUSH_MESSAGES needs no such subtraction — CLIENT_PUSHES is already a separate
+ * list, for the same reason on the other direction of the wire.
+ */
+export const WIRE_METHODS: readonly RequestMethod[] = REQUEST_METHODS.filter((m) => !CLIENT_ONLY.has(m));
+
 // Exhaustiveness, in the direction `satisfies` cannot see. It refuses a name
 // the schema does not have; these refuse a schema name the lists do not have,
 // and the compiler's error is the missing method's own name. Between them,
@@ -518,30 +571,20 @@ export function fromBase64(text: string): Uint8Array {
 }
 
 /**
- * FNV-1a over the sorted names. Not a hash for security: it is a fingerprint
- * that moves when the protocol's METHOD SURFACE moves, so a client and a
- * server built from different schemas refuse each other at the handshake
- * instead of failing on the first call nobody implements.
+ * Which of the peer's declared names this end also knows.
  *
- * What it does NOT see is a payload SHAPE change under an unchanged name. That
- * one rides the `build` string, which the handshake also carries and which the
- * upgrade offer reads (remote.md §11) — a mismatch there means "these are
- * different builds", which is exactly the question a shape change poses.
+ * The intersection, and in that order on purpose: `mine` bounds the result, so
+ * what a connection retains is the size of our own surface however many names
+ * the peer sent. A peer that declares nothing gets null rather than an empty
+ * set — "said nothing" and "said it can do nothing" are opposite answers, and
+ * conflating them would take every call down against a server that simply
+ * predates the field.
  */
-export function fingerprint(names: readonly string[]): string {
-  const text = [...names].sort().join(",");
-  let h = 0x811c9dc5;
-  for (let i = 0; i < text.length; i++) {
-    h ^= text.charCodeAt(i);
-    h = Math.imul(h, 0x01000193);
-  }
-  return (h >>> 0).toString(16).padStart(8, "0");
+export function declared(theirs: readonly string[], mine: readonly string[]): Set<string> | null {
+  if (theirs.length === 0) return null;
+  const named = new Set(theirs);
+  return new Set(mine.filter((m) => named.has(m)));
 }
-
-export const SCHEMA_VERSION = fingerprint([
-  ...REQUEST_METHODS.map((m) => `req:${m}`),
-  ...PUSH_MESSAGES.map((m) => `push:${m}`),
-]);
 
 export function hello(
   role: "client" | "server",
@@ -551,11 +594,27 @@ export function hello(
   hold = 0,
   label = "",
 ): Hello {
-  // Cleaned on the way out as well as on the way in. The rule belongs to the
-  // wire rather than to whichever shell asked the operating system for a name,
-  // and a device whose name has a newline in it should not be able to send one
-  // to a server that predates the check.
-  return { t: "hello", role, protocol: PROTOCOL_VERSION, schema: SCHEMA_VERSION, build, client, label: cleanLabel(label), instance, hold };
+  // Filled from the role rather than passed in. What an end serves is a fact
+  // about which end it is, not a decision either caller gets to make, and a
+  // server that could forget to declare its methods would be a server that
+  // silently reads as "assume it can do anything".
+  const serves = role === "server";
+  return {
+    t: "hello",
+    role,
+    protocol: PROTOCOL_VERSION,
+    build,
+    methods: serves ? [...WIRE_METHODS] : [],
+    pushes: serves ? [...PUSH_MESSAGES] : [],
+    client,
+    // Cleaned on the way out as well as on the way in. The rule belongs to the
+    // wire rather than to whichever shell asked the operating system for a
+    // name, and a device whose name has a newline in it should not be able to
+    // send one to a server that predates the check.
+    label: cleanLabel(label),
+    instance,
+    hold,
+  };
 }
 
 /**
@@ -574,18 +633,27 @@ export function sessionHold(asked: number, ceiling: number): number {
 /**
  * null when the peer is compatible, else the refusal to report and hang up on.
  * Both versions are always named: "incompatible" with no numbers in it is a
- * message nobody can act on (remote.md §11). A differing BUILD is deliberately
- * not a refusal — it is what the upgrade offer reads — and a partially
- * understood protocol is never negotiated, because that is how silent
+ * message nobody can act on (remote.md §11).
+ *
+ * Two refusals, and they are the two things that cannot be survived. A peer on
+ * the wrong END of the wire is answering questions it has no business
+ * answering. A peer on another PROTOCOL_VERSION may put different bytes behind
+ * the same names, and a partially understood protocol is how silent
  * data-shaped bugs happen.
+ *
+ * What is deliberately NOT a refusal is either end knowing a name the other
+ * does not. That was refused here until it became clear what it cost: two
+ * window verbs no server has ever answered refused every deployed server, and
+ * a rule that stops a whole connection over a method nobody was going to call
+ * makes the client and the server a matched pair that must ship together
+ * forever. A missing method now fails at the call that needs it, naming itself
+ * and both builds, and everything else on the connection keeps working. A
+ * differing BUILD is not a refusal either — it is what the upgrade offer reads.
  */
 export function checkHello(peer: Hello, expect: "client" | "server"): string | null {
   if (peer.role !== expect) return `expected to be talking to a ${expect}, and the peer says it is a ${peer.role}`;
   if (peer.protocol !== PROTOCOL_VERSION) {
-    return `protocol version ${peer.protocol} on the ${peer.role}, ${PROTOCOL_VERSION} here`;
-  }
-  if (peer.schema !== SCHEMA_VERSION) {
-    return `schema ${peer.schema} on the ${peer.role} (build ${peer.build}), ${SCHEMA_VERSION} here`;
+    return `protocol version ${peer.protocol} on the ${peer.role} (build ${peer.build}), ${PROTOCOL_VERSION} here`;
   }
   return null;
 }
@@ -648,7 +716,7 @@ export function parseControl(text: string): WireMessage {
     case "hello":
       if (m["role"] !== "client" && m["role"] !== "server") return bad("a hello with no role");
       if (typeof m["protocol"] !== "number") return bad("a hello with no protocol version");
-      if (typeof m["schema"] !== "string" || typeof m["build"] !== "string") return bad("a hello with no versions");
+      if (typeof m["build"] !== "string") return bad("a hello with no build");
       // A peer that predates the field is not refused here: checkHello owns
       // compatibility, and it will refuse this one on the protocol version
       // with both numbers named, which is a far better message than "a hello
@@ -670,8 +738,15 @@ export function parseControl(text: string): WireMessage {
         t: "hello",
         role: m["role"],
         protocol: m["protocol"],
-        schema: m["schema"],
         build: m["build"],
+        // Absent is empty rather than a refusal, and empty means "declared
+        // nothing" — `declared()` reads that as the permissive answer. Anything
+        // that is not a string is DROPPED rather than refused: the list is
+        // intersected with our own names before it is used, so a number in it
+        // could never have matched one, and hanging up over it would be
+        // refusing a connection on behalf of a name that does not exist.
+        methods: names(m["methods"]),
+        pushes: names(m["pushes"]),
         client: typeof m["client"] === "string" ? m["client"] : "",
         label: cleanLabel(m["label"]),
         instance: typeof m["instance"] === "string" ? m["instance"] : "",
@@ -739,6 +814,26 @@ const MAX_LABEL_CHARS = 64;
 function cleanLabel(v: unknown): string {
   return typeof v === "string" ? v.replace(/\p{Cc}/gu, " ").slice(0, MAX_LABEL_CHARS).trim() : "";
 }
+
+/**
+ * A declared method or push list, made safe to hold.
+ *
+ * Not a string is not a name, so it is dropped. What is left is capped, and
+ * that cap is the only reason this is not a one-line filter: `declared()`
+ * intersects the result with our own surface and would bound it anyway, but
+ * this runs FIRST, on an array whose length the peer chose. A hello listing ten
+ * million methods must not be built into a ten-million-entry Set on the way to
+ * being thrown away.
+ */
+function names(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  return v.filter((n): n is string => typeof n === "string").slice(0, MAX_DECLARED_NAMES);
+}
+
+/** Comfortably over the real surface (about 70 requests and 10 pushes) and far
+ * under a number worth allocating for. A peer with more names than this to
+ * declare is not a Ledge server. */
+const MAX_DECLARED_NAMES = 512;
 
 // Absent stays absent. Spreading `{op: undefined}` would put the key in the
 // object, and the encoder would put `"op":null` on the wire for every read.

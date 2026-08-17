@@ -537,8 +537,9 @@ possible screens. That is what `Hello.client` is for. Beside it rides
 `Hello.label`, the readable half: the id keys files and stays opaque, while the
 label is what the OTHER clients on that server put on screen (§7). The handshake
 carries the server's identity too — `Hello.instance`, which names the RUN rather
-than the machine, and which §7 uses to decide whether a replay is safe. The
-protocol version is 4.
+than the machine, and which §7 uses to decide whether a replay is safe. It
+carries `Hello.methods` and `Hello.pushes`, which are what the server can be
+asked to do (§11). The protocol version is 5.
 
 **The client home is `.client` inside the app home**, not a second top-level
 directory: on every machine Ledge ships to, the client and its local server are
@@ -816,7 +817,8 @@ Adding the two frames moved the protocol version to 4, which is what that number
 is for: an older server would meet its first `ping` at the default arm of its own
 `handle`, hang up on a client that "may not send ping", and be re-dialled into
 the same refusal. Refusing at the handshake instead names both versions and says
-what to do about it (§11).
+what to do about it (§11). It is at 5 now, for the hello that carries a method
+list instead of a schema hash.
 
 The probe is a frame rather than a request, and the server answers it in the
 transport rather than in a handler. Both follow from what it has to prove. A
@@ -1505,10 +1507,55 @@ the fallback is now two commands a user can actually run, rather than a git
 checkout and a compiler.
 
 **The handshake is the first frame in each direction** and carries the
-protocol version, the schema version, and the build. A schema mismatch
-refuses the connection with the two versions named and the upgrade offered.
-It does not negotiate a subset: a partially-understood protocol is how
-silent data-shaped bugs happen.
+protocol version, the build, and the list of methods and pushes the server
+serves.
+
+**One thing refuses a connection: the protocol version.** It covers the
+framing, the shape of the control messages, and the shape of any payload under
+a name that stays the same. Those are the incompatibilities a caller cannot see
+coming, where carrying on means one end reading the other's bytes as something
+they are not. A mismatch refuses with both numbers and the peer's build named,
+and the upgrade offered. It does not negotiate a subset: a partially understood
+protocol is how silent data-shaped bugs happen.
+
+**A method one end has and the other does not is not one of those, and does not
+refuse anything.** It is loud, local, and survivable, so it is handled where it
+happens instead. The server declares its `WIRE_METHODS` and `PUSH_MESSAGES` in
+its hello; the client intersects that with its own names and refuses a call to
+anything missing from it, before the call goes out, with the method and the
+server's build in the message (`Unsupported`, `shared/transport.ts`).
+Everything else on that connection keeps working. `supports()` answers the same
+question ahead of time, so a command that needs a method this server lacks can
+be absent from the palette rather than present and then apologetic
+(interactions.md §8).
+
+The declaration is a LIST rather than a hash of one. A hash can only answer
+"same or different", and different is not incompatible — which was the whole
+problem. A list answers the question a client actually has, which is whether
+this server can do the thing it is about to ask for.
+
+Three consequences worth stating, because each one used to be a refusal:
+
+| The two ends differ by | What happens |
+| --- | --- |
+| A client-only verb (`CLIENT_METHODS`, `CLIENT_PUSHES`) | Nothing. Never declared, never on the wire, invisible to the handshake. |
+| A method the client has and the server does not | Connects. That one call fails, named, with no round trip. |
+| A method the server has and the client does not | Connects. The client never calls it; an unknown push is ignored. |
+
+Why this changed: a fingerprint over the whole method surface refused every
+deployed 0.1.0 server the moment `windowDocs` and `windowRole` were added, and
+neither is a method any server has ever answered. A rule that stops a whole
+connection over a method nobody was going to call makes the client and the
+server a matched pair that has to ship together forever, which is not a
+property this design can afford.
+
+**The cost is that `PROTOCOL_VERSION` is now bumped by a person, not derived.**
+A payload shape changing under a stable name is the one incompatibility nothing
+else catches, so `shared/rpc-schema.shape.test.ts` is the tripwire: it pins a
+digest of the schema's types, ignoring comments and formatting, and fails when
+they move without the version moving. It cannot tell an additive change from a
+breaking one, and it is not supposed to. It exists so that nobody is never
+asked.
 
 The compiled-in docs corpus (`bun/docsContent.ts`) ships with the server, so
 a VPS serves the manual that matches its own version.

@@ -11,7 +11,14 @@
 // the split in phase 1 of ios.md has come undone, and portable.test.ts says so
 // in the general case.
 import { describe, expect, test } from "bun:test";
-import { clientConnection, fedDuplex, type Duplex, type HeartbeatOpts } from "./transport";
+import {
+  clientConnection,
+  ConnectionLost,
+  fedDuplex,
+  Unsupported,
+  type Duplex,
+  type HeartbeatOpts,
+} from "./transport";
 import {
   CONTROL_FRAME,
   encodeControl,
@@ -172,12 +179,12 @@ describe("a client facing a server that will not talk", () => {
     await expect(client.ready).rejects.toThrow("protocol version 1 on the client, 2 here");
   });
 
-  test("a server on another schema is refused before any request is sent", async () => {
+  test("a server on another protocol is refused before any request is sent", async () => {
     const server = peer();
     const client = clientConnection(server.duplex, { push: nowherePush(), build: "0.1.0" });
-    server.greet({ schema: "deadbeef", build: "0.9.0" });
-    await expect(client.ready).rejects.toThrow(/deadbeef/);
-    await expect(client.requests.vaultState({})).rejects.toThrow(/deadbeef/);
+    server.greet({ protocol: 99, build: "0.9.0" });
+    await expect(client.ready).rejects.toThrow(/protocol version 99/);
+    await expect(client.requests.vaultState({})).rejects.toThrow(/protocol version 99/);
     // The client's own hello and nothing after it: a request never went out
     // over a connection whose protocol was already in doubt.
     expect(server.writes()).toBe(1);
@@ -202,6 +209,114 @@ describe("a client facing a server that will not talk", () => {
     client.close();
     expect(server.isClosed()).toBe(true);
     await client.closed;
+  });
+});
+
+// --- a server that knows fewer methods than this client (remote.md §11) -------
+//
+// The half of compatibility the handshake stopped refusing over. A connection
+// to an older server has to WORK, minus the calls that server has never heard
+// of, and those have to fail in a way a caller can act on.
+
+describe("a server that does not have every method", () => {
+  const without = (...gone: string[]) => ({
+    methods: hello("server", "0.1.0").methods.filter((m) => !gone.includes(m)),
+  });
+
+  test("the connection is made, not refused", async () => {
+    const server = peer();
+    const client = clientConnection(server.duplex, { push: nowherePush(), build: "0.1.0" });
+    server.greet(without("vaultUnlock", "noteLock"));
+    await expect(client.ready).resolves.toMatchObject({ role: "server" });
+  });
+
+  test("everything it does have still works", async () => {
+    const server = peer();
+    const client = clientConnection(server.duplex, { push: nowherePush(), build: "0.1.0" });
+    server.greet(without("vaultUnlock"));
+    const pending = client.requests.noteRead({ path: "/notes/a.md" });
+    await settle();
+    const req = server.heard.at(-1) as { id: number };
+    server.say({ t: "res", id: req.id, r: { note: { text: "hi", mtimeMs: 1 } } });
+    expect(await pending).toEqual({ note: { text: "hi", mtimeMs: 1 } });
+  });
+
+  test("the one it lacks fails locally, naming itself and the build to upgrade", async () => {
+    const server = peer();
+    const client = clientConnection(server.duplex, { push: nowherePush(), build: "0.1.0" });
+    server.greet({ ...without("vaultUnlock"), build: "0.0.9" });
+    await client.ready;
+    const before = server.writes();
+    await expect(client.requests.vaultUnlock({ passphrase: "x" })).rejects.toThrow(/vaultUnlock/);
+    await expect(client.requests.vaultUnlock({ passphrase: "x" })).rejects.toThrow(/0\.0\.9/);
+    // Refused here, so it never left: no round trip to be told what the
+    // handshake already said.
+    expect(server.writes()).toBe(before);
+  });
+
+  // Not a ConnectionLost, or reconnectingClient would replay it forever against
+  // a server whose answer will never change.
+  test("the failure is a refusal, not a lost wire", async () => {
+    const server = peer();
+    const client = clientConnection(server.duplex, { push: nowherePush(), build: "0.1.0" });
+    server.greet(without("vaultUnlock"));
+    await client.ready;
+    const err = await client.requests.vaultUnlock({ passphrase: "x" }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Unsupported);
+    expect(err).not.toBeInstanceOf(ConnectionLost);
+    expect((err as Unsupported).method).toBe("vaultUnlock");
+  });
+
+  // What a palette asks before it offers a command (interactions.md §8): better
+  // an absent verb than one that apologizes after you pick it.
+  test("a caller can ask before it calls", async () => {
+    const server = peer();
+    const client = clientConnection(server.duplex, { push: nowherePush(), build: "0.1.0" });
+    server.greet(without("vaultUnlock"));
+    await client.ready;
+    expect(client.supports("noteRead")).toBe(true);
+    expect(client.supports("vaultUnlock")).toBe(false);
+  });
+
+  // A server that predates the field says nothing, and saying nothing is not
+  // saying no: it gets the behavior it had before anyone asked, which is that
+  // the call goes out and the server answers for itself.
+  test("a server that declares nothing is assumed to do everything", async () => {
+    const server = peer();
+    const client = clientConnection(server.duplex, { push: nowherePush(), build: "0.1.0" });
+    server.greet({ methods: [], pushes: [] });
+    await client.ready;
+    expect(client.supports("vaultUnlock")).toBe(true);
+    const pending = client.requests.vaultUnlock({ passphrase: "x" });
+    await settle();
+    expect(server.heard.at(-1)).toMatchObject({ t: "req", m: "vaultUnlock" });
+    server.say({ t: "res", id: (server.heard.at(-1) as { id: number }).id, r: { state: "open" } });
+    await pending;
+  });
+
+  // Two refusals that must not read as one. "This server is too old" invites an
+  // upgrade; a clipboard is never coming to a VPS however new it is (remote.md
+  // §10), and telling someone to upgrade for one would send them after a fix
+  // that does not exist.
+  test("a method that is the client's own is refused as that, not as an old server", async () => {
+    const server = peer();
+    const client = clientConnection(server.duplex, { push: nowherePush(), build: "0.1.0" });
+    server.greet();
+    await client.ready;
+    await expect(client.requests.clipboardRead({})).rejects.toThrow("remote.md §10");
+    await expect(client.requests.clipboardRead({})).rejects.not.toThrow(/upgrad/i);
+    expect(client.supports("clipboardRead")).toBe(false);
+  });
+
+  // A name the server declares that this client has never heard of is simply
+  // not in the intersection, and asking about it is not a crash.
+  test("a name only the server knows is not something this client can call", async () => {
+    const server = peer();
+    const client = clientConnection(server.duplex, { push: nowherePush(), build: "0.1.0" });
+    server.greet({ methods: [...hello("server", "0.1.0").methods, "shippedNextYear"] });
+    await client.ready;
+    expect(client.supports("shippedNextYear")).toBe(false);
+    expect(client.supports("noteRead")).toBe(true);
   });
 });
 

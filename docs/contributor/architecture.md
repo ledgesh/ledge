@@ -786,8 +786,11 @@ The recipe, in order, using `trashDelete` as the worked example:
 2. **`src/shared/wire.ts`** — add the name to `REQUEST_METHODS` (or
    `PUSH_MESSAGES`, or `CLIENT_PUSHES` for a message the client shell raises
    about itself). The build fails until you do, naming the method it is
-   missing: the list is what a remote client is built from and what the two
-   ends fingerprint at the handshake (`remote.md` §11). Then decide two things
+   missing: the list is what a remote client is built from and what a server
+   declares at the handshake (`remote.md` §11). Adding one does not refuse any
+   existing server — an older one simply does not list it, and the call that
+   needs it says so — so a new method is not a reason to redeploy. Then decide
+   two things
    about it, both in this file. Is it a READ? If so it goes in
    `READ_ONLY_METHODS`, and a reconnecting client may simply send it again;
    everything else is deduped by `op` (`remote.md` §7), which is the safe

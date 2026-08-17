@@ -8,11 +8,12 @@ import {
   BINARY_FRAME,
   binaryPath,
   checkHello,
+  CLIENT_METHODS,
   CLIENT_PUSHES,
   CONTROL_FRAME,
+  declared,
   encodeBinary,
   encodeControl,
-  fingerprint,
   FrameDecoder,
   hello,
   hoistBinary,
@@ -24,10 +25,11 @@ import {
   READ_ONLY_METHODS,
   REQUEST_METHODS,
   restoreBinary,
-  SCHEMA_VERSION,
   sessionHold,
+  WIRE_METHODS,
   WireError,
   type Frame,
+  type Hello,
   type WireMessage,
 } from "./wire";
 
@@ -196,10 +198,10 @@ describe("control messages", () => {
     ["a response with no id", '{"t":"res","r":1}'],
     ["an error with no message", '{"t":"err","id":1}'],
     ["a push with no message name", '{"t":"push","p":{}}'],
-    ["a hello with no role", '{"t":"hello","protocol":1,"schema":"a","build":"b"}'],
-    ["a hello claiming to be neither end", '{"t":"hello","role":"proxy","protocol":1,"schema":"a","build":"b"}'],
-    ["a hello with no protocol version", '{"t":"hello","role":"server","schema":"a","build":"b"}'],
-    ["a hello with no schema version", '{"t":"hello","role":"server","protocol":1,"build":"b"}'],
+    ["a hello with no role", '{"t":"hello","protocol":1,"build":"b"}'],
+    ["a hello claiming to be neither end", '{"t":"hello","role":"proxy","protocol":1,"build":"b"}'],
+    ["a hello with no protocol version", '{"t":"hello","role":"server","build":"b"}'],
+    ["a hello with no build", '{"t":"hello","role":"server","protocol":1}'],
   ])("%s is refused", (_what, text) => {
     expect(() => parseControl(text)).toThrow(WireError);
   });
@@ -231,11 +233,67 @@ describe("the handshake", () => {
     expect(refusal).toContain(String(PROTOCOL_VERSION));
   });
 
-  test("a schema mismatch names both fingerprints and the peer's build", () => {
-    const refusal = checkHello({ ...hello("server", "9.9.9"), schema: "deadbeef" }, "server");
-    expect(refusal).toContain("deadbeef");
-    expect(refusal).toContain(SCHEMA_VERSION);
-    expect(refusal).toContain("9.9.9");
+  test("a protocol mismatch names the peer's build too, so the fix is obvious", () => {
+    expect(checkHello({ ...hello("server", "9.9.9"), protocol: 99 }, "server")).toContain("9.9.9");
+  });
+
+  // The regression this whole mechanism exists for. `windowDocs` and
+  // `windowRole` are the client shell's own, no server has ever answered one,
+  // and under the old fingerprint they refused every deployed server.
+  test("a server that knows fewer methods than this client is NOT refused", () => {
+    const older = hello("server", "0.1.0");
+    older.methods = older.methods.filter((m) => m !== "vaultUnlock" && m !== "noteLock");
+    expect(checkHello(older, "server")).toBeNull();
+  });
+
+  test("a server that knows MORE methods than this client is not refused either", () => {
+    const newer = hello("server", "9.9.9");
+    newer.methods = [...newer.methods, "somethingShippedNextYear"];
+    newer.pushes = [...newer.pushes, "aPushFromTheFuture"];
+    expect(checkHello(newer, "server")).toBeNull();
+  });
+
+  test("a server declares what it serves, and a client declares nothing", () => {
+    expect(hello("server", "0.1.0").methods).toEqual([...WIRE_METHODS]);
+    expect(hello("server", "0.1.0").pushes).toEqual([...PUSH_MESSAGES]);
+    // Every CLIENT_METHOD is answered at home, so none of them is a promise a
+    // server makes: this is the subtraction that stopped the churn.
+    for (const m of CLIENT_METHODS) expect(hello("server", "0.1.0").methods).not.toContain(m);
+    expect(hello("client", "0.1.0").methods).toEqual([]);
+    expect(hello("client", "0.1.0").pushes).toEqual([]);
+  });
+
+  describe("reading what a peer declared", () => {
+    test("it is the intersection, bounded by our own names", () => {
+      expect(declared(["a", "b", "zzz"], ["a", "b", "c"])).toEqual(new Set(["a", "b"]));
+    });
+
+    // "Said nothing" and "said it can do nothing" are opposite answers, and
+    // reading the first as the second would take every call down against a
+    // server that predates the field.
+    test("a peer that declared nothing is unknown, not empty", () => {
+      expect(declared([], ["a", "b"])).toBeNull();
+    });
+
+    test("a peer cannot grow this end's memory by declaring a lot", () => {
+      const flood = Array.from({ length: 5_000 }, (_, i) => `m${i}`);
+      expect(declared(flood, ["m1", "m2"])?.size).toBe(2);
+    });
+  });
+
+  test("a declared list is capped and cleaned on arrival", () => {
+    const flood = JSON.stringify({
+      t: "hello",
+      role: "server",
+      protocol: PROTOCOL_VERSION,
+      build: "0.1.0",
+      methods: [...Array.from({ length: 10_000 }, (_, i) => `m${i}`), 7, null],
+      pushes: "not an array",
+    });
+    const parsed = parseControl(flood) as Hello;
+    expect(parsed.methods.length).toBeLessThanOrEqual(512);
+    for (const m of parsed.methods) expect(typeof m).toBe("string");
+    expect(parsed.pushes).toEqual([]);
   });
 
   // Deliberately not a refusal: differing builds are what the upgrade offer
@@ -389,33 +447,30 @@ describe("the session hold", () => {
   });
 });
 
-describe("the schema fingerprint", () => {
-  test("it is eight hex digits", () => {
-    expect(SCHEMA_VERSION).toMatch(/^[0-9a-f]{8}$/);
-  });
-
-  test("reordering the list is not a schema change", () => {
-    expect(fingerprint(["b", "a"])).toBe(fingerprint(["a", "b"]));
-  });
-
-  test("renaming, adding, or removing a method is", () => {
-    const base = fingerprint(["a", "b"]);
-    expect(fingerprint(["a", "c"])).not.toBe(base);
-    expect(fingerprint(["a", "b", "c"])).not.toBe(base);
-    expect(fingerprint(["a"])).not.toBe(base);
-  });
-
-  // A request and a push could one day share a name; the fingerprint must not
-  // read the pair as unchanged when one moves to the other.
-  test("a request and a push of the same name fingerprint differently", () => {
-    expect(fingerprint(["req:x"])).not.toBe(fingerprint(["push:x"]));
-  });
-
+describe("what a server declares", () => {
   // The lists are checked against the schema at COMPILE time in both
   // directions (wire.ts); these are the properties a type cannot state.
   test("the method lists have no duplicates", () => {
     expect(new Set(REQUEST_METHODS).size).toBe(REQUEST_METHODS.length);
     expect(new Set(PUSH_MESSAGES).size).toBe(PUSH_MESSAGES.length);
+    expect(new Set(WIRE_METHODS).size).toBe(WIRE_METHODS.length);
+  });
+
+  // What a client answers at home is not a promise a server makes, so it has no
+  // business in what a server declares — nor, before this, in the fingerprint
+  // that used to refuse over it.
+  test("nothing the client serves itself is declared", () => {
+    for (const m of CLIENT_METHODS) expect(WIRE_METHODS).not.toContain(m);
+    for (const m of CLIENT_PUSHES) expect(PUSH_MESSAGES).not.toContain(m);
+  });
+
+  test("everything a server does answer is declared", () => {
+    for (const m of ["noteRead", "noteWrite", "terminalInput", "vaultUnlock"] as const) {
+      expect(WIRE_METHODS).toContain(m);
+    }
+    // The two lists together are the whole request surface, with nothing
+    // falling between them.
+    expect([...WIRE_METHODS, ...CLIENT_METHODS].sort()).toEqual([...REQUEST_METHODS].sort());
   });
 });
 

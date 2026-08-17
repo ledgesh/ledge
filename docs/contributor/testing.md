@@ -441,12 +441,14 @@ Quit and reopen Simulator and it is right again. Anything about LAYOUT under the
 keyboard — which is most of what ios.md §7 now settles — is untestable in that
 state, because the keyboard that would change the layout never appears.
 
-**Rebuild the container after any schema change.** `ledge-sshd:probe` bakes the
-server in, and the handshake fingerprints the schema on both ends (remote.md
-§11), so a client built from a newer `rpc-schema.ts` is refused by an older
-image with "the server refused this client: schema … on the server". That is the
-check working, and it is a full `docker build` of both images to clear, which
-also loses the workspace the probe seeded.
+**Rebuild the container when the probe needs a method the image predates.**
+`ledge-sshd:probe` bakes the server in, and a client built from a newer
+`rpc-schema.ts` now CONNECTS to an older image rather than being refused by it
+(remote.md §11): only a call to a method that image does not have fails, with
+"this server has no …". So rebuild when the thing under test is one of those,
+and not otherwise — a `docker build` of both images also loses the workspace the
+probe seeded. A refusal naming the PROTOCOL version is the other case, and that
+one always needs the rebuild.
 
 Tear down by uninstalling the app (`simctl uninstall`), `docker rm -f`, and
 checking that nothing still listens on 22.
