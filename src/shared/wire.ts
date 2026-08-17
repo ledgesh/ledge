@@ -653,9 +653,27 @@ export function sessionHold(asked: number, ceiling: number): number {
 export function checkHello(peer: Hello, expect: "client" | "server"): string | null {
   if (peer.role !== expect) return `expected to be talking to a ${expect}, and the peer says it is a ${peer.role}`;
   if (peer.protocol !== PROTOCOL_VERSION) {
-    return `protocol version ${peer.protocol} on the ${peer.role} (build ${peer.build}), ${PROTOCOL_VERSION} here`;
+    return `protocol version ${peer.protocol} on the ${peer.role} (build ${peer.build}), ${PROTOCOL_VERSION} here. ${upgrade(peer)}`;
   }
   return null;
+}
+
+/**
+ * Which end to upgrade, in a sentence, appended to the two numbers.
+ *
+ * The numbers are the diagnosis and this is the instruction, and a user needs
+ * both: "protocol version 4 on the server, 5 here" says what is wrong to
+ * somebody who already knows what this number is, and says nothing at all to
+ * everybody else. Always the OLDER end, whichever end that turns out to be:
+ * two builds that disagree do not meet in the middle, and the older one is the
+ * one that has never heard of the newer.
+ */
+function upgrade(peer: Hello): string {
+  const weAreOlder = PROTOCOL_VERSION < peer.protocol;
+  if (peer.role === "server") {
+    return weAreOlder ? "Update this app to match that server." : "Update ledge-server on that machine, then try again.";
+  }
+  return weAreOlder ? "Update ledge-server on this machine." : "Update Ledge on that device.";
 }
 
 // --- encoding ----------------------------------------------------------------

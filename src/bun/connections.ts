@@ -319,15 +319,29 @@ export function sshDial(
  * Null when there is nothing to add, which is what a server that accepted the
  * connection and then went quiet looks like from here.
  */
+/**
+ * Lines that are equally true of a connection that went on to work, so none of
+ * them is ever the fault: ssh's own narration, and the far end's `serve`
+ * announcing that it attached to the daemon (bun/serve.ts, which logs to stderr
+ * because stdout is the protocol).
+ *
+ * That last one is why this list is named. The banner is the last thing on
+ * stderr whenever the DIAL succeeded and the protocol then failed, so a
+ * handshake refused over the version reached the user as "Could not reach v1:
+ * [serve] ledge-server 0.1.0 attached to …" — a sentence that says a machine is
+ * unreachable by quoting the line where it says it is up. The transport's own
+ * verdict wins that case now (shared/transport.ts `Refused`); this makes the
+ * fallback honest too, for every failure after the dial that nobody has typed.
+ */
+const NOT_A_FAULT = /^(Warning: Permanently added|Pseudo-terminal|Shared connection to|\[serve\] )/;
+
 export function explainDial(stderr: string): string | null {
   // Last first: ssh narrates (`Warning: Identity file … not accessible`) and
-  // then fails, and the failure is the last thing it says. Banners and the
-  // pseudo-terminal notice are dropped for the same reason — they are true of
-  // connections that went on to work.
+  // then fails, and the failure is the last thing it says.
   const lines = stderr
     .split("\n")
     .map((l) => l.trim())
-    .filter((l) => l.length > 0 && !/^(Warning: Permanently added|Pseudo-terminal|Shared connection to)/.test(l));
+    .filter((l) => l.length > 0 && !NOT_A_FAULT.test(l));
 
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i]!;

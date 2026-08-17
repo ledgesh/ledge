@@ -204,6 +204,11 @@ export function clientConnection(
   // which is what makes an older server degrade one call at a time instead of
   // failing at the door.
   let serverMethods: Set<string> | null = null;
+  // Whether the server's hello has been accepted. Only the handshake reads it,
+  // and only to tell a refusal at the door from a connection that worked and
+  // later ended: the first is a verdict about the two builds, the second is
+  // anything at all.
+  let greeted = false;
 
   let settleClosed!: () => void;
   const closed = new Promise<void>((resolve) => (settleClosed = resolve));
@@ -252,7 +257,13 @@ export function clientConnection(
     switch (msg.t) {
       case "hello": {
         const refusal = checkHello(msg, "server");
-        if (refusal) return fail(new Error(`the server refused this client: ${refusal}`));
+        // The refusal as it was written, with nothing in front of it. It used
+        // to be prefixed "the server refused this client", which named the
+        // wrong end: this is THIS end refusing, on a hello the server sent
+        // without knowing who would read it, and the server may well accept
+        // ours in the same instant.
+        if (refusal) return fail(new Refused(refusal));
+        greeted = true;
         serverMethods = declared(msg.methods, WIRE_METHODS);
         acceptHello(msg);
         return;
@@ -280,7 +291,12 @@ export function clientConnection(
       }
       case "bye": {
         farewell = msg.why;
-        return fail(new Error(msg.why));
+        // Before the handshake finished, a `bye` is the far end refusing this
+        // one: the two hellos cross, so a version mismatch is decided at both
+        // ends at once and whichever verdict lands first is the one reported.
+        // Typing both of them the same way is what keeps the message the same
+        // sentence either way (bun/index.ts).
+        return fail(greeted ? new Error(msg.why) : new Refused(msg.why));
       }
       // Nothing to do with it. `heard` below was set by the bytes it arrived
       // in, and that is the entire content of a pong; the case exists so that
@@ -711,6 +727,24 @@ interface Held {
  * than a string match on a message. */
 export class ConnectionLost extends Error {
   override readonly name = "ConnectionLost";
+}
+
+/**
+ * The handshake was refused, by either end (remote.md §11).
+ *
+ * A type rather than a wording, because of who else is holding an explanation
+ * at that moment. Nearly every way of failing to reach a server happens BEFORE
+ * the protocol starts, so the caller that dials over ssh keeps ssh's stderr and
+ * puts it in front of the transport's account, which for all of those is the
+ * useless "the connection to the server closed" (bun/connections.ts
+ * `explainDial`). A refused handshake is the one failure on the other side of
+ * that line: the far end ran, spoke, and was understood well enough to be
+ * disagreed with, and by then stderr holds nothing but the far end's own
+ * startup banner. This says "the protocol already answered, do not paraphrase
+ * it with ssh's leftovers".
+ */
+export class Refused extends Error {
+  override readonly name = "Refused";
 }
 
 /**

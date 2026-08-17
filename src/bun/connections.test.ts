@@ -367,6 +367,28 @@ describe("why the dial failed", () => {
     expect(explainDial("Pseudo-terminal will not be allocated because stdin is not a terminal.\n")).toBeNull();
   });
 
+  // The far end saying it is UP, reported as the reason it could not be
+  // reached. It is the last line on stderr whenever the dial worked and the
+  // protocol then refused, which is every version mismatch.
+  test("the server's own startup banner is not a diagnosis either", () => {
+    expect(explainDial("[serve] ledge-server 0.1.0 attached to /home/linuxuser/.ledge/.server.sock\n")).toBeNull();
+    expect(
+      explainDial(
+        [
+          "Warning: Permanently added '10.0.0.4' to the list of known hosts.",
+          "[serve] ledge-server 0.1.0 attached to /home/linuxuser/.ledge/.server.sock",
+        ].join("\n"),
+      ),
+    ).toBeNull();
+  });
+
+  // Dropping the banner must not drop what came after it: a server that
+  // attached and then died says both, and the second one is the answer.
+  test("a fault after the banner is still the fault", () => {
+    const said = ["[serve] ledge-server 0.1.0 attached to /home/linuxuser/.ledge/.server.sock", "Killed"].join("\n");
+    expect(explainDial(said)).toBe("Killed");
+  });
+
   test("a server that accepted the connection and then went quiet has nothing to add", () => {
     expect(explainDial("")).toBeNull();
     expect(explainDial("   \n\n  \n")).toBeNull();

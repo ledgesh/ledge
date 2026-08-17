@@ -35,7 +35,7 @@ import { createConnectionManager, type Attached, type ConnectionManager } from "
 import { createConnectionStore } from "./connectionStore";
 import { explainDial, KNOWN_HOSTS_PATH, LOCAL_ID, sshDial, userKnownHosts, type Connection } from "./connections";
 import { ASKPASS_PATH, ensureAskpass, hasPassword } from "./secrets";
-import { reconnectingClient } from "../shared/transport";
+import { reconnectingClient, Refused } from "../shared/transport";
 import { spawnDuplex } from "./transport";
 import { BUILD_VERSION } from "../shared/version";
 import type { LedgeRPC } from "../shared/rpc-schema";
@@ -398,6 +398,13 @@ async function attachFor(win: Win, conn: Connection): Promise<Attached> {
     // Only the first dial reaches this: reconnectingClient resolves once the
     // wire is up, so everything after that is the ladder's business.
   }).catch((err: unknown) => {
+    // A refused handshake keeps its own words. ssh explains what happens
+    // before the protocol starts, and it is the better account of all of it —
+    // but once the two ends have exchanged hellos, the last thing on stderr is
+    // the far end's `serve` announcing that it attached, and reporting THAT as
+    // the reason a connection failed says a server is unreachable by quoting
+    // the line where it says it is up (shared/transport.ts `Refused`).
+    if (err instanceof Refused) throw err;
     throw new Error(explainDial(said) ?? (err instanceof Error ? err.message : String(err)));
   });
   const peer = await wire.ready;

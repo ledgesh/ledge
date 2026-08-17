@@ -1083,6 +1083,20 @@ shell. Everything else goes through as ssh wrote it, because "Permission denied
 guesses would only be a worse one. The capture is opt-in because a piped stderr
 nobody drains is a child that blocks once the buffer fills.
 
+**Except a refused handshake, which keeps its own words.** "Every way of
+failing happens before the first frame" is true of the dial and false of the
+protocol, and §11's version check is the failure on the other side of that
+line: the far end ran, spoke, and was understood well enough to be disagreed
+with. By then the last thing on stderr is that far end's own `serve` banner, so
+the rule as written reported "Could not reach v1: `[serve] ledge-server 0.1.0
+attached to …`", which says a machine is unreachable by quoting the line where
+it says it is up. Two changes, because either alone leaves the other half
+wrong. A refusal is a type (`Refused`, `shared/transport.ts`), raised whichever
+end decided it, and `bun/index.ts` gives it precedence over stderr. And the
+banner joins the lines `explainDial` already drops as true of connections that
+went on to work, so the fallback is honest for the failures nobody has typed
+yet.
+
 **`ledge <title>` on a server reaches every connected client.** The open-request
 file (`bun/openRequest.ts`) stays exactly as it is for the local case. When
 clients are attached, the server also pushes `openExternal` to all of them,
@@ -1514,9 +1528,15 @@ serves.
 framing, the shape of the control messages, and the shape of any payload under
 a name that stays the same. Those are the incompatibilities a caller cannot see
 coming, where carrying on means one end reading the other's bytes as something
-they are not. A mismatch refuses with both numbers and the peer's build named,
-and the upgrade offered. It does not negotiate a subset: a partially understood
-protocol is how silent data-shaped bugs happen.
+they are not. It does not negotiate a subset: a partially understood protocol
+is how silent data-shaped bugs happen.
+
+A mismatch refuses with both numbers, the peer's build, and a sentence naming
+which end to update: always the older one, since two builds that disagree do
+not meet in the middle. The numbers are for whoever reads the log and the
+sentence is for whoever reads the connection row, and a message with only the
+first was reported as a bug the first time a version moved under a deployed
+server.
 
 **A method one end has and the other does not is not one of those, and does not
 refuse anything.** It is loud, local, and survivable, so it is handled where it

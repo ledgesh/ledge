@@ -15,6 +15,7 @@ import {
   clientConnection,
   ConnectionLost,
   fedDuplex,
+  Refused,
   Unsupported,
   type Duplex,
   type HeartbeatOpts,
@@ -188,6 +189,42 @@ describe("a client facing a server that will not talk", () => {
     // The client's own hello and nothing after it: a request never went out
     // over a connection whose protocol was already in doubt.
     expect(server.writes()).toBe(1);
+  });
+
+  // The type is what the ssh caller branches on: everything else that fails on
+  // the way to a server is explained better by ssh's stderr, and this is the
+  // one failure where stderr holds nothing but the far end's startup banner
+  // (bun/index.ts, bun/connections.ts `explainDial`).
+  test("a version mismatch is typed, so ssh's leftovers cannot outrank it", async () => {
+    const server = peer();
+    const client = clientConnection(server.duplex, { push: nowherePush(), build: "0.1.0" });
+    server.greet({ protocol: 4, build: "0.1.0" });
+    await expect(client.ready).rejects.toBeInstanceOf(Refused);
+    // Both numbers, the peer's build, and which end to upgrade.
+    await expect(client.ready).rejects.toThrow(/protocol version 4 on the server \(build 0\.1\.0\), \d+ here/);
+    await expect(client.ready).rejects.toThrow(/Update ledge-server on that machine/);
+  });
+
+  test("a server that hangs up before greeting is typed the same way, since the verdict is the same one", async () => {
+    const server = peer();
+    const client = clientConnection(server.duplex, { push: nowherePush(), build: "0.1.0" });
+    // The mirror image: the two hellos cross, and this is the far end deciding
+    // first. Same disagreement, same sentence, so the caller must not have to
+    // tell them apart.
+    server.say({ t: "bye", why: "protocol version 5 on the client (build 0.1.0), 4 here. Update ledge-server on this machine." });
+    await expect(client.ready).rejects.toBeInstanceOf(Refused);
+  });
+
+  test("a connection that greeted and later ended is NOT a refusal", async () => {
+    const server = peer();
+    const client = clientConnection(server.duplex, { push: nowherePush(), build: "0.1.0" });
+    server.greet();
+    await client.ready;
+    server.say({ t: "bye", why: "another client took this session" });
+    // ssh's account of a wire that died mid-session is worth having; only the
+    // handshake's verdict outranks it.
+    await expect(client.closed).resolves.toBeUndefined();
+    expect(client.farewell()).toBe("another client took this session");
   });
 
   // Not a hang. A caller that awaits a request on a connection that is already
