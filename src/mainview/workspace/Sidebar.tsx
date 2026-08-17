@@ -8,6 +8,7 @@ import { ResizeHandle } from "@/components/ResizeHandle";
 import { ContextMenu } from "@/components/ContextMenu";
 import { RenameField } from "@/components/RenameField";
 import { NoteBrowser } from "@/notes/NoteBrowser";
+import { docsWindow } from "@/lib/windows";
 import { ConnectionBar } from "./ConnectionBar";
 import { useCommands } from "@/commands/CommandProvider";
 import { CommandMenuItem } from "@/commands/CommandMenuItem";
@@ -41,6 +42,19 @@ export function Sidebar() {
     const avail = ref.current?.clientHeight ?? window.innerHeight;
     setStripHeight(Math.max(STRIP_MIN, Math.min(h, avail - NOTES_MIN)));
   }, []);
+
+  // In the manual's window the sidebar is the manual's contents and nothing
+  // else (remote.md §8a): the strip would be an empty list under a heading —
+  // the docs workspace is filtered out of it, and no other can be added there —
+  // and the connection bar would name a machine that window cannot be switched
+  // off. What is left is exactly the table of contents, full height.
+  if (docsWindow()) {
+    return (
+      <aside className="flex h-full w-full min-w-0 flex-col bg-muted/20">
+        <NoteBrowser />
+      </aside>
+    );
+  }
 
   return (
     <aside ref={ref} className="flex h-full w-full min-w-0 flex-col bg-muted/20">

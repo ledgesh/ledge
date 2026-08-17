@@ -1118,7 +1118,7 @@ between them, one owner per drawer — now reachable without a second device.
 | The connection, and which server it points at | window |
 | The client id, and so the layout it reads (§5) | the connection, held by whichever window points at it |
 | The label other clients display (`Hello.label`) | window |
-| The window title | window, and it is the connection's name |
+| The window title | window, and it is the connection's name (the manual's window is titled for the manual) |
 | The webview's RPC, and the pushes routed to it | window |
 | The window frame | window |
 | The connection list and its pinned host keys | process |
@@ -1196,6 +1196,44 @@ starts empty, and saves nothing over the first — its `layoutGet` answers null
 and its `layoutSave` is dropped by the client rather than filed under an id
 nothing will ask for again. One window per server is the ordinary arrangement
 and never reaches that rule.
+
+**The manual has a window, and it is the one window that is not a place to
+work.** The built-in documentation used to be a hidden workspace that took over
+whichever workspace you were in — the one surface in the app that answered "what
+does this do" by putting away what you were doing. It is a window now
+(`interactions.md` §1, Documentation), which is what a window is for: two
+things at once, one of them the notes and the other the manual about them.
+
+Everything else about it follows from what a window is here. It is a CLIENT,
+so it needs a server, and it is always the LOCAL one: the corpus is compiled
+into this build and synced to the local docs root at every launch
+(`bun/docsContent.ts`), and a remote server's copy is whatever version happens
+to be installed over there. It is titled for what it is rather than for the
+machine it is on, breaking the title rule above for its own reason: every copy
+of the manual is the same one, so which machine is not the question its title
+has to answer. There is at most one — asking again raises it and lands it on
+the page asked for (the `windowDocs` request and the `docsShow` push, both of
+them the shell's own: no server has windows) — because a second window onto
+four read-only pages is two windows scrolled to different places in the same
+thing.
+
+It also holds no arrangement anybody chose, and two rules fall out of that.
+It never takes its connection's client id, so it neither reads nor writes that
+server's layout and a window opened after it still gets the layout on file —
+the blank-client rule above, applied for a different reason than "another
+window got there first", which is also why it is not counted as that other
+window. And it is not in `window.json`: a launch never reopens it, since it is
+one click away, and a session that ended with only the manual up would
+otherwise come back as an app showing its help with no notes in sight.
+
+The view learns which window it is in at boot, from the shell, through
+`windowRole` — a question about a window, which is not a fact about the notes
+and so never becomes a frame. What it does with the answer is small and
+entirely chrome: the manual's window has no workspace strip, no connection
+bar, and none of the verbs that would act on a workspace it does not have or a
+machine it cannot be pointed at (`interactions.md` §1 lists them). A client
+with one window and no way to have two answers false and opens the manual in
+the window it has, which is what a phone does (`ios.md` §4).
 
 **The map is bounded by the connection list**, one entry per connection rather
 than one per window ever opened, and `connectionRemove` drops the id alongside

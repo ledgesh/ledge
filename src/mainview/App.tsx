@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useSinglePane } from "@/lib/viewport";
 import { hasTerminal } from "@/lib/shell";
+import { docsWindow, onDocsShow } from "@/lib/windows";
 import { pushLayer } from "@/commands/layers";
 import { ResizeHandle } from "@/components/ResizeHandle";
 import { TerminalDrawer } from "@/terminal/TerminalDrawer";
@@ -21,9 +22,9 @@ import { parseWikiTarget, resolveWikiTitle } from "@/editor/wikilinks";
 import { refreshWikilinks } from "@/editor/livePreview";
 import { refreshFolder } from "@/workspace/actions";
 import { docsFolder, workspaceKind } from "@/workspace/channel";
-import { allDocIds, notesOf, useWorkspace, WorkspaceProvider, type AppState } from "@/workspace/store";
+import { allDocIds, docsLanding, notesOf, useWorkspace, WorkspaceProvider, type AppState } from "@/workspace/store";
 import { flushLayout, scheduleLayoutSave } from "@/workspace/persist";
-import { findTabBy, focusedDocId } from "@/workspace/tree";
+import { findTabBy, focusedDocId, tabPaths } from "@/workspace/tree";
 import { allEditorViews, configureLockedUi, releaseEditor, reloadOpenNotes, requestHeadingReveal } from "@/workspace/editorPool";
 import { VaultDialog } from "@/components/VaultDialog";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -620,6 +621,32 @@ function Shell() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dispatch]);
 
+  // The manual, asked for while its window was already open (remote.md §8a).
+  // The shell has raised the window; turning to the page is this end's half,
+  // and it is the same shape as the open request above — a title rather than a
+  // path, because a page is named by its H1 and its file is numbered
+  // (bun/docsContent.ts). Only the manual's window ever hears it.
+  //
+  // A page NAMED is always opened (Help > Third-Party Licenses has to show the
+  // licences, wherever the manual was left). The bare ask — the help button,
+  // pressed again — only opens one when there is nothing open at all: raising
+  // the window is what was asked for, and losing the reader's place on the way
+  // would be a worse answer than doing nothing. Nothing open is the exception
+  // because a raised window showing an empty pane looks like a dead button
+  // (the same rule the in-window open keeps; workspace/actions.ts).
+  const notesRef = useRef(state.notes);
+  notesRef.current = state.notes;
+  useEffect(
+    () =>
+      onDocsShow((page) => {
+        const ws = wsRef.current[0];
+        if (!ws || (!page && tabPaths(ws.root).length > 0)) return;
+        const note = docsLanding(notesRef.current[ws.folder] ?? [], page);
+        if (note) dispatch({ type: "openNote", note });
+      }),
+    [dispatch],
+  );
+
   // Suppress the WebView's native context menu app-wide. In this dev WKWebView it
   // carries only debug items (Reload, Inspect Element), unwanted in a notes app.
   // Our own right-click menus (e.g. the workspace strip) call preventDefault in
@@ -728,12 +755,17 @@ function Shell() {
         >
           <Hash className="size-4" />
         </Button>
-        {/* The built-in documentation: a hidden read-only workspace, and this
-            button (plus the palette entry) is its whole doorway — it never
-            gets a strip row. Lit while it is the selected workspace, since no
-            row can show that. Absent when Bun reported no docs root
-            (docsFolder is boot-static, like the settings snapshot). */}
-        {docsFolder() !== null && (
+        {/* The built-in documentation, and this button (plus the palette
+            entry) is its whole doorway. On a Mac it opens or raises the
+            manual's own window (remote.md §8a) and is never lit — the manual is
+            not in this window to be selected. On a client with one window it is
+            the old toggle: a hidden read-only workspace that takes this window
+            over, lit while it is selected, since no strip row can show that.
+
+            Absent in the manual's window itself — the button that opens a
+            window has nothing to say inside it — and when Bun reported no docs
+            root (docsFolder is boot-static, like the settings snapshot). */}
+        {docsFolder() !== null && !docsWindow() && (
           <Button
             variant={workspaceKind(selected.folder) === "docs" ? "secondary" : "ghost"}
             size="icon"

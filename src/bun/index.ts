@@ -162,6 +162,16 @@ interface Win {
   push: ServerPush;
   /** This window's own report about its own wire (wire.ts CLIENT_PUSHES). */
   say(p: { state: "live" | "reconnecting" | "lost"; detail: string }): void;
+  /** Land the manual on a page. The other client push, and only ever sent to a
+   * window whose `docs` is true. */
+  show(p: { page: string }): void;
+  /** Whether this window is the manual's (`windowDocs`). One window per app
+   * wears it; everything else about it follows — its title, that it saves no
+   * layout, that it is not in the saved window list. */
+  docs: boolean;
+  /** The page it was opened to show, by title; "" for the landing page. Read
+   * once, by the view's boot (`windowRole`). */
+  page: string;
   manager: ConnectionManager | null;
   /** The connection this window is on, "" until its first attach lands. Set by
    * `attachFor` at the moment the manager commits to a connection, which is why
@@ -273,11 +283,21 @@ async function attachFor(win: Win, conn: Connection): Promise<Attached> {
   // Whether another window is already this server's client. Two things follow
   // from it, and they are the same fact twice: the id this window sends, and
   // the name the other one displays for it.
-  const others = windows.filter((w) => w !== win && w.connection === conn.id).length;
-  const client = others > 0 ? ephemeralClientId() : await clientIdFor(conn.id);
+  //
+  // The manual's window is not one of them, in either direction. It never takes
+  // a connection's id (`blank` below), so a window that opens after it still
+  // gets the layout that connection has on file; and it is not counted here, so
+  // it cannot make an ordinary window the second client of a server it is the
+  // only real client of.
+  const others = windows.filter((w) => w !== win && !w.docs && w.connection === conn.id).length;
+  const blank = win.docs || others > 0;
+  const client = blank ? ephemeralClientId() : await clientIdFor(conn.id);
   // A server displays what it is told (remote.md §5), and "iPhone took this
-  // shell" naming the Mac you are looking at would be worse than no name.
-  const label = others > 0 ? `${myLabel} (${others + 1})` : myLabel;
+  // shell" naming the Mac you are looking at would be worse than no name. The
+  // manual's window is named for what it is: it shows up in presence like any
+  // client — its demo blocks run real shells on this server — and "MacBook"
+  // twice would be the row nobody can act on.
+  const label = win.docs ? `${myLabel} (manual)` : others > 0 ? `${myLabel} (${others + 1})` : myLabel;
   const token = ++attachToken;
   const arrived = (): void => {
     win.connection = conn.id;
@@ -285,7 +305,7 @@ async function attachFor(win: Win, conn: Connection): Promise<Attached> {
     // Which window is which client of which server, which is the one fact that
     // makes a two-window log readable at all: every line after this that names
     // a client id is naming one of these.
-    console.log(`[window] ${label} on ${conn.name} as ${client}${others > 0 ? " (blank; another window has this server)" : ""}`);
+    console.log(`[window] ${label} on ${conn.name} as ${client}${blank ? " (blank; the layout on file is another window's)" : ""}`);
   };
 
   if (conn.destination === "") {
@@ -295,7 +315,7 @@ async function attachFor(win: Win, conn: Connection): Promise<Attached> {
     arrived();
     announceLocalPresence();
     return {
-      requests: others > 0 ? withoutLayout(requests) : requests,
+      requests: blank ? withoutLayout(requests) : requests,
       build,
       shutdown: () => {
         // Only while it is still the registration this attach made: re-selecting
@@ -385,7 +405,7 @@ async function attachFor(win: Win, conn: Connection): Promise<Attached> {
   console.log(`[connect] ${conn.name} (${conn.destination}): ledge-server ${peer.build}`);
   const requests = await clientOverlay(wire.requests, nativeFor(win));
   return {
-    requests: others > 0 ? withoutLayout(requests) : requests,
+    requests: blank ? withoutLayout(requests) : requests,
     build: peer.build,
     shutdown: () => wire.close(),
   };
@@ -405,7 +425,7 @@ function applyMenu(win: Win): void {
 }
 
 /** This window's half of the client seams: the menu bar it fills while it is
- * focused, and the verb that opens another one. */
+ * focused, the verbs that open another window, and what this one is. */
 function nativeFor(win: Win): ClientNative {
   return {
     ...sharedNative,
@@ -416,7 +436,54 @@ function nativeFor(win: Win): ClientNative {
       if (focused === win || focused === null) applyMenu(win);
     },
     newWindow: () => void openWindow(LOCAL_ID),
+    docsWindow: (page) => showDocs(page),
+    windowRole: () => ({ docs: win.docs, page: win.page }),
   };
+}
+
+// One manual window at a time, including while one is being built: a window
+// joins `windows` inside buildWindow, which is deferred behind whatever else is
+// opening, so "is there one already" is not answerable from the list alone.
+let docsOpening: Promise<void> | null = null;
+
+/**
+ * The manual, in the window that holds it (remote.md §8a).
+ *
+ * One window per app, because the corpus is read-only and identical in every
+ * copy of it: a second one would be two windows onto the same fixed pages, both
+ * of them scrolled somewhere different. So an app already showing the manual
+ * raises that window instead, and the page asked for is shown there — the
+ * licenses have to appear when the licenses are what was clicked, whether or
+ * not the manual was already up.
+ *
+ * An ask that arrives while a manual window is still opening WAITS for it and
+ * then takes the raise path, rather than being dropped: the second ask may name
+ * a page, and dropping it would answer Help > Third-Party Licenses with the
+ * front page.
+ *
+ * It opens on the LOCAL connection whatever window asked for it. The manual is
+ * this app's own, compiled into this build (bun/docsContent.ts) and synced to
+ * the local docs root at every launch; a remote server's copy would be whatever
+ * version happens to be installed over there.
+ */
+function showDocs(page: string): void {
+  const open = windows.find((w) => w.docs);
+  if (open) {
+    open.page = page;
+    open.window?.activate();
+    open.show({ page });
+    return;
+  }
+  if (docsOpening) {
+    // The failure branch does nothing: openWindow already logged it, and a
+    // window that did not open has nothing to raise.
+    void docsOpening.then(() => showDocs(page), () => {});
+    return;
+  }
+  docsOpening = openWindow(LOCAL_ID, undefined, { page }).finally(() => {
+    docsOpening = null;
+  });
+  docsOpening.catch(() => {});
 }
 
 // --- the windows themselves ---------------------------------------------------
@@ -445,6 +512,10 @@ function workAreas(): Rect[] {
 // coordinates look like one window.
 const CASCADE = 28;
 
+// What the manual's window is called, whichever machine the window it was
+// opened from is on: the pages in it are this app's own.
+const DOCS_TITLE = "Documentation";
+
 /**
  * Title a window after the connection it is on (remote.md §8a).
  *
@@ -454,24 +525,37 @@ const CASCADE = 28;
  * at — the app they can see. It follows the connection rather than the note in
  * front of it because a window is a client: what changes underneath it is the
  * machine, and the notes are named by their own tabs.
+ *
+ * The manual's window is the exception the rule explains: it is a client of
+ * this Mac, but what a person needs from its title is not which machine —
+ * every copy of the manual is the same one — but that this is the manual.
  */
 function nameWindow(win: Win, name: string): void {
-  win.title = name;
+  win.title = win.docs ? DOCS_TITLE : name;
   // Null before the window is built, which is where the first report lands;
   // `buildWindow` reads win.title back when it constructs one.
-  win.window?.setTitle(name);
+  win.window?.setTitle(win.title);
 }
 
 function snapshot(): WindowState[] {
-  return windows.map((w) => ({ frame: w.frame, connection: w.connection || LOCAL_ID }));
+  // The manual's window is not in the list, so a launch never reopens it. It is
+  // one click away, it holds nothing a person put there, and a session that
+  // ended with only the manual open would otherwise come back as an app with
+  // its help up and no notes in sight.
+  return windows
+    .filter((w) => !w.docs)
+    .map((w) => ({ frame: w.frame, connection: w.connection || LOCAL_ID }));
 }
 
 function saveWindows(): void {
   // Never the empty list. Closing the last window IS quitting, and a file
   // saying "no windows" would open the next launch onto a window it had to
-  // invent anyway — with the wrong connection and the wrong frame.
-  if (windows.length === 0) return;
-  writeWindows(snapshot());
+  // invent anyway — with the wrong connection and the wrong frame. Closing the
+  // last window that is not the manual reaches the same rule through the
+  // filter above: the list that stands is the one from before it went.
+  const state = snapshot();
+  if (state.length === 0) return;
+  writeWindows(state);
 }
 
 // Remember where a window was left. Debounced because macOS emits move and
@@ -500,16 +584,18 @@ function noteFrame(win: Win, next: Partial<Rect>): void {
 // interleaving would each answer that question before the other had arrived.
 let opening: Promise<unknown> = Promise.resolve();
 
-function openWindow(want: string, frame?: Rect): Promise<void> {
+// `docs` opens the manual's window rather than an ordinary one, on the page it
+// names (showDocs above owns the rule that there is only ever one).
+function openWindow(want: string, frame?: Rect, docs?: { page: string }): Promise<void> {
   const next = opening.then(
-    () => buildWindow(want, frame),
-    () => buildWindow(want, frame),
+    () => buildWindow(want, frame, docs),
+    () => buildWindow(want, frame, docs),
   );
   opening = next;
   return next;
 }
 
-async function buildWindow(want: string, frame?: Rect): Promise<void> {
+async function buildWindow(want: string, frame?: Rect, docs?: { page: string }): Promise<void> {
   // Null until the RPC exists, which happens in the same synchronous run as
   // the manager below returns, so no timer or fs event can observe it; the
   // optional call is the belt.
@@ -531,12 +617,16 @@ async function buildWindow(want: string, frame?: Rect): Promise<void> {
       menuCommand: (p) => rpc?.send.menuCommand(p),
     },
     say: (p) => rpc?.send.connectionState(p),
+    show: (p) => rpc?.send.docsShow(p),
+    docs: docs !== undefined,
+    page: docs?.page ?? "",
     manager: null,
     connection: "",
     client: "",
     // Replaced by the manager's first report, which lands before the window
-    // below is built. It stands only if a window ever opens without one.
-    title: "Ledge",
+    // below is built (and by nameWindow's own answer for the manual's window).
+    // It stands only if a window ever opens without one.
+    title: docs !== undefined ? DOCS_TITLE : "Ledge",
     frame: start,
     reported: start,
     menu: null,

@@ -1,5 +1,5 @@
 import { test, expect, describe } from "bun:test";
-import { reducer, initialState, allDocIds, notesOf, openNotePaths, trashOf, type AppState, type Action } from "./store";
+import { reducer, initialState, docsState, allDocIds, notesOf, openNotePaths, trashOf, type AppState, type Action } from "./store";
 import { firstLeaf, leafIds, findLeaf, countTabs, focusedTab, type SplitNode } from "./tree";
 import { DEFAULT_ICON } from "./icons";
 import type { NoteMeta, TrashMeta } from "../../shared/rpc-schema";
@@ -33,6 +33,49 @@ describe("initialState", () => {
     expect(ws.folder).toBe(FOLDER);
     expect(leafIds(ws.root)).toHaveLength(1);
     expect(countTabs(ws.root)).toBe(1);
+    expect(ws.focusedPaneId).toBe(firstLeaf(ws.root).id);
+  });
+});
+
+// The manual window's launch state (remote.md §8a). The pages are numbered so
+// that path order is reading order, and the titles are their H1s — which is
+// what a page is asked for by, since the numbers move as the corpus grows.
+describe("docsState", () => {
+  const DOCS = "/ws/.ledge-docs";
+  const PAGES: NoteMeta[] = [
+    { path: `${DOCS}/03-about-panes.md`, title: "About Panes", mtimeMs: 3 },
+    { path: `${DOCS}/01-getting-started.md`, title: "Getting Started", mtimeMs: 1 },
+    { path: `${DOCS}/09-licenses.md`, title: "Third-Party Licenses", mtimeMs: 9 },
+  ];
+
+  test("one workspace holding the manual, landing on Getting Started", () => {
+    const s = docsState(DOCS, PAGES);
+    expect(s.workspaces).toHaveLength(1);
+    const ws = selected(s);
+    expect(ws.folder).toBe(DOCS);
+    expect(ws.name).toBe("Documentation");
+    expect(focusedTab(ws)?.title).toBe("Getting Started");
+    expect(notesOf(s, DOCS)).toHaveLength(3);
+  });
+
+  test("a page asked for by title is the one it opens", () => {
+    expect(focusedTab(selected(docsState(DOCS, PAGES, "Third-Party Licenses")))?.path).toBe(
+      `${DOCS}/09-licenses.md`,
+    );
+  });
+
+  // A corpus that renamed the landing page under a stale docs root. The window
+  // still opens on something readable rather than on nothing.
+  test("a page that is not there falls back to the first in path order", () => {
+    const without = PAGES.filter((p) => p.title !== "Getting Started");
+    expect(focusedTab(selected(docsState(DOCS, without, "No Such Page")))?.title).toBe("About Panes");
+  });
+
+  // Never a scratch tab: in a folder that refuses writes it is an Untitled
+  // that can never save (the same rule splitPane and the restore path keep).
+  test("an empty corpus opens an empty pane, not an untitled note", () => {
+    const ws = selected(docsState(DOCS, []));
+    expect(countTabs(ws.root)).toBe(0);
     expect(ws.focusedPaneId).toBe(firstLeaf(ws.root).id);
   });
 });

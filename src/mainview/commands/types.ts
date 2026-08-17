@@ -160,6 +160,11 @@ export interface RegistryDeps {
   // `page` lands on one page by title instead of the manual's front (Help >
   // Third-Party Licenses).
   openDocs(state: AppState, dispatch: (a: Action) => void, page?: string): Promise<void>;
+  // The same verb where the shell has windows: the manual gets one of its own,
+  // opened or raised by the shell (lib/windows.ts). Which of the two paths a
+  // command takes is lib/shell.ts's multiWindow, and the one below is what a
+  // client with a single window does instead (ios.md §4).
+  openDocsWindow(page: string): void;
   // The other half of the toggle: select the workspace the manual was opened
   // from, leaving it open behind. Nothing closes — a workspace switch is what
   // this is.

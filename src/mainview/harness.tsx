@@ -29,7 +29,7 @@ import { configureVault, recordVaultState, refreshVaultState } from "./vault/cha
 import { configureWorkspaces, recordWorkspaceKinds } from "./workspace/channel";
 import { configureClipboard } from "./lib/clipboard";
 import { configureCli } from "./lib/cli";
-import { configureWindows } from "./lib/windows";
+import { configureWindows, dispatchDocsShow, recordWindowRole } from "./lib/windows";
 import { configureAssets } from "./lib/assets";
 import { configureSettings } from "./lib/settings";
 import { configureConnections, recordLinkState, recordPresence } from "./lib/connections";
@@ -44,6 +44,7 @@ import {
 import { applyAppearance } from "./lib/theme";
 import { configureShell, recordServerCaps } from "./lib/shell";
 import { configureLayout, restoredState } from "./workspace/persist";
+import { docsState } from "./workspace/store";
 
 // Which shell to be. Two clients bind these seams for real — Electrobun on the
 // Mac and Swift on iOS (ios.md §1) — and they differ in what the DEVICE can do,
@@ -77,6 +78,14 @@ configureShell({
   // thing there in a way they stopped being on the Mac (remote.md §8a).
   multiWindow: !FAKING_IOS,
 });
+// Which window this page stands in for. A shell with windows gives the manual
+// one of its own (remote.md §8a), and that window is another webview running
+// this same view — so a spec reaches it the way the shell does: by loading the
+// page as it, rather than by clicking the button that would open it. The
+// ordinary harness page is an ordinary window, where the button is the ask
+// (`docsOpens` above).
+const DOCS_WINDOW = new URLSearchParams(window.location.search).get("docs") === "1";
+recordWindowRole({ docs: DOCS_WINDOW });
 // The SERVER's half of the same picture, and a different question: what the
 // machine holding the notes can do for itself. Set here rather than arriving
 // with workspaceList because this harness renders without boot.tsx's boot(),
@@ -1043,10 +1052,18 @@ configureCli({
 // New Window is a native seam with no in-page consequence at all — the second
 // window is another client of another server, in another webview (remote.md
 // §8a) — so what a spec can see is that the ask left, and how many times.
+//
+// The manual's window is the same kind of seam and the same kind of evidence:
+// the pages it opens onto are what `?docs=1` below renders, and what a spec
+// driving an ORDINARY window can see is the page it asked the shell for.
 const windowOpens: number[] = [];
+const docsOpens: string[] = [];
 configureWindows({
   open: () => {
     windowOpens.push(windowOpens.length + 1);
+  },
+  openDocs: (page) => {
+    docsOpens.push(page);
   },
 });
 
@@ -1062,6 +1079,13 @@ declare global {
       linkOpens: () => string[];
       // How many windows New Window asked the shell for.
       windowOpens: () => number;
+      // Every page the manual's window was asked for, in order ("" is the
+      // landing page). The window itself is another webview, which a spec
+      // reaches by loading the harness with `?docs=1`.
+      docsOpens: () => string[];
+      // Simulate the shell's docsShow push: somebody asked for a page while
+      // the manual's window was already open. Only meaningful under `?docs=1`.
+      showDocs: (page: string) => void;
       layout: () => string | null;
       termAttaches: () => { sessionId: string; host: string | null }[];
       termPastes: () => { sessionId: string; text: string; host: string | null }[];
@@ -1153,6 +1177,8 @@ window.__harness = {
   settingsText: (home) => settingsFiles[home],
   linkOpens: () => [...linkOpens],
   windowOpens: () => windowOpens.length,
+  docsOpens: () => [...docsOpens],
+  showDocs: (page) => dispatchDocsShow(page),
   layout: () => layoutText,
   termAttaches: () => termAttaches.map((a) => ({ ...a })),
   termPastes: () => termPastes.map((p) => ({ ...p })),
@@ -1197,17 +1223,26 @@ window.__harness = {
 // Same boot shape as main.tsx: the registry first, then per-folder lists.
 // null layout: a harness run always starts from the seeded notes; restore
 // behavior itself is covered by persist.test.ts, not specs.
+//
+// And the same fork at the end of it: the manual's window boots onto the
+// manual, on the page it was opened for (`?page=`, the harness's stand-in for
+// the title the shell passes through windowRole).
 const bootRoots = store.workspaceList();
 recordWorkspaceKinds(bootRoots);
+const bootPage = new URLSearchParams(window.location.search).get("page") ?? "";
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <App
-      initial={restoredState(
-        null,
-        bootRoots,
-        Object.fromEntries(bootRoots.map((r) => [r.root, store.list(r.root)])),
-        Object.fromEntries(bootRoots.map((r) => [r.root, store.listTrash(r.root)])),
-      )}
+      initial={
+        DOCS_WINDOW
+          ? docsState(DOCS, store.list(DOCS), bootPage)
+          : restoredState(
+              null,
+              bootRoots,
+              Object.fromEntries(bootRoots.map((r) => [r.root, store.list(r.root)])),
+              Object.fromEntries(bootRoots.map((r) => [r.root, store.listTrash(r.root)])),
+            )
+      }
     />
   </StrictMode>,
 );

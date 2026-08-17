@@ -382,7 +382,7 @@ function newServerId(): string {
 }
 
 /**
- * The thirteen a client shell answers itself (wire.ts CLIENT_METHODS), for iOS.
+ * The sixteen a client shell answers itself (wire.ts CLIENT_METHODS), for iOS.
  *
  * Typed as the whole list rather than as a partial map, so a name added to
  * CLIENT_METHODS fails to compile here until this shell answers it too. The
@@ -441,6 +441,13 @@ function clientSeams(
     // on the Mac (remote.md §8a). False rather than a no-op, so the verb is
     // absent from the palette instead of present and silent.
     windowNew: async () => ({ ok: false }),
+    // And so no window for the manual to have of its own: it opens in the one
+    // window there is, which is what `multiWindow` already tells the view
+    // before it asks. False here is the answer to anything that asks anyway.
+    windowDocs: async () => ({ ok: false }),
+    // The one window a phone has is never the manual's — the manual is a
+    // workspace inside it (mainview/workspace/actions.ts openDocs).
+    windowRole: async () => ({ docs: false, page: "" }),
 
     // The connection list, which is the phone's own and not a server's — the
     // same claim remote.md §8 makes about a Mac's. Swift holds the file; every

@@ -12,7 +12,7 @@ import {
   moveWorkspaceFolder,
   workspaceKind,
 } from "./channel";
-import { notesOf, type Action, type AppState } from "./store";
+import { docsLanding, notesOf, type Action, type AppState } from "./store";
 import { tabPaths } from "./tree";
 
 // New Workspace: ask Bun for a folder first (it slugs the display name and
@@ -58,17 +58,22 @@ export async function attachWorkspace(
   return null;
 }
 
-// Open the built-in Documentation workspace: select it if it is already open,
-// else add it over the docs folder Bun reported at boot, landing on the
-// Getting Started page (else the first page in path order — the browser's
-// order for docs: the manifest's numbered filenames, bun/docsContent.ts).
-// The page list comes from the store when a restored session already
-// carries it, else one listNotes round trip: the fresh-start boot seeds only
-// the first workspace's lists, and an open that trusted the store alone would
-// land on a scratch tab in a folder that refuses writes. It joins
-// state.workspaces like any workspace — panes, tabs, search, quick-open all
-// just work — and the strip simply declines to show it (Sidebar filters kind
-// "docs").
+// Open the built-in Documentation workspace IN THIS WINDOW, which is what the
+// manual does on a client that has one window and can only have one (a phone,
+// ios.md §4). A shell with windows gives the manual one of its own instead, and
+// the two paths meet nowhere but the command that chooses between them
+// (commands/registry.ts docs.toggle, on lib/shell.ts multiWindow).
+//
+// Select it if it is already open, else add it over the docs folder Bun
+// reported at boot, landing on the Getting Started page (else the first page in
+// path order — the browser's order for docs: the manifest's numbered filenames,
+// bun/docsContent.ts). The page list comes from the store when a restored
+// session already carries it, else one listNotes round trip: the fresh-start
+// boot seeds only the first workspace's lists, and an open that trusted the
+// store alone would land on a scratch tab in a folder that refuses writes. It
+// joins state.workspaces like any workspace — panes, tabs, search, quick-open
+// all just work — and the strip simply declines to show it (Sidebar filters
+// kind "docs").
 //
 // The already-open branch must still land on a page: a docs workspace can be
 // sitting on nothing but a reseeded scratch tab (its pages all closed, so
@@ -113,12 +118,7 @@ export async function openDocs(
     notes = await listNotes(folder).catch(() => []);
     fetched = true;
   }
-  // A page that has gone missing (a corpus that changed under a stale docs
-  // root) falls back to the first page rather than opening nothing.
-  const wanted = (page ?? "getting started").toLowerCase();
-  const start =
-    notes.find((n) => n.title.toLowerCase() === wanted) ??
-    [...notes].sort((a, b) => a.path.localeCompare(b.path))[0];
+  const start = docsLanding(notes, page);
   if (existing) {
     dispatch({ type: "selectWorkspace", id: existing.id });
     // openNote acts on the selected workspace at reduce time, so it follows

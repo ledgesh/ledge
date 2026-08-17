@@ -622,6 +622,31 @@ export type LedgeRPC = {
       // learn the answer; this is the honest reply to anything that calls
       // anyway.
       windowNew: { params: {}; response: { ok: boolean } };
+      // The manual, in the window that holds it (remote.md §8a). One window per
+      // app: an app already showing the manual raises that window rather than
+      // opening a second copy of a read-only corpus, which is why this is a
+      // verb about the manual rather than windowNew with an argument.
+      //
+      // `page` names a page by title, for the menu items that mean one page
+      // rather than the manual (Help > Third-Party Licenses); "" is the landing
+      // page. It is honored whether the window is opened or merely raised —
+      // "show me the licenses" has to show them.
+      //
+      // `ok` is false where the shell has no second window to give (a phone,
+      // ios.md §4), and the caller then opens the manual in the window it
+      // already has. Which of the two happens is decided WITHOUT asking
+      // (mainview/lib/shell.ts multiWindow), for windowNew's reason: a `when`
+      // predicate cannot await.
+      windowDocs: { params: { page: string }; response: { ok: boolean } };
+      // What this window is, asked once at boot, before the first render.
+      //
+      // Every window runs the same view, and all of them but one boot onto the
+      // saved layout; the manual's boots onto the manual (`docs`, with `page`
+      // the title it was opened to show, "" for the landing page). It is a
+      // question for the SHELL rather than for the server — which window this
+      // view is in is not a fact about the notes — so it never becomes a frame,
+      // and a shell with one window answers false.
+      windowRole: { params: {}; response: { docs: boolean; page: string } };
       // The validated settings snapshot (shared/settings.ts), fetched once at
       // boot. Bun owns the files, the parsing, and the fallbacks; the view only
       // ever sees a complete, valid Settings and never learns there were two of
@@ -988,6 +1013,12 @@ export type LedgeRPC = {
       // stopped and what was held has been refused. `detail` is the sentence to
       // show. The local server never leaves "live": there is no wire to drop.
       connectionState: { state: "live" | "reconnecting" | "lost"; detail: string };
+      // Land the manual on a page, pushed to the window that holds it when
+      // somebody asks for a page while it is already open (windowDocs above).
+      // "" is the landing page. Also a CLIENT push: the shell holding the
+      // windows is the only thing that knows one of them is showing the manual,
+      // and a server has no windows at all.
+      docsShow: { page: string };
     };
   };
 };

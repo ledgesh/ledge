@@ -10,7 +10,7 @@ Panes put notes side by side. Each note keeps its own shell ([[Running Code]]), 
 
 The new pane opens with a fresh Untitled note and takes focus. Either side can split again, along either axis, as many times as you like. The layout is a tree, not a fixed two-column or three-column arrangement.
 
-In the read-only Documentation workspace the new pane opens empty instead, because there is no new note to make there. It still takes focus, so the next page you open lands in it and the two sit side by side.
+In the manual's window the new pane opens empty instead, because there is no new note to make in a read-only folder. It still takes focus, so the next page you open lands in it and two pages sit side by side.
 
 A tab's context menu carries Split Right, Split Down and Close Pane too, and those act on the tab's own pane rather than the focused one.
 
@@ -95,6 +95,8 @@ Ledge reopens the windows you left open, each at the position and size you left 
 If a position no longer exists, because you unplugged the display it was on or the display got smaller, Ledge keeps the size and centers the window on the display that best matches.
 
 New Window in the File menu opens another one. A window belongs to one machine, so a second window is how you have two machines open at once ([[Notes on Another Machine]]).
+
+The help button in the top right opens this manual in a window of its own, so reading it costs you nothing you had open. Pressing it again brings that window forward rather than opening a second one. It is the one window Ledge does not reopen at the next launch, since it is a button away.
 
 Two more keys for the window itself:
 

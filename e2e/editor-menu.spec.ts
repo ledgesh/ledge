@@ -185,7 +185,9 @@ test("a run panel keeps its own gesture: no note menu over a block's output", as
 });
 
 test("the manual keeps reading and loses writing", async ({ page }) => {
-  await page.getByTitle("Documentation", { exact: true }).click();
+  // The manual has a window of its own (remote.md §8a), which a spec reaches
+  // the way the shell opens it: as that window (docs.spec.ts).
+  await page.goto("/harness.html?docs=1");
   await expect(noteRow(page, "Getting Started")).toBeVisible();
   await page.locator(".cm-line").first().click({ button: "right" });
   // Copy and Select All survive — copying a command out of the docs is what

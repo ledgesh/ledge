@@ -33,7 +33,7 @@ import { configureWorkspaces, recordDailyRoot, recordWorkspaceKinds } from "./wo
 import { configureClipboard } from "./lib/clipboard";
 import { configureMenu, dispatchNativeCommand } from "./lib/menu";
 import { configureCli } from "./lib/cli";
-import { configureWindows } from "./lib/windows";
+import { configureWindows, dispatchDocsShow, recordWindowRole } from "./lib/windows";
 import { captureFailures, configureLog } from "./lib/log";
 import { configureAssets } from "./lib/assets";
 import { configureSettings } from "./lib/settings";
@@ -42,6 +42,7 @@ import { configureConnections, recordLinkState, recordPresence, type ConnectionS
 import { applyAppearance } from "./lib/theme";
 import { DEFAULT_SETTINGS, type Settings } from "../shared/settings";
 import { configureLayout, restoredState } from "./workspace/persist";
+import { docsState } from "./workspace/store";
 // Here rather than in an entry point, because this is the file that renders:
 // a shell that forgot the import would build fine and open an unstyled app.
 import "./index.css";
@@ -77,6 +78,10 @@ export const viewPush: ViewPush = {
   // re-renders from the one record.
   vaultChanged: ({ state }) => recordVaultState(state),
   menuCommand: ({ action }) => dispatchNativeCommand(action),
+  // Also the shell's own, and only ever sent to the manual's window: somebody
+  // asked for a page while it was already open (remote.md §8a). The shell has
+  // raised the window; this lands it on the page.
+  docsShow: ({ page }) => dispatchDocsShow(page),
   // From the shell holding this end of the wire, never from a server
   // (remote.md §7).
   connectionState: ({ state, detail }) => {
@@ -197,9 +202,16 @@ export function bootView(requests: RequestClient): Promise<void> {
   // or the shell logged why, and there is nothing here that could act on the
   // answer — a shell with no second window to give is one where the verb was
   // never offered (lib/shell.ts multiWindow).
+  //
+  // The manual's window is the same seam with a page on it: the shell opens it
+  // or raises the one already showing the manual, and this end never learns
+  // which (lib/windows.ts).
   configureWindows({
     open: () => {
       void requests.windowNew({});
+    },
+    openDocs: (page) => {
+      void requests.windowDocs({ page });
     },
   });
 
@@ -273,6 +285,10 @@ async function boot(requests: RequestClient): Promise<void> {
   const trashByFolder: Record<string, TrashMeta[]> = {};
   let settings: Settings = DEFAULT_SETTINGS;
   let layout: string | null = null;
+  // Which window this view is in (remote.md §8a). Asked with the registry
+  // rather than after it, because the answer decides which folders are worth
+  // listing at all: the manual's window reads one, and reads no layout.
+  let role = { docs: false, page: "" };
   // Which machine everything below belongs to (remote.md §8). Fetched before
   // the first paint like settings and the layout: the indicator is chrome, and
   // chrome that names the wrong machine for one frame is the one frame where
@@ -288,8 +304,13 @@ async function boot(requests: RequestClient): Promise<void> {
     // render's shape. Eager per-folder fetch keeps that first paint complete;
     // fine at human workspace counts (revisit lazily if a huge external folder
     // ever makes boot crawl). A folder that fails to list costs itself only.
-    const registry = await requests.workspaceList({});
+    const [registry, asked] = await Promise.all([requests.workspaceList({}), requests.windowRole({})]);
     roots = registry.workspaces;
+    role = asked;
+    // Before the first render, like the settings snapshot: the chrome the
+    // manual's window does without is decided in the first paint, not swapped
+    // out of it (lib/windows.ts).
+    recordWindowRole(role);
     // This fetch bypasses the channel wrapper, so record explicitly: kinds
     // for the per-workspace default cwd, the resolved daily root for the
     // Edit Daily Template faces (workspace/channel.ts).
@@ -301,7 +322,12 @@ async function boot(requests: RequestClient): Promise<void> {
     // wrapper, and it is the first round trip, so the answers are in place
     // before the first palette opens.
     recordServerCaps(registry);
-    const available = roots.filter((w) => w.available).map((w) => w.root);
+    // The manual's window lists one folder, its own: it can show nothing else,
+    // and a workspace over a big external folder should not cost a window that
+    // opened to read the manual.
+    const available = roots
+      .filter((w) => w.available && (!role.docs || w.kind === "docs"))
+      .map((w) => w.root);
     [settings, layout, connections] = await Promise.all([
       requests.settingsGet({}).then((r) => r.settings),
       requests.layoutGet({}).then((r) => r.text),
@@ -368,9 +394,20 @@ async function boot(requests: RequestClient): Promise<void> {
   // almost always after — this lands ("unlocked" cannot survive a relaunch;
   // the fetch only distinguishes locked from none for the dialog's face).
   void refreshVaultState().catch(() => {});
+  // The manual's window boots onto the manual and nothing else; every other
+  // window boots onto the layout it left (remote.md §8a). A docs root that is
+  // missing — an app whose docs sync failed — falls back to the ordinary boot
+  // rather than opening a window over no folder at all.
+  const docsRoot = role.docs ? (roots.find((w) => w.kind === "docs" && w.available)?.root ?? "") : "";
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
-      <App initial={restoredState(layout, roots, notesByFolder, trashByFolder)} />
+      <App
+        initial={
+          docsRoot
+            ? docsState(docsRoot, notesByFolder[docsRoot] ?? [], role.page)
+            : restoredState(layout, roots, notesByFolder, trashByFolder)
+        }
+      />
     </StrictMode>,
   );
 }

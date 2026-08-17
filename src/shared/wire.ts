@@ -212,6 +212,8 @@ export const REQUEST_METHODS = [
   "clipboardReadRich",
   "menuSet",
   "windowNew",
+  "windowDocs",
+  "windowRole",
   "settingsGet",
   "settingsRead",
   "settingsWrite",
@@ -261,7 +263,7 @@ export const PUSH_MESSAGES = [
  * connection is a fact about the wire, and the end holding the far side of a
  * dropped one is in no position to report it.
  */
-export const CLIENT_PUSHES = ["connectionState"] as const satisfies readonly PushMessage[];
+export const CLIENT_PUSHES = ["connectionState", "docsShow"] as const satisfies readonly PushMessage[];
 
 export type ClientPush = (typeof CLIENT_PUSHES)[number];
 
@@ -278,7 +280,7 @@ export type ClientPush = (typeof CLIENT_PUSHES)[number];
 // compile.
 
 /**
- * The native eight: the pasteboard, the picture library, the browser, the menu
+ * The native ten: the pasteboard, the picture library, the browser, the menu
  * bar, and the windows.
  *
  * The pasteboard you copied from, the photos you took, the browser that should
@@ -298,6 +300,8 @@ export const NATIVE_METHODS = [
   "linkOpen",
   "menuSet",
   "windowNew",
+  "windowDocs",
+  "windowRole",
 ] as const satisfies readonly RequestMethod[];
 
 export type NativeMethod = (typeof NATIVE_METHODS)[number];

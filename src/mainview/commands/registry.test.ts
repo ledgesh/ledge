@@ -6,6 +6,7 @@ import { EDITOR_MENU_COMMANDS } from "./editorMenu";
 import { parseKey, resolveChord, DEFAULT_DOMAINS, type FocusDomain } from "./keymap";
 import type { Command, CommandCtx, RegistryDeps } from "./types";
 import { configureShell, recordServerCaps } from "@/lib/shell";
+import { recordWindowRole } from "@/lib/windows";
 
 // Stub deps: the registry never touches the editor stack or the clipboard in
 // tests; we only record that the right edge was invoked. `noteHead` is what a
@@ -45,6 +46,7 @@ function stubDeps(
     openDocs: async (_state, _dispatch, page) => {
       calls.push(page ? `openDocs:${page}` : "openDocs");
     },
+    openDocsWindow: (page) => calls.push(page ? `openDocsWindow:${page}` : "openDocsWindow"),
     closeDocs: () => calls.push("closeDocs"),
     restartSession: record("restartSession"),
     openDailyNote: async (folder) => {
@@ -803,7 +805,19 @@ describe("registry", () => {
   const docsSelectedState = () =>
     apply(initialState(FOLDER, []), { type: "addWorkspace", name: "Documentation", folder: DOCS });
 
-  test("docs.toggle shows only when a docs root exists, and routes to the openDocs edge", () => {
+  // A client with one window and no way to have two (a phone, ios.md §4),
+  // where the manual is a workspace rather than a window. Module state, put
+  // back after: every other test in this file expects a Mac's answers.
+  function oneWindow(check: () => void): void {
+    configureShell({ multiWindow: false });
+    try {
+      check();
+    } finally {
+      configureShell({ multiWindow: true });
+    }
+  }
+
+  test("docs.toggle shows only when a docs root exists, and asks for the manual's window", () => {
     // The base stub reports no docs root: hidden (a harness or failed boot).
     expect(find(commands, "docs.toggle").when!(makeCtx(initialState(FOLDER, [])))).toBe(false);
     const calls: string[] = [];
@@ -811,31 +825,72 @@ describe("registry", () => {
     const ctx = makeCtx(initialState(FOLDER, []));
     expect(find(cmds, "docs.toggle").when!(ctx)).toBe(true);
     find(cmds, "docs.toggle").run(ctx);
-    expect(calls).toEqual(["openDocs"]);
+    // The window, not this one: the workspace in front of the user is left
+    // exactly where it was (remote.md §8a).
+    expect(calls).toEqual(["openDocsWindow"]);
   });
 
-  // The other half, and the reason the command is a toggle at all: the docs
-  // workspace is no strip row and no ⌘1…9 slot, so the surface that would
-  // otherwise be the way back is one the manual itself is covering.
-  test("docs.toggle closes the manual when the manual is what is selected", () => {
-    const calls: string[] = [];
-    const cmds = buildCommands(docsDeps(calls));
-    find(cmds, "docs.toggle").run(makeCtx(docsSelectedState()));
-    expect(calls).toEqual(["closeDocs"]);
+  // The single-window path, and the reason the command is a toggle there at
+  // all: the docs workspace is no strip row and no ⌘1…9 slot, so the surface
+  // that would otherwise be the way back is one the manual itself is covering.
+  test("on a client with one window it is the old toggle: open, then close", () => {
+    oneWindow(() => {
+      const calls: string[] = [];
+      const cmds = buildCommands(docsDeps(calls));
+      find(cmds, "docs.toggle").run(makeCtx(initialState(FOLDER, [])));
+      find(cmds, "docs.toggle").run(makeCtx(docsSelectedState()));
+      expect(calls).toEqual(["openDocs", "closeDocs"]);
+    });
   });
 
   // The licenses have to be reachable in the shipped app, not only in the
   // repository: the title it asks for is the H1 of the generated page
   // (bun/licenses.ts), and a rename on either side breaks the landing.
-  test("docs.licenses opens the manual on the notices page", () => {
+  test("docs.licenses names the page, whichever path the manual takes", () => {
     const calls: string[] = [];
     const cmds = buildCommands(docsDeps(calls));
     const ctx = makeCtx(initialState(FOLDER, []));
     expect(find(cmds, "docs.licenses").when!(ctx)).toBe(true);
     find(cmds, "docs.licenses").run(ctx);
-    expect(calls).toEqual(["openDocs:Third-Party Licenses"]);
+    expect(calls).toEqual(["openDocsWindow:Third-Party Licenses"]);
+    oneWindow(() => {
+      const one: string[] = [];
+      find(buildCommands(docsDeps(one)), "docs.licenses").run(makeCtx(initialState(FOLDER, [])));
+      expect(one).toEqual(["openDocs:Third-Party Licenses"]);
+    });
     // Hidden with no docs root, same as docs.toggle: there is nothing to open.
     expect(find(commands, "docs.licenses").when!(makeCtx(initialState(FOLDER, [])))).toBe(false);
+  });
+
+  // Inside the manual's own window (lib/windows.ts windowRole). What goes is
+  // everything that would act on a workspace this window does not have, or on
+  // a machine it cannot be pointed at; what stays is the page verbs and the
+  // one that turns to another page.
+  test("the manual's window drops the verbs that have nothing to act on", () => {
+    recordWindowRole({ docs: true });
+    try {
+      const calls: string[] = [];
+      // With a daily workspace pinned, which is the one configuration where
+      // ⌘J would otherwise still be offered in a docs workspace.
+      const cmds = buildCommands({ ...docsDeps(calls), dailyRoot: () => "/ws/daily" });
+      const ctx = makeCtx(docsSelectedState());
+      const visible = (id: string) => find(cmds, id).when?.(ctx) ?? true;
+      // The button that opens this window has nothing to say inside it, and
+      // neither has a workspace nor a machine switch.
+      for (const id of ["docs.toggle", "workspace.new", "workspace.attach", "connection.switch", "daily.open"]) {
+        expect(`${id}:${visible(id)}`).toBe(`${id}:false`);
+      }
+      // Turning to the licences page is the one docs verb that still means
+      // something here, and it turns to it IN this window.
+      expect(visible("docs.licenses")).toBe(true);
+      find(cmds, "docs.licenses").run(ctx);
+      expect(calls).toEqual(["openDocs:Third-Party Licenses"]);
+      // Another ordinary window is still on offer: the manual's window is a
+      // dead end for workspaces, not for the app.
+      expect(visible("window.new")).toBe(true);
+    } finally {
+      recordWindowRole({ docs: false });
+    }
   });
 
   test("⌘N indexing skips the docs workspace", () => {

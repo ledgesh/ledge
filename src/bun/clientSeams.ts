@@ -33,6 +33,13 @@ export interface ClientNative {
   // (remote.md §8a). Absent on a shell that has one window and can only ever
   // have one, which is what makes the verb disappear rather than fail.
   newWindow?(): void;
+  // Open the manual's window on `page` ("" for its landing page), or raise it
+  // and show that page where it is already open. Absent for newWindow's
+  // reason, and the caller then opens the manual in the window it has.
+  docsWindow?(page: string): void;
+  // Whether THIS window is the manual's, and the page it was opened to show.
+  // Absent on a shell whose one window is never it.
+  windowRole?(): { docs: boolean; page: string };
   // The pasteboard's image, as PNG bytes. Defaults to the osascript route
   // (bun/clipboard.ts). Injectable for two reasons that point the same way: a
   // client that is not a Mac reads its pasteboard some other way, and a test
@@ -99,7 +106,7 @@ export async function clientOverlay(base: RequestHandlers, native: ClientNative)
 }
 
 /**
- * The eight themselves. `server` is where the one of them that produces a FILE
+ * The ten themselves. `server` is where the one of them that produces a FILE
  * sends its bytes: reading a pasteboard and naming a file in a workspace are
  * different machines' jobs, and this is the seam between them.
  */
@@ -171,6 +178,18 @@ export function clientSeams(
       native.newWindow();
       return { ok: true };
     },
+    // The manual's window: one per app, raised rather than duplicated. The
+    // shell decides whether that means opening a window or activating the one
+    // that is already showing it — the view knows only that the manual is
+    // somewhere else now.
+    windowDocs: async ({ page }) => {
+      if (!native.docsWindow) return { ok: false };
+      native.docsWindow(page);
+      return { ok: true };
+    },
+    // Which window this view is in, asked once at boot. A shell that has one
+    // window answers for it: it is never the manual's.
+    windowRole: async () => native.windowRole?.() ?? { docs: false, page: "" },
     // openableUrl is the guard here, not a convenience: `open` treats a
     // non-URL argument as a file path (and launches .app bundles), so only the
     // allowlisted schemes may pass. This is the boundary, and the view's own

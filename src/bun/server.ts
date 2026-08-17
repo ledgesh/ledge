@@ -158,6 +158,8 @@ function clientSeamRefusals(): Pick<RequestHandlers, ClientMethod> {
     linkOpen: refuse("linkOpen"),
     menuSet: refuse("menuSet"),
     windowNew: refuse("windowNew"),
+    windowDocs: refuse("windowDocs"),
+    windowRole: refuse("windowRole"),
     connectionList: refuse("connectionList"),
     connectionSelect: refuse("connectionSelect"),
     connectionAdd: refuse("connectionAdd"),

@@ -81,6 +81,47 @@ export function initialState(folder: string, notes: NoteMeta[] = [], trash: Tras
   };
 }
 
+/**
+ * The page the manual opens on: the one asked for by title, else Getting
+ * Started, else the first page in path order — which is the manifest's reading
+ * order, since the pages are numbered (bun/docsContent.ts).
+ *
+ * A page that has gone missing (a corpus that changed under a stale docs root)
+ * falls back the same way rather than opening nothing. Undefined only where the
+ * folder listed empty, which the callers render as an empty pane: a scratch tab
+ * in a folder that refuses writes is an Untitled that can never save.
+ */
+export function docsLanding(notes: NoteMeta[], page = ""): NoteMeta | undefined {
+  const wanted = (page || "getting started").toLowerCase();
+  return (
+    notes.find((n) => n.title.toLowerCase() === wanted) ??
+    [...notes].sort((a, b) => a.path.localeCompare(b.path))[0]
+  );
+}
+
+/**
+ * The manual window's launch state: one workspace, one page, and nothing else
+ * (remote.md §8a).
+ *
+ * `initialState`'s sibling — a boot state built from one folder and its notes —
+ * for the window whose whole job is the manual. The saved layout is not
+ * consulted and not written: this window holds no arrangement anyone chose, and
+ * what it shows is decided by which page was asked for.
+ */
+export function docsState(folder: string, notes: NoteMeta[], page = ""): AppState {
+  const start = docsLanding(notes, page);
+  const leaf = makeLeaf(start ? makeNoteTab(start.path, start.title) : undefined);
+  const ws: Workspace = {
+    id: uid("ws"),
+    name: "Documentation",
+    symbol: DEFAULT_ICON,
+    folder,
+    root: leaf,
+    focusedPaneId: leaf.id,
+  };
+  return { workspaces: [ws], selectedId: ws.id, notes: { [folder]: notes }, trash: { [folder]: [] } };
+}
+
 // --- actions ---------------------------------------------------------------
 
 export type Action =

@@ -68,6 +68,7 @@ import { notesOf, trashOf } from "@/workspace/store";
 import { parseFrontmatter } from "../../shared/frontmatter";
 import type { NoteMeta } from "../../shared/rpc-schema";
 import { canInstallCli, canPickFolder, hasTerminal, multiWindow, runsBlocks, spawnsSessions } from "../lib/shell";
+import { docsWindow } from "../lib/windows";
 import { keysOf, listKeysOf, tabSelectKey, titleOf, workspaceSelectKey, type CommandId } from "./keys";
 import { chipOf } from "./format";
 import type { Command, CommandCtx, RegistryDeps } from "./types";
@@ -246,25 +247,30 @@ export function buildCommands(deps: RegistryDeps): Command[] {
           paneId: ctx.target?.kind === "pane" ? ctx.target.paneId : undefined,
         }),
     }),
-    // Open (or switch to) the built-in Documentation workspace — hidden from
-    // the strip and ⌘1…9, read-only end to end; the header's help button is
-    // the icon surface. Hidden entirely when Bun reported no docs root (a
-    // failed boot, a harness without one).
+    // The built-in documentation — read-only end to end; the header's help
+    // button is the icon surface. Hidden entirely when Bun reported no docs
+    // root (a failed boot, a harness without one).
     //
-    // A toggle, like the four panel buttons beside it in the header and for
-    // the same reason: that button already renders LIT while the manual is
-    // selected, and a lit control that does nothing when pressed again is a
-    // dead end. It is the only one here that matters, too — the way back the
-    // manual documents is "select another workspace", and the surface that
-    // lives on is the strip, which on a phone is inside the drawer the manual
-    // is covering.
+    // On a shell with windows the manual gets one of its own (remote.md §8a),
+    // so this opens or raises that window and the workspace in front of you is
+    // left where it was. Absent from the manual's own window, which is why it
+    // is no longer a toggle there: the way to put a window away is its close
+    // button, and the way back to your notes is the window still sitting behind
+    // this one.
+    //
+    // On a client with one window and no way to have two (a phone, ios.md §4)
+    // it stays the toggle it was: the manual takes over the window, and the
+    // same button — lit, since the manual is the selected workspace — is the
+    // way back, because the strip that would otherwise offer one is inside the
+    // drawer the manual is covering.
     cmd("docs.toggle", {
       // A question mark, not a book: on a notes app, a book glyph reads as
       // "another notebook", while ? is the universal help affordance.
       icon: CircleHelp,
-      when: () => deps.docsFolder() !== null,
+      when: () => deps.docsFolder() !== null && !docsWindow(),
       run: (ctx) => {
-        if (docsSelected(ctx)) deps.closeDocs(ctx.state, ctx.dispatch);
+        if (multiWindow()) deps.openDocsWindow("");
+        else if (docsSelected(ctx)) deps.closeDocs(ctx.state, ctx.dispatch);
         else void deps.openDocs(ctx.state, ctx.dispatch);
       },
     }),
@@ -272,13 +278,17 @@ export function buildCommands(deps: RegistryDeps): Command[] {
     // file the Finder reveals because the app already knows how to show a
     // Markdown document, and because a notice reproduced somewhere the user
     // cannot reach is the same as one that did not ship.
+    //
+    // Offered in the manual's window too, unlike the verb above: there it means
+    // "turn to that page", and the page is right here.
     cmd("docs.licenses", {
       icon: Scale,
       when: () => deps.docsFolder() !== null,
       run: (ctx) => {
         // By title: the corpus renumbers pages as it grows, and the H1 is what
         // survives that (bun/docsContent.ts).
-        void deps.openDocs(ctx.state, ctx.dispatch, "Third-Party Licenses");
+        if (multiWindow() && !docsWindow()) deps.openDocsWindow("Third-Party Licenses");
+        else void deps.openDocs(ctx.state, ctx.dispatch, "Third-Party Licenses");
       },
     }),
     // Create-or-open today's YYYY-MM-DD note and land in it. The open rides
@@ -289,7 +299,11 @@ export function buildCommands(deps: RegistryDeps): Command[] {
       // In the docs workspace, ⌘J still works when a daily workspace is
       // pinned (Bun acts there, not here); unpinned it would fall back to the
       // selected — read-only — folder, so it gates instead of erroring.
-      when: (ctx) => !docsSelected(ctx) || deps.dailyRoot() !== null,
+      //
+      // In the manual's WINDOW it is gone either way: that window holds one
+      // workspace and it is the manual, so a daily note opened here would have
+      // no pane to land in (App's external-open subscriber would drop it).
+      when: (ctx) => !docsWindow() && (!docsSelected(ctx) || deps.dailyRoot() !== null),
       run: (ctx) => {
         void deps.openDailyNote(ctx.selected.folder).then((err) => {
           if (err) ctx.ui.showError?.(err);
@@ -453,8 +467,14 @@ export function buildCommands(deps: RegistryDeps): Command[] {
     }),
 
     // --- workspaces ----------------------------------------------------------
+    //
+    // None of the two verbs that ADD one are offered in the manual's window: it
+    // shows one workspace and has no strip to put another in, so a workspace
+    // created there would be invisible and selected — the manual replaced by a
+    // scratch note, in a window with no way back to either (remote.md §8a).
     cmd("workspace.new", {
       icon: Plus,
+      when: () => !docsWindow(),
       // Async behind a void (deleteNoteWithUndo's pattern): Bun creates the
       // folder, then the reducer adds the workspace over it.
       run: (ctx) => {
@@ -471,7 +491,7 @@ export function buildCommands(deps: RegistryDeps): Command[] {
       // Absent where the picker cannot open, rather than present and answering
       // with NO_DIALOG: a headless server has nobody at it to choose a folder,
       // and a phone is permanently that case (ios.md §8, lib/shell.ts).
-      when: () => canPickFolder(),
+      when: () => canPickFolder() && !docsWindow(),
       run: (ctx) => {
         void deps.attachWorkspace(ctx.dispatch).then((err) => {
           if (err) ctx.ui.showError?.(err);
@@ -666,8 +686,13 @@ export function buildCommands(deps: RegistryDeps): Command[] {
     // Which machine the notes are on. Everything workspace-scoped is scoped
     // to a server one level up (remote.md §8), so this is the widest-scope
     // switch in the app — and the only one that closes every tab.
+    //
+    // Not in the manual's window: the manual is this build's own, read off this
+    // Mac whatever the window that opened it was looking at (remote.md §8a), so
+    // there is no other machine for it to be on.
     cmd("connection.switch", {
       icon: ServerIcon,
+      when: () => !docsWindow(),
       run: (ctx) => ctx.ui.openConnectionPicker?.(),
     }),
     // Two machines at once, which switching cannot give you: a window is a
