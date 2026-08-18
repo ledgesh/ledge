@@ -1,6 +1,6 @@
 // GFM tables, rendered: a pipe table draws as a real <table> whenever the
-// selection is outside it, and reverts to raw pipes the moment the caret
-// touches it — the block-level half of livePreview.ts's reveal-on-touch rule.
+// selection starts outside it, and reverts to raw pipes the moment the caret
+// lands on it — the block-level half of livePreview.ts's reveal rule.
 // Clicking a rendered cell places the caret at that cell's text (which
 // reveals the raw table right where you aimed); ⌘-clicking a link inside a
 // cell opens it, same grammar as everywhere else.
@@ -25,7 +25,7 @@ import {
   StateField,
 } from "@codemirror/state";
 import { Decoration, type DecorationSet, EditorView, WidgetType } from "@codemirror/view";
-import { concealments, type Conceal, type DocSlice, type Span } from "./livePreview";
+import { blockRevealed, concealments, type Conceal, type DocSlice, type Span } from "./livePreview";
 import { frontmatterRange } from "./frontmatter";
 import { openExternal } from "./bridge";
 
@@ -262,10 +262,11 @@ function buildTables(state: EditorState): DecorationSet {
   const exclude = frontmatterRange(state);
   const ranges: Range<Decoration>[] = [];
   for (const m of models) {
-    // Same reveal rule as every inline conceal: selection touching the table
-    // (endpoints inclusive) shows the raw pipes.
+    // A selection ANCHORED on the table (endpoints inclusive) shows the raw
+    // pipes; one merely sweeping across leaves the table drawn, so dragging
+    // past it cannot flap a widget this tall. blockRevealed has the why.
     if (exclude !== null && m.from <= exclude.to && m.to >= exclude.from) continue;
-    if (state.selection.ranges.some((r) => r.from <= m.to && r.to >= m.from)) continue;
+    if (blockRevealed(m, state.selection.ranges)) continue;
     // Block replace ranges must cover whole lines.
     const from = state.doc.lineAt(m.from).from;
     const to = state.doc.lineAt(m.to).to;

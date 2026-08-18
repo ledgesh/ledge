@@ -102,6 +102,35 @@ function touches(span: Span, ranges: readonly Span[]): boolean {
   return ranges.some((r) => r.from <= span.to && r.to >= span.from);
 }
 
+/** A selection range as the block reveal rule reads it: the span, plus which
+ * end of it the user is holding still. CodeMirror's SelectionRange satisfies
+ * this. */
+export interface AnchoredSpan extends Span {
+  anchor: number;
+}
+
+/**
+ * Whether a BLOCK element — a table or an alone-on-its-line image, the two
+ * things that draw as a widget of their own height — shows its raw markdown.
+ *
+ * Inline concealment reveals on any touch (`touches`, above), but a block
+ * cannot use that rule: its widget is taller than the markdown it replaces,
+ * so revealing one mid-drag pulls every line below it up past the pointer,
+ * which moves the selection's head, which can carry the selection back off
+ * the block, which re-renders it and pushes those lines down again. The
+ * pointer chases the reflow and the block flaps between its two faces, so a
+ * selection spanning one never settles.
+ *
+ * A block therefore reads the ANCHOR: it reveals when a selection STARTS on
+ * it, and stays rendered when one merely sweeps across. The anchor is the end
+ * a drag holds still, so each block's face is fixed for the whole of a drag
+ * in either direction — while a caret landing on the block (anchor and head
+ * together) reveals it exactly as before.
+ */
+export function blockRevealed(span: Span, ranges: readonly AnchoredSpan[]): boolean {
+  return ranges.some((r) => r.anchor >= span.from && r.anchor <= span.to);
+}
+
 /**
  * Every concealment for `doc` under `selection`, sorted by position. `tree`
  * is the markdown parse (syntaxTree in the editor, @lezer/markdown in tests);

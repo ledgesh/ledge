@@ -508,11 +508,28 @@ body {
   padding: 2px 0;
   cursor: default;
 }
+.ledge-mdimage-frame {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+}
 .ledge-mdimage img {
   display: block;
   max-width: 100%;
   max-height: 420px;
   border-radius: 6px;
+}
+/* Inside a selection that swept past it (editor/images.ts): the image stays
+   drawn, and CodeMirror's selection layer paints BEHIND it, so the picture
+   would be the one thing in the band that looked untouched. Lay the same
+   translucent selection color over it instead. */
+.ledge-mdimage.is-selected .ledge-mdimage-frame::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 6px;
+  background: var(--selection);
+  pointer-events: none;
 }
 /* The file is gone (or the URL would not load): say so quietly, in place. */
 .ledge-mdimage-broken {

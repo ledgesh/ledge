@@ -33,6 +33,8 @@ Supported formats are png, jpeg, gif, webp, avif, and svg. Absolute paths and re
 
 An image renders when its reference sits alone on a line and your caret is elsewhere. Click the picture, or move the caret onto its line, and it reverts to editable Markdown; move away and it draws again. This is the same reveal-on-touch behavior as tables and links.
 
+A selection that only passes over an image leaves it drawn, tinted to show it is included. Dragging or shift-arrowing across a picture therefore selects the text on both sides of it without the page moving under you. What decides is where the selection started: begin on the image's own line and the Markdown shows, as it does for the caret.
+
 A reference inline in a sentence stays compact instead: the syntax is concealed and the alt text is styled like a link, so the line does not reflow while you read.
 
 ## Deleting notes and images

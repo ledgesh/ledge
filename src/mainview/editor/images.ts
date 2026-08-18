@@ -1,6 +1,6 @@
 // Rendered images: `![alt](src)` standing alone on a line draws as the actual
-// image whenever the selection is outside that line, and reverts to raw
-// markdown the moment the caret touches it — the same reveal-on-touch rule as
+// image whenever the selection starts outside that line, and reverts to raw
+// markdown the moment the caret lands on it — the same reveal rule as
 // tables, and in the same shape: a StateField, because an image changes the
 // line's height and CodeMirror only accepts layout-affecting decorations from
 // a field. Clicking the rendered image places the caret at its markdown
@@ -31,7 +31,7 @@ import {
   StateField,
 } from "@codemirror/state";
 import { Decoration, type DecorationSet, EditorView, WidgetType } from "@codemirror/view";
-import type { DocSlice, Span } from "./livePreview";
+import { blockRevealed, type DocSlice, type Span } from "./livePreview";
 import { frontmatterRange } from "./frontmatter";
 import { sessionIdFacet } from "./session";
 import { assetDataUrl } from "../lib/assets";
@@ -177,23 +177,37 @@ export async function embedImage(
 // --- The view wrappers -------------------------------------------------------
 
 class ImageWidget extends WidgetType {
-  constructor(readonly model: ImageModel) {
+  /** `selected` is the view's business, not the model's: a selection sweeping
+   * over the image leaves it drawn (blockRevealed), and an opaque image sits
+   * ON TOP of CodeMirror's selection layer, so without a face of its own it
+   * would be the one thing in a selection that looks untouched. */
+  constructor(readonly model: ImageModel, readonly selected: boolean) {
     super();
   }
+  /** What makes this the same picture: the bytes it points at and its alt. */
+  private key(): string {
+    const s = this.model.src;
+    return `${s.kind}:${s.kind === "remote" ? s.url : s.path}\u0000${this.model.alt}`;
+  }
   eq(other: ImageWidget) {
-    const a = this.model;
-    const b = other.model;
-    return (
-      a.alt === b.alt &&
-      a.src.kind === b.src.kind &&
-      (a.src.kind === "remote" ? a.src.url : a.src.path) ===
-        (b.src.kind === "remote" ? b.src.url : b.src.path)
-    );
+    return this.key() === other.key() && this.selected === other.selected;
+  }
+  /** Reached when only `selected` changed: repaint the face in place rather
+   * than let CodeMirror redraw, because a redraw builds a new <img> and
+   * re-runs the asset fetch — a blank frame mid-drag is the very flicker the
+   * anchor rule exists to remove. A different picture returns false and gets
+   * the redraw. */
+  updateDOM(dom: HTMLElement): boolean {
+    if (dom.dataset.key !== this.key()) return false;
+    dom.classList.toggle("is-selected", this.selected);
+    return true;
   }
   toDOM(view: EditorView): HTMLElement {
     const m = this.model;
     const box = document.createElement("div");
     box.className = "ledge-mdimage";
+    if (this.selected) box.classList.add("is-selected");
+    box.dataset.key = this.key();
 
     const broken = () => {
       box.textContent = "";
@@ -219,7 +233,12 @@ class ImageWidget extends WidgetType {
       view.requestMeasure();
     };
 
-    const img = box.appendChild(document.createElement("img"));
+    // The frame shrink-wraps the image so the selected tint lands on the
+    // picture and not on the empty row beside it; the box stays full width so
+    // clicking anywhere on the line still reveals the markdown.
+    const frame = box.appendChild(document.createElement("span"));
+    frame.className = "ledge-mdimage-frame";
+    const img = frame.appendChild(document.createElement("img"));
     if (m.alt) img.alt = m.alt;
     img.title = m.alt || "Click to edit image markdown";
     // The widget's height settles when the bytes arrive, in both branches;
@@ -274,10 +293,19 @@ function buildImages(state: EditorState): DecorationSet {
   for (const m of models) {
     if (exclude !== null && m.from <= exclude.to && m.to >= exclude.from) continue;
     // The reveal unit is the whole line (endpoints inclusive), like a table's
-    // rows: the caret arriving anywhere on it shows the raw markdown.
-    if (state.selection.ranges.some((r) => r.from <= m.lineTo && r.to >= m.lineFrom)) continue;
+    // rows: a caret arriving anywhere on it shows the raw markdown. A
+    // selection merely sweeping ACROSS the line leaves the image drawn —
+    // blockRevealed reads the anchor, not the whole range, so dragging a
+    // selection past an image cannot flap it (livePreview.ts).
+    const unit = { from: m.lineFrom, to: m.lineTo };
+    if (blockRevealed(unit, state.selection.ranges)) continue;
+    // Still drawn, but inside the selection: wear the selected face.
+    const selected = state.selection.ranges.some((r) => r.from <= unit.to && r.to >= unit.from);
     ranges.push(
-      Decoration.replace({ widget: new ImageWidget(m), block: true }).range(m.lineFrom, m.lineTo),
+      Decoration.replace({ widget: new ImageWidget(m, selected), block: true }).range(
+        m.lineFrom,
+        m.lineTo,
+      ),
     );
   }
   return Decoration.set(ranges);

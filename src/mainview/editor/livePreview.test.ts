@@ -5,7 +5,7 @@
 // tests independent of exactly how the parser slices its mark nodes.
 import { describe, expect, test } from "bun:test";
 import { GFM, parser } from "@lezer/markdown";
-import { concealments, linkAt, linkTargetAt, type Conceal, type Span } from "./livePreview";
+import { blockRevealed, concealments, linkAt, linkTargetAt, type Conceal, type Span } from "./livePreview";
 import { wikiLinkExtension } from "./wikilinks";
 import { hashtagExtension } from "./tags";
 
@@ -288,5 +288,52 @@ describe("linkTargetAt", () => {
       to: bare.indexOf(" now"),
       url: "https://a.com",
     });
+  });
+});
+
+describe("blockRevealed", () => {
+  // The block (an image line, a table) occupies [10, 20].
+  const block = { from: 10, to: 20 };
+  const range = (anchor: number, head: number) => ({
+    anchor,
+    head,
+    from: Math.min(anchor, head),
+    to: Math.max(anchor, head),
+  });
+
+  test("a caret on the block reveals it, endpoints included", () => {
+    expect(blockRevealed(block, [range(15, 15)])).toBe(true);
+    expect(blockRevealed(block, [range(10, 10)])).toBe(true);
+    expect(blockRevealed(block, [range(20, 20)])).toBe(true);
+  });
+
+  test("a caret off the block leaves it drawn", () => {
+    expect(blockRevealed(block, [range(9, 9)])).toBe(false);
+    expect(blockRevealed(block, [range(21, 21)])).toBe(false);
+  });
+
+  // The bug this rule exists for: a selection dragged past a block must not
+  // change its face, in either direction, or the reflow moves the text out
+  // from under the pointer and the block flaps.
+  test("a selection sweeping across the block from below leaves it drawn", () => {
+    expect(blockRevealed(block, [range(40, 15)])).toBe(false);
+    expect(blockRevealed(block, [range(40, 5)])).toBe(false);
+  });
+
+  test("a selection sweeping across the block from above leaves it drawn", () => {
+    expect(blockRevealed(block, [range(0, 15)])).toBe(false);
+    expect(blockRevealed(block, [range(0, 40)])).toBe(false);
+  });
+
+  test("a selection started ON the block keeps it revealed as it grows off", () => {
+    expect(blockRevealed(block, [range(12, 12)])).toBe(true);
+    expect(blockRevealed(block, [range(12, 18)])).toBe(true);
+    expect(blockRevealed(block, [range(12, 40)])).toBe(true);
+    expect(blockRevealed(block, [range(12, 0)])).toBe(true);
+  });
+
+  test("any one of several cursors anchored on the block reveals it", () => {
+    expect(blockRevealed(block, [range(0, 2), range(15, 15)])).toBe(true);
+    expect(blockRevealed(block, [range(0, 2), range(30, 32)])).toBe(false);
   });
 });
