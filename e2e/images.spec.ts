@@ -48,6 +48,28 @@ test("clicking a rendered image reveals its markdown right there", async ({ page
   await expect(page.locator(".cm-content")).toContainText("![pic](assets/dot.png)");
 });
 
+test("clicking a rendered image still reveals it after edits above shift it down", async ({ page }) => {
+  // The widget keeps its DOM (and its listener) across edits elsewhere in the
+  // document — deliberately, since rebuilding it re-runs the asset fetch. So
+  // the click must read the image's position off the DOM rather than
+  // remember the one it was built with, or clicking the picture silently
+  // moves the caret to whatever now sits at the old offset.
+  await page.keyboard.press("Meta+a");
+  await page.keyboard.type("x\n![pic](assets/dot.png)\nbelow");
+  await expect(page.locator(".ledge-mdimage")).toHaveCount(1);
+
+  await page.keyboard.press("Meta+ArrowUp");
+  await page.keyboard.type("hello world ");
+  await expect(page.locator(".ledge-mdimage")).toHaveCount(1);
+
+  await page.locator(".ledge-mdimage").click();
+  await expect(page.locator(".ledge-mdimage")).toHaveCount(0);
+  await expect(page.locator(".cm-content")).toContainText("![pic](assets/dot.png)");
+  // The caret really landed on the image's line: typing edits it, not line 1.
+  await page.keyboard.type("Z");
+  await expect(page.locator(".cm-line").nth(1)).toHaveText("Z![pic](assets/dot.png)");
+});
+
 test("a missing asset says so in place instead of rendering nothing", async ({ page }) => {
   await page.keyboard.press("Meta+a");
   await page.keyboard.type("![gone](assets/nope.png)");

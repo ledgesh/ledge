@@ -263,13 +263,23 @@ class ImageWidget extends WidgetType {
       }
     }
 
-    // A click is a caret move to the image's markdown, which reveals it right
-    // where the user aimed — the table-cell grammar. ignoreEvent() keeps
-    // CodeMirror from also treating this as a click into the replaced text.
+    // A click is a caret move onto the image's line, which reveals its
+    // markdown right where the user aimed — the table-cell grammar.
+    // ignoreEvent() keeps CodeMirror from also treating this as a click into
+    // the replaced text.
+    //
+    // The position is read off the DOM at click time rather than taken from
+    // the model this widget was built with. `eq` above compares the picture
+    // and not where it sits (comparing position would redraw the widget on
+    // every edit above it, and a redraw re-runs the asset fetch), so
+    // CodeMirror keeps this element — and this listener — when text inserted
+    // higher up shifts the image down the document. A remembered offset would
+    // by then name some other line, and the click would look like it did
+    // nothing. posAtDOM answers where this element is NOW.
     box.addEventListener("mousedown", (event) => {
       event.preventDefault();
       view.dispatch({
-        selection: { anchor: Math.min(m.from, view.state.doc.length) },
+        selection: { anchor: view.posAtDOM(box) },
         scrollIntoView: true,
       });
       view.focus();

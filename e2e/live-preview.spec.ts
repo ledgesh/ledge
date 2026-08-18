@@ -165,6 +165,24 @@ test("a pipe table renders as a real table; clicking a cell reveals the pipes th
   await expect(page.locator(".cm-line").nth(2)).toHaveText("| 1 | !2 |");
 });
 
+test("clicking a cell still lands there after edits above shift the table down", async ({ page }) => {
+  // The counterpart to the image case (e2e/images.spec.ts): a table bakes
+  // absolute cell offsets into its DOM, so a shifted table has to be redrawn
+  // rather than reused — TableWidget.eq compares position for exactly this.
+  await page.keyboard.press("Meta+a");
+  await page.keyboard.type("x\n| a | b |\n| --- | --- |\n| 1 | 2 |\n");
+  await expect(page.locator(".ledge-mdtable")).toBeVisible();
+
+  await page.keyboard.press("Meta+ArrowUp");
+  await page.keyboard.type("hello world ");
+  await expect(page.locator(".ledge-mdtable")).toBeVisible();
+
+  await page.locator(".ledge-mdtable td", { hasText: "2" }).click();
+  await expect(page.locator(".ledge-mdtable")).toHaveCount(0);
+  await page.keyboard.type("!");
+  await expect(page.locator(".cm-line").nth(3)).toHaveText("| 1 | !2 |");
+});
+
 test("a --- line draws as a rule; the caret on it reveals the dashes", async ({ page }) => {
   await page.keyboard.press("Meta+a");
   await page.keyboard.type("above\n\n---\n\nbelow");

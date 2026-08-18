@@ -181,6 +181,13 @@ class TableWidget extends WidgetType {
   constructor(readonly model: TableModel) {
     super();
   }
+  /** Position is part of the identity on purpose: the cell offsets this
+   * widget bakes into `data-pos` are absolute, so a table that has shifted
+   * must be redrawn rather than reused, or its click handler would aim the
+   * caret at the line the table used to occupy. Cheap here — a table draws
+   * from the document alone. images.ts cannot afford the same redraw (it
+   * would re-fetch the bytes) and reads its position back from the DOM
+   * instead. */
   eq(other: TableWidget) {
     return other.model.src === this.model.src && other.model.from === this.model.from;
   }
