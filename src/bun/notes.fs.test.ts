@@ -30,6 +30,7 @@ import {
   restoreNote,
   retitleNote,
   searchNotes,
+  stashNote,
   tagsIn,
   trashDirOf,
   writeNote,
@@ -519,6 +520,72 @@ describe("trash round-trip", () => {
     expect(restored.path).toBe(join(ROOT, "twice-2.md"));
     expect(await textAt(restored.path)).toBe("# Twice\n\noriginal");
     expect(await textAt(join(ROOT, "twice.md"))).toBe("# Twice\n\nusurper");
+  });
+});
+
+describe("stashNote", () => {
+  beforeEach(async () => {
+    resetVaultForTests(); // module state outlives the wiped app home
+    await createVault("test passphrase");
+  });
+
+  const STRANDED = "the paragraph nobody else has";
+
+  test("parks text in the trash and leaves the note itself alone", async () => {
+    const note = await createNote(ROOT, "# Plan\n\nwhat the server says\n");
+    const dest = await stashNote(note.path, `# Plan\n\n${STRANDED}\n`);
+
+    expect(dest.startsWith(TRASH + sep)).toBe(true);
+    expect(await readRaw(dest, "utf8")).toContain(STRANDED);
+    // The live note is untouched: a stash is not a save.
+    expect(await textAt(note.path)).toBe("# Plan\n\nwhat the server says\n");
+    expect((await listTrash(ROOT)).map((t) => t.path)).toEqual([dest]);
+  });
+
+  test("two stashes of one note do not overwrite each other", async () => {
+    const note = await createNote(ROOT, "# Plan\n\nlive\n");
+    const first = await stashNote(note.path, "# Plan\n\nfirst try\n");
+    const second = await stashNote(note.path, "# Plan\n\nsecond try\n");
+
+    expect(second).not.toBe(first);
+    expect(await readRaw(first, "utf8")).toContain("first try");
+    expect(await readRaw(second, "utf8")).toContain("second try");
+  });
+
+  // The reason a stash goes to the trash rather than anywhere else: restoring
+  // one puts both versions on screen so the merge can be made by hand.
+  test("restoring a stash lands beside the live note, never over it", async () => {
+    const note = await createNote(ROOT, "# Plan\n\nwhat the server says\n");
+    const dest = await stashNote(note.path, `# Plan\n\n${STRANDED}\n`);
+
+    const restored = await restoreNote(dest);
+    expect(restored.path).not.toBe(note.path);
+    expect(await textAt(note.path)).toContain("what the server says");
+    expect(await textAt(restored.path)).toContain(STRANDED);
+  });
+
+  test("a locked note's stash is sealed, not plaintext in the trash", async () => {
+    const note = await createNote(ROOT, "# Secrets\n\nold\n");
+    await lockNote(note.path);
+    const dest = await stashNote(note.path, `# Secrets\n\n${STRANDED}\n`);
+
+    const raw = await readRaw(dest, "utf8");
+    expect(raw).not.toContain(STRANDED);
+    expect(raw).toContain("locked: v1.");
+    expect(raw).toContain("# Secrets\n"); // the title stays plaintext, as everywhere
+    // And it opens again with the vault, which is what makes it recoverable
+    // rather than merely unreadable.
+    const restored = await restoreNote(dest);
+    expect((await readNote(restored.path))?.text).toContain(STRANDED);
+  });
+
+  test("a locked note's stash fails with the vault locked, so the caller keeps the buffer", async () => {
+    const note = await createNote(ROOT, "# Secrets\n\nold\n");
+    await lockNote(note.path);
+    lockVault();
+
+    await expect(stashNote(note.path, `# Secrets\n\n${STRANDED}\n`)).rejects.toThrow();
+    expect(await readdir(TRASH).catch(() => [])).toEqual([]);
   });
 });
 

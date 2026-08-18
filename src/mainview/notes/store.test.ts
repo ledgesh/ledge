@@ -4,19 +4,24 @@ import { recordWorkspaceKinds, resetWorkspaceKinds } from "../workspace/channel"
 import { slugOf } from "../../shared/slug";
 import type { NoteParams } from "../../shared/frontmatter";
 import {
+  adoptOverStranded,
   bindDoc,
   configureStoreUi,
   flushAll,
+  flushAllNow,
   forgetDoc,
   freezeDoc,
+  holdSaves,
   noteChanged,
   releaseDoc,
+  releaseSaves,
   reloadCandidates,
   reseedDoc,
   resetDocs,
   retargetDoc,
   saveNow,
   seedSlug,
+  strandedCandidates,
   type DocHandlers,
 } from "./store";
 
@@ -33,6 +38,8 @@ function fakeBridge() {
   const writes: Array<{ path: string; text: string }> = [];
   // The baseMtimeMs each write stated — the external-edit guard's expectation.
   const writeBases: Array<number | null> = [];
+  // Every buffer parked in the trash rather than saved (channel stash).
+  const stashes: Array<{ path: string; text: string }> = [];
   // Everything the save path asked the browser's notice strip to show.
   const notices: string[] = [];
   const creates: string[] = [];
@@ -43,6 +50,7 @@ function fakeBridge() {
   const state = {
     writes,
     writeBases,
+    stashes,
     notices,
     creates,
     createFolders,
@@ -56,6 +64,7 @@ function fakeBridge() {
     // When set, every write parks on this promise until it is resolved.
     gate: null as { promise: Promise<void>; open: () => void } | null,
     failNextWrite: false,
+    failNextStash: false,
     hold() {
       let open!: () => void;
       const promise = new Promise<void>((res) => {
@@ -84,6 +93,14 @@ function fakeBridge() {
     },
     createFromTemplate: async () => {
       throw new Error("unused in store tests");
+    },
+    stash: async (path, text) => {
+      if (state.failNextStash) {
+        state.failNextStash = false;
+        throw new Error("nowhere to park it");
+      }
+      stashes.push({ path, text });
+      return `/notes/.ledge-trash/stashed-${stashes.length}.md`;
     },
     write: async (path, text, baseMtimeMs) => {
       if (state.gate) await state.gate.promise;
@@ -1045,5 +1062,132 @@ describe("external-edit safety: reload", () => {
     seedSlug("doc-1", "# A\n", 10);
     reseedDoc("doc-1", "/notes/a.md", "---\ncwd: /tmp/agent-proj\n---\n# A\n", 20);
     expect(fs.configures.at(-1)?.params.cwd).toBe("/tmp/agent-proj");
+  });
+});
+
+// --- the outage path ---------------------------------------------------------
+// A buffer typed while the server could not be reached, and what becomes of it
+// when the wire returns (remote.md §7). The DOM half is editorPool's; these are
+// the decisions.
+
+describe("the save hold", () => {
+  test("a held save does not reach the server and stays pending", async () => {
+    const fs = fakeBridge();
+    bind("doc-1", "/notes/a.md", noop());
+
+    holdSaves();
+    noteChanged("doc-1", "typed while the wire was down");
+    await saveNow("doc-1");
+    expect(fs.writes).toEqual([]);
+
+    // Not dropped, just waiting: releasing alone must get it out.
+    releaseSaves();
+    await tick();
+    expect(fs.writes).toEqual([{ path: "/notes/a.md", text: "typed while the wire was down" }]);
+  });
+
+  test("releasing twice writes once", async () => {
+    const fs = fakeBridge();
+    bind("doc-1", "/notes/a.md", noop());
+    holdSaves();
+    noteChanged("doc-1", "v1");
+    releaseSaves();
+    releaseSaves();
+    await tick();
+    expect(fs.writes).toEqual([{ path: "/notes/a.md", text: "v1" }]);
+  });
+
+  // A connection switch is about to reload the page, so a hold must never be
+  // the reason an edit was not even attempted.
+  test("flushAllNow drops the hold rather than honouring it", async () => {
+    const fs = fakeBridge();
+    bind("doc-1", "/notes/a.md", noop());
+    holdSaves();
+    noteChanged("doc-1", "last chance");
+
+    await flushAllNow();
+    expect(fs.writes).toEqual([{ path: "/notes/a.md", text: "last chance" }]);
+  });
+});
+
+describe("stranded buffers", () => {
+  const seeded = (docId: string, path: string, text: string, mtimeMs: number) => {
+    bind(docId, path, noop());
+    seedSlug(docId, text, mtimeMs);
+  };
+
+  test("lists what reloadCandidates skips, and nothing else", () => {
+    fakeBridge();
+    seeded("dirty", "/notes/a.md", "# A\n\nfrom disk\n", 1000);
+    seeded("clean", "/notes/b.md", "# B\n\nfrom disk\n", 1000);
+    holdSaves();
+    noteChanged("dirty", "# A\n\ntyped here\n");
+
+    expect(strandedCandidates().map((c) => c.docId)).toEqual(["dirty"]);
+    expect(reloadCandidates().map((c) => c.docId)).toEqual(["clean"]);
+    expect(strandedCandidates()[0]).toMatchObject({ path: "/notes/a.md", text: "# A\n\ntyped here\n", mtimeMs: 1000 });
+  });
+
+  test("a note being renamed is nobody's candidate: its path is in the air", () => {
+    fakeBridge();
+    seeded("doc-1", "/notes/a.md", "# A\n\nfrom disk\n", 1000);
+    holdSaves();
+    noteChanged("doc-1", "# A\n\ntyped here\n");
+    freezeDoc("doc-1");
+
+    expect(strandedCandidates()).toEqual([]);
+  });
+
+  test("adopting takes the server's text, stops the note being dirty, and says so", async () => {
+    const fs = fakeBridge();
+    const notices: string[] = [];
+    configureStoreUi({ notice: (m) => notices.push(m) });
+    seeded("doc-1", "/notes/a.md", "# Plan\n\nfrom disk\n", 1000);
+    holdSaves();
+    noteChanged("doc-1", "# Plan\n\ntyped here\n");
+
+    const ok = adoptOverStranded("doc-1", "/notes/a.md", "# Plan\n\nthe server's\n", 2000, "# Plan\n\ntyped here\n", "/notes/.ledge-trash/plan.md");
+    expect(ok).toBe(true);
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toContain("Plan");
+    expect(notices[0]).toContain("Trash");
+
+    // Clean now: releasing must write nothing, and the next save states the
+    // server's version as its base rather than the one it was typed against.
+    releaseSaves();
+    await tick();
+    expect(fs.writes).toEqual([]);
+    noteChanged("doc-1", "# Plan\n\nedited after\n");
+    await saveNow("doc-1");
+    expect(fs.writeBases).toEqual([2000]);
+  });
+
+  test("a buffer typed into while it was being parked keeps its own text", () => {
+    fakeBridge();
+    const notices: string[] = [];
+    configureStoreUi({ notice: (m) => notices.push(m) });
+    seeded("doc-1", "/notes/a.md", "# Plan\n\nfrom disk\n", 1000);
+    holdSaves();
+    noteChanged("doc-1", "# Plan\n\ntyped here\n");
+    // The stash was a round trip; somebody kept typing across it.
+    noteChanged("doc-1", "# Plan\n\nstill typing\n");
+
+    const ok = adoptOverStranded("doc-1", "/notes/a.md", "# Plan\n\nthe server's\n", 2000, "# Plan\n\ntyped here\n", "/notes/.ledge-trash/plan.md");
+    expect(ok).toBe(false);
+    expect(notices).toEqual([]);
+    expect(strandedCandidates()[0]?.text).toBe("# Plan\n\nstill typing\n");
+  });
+
+  test("nothing parked, nothing said: two clients that typed the same words", () => {
+    fakeBridge();
+    const notices: string[] = [];
+    configureStoreUi({ notice: (m) => notices.push(m) });
+    seeded("doc-1", "/notes/a.md", "# Plan\n\nfrom disk\n", 1000);
+    holdSaves();
+    noteChanged("doc-1", "# Plan\n\nsame words\n");
+
+    expect(adoptOverStranded("doc-1", "/notes/a.md", "# Plan\n\nsame words\n", 2000, "# Plan\n\nsame words\n", null)).toBe(true);
+    expect(notices).toEqual([]);
+    expect(strandedCandidates()).toEqual([]);
   });
 });

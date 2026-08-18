@@ -32,6 +32,14 @@ function divergedNotice(label: string): string {
   return `“${label}” also changed elsewhere while you were editing. Your version was saved; the other one is in the Trash.`;
 }
 
+// Its mirror image, for the outage case (workspace/editorPool.ts
+// resolveStrandedNotes). Deliberately the same sentence shape, because it is
+// the same event with the winner the other way round, and a user who has seen
+// one should be able to read the other at a glance.
+function strandedNotice(label: string): string {
+  return `“${label}” changed on the server while you were disconnected. That version is now open; what you had typed is in the Trash.`;
+}
+
 interface Entry {
   docId: string;
   // The workspace folder this note belongs to, captured when its tab opened.
@@ -222,6 +230,7 @@ export function noteChanged(docId: string, text: string): void {
   const e = docs.get(docId);
   if (!e) return; // not a persisted note (an editor built outside the pool, e.g. a test)
   e.pending = text;
+  refreshDirty();
   if (e.timer !== null) clearTimeout(e.timer);
   e.timer = setTimeout(() => {
     e.timer = null;
@@ -229,12 +238,114 @@ export function noteChanged(docId: string, text: string): void {
   }, SAVE_DELAY_MS);
 }
 
+// --- who is unsaved ----------------------------------------------------------
+
+/**
+ * Which open notes are holding text that is not on disk, for the tab strip.
+ *
+ * The same shape as the block chrome's busy state (editor/bridge.ts
+ * onTerminalBusyChange), and here for the same reason: a fact the store owns
+ * that a component several levels away has to draw, with no route between them
+ * through props.
+ *
+ * Worth drawing at all times and not only during an outage. Until now "saved"
+ * and "not saved" looked identical in every state, which is tolerable while the
+ * debounce is 500ms and always wins, and exactly wrong the moment a save can be
+ * waiting on something (remote.md §7).
+ */
+const dirty = new Set<string>();
+const dirtySinks = new Set<() => void>();
+
+export function onDirtyChange(sink: () => void): () => void {
+  dirtySinks.add(sink);
+  return () => {
+    dirtySinks.delete(sink);
+  };
+}
+
+export function isNoteDirty(docId: string): boolean {
+  return dirty.has(docId);
+}
+
+/**
+ * Recompute from the entries and tell the subscribers, if anything moved.
+ *
+ * Recomputed rather than maintained at each place `pending` is assigned: the
+ * set is as big as the open tabs, so this costs nothing, and the alternative is
+ * a second piece of bookkeeping that can silently disagree with the first.
+ * Notifying only on a real change is what keeps the strip from re-rendering on
+ * every keystroke.
+ */
+function refreshDirty(): void {
+  const seen = new Set<string>();
+  for (const e of docs.values()) if (e.pending !== null) seen.add(e.docId);
+  if (seen.size === dirty.size && [...seen].every((d) => dirty.has(d))) return;
+  dirty.clear();
+  for (const docId of seen) dirty.add(docId);
+  for (const sink of dirtySinks) sink();
+}
+
+// --- the save hold -----------------------------------------------------------
+
+/**
+ * Whether saving is suspended for EVERY note because the server cannot be
+ * reached (remote.md §7).
+ *
+ * Not Entry.frozen, though it stops the flush loop the same way: frozen is one
+ * note's rename, this is every note's server, and folding a global condition
+ * into a per-entry flag would mean remembering which entries were already
+ * frozen for their own reasons before the wire went.
+ *
+ * Set for a connection that is LOST, never one that is merely reconnecting: a
+ * reconnecting client's requests wait on the ladder and land when it returns
+ * (shared/transport.ts), so holding those would replace a save that works with
+ * one that has to be re-armed. Against a lost connection the write would fail
+ * its way back into `pending` anyway, so what the hold really buys is the
+ * moment AFTER the wire returns: it keeps a debounce or a blur from landing a
+ * stranded write before the reconciliation has decided whether that buffer is
+ * still the note (workspace/editorPool.ts resolveStrandedNotes).
+ */
+let held = false;
+
+export function holdSaves(): void {
+  held = true;
+}
+
+/**
+ * Whether saving is currently suspended, which is also the record of whether a
+ * buffer could be STRANDED (workspace/editorPool.ts resolveStrandedNotes).
+ *
+ * The two questions have one answer because a buffer is stranded exactly when
+ * saving was suspended under it. A wire that merely flapped never suspends
+ * anything: those writes wait on the ladder and land, so a buffer dirty across
+ * a reconnect is somebody mid-thought and the ordinary guard is its arbiter.
+ * Reading `held` rather than a second flag is what keeps those two from ever
+ * disagreeing about which kind of outage just ended.
+ */
+export function savesHeld(): boolean {
+  return held;
+}
+
+/**
+ * Let saving resume, and flush whatever accumulated while it could not.
+ *
+ * Called after the relink reconciliation has settled every stranded buffer and
+ * never before it: the entire value of the hold is that nothing writes in
+ * between, so a caller that releases early has bought nothing. Idempotent, so
+ * the release can sit in a `finally` without caring whether the hold was on.
+ */
+export function releaseSaves(): void {
+  if (!held) return;
+  held = false;
+  for (const e of docs.values()) if (e.pending !== null) void flush(e);
+}
+
 // Write `pending` through, then keep writing until nothing is pending: an edit
 // that arrives while Bun is mid-write is picked up by this same loop instead of
 // starting a second, racing write. `inFlight` makes concurrent callers (the
 // debounce and a Cmd+S landing together) collapse into the one running flush.
 async function flush(e: Entry): Promise<void> {
-  if (e.inFlight || e.frozen) return;
+  if (e.inFlight || e.frozen || held) return;
   e.inFlight = true;
   try {
     while (e.pending !== null) {
@@ -290,6 +401,7 @@ async function flush(e: Entry): Promise<void> {
     }
   } finally {
     e.inFlight = false;
+    refreshDirty();
   }
 }
 
@@ -390,6 +502,86 @@ export function reloadCandidates(): ReloadCandidate[] {
   return out;
 }
 
+/**
+ * What a buffer that never reached the server looks like to the caller that has
+ * to settle it.
+ */
+export interface StrandedCandidate {
+  docId: string;
+  path: string;
+  /** The text still waiting to be written. */
+  text: string;
+  /** The disk version it was typed against, or null if none was ever seen. */
+  mtimeMs: number | null;
+}
+
+/**
+ * Every open note holding text that never reached the server.
+ *
+ * The exact complement of reloadCandidates: those are the buffers safe to
+ * overwrite, these are the ones it deliberately skips, and after an outage they
+ * are precisely the writing at risk (remote.md §7).
+ *
+ * `frozen` and `inFlight` disqualify here as they do there, for the same reason
+ * in both cases: a rename has that entry's path in the air, and a write already
+ * out is past recall. The save hold is NOT a disqualifier, because it is the
+ * state this list exists to be read in.
+ */
+export function strandedCandidates(): StrandedCandidate[] {
+  const out: StrandedCandidate[] = [];
+  for (const e of docs.values()) {
+    if (!e.path || !e.slugSeeded) continue;
+    if (e.pending === null || e.inFlight || e.frozen) continue;
+    out.push({ docId: e.docId, path: e.path, text: e.pending, mtimeMs: e.mtimeMs });
+  }
+  return out;
+}
+
+/**
+ * Give up a stranded buffer and take the server's text as this note's content.
+ *
+ * The one place in this module that DISCARDS pending text, which everything
+ * else exists to avoid. It is only defensible because the caller has already
+ * put that text somewhere recoverable (channel stashNote), and it must not be
+ * called by anything that has not: `stashed` is the text that was parked, and a
+ * buffer that no longer matches it is refused.
+ *
+ * That check is the same one reseedDoc makes and is here for the same reason:
+ * parking the text was a round trip, and a buffer typed into since is not
+ * stranded any more — somebody is at the keyboard, so it keeps its own text and
+ * the ordinary divergence guard arbitrates their next save.
+ *
+ * False means the editor must not be touched.
+ */
+export function adoptOverStranded(
+  docId: string,
+  path: string,
+  text: string,
+  mtimeMs: number,
+  stashed: string,
+  stashedTo: string | null,
+): boolean {
+  const e = docs.get(docId);
+  if (!e || e.path !== path) return false;
+  if (e.inFlight || e.frozen) return false;
+  if (e.pending !== stashed) return false;
+  if (e.timer !== null) {
+    clearTimeout(e.timer);
+    e.timer = null;
+  }
+  e.pending = null;
+  refreshDirty();
+  // Through reseedDoc rather than repeating it: adopting the server's text has
+  // exactly the tracking consequences adopting an external edit does, including
+  // the rule that a heading changed on disk relabels the tab without renaming
+  // the file. Its own dirty check now passes, the line above having cleared it.
+  if (!reseedDoc(docId, path, text, mtimeMs)) return false;
+  // Only when something was actually parked. Two clients that happened to type
+  // the same words displace nothing and are worth saying nothing about.
+  if (stashedTo !== null) ui.notice?.(strandedNotice(labelOf(headingOf(text), path)));
+  return true;
+}
+
 // Adopt an external edit's text as the note's new baseline, re-checking that
 // the entry is STILL clean and still aimed at `path` — the read was async, and
 // a keystroke (or a delete, or a retitle) may have landed since the candidate
@@ -457,6 +649,7 @@ export function forgetDoc(docId: string): void {
   // flush loop from starting another lap once it returns.
   e.frozen = true;
   docs.delete(docId);
+  refreshDirty();
 }
 
 // The note's tab closed. Drop it from the map immediately (nothing may schedule
@@ -467,6 +660,7 @@ export function releaseDoc(docId: string): void {
   if (!e) return;
   if (e.timer !== null) clearTimeout(e.timer);
   docs.delete(docId);
+  refreshDirty();
   void flush(e);
 }
 
@@ -481,8 +675,25 @@ export function flushAll(): void {
 // cannot promise that ordering. Flushes everything rather than just locked
 // notes: the extra saves are no-ops for clean buffers, and filtering here
 // would mean this module learning what locked means.
-export function flushAllNow(): Promise<void> {
-  return Promise.all([...docs.keys()].map((docId) => saveNow(docId))).then(() => {});
+//
+// Answers with how many notes are STILL unsaved when it settles, which is only
+// ever non-zero when the writes could not land at all (remote.md §7). Callers
+// that are about to make these entries unreachable — a connection switch, which
+// reloads the page — have to know: past that point the text is in no file
+// anywhere, and there is no trash to look in.
+export function flushAllNow(): Promise<number> {
+  // The hold is dropped rather than released, and the difference matters:
+  // releaseSaves would start its own flushes, and saveNow's `inFlight` guard
+  // returns immediately against one already running — so this would resolve
+  // while writes were still out, which is the one promise this function makes.
+  //
+  // Dropped at all because every caller is a last chance. A connection switch
+  // and a workspace move are both about to put these entries out of reach, so a
+  // hold must never be the reason an edit was not even attempted (remote.md §7).
+  held = false;
+  return Promise.all([...docs.keys()].map((docId) => saveNow(docId))).then(
+    () => [...docs.values()].filter((e) => e.pending !== null).length,
+  );
 }
 
 // The file an open note is currently aimed at, or null (no file yet, or an
@@ -496,4 +707,5 @@ export function pathOf(docId: string): string | null {
 export function resetDocs(): void {
   for (const e of docs.values()) if (e.timer !== null) clearTimeout(e.timer);
   docs.clear();
+  refreshDirty();
 }

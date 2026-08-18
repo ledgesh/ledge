@@ -217,6 +217,7 @@ export const REQUEST_METHODS = [
   "dailyOpen",
   "noteFromTemplate",
   "noteDelete",
+  "noteStash",
   "noteSearch",
   "noteBacklinks",
   "tagList",

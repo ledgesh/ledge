@@ -53,7 +53,12 @@ function digest(text: string): string {
 
 describe("the schema's shape against the protocol version", () => {
   // Bump PROTOCOL_VERSION first if the change is breaking; see the header.
-  const PINNED = { protocol: 5, shape: "797dd3ae7e8ced3a" };
+  // noteStash was added: a new method, no existing payload touched. A client
+  // that has it talking to a server that does not is refused at `supports`
+  // before the round trip (remote.md §11), and the one caller keeps its buffer
+  // rather than acting — so the two builds still read each other correctly.
+  // Additive, therefore the pin moves and the version does not.
+  const PINNED = { protocol: 5, shape: "d0e9c1c9bfe2eb7e" };
 
   test("a payload shape does not change without someone deciding whether it breaks", async () => {
     const shape = digest(shapeOf(await Bun.file(SCHEMA).text()));

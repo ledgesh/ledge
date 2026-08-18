@@ -41,6 +41,7 @@ import {
   restoreNote,
   retitleNote,
   searchNotes,
+  stashNote,
   tagsIn,
   writeNote,
 } from "./notes";
@@ -687,6 +688,13 @@ export async function createServer(deps: { push: Audience; native: NativeDeps })
       note: await createFromTemplatePath(root, templatePath, title),
     }),
     noteDelete: async ({ path }) => ({ trashed: await deleteNote(path) }),
+    // Logged for writeNote's reason: a stash means somebody's typing did not
+    // become the note, and the view's console is invisible in the shipped app.
+    noteStash: async ({ path, text }) => {
+      const stashed = await stashNote(path, text);
+      console.warn("[notes] unsaved edit preserved in trash:", stashed, "(the server's copy of", path, "won)");
+      return { stashed };
+    },
     // The scans return their lockedSkipped counts themselves (notes.ts
     // decides the skip; locking.md §4) — these are passthroughs.
     noteSearch: async ({ root, query }) => searchNotes(root, query),

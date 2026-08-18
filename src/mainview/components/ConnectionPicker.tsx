@@ -48,6 +48,14 @@ interface Probed {
   keyType: string;
 }
 
+// What a switch says when it will not go: how much writing is at stake and
+// where it was headed. Named rather than counted vaguely, because "some notes"
+// is not something anyone can act on.
+function unsavedRefusal(unsaved: number, machine: string): string {
+  const what = unsaved === 1 ? "One note has unsaved changes" : `${unsaved} notes have unsaved changes`;
+  return `${what} that could not reach ${machine}. Switching would lose them, so wait for the connection to come back, or copy them out first.`;
+}
+
 export function ConnectionPicker({ onClose }: { onClose: () => void }) {
   const [status, setStatus] = useState<ConnectionStatus>(connectionStatus());
   // Null for the list, "new" for the add form, a connection for the edit form.
@@ -57,16 +65,38 @@ export function ConnectionPicker({ onClose }: { onClose: () => void }) {
 
   useEffect(() => pushLayer("dialog", onClose), [onClose]);
 
+  // The machine the unsaved text belongs to, which is the one being LEFT.
+  const activeName = status.connections.find((c) => c.id === status.active)?.name ?? "the server";
+
   const switchTo = async (id: string) => {
     if (busy) return;
     setBusy(true);
     setError("");
     try {
+      // Before anything is torn down. A switch reloads the page, and text that
+      // could not reach the server it belongs to is in no file anywhere: not on
+      // that machine, and not in a trash we could point at (remote.md §7). So
+      // this is §4's irreversible destruction, and the app does not offer a
+      // one-click path to it.
+      //
+      // A refusal rather than a confirmation, though the policy allows either,
+      // because the confirmation would be the wrong shape here: there is
+      // nothing about the switch worth deciding, and everything about the
+      // unsaved text worth handling first. It is also the third of §4-1's
+      // refusals that keep the app somewhere it can work from.
+      const unsaved = await flushAllNow();
+      if (unsaved > 0) {
+        setError(unsavedRefusal(unsaved, activeName));
+        setBusy(false);
+        return;
+      }
       // On success this never returns: selectConnection reloads the page, which
       // is how everything server-scoped gets rebuilt. Staying busy through it
       // is deliberate — the list must not become clickable again in the moment
-      // between the switch landing and the page going away.
-      const refusal = await selectConnection(id, flushAllNow);
+      // between the switch landing and the page going away. The flush passed in
+      // is the one above, run again: it wrote everything the first time, so the
+      // second is a no-op that keeps selectConnection's contract intact.
+      const refusal = await selectConnection(id, async () => void (await flushAllNow()));
       if (!refusal) return;
       setError(refusal);
     } catch (err) {
@@ -430,7 +460,7 @@ function ConnectionForm({
                   keyPath.trim() !== existing.keyPath ||
                   auth !== existing.auth ||
                   typedPassword !== null),
-              flush: flushAllNow,
+              flush: async () => void (await flushAllNow()),
             },
           )
         : (

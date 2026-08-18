@@ -572,12 +572,21 @@ the failure it prevents, which is running a command on the wrong box.
   host, saves in one step. A server that rotated its key legitimately would
   otherwise cost a delete and a re-add, so the form carries "Check Key Again"
   for exactly that.
-- **Two refusals keep the app somewhere it can work from**: the local server
+- **Three refusals keep the app somewhere it can work from**: the local server
   cannot be removed, and neither can the connection currently being served. A
   phone has no local server to fall back to, so there the second refusal holds
   only while another server exists — removing the last one returns it to the
   pairing screen, which is the only way a phone can forget an address it typed
   wrong (ios.md §4).
+- **A switch will not run over unsaved writing.** The switch reloads the page,
+  so text that never reached the server it belongs to is gone afterwards and is
+  in no trash anyone could be sent to (remote.md §7). Every dirty note is
+  flushed before anything is torn down, and if any of them are still unsaved
+  when that settles, the switch is refused with the count and the machine
+  named. §4 calls that class irreversible destruction, and this is the third of
+  the refusals above rather than a confirmation: there is nothing about the
+  switch worth deciding, and everything about the unsaved text worth handling
+  first, so a prompt here would only teach the click-through §4 warns about.
 - **A connection that will not open costs nothing.** The new server is reached
   *before* the old one is torn down, so a typo or a sleeping laptop leaves the
   session exactly where it was, with the reason in the dialog. At boot the

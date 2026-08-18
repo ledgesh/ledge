@@ -9,6 +9,8 @@ import { useCommands } from "@/commands/CommandProvider";
 import { CommandMenuItem } from "@/commands/CommandMenuItem";
 import { tooltip } from "@/commands/format";
 import { workspaceKind } from "./channel";
+import { isNoteDirty, onDirtyChange } from "@/notes/store";
+import { linkState, subscribeConnections } from "@/lib/connections";
 import { useWorkspace } from "./store";
 import { EditorMenu, editorMenuAt, type EditorMenuAnchor } from "./EditorMenu";
 import { attachEditor, detachEditor, focusEditor } from "./editorPool";
@@ -444,6 +446,17 @@ function TabItem({
   const active = leaf.activeTabId === tab.id;
   const [dragged, setDragged] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  // Whether this note's text is on disk, and whether there is currently a disk
+  // to put it on. Two subscriptions rather than one because they are two facts
+  // that change on their own schedules; both only ever bump this one tab.
+  const [, bumpDirty] = useState(0);
+  useEffect(() => onDirtyChange(() => bumpDirty((n) => n + 1)), []);
+  useEffect(() => subscribeConnections(() => bumpDirty((n) => n + 1)), []);
+  const unsaved = isNoteDirty(tab.docId);
+  // A dot on its own reads as "saving in a moment", which is true almost
+  // always and false in the one case worth drawing attention to. A lost wire
+  // makes it a warning and gives it words (remote.md §7).
+  const stranded = unsaved && linkState().state === "lost";
   // A tab is a row for menu purposes (R6): right-click, or a finger held on
   // it, opens the same menu. That menu is where Close Tab and Close Others
   // live for anyone without ⌘W, which is every touch client.
@@ -487,6 +500,15 @@ function TabItem({
       }}
     >
       <span className="truncate">{tab.title}</span>
+      {unsaved && (
+        // Before the close button, so it does not move when the button appears
+        // on hover, and present on touch where that button is not (§1a).
+        <span
+          data-unsaved={stranded ? "stranded" : "pending"}
+          title={stranded ? "Not saved: this note's server cannot be reached." : "Not saved yet."}
+          className={cn("size-1.5 shrink-0 rounded-full", stranded ? "bg-destructive" : "bg-current opacity-50")}
+        />
+      )}
       {/* `hidden hoverable:flex`, not `flex`: on a client with no hover this
           button can never be revealed, and an invisible one still takes the
           taps that land on it — a 16-point close target at the end of every

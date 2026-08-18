@@ -13,15 +13,19 @@ import { createEditor } from "../editor/setup";
 import { handleRunEvent, pingOverlay, runningRunIds } from "../editor/blocks";
 import { onRunEvent, type RunSink } from "../editor/bridge";
 import { fromDisk } from "../editor/session";
-import { readNote } from "../notes/channel";
+import { readNote, stashNote } from "../notes/channel";
 import {
+  adoptOverStranded,
   bindDoc,
   docIdAt,
   pathOf,
   releaseDoc,
   reloadCandidates,
+  releaseSaves,
   reseedDoc,
+  savesHeld,
   seedSlug,
+  strandedCandidates,
   type DocHandlers,
 } from "../notes/store";
 import { onVaultChanged, vaultState } from "../vault/channel";
@@ -317,6 +321,97 @@ export async function reloadOpenNotes(): Promise<void> {
       changes: span,
       annotations: [fromDisk.of(true), Transaction.addToHistory.of(false)],
     });
+  }
+}
+
+/**
+ * Settle every buffer that was typed while the server could not be reached, and
+ * then let saving resume (remote.md §7).
+ *
+ * reloadOpenNotes' mirror image. That one pours the server's text into buffers
+ * with nothing at stake; this one handles the buffers it skips, where there IS
+ * something at stake on both sides: text somebody typed here, and text the note
+ * has acquired elsewhere since.
+ *
+ * Relink only, never window focus and never a watcher push. On those two paths a
+ * dirty buffer means the user is mid-thought and the save's own guard is the
+ * right arbiter, exactly as it has always been. A relink is the one arrival
+ * where the buffer could have been stranded across an outage, which is what
+ * makes "somebody is typing" — the whole basis for letting the buffer win —
+ * something we can no longer assume.
+ *
+ * The server's version wins and the buffer goes to the trash, which is the
+ * existing divergence handling turned around. It is turned around because the
+ * argument for the buffer winning is that its author is present, and after an
+ * outage the version with an author present is more likely the other one. What
+ * does not change is that neither is destroyed: a restore puts the stashed copy
+ * beside the live note, so the merge stays available and stays the user's.
+ *
+ * Always releases the hold, whatever happened above it. A reconciliation that
+ * threw must not leave the app unable to save.
+ */
+export async function resolveStrandedNotes(): Promise<void> {
+  try {
+    // Only after an outage that actually suspended saving. A wire that flapped
+    // and came back never did: those writes waited on the ladder and landed, so
+    // a buffer still dirty here is somebody mid-thought, and taking it away
+    // would be the clobber this whole path exists to avoid — every time a phone
+    // changed cell (remote.md §7).
+    if (!savesHeld()) return;
+    const stranded = strandedCandidates();
+    if (stranded.length === 0) return;
+    // Every read at once, reloadOpenNotes' round-trip stance (remote.md §12):
+    // this runs the moment a wire comes back, which is the worst moment to
+    // spend one trip per open tab.
+    const files = await Promise.all(stranded.map((c) => readNote(c.path).catch(() => null)));
+    for (const [i, cand] of stranded.entries()) {
+      const file = files[i]!;
+      // Gone, or never seen: nothing to arbitrate against. The buffer keeps
+      // what it has and the ordinary save path recreates the file.
+      if (file === null || cand.mtimeMs === null) continue;
+      // The note did not move. The buffer is merely unsaved, which the release
+      // below is about to fix.
+      if (file.mtimeMs === cand.mtimeMs) continue;
+      // Locked with the vault shut: the body on screen is withheld and the
+      // buffer cannot be sealed to park it. The idle relock's own eviction owns
+      // this case (remote.md §7) and it is the one path allowed to drop the
+      // edit, because a locked note's save could not have landed either way.
+      if (file.held) continue;
+      const entry = pool.get(cand.docId);
+      if (!entry) continue; // tab closed while the read was out
+      if (file.text === cand.text) {
+        // Somebody else wrote the same thing. Nothing is at stake and nothing
+        // needs parking; just stop being dirty.
+        adoptOverStranded(cand.docId, cand.path, file.text, file.mtimeMs, cand.text, null);
+        continue;
+      }
+      let stashedTo: string;
+      try {
+        stashedTo = await stashNote(cand.path, cand.text);
+      } catch (err) {
+        // Nowhere to park it (a relocked vault, a server too old to know the
+        // method, a wire that went again). Keep the buffer: an unresolved
+        // conflict is recoverable and a discarded paragraph is not.
+        console.error("[notes] could not park a stranded edit; keeping it in the buffer", cand.path, err);
+        continue;
+      }
+      if (!adoptOverStranded(cand.docId, cand.path, file.text, file.mtimeMs, cand.text, stashedTo)) continue;
+      const span = changedSpan(entry.view.state.doc.toString(), file.text);
+      if (span) {
+        entry.view.dispatch({
+          changes: span,
+          // Not undoable, unlike an ordinary edit and for a sharper reason than
+          // reloadOpenNotes has. There the buffer was clean so nothing was at
+          // stake; here a Cmd+Z would put the stranded text back AND mark the
+          // note dirty again, rebuilding the conflict that was just settled.
+          // The copy in the trash is the way back, which is what the notice says.
+          annotations: [fromDisk.of(true), Transaction.addToHistory.of(false)],
+        });
+      }
+      console.warn("[notes] a stranded edit was parked in the trash:", stashedTo, "(the server's copy of", cand.path, "won)");
+    }
+  } finally {
+    releaseSaves();
   }
 }
 

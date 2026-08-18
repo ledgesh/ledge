@@ -354,6 +354,18 @@ export type LedgeRPC = {
       // the note landed, which is the handle Undo restores from, or null if
       // there was nothing there to delete.
       noteDelete: { params: { path: string }; response: { trashed: string | null } };
+      // Park a buffer's text in the note's own root trash without it ever
+      // having been a file. Sent when a note was edited here while the server
+      // could not be reached and the server's copy moved on meanwhile
+      // (remote.md §7): the buffer is somebody's writing, it is no longer what
+      // the note says, and the live path has nowhere to put it. noteDelete
+      // cannot carry it, because that moves a file and this has never been one.
+      // Responds with where it landed, which the notice names. A locked note's
+      // stash is sealed exactly as a save is, so this is never the path that
+      // writes a locked body in the clear, and it fails the same way when the
+      // vault has relocked — leaving the caller holding the buffer, which is
+      // the whole point of it having asked.
+      noteStash: { params: { path: string; text: string }; response: { stashed: string } };
       // Full-text search over ONE workspace's note bodies: the query as one
       // case-insensitive substring (shared/search.ts owns the grammar and the
       // caps). Sent, debounced, as the search overlay's query changes, scoped

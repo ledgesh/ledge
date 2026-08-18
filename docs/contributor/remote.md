@@ -722,10 +722,61 @@ The refresh reloads CLEAN buffers only (`reloadCandidates` in
 second one: a reconnect that reloaded unconditionally would take a half-typed
 paragraph away every time a phone changed cell. A buffer that IS dirty keeps
 what was typed and settles it the ordinary way, through the divergence guard on
-the next save. That is also the ceiling on this whole bug's severity, and why it
+the next save. That holds for a wire that FLAPPED, which is what this paragraph
+is about; a wire that was declared lost is the next one's subject, and there the
+answer is the other way round. That is also the ceiling on this whole bug's severity, and why it
 was the second of the two to fix: a missed `vaultChanged` leaves plaintext on
 screen, while a missed `notesChanged` leaves a stale list and a save that
 displaces the other version into the Trash with a notice.
+
+**A buffer stranded across a LOST connection loses to the server, and is kept.**
+Everything above is about a wire that dropped and came back. A wire the ladder
+gave up on is different in one way that matters: `reconnectingClient` holds
+requests while it is reconnecting and lands them, so a flap never leaves a save
+unmade, while a `lost` connection has nowhere to put one at all. The text sits
+in the view's `pending` and the server's copy goes on being edited by whoever
+else can reach it.
+
+The client suspends saving for every note the moment it is told `lost`
+(`holdSaves` in `mainview/notes/store.ts`) and settles them all on the way back
+in (`resolveStrandedNotes` in `mainview/workspace/editorPool.ts`). A note whose
+server copy did not move is simply written. A note whose copy DID move has its
+buffer written into that root's trash (`stashNote`, rpc `noteStash`) and then
+takes the server's text.
+
+That is the divergence guard turned around, and the reason it turns is worth
+stating, because the guard's own rule is the opposite one. `writeNote` lets the
+buffer win because its author is the one typing, which is true of an agent edit
+landing under a live keyboard and is what makes that rule right there. After an
+outage it is the assumption that has failed: nobody has typed here since the
+wire went, and the version with somebody behind it is more likely the other one.
+So the presumption follows the presence rather than the buffer. Neither version
+is destroyed under either rule, and `restoreNote` puts a stashed copy BESIDE the
+live note rather than over it, so the merge is available and stays the user's.
+
+Three things narrow it, and each is a case where the flip would be wrong.
+Nothing happens unless saving was actually held, so a flap is untouched and a
+phone changing cell never loses a paragraph. A buffer typed into while its text
+was being parked is not stranded any more and keeps what it has, checked by
+comparing the parked text against the current one. And a stash that cannot land
+— a relocked vault, a server too old to know the method (§11), a wire that went
+again — leaves the buffer exactly where it was, because an unresolved conflict is
+recoverable and a discarded paragraph is not.
+
+A locked note is the one case with no good answer, and it already had one. Its
+buffer is plaintext in memory and its stash is sealed like any save, so a vault
+that has relocked cannot park it; the idle relock's own eviction owns that
+buffer, as described above, and it is allowed to drop it because a locked note's
+save could not have landed either way.
+
+**What a switch will not do is destroy writing to complete itself.** Choosing a
+connection reloads the page, so text that never reached the server it belongs to
+is in no file anywhere afterwards: not on that machine, and not in a trash
+anyone could be pointed at. `flushAllNow` answers with how many notes are still
+unsaved when it settles, and the picker refuses the switch rather than offering
+a one-click path to §4's irreversible destruction (`interactions.md` §4-1). A
+refusal rather than a confirmation because there is nothing about the switch
+worth deciding and everything about the unsaved text worth handling first.
 
 **Every push is addressed** (`Audience` in `bun/server.ts`). With more than one
 client, "send this" stopped being a complete instruction, and the answers are

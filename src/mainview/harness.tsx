@@ -44,6 +44,8 @@ import {
 import { applyAppearance } from "./lib/theme";
 import { configureShell, recordServerCaps } from "./lib/shell";
 import { configureLayout, restoredState } from "./workspace/persist";
+import { holdSaves } from "./notes/store";
+import { resolveStrandedNotes } from "./workspace/editorPool";
 import { docsState } from "./workspace/store";
 
 // Which shell to be. Two clients bind these seams for real — Electrobun on the
@@ -419,6 +421,19 @@ class FakeStore {
     return this.meta(data, target);
   }
 
+  // Mirrors stashNote (bun/notes.ts): text into the note's own trash under the
+  // note's name, the note itself untouched. A locked note's stash needs the
+  // vault open for the same reason its save does.
+  stash(path: string, text: string): string {
+    this.assertWritable(path);
+    const { root, data } = this.rootOf(path);
+    const cur = data.notes.get(path);
+    if (cur && this.lockedOf(cur.text) && this.vault.state !== "unlocked") throw new Error("the vault is locked");
+    const dest = `${root}/.ledge-trash/${this.allocate(text, data.trash.keys())}`;
+    data.trash.set(dest, { text, deletedAt: this.tick() });
+    return dest;
+  }
+
   remove(path: string): string | null {
     this.assertWritable(path);
     const { root, data } = this.rootOf(path);
@@ -630,6 +645,7 @@ configureNotes({
   tags: async (folder) => store.tags(folder),
   tagged: async (folder, tag) => store.tagged(folder, tag),
   write: async (path, text, baseMtimeMs) => store.write(path, text, baseMtimeMs),
+  stash: async (path, text) => store.stash(path, text),
   create: async (folder, text) => store.create(folder, text),
   retitle: async (path, text) => store.retitle(path, text),
   remove: async (path) => store.remove(path),
@@ -1206,11 +1222,15 @@ window.__harness = {
   vaultMoved: (state) => {
     store.vault.state = state;
   },
-  // The same five things boot.tsx's connectionState push does, because a
-  // reconnect that did not reconcile is not the reconnect the app performs.
+  // The same things boot.tsx's connectionState push does, because a reconnect
+  // that did not reconcile is not the reconnect the app performs — and the save
+  // hold on the way down, because the stranded-buffer path is only reachable
+  // through it.
   linkState: (state, detail) => {
     recordLinkState(state, detail);
+    if (state === "lost") holdSaves();
     if (state === "live") {
+      void resolveStrandedNotes();
       void reconcileRuns();
       dispatchTerminalRelink();
       void refreshVaultState().catch(() => {});

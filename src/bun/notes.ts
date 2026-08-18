@@ -369,6 +369,42 @@ export interface WriteResult {
   divergedTo: string | null;
 }
 
+/**
+ * The bytes a buffer becomes on disk at `path`, and the plaintext they stand for.
+ *
+ * What the DISK says governs lock state, not the buffer (locking.md §2): the
+ * head read is what decides. A buffer cannot MINT a lock — a stray locked: line
+ * (pasted from a locked file's text) is stripped, since honoring it would write
+ * a "locked" note whose key nobody holds — and it cannot DROP one: a save whose
+ * buffer lost the line still encrypts under the disk's header. Only lockNote and
+ * removeLockNote change the state.
+ *
+ * Its own function because two callers write a buffer into this root, and the
+ * second one (stashNote) is the one that would be easy to get wrong: a stash
+ * that skipped the seal would be the only path in the app that puts a locked
+ * note's body on disk in the clear.
+ *
+ * `outgoing` is what to write. `text` is the same content with the body still in
+ * the clear, which is what a divergence comparison has to be made against —
+ * sealing is nondeterministic, so a locked note's bytes never match twice.
+ *
+ * Sealing NEEDS the vault open, and sealBody throws when it is not. That throw
+ * is load-bearing in both callers: it keeps the edit in the view's autosave
+ * retry rather than writing plaintext. The placeholder face makes it
+ * near-unreachable for a save, but an unlock that raced a relock must fail.
+ */
+async function sealFor(path: string, text: string): Promise<{ outgoing: string; text: string; header: string | null }> {
+  const diskHead = await headAt(path);
+  const header = diskHead === null ? null : parseFrontmatter(diskHead).params.locked;
+  if (header === null) {
+    const stripped = stripLockedLine(text);
+    if (stripped !== text) console.warn("[vault] dropped a locked: line from a save to an unlocked note:", path);
+    return { outgoing: stripped, text: stripped, header };
+  }
+  const { head, body } = splitHead(stampLockedLine(text, header));
+  return { outgoing: head + sealBody(header, body) + "\n", text: head + body, header };
+}
+
 // Atomic save: write a temp file in the SAME directory, then rename(2) over the
 // target. rename is atomic within a filesystem, so a crash (or a `kill -9`)
 // mid-save leaves either the old note or the new one, never a half-written file.
@@ -398,29 +434,10 @@ export async function writeNote(path: string, text: string, baseMtimeMs: number 
   const dir = dirname(path);
   await mkdir(dir, { recursive: true });
 
-  // What the DISK says governs lock state, not the buffer (locking.md
-  // §2): the head read is what decides. A buffer cannot MINT a lock — a
-  // stray locked: line (pasted from a locked file's text) is stripped, since
-  // honoring it would write a "locked" note whose key nobody holds — and it
-  // cannot DROP one: a save whose buffer lost the line still encrypts under
-  // the disk's header. Only lockNote/removeLockNote change the state.
-  const diskHead = await headAt(path);
-  const diskHeader = diskHead === null ? null : parseFrontmatter(diskHead).params.locked;
-  let outgoing: string;
-  if (diskHeader === null) {
-    const stripped = stripLockedLine(text);
-    if (stripped !== text) console.warn("[vault] dropped a locked: line from a save to an unlocked note:", path);
-    outgoing = stripped;
-    text = stripped;
-  } else {
-    // Saving a locked note NEEDS the vault open (the body must encrypt).
-    // Throwing keeps the edit pending in the view's autosave retry — the
-    // placeholder face makes this near-unreachable, but an unlock that
-    // raced a relock must fail the save, never write plaintext.
-    const { head, body } = splitHead(stampLockedLine(text, diskHeader));
-    outgoing = head + sealBody(diskHeader, body) + "\n";
-    text = head + body;
-  }
+  const sealed = await sealFor(path, text);
+  const { outgoing } = sealed;
+  const diskHeader = sealed.header;
+  text = sealed.text;
 
   let divergedTo: string | null = null;
   if (baseMtimeMs !== null) {
@@ -795,6 +812,40 @@ export async function deleteNote(path: string): Promise<string | null> {
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
     return null;
   }
+  return dest;
+}
+
+/**
+ * Park text in a root's trash without it ever having been a note.
+ *
+ * The case is a buffer typed while its server could not be reached, and
+ * overtaken on the server since (remote.md §7). It is somebody's writing, it is
+ * not what the note says any more, and there is nowhere on the live path for it
+ * to go. deleteNote cannot take it: deleteNote moves a FILE, and this has never
+ * been one.
+ *
+ * The trash rather than a new note, and named exactly as a delete names one,
+ * because restoreNote already does the right thing with it. A restore lands
+ * BESIDE the live note under a free name rather than over it, which is precisely
+ * the affordance a stranded buffer needs: both versions on screen, and the merge
+ * is the user's to make. Giving it a name of its own would buy a little clarity
+ * in the Trash list and cost the Trash section a second kind of thing to
+ * understand.
+ *
+ * Sealed like a save (sealFor), because the trash is inside the root and a
+ * locked note's stranded buffer is plaintext in memory. A stash whose vault has
+ * relocked throws, and the caller keeps the buffer rather than losing it.
+ */
+export async function stashNote(path: string, text: string): Promise<string> {
+  const root = assertWritableRoot(assertNote(path));
+  touchVault();
+  await rootReady(root);
+  const { outgoing } = await sealFor(path, text);
+  const trashDir = trashDirOf(root);
+  await mkdir(trashDir, { recursive: true });
+  const taken = new Set(await readdir(trashDir));
+  const dest = join(trashDir, uniqueName(titleOf(path), taken));
+  await writeFile(dest, outgoing, "utf8");
   return dest;
 }
 

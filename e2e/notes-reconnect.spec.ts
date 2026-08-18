@@ -97,3 +97,90 @@ test("a reconnect does not clobber a buffer that was being edited", async ({ pag
   await expect(page.locator(".cm-content")).toContainText("plus my half-typed thought");
   await expect(page.locator(".cm-content")).not.toContainText("the competing version");
 });
+
+// --- a buffer stranded across an outage --------------------------------------
+//
+// The case above is a wire that flapped: the ladder held the writes and landed
+// them, so the buffer was never at risk and taking it away would be the clobber.
+// This is the other one. The ladder ran out, saving was suspended under the
+// buffer (notes/store.ts holdSaves), and by the time the server is reachable
+// again its copy has moved on — because somebody's phone was editing the same
+// note from the airport.
+//
+// The winner flips here, and the reason it flips is that the argument for the
+// buffer winning is that its author is at the keyboard. After an outage the
+// version with an author present is more likely the other one. Neither is
+// destroyed either way: the losing text goes to the trash, and restoring it
+// lands it BESIDE the live note so the merge stays the user's to make.
+
+async function outage(page: Page) {
+  await page.evaluate(() => window.__harness.linkState("reconnecting", "The connection dropped. Reconnecting…"));
+  await page.evaluate(() => window.__harness.linkState("lost", "Lost the connection: host is down."));
+}
+
+const unsavedDot = (page: Page) => page.locator("[data-unsaved]");
+
+test("a buffer typed during an outage loses to the server's newer version, and is kept", async ({ page }) => {
+  const before = await page.evaluate((root) => window.__harness.store.listTrash(root).length, SCRATCH);
+
+  await outage(page);
+  await page.locator(".cm-content").click();
+  await page.keyboard.press("End");
+  await page.keyboard.type(" plus what I typed on the plane");
+  // Nothing reached the server while it could not be reached.
+  await expect(unsavedDot(page)).toHaveAttribute("data-unsaved", "stranded");
+
+  // Meanwhile, the other device.
+  await wroteWhileAway(page, ALPHA, "# Alpha\n\nthe version from the phone\n");
+  await page.evaluate(() => window.__harness.linkState("live", ""));
+
+  await expect(page.locator(".cm-content")).toContainText("the version from the phone");
+  await expect(page.locator(".cm-content")).not.toContainText("what I typed on the plane");
+  await expect
+    .poll(() => page.evaluate((root) => window.__harness.store.listTrash(root).length, SCRATCH))
+    .toBe(before + 1);
+});
+
+test("the losing version is announced rather than only logged", async ({ page }) => {
+  await outage(page);
+  await page.locator(".cm-content").click();
+  await page.keyboard.press("End");
+  await page.keyboard.type(" plus what I typed on the plane");
+  await wroteWhileAway(page, ALPHA, "# Alpha\n\nthe version from the phone\n");
+
+  await page.evaluate(() => window.__harness.linkState("live", ""));
+
+  await expect(page.getByText(/“Alpha” changed on the server while you were disconnected/)).toBeVisible();
+  await expect(page.getByText(/what you had typed is in the Trash/)).toBeVisible();
+});
+
+// The ordinary outage, where nobody else touched the note. Nothing is displaced
+// and nothing is said: the buffer simply gets written once there is somewhere
+// to write it.
+test("a buffer stranded against a note nobody else touched is just saved on reconnect", async ({ page }) => {
+  await outage(page);
+  await page.locator(".cm-content").click();
+  await page.keyboard.press("End");
+  await page.keyboard.type(" plus what I typed on the plane");
+
+  await page.evaluate(() => window.__harness.linkState("live", ""));
+
+  await expect(page.locator(".cm-content")).toContainText("what I typed on the plane");
+  await expect(unsavedDot(page)).toHaveCount(0);
+  await expect(page.getByText(/changed on the server/)).toHaveCount(0);
+});
+
+// The indicator itself, which the app had none of in any state before this.
+test("an unsaved note says so on its tab, and says more when the wire is down", async ({ page }) => {
+  await expect(unsavedDot(page)).toHaveCount(0);
+
+  await outage(page);
+  await page.locator(".cm-content").click();
+  await page.keyboard.press("End");
+  await page.keyboard.type(" typed with nowhere to put it");
+  await expect(unsavedDot(page)).toHaveAttribute("data-unsaved", "stranded");
+  await expect(unsavedDot(page)).toHaveAttribute("title", /server cannot be reached/);
+
+  await page.evaluate(() => window.__harness.linkState("live", ""));
+  await expect(unsavedDot(page)).toHaveCount(0);
+});

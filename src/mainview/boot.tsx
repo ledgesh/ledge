@@ -39,6 +39,8 @@ import { configureAssets } from "./lib/assets";
 import { configureSettings } from "./lib/settings";
 import { recordServerCaps } from "./lib/shell";
 import { configureConnections, recordLinkState, recordPresence, type ConnectionStatus } from "./lib/connections";
+import { holdSaves } from "./notes/store";
+import { resolveStrandedNotes } from "./workspace/editorPool";
 import { applyAppearance } from "./lib/theme";
 import { DEFAULT_SETTINGS, type Settings } from "../shared/settings";
 import { configureLayout, restoredState } from "./workspace/persist";
@@ -108,7 +110,18 @@ export const viewPush: ViewPush = {
     // reason: every `notesChanged` for every root that moved meanwhile was
     // dropped, and no push names them afterwards, so the answer is to re-read
     // the lot (notes/channel.ts onNotesRelink).
+    // A connection nothing is coming back from has nowhere to put a save, and
+    // the writes would only fail their way back into the buffer. What the hold
+    // is really for is the instant AFTER it returns: a debounce or a window
+    // blur landing in there would write text typed against a note the server
+    // has since moved past, and the save guard would let it win
+    // (notes/store.ts holdSaves).
+    if (state === "lost") holdSaves();
     if (state === "live") {
+      // First, and the only one of the five with somebody's writing at stake:
+      // it decides what becomes of every buffer that never reached the server,
+      // and it is what lifts the hold above once it has (editorPool.ts).
+      void resolveStrandedNotes();
       void reconcileRuns();
       dispatchTerminalRelink();
       void refreshVaultState().catch(() => {});
@@ -242,6 +255,7 @@ export function bootView(requests: RequestClient): Promise<void> {
     tags: (folder) => requests.tagList({ root: folder }),
     tagged: (folder, tag) => requests.tagNotes({ root: folder, tag }),
     write: (path, text, baseMtimeMs) => requests.noteWrite({ path, text, baseMtimeMs }),
+    stash: (path, text) => requests.noteStash({ path, text }).then((r) => r.stashed),
     create: (folder, text) => requests.noteCreate({ root: folder, text }).then((r) => r.note),
     retitle: (path, text) => requests.noteRetitle({ path, text }).then((r) => r.note),
     remove: (path) => requests.noteDelete({ path }).then((r) => r.trashed),

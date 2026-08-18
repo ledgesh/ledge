@@ -41,6 +41,9 @@ interface NoteHandlers {
   tags: (folder: string) => Promise<{ tags: TagInfo[]; lockedSkipped: number }>;
   tagged: (folder: string, tag: string) => Promise<{ hits: TagHit[]; lockedSkipped: number }>;
   write: (path: string, text: string, baseMtimeMs: number | null) => Promise<WriteResult>;
+  // Park a buffer's text in the note's trash without writing the note itself
+  // (rpc noteStash). The stranded-edit path calls it and nothing else does.
+  stash: (path: string, text: string) => Promise<string>;
   create: (folder: string, text: string) => Promise<NoteMeta>;
   retitle: (path: string, text: string) => Promise<NoteMeta>;
   remove: (path: string) => Promise<string | null>;
@@ -122,6 +125,15 @@ export function notesTagged(folder: string, tag: string): Promise<{ hits: TagHit
 // past it — see noteWrite in the rpc schema for the arbitration.
 export function writeNote(path: string, text: string, baseMtimeMs: number | null): Promise<WriteResult> {
   return bridge().write(path, text, baseMtimeMs);
+}
+
+// Put text somewhere recoverable that is NOT this note: the root's trash, under
+// the note's own name (rpc noteStash). For a buffer that was typed while the
+// server was unreachable and has been overtaken there since — it is writing,
+// it is not the note, and it needs a home before the note's real text replaces
+// it on screen (workspace/editorPool.ts resolveStrandedNotes).
+export function stashNote(path: string, text: string): Promise<string> {
+  return bridge().stash(path, text);
 }
 
 export function createNote(folder: string, text: string): Promise<NoteMeta> {
