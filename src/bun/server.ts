@@ -235,6 +235,28 @@ const SB_CAP = 256 * 1024;
 // prompt, tracking this live `promptReady` state from the two sequences.
 const BP_ENABLE = "\x1b[?2004h";
 const BP_DISABLE = "\x1b[?2004l";
+
+// The drain loop's two cadences (the loop itself is below, in createServer).
+//
+// A pty is polled rather than waited on: nothing wakes the event loop when a
+// shell has bytes, so the tick IS the read, and its period is the latency of
+// everything a shell says. 8ms is a frame at 120Hz — far enough under the ~50ms
+// at which an echoed keystroke starts to feel like it lagged that there is no
+// argument about it, and the rate remote.md §6's coalescing is written against.
+const DRAIN_FAST_MS = 8;
+// Where it settles when nothing is happening. The tick used to run at
+// DRAIN_FAST_MS for the life of the process whether or not a shell existed,
+// which on a desktop in front of somebody is invisible and on a daemon running
+// for weeks (remote.md §11) is ~1% of a core spent asking idle shells whether
+// they have said anything, forever. What this can delay is output nobody asked
+// for arriving after a long silence — a background job's first line — because
+// anything a person just did woke the loop first (`wake`). 100ms because that
+// is still inside the window where a delay reads as instant.
+const DRAIN_IDLE_MS = 100;
+// How long everything must stay quiet before backing off. Comfortably longer
+// than the gap between keystrokes at any typing speed, so a pause to think
+// mid-command does not drop the cadence and make the next character feel heavy.
+const DRAIN_SETTLE_MS = 2_000;
 interface Term {
   term: PtyProcess;
   // The machine this shell lives on (LOCAL_HOST or an ssh destination), fixed
@@ -458,6 +480,10 @@ export async function createServer(deps: { push: Audience; native: NativeDeps })
         sentBusy: false,
       };
       terms.set(sessionId, t);
+      // The one place a drawer's shell is born, so the one place its cadence
+      // has to be claimed: a cold shell's first prompt is output nobody typed
+      // for, and the loop may have been idling when it was asked for.
+      wake();
     }
     return t;
   }
@@ -752,6 +778,7 @@ export async function createServer(deps: { push: Audience; native: NativeDeps })
       );
       if (!spec.remote) await Bun.write(spec.path, spec.contents);
       inlinePool.run(sessionId, id, spec.command, { client, host: target });
+      wake();
       return { accepted: true };
     },
     cancelRun: ({ sessionId, id }) => {
@@ -767,6 +794,7 @@ export async function createServer(deps: { push: Audience; native: NativeDeps })
       // with its cwd/env intact for the note's next block, and the run ends on
       // the D marker its precmd hook prints when the prompt comes back.
       inlinePool.cancel(sessionId, id);
+      wake();
       return { ok: true };
     },
     inlineResize: ({ sessionId, id, cols, rows }) => {
@@ -775,12 +803,14 @@ export async function createServer(deps: { push: Audience; native: NativeDeps })
       // (the panel fits itself the moment it renders) and applies it when the
       // run picks its shell.
       inlinePool.resize(sessionId, id, cols, rows);
+      wake();
       return { ok: true };
     },
     inlineInput: ({ sessionId, id, dataB64 }) => {
       // Feed keystrokes to the run's shell (only sent while the block's program
       // is the running foreground process).
       inlinePool.input(sessionId, id, fromB64(dataB64));
+      wake();
       return { ok: true };
     },
     inlineClaim: ({ ids }) => {
@@ -809,6 +839,7 @@ export async function createServer(deps: { push: Audience; native: NativeDeps })
       const t = terms.get(sessionId);
       if (!t || t.owner !== client) return { ok: false };
       t.term.write(fromB64(dataB64));
+      wake();
       return { ok: true };
     },
     // Open to any client, unlike the input and resize around it: a paste says
@@ -854,6 +885,7 @@ export async function createServer(deps: { push: Audience; native: NativeDeps })
       // has told us about itself, and that can still change after the queue.
       t.pasteQueue.push(paste);
       flushPaste(t);
+      wake();
       return { ok: true };
     },
     // The winsize follows the owner's window for the same reason the bytes do:
@@ -866,6 +898,7 @@ export async function createServer(deps: { push: Audience; native: NativeDeps })
       const t = terms.get(sessionId);
       if (!t || t.owner !== client) return { ok: false };
       t.term.resize(cols, rows);
+      wake();
       return { ok: true };
     },
     // Synchronous so no drain tick can interleave between the snapshot and
@@ -944,6 +977,7 @@ export async function createServer(deps: { push: Audience; native: NativeDeps })
       // keep the params, and lazy respawn does the rest. The pool closes out
       // open runs through the same event path the drain loop uses.
       inlinePool.restartSession(sessionId, sendRunEvent);
+      wake();
       const t = terms.get(sessionId);
       if (t) {
         // Mirror the shell-exited teardown below: the drawer closes, and a
@@ -1088,13 +1122,53 @@ export async function createServer(deps: { push: Audience; native: NativeDeps })
   // no per-note bookkeeping here); terminal shells stream raw to the client that
   // owns that note's drawer. Inline lifecycle — overflow teardown on a run's end,
   // closing out the run of a shell that died mid-block — lives in the pool.
-  const drain = setInterval(() => {
-    inlinePool.drain(sendRunEvent);
+  //
+  // Full speed while bytes are moving, backing off to DRAIN_IDLE_MS once
+  // everything has been quiet for DRAIN_SETTLE_MS. `wake` below puts it back,
+  // and every path that writes to a shell or spawns one calls it, so the
+  // cadence is fast again before the output it has to carry arrives. A wake
+  // site that gets missed costs one late tick and nothing else: bytes turning
+  // up set `lastBusyAt` by themselves.
+  //
+  // A block that runs for a minute in silence is deliberately NOT held at full
+  // speed. Its first byte is then up to DRAIN_IDLE_MS late, once, and the burst
+  // behind it streams at full rate; a `sleep 60` holding a 125Hz timer to
+  // deliver nothing is the cost this exists to stop paying.
+  //
+  // The timer is only ever slowed, never cleared: it is what holds the event
+  // loop open in-process, which vault.ts's housekeeping leans on by unref'ing
+  // its own, and whether a daemon with no shells should still be alive is the
+  // idle exit's question rather than this loop's (daemon.ts).
+  let cadence = 0;
+  let drain: ReturnType<typeof setInterval> | null = null;
+  let lastBusyAt = 0;
+
+  function pace(ms: number): void {
+    if (ms === cadence) return;
+    cadence = ms;
+    if (drain) clearInterval(drain);
+    drain = setInterval(drainTick, ms);
+  }
+
+  /** Something is about to happen on a shell: carry the fast cadence into it. */
+  function wake(): void {
+    lastBusyAt = Date.now();
+    pace(DRAIN_FAST_MS);
+  }
+
+  function drainTick(): void {
+    // Bytes moving, or waiting to move: a paste the tty has not taken yet, and
+    // a paste still queued for a prompt, both mean work in flight that no
+    // output would otherwise announce (pty.ts `pending`, and an echo-less
+    // password prompt is exactly when it matters).
+    let awake = inlinePool.drain(sendRunEvent) || inlinePool.pending();
 
     const now = Date.now();
     for (const [sessionId, t] of terms) {
       const termData = t.term.drain();
+      if (t.term.pending || t.pasteQueue.length > 0) awake = true;
       if (termData) {
+        awake = true;
         t.lastOut = now;
         sbPush(t, termData);
         if (t.owner !== null) push.to(t.owner).terminalOutput({ sessionId, dataB64: toB64(termData) });
@@ -1139,7 +1213,12 @@ export async function createServer(deps: { push: Audience; native: NativeDeps })
         terms.delete(sessionId);
       }
     }
-  }, 8);
+
+    if (awake) lastBusyAt = now;
+    pace(now - lastBusyAt < DRAIN_SETTLE_MS ? DRAIN_FAST_MS : DRAIN_IDLE_MS);
+  }
+
+  wake();
 
   // Age old deletions out of every available workspace's trash, once per launch.
   // Deliberately not awaited: it is housekeeping, and the window should not wait
@@ -1165,7 +1244,7 @@ export async function createServer(deps: { push: Audience; native: NativeDeps })
     // for, and it is what `running` above is right to ignore.
     sessionsOpen: () => inlinePool.sessionsOpen() || terms.size > 0,
     shutdown() {
-      clearInterval(drain);
+      if (drain) clearInterval(drain);
       inlinePool.closeAll();
       for (const t of terms.values()) t.term.close();
     },

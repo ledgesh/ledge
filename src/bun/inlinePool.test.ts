@@ -21,6 +21,9 @@ class FakeShell implements InlineShellIO {
   interrupts = 0;
   closed = false;
   exited = false;
+  // What a real pty reports when the tty would not take all of a write
+  // (pty.ts `pending`); set directly here, since a fake has no tty to refuse.
+  pending = false;
   private queue: Uint8Array[] = [];
 
   write(data: string | Uint8Array): void {
@@ -728,5 +731,59 @@ describe("runs belong to the client that started them", () => {
 
     expect(pool.claim("", []).orphaned).toEqual(["a"]);
     expect(shells[0].interrupts).toBe(1);
+  });
+});
+
+// The drain loop no longer ticks at a fixed rate: it runs fast while bytes are
+// moving and backs off when they are not (bun/server.ts). These are the two
+// answers the pool owes it, and getting either wrong is a stall rather than a
+// crash — output that arrives late, or never, with nothing in the log.
+describe("what the drain loop reads to set its cadence", () => {
+  test("drain reports whether any shell spoke", () => {
+    const { pool, shells, drained } = makePool();
+    pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
+
+    // The spawn wrote the marker hook, but nothing has come back yet.
+    expect(pool.drain(() => {})).toBe(false);
+
+    shells[0].emit(began("a") + "hello");
+    expect(pool.drain(() => {})).toBe(true);
+
+    // Drained dry: silent again, even with the run still open.
+    expect(pool.drain(() => {})).toBe(false);
+    expect(pool.running()).toBe(true);
+
+    shells[0].emit(ended("a"));
+    drained();
+    expect(pool.running()).toBe(false);
+  });
+
+  test("a shell the tty has not taken all of keeps the pool pending", () => {
+    const { pool, shells } = makePool();
+    pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
+
+    expect(pool.pending()).toBe(false);
+    // A paste into a program reading with echo off: nothing comes back, so
+    // this is the only sign the loop gets that it must not slow down.
+    shells[0].pending = true;
+    expect(pool.pending()).toBe(true);
+    shells[0].pending = false;
+    expect(pool.pending()).toBe(false);
+  });
+
+  test("a pool with no shells is silent and has nothing pending", () => {
+    const { pool } = makePool();
+    expect(pool.drain(() => {})).toBe(false);
+    expect(pool.pending()).toBe(false);
+    expect(pool.sessionsOpen()).toBe(false);
+  });
+
+  test("a shell too old to report pending never holds the loop fast", () => {
+    // `pending` is optional on InlineShellIO: a shell that does not answer is
+    // one the loop cannot slow down FOR, not one it refuses to slow down.
+    const { pool, shells } = makePool();
+    pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
+    delete (shells[0] as { pending?: boolean }).pending;
+    expect(pool.pending()).toBe(false);
   });
 });

@@ -28,6 +28,15 @@ allowed to be a wire. `remote.md` is where that lives.)
   here is a module that has quietly stopped being shared. `portable.test.ts`
   enforces both.
 
+**What holds the Bun process open is the drain loop**, the timer in `server.ts`
+that reads every live pty (`remote.md` §6 sets its cadence). Housekeeping
+timers therefore `unref` themselves and lean on it — `vault.ts`'s idle relock
+says so — which makes it load-bearing in a way its own module cannot see. It
+may be slowed, and it is; it may not be cleared while the process should live,
+because the thing that would end up deciding that is the absence of a timer
+rather than anyone's policy. Whether a server with nothing open should still be
+running is the daemon's idle exit (`remote.md` §7), which decides it out loud.
+
 Every crossing rides the schema in `src/shared/rpc-schema.ts` — as the typed
 Electrobun RPC on the Mac, and as frames on a socket where the boundary is a
 wire. There is no second channel: no direct filesystem access from the view

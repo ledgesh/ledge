@@ -31,6 +31,11 @@ import { MarkerParser, markerCommand, markerInit } from "./markers";
 /** The slice of PtyProcess the pool drives (pty.ts satisfies it structurally). */
 export interface InlineShellIO {
   readonly exited: boolean;
+  /** Input still queued for the tty, if the shell tracks it (pty.ts does).
+   * Optional because it is a hint to whoever schedules `drain` rather than
+   * anything this pool's policy reads: a shell that does not answer is simply
+   * one the drain loop cannot slow down for. */
+  readonly pending?: boolean;
   write(data: string | Uint8Array): void;
   drain(): Uint8Array | null;
   resize(cols: number, rows: number): void;
@@ -294,11 +299,13 @@ export class InlinePool {
    * else can now, and a panel left on "Running" would disable that block's run
    * button for good.
    */
-  drain(emit: InlineEmit): void {
+  drain(emit: InlineEmit): boolean {
+    let spoke = false;
     for (const [sessionId, session] of [...this.sessions]) {
       for (const slot of this.slots(session)) {
         const data = slot.shell.drain();
         if (data) {
+          spoke = true;
           // Anything arriving before the run's start marker: kept, or shown, by
           // the rules in SILENT_MS. The parser would drop it, and it is the
           // only account a stuck shell ever gives of itself.
@@ -345,6 +352,26 @@ export class InlinePool {
       }
       if (session.primaries.size === 0 && session.overflow.size === 0) this.sessions.delete(sessionId);
     }
+    return spoke;
+  }
+
+  /**
+   * Whether any inline shell still has input the tty has not taken.
+   *
+   * Read by the drain loop alone, to decide whether it may slow down: the
+   * remainder of a paste goes out on the next tick, and with the echo off
+   * (`sudo` reading a password) nothing else would tell the loop to stay fast.
+   * `running()` above answers the question that matters to the DAEMON; this one
+   * only sets a cadence, and a shell too old to answer it just never slows the
+   * loop down.
+   */
+  pending(): boolean {
+    for (const session of this.sessions.values()) {
+      for (const slot of this.slots(session)) {
+        if (slot.shell.pending === true) return true;
+      }
+    }
+    return false;
   }
 
   /**

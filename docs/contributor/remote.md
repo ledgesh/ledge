@@ -205,10 +205,23 @@ request id and are interleaved freely; nothing in the protocol is
 request-response ordered.
 
 **Terminal output coalesces, on Nagle's shape rather than a fixed delay.** The
-drain loop pushes whatever a shell produced every 8ms, which is free in-process
-and 125 frames a second down a wire. So the first chunk after a quiet moment
-goes out at once — an echoed keystroke is never delayed — and only a shell that
-is producing CONTINUOUSLY is batched, at one frame per 30ms or per 128 KB.
+drain loop pushes whatever a shell produced every 8ms while bytes are moving,
+which would be 125 frames a second down a wire. So the first chunk after a
+quiet moment goes out at once — an echoed keystroke is never delayed — and only
+a shell that is producing CONTINUOUSLY is batched, at one frame per 30ms or per
+128 KB.
+
+**The 8ms is the busy cadence, not the loop's period.** A pty is polled rather
+than waited on, so the tick IS the read, and a fixed one ran 125 times a second
+for the life of the process whether or not a shell existed: measured on an idle
+Linux server, ~0.8% of a core with nothing open at all and ~1.8% with one shell
+sitting at a prompt, forever. So the loop backs off to 100ms once everything has
+been quiet for two seconds, and every path that writes to a shell or spawns one
+calls `wake` first, which is why an echoed keystroke is still never delayed —
+the cadence is fast again before the byte it has to carry exists. What CAN
+arrive up to 100ms late is output nobody asked for after a long silence, a
+background job's first line, and the burst behind it streams at full rate. The
+same measurements after: 0.23% empty, 0.50% with the shell.
 
 It lives in the transport, not in the server: the cost it exists to avoid is a
 wire's, and the in-process case should not pay a millisecond for a problem it

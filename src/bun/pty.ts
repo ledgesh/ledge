@@ -371,6 +371,20 @@ export class PtyProcess {
     return this.ended;
   }
 
+  /**
+   * Whether input is still queued for the tty (see write()).
+   *
+   * The drain loop's business, not the caller's: a tty in canonical mode takes
+   * one line at a time, so a paste leaves a remainder that only the next tick
+   * can push, and a loop that had backed off to its idle cadence would trickle
+   * it out a chunk per tick. Usually the echo of what did land keeps the loop
+   * awake by itself; this is the case where it cannot, because the program
+   * reading has echo off (a password prompt).
+   */
+  get pending(): boolean {
+    return this.outBuf !== null;
+  }
+
   /** Drain everything currently readable. Never blocks (poll gates the read). */
   drain(): Uint8Array | null {
     if (this.closed) return null;
