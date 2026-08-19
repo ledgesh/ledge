@@ -306,12 +306,19 @@ export function dispatchRunLink(up: boolean): void {
  * server interrupt the rest.
  *
  * A run the CLIENT still shows and the server has already finished is the
- * mirror image, and it is what a dropped connection leaves behind: a push with
- * nowhere to go is dropped rather than queued (bun/daemon.ts), so the ended
- * event that would have closed the panel can simply have been lost. Those are
- * closed out here with no exit status, the same shape a shell dying under a run
- * produces — which is honest, because what happened to it is exactly what we
- * could not see.
+ * mirror image, and it is what a dropped connection can leave behind. Run
+ * output IS held for an absent client and released by this very call
+ * (bun/server.ts `missed`), so the ordinary outage now returns the ending
+ * rather than losing it — but the hold only starts once the server knows the
+ * client has gone, and the seconds before a silently dead wire is noticed are
+ * written to a socket nobody reads. A run whose ending fell in there is closed
+ * out here with no exit status, the same shape a shell dying under a run
+ * produces, which is honest: what happened to it is exactly what we could not
+ * see.
+ *
+ * The release lands ahead of the answer, so anything it already closed out is
+ * gone from the panels by the time the answer is read. That is why what is
+ * still live is asked for a second time below rather than reused.
  */
 export async function reconcileRuns(): Promise<void> {
   const claim = handlers.claimRuns;
@@ -326,8 +333,14 @@ export async function reconcileRuns(): Promise<void> {
     return;
   }
   const alive = new Set(running);
+  // Asked again rather than reusing `ids`, because the answer may have arrived
+  // BEHIND output the server had been holding for this client, including the
+  // `ended` that closed a run out properly (remote.md §7). Such a run is gone
+  // from this set, and ending it a second time would replace its real exit code
+  // with the blank "Session ended".
+  const still = new Set([...runEventSinks].flatMap((sink) => sink.live()));
   for (const id of ids) {
-    if (!alive.has(id)) dispatchRunEvent({ id, kind: "ended", exitCode: null });
+    if (!alive.has(id) && still.has(id)) dispatchRunEvent({ id, kind: "ended", exitCode: null });
   }
 }
 

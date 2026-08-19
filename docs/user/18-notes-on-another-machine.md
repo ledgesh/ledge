@@ -281,13 +281,15 @@ Two other things can have become of that shell while you were away, and the term
 
 A block's output panel is the exception, and only across a restart. The panel lives in the page rather than on the server, so a wire that drops and comes back finds it still there with the run still going.
 
-Once the bar reads "disconnected" that panel reads "Disconnected" too, rather than "Running". Ledge cannot see the machine, so it neither claims the block finished nor claims it is still going. The output that already arrived stays on screen and the word says why no more is appearing. When the connection returns the panel goes back to "Running" if the server still has that run, and closes out if it does not.
-
-What the block printed while you were away does not appear. A terminal keeps a scrollback Ledge can ask for again, and an output panel keeps none, so a panel that comes back picks up from whatever the block prints next. A long build's last lines are still worth waiting for; a build whose interesting output was in the middle is worth running in the terminal drawer instead.
+Once the bar reads "disconnected" that panel reads "Disconnected" too, rather than "Running". Ledge cannot see the machine, so it neither claims the block finished nor claims it is still going. The output that already arrived stays on screen and the word says why no more is appearing. When the connection returns the panel goes back to "Running" if the server still has that run, and finishes if it does not.
 
 The block underneath it will not run again meanwhile. It may still be executing over there, and a second copy of a deploy is worse than a wait.
 
 That panel stops taking what you type at it too. A block that was waiting on a password is the case worth getting right: the answer would go nowhere, and nothing would say it had. The line beside the header that reads "typing here" reads "not connected" instead. The caret stays in the panel rather than jumping back to the note, because the connection may be back in seconds, and the panel takes your typing again the moment it is.
+
+What the block printed while you were away arrives when the connection does. The server holds it for you, in the order the shell said it, and the panel adds it to what was already there. A block that finished while you were away comes back finished, with its exit status, rather than closed out blank.
+
+Two limits on that. The last 256 KB is what is held, so a very long outage over a very chatty build loses the middle and keeps the end. And the twenty seconds or so before Ledge notices the connection has gone are lost too: nothing can be held back until something knows there is a reason to.
 
 You cannot start a run at all once the bar reads "disconnected". Every block's Run and terminal buttons go gray, hovering one names the machine that cannot be reached, and ⌘↩ answers with the same sentence. While the bar still reads "reconnecting…" they stay live, and a block run there really does run: the request waits for the connection like any other and goes as soon as it is back. This is the only thing Ledge refuses outright instead of trying and telling you what came back. A run is the one request with no answer to report: Ledge sends it and then listens for output, so a block sent to a machine that is not there would open a panel reading "Running" that nothing would ever correct.
 

@@ -98,4 +98,22 @@ describe("audienceOf", () => {
     expect(push.to("mac")).toBe(push.to("mac"));
     expect(push.to("mac")).not.toBe(push.to("phone"));
   });
+
+  // The one question a caller asks before pushing rather than after, and it
+  // exists for run output alone: dropping a state is fine because the next
+  // connection re-reads it, and dropping a sequence loses it (server.ts
+  // sendRunEvent). Read live, not memoized like `to`, since the whole point is
+  // that the answer changes when a client leaves.
+  test("has says whether that client is here, now", () => {
+    const clients = new Map<string, ServerPush>();
+    const push = audienceOf(clients, (held) => held);
+    expect(push.has("mac")).toBe(false);
+
+    clients.set("mac", recorder("mac", []));
+    expect(push.has("mac")).toBe(true);
+    expect(push.has("phone")).toBe(false);
+
+    clients.delete("mac");
+    expect(push.has("mac")).toBe(false);
+  });
 });

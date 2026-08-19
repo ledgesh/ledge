@@ -58,6 +58,29 @@ describe("reconcileRuns", () => {
     editor.off();
   });
 
+  // The answer can arrive BEHIND output the server had been holding for this
+  // client (remote.md §7), and that output may include the `ended` that closed
+  // a run out properly. Asking the editors again is what stops the blank
+  // "Session ended" from landing on top of a real exit code.
+  test("a run the released gap already ended is not ended a second time", async () => {
+    const live = ["finished", "alive"];
+    const editor = fakeEditor(live);
+    configureBridge({
+      claimRuns: (ids) => {
+        // What the release does on the way past: the panel took its ending and
+        // stopped being one of this editor's live runs.
+        expect(ids).toEqual(["finished", "alive"]);
+        live.splice(live.indexOf("finished"), 1);
+        return Promise.resolve(["alive"]);
+      },
+    });
+
+    await reconcileRuns();
+
+    expect(editor.applied).toEqual([]);
+    editor.off();
+  });
+
   test("a page that reloaded claims nothing and closes out nothing", async () => {
     const claims = fakeServer([]);
 

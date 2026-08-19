@@ -704,6 +704,56 @@ a deploy, or to leave it pulsing, which is a lie about a wire.
   nowhere while the wire is down, but dropping the panel drops the id from the
   next claim, and a run the claim leaves out is one the server interrupts.
 
+**What the block printed while nobody was listening is held rather than
+dropped.** A push with nowhere to go is dropped, and for every other push that
+is right: each describes a STATE, and the next connection re-reads it at boot.
+A run's output is not a state but a sequence, and there is nowhere to re-read
+it from. The shell said it once, at a connection that had gone. So
+`sendRunEvent` asks `push.has(client)` before it pushes and puts what it cannot
+deliver in `missed`, a per-client queue in `bun/server.ts`.
+
+- **The claim releases it, not the connection.** Everything stays held until
+  `inlineClaim` arrives, including after the client is back. That is what puts
+  the gap AHEAD of the live bytes: released at connection time instead, the
+  held output would race the output still arriving and a panel would get the
+  tail before the middle.
+- **The ending rides with it.** Among the held events may be the `ended` that
+  closes a run out properly, which is why the release runs before the
+  reconciliation in the same handler. A run that finished during the outage now
+  comes back with its real exit code and its last output, where before the
+  claim's empty answer closed it out blank.
+- **So `reconcileRuns` asks the editors again after the answer.** The answer
+  arrives behind the release, so a run the release already ended is gone from
+  the panels by then, and ending it a second time would replace that exit code
+  with the blank one (`mainview/editor/bridge.ts`). A client older than that
+  fix, against a server with the hold, reuses the ids it captured and overwrites
+  the exit code with "Session ended" — the old behavior, on a run that now has a
+  better answer available. Cosmetic, in one direction, on one kind of run, which
+  is why nothing here moved `PROTOCOL_VERSION`: no payload changed shape (§11).
+- **One order across all of a client's runs**, which is the order the shell said
+  them in. Two runs interleaving is a fact about what happened, and a queue per
+  run would replay them as two blocks.
+- **Capped at `SB_CAP`, and the markers are never what goes.** `holdRunEvent`
+  trims the oldest output; a `began` or an `ended` trimmed away would cost a
+  panel its state rather than some of its text, and leave it on "Running" for
+  good. The newest chunk survives even alone over the cap, so a gap cannot trim
+  itself to nothing.
+- **Not the drawer's ring, and the difference is the point.** The ring holds a
+  shell's WHOLE scrollback and is replayed over a reset screen, which works
+  because the server's copy is authoritative: a fresh attach gets the same
+  bytes. A panel is the only place its run's output lives, so replaying a capped
+  ring over it would DELETE what the panel already has and leave the tail in its
+  place. The hold is the gap, and the panel appends it.
+- **The seconds before the drop is noticed are still lost.** A silently dead
+  wire takes twenty to twenty-five seconds to detect (§7 above), and until then
+  the client is in the map, so those pushes are written to a socket nobody will
+  read. Closing that would mean sequencing every push and acking it, which is a
+  protocol, not a buffer. What this holds is everything from the moment the
+  server knows.
+- **A client that never comes back holds its gap until the daemon goes.** It is
+  bounded by the cap, and the runs behind it were already outliving that client
+  (the claim that would collect them is the one it is not making).
+
 **A run cannot be STARTED once the client is `lost`, and this is the one place
 the app predicts a failure rather than reporting it.** Everything else the view
 does over the wire is a request that comes back rejected, and a rejection can

@@ -476,10 +476,19 @@ export type LedgeRPC = {
       // WIRE dropped has a drawer already mounted and attaches nothing.
       //
       // The answer is which of `ids` the server is really running, so a client
-      // that missed an ended event while the wire was down (a push with nowhere
-      // to go is dropped; bun/daemon.ts) closes those panels out instead of
-      // leaving them on "Running" for good. `orphaned` is how many unclaimed
-      // runs were interrupted, for the log.
+      // that missed an ended event while the wire was down closes those panels
+      // out instead of leaving them on "Running" for good. `orphaned` is how
+      // many unclaimed runs were interrupted, for the log.
+      //
+      // IT ALSO RELEASES THE GAP, before it answers. Run output pushed at an
+      // absent client is held rather than dropped, because it is a sequence and
+      // nothing can re-read it (bun/server.ts `missed`); this call is what lets
+      // it go, so the held bytes land AHEAD of whatever the run has printed
+      // since. The `ended` for a run that finished during the outage is among
+      // them, which is why the release comes first: the panel takes its real
+      // exit code and its last output, and the answer below then has nothing
+      // left to close out. A client therefore reads the answer against what its
+      // panels show AFTER the release, not before (mainview/editor/bridge.ts).
       //
       // Scoped to the calling client, both ways: it is told about none of
       // another client's runs and interrupts none of them (remote.md §7). The
@@ -951,6 +960,12 @@ export type LedgeRPC = {
   webview: {
     requests: {};
     messages: {
+      // One streamed update about one running block, to the client that started
+      // it (see RunEvent). The one push that is HELD rather than dropped when
+      // its client is not there: everything else here describes a state the
+      // next connection re-reads, and a run's output is a sequence with nothing
+      // to re-read it from. `inlineClaim` above releases what was held, in the
+      // order the shell said it, before it answers.
       runEvent: RunEvent;
       // Raw pty output for one note's terminal drawer, base64-encoded. `sessionId`
       // lets the mounted drawer ignore output from a note other than the one it

@@ -40,6 +40,8 @@ export function fanout(pick: () => Iterable<ServerPush>): ServerPush {
  * A push addressed to a client that is not here is dropped, which is the
  * ordinary case rather than an edge: the watcher fires whenever a file moves, a
  * run keeps producing output, and both go on happily while nobody is attached.
+ * Whether to drop is not this layer's question, though — `has` is here so the
+ * one caller with a reason to care can ask first (bun/server.ts sendRunEvent).
  */
 export function audienceOf<T>(clients: ReadonlyMap<string, T>, pushOf: (held: T) => ServerPush): Audience {
   const addressed = new Map<string, ServerPush>();
@@ -58,5 +60,6 @@ export function audienceOf<T>(clients: ReadonlyMap<string, T>, pushOf: (held: T)
       }
       return one;
     },
+    has: (client) => clients.has(client),
   };
 }

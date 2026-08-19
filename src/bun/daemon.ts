@@ -142,7 +142,9 @@ export async function startDaemon(opts: DaemonOpts = {}): Promise<Daemon> {
   // whenever a file moves, a run keeps producing output, and both of those go
   // on happily while every client is away. A push with nowhere to go is
   // dropped, and the state it described is re-read at the next connection's
-  // boot.
+  // boot. One exception, and it is the one push that describes no state: a
+  // run's output is a sequence with nothing to re-read it from, so bun/server.ts
+  // holds that before it ever reaches this map.
   const clients = new Map<string, ServerConnection>();
 
   // The routing itself is bun/audience.ts, shared with the app's own shell:

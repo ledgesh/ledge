@@ -119,6 +119,59 @@ export interface Audience {
   /** One client, by the id from its hello. Dropped if it is not here, the same
    * as a push with nobody attached at all has always been. */
   to(client: string): ServerPush;
+  /** Whether that client is connected right now.
+   *
+   * The one push whose caller needs to know is a run's output: everything else
+   * describes a state the next connection re-reads at boot, and letting those
+   * drop is right. Run output is a sequence with nowhere to re-read it from,
+   * so `sendRunEvent` asks before it pushes and holds what it cannot deliver. */
+  has(client: string): boolean;
+}
+
+/** One client's share of the run output it was not there to hear (`missed` in
+ * createServer). `bytes` counts only what a cap can act on, which is output. */
+export interface HeldRuns {
+  events: InlineEvent[];
+  bytes: number;
+}
+
+/**
+ * Add one event to a client's gap, trimming to `cap`.
+ *
+ * The cap is the drawer's ring, because it is the same promise about the same
+ * kind of bytes and a second number would be a second thing to explain.
+ *
+ * Over it, the OLDEST output goes and the markers stay. Dropping a `began` or
+ * an `ended` would cost a panel its state rather than some of its text: a run
+ * whose ending was trimmed away sits on "Running" for good, which is the exact
+ * failure the hold exists to prevent. So a gap longer than the cap arrives with
+ * its middle missing and its ending intact, the way the drawer's scrollback
+ * arrives without its beginning.
+ *
+ * The newest chunk is never dropped, even when it alone is over the cap. A pty
+ * read is bounded by its own buffer, so this can overshoot by one of those and
+ * no further, and the alternative is a gap that trims itself down to nothing.
+ *
+ * Not the drawer's ring itself, though, and the difference is worth stating.
+ * That one holds the WHOLE scrollback and is replayed over a reset screen,
+ * which works because the server's copy is authoritative: a fresh attach gets
+ * exactly the same bytes. A panel is the only place its run's output lives, so
+ * replaying a capped ring over it would DELETE what the panel already has and
+ * leave the tail in its place. This holds the gap, and the panel appends it.
+ */
+export function holdRunEvent(held: HeldRuns, ev: InlineEvent, cap: number): void {
+  held.events.push(ev);
+  if (ev.type !== "output") return;
+  held.bytes += ev.data.length;
+  let chunks = held.events.reduce((n, e) => n + (e.type === "output" ? 1 : 0), 0);
+  while (held.bytes > cap && chunks > 1) {
+    const i = held.events.findIndex((e) => e.type === "output");
+    const oldest = held.events[i];
+    if (!oldest || oldest.type !== "output") break;
+    held.bytes -= oldest.data.length;
+    held.events.splice(i, 1);
+    chunks--;
+  }
 }
 
 // What the interpreter value "bun" means for a block that runs on THIS
@@ -578,6 +631,50 @@ export async function createServer(deps: { push: Audience; native: NativeDeps })
     }
   }
 
+  /**
+   * A run's output, kept for a client that was not there to hear it
+   * (remote.md §7).
+   *
+   * The one push in the app worth holding rather than dropping. Every other one
+   * describes a STATE, and the next connection re-reads it at boot: the note
+   * list, the presence list, the vault. A run's output is not a state but a
+   * sequence, and there is nowhere to re-read it from — the shell said it once,
+   * at a connection that had gone, and a panel that comes back with a hole in
+   * it has lost the middle of a build for good.
+   *
+   * Per client and in ONE order across all of that client's runs, which is the
+   * order the shell said them in. Two runs interleaving is a fact about what
+   * happened, and a queue per run would replay them as two blocks.
+   */
+  const missed = new Map<string, HeldRuns>();
+
+  function hold(ev: InlineEvent, client: string): void {
+    let held = missed.get(client);
+    if (!held) {
+      held = { events: [], bytes: 0 };
+      missed.set(client, held);
+    }
+    holdRunEvent(held, ev, SB_CAP);
+  }
+
+  /**
+   * Let the gap go, in order, to a client that is asking (inlineClaim).
+   *
+   * The entry is cleared FIRST, because sendRunEvent holds anything it finds
+   * there: with it still present these would go straight back in, and the
+   * buffer would never empty.
+   *
+   * Which also makes a release that is interrupted correct rather than lossy.
+   * A wire that dies partway through one puts the remainder back, in order,
+   * under a fresh entry, and the next claim picks up where this one stopped.
+   */
+  function release(client: string): void {
+    const held = missed.get(client);
+    missed.delete(client);
+    if (!held) return;
+    for (const ev of held.events) sendRunEvent(ev, client);
+  }
+
   // One pool event -> one runEvent message. Shared by the drain loop and
   // sessionRestart, which closes out open runs through the same path so the
   // view cannot tell a restart-killed run from a shell that died on its own.
@@ -587,6 +684,12 @@ export async function createServer(deps: { push: Audience; native: NativeDeps })
   // panel that minted it. Anywhere else it is an event about a block that is
   // not on screen.
   function sendRunEvent(ev: InlineEvent, client: string): void {
+    // Held rather than dropped when there is nobody to push to, and held on
+    // after they come back until `inlineClaim` releases them (see `missed`).
+    if (!push.has(client) || missed.has(client)) {
+      hold(ev, client);
+      return;
+    }
     const to = push.to(client);
     if (ev.type === "began") {
       to.runEvent({ id: ev.blockId, kind: "began" });
@@ -823,6 +926,12 @@ export async function createServer(deps: { push: Audience; native: NativeDeps })
       return { ok: true };
     },
     inlineClaim: ({ ids }) => {
+      // Everything this client missed, ahead of the answer and in the order the
+      // shell said it (see `missed`). Before the reconciliation rather than
+      // after, because an `ended` may be among these: released first, a run
+      // that finished during the outage arrives with its real exit code and its
+      // last output, instead of being closed out blank by the answer below.
+      release(client);
       // The client's runs, reconciled with this server's (see rpc-schema).
       // Nothing here is per session: a reloaded page has no sessions yet
       // either, and the orphans it is asking about are spread across every

@@ -1,11 +1,12 @@
 // What a reconnect does to a panel that was left on "Running".
 //
 // The wire dropping does not pause anything: the run keeps going on the server
-// and its events are pushed at a connection that is gone, and a push with
-// nowhere to go is dropped rather than queued (bun/daemon.ts). So a client that
-// comes back can be holding a panel for a run that finished while it was away,
-// with a run button disabled for good behind it. Coming back is therefore also
-// when it asks (bridge.ts reconcileRuns), and these state both answers.
+// and its events are pushed at a connection that is gone. Those are held for
+// the client they were addressed to and released by its next claim (bun/server.ts
+// `missed`), but the hold only starts once the server knows the client has left,
+// so a client that comes back can still be holding a panel for a run that
+// finished in the seconds before that. Coming back is therefore also when it
+// asks (bridge.ts reconcileRuns), and these state both answers.
 //
 // And what the outage ITSELF does to one, which is the other half: a panel is
 // the only thing on screen that claims a machine is doing something right now,

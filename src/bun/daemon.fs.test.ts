@@ -726,6 +726,91 @@ describe("runs the client that started them can no longer show", () => {
     expect(client.runs().some((ev) => ev.kind === "ended")).toBe(false);
   });
 
+  // The gap itself (server.ts `missed`, remote.md §7). A push with nowhere to
+  // go is dropped, which is right for every push that describes a STATE — the
+  // next connection re-reads it. A run's output is a sequence and there is
+  // nowhere to re-read it from, so it is held instead, and the claim a client
+  // makes on the way back is what releases it.
+  test("what a block printed while the client was away arrives when it comes back", async () => {
+    const { socketPath } = await daemonIn({ idleMs: 60_000 });
+    const first = await watching(socketPath, "mac-1");
+    await first.conn.requests.runBlock({
+      sessionId: "note-1",
+      id: "run-1",
+      code: "sleep 0.4; echo while-you-were-out",
+      language: "sh",
+    });
+    expect(await until(() => first.runs().some((ev) => ev.kind === "began"))).toBe(true);
+    first.conn.close();
+
+    // Long enough for the echo to have happened at a connection that is gone.
+    await new Promise((r) => setTimeout(r, 900));
+
+    const next = await watching(socketPath, "mac-1");
+    // Nothing yet: the hold is released by the claim and not by the connection,
+    // so that these land AHEAD of any live output rather than behind it.
+    expect(next.runs()).toEqual([]);
+
+    await next.conn.requests.inlineClaim({ ids: ["run-1"] });
+
+    expect(await until(() => next.runs().some((ev) => ev.kind === "ended"))).toBe(true);
+    const printed = next
+      .runs()
+      .filter((ev) => ev.kind === "output")
+      .map((ev) => Buffer.from((ev as { dataB64: string }).dataB64, "base64").toString())
+      .join("");
+    expect(printed).toContain("while-you-were-out");
+  });
+
+  // And the ending with it, which is the part that changes what the panel says.
+  // Without the hold this run is closed out by the empty answer below, with no
+  // exit status, because that is all the answer knows. With it the real one
+  // arrives first and the answer has nothing left to close.
+  test("a run that finished during the outage comes back with its exit code", async () => {
+    const { socketPath } = await daemonIn({ idleMs: 60_000 });
+    const first = await watching(socketPath, "mac-1");
+    // A subshell, so the status is the BLOCK's: a bare `exit` kills the note's
+    // own shell, and the pool closes that run out with no status at all.
+    await first.conn.requests.runBlock({ sessionId: "note-1", id: "run-1", code: "sleep 0.4; (exit 7)", language: "sh" });
+    expect(await until(() => first.runs().some((ev) => ev.kind === "began"))).toBe(true);
+    first.conn.close();
+    await new Promise((r) => setTimeout(r, 900));
+
+    const next = await watching(socketPath, "mac-1");
+    expect(await next.conn.requests.inlineClaim({ ids: ["run-1"] })).toEqual({ running: [], orphaned: 0 });
+
+    expect(await until(() => next.runs().some((ev) => ev.kind === "ended"))).toBe(true);
+    expect(next.runs().find((ev) => ev.kind === "ended")).toEqual({ id: "run-1", kind: "ended", exitCode: 7 });
+  });
+
+  // Held for the client it was addressed to and no other, exactly as the live
+  // push is: a run event carries an id only its own panel can do anything with,
+  // and a gap handed to the wrong client would be one device's block output
+  // appearing on another's screen.
+  test("one client's gap is not released to another", async () => {
+    const { socketPath } = await daemonIn({ idleMs: 60_000 });
+    const mac = await watching(socketPath, "mac-1");
+    await mac.conn.requests.runBlock({
+      sessionId: "note-1",
+      id: "run-1",
+      code: "sleep 0.4; echo the-macs-business",
+      language: "sh",
+    });
+    expect(await until(() => mac.runs().some((ev) => ev.kind === "began"))).toBe(true);
+    mac.conn.close();
+    await new Promise((r) => setTimeout(r, 900));
+
+    const phone = await watching(socketPath, "phone-1");
+    await phone.conn.requests.inlineClaim({ ids: [] });
+    await new Promise((r) => setTimeout(r, 200));
+    expect(phone.runs()).toEqual([]);
+
+    // Still waiting for the client whose run it is.
+    const back = await watching(socketPath, "mac-1");
+    await back.conn.requests.inlineClaim({ ids: ["run-1"] });
+    expect(await until(() => back.runs().some((ev) => ev.kind === "output"))).toBe(true);
+  });
+
   test("a run the server already finished is simply not confirmed", async () => {
     const { socketPath } = await daemonIn({ idleMs: 60_000 });
     const client = await watching(socketPath, "mac-1");
