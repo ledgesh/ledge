@@ -273,6 +273,8 @@ A drop the network does not announce takes twenty to twenty-five seconds to noti
 
 Anything running keeps running. Shells belong to the server and survive a wire dropping, so a build carries on while you are on a train and its output is waiting when you come back.
 
+An open terminal stops taking what you type once the bar reads "disconnected", and covers itself with a notice saying so. Nothing typed at a machine Ledge cannot reach would get there, and a terminal that does not echo looks exactly like one waiting on a slow command, so the notice is what tells the two apart. The last output stays readable underneath it and can still be selected and copied. While the bar reads "reconnecting…" the terminal takes your typing as usual, and it lands when the connection does.
+
 A terminal that was open the whole time fills in its own gap. Ledge asks that shell for its history the moment the connection is back and redraws it, so what printed while you were away is on screen with everything that came before it. The last 256 KB is what a shell keeps, on a reconnect exactly as on any other reattach.
 
 Two other things can have become of that shell while you were away, and the terminal tells you which. Another device may have taken it, which reads the same as it always does: the notice, and the Take This Shell button. Or it may have ended, and the terminal closes rather than reopening on a fresh prompt with none of your work in it.
@@ -284,6 +286,8 @@ Once the bar reads "disconnected" that panel reads "Disconnected" too, rather th
 What the block printed while you were away does not appear. A terminal keeps a scrollback Ledge can ask for again, and an output panel keeps none, so a panel that comes back picks up from whatever the block prints next. A long build's last lines are still worth waiting for; a build whose interesting output was in the middle is worth running in the terminal drawer instead.
 
 The block underneath it will not run again meanwhile. It may still be executing over there, and a second copy of a deploy is worse than a wait.
+
+That panel stops taking what you type at it too. A block that was waiting on a password is the case worth getting right: the answer would go nowhere, and nothing would say it had. The line beside the header that reads "typing here" reads "not connected" instead. The caret stays in the panel rather than jumping back to the note, because the connection may be back in seconds, and the panel takes your typing again the moment it is.
 
 You cannot start a run at all once the bar reads "disconnected". Every block's Run and terminal buttons go gray, hovering one names the machine that cannot be reached, and ⌘↩ answers with the same sentence. While the bar still reads "reconnecting…" they stay live, and a block run there really does run: the request waits for the connection like any other and goes as soon as it is back. This is the only thing Ledge refuses outright instead of trying and telling you what came back. A run is the one request with no answer to report: Ledge sends it and then listens for output, so a block sent to a machine that is not there would open a panel reading "Running" that nothing would ever correct.
 

@@ -24,6 +24,8 @@ An inline run can ask you things. When it prints its first output it takes the k
 
 If you pressed ⌘↩ and carried on writing, the run does not take the keyboard. Your caret moved on, so your typing stays in the note.
 
+If the connection to that machine drops, the panel stops taking your typing and the line reads "not connected" instead. It takes typing again as soon as the connection is back ([[Notes on Another Machine]]).
+
 To leave a running command, press Escape twice (the first Escape goes to the program, in case it wanted it) or ⌘Escape. While a full-screen program such as `vim` holds the panel, every Escape belongs to it, and ⌘Escape is the way out.
 
 On a phone a run never takes the keyboard by itself, because taking it would raise one over half the screen you just asked to look at. While a run is going and your keys are still in the note, its header carries a Tap to type button, which is how you answer a password prompt or a `[y/N]` there. Tapping the output does the same thing.

@@ -836,6 +836,20 @@ run this.`
   `unknown` and the panel says "Disconnected" (`remote.md` §7). The block stays
   gated behind it, because the program may still be executing over there and a
   second run would make two.
+- **Neither terminal is typed into while `lost`.** A panel on `unknown` and an
+  open terminal drawer both stop sending keystrokes, and both say why: the
+  panel's focus hint reads "not connected" in place of "typing here", and the
+  drawer covers its terminal with a notice. `inlineInput` and `terminalInput`
+  are `void` calls like the run, so a keystroke sent at a machine that is not
+  there is dropped without a word — and a terminal that does not echo is what
+  waiting on a slow shell looks like too. The case that earns the gate is the
+  one a run asks for by name: a password, typed into a terminal that quietly
+  discards it.
+- **Refusing input is not freezing.** A frozen panel is finished output and
+  will never take a key again; these take one the moment the wire returns.
+  Nothing is torn down on the way out and focus is not moved, because the
+  outage may be over in seconds and pulling the caret back into the prose
+  mid-sentence would be worse than the wait.
 
 ## 5. Tooltips
 

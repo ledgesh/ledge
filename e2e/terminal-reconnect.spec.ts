@@ -9,9 +9,15 @@
 // dropped as well. Coming back is therefore when the drawer asks, and these
 // state all three answers.
 //
+// And what the outage ITSELF does to one, which is the other half. A terminal
+// is the one piece of chrome that looks identical whether it is waiting on the
+// shell or unable to reach it: no echo comes back either way. So a drawer that
+// went on accepting keystrokes while the wire was down would be swallowing
+// them, and these state that it stops and says so.
+//
 // The sibling of inline-reconnect.spec.ts, which does the same for run panels.
 // PTYs are inert here; `__harness.shellClaim` is the fake server's side of the
-// question and `__harness.linkState` is the wire coming back.
+// question and `__harness.linkState` is the wire going and coming back.
 import { expect, test } from "@playwright/test";
 
 type Page = import("@playwright/test").Page;
@@ -31,6 +37,10 @@ async function reconnect(page: Page, others: { client: string; label: string }[]
   await page.evaluate(() => window.__harness.linkState("reconnecting", "The connection dropped. Reconnecting…"));
   await page.evaluate((list) => window.__harness.presence(list), others);
   await page.evaluate(() => window.__harness.linkState("live", ""));
+}
+
+async function drop(page: Page) {
+  await page.evaluate(() => window.__harness.linkState("lost", "Lost the connection: the network is unreachable."));
 }
 
 async function sessionId(page: Page) {
@@ -142,4 +152,74 @@ test("a shell that ended while the wire was down closes the drawer", async ({ pa
   await reconnect(page);
 
   await expect(page.locator(".xterm")).toHaveCount(0);
+});
+
+// --- the outage itself ------------------------------------------------------
+
+// The keystrokes go through a `void` request whose rejection nothing reads
+// (boot.tsx terminalInput), so a drawer that kept sending them would be
+// dropping every one without a word — and a terminal that does not echo is
+// what waiting on a slow shell looks like too. Refusing at the source is what
+// makes the two distinguishable, and the notice is what says which this is.
+test("a drawer whose wire is down takes nothing, and says why", async ({ page }) => {
+  await drop(page);
+
+  await expect(page.getByTestId("terminal-offline")).toBeVisible();
+  await expect(page.getByText("Not connected to This Mac.")).toBeVisible();
+
+  const before = await typed(page);
+  await page.keyboard.type("rm -rf /");
+  expect(await typed(page)).toBe(before);
+});
+
+// The whole state has to be temporary, or it is just a broken drawer: nothing
+// is torn down on the way out, so the shell is typed into again the moment the
+// wire is back — without a take-back, because this client never lost the shell.
+test("the drawer takes keystrokes again when the wire comes back", async ({ page }) => {
+  await drop(page);
+  await expect(page.getByTestId("terminal-offline")).toBeVisible();
+
+  await reconnect(page);
+
+  await expect(page.getByTestId("terminal-offline")).toHaveCount(0);
+  const before = await typed(page);
+  await page.locator(".xterm-screen").click();
+  await page.keyboard.type("echo hi");
+  await expect.poll(() => typed(page)).toBeGreaterThan(before);
+});
+
+// The regression guard for the obvious over-correction, and the same one
+// inline-reconnect.spec.ts keeps for the run gate. A request made while the
+// ladder is still running is HELD and replayed (shared/transport.ts), so these
+// keystrokes are going to arrive: refusing them here would throw away typing
+// over a wire that was merely slow, which is the failure being fixed and not a
+// milder version of it.
+test("a wire still being re-dialled does not gate the drawer", async ({ page }) => {
+  await page.evaluate(() =>
+    window.__harness.linkState("reconnecting", "The connection dropped. Reconnecting…"),
+  );
+
+  await expect(page.getByTestId("terminal-offline")).toHaveCount(0);
+  const before = await typed(page);
+  await page.keyboard.type("echo hi");
+  await expect.poll(() => typed(page)).toBeGreaterThan(before);
+});
+
+// Both notices at once, which is a real state: a device took the shell, and
+// then the wire went. The outage wins because it outranks in both directions —
+// whether that device still has the shell is not knowable from here, and the
+// button that would take it back is a request that cannot be sent.
+test("the outage outranks a shell another device is holding", async ({ page }) => {
+  await page.evaluate((sid) => window.__harness.terminalTaken(sid, "phone-1"), await sessionId(page));
+  await expect(page.getByTestId("terminal-taken")).toBeVisible();
+
+  await drop(page);
+
+  await expect(page.getByTestId("terminal-offline")).toBeVisible();
+  await expect(page.getByTestId("terminal-taken")).toHaveCount(0);
+
+  // And the fact underneath survived being covered: the shell is still
+  // somewhere else, so what comes back is the notice that says so.
+  await reconnect(page);
+  await expect(page.getByTestId("terminal-taken")).toBeVisible();
 });

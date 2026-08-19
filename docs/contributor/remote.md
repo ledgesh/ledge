@@ -725,6 +725,40 @@ help. Gating the ladder would refuse a run that was going to work, and would
 make this the one verb that treats `reconnecting` as a failure when every other
 thing the view does treats it as a wait.
 
+**Neither terminal takes what is typed at it while `lost`, and both say so.**
+`inlineInput` and `terminalInput` are `void` calls exactly as `runBlock` is, so
+a keystroke sent at a machine that is not there is dropped without a word. What
+makes this worse than the run rather than milder is that a terminal has no
+panel to be caught lying in: an xterm that does not echo is also what waiting
+on a slow shell looks like, so the silence is indistinguishable from working.
+The case that earns the gate is the one an interactive run asks for by name, a
+password, typed into a terminal that quietly discards it.
+
+- **The panel's tell is the hint beside its header.** An `unknown` run keeps
+  the keyboard and reads "not connected" where a running one reads "typing
+  here" (`mainview/editor/inlineTerm.ts` `accepts`). Focus is deliberately left
+  where it is: the outage may be over in seconds, and pulling the caret back
+  into the prose mid-sentence is worse than the wait. The touch client's "tap
+  to type" button is withdrawn for the duration, since it invites exactly the
+  thing being refused.
+- **The drawer's is a notice over the terminal**, in the shape the take-back
+  notice already had (`mainview/terminal/TerminalDrawer.tsx`), and it outranks
+  that one when both are true: while the wire is down, whether another device
+  still holds the shell is not knowable from here, and the button that would
+  take it back is a request that cannot be sent. It carries no Reconnect button
+  of its own, because the connection bar is on screen throughout and is that
+  button. It is pointer-transparent, so the last output stays selectable while
+  the notice explains why there is no more of it.
+- **Refusing input is not freezing.** A frozen panel is finished output whose
+  shell is gone for good; these are programs that may well still be running,
+  out of reach. Nothing is torn down on the way out, so both take a keystroke
+  again the moment the wire returns, with no take-back and no re-run.
+- **Both gate on `lost`, for the run gate's reason.** Keystrokes made
+  mid-ladder are held and replayed in order, which is a terminal that was
+  briefly slow. Refusing them would throw away typing over a wire that was
+  about to come back, which is the failure being fixed and not a milder form
+  of it.
+
 **The vault is re-asked too, and it is the one where being stale is not
 cosmetic.** The vault belongs to the server and relocks itself after fifteen
 idle minutes (`bun/vault.ts`). That relock is a `vaultChanged` push, dropped at a

@@ -10,8 +10,9 @@
 // And what the outage ITSELF does to one, which is the other half: a panel is
 // the only thing on screen that claims a machine is doing something right now,
 // so it is the one piece of chrome that can be caught lying. While the wire is
-// down it says so, and it neither invents an ending nor lets the block start a
-// second run over the top of a first that may still be going.
+// down it says so, and it neither invents an ending, nor lets the block start a
+// second run over the top of a first that may still be going, nor goes on
+// taking dictation for a program it cannot reach.
 //
 // PTYs are inert here; `__harness.holdRuns` is the fake server's side of that
 // question and `__harness.linkState` is the wire going and coming back.
@@ -36,6 +37,20 @@ async function runBlock(page: import("@playwright/test").Page) {
   const runs = await page.evaluate(() => window.__harness.inlineRuns());
   return runs[runs.length - 1].id;
 }
+
+// The same, made to speak: PTYs are inert here, so the first byte is pushed by
+// hand. It is also what puts the keyboard in the panel, since a run claims it
+// at the moment a "Password:" could appear (blocks.ts claimFocus) — which is
+// the only state in which typing at a panel means anything.
+async function talkingRun(page: import("@playwright/test").Page) {
+  const id = await runBlock(page);
+  await page.evaluate((runId) => window.__harness.runOutput(runId, "Password:"), id);
+  await expect.poll(() => page.evaluate(() => !!document.activeElement?.closest(".xterm"))).toBe(true);
+  return id;
+}
+
+const typedAt = (page: import("@playwright/test").Page, id: string) =>
+  page.evaluate((runId) => window.__harness.inlineInputs().filter((i) => i.id === runId).length, id);
 
 async function drop(page: import("@playwright/test").Page) {
   await page.evaluate(() => window.__harness.linkState("lost", "Lost the connection: the network is unreachable."));
@@ -194,4 +209,50 @@ test("a wire still being re-dialled does not gate anything", async ({ page }) =>
   // stops claiming anything.
   await drop(page);
   await expect(page.locator(".ledge-status")).toHaveText("Disconnected");
+});
+
+// The panel's other half of the same lie. Saying "Disconnected" in the header
+// while the caret below it goes on blinking and accepting characters is a
+// terminal that looks like it is taking a password and is not: `inlineInput`
+// is a `void` request (boot.tsx) whose rejection nothing reads, so every one
+// of those characters is dropped in silence. The worst case is exactly the one
+// a run asks for by name.
+test("a panel whose machine is gone stops taking what is typed at it", async ({ page }) => {
+  const id = await talkingRun(page);
+  await page.keyboard.type("before");
+  await expect.poll(() => typedAt(page, id)).toBeGreaterThan(0);
+  const before = await typedAt(page, id);
+
+  await drop(page);
+  await expect(page.locator(".ledge-status")).toHaveText("Disconnected");
+
+  await page.keyboard.type("hunter2");
+  expect(await typedAt(page, id)).toBe(before);
+  // Focus stays where it was, deliberately: the outage may be over in seconds,
+  // and yanking the caret back into the prose mid-sentence would be worse than
+  // the wait. So the hint beside the header is what changes instead.
+  expect(await page.evaluate(() => !!document.activeElement?.closest(".xterm"))).toBe(true);
+  await expect(page.locator(".ledge-focus-hint")).toHaveText("not connected");
+});
+
+// Not frozen, only unreachable: the difference between the two states is the
+// whole reason they are separate, and it is only visible on the way back.
+test("a panel takes what is typed at it again when the wire comes back", async ({ page }) => {
+  const id = await talkingRun(page);
+  // The server still has it, which is the case this is about: a run that was
+  // interrupted while nobody was listening ends on reconnect and its panel is
+  // frozen, and freezing is the OTHER no.
+  await page.evaluate((runId) => window.__harness.holdRuns([runId]), id);
+  await drop(page);
+  await page.keyboard.type("lost");
+  const before = await typedAt(page, id);
+
+  await reconnect(page);
+  // Still this client's run, because it was still claimed as one while unknown
+  // (bridge.ts runningRunIds), so the server did not interrupt it.
+  await expect(page.locator(".ledge-status")).toHaveText("Running");
+
+  await page.keyboard.type("hunter2");
+  await expect.poll(() => typedAt(page, id)).toBeGreaterThan(before);
+  await expect(page.locator(".ledge-focus-hint")).toHaveText("typing here");
 });

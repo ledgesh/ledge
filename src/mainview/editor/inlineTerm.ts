@@ -80,6 +80,11 @@ export class InlineTerm {
   private pinned = false;
   /** True while the command is still running (drives grid size / step-2 input). */
   live = true;
+  /** The machine this run is on has gone (RunInfo "unknown", blocks.ts
+   * setRunsLink). Kept apart from `live` because it is the opposite kind of
+   * no: a frozen panel will never take input again, and this one takes it
+   * again the moment the wire comes back. Derived in setState. */
+  private unreachable = false;
   /** A run's pending claim on the keyboard; see claimFocus(). */
   private claim: (() => boolean) | null = null;
   /** When the last Escape landed, for the leave-the-terminal double tap. */
@@ -115,7 +120,6 @@ export class InlineTerm {
     // get back out (the Escape grammar below).
     this.focusHint = document.createElement("span");
     this.focusHint.className = "ledge-focus-hint";
-    this.focusHint.textContent = "typing here";
     // The other half of that sentence, and only a touch client has it: there,
     // a run does NOT take the keyboard (editor/blocks.ts), so a program asking
     // for a password is waiting on a tap nothing else would announce. Shown
@@ -240,11 +244,12 @@ export class InlineTerm {
     this.term.loadAddon(this.fit);
     this.term.open(this.host);
 
-    // Keystrokes / pasted text -> the note's inline shell, but only while the
-    // block's command is running: a frozen terminal is read-only output (its text
-    // stays selectable for copy).
+    // Keystrokes / pasted text -> the note's inline shell, but only while there
+    // is something at the other end to take them (see accepts): a frozen
+    // terminal is read-only output, and a disconnected one is a program nothing
+    // typed here can reach. Either way the text stays selectable for copy.
     this.term.onData((data) => {
-      if (this.live) this.opts.onInput?.(data);
+      if (this.accepts()) this.opts.onInput?.(data);
     });
 
     // Clipboard, matching a normal terminal (and the drawer): xterm draws its own
@@ -275,7 +280,7 @@ export class InlineTerm {
       }
       if (cmd && (e.key === "v" || e.key === "V")) {
         e.preventDefault();
-        if (this.live) void readClipboard().then((text) => text && this.term.paste(text));
+        if (this.accepts()) void readClipboard().then((text) => text && this.term.paste(text));
         return false;
       }
       if (cmd && (e.key === "a" || e.key === "A")) {
@@ -314,6 +319,17 @@ export class InlineTerm {
   setState(run: RunInfo): void {
     this.dot.className = `ledge-dot ledge-dot-${run.state}`;
     this.status.textContent = statusText(run);
+    // Derived here rather than pushed separately: every transition into and out
+    // of "unknown" already comes through this method (blocks.ts setRunsLink),
+    // and one source for the header's word and the keyboard's gate is what
+    // keeps the panel from saying "Disconnected" while still taking dictation.
+    this.unreachable = run.state === "unknown";
+    this.setFocusHint();
+    // The touch client's invitation to type, withdrawn while there is nothing
+    // to type at (CSS shows it under .ledge-term-live, which an unknown run
+    // keeps). An inline style rather than a class because that is how the host
+    // chip below hides too, and because it beats the media query outright.
+    this.tapHint.style.display = this.unreachable ? "none" : "";
     // "local" is the reserved frontmatter word, not a place worth labeling.
     const remote = run.host && run.host !== "local" ? run.host : null;
     this.hostChip.textContent = remote ?? "";
@@ -387,14 +403,37 @@ export class InlineTerm {
       this.leave();
       return true;
     }
-    // A frozen panel is output, not a program: its shell has already gone, and
-    // a key sent into it would be typing at nothing.
-    if (!this.live) return false;
+    // Same gate the keyboard gets, for the same reason: a frozen panel is
+    // output rather than a program, and a disconnected one is a program out of
+    // reach. Answering false is what leaves the bar's key looking pressed and
+    // ignored rather than pressed and lost.
+    if (!this.accepts()) return false;
     this.opts.onInput?.(runKeyBytes(key, this.term.modes.applicationCursorKeysMode));
     return true;
   }
 
+  /**
+   * Whether a keystroke typed here can actually reach a program.
+   *
+   * Two different noes, and the header says which: `live` is a run that has
+   * ENDED, whose shell is gone for good, so the panel is output to be read;
+   * `unreachable` is a run whose machine went away mid-flight, so the program
+   * may well still be there and the keystroke simply cannot get to it. Both
+   * refuse input rather than send it, because a request made either way is
+   * dropped without a word (boot.tsx inputInline is a `void` call), and a
+   * password typed into a terminal that quietly discards it is the worst
+   * version of this.
+   */
+  private accepts(): boolean {
+    return this.live && !this.unreachable;
+  }
+
   private setFocusHint(): void {
+    // What the keyboard is doing, which is not always "going to the program":
+    // a run whose machine is unreachable keeps focus, because the outage may
+    // be over in seconds and yanking the caret back into the prose mid-sentence
+    // would be worse than the wait. So the hint says what is true instead.
+    this.focusHint.textContent = this.unreachable ? "not connected" : "typing here";
     this.exitKey.textContent = this.pinned ? "· ⌘esc to exit" : "· esc esc to exit";
   }
 

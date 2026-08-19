@@ -1250,6 +1250,23 @@ test.describe("giving the keyboard back, with no key to press", () => {
     await expect.poll(() => page.evaluate(IN_TERMINAL)).toBe(true);
   });
 
+  // The invitation is the only thing on this client that asks for a keystroke,
+  // so it is the only thing that can ask for one nothing can carry. A tap here
+  // would put the keyboard in a panel whose program is out of reach
+  // (inlineTerm.ts accepts), which is the silent drop the header just stopped
+  // telling: the two have to agree.
+  test("the invitation goes while the machine is out of reach", async ({ page }) => {
+    await speakingRun(page);
+    await expect(page.locator(".ledge-tap-hint")).toBeVisible();
+
+    await page.evaluate(() =>
+      window.__harness.linkState("lost", "Lost the connection: the network is unreachable."),
+    );
+
+    await expect(page.locator(".ledge-status")).toHaveText("Disconnected");
+    await expect(page.locator(".ledge-tap-hint")).toBeHidden();
+  });
+
   test("the invitation goes once it has been taken, and once the run is over", async ({
     page,
   }) => {

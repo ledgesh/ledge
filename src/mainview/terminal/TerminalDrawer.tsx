@@ -16,7 +16,7 @@ import {
 } from "./channel";
 import { Button } from "@/components/ui/button";
 import { copyText, readClipboard } from "../lib/clipboard";
-import { labelFor } from "../lib/connections";
+import { activeConnection, labelFor, linkState, subscribeConnections } from "../lib/connections";
 import { settings } from "../lib/settings";
 import { isDarkAppearance, onAppearanceChange } from "../lib/theme";
 import { eventToChord, matchesKey } from "../commands/keymap";
@@ -51,6 +51,11 @@ function xtermTheme(dark: boolean) {
 // session and replays the ring (rpc-schema terminalClaim). Mounting attaches,
 // reconnecting claims, and the difference is that one of them may take a shell
 // and spawn one while the other may do neither.
+//
+// While that wire is down the drawer also stops TAKING anything, and says so.
+// A terminal is the one piece of chrome that looks identical whether it is
+// waiting for the shell or unable to reach it, so without the notice below the
+// only feedback for a typed line is that no echo comes back.
 export function TerminalDrawer({
   sessionId,
   spawnHost,
@@ -81,6 +86,11 @@ export function TerminalDrawer({
   // Attaching again, which is how the shell comes back — published by the mount
   // effect, since that is where the terminal it writes into lives.
   const takeBack = useRef<() => void>(() => {});
+  // The wire to the machine this shell is on is down (lib/connections.ts).
+  // Only for drawing: what the keystroke path reads is linkState() itself, so
+  // a key pressed between the drop and the re-render is refused too.
+  const [offline, setOffline] = useState(() => linkState().state === "lost");
+  useEffect(() => subscribeConnections(() => setOffline(linkState().state === "lost")), []);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -104,9 +114,19 @@ export function TerminalDrawer({
     // refuses them either way — this is so the refused ones are never sent.
     let mine = false;
 
-    // Keystrokes / pasted text -> Bun.
+    // Keystrokes / pasted text -> Bun, while there is both a shell of ours to
+    // take them and a wire to carry them. Refused rather than sent, because
+    // `terminalInput` is a `void` call (boot.tsx) whose rejection nothing reads:
+    // a line typed at a dropped connection would vanish without a word.
+    //
+    // "lost" and not merely "reconnecting", matching the run gate in
+    // editor/blocks.ts and for the same reason: a request made mid-ladder is
+    // HELD and replayed when the wire comes back (shared/transport.ts), so
+    // refusing then would throw away keystrokes that were going to arrive. A
+    // reconnect that lands is a terminal that was briefly slow; a ladder that
+    // runs out is a terminal that is not connected to anything.
     const dataSub = term.onData((data) => {
-      if (mine) sendTerminalText(sessionId, data);
+      if (mine && linkState().state !== "lost") sendTerminalText(sessionId, data);
     });
 
     // Clipboard, matching a normal terminal. xterm draws its own selection (not a
@@ -299,7 +319,31 @@ export function TerminalDrawer({
   return (
     <div className="relative h-full w-full">
       <div ref={hostRef} className="h-full w-full" />
-      {takenBy !== null && (
+      {offline && (
+        // Over the terminal for the same reason the take-back notice is, and
+        // ahead of it when both are true: while the wire is down, whether
+        // another device still holds the shell is not knowable from here, and
+        // the button that would take it back is a request that cannot be sent.
+        //
+        // No Reconnect button of its own. The connection bar is on screen
+        // throughout and is already that button (workspace/ConnectionBar.tsx),
+        // which is also where the app reports that it is dialling on its own.
+        // Pointer-transparent, unlike the take-back notice, which has a button
+        // to press. Nothing here does, and an outage lasts as long as the
+        // outage: the terminal underneath stays clickable so its last output
+        // can still be selected and copied while this explains itself over it.
+        <div
+          className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background/85 px-4 text-center"
+          data-testid="terminal-offline"
+        >
+          <p className="text-[12px] font-medium">Not connected to {activeConnection().name}.</p>
+          <p className="max-w-[42ch] text-[11px] text-muted-foreground">
+            Nothing typed here reaches the shell. This is the last thing it said, and the drawer catches up when the
+            connection comes back.
+          </p>
+        </div>
+      )}
+      {!offline && takenBy !== null && (
         // Over the terminal rather than instead of it: what is underneath is
         // the last thing this shell said here, and it stays readable while the
         // notice explains why nothing has been added to it.
