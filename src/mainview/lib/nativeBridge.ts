@@ -28,7 +28,7 @@
 // Nothing in this file touches WebKit. `attachShell` at the bottom is the
 // three lines that do, and everything above it is testable in Bun.
 import { hostPart, validateConnection, validatePassword, type AuthMode } from "../../shared/connections";
-import { fedDuplex, type Duplex } from "../../shared/transport";
+import { fedDuplex, type ClientConnection, type Duplex } from "../../shared/transport";
 import {
   CLIENT_METHODS,
   fromBase64,
@@ -333,11 +333,11 @@ export function focusReporter(tell: (over: BarFace) => void): (over: BarFace) =>
  * shows what it is connected TO (remote.md §11).
  */
 export function nativeOverlay(
-  requests: RequestClient,
+  wire: Pick<ClientConnection, "requests" | "recheck">,
   shell: Pick<Shell, "call" | "destination">,
   build: string,
 ): RequestClient {
-  return { ...requests, ...clientSeams(requests, shell, build) };
+  return { ...wire.requests, ...clientSeams(wire, shell, build) };
 }
 
 /** One server this phone knows, as Swift stores it (ios/Sources/ShellConfig).
@@ -391,10 +391,11 @@ function newServerId(): string {
  * attached.
  */
 function clientSeams(
-  requests: RequestClient,
+  wire: Pick<ClientConnection, "requests" | "recheck">,
   shell: Pick<Shell, "call" | "destination">,
   build: string,
 ): Pick<RequestClient, ClientMethod> {
+  const requests = wire.requests;
   const stored = (): Promise<{ servers: ShellServer[]; selected: string }> =>
     shell.call("servers.list", {}) as Promise<{ servers: ShellServer[]; selected: string }>;
   const store = async (servers: ShellServer[], selected: string): Promise<void> => {
@@ -489,6 +490,16 @@ function clientSeams(
     // one already selected is not a no-op here and must not become one: it is
     // how a phone reconnects after the ladder has given up, which on a phone is
     // the ordinary path rather than the exception (ios.md §5).
+    // The phone's half of the same verb (rpc-schema.ts connectionReconnect). It
+    // reaches the same `recheck` the Mac's does, because the transport under
+    // both is literally the same module (ios.md §2) — a phone that has just come
+    // back to the foreground on a different network is the case it was written
+    // for.
+    connectionReconnect: async () => {
+      wire.recheck();
+      return { ok: true };
+    },
+
     connectionSelect: async ({ id }) => {
       const { servers, selected } = await stored();
       if (!servers.some((s) => s.id === id)) return { ok: false, error: NO_SUCH };
@@ -600,7 +611,13 @@ function clientSeams(
 
 /** What the overlay answers, for the test that holds it to CLIENT_METHODS. */
 export const iosClientMethods = (): string[] =>
-  Object.keys(clientSeams({} as RequestClient, { call: async () => null, destination: () => "" }, ""));
+  Object.keys(
+    clientSeams(
+      { requests: {} as RequestClient, recheck: () => {} },
+      { call: async () => null, destination: () => "" },
+      "",
+    ),
+  );
 
 declare global {
   interface Window {

@@ -267,6 +267,8 @@ This is the same arbitration a note gets from any other writer, including an age
 
 The bar reads "reconnecting…" and Ledge re-dials for about thirty seconds. Requests made in the meantime wait rather than fail.
 
+A machine that has been asleep is asked about at once rather than after the usual twenty seconds, because a lid that opens usually opens onto a connection that ended hours ago.
+
 A drop the network does not announce takes twenty to twenty-five seconds to notice. A connection that closes tells Ledge straight away. A network that simply goes away, such as wifi dropping or a laptop moving between networks, sends nothing at all, so Ledge asks the server every 5 seconds and treats three unanswered asks as a lost wire. The same goes for a server that stops answering while the network is fine. The bar still reads as connected until then, and anything you send in that window is held and sent again once the connection is back.
 
 Anything running keeps running. Shells belong to the server and survive a wire dropping, so a build carries on while you are on a train and its output is waiting when you come back.
@@ -285,13 +287,23 @@ A save that was in flight when the wire dropped is retried once the connection i
 
 Notes that changed on the server while you were away are re-read as soon as the connection is back. Another device saving, a checkout in a terminal, an agent writing to a note: none of that reaches you while the wire is down, so Ledge asks every open workspace for its list again and re-reads the notes you have open. A note somebody added appears in the sidebar, and an open note you had not touched pours in the newer text.
 
-A note you were editing keeps exactly what you typed. If that note also changed on the server, the two are settled on your next save the same way any two devices editing at once are (see above): your version is saved, and the one it displaced goes to the workspace trash with a notice naming the note.
+A note you were editing across a brief drop keeps exactly what you typed. If that note also changed on the server, the two are settled on your next save the same way any two devices editing at once are (see above): your version is saved, and the one it displaced goes to the workspace trash with a notice naming the note.
+
+After a real outage it goes the other way, and it is worth knowing which way before it happens. Once the bar has read "disconnected", Ledge stops trying to save and holds what you type in the tab, with a red dot on it saying so. When the connection comes back, a note nobody else touched is simply saved. A note that did change on the server takes the server's version, and what you had typed goes to that workspace trash with a notice naming the note.
+
+The reason it flips is that the argument for keeping your version is that you are the one at the keyboard, which is exactly what an outage undoes: a laptop shut in a bag for a day, while the same note is edited from a phone, has the older text and the emptier claim to it. Neither version is thrown away either way, and restoring from the trash puts the copy next to the live note rather than over it, so you can merge the two yourself.
 
 Locked notes relock while you are away, and Ledge catches up the moment the connection is back. The vault belongs to the server and shuts itself after 15 minutes with nothing to do ([[Note Locking]]), and a connection that is down is 15 quiet minutes. So a locked note you had open goes back to its placeholder on the reconnect, exactly as if you had pressed ⌘L, and unlocking again pours it back. Unlocking on another machine reaches you the same way: a note sitting behind its placeholder opens as soon as the connection is back.
 
 Anything you typed into a locked note during the outage goes with it. That text could not have reached the disk either way, because writing a locked note needs the vault open, so copy it somewhere else before you reconnect if you want to keep it.
 
-If the reconnect runs out, the bar reads "disconnected" and Ledge stops accepting work for a machine it cannot reach. Choose the connection again from the picker to start over.
+If the re-dialling runs out, the bar reads "disconnected" and Ledge stops accepting work for a machine it cannot reach. It keeps trying underneath, every thirty seconds, for as long as the window is open, so a laptop that wakes up on a working network reconnects itself with nothing for you to do. Clicking the bar tries immediately instead of waiting for the next attempt.
+
+Ledge also tries the moment your machine wakes and the moment your operating system says the network is back, which are the two times a connection that has been failing for hours suddenly works.
+
+Reconnecting to a server that has restarted meanwhile works too, and it is what usually happens after a long sleep: a server with nobody connected shuts itself down after a minute, and connecting starts a fresh one. Your notes are on its disk and are all there. What does not survive is anything that was only in the old server's memory, so shells and running blocks are gone, and the terminal and any output panels say so rather than showing you a prompt that is not there.
+
+A short absence keeps them. Ledge asks every server it connects to hold its shells for five minutes after the connection ends, which covers a lift, a lid closed for a meeting, or a walk between buildings.
 
 Ledge also stops when the server hangs up on purpose rather than the wire failing, and hovering the bar says why. One reason is the server shutting down. The other is a second copy of Ledge on this same device connecting to it: the server keeps the newer connection and tells the older one, which stops instead of the two taking the server off each other in a loop. Another device connecting is not a reason (see above).
 

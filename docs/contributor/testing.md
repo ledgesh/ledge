@@ -274,6 +274,24 @@ its own, and why this step is where that claim is settled. SIGSTOP rather than a
 kill for the cut's reason turned around: the point is a server that is still
 THERE, so the same run of the same process has to answer once it is resumed.
 
+And it kills its own server. `[restart]` sends SIGKILL to the daemon and lets
+the autostart bring a fresh one up, which is the third instrument and the
+opposite of both above: the wire is fine, the process is gone, and the process
+that answers next is a different one. It is the ordinary overnight case rather
+than an exotic one, because a daemon with nobody connected exits after a minute
+anyway, so a laptop that slept always wakes to a new process. What it settles is
+that a client adopts that server instead of refusing it, and that it says `lost`
+before `live` on the way in, which is what makes the app above hold its unsaved
+buffers rather than let a day-old one win (`remote.md` §7).
+
+`[beat]` is the fourth, and it reuses the cut: it lets the ladder run out
+against a wire that is genuinely gone, checks that a request made in that state
+is refused rather than held, and then mends the wire and waits for a recovery
+nobody asked for. Its ladder and beat are both shortened by the options, because
+what is under test is that there IS something after the ladder and that it
+lands; waiting out the shipped numbers would add a minute of sleeping and no
+claim.
+
 For `host:` EXECUTION hosts, which is a different feature (`remote.md` §6),
 the container is still yours to build, and the shape is: `openssh-server`,
 published on `127.0.0.1:22` so a bare `host: 127.0.0.1` is a

@@ -302,6 +302,46 @@ test("a connection that will not come back is disconnected, not reconnecting", a
   await expect(bar(page)).toHaveAttribute("title", /host is down/);
 });
 
+// The bar has one click and two verbs under it. Switching machines is the
+// everyday one and the wrong one to offer at the moment the machine you are on
+// cannot be reached: the switch reloads the page, so it is refused outright
+// while anything is unsaved, and a chooser that opens only to say no would be
+// the app's entire visible answer to being disconnected.
+//
+// The app dials on its own either way (remote.md §7), so this is never the only
+// way back. It is for the person who can see their wifi return.
+test("the bar reconnects while the link is down, and switches while it is up", async ({ page }) => {
+  await bar(page).click();
+  await expect(dialog(page)).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(dialog(page)).toHaveCount(0);
+  expect(await page.evaluate(() => window.__harness.reconnects())).toBe(0);
+
+  await page.evaluate(() => window.__harness.linkState("lost", "Lost the connection: host is down."));
+  await bar(page).click();
+  await expect(dialog(page)).toHaveCount(0);
+  expect(await page.evaluate(() => window.__harness.reconnects())).toBe(1);
+  // A press with nothing to await must still answer for itself: the dial's
+  // outcome arrives later as a link state, and without this the button reads as
+  // dead every time the server is still unreachable.
+  await expect(page.getByText(/Trying to reach This Mac/)).toBeVisible();
+});
+
+// And it is offered nowhere while the link is fine. A "Reconnect" that is
+// present and inert on a working connection teaches nobody anything
+// (interactions.md §8).
+test("reconnect is absent from the palette until there is something to reconnect", async ({ page }) => {
+  await page.keyboard.press("Shift+Meta+p");
+  await page.keyboard.type("Reconnect");
+  await expect(page.getByText("Reconnect", { exact: true })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+
+  await page.evaluate(() => window.__harness.linkState("lost", "Lost the connection: host is down."));
+  await page.keyboard.press("Shift+Meta+p");
+  await page.keyboard.type("Reconnect");
+  await expect(page.getByText("Reconnect", { exact: true })).toBeVisible();
+});
+
 // Who else is on the machine (remote.md §7). It is in this bar because it is
 // the same question one step further in — which machine, whether it can be
 // reached, and who else is on it — and because the device named here is the one

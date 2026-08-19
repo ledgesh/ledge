@@ -10,7 +10,7 @@
 // check are the SAME code the Mac runs over ssh. Nothing about being a phone
 // re-implements any of it (§2), and the parts that are genuinely a phone's —
 // the socket, the pasteboard, the keys — are the ten strings the bridge names.
-import { reconnectingClient } from "../shared/transport";
+import { reconnectingClient, SESSION_HOLD_MS } from "../shared/transport";
 import { sessionHold } from "../shared/wire";
 import { BUILD_VERSION } from "../shared/version";
 import { bootView, viewPush } from "./boot";
@@ -34,26 +34,6 @@ const mark = (what: string): void => void marks.push(`${what}=${Math.round(perfo
 // been composited. An approximation, and the only one a page can make.
 const painted = (): Promise<void> =>
   new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
-
-/**
- * How long this client asks a server to keep its sessions once it goes away
- * (wire.ts `Hello.hold`), and the one number in the protocol that is a phone's
- * rather than a server's.
- *
- * Stated at connect time because iOS gives no useful moment to state it later:
- * the app is suspended shortly after it leaves the foreground, and a client
- * that is force-quit or killed for memory never gets a moment at all. So this
- * says what should happen when this connection ends by ANY means, before it has
- * ended by any of them.
- *
- * Five minutes is what a locked screen, a message answered and a way back costs.
- * It is deliberately far short of the daemon's ceiling (bun/daemon.ts
- * `HOLD_MAX_MS`), which is there for a client asking something absurd rather
- * than for this one: the ordinary phone should be granted what it asks for
- * whole, and a number that always came back clamped would teach nobody anything
- * when it did.
- */
-export const SESSION_HOLD_MS = 5 * 60_000;
 
 async function start(): Promise<void> {
   const shell = attachShell();
@@ -157,7 +137,7 @@ async function start(): Promise<void> {
   // answers with a new instance, and nothing below the transport can rebuild a
   // session's state (shared/transport.ts). Reloading is how a page starts over,
   // and `lib/connections.ts` does it once, after flushing.
-  await bootView(nativeOverlay(wire.requests, shell, peer.build));
+  await bootView(nativeOverlay(wire, shell, peer.build));
   mark("view");
   await painted();
   mark("paint");

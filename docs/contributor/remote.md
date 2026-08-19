@@ -756,7 +756,10 @@ live note rather than over it, so the merge is available and stays the user's.
 
 Three things narrow it, and each is a case where the flip would be wrong.
 Nothing happens unless saving was actually held, so a flap is untouched and a
-phone changing cell never loses a paragraph. A buffer typed into while its text
+phone changing cell never loses a paragraph. (A server that restarted holds
+saving too, on its way back: it announces `lost` before `live` precisely so that
+this rule sees it, since a laptop that slept overnight can be reconnected inside
+the fast ladder and would otherwise look like a flap.) A buffer typed into while its text
 was being parked is not stranded any more and keeps what it has, checked by
 comparing the parked text against the current one. And a stash that cannot land
 — a relocked vault, a server too old to know the method (§11), a wire that went
@@ -892,6 +895,22 @@ was merely starting. And what a pong proves is that the process holding the
 notes is reading its socket and writing to it — which is the question, and which
 no hop between the two ends can answer on that process's behalf.
 
+**A client that was suspended asks at once instead of counting.** The beat
+counts TICKS rather than reading a clock, and that is what makes it safe on a
+device the operating system stops: an app that woke after ten minutes has fired
+no timers, so elapsed time says nothing about the wire and a client that read
+one would drop a session it still had. The other half of that rule is this one.
+Having not declared anything, a client that finds a beat late by more than the
+whole patience budget probes immediately, and treats that one probe as the
+wire's last chance — five seconds to the verdict rather than twenty.
+
+The narrowed budget is the point rather than a shortcut. Three probes exist
+because a wire can be slow without being dead, and that is not the question
+after a suspension: the far end either still has this socket or it does not, and
+a pong over any working link is milliseconds. What a lid usually opens onto is
+an ssh whose far end exited and a daemon that idled out hours ago. Being wrong
+costs a reconnect, and a reconnect is now something that finishes by itself.
+
 **A client speaks when it has been quiet in EITHER direction.** The two
 questions are asked for different ends: what ARRIVED is how this client knows
 the server is there, and what LEFT is how the server knows this client is. A
@@ -968,11 +987,56 @@ answer is that a client says what it needs and notes are never at stake either
 way. Requests made while it climbs are HELD, not failed. When it runs
 out, the state is `lost`, what was held is refused with the last reason, and
 nothing new is accepted — an app that keeps taking requests for a server it
-cannot reach looks like it is working. Recovery from there is choosing the
-connection again (`interactions.md` §4-1), which rebuilds everything from boot.
-That recovery has to work on a connection the manager still considers active,
-which is why a wire giving up is reported to `connectionManager.ts`: choosing
-the server already being served is otherwise a deliberate no-op.
+cannot reach looks like it is working.
+
+**The ladder ends in a beat rather than a wall.** Everything in the paragraph
+above is about the app's contract with its callers, and none of it changes; what
+changes underneath is that the client keeps dialling, every thirty seconds,
+until it lands or is closed (`RETRY_EVERY_MS`). The two halves are deliberately
+not the same fact. Reporting `reconnecting` through the beat would be friendlier
+and would be a lie with teeth, because a request in that state WAITS, and
+waiting on a wire that is dialled twice a minute is the hang that being `lost`
+exists to prevent.
+
+Ending for good was the shape before this, and it made every outage longer than
+thirty-two seconds permanent: a closed lid, a flight, a hotel with a captive
+portal. It also left the app in a state only a person could get it out of, by
+finding the chrome and choosing the same server again — which is a page reload,
+and which `interactions.md` §4-1 now refuses outright while anything is unsaved,
+so the one documented recovery was unavailable in exactly the case that had cost
+somebody their writing.
+
+Half a minute is chosen against what each half of the mistake costs. A dial that
+finds nothing is a TCP handshake to a host that does not answer, so beating
+faster buys a smaller number and pays for it all day; beating slower means a lid
+that opens onto a working network waits, visibly, for nothing. It is rarely what
+anybody waits on either, because three things bring the next dial forward to now
+(`recheck` on the connection): a machine that has just woken, the operating
+system saying an interface came back (`online` in the view), and the person who
+pressed the button.
+
+**A `bye` still stops for good, and that is the whole of the split.** A wire
+that broke cannot say anything, so a reason means the server decided, and no
+amount of beating improves on an answer. Displacement is what makes it matter
+rather than merely tidy: the daemon serves one client and gives the session to
+whoever dialled last, so two beating clients would kick each other off twice a
+minute forever, at an ssh handshake and a server process apiece.
+
+**Reconnect is a verb** (`connectionReconnect`, `interactions.md` §4-1). It is
+not a request to the server — there may be no server to ask — but to this
+client's own shell, telling the wire to stop waiting for its next beat. The
+indicator's click means it while the link is down and means the switcher while
+it is up, because the switcher is the wrong offer at the moment the machine you
+are on cannot be reached. Nothing is awaited and nothing is returned: what came
+of the dial arrives as a link state, the way it does when nobody asked.
+
+**A wire that comes back on its own is reported, like one that gives up.** A
+connection giving up is told to `connectionManager.ts` so that choosing the same
+server again attaches instead of being the deliberate no-op it is for a working
+one. Now that a lost connection can recover by itself, the recovery has to be
+told too: a record left standing would make choosing that server tear down a
+session that was already working and rebuild the identical one, at the cost of a
+page reload and everything unsaved on it.
 
 **A client can ask for its sessions to be kept, and the server sets the term.**
 The handshake carries two numbers under one name (`wire.ts` `Hello.hold`): from
@@ -997,10 +1061,15 @@ Three rules make it a policy rather than a lever:
 - **A hold is a deadline, not an exemption.** `running()` still overrides both,
   and a hold that expires exits exactly as the sixty seconds would have.
 
-The client that needs this is a phone: iOS suspends an app shortly after it
-leaves the foreground and can kill it outright, so the ask has to be on file
-before the connection ends by any means (`ios.md` §5, and `HOLD_MAX_MS` for the
-ceiling and why it is where it is).
+Every client asks, for five minutes (`SESSION_HOLD_MS`). The phone is the
+client that forced the question — iOS suspends an app shortly after it leaves
+the foreground and can kill it outright, so the ask has to be on file before the
+connection ends by any means (`ios.md` §5) — but the reasoning was never about
+phones. A Mac in a lift, on hotel wifi, or with its lid shut for the length of a
+meeting is in the same position and says nothing on the way out either, and a
+Mac that asked for nothing lost its shells the moment `IDLE_EXIT_MS` fired
+however briefly it had been away. `HOLD_MAX_MS` is the ceiling and why it is
+where it is.
 
 **The ladder does not start over unless the connection lasted.** A ladder that
 resets on every success is not bounded, because a connection that dies the
@@ -1051,13 +1120,37 @@ Three details decide whether that is safe rather than merely plausible:
   connection would be forgotten at the exact moment a replay needs it.
 - **The handshake names the server's RUN** (`Hello.instance`). A different
   instance answering means the op log is empty and a replay cannot be told from
-  a first attempt, so what was in flight is failed instead. That case needs the
-  daemon to have died and restarted between two dials, and it is the one case
-  where guessing is a corrupted note.
+  a first attempt, so what was in flight under an op is failed instead. A read
+  in flight is carried: the line is the same one `needsOp` draws, since a write
+  replayed into an empty record could apply twice and a read is a question about
+  right now that any server holding the notes can answer.
 
 **Only a transport failure is replayed.** A handler saying no is an ANSWER and
 it is final; the difference is carried by a type (`ConnectionLost`) rather than
 by matching on the wording of a message.
+
+**A restarted server is reconnected to, not refused.** Failing what was in
+flight is the op log's rule and it stays; refusing the CONNECTION was a separate
+decision, and it was wrong. The daemon idles out a minute after its last client
+leaves, so a laptop that slept always wakes to a different process than the one
+it left: the ordinary overnight case was the case that could not recover, and it
+needed a person to notice and choose the same server again.
+
+The restart is announced as a `lost` and then a `live`, rather than as a live
+connection with a footnote, because that pair is exactly what the app above does
+about it. Everything the previous process held is gone — the op log, the shells,
+the runs, the vault's idle clock — and each of those has a reconnect mechanism
+already: `holdSaves` and `resolveStrandedNotes` settle the buffers against a
+server that has moved on, `inlineClaim` closes out runs nobody is executing,
+`terminalClaim` finds no shell, `vaultState` re-reads. A restart that reported
+only `live` would skip all of them, and the first of those is somebody's
+writing.
+
+That pair is also the only reason a phone-length flap and an overnight sleep can
+be told apart at all. The stranded-buffer rule turns on saving having actually
+been suspended, and the fast ladder never suspends anything: without the `lost`
+on a restart, a laptop that reconnected inside thirty-two seconds would let its
+day-old buffer win the argument the whole rule exists to settle.
 
 ## 8. One connection at a time
 

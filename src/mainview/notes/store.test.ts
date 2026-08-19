@@ -20,6 +20,7 @@ import {
   resetDocs,
   retargetDoc,
   saveNow,
+  savesSettled,
   seedSlug,
   strandedCandidates,
   type DocHandlers,
@@ -1095,6 +1096,50 @@ describe("the save hold", () => {
     releaseSaves();
     await tick();
     expect(fs.writes).toEqual([{ path: "/notes/a.md", text: "v1" }]);
+  });
+
+  // The gap between the two halves of a reconnect is now microseconds wide: a
+  // server that restarted announces `lost` and `live` in one breath
+  // (shared/transport.ts). A save that was already out is failed by the
+  // transport and puts its text BACK a moment later, so anyone deciding what a
+  // buffer contains has to wait for that moment or decide against a buffer that
+  // looks clean and is not.
+  test("settling waits for a save that was already out to finish failing", async () => {
+    const fs = fakeBridge();
+    bind("doc-1", "/notes/a.md", noop());
+    seedSlug("doc-1", "# A\n\nfrom disk\n", 1000);
+    const release = fs.hold();
+
+    noteChanged("doc-1", "typed just before the wire went");
+    void saveNow("doc-1");
+    await tick();
+
+    // Mid-write, and the buffer looks clean from outside because the text is in
+    // the request rather than in `pending`.
+    let landed = false;
+    void savesSettled().then(() => (landed = true));
+    holdSaves();
+    await tick();
+    expect(landed).toBe(false);
+    expect(strandedCandidates()).toEqual([]);
+
+    // The wire fails it. The text comes back, and only now is the buffer's true
+    // state readable.
+    fs.failNextWrite = true;
+    release();
+    await savesSettled();
+    expect(strandedCandidates().map((c) => c.text)).toEqual(["typed just before the wire went"]);
+  });
+
+  test("and settles at once when nothing is out", async () => {
+    fakeBridge();
+    bind("doc-1", "/notes/a.md", noop());
+    holdSaves();
+    noteChanged("doc-1", "typed while the wire was down");
+    let landed = false;
+    void savesSettled().then(() => (landed = true));
+    await tick();
+    expect(landed).toBe(true);
   });
 
   // A connection switch is about to reload the page, so a hold must never be

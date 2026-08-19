@@ -950,7 +950,12 @@ describe("a client that reconnects", () => {
     };
   }
 
-  const instant = { delaysMs: [0, 0, 0], sleep: () => Promise.resolve() };
+  // A ladder with no waiting in it, and no beat after it. `retryEveryMs: 0` is
+  // the heartbeat's `everyMs: 0` one layer up: the tests below that are about
+  // giving up need the moment the ladder ends to be an ENDING, and a fixture
+  // whose sleep resolves instantly would otherwise dial in a tight loop. The
+  // beat has its own tests, with a sleep it can be watched through.
+  const instant = { delaysMs: [0, 0, 0], sleep: () => Promise.resolve(), retryEveryMs: 0 };
 
   test("a request in flight when the wire drops is finished by the next connection", async () => {
     let writes = 0;
@@ -1084,9 +1089,67 @@ describe("a client that reconnects", () => {
     await settle();
     wire.cut();
     await expect(pending).rejects.toThrow("the server restarted");
-    expect(states.at(-1)).toContain("lost:");
   });
 
+  // And then talks to it. Refusing was the old answer, and it made the ordinary
+  // overnight case unrecoverable without a human: the daemon idles out a minute
+  // after its last client leaves, so a laptop that slept ALWAYS wakes to a
+  // different process than the one it left.
+  //
+  // The pair of announcements is the load-bearing part. `lost` is what suspends
+  // saving above and `live` is what settles the buffers against a server that
+  // has moved on (notes/store.ts, workspace/editorPool.ts), so a restart that
+  // reported only `live` would let a stale buffer win exactly the argument this
+  // whole phase is about.
+  test("and then talks to it, saying plainly that everything it was holding is gone", async () => {
+    let n = 0;
+    const wire = reconnectable(handlers(), { instance: () => `run-${++n}` });
+    const states: string[] = [];
+    const client = await reconnectingClient({
+      dial: wire.dial,
+      push: recordingPush().push,
+      build: "0.1.0",
+      onState: (s, d) => states.push(`${s}:${d}`),
+      ...instant,
+    });
+    wire.cut();
+    expect(await client.requests.vaultState({})).toEqual({ state: "locked" });
+    expect(states).toEqual([
+      "reconnecting:The connection dropped. Reconnecting…",
+      "lost:The server restarted, so everything it was holding is gone.",
+      "live:",
+    ]);
+  });
+
+  // The op line, drawn where the op log draws it: a write cannot be replayed
+  // into an empty record, and a read is a question about right now.
+  test("a read in flight across a restart is carried; a write is not", async () => {
+    let n = 0;
+    let slow!: () => void;
+    const waited = new Promise<void>((r) => (slow = r));
+    const wire = reconnectable(
+      handlers({
+        noteWrite: () => new Promise(() => {}),
+        vaultState: async () => {
+          await waited; // the answer the first server never gets to send
+          return { state: "locked" };
+        },
+      }),
+      { instance: () => `run-${++n}` },
+    );
+    const client = await reconnectingClient({ dial: wire.dial, push: recordingPush().push, build: "0.1.0", ...instant });
+    const read = client.requests.vaultState({});
+    const write = client.requests.noteWrite({ path: "/a.md", text: "x", baseMtimeMs: null });
+    await settle();
+    slow();
+    wire.cut();
+    await expect(write).rejects.toThrow("One request could not be finished: the server restarted.");
+    expect(await read).toEqual({ state: "locked" });
+  });
+
+  // With no beat under it (`retryEveryMs: 0`), which is the shape a one-shot
+  // wants: a client with somewhere else to be should not be kept alive by its
+  // own hope. The app's shape is the test below this one.
   test("a ladder that runs out gives up, says the last reason, and stops pretending", async () => {
     let alive = true;
     let cut!: () => void;
@@ -1120,6 +1183,186 @@ describe("a client that reconnects", () => {
     await expect(client.requests.vaultState({})).rejects.toThrow("There is no connection to the server.");
   });
 
+  // --- and the ladder that does not end -----------------------------------
+  //
+  // Every test above turns the beat off, because they are about the ladder.
+  // These are about what happens after it, which is the difference between an
+  // outage that costs a pause and one that costs the session: a closed lid, a
+  // flight, a hotel with a captive portal are all longer than thirty seconds,
+  // and all of them used to be permanent.
+
+  /** A sleep held open, so a beat can be watched rather than waited for. Every
+   * `sleep` in the client comes through here — the ladder's rungs and the beat
+   * alike — so a test says exactly how many waits it is releasing. */
+  function pacer() {
+    let waiting: Array<() => void> = [];
+    return {
+      sleep: () => new Promise<void>((resolve) => waiting.push(resolve)),
+      /** Let every current wait finish, and let what it starts settle. */
+      async release(): Promise<void> {
+        for (const resolve of waiting.splice(0)) resolve();
+        await settle();
+      },
+      waiting: () => waiting.length,
+    };
+  }
+
+  /** A server that can be taken away and put back, which is a network rather
+   * than a peer: `dial` throws while it is down, exactly as ssh does. */
+  function flaky() {
+    let up = true;
+    let dials = 0;
+    let cut: () => void = () => {};
+    const ops = createOpLog();
+    return {
+      dial: (): Duplex => {
+        dials += 1;
+        if (!up) throw new Error("host is down");
+        const pipe = pipePair();
+        serverConnection(pipe.a, { build: "0.1.0", instance: "one-server", ops }).serve(handlers());
+        cut = () => pipe.a.close();
+        return pipe.b;
+      },
+      down: () => {
+        up = false;
+        cut();
+      },
+      up: () => (up = true),
+      dials: () => dials,
+    };
+  }
+
+  test("a ladder that runs out keeps dialling, and comes back on its own", async () => {
+    const net = flaky();
+    const beats = pacer();
+    const states: string[] = [];
+    const client = await reconnectingClient({
+      dial: net.dial,
+      push: recordingPush().push,
+      build: "0.1.0",
+      onState: (s, d) => states.push(`${s}:${d}`),
+      delaysMs: [0],
+      sleep: beats.sleep,
+      retryEveryMs: 30_000,
+    });
+    net.down();
+    await settle();
+    await beats.release(); // the ladder's one rung, which finds nothing
+    expect(states.at(-1)).toBe("lost:Lost the connection: host is down.");
+
+    const spent = net.dials();
+    await beats.release(); // a beat, still nothing there
+    expect(net.dials()).toBe(spent + 1);
+    expect(states.at(-1)).toContain("lost:");
+
+    net.up();
+    await beats.release(); // and one that lands
+    expect(states.at(-1)).toBe("live:");
+    expect(await client.requests.vaultState({})).toEqual({ state: "locked" });
+    client.close();
+  });
+
+  // The half that must NOT change with it. A beating client is still lost, and
+  // lost still means an answer now rather than a wait: a request that hung on
+  // the next half-minute would be the disconnected app that looks like a working
+  // one, which is the whole thing this is for.
+  test("a client that is still trying is still lost, and says so at once", async () => {
+    const net = flaky();
+    const beats = pacer();
+    const client = await reconnectingClient({
+      dial: net.dial,
+      push: recordingPush().push,
+      build: "0.1.0",
+      delaysMs: [0],
+      sleep: beats.sleep,
+      retryEveryMs: 30_000,
+    });
+    net.down();
+    await settle();
+    await beats.release();
+    await expect(client.requests.vaultState({})).rejects.toThrow("There is no connection to the server.");
+    client.close();
+  });
+
+  // What a woken laptop, a network coming back and a pressed button all reach.
+  // Worth its own path because the beat is half a minute wide: a lid that opens
+  // onto a working network should not spend any of it.
+  test("a recheck brings the next beat forward instead of waiting for it", async () => {
+    const net = flaky();
+    const beats = pacer();
+    const client = await reconnectingClient({
+      dial: net.dial,
+      push: recordingPush().push,
+      build: "0.1.0",
+      delaysMs: [0],
+      sleep: beats.sleep,
+      retryEveryMs: 30_000,
+    });
+    net.down();
+    await settle();
+    await beats.release();
+    const spent = net.dials();
+
+    net.up();
+    client.recheck();
+    await settle();
+    expect(net.dials()).toBe(spent + 1);
+    expect(await client.requests.vaultState({})).toEqual({ state: "locked" });
+    client.close();
+  });
+
+  // A client that has been closed is finished, and a beat that outlived it
+  // would dial a server the app has already let go of — on a switch, that is
+  // an ssh child spawned against the machine you just left.
+  test("closing stops the beat", async () => {
+    const net = flaky();
+    const beats = pacer();
+    const client = await reconnectingClient({
+      dial: net.dial,
+      push: recordingPush().push,
+      build: "0.1.0",
+      delaysMs: [0],
+      sleep: beats.sleep,
+      retryEveryMs: 30_000,
+    });
+    net.down();
+    await settle();
+    await beats.release();
+    const spent = net.dials();
+
+    client.close();
+    await beats.release();
+    await beats.release();
+    expect(net.dials()).toBe(spent);
+  });
+
+  // The same rule one step later, and the beat is what makes it ordinary: a
+  // lost client sits in a dial for half a minute at a time, so a switch lands
+  // in the middle of one routinely. Adopting what comes back would put a live
+  // wire on a closed client, pointed at the machine the app just left.
+  test("a dial that lands after the client was closed is thrown away", async () => {
+    const net = flaky();
+    const beats = pacer();
+    const client = await reconnectingClient({
+      dial: net.dial,
+      push: recordingPush().push,
+      build: "0.1.0",
+      delaysMs: [0],
+      sleep: beats.sleep,
+      retryEveryMs: 30_000,
+    });
+    net.down();
+    await settle();
+    await beats.release();
+
+    // The server is back, and the beat is released in the same breath as the
+    // close: the dial succeeds, and finds a client that has finished.
+    net.up();
+    client.close();
+    await beats.release();
+    await expect(client.requests.vaultState({})).rejects.toThrow("There is no connection to the server.");
+  });
+
   // A wire cannot say anything, so a reason means the server DECIDED. The
   // ladder is for the other case, and running it against a decision is an
   // argument with a server that has already answered: the daemon serves one
@@ -1144,6 +1387,31 @@ describe("a client that reconnects", () => {
     // the user looking at their network for something that is not there.
     expect(states).toEqual(["lost:Disconnected: another client connected to this server."]);
     await expect(client.requests.vaultState({})).rejects.toThrow("There is no connection to the server.");
+  });
+
+  // The whole point of the split. A ladder that ran out is a wire nobody could
+  // ask, and it keeps asking; a `bye` is an answer, and no amount of beating
+  // improves on it. Displacement is what bites: the daemon serves one client and
+  // gives the session to whoever dialled last, so two beating clients would kick
+  // each other off twice a minute forever, at an ssh handshake apiece.
+  test("and a beat does not talk it round", async () => {
+    const wire = reconnectable(handlers());
+    const beats = pacer();
+    const client = await reconnectingClient({
+      dial: wire.dial,
+      push: recordingPush().push,
+      build: "0.1.0",
+      delaysMs: [0],
+      sleep: beats.sleep,
+      retryEveryMs: 30_000,
+    });
+    wire.bye("another client connected to this server");
+    await settle();
+    await beats.release();
+    await beats.release();
+    expect(wire.dials()).toBe(1);
+    expect(beats.waiting()).toBe(0);
+    client.close();
   });
 
   // The general shape of the same failure, for every cause that does NOT come

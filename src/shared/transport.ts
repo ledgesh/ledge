@@ -72,6 +72,17 @@ export interface ClientConnection {
    * is what the SERVER answers, and those are answered at home.
    */
   supports(method: string): boolean;
+  /**
+   * Ask about the link right now, rather than at whatever this connection's own
+   * next moment would have been.
+   *
+   * For the callers that learn something the wire cannot: a machine that just
+   * woke, an operating system saying the network is back, a user who pressed
+   * the button because they can see it is. What it means depends on where the
+   * link is — one connection probes, a reconnecting one dials — and that is the
+   * point of it being one verb: none of those callers knows which.
+   */
+  recheck(): void;
   closed: Promise<void>;
   /**
    * Why the server said it was hanging up, once `closed` has settled. Null for
@@ -126,6 +137,32 @@ export const PROBES_ALLOWED = 3;
  * against it (bun/transport.ts). */
 export const DEAD_AFTER_MS = PROBE_EVERY_MS * (PROBES_ALLOWED + 1);
 
+/**
+ * How long a client asks a server to keep its sessions once it goes away
+ * (wire.ts `Hello.hold`), and the one number in the protocol that is a
+ * client's rather than a server's.
+ *
+ * Stated at connect time because the moment it is for is a moment nobody gets:
+ * an iOS app is suspended shortly after it leaves the foreground and killed for
+ * memory without warning (ios.md §5), and a Mac whose wifi drops or whose lid
+ * closes says nothing on the way out either. So this says what should happen
+ * when this connection ends by ANY means, before it has ended by any of them.
+ *
+ * Every client, not just the phone. The reasoning that put it on the phone
+ * first — a device that leaves and comes back within a few minutes should find
+ * its shells where it left them — describes a laptop in a lift, on hotel wifi,
+ * or asleep in a bag just as exactly, and a Mac that asked for nothing lost its
+ * shells the moment the daemon's idle timer fired (bun/daemon.ts IDLE_EXIT_MS)
+ * however briefly it had been away.
+ *
+ * Five minutes is what a locked screen, a message answered and a way back costs.
+ * It is deliberately far short of the daemon's ceiling (`HOLD_MAX_MS`), which is
+ * there for a client asking something absurd rather than for this one: the
+ * ordinary client should be granted what it asks for whole, and a number that
+ * always came back clamped would teach nobody anything when it did.
+ */
+export const SESSION_HOLD_MS = 5 * 60_000;
+
 export interface HeartbeatOpts {
   /** Quiet for this long and the client probes. 0 turns the heartbeat off
    * entirely, which is for a test that is not about it. */
@@ -139,6 +176,9 @@ export interface HeartbeatOpts {
    * canceller.
    */
   repeat?(ms: number, tick: () => void): () => void;
+  /** The clock the suspension check below reads. Injectable so a test can put
+   * an hour between two beats without waiting one. */
+  now?(): number;
 }
 
 /** The names a client shell answers at home, which therefore never become a
@@ -193,10 +233,14 @@ export function clientConnection(
   const heartbeat = opts.heartbeat ?? {};
   const probeEveryMs = heartbeat.everyMs ?? PROBE_EVERY_MS;
   const probesAllowed = heartbeat.allowed ?? PROBES_ALLOWED;
+  const clock = heartbeat.now ?? (() => Date.now());
   let heard = false;
   let sent = false;
   let unanswered = 0;
   let stopProbing: (() => void) | null = null;
+  // When the last beat ran, which is the only thing in here that reads a clock
+  // — and it reads it to notice the beats that DID NOT run (see `beat`).
+  let beatAt = clock();
 
   // What the server said it answers, narrowed to names this client knows
   // (wire.ts `declared`). Null until the hello arrives, and null after it for a
@@ -321,6 +365,21 @@ export function clientConnection(
    * and been ignored.
    */
   function beat(): void {
+    // A tick that is late by more than the whole patience budget did not
+    // happen: the machine slept, the app was suspended, the process was
+    // stopped. Nothing was counted while it did not run, so the counters are
+    // about a wire that stopped existing several hours ago, and the wire itself
+    // is very likely gone — a lid opens onto an ssh whose far end exited and a
+    // daemon that idled out (bun/daemon.ts).
+    //
+    // This does not contradict the tick-counting above it, it is what makes it
+    // safe. Counting ticks is why a wake never DECLARES a connection dead; this
+    // is why it does not spend the next twenty seconds pretending it is alive
+    // either. It asks, immediately, and acts on the answer.
+    const at = clock();
+    const asleep = at - beatAt > probeEveryMs * (probesAllowed + 1);
+    beatAt = at;
+    if (asleep) return recheck();
     const quietIn = !heard;
     const quietOut = !sent;
     heard = false;
@@ -336,6 +395,28 @@ export function clientConnection(
     // After the probe, so this end's own heartbeat is not the traffic that
     // convinces it the wire is busy. Only what the APP sends counts as a
     // client with something to say.
+    sent = false;
+  }
+
+  /**
+   * Probe now, and let this one probe be the wire's last chance.
+   *
+   * The budget above is three probes because a wire can be slow without being
+   * dead. This is asked at moments when that is not the question: something
+   * outside just changed — a machine woke, an interface came back, a person
+   * pressed the button — and the far end either still has this socket or it
+   * does not. A pong over any working link is milliseconds; three rounds of
+   * patience buys nothing here and costs fifteen seconds of an app that looks
+   * connected and is not.
+   *
+   * Being wrong costs a reconnect, and a reconnect is now a thing that finishes
+   * by itself (reconnectingClient).
+   */
+  function recheck(): void {
+    if (!open) return;
+    heard = false;
+    unanswered = probesAllowed;
+    raw(encodeControl({ t: "ping" }));
     sent = false;
   }
 
@@ -424,6 +505,7 @@ export function clientConnection(
     supports: (method: string) =>
       !CLIENT_SEAM.has(method) && (serverMethods === null || serverMethods.has(method)),
     farewell: () => farewell,
+    recheck,
     close: () => fail(new Error("this client closed the connection")),
   };
 }
@@ -484,6 +566,11 @@ export interface ReconnectOpts {
    * that stopped carrying bytes into a `closed` the ladder below can act on, so
    * the two are one mechanism described in two places. */
   heartbeat?: HeartbeatOpts;
+  /** How often to dial once the ladder is spent (`RETRY_EVERY_MS`). 0 stops
+   * for good instead, which is for a client that has somewhere else to be: a
+   * test that is not about the beat, and a one-shot that would otherwise never
+   * exit. */
+  retryEveryMs?: number;
 }
 
 const RECONNECT_DELAYS = [250, 500, 1000, 2000, 4000, 8000, 8000, 8000] as const;
@@ -508,10 +595,37 @@ const RECONNECT_DELAYS = [250, 500, 1000, 2000, 4000, 8000, 8000, 8000] as const
  */
 const STEADY_MS = 10_000;
 
+/**
+ * How often to dial once the ladder has run out.
+ *
+ * The ladder ends after about half a minute, and what it ends is the FAST part:
+ * a wire that flapped is back within a rung or two, and climbing at that rate
+ * forever would spend an ssh handshake every few seconds on a laptop in a bag.
+ * What used to happen at the top of it was that the client stopped for good,
+ * which made every outage longer than thirty seconds permanent — a closed lid,
+ * a flight, a hotel with a captive portal — and left the app in a state only a
+ * human could get it out of, by finding the chrome and choosing the same server
+ * again.
+ *
+ * So the ladder is a change of pace rather than a wall. Everything about being
+ * `lost` still holds while this beats: nothing is in flight, new requests fail
+ * at once instead of hanging, and saving is suspended above (notes/store.ts).
+ * The one thing that is no longer true is that it is over.
+ *
+ * Half a minute, against what each half of the mistake costs. A dial that finds
+ * nothing is a TCP handshake to a host that does not answer, so beating faster
+ * buys a smaller number and pays for it all day; beating slower means a lid
+ * that opens onto a working network waits, visibly, for nothing. It is also
+ * rarely what anyone waits on: a machine that just woke rechecks the moment it
+ * wakes, and so does a button (`recheck`).
+ */
+const RETRY_EVERY_MS = 30_000;
+
 export async function reconnectingClient(opts: ReconnectOpts): Promise<ClientConnection> {
   const delays = opts.delaysMs ?? RECONNECT_DELAYS;
-  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const sleep = opts.sleep ?? waitFor;
   const now = opts.now ?? (() => Date.now());
+  const retryEveryMs = opts.retryEveryMs ?? RETRY_EVERY_MS;
   // Unique to this process, so an op id cannot collide with one the server
   // recorded for a previous run of this same client (the id in the handshake
   // is stable across launches; a counter starting at 1 is not).
@@ -539,6 +653,12 @@ export async function reconnectingClient(opts: ReconnectOpts): Promise<ClientCon
   // Resolves whenever the connection is live again, so a request that arrives
   // mid-reconnect waits instead of failing.
   let resume: Promise<void> = Promise.resolve();
+  // Cuts the beat's sleep short, set only while it is sleeping. `recheck` is
+  // the only caller: a machine that woke, an interface that came back, a button
+  // that was pressed. Null the rest of the time, which is what makes a recheck
+  // during the ladder the no-op it should be — something is already happening,
+  // and it is happening within seconds.
+  let interrupt: (() => void) | null = null;
 
   function open(): Promise<ClientConnection> | ClientConnection {
     const dialed = opts.dial();
@@ -560,8 +680,17 @@ export async function reconnectingClient(opts: ReconnectOpts): Promise<ClientCon
     return dialed instanceof Promise ? dialed.then(build) : build(dialed);
   }
 
+  // The last thing said, so a beat that fails the same way for an hour says it
+  // once. The state alone is not enough to dedupe on: `lost` is now a state a
+  // client can sit in for a long time, and the REASON it is in it is the part
+  // that changes and is worth hearing (a host that was unreachable and is now
+  // refusing has told you your network came back).
+  let told = "";
+
   function announce(next: typeof state, detail: string): void {
+    if (state === next && told === detail) return;
     state = next;
+    told = detail;
     opts.onState?.(next, detail);
   }
 
@@ -599,47 +728,132 @@ export async function reconnectingClient(opts: ReconnectOpts): Promise<ClientCon
     while (rung < delays.length) {
       await sleep(delays[rung++]!);
       if (shut) return wake();
-      let next: ClientConnection;
-      try {
-        next = await open();
-        const peer = await next.ready;
-        // The same server, or a different one wearing the same address. Only
-        // the first can honour a replay.
-        if (instance !== "" && peer.instance !== instance) {
-          next.close();
-          return give(`${plural(inflight.size)} could not be finished: the server restarted.`, wake);
-        }
-        instance = peer.instance;
-      } catch (err) {
-        last = reasonOf(err);
-        continue;
-      }
-      conn = next;
-      watch(next);
-      liveSince = now();
-      announce("live", "");
-      wake();
-      // Under the SAME op ids. The server answers from its record if it ran
-      // them already, and runs them if it did not; either way once.
-      for (const held of [...inflight.values()]) issue(held);
-      return;
+      const why = await attempt(wake);
+      if (why === null) return;
+      last = why;
     }
-    give(`Lost the connection: ${last}.`, wake);
+    // Out of rungs, not out of hope: the fast part is over and the slow one
+    // starts, with everything about being `lost` true in between.
+    stall(`Lost the connection: ${last}.`, wake);
   }
 
-  // The ladder is over, a different server answered, or the server said
-  // goodbye. Recovery from here is choosing the connection again
-  // (interactions.md §4-1), which rebuilds everything from boot: nothing in
-  // this module could re-establish a session's state by itself, and pretending
-  // otherwise would mean an app that looks connected to sessions that no
-  // longer exist.
+  /**
+   * One dial: null when this client is live again, and the reason it is not
+   * otherwise. The whole of what a rung and a beat have in common.
+   */
+  async function attempt(wake: () => void): Promise<string | null> {
+    let next: ClientConnection;
+    let restarted = false;
+    try {
+      next = await open();
+      const peer = await next.ready;
+      // The same server, or a different process wearing the same address. Only
+      // the first can honour a replay: a fresh op log cannot tell a repeat from
+      // a first attempt, and guessing there is a note written twice.
+      restarted = instance !== "" && peer.instance !== instance;
+      instance = peer.instance;
+    } catch (err) {
+      return reasonOf(err);
+    }
+    // Closed while this dial was out, which a beat makes ordinary rather than
+    // exotic: a lost client sits in one for half a minute at a time, and a
+    // connection switch closes it from under whatever it is doing. Adopting the
+    // connection now would install a live wire on a client that has been shut,
+    // against a machine the app has already moved off.
+    if (shut) {
+      next.close();
+      return "this client closed the connection";
+    }
+    conn = next;
+    watch(next);
+    liveSince = now();
+    if (restarted) {
+      // A server that restarted kept nothing: not the op log, not the shells,
+      // not the runs. Refusing to talk to it was this client's old answer, and
+      // it made the ordinary overnight case unrecoverable without a human —
+      // the daemon idles out a minute after its last client leaves
+      // (bun/daemon.ts), so a laptop that slept ALWAYS wakes to a different
+      // process than the one it left.
+      //
+      // Said as a `lost` and then a `live` rather than as a live connection
+      // with a footnote, because that pair is exactly what the app above does
+      // about it: hold what has not been saved, then settle it against a server
+      // that has moved on, and line the runs back up with what is actually
+      // running (notes/store.ts holdSaves, editor/bridge.ts reconcileRuns).
+      //
+      // What is failed is what carries an OP, which is the same line the op log
+      // itself is drawn on (wire.ts needsOp): a write replayed into an empty
+      // record could apply twice, and a read is a question about right now that
+      // any server holding the notes can answer. So a note list that was in
+      // flight when the daemon turned over simply arrives.
+      const doomed = [...inflight.values()].filter((h) => h.op !== undefined);
+      if (doomed.length > 0) {
+        const err = new Error(`${plural(doomed.length)} could not be finished: the server restarted.`);
+        for (const held of doomed) {
+          inflight.delete(held.id);
+          held.reject(err);
+        }
+      }
+      announce("lost", "The server restarted, so everything it was holding is gone.");
+    }
+    announce("live", "");
+    wake();
+    // Under the SAME op ids. The server answers from its record if it ran
+    // them already, and runs them if it did not; either way once.
+    for (const held of [...inflight.values()]) issue(held);
+    return null;
+  }
+
+  /**
+   * The ladder is spent. Everything a caller can see about being `lost` becomes
+   * true — nothing in flight, nothing accepted, saving suspended above — and
+   * the dialling carries on quietly underneath at `RETRY_EVERY_MS`.
+   *
+   * The two halves are deliberately not the same fact. Reporting `reconnecting`
+   * through the beat would be friendlier and would be a lie with teeth: a
+   * request made in that state WAITS, and waiting on a wire that is beating
+   * every half minute is the hang this whole phase exists to remove.
+   */
+  function stall(detail: string, wake: () => void = () => {}): void {
+    if (retryEveryMs <= 0) return give(detail, wake);
+    announce("lost", detail);
+    strand(new Error(detail));
+    wake();
+    void beating();
+  }
+
+  async function beating(): Promise<void> {
+    while (!shut && state === "lost") {
+      await new Promise<void>((resolve) => {
+        interrupt = resolve;
+        void sleep(retryEveryMs).then(resolve);
+      });
+      interrupt = null;
+      if (shut || state !== "lost") return;
+      const why = await attempt(() => {});
+      if (why === null) return;
+      announce("lost", `Cannot reach the server: ${why}.`);
+    }
+  }
+
+  // Over: the server said goodbye, or nobody is going to dial again. Recovery
+  // from here is choosing the connection again (interactions.md §4-1), which
+  // rebuilds everything from boot: nothing in this module could re-establish a
+  // session's state by itself, and pretending otherwise would mean an app that
+  // looks connected to sessions that no longer exist.
   function give(detail: string, wake: () => void = () => {}): void {
     announce("lost", detail);
-    const err = new Error(detail);
-    for (const held of inflight.values()) held.reject(err);
-    inflight.clear();
+    strand(new Error(detail));
     wake();
     settleClosed();
+  }
+
+  /** Everything waiting on a wire that will not carry it, told so at once. A
+   * request that hangs forever is indistinguishable from a slow one, and it is
+   * what makes a disconnected app look like a working one. */
+  function strand(err: Error): void {
+    for (const held of inflight.values()) held.reject(err);
+    inflight.clear();
   }
 
   function issue(held: Held): void {
@@ -697,6 +911,16 @@ export async function reconnectingClient(opts: ReconnectOpts): Promise<ClientCon
     // business and not its predecessor's.
     supports: (method: string) => conn.supports(method),
     farewell: () => goodbye,
+    // Whatever this client is doing, do it now. Live, that is a probe on the
+    // wire that may already be dead; lost, it is the next beat brought forward
+    // to this instant. Mid-ladder it is nothing, and that is the honest answer:
+    // the next rung is seconds away and a second dial in parallel with it is
+    // two ssh children racing to be the one connection.
+    recheck() {
+      if (shut) return;
+      if (state === "live") return conn.recheck();
+      interrupt?.();
+    },
     close() {
       shut = true;
       // Before the connection goes, because the whole point of holding a
@@ -707,10 +931,23 @@ export async function reconnectingClient(opts: ReconnectOpts): Promise<ClientCon
       for (const held of inflight.values()) held.reject(err);
       inflight.clear();
       state = "lost";
+      // So a beat that is asleep wakes, sees `shut`, and stops, instead of
+      // dialling a server this client has finished with in half a minute.
+      interrupt?.();
       conn.close();
       settleClosed();
     },
   };
+}
+
+/** The default wait, and unref'd for the reason repeatEvery's timer is: a
+ * client that is only counting down to its next attempt is not a reason for a
+ * process to stay alive, and the beat below counts down forever. */
+function waitFor(ms: number): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const id = setTimeout(resolve, ms);
+    (id as unknown as { unref?: () => void }).unref?.();
+  });
 }
 
 interface Held {

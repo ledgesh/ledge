@@ -981,10 +981,19 @@ const unreachable = FAKING_IOS ? new Set<string>() : new Set(["ledge@vps"]);
 const WEDGED_PROBE = "ledge@wedged";
 const WEDGED_SELECT = "ledge@wedged-later";
 const RPC_GAVE_UP = "RPC request timed out.";
+// How many times this client has been told to dial NOW rather than at its next
+// beat (rpc-schema connectionReconnect). Counted rather than acted on: the
+// harness has no wire to redial, and what a spec is asking is whether the verb
+// reached the shell at all.
+let reconnects = 0;
 configureConnections(
   { connections, active: activeConn, wanted: activeConn, error: "", build: "0.1.0-harness" },
   {
     list: async () => ({ connections, active: activeConn, wanted: activeConn, error: "", build: "0.1.0-harness" }),
+    reconnect: async () => {
+      reconnects += 1;
+      return { ok: true };
+    },
     select: async (id) => {
       const conn = connections.find((c) => c.id === id);
       if (!conn) return { ok: false, error: "There is no such connection." };
@@ -1166,6 +1175,8 @@ declare global {
       // the real thing, so there is no user action a spec could take to cause
       // it — the same reason externalOpen is here.
       linkState: (state: "live" | "reconnecting" | "lost", detail: string) => void;
+      // How many times the shell has been asked to dial now (see `reconnects`).
+      reconnects: () => number;
       // Every session a drawer has claimed, in order (one per reconnect;
       // rpc-schema terminalClaim).
       shellClaims: () => string[];
@@ -1226,6 +1237,7 @@ window.__harness = {
   // that did not reconcile is not the reconnect the app performs — and the save
   // hold on the way down, because the stranded-buffer path is only reachable
   // through it.
+  reconnects: () => reconnects,
   linkState: (state, detail) => {
     recordLinkState(state, detail);
     if (state === "lost") holdSaves();

@@ -33,6 +33,17 @@ export function ConnectionBar() {
   // (remote.md §7). Saying nothing while requests pile up unanswered is the
   // failure this exists to prevent.
   const dropped = link.state !== "live";
+  // What the button DOES, which is not always the same verb. Switching machines
+  // is the everyday one, and it is the wrong one to offer at the moment the
+  // machine you are on cannot be reached: the switch reloads the page, so it is
+  // refused outright while anything is unsaved (ConnectionPicker), and a bar
+  // that answered a dropped connection by opening a chooser that then said no
+  // would be the app's only visible response to being disconnected.
+  //
+  // The app is already dialling on its own (remote.md §7), so this is never the
+  // only way back. It is for the person who can see their wifi return and is
+  // holding information the beat does not have.
+  const verb = dropped ? "connection.reconnect" : "connection.switch";
   const Icon = fellBack || link.state === "lost" ? TriangleAlert : dropped ? PlugZap : local ? Laptop : Server;
   const trouble = fellBack || (dropped ? link.detail : "");
   // Who else is on this machine (remote.md §7). Nothing at all when nobody is,
@@ -53,8 +64,8 @@ export function ConnectionBar() {
       // The command's own tooltip, prefixed with where the notes actually are:
       // the name in the bar is the user's word for the machine, and the
       // destination is the fact.
-      title={`${trouble || (local ? "Notes on this Mac" : `Notes on ${conn.destination}`)} — ${tooltip("connection.switch")}`}
-      onClick={() => exec("connection.switch")}
+      title={`${trouble || (local ? "Notes on this Mac" : `Notes on ${conn.destination}`)} — ${tooltip(verb)}`}
+      onClick={() => exec(verb)}
       // 21 points, flush against the workspace strip below it, for the control
       // that replaces every note, tab, tag and shell on screen (§1a). The text
       // stays 11px: this is a physical target, not a bigger label.

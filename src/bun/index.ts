@@ -35,7 +35,7 @@ import { createConnectionManager, type Attached, type ConnectionManager } from "
 import { createConnectionStore } from "./connectionStore";
 import { explainDial, KNOWN_HOSTS_PATH, LOCAL_ID, sshDial, userKnownHosts, type Connection } from "./connections";
 import { ASKPASS_PATH, ensureAskpass, hasPassword } from "./secrets";
-import { reconnectingClient, Refused } from "../shared/transport";
+import { reconnectingClient, Refused, SESSION_HOLD_MS } from "../shared/transport";
 import { spawnDuplex } from "./transport";
 import { BUILD_VERSION } from "../shared/version";
 import type { LedgeRPC } from "../shared/rpc-schema";
@@ -317,6 +317,9 @@ async function attachFor(win: Win, conn: Connection): Promise<Attached> {
     return {
       requests: blank ? withoutLayout(requests) : requests,
       build,
+      // Nothing to ask: the server is in this process, and a link that cannot
+      // drop cannot be hurried.
+      recheck: () => {},
       shutdown: () => {
         // Only while it is still the registration this attach made: re-selecting
         // a local connection whose wire was declared lost attaches again under
@@ -386,6 +389,12 @@ async function attachFor(win: Win, conn: Connection): Promise<Attached> {
     build,
     client,
     label,
+    // The same ask a phone makes, for the same reason (shared/transport.ts
+    // SESSION_HOLD_MS): a lid that closes for the length of a meeting, a lift,
+    // or a walk between buildings should not cost the shells on the other end,
+    // and a Mac that asked for nothing lost them to the daemon's idle timer
+    // however briefly it had been away.
+    hold: SESSION_HOLD_MS,
     onState: (state, detail) => {
       if (state !== "live") console.warn(`[connect] ${conn.name}: ${detail}`);
       // A ladder that ran out, or a server that said goodbye. The manager has
@@ -393,6 +402,11 @@ async function attachFor(win: Win, conn: Connection): Promise<Attached> {
       // chrome offers, and the only one there is — would be the no-op it is
       // for a connection that is already working (connectionManager.ts).
       if (state === "lost") win.manager?.lost(conn.id, detail);
+      // A wire that came back on its own, which it now does: the ladder ends in
+      // a beat rather than a wall (shared/transport.ts). Without this the
+      // recovery would be invisible to the manager, and choosing this same
+      // connection afterwards would rebuild a session that was already working.
+      if (state === "live") win.manager?.restored(conn.id);
       win.say({ state, detail });
     },
     // Only the first dial reaches this: reconnectingClient resolves once the
@@ -414,6 +428,7 @@ async function attachFor(win: Win, conn: Connection): Promise<Attached> {
   return {
     requests: blank ? withoutLayout(requests) : requests,
     build: peer.build,
+    recheck: () => wire.recheck(),
     shutdown: () => wire.close(),
   };
 }

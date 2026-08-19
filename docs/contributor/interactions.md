@@ -587,6 +587,20 @@ the failure it prevents, which is running a command on the wrong box.
   the refusals above rather than a confirmation: there is nothing about the
   switch worth deciding, and everything about the unsaved text worth handling
   first, so a prompt here would only teach the click-through §4 warns about.
+- **The indicator's click has a second verb, for when the link is down.**
+  `connection.reconnect`, titled "Reconnect", tells this client's wire to dial
+  now instead of waiting for its next beat (remote.md §7). The bar means it
+  whenever the link is not live and means the switcher otherwise, because the
+  switcher is the wrong offer at exactly that moment: it reloads the page, so
+  the refusal above can be the only thing it has to say, and a chooser that
+  opens in order to say no would be the app's entire visible answer to being
+  disconnected. It is offered nowhere while the link is fine, since a Reconnect
+  that is present and inert on a working connection teaches nobody anything
+  (§8). It takes no chord: the app is already dialling on its own, so this is
+  impatience made pressable rather than a step anybody needs to know. Nothing is
+  awaited — the dial's outcome arrives as a link state like any other — so the
+  press answers for itself with a notice naming the machine, or it would read as
+  a dead button every time the server was still unreachable.
 - **A connection that will not open costs nothing.** The new server is reached
   *before* the old one is torn down, so a typo or a sleeping laptop leaves the
   session exactly where it was, with the reason in the dialog. At boot the

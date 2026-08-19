@@ -419,6 +419,69 @@ describe("a client whose wire has gone quiet", () => {
     await client.closed;
   });
 
+  // What a lid opening looks like from in here: the timer did not fire for an
+  // hour, so nothing was counted, and the counters describe a wire that stopped
+  // existing while nobody was watching.
+  //
+  // Counting ticks is why this never DECLARES the connection dead on waking —
+  // that rule is what keeps a phone from dropping a session it still has. This
+  // is the other half of it: having not declared anything, ask, now, rather than
+  // spend the next twenty seconds looking connected to an ssh whose far end
+  // exited hours ago.
+  test("a client that was suspended asks at once, rather than counting to twenty", async () => {
+    let clock = 0;
+    const { server, beats, client, probes } = connect({ now: () => clock });
+    server.greet();
+    await client.ready;
+
+    clock += 60 * 60_000; // a lid, closed
+    beats.beat();
+    expect(probes()).toBe(1);
+    expect(server.isClosed()).toBe(false);
+
+    // And that one probe is the whole budget, because the question here is not
+    // whether the wire is slow. One more silence and it is over: five seconds
+    // rather than twenty.
+    clock += 5_000;
+    beats.beat();
+    expect(server.isClosed()).toBe(true);
+    await expect(client.requests.vaultState({})).rejects.toThrow(/stopped answering/);
+  });
+
+  test("and a wire that survived the sleep costs nothing but the asking", async () => {
+    let clock = 0;
+    const { server, beats, client } = connect({ now: () => clock });
+    server.greet();
+    await client.ready;
+
+    clock += 60 * 60_000;
+    beats.beat();
+    server.say({ t: "pong" });
+
+    // The whole budget back, exactly as any other answer buys.
+    clock += 5_000;
+    beats.beat(4);
+    expect(server.isClosed()).toBe(false);
+  });
+
+  // The rule has to be about time that DID NOT PASS in here, not about time
+  // passing: a client left running for a week beats on schedule the whole way
+  // and must never take its own longevity for a suspension.
+  test("a beat that arrives on time is never mistaken for one that did not", async () => {
+    let clock = 0;
+    const { server, beats, client, probes } = connect({ now: () => clock });
+    server.greet();
+    await client.ready;
+    for (let i = 0; i < 5; i++) {
+      clock += 5_000;
+      beats.beat();
+    }
+    // The ordinary five-beat trace from the top of this describe, unchanged: a
+    // beat mistaken for a suspension would have spent its budget in two.
+    expect(probes()).toBe(3);
+    expect(server.isClosed()).toBe(true);
+  });
+
   test("an answer buys the whole budget again", async () => {
     const { server, beats, client, probes } = connect();
     server.greet();

@@ -303,8 +303,16 @@ function noServer(extra: Partial<RequestClient> = {}): RequestClient {
   };
 }
 
-function overlay(calls: (m: string, p: unknown) => Promise<unknown>, requests = noServer()): RequestClient {
-  return nativeOverlay(requests, { call: (m, p) => calls(m, p), destination: () => "dev@mac.local" }, "0.1.0-server");
+function overlay(
+  calls: (m: string, p: unknown) => Promise<unknown>,
+  requests = noServer(),
+  recheck: () => void = () => {},
+): RequestClient {
+  return nativeOverlay(
+    { requests, recheck },
+    { call: (m, p) => calls(m, p), destination: () => "dev@mac.local" },
+    "0.1.0-server",
+  );
 }
 
 interface StoredServer {

@@ -144,6 +144,11 @@ export const COMMANDS = {
   // the everyday surface, with this as the palette's and the menu's way in.
   // Ellipsis because it opens a chooser rather than switching to anything.
   "connection.switch": { title: "Notes On…" },
+  // Try the server again, now. No chord: it is one click on the indicator that
+  // is already saying the connection is down, and the app is trying on its own
+  // anyway (shared/transport.ts) — this is impatience made pressable, not a
+  // step anybody has to know about. No ellipsis: it acts.
+  "connection.reconnect": { title: "Reconnect" },
   // Another window, which is another client of another server (remote.md §8a).
   // No chord, because the N family is spent: ⌘N is New Note, ⇧⌘N New Workspace,
   // ⌥⌘N New Note From Template. A window is a bigger scope than a workspace, so

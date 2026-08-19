@@ -23,6 +23,7 @@ export interface ConnectionStatus {
 interface ConnectionHandlers {
   list: () => Promise<ConnectionStatus>;
   select: (id: string) => Promise<{ ok: boolean; error: string }>;
+  reconnect: () => Promise<{ ok: boolean }>;
   add: (fields: {
     name: string;
     destination: string;
@@ -151,6 +152,22 @@ export function recordPresence(list: PeerInfo[]): void {
  * the shell and this being asked, or one that gave no name. */
 export function labelFor(client: string): string {
   return others.find((p) => p.client === client)?.label ?? "";
+}
+
+/**
+ * Dial now (rpc-schema.ts connectionReconnect).
+ *
+ * A connection that stopped answering is retried on its own beat, measured in
+ * tens of seconds (shared/transport.ts). This is for the moments something
+ * outside knows better than the beat does: a machine that woke, an interface
+ * that came back, a person who pressed the button.
+ *
+ * Nothing to await and nothing to report. What came of it arrives the way every
+ * other link change does, as a `connectionState` push, because that is the
+ * answer whether this asked for it or not.
+ */
+export function reconnectLink(): void {
+  void handlers?.reconnect().catch(() => {});
 }
 
 export async function refreshConnections(): Promise<ConnectionStatus> {

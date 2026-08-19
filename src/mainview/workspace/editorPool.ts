@@ -24,6 +24,7 @@ import {
   releaseSaves,
   reseedDoc,
   savesHeld,
+  savesSettled,
   seedSlug,
   strandedCandidates,
   type DocHandlers,
@@ -358,6 +359,12 @@ export async function resolveStrandedNotes(): Promise<void> {
     // would be the clobber this whole path exists to avoid — every time a phone
     // changed cell (remote.md §7).
     if (!savesHeld()) return;
+    // The writes that were already out have to finish failing before the
+    // buffers can be read for what they are: a save the wire killed puts its
+    // text back on the way out, and a server that restarted announces its two
+    // halves close enough together that it has not done so yet (store.ts
+    // savesSettled). Nothing new can start meanwhile, because the hold is on.
+    await savesSettled();
     const stranded = strandedCandidates();
     if (stranded.length === 0) return;
     // Every read at once, reloadOpenNotes' round-trip stance (remote.md §12):

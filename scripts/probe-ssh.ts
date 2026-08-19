@@ -935,6 +935,109 @@ try {
   );
   resumed.close();
 
+  step("[beat] an outage longer than the ladder, which used to be permanent");
+  // The ladder ending used to BE the ending, so every outage longer than half a
+  // minute cost the session and needed a person to notice and choose the same
+  // server again (remote.md §7). What this reads is the half nothing above the
+  // transport can fake: a wire that is genuinely gone, a client that genuinely
+  // gives up on it, and a recovery that nobody asks for.
+  //
+  // The ladder and the beat are both shortened, because what is under test is
+  // the SHAPE — that there is something after the ladder, and that it lands —
+  // and waiting out the shipped numbers would put a minute of sleeping in a
+  // probe for no claim it does not already make.
+  const beatStates: string[] = [];
+  const beating = await reconnectingClient({
+    dial: () => spawnDuplex(argv),
+    push: ears().push,
+    build: BUILD_VERSION,
+    client: "probe-mac",
+    delaysMs: [250, 250],
+    retryEveryMs: 2_000,
+    onState: (st) => beatStates.push(st),
+  });
+  await beating.requests.noteList({ root });
+  ok("a connection that is answering");
+
+  cutWire();
+  const gaveUpAt = Date.now();
+  for (let i = 0; i < 600 && beatStates.at(-1) !== "lost"; i++) await Bun.sleep(100);
+  check(
+    "the ladder runs out and the client says so",
+    beatStates.at(-1) === "lost",
+    `${((Date.now() - gaveUpAt) / 1000).toFixed(1)}s after the cut`,
+  );
+  // The half that must NOT change with the beat, and the reason the beat is not
+  // reported as `reconnecting`: a request held on a wire that is dialled twice a
+  // minute is the hang being `lost` exists to prevent.
+  const whileLost = await beating.requests.noteList({ root }).then(
+    () => "answered",
+    (err: Error) => err.message,
+  );
+  check("and a request made while it is lost is refused at once, not held", /no connection to the server/.test(whileLost), whileLost);
+
+  mendWire();
+  const mendedAgain = Date.now();
+  for (let i = 0; i < 600 && beatStates.at(-1) !== "live"; i++) await Bun.sleep(100);
+  check(
+    "and it comes back on its own, with nobody choosing anything",
+    beatStates.at(-1) === "live",
+    `${((Date.now() - mendedAgain) / 1000).toFixed(1)}s after mending, ${beatStates.join(" → ")}`,
+  );
+  check("and answers again", (await beating.requests.noteList({ root })).notes.length >= 0);
+  beating.close();
+
+  step("[restart] the daemon a sleeping laptop actually wakes up to");
+  // The case the instance check is for, run for real rather than against a
+  // fixture's fake nonce. It is also the ORDINARY overnight case rather than a
+  // rare one: the daemon idles out a minute after its last client leaves, so a
+  // laptop that slept always wakes to a different process than the one it left
+  // (remote.md §7). Refusing to talk to it was the old answer, and it made that
+  // case unrecoverable without a person.
+  const wasPid = daemonPid();
+  const restartStates: string[] = [];
+  const restarting = await reconnectingClient({
+    dial: () => spawnDuplex(argv),
+    push: ears().push,
+    build: BUILD_VERSION,
+    client: "probe-mac",
+    delaysMs: [250, 500, 1_000],
+    retryEveryMs: 2_000,
+    onState: (st) => restartStates.push(st),
+  });
+  const firstRun = (await restarting.ready).instance;
+  await restarting.requests.noteList({ root });
+  ok("a connection to the daemon that is running now", `pid ${wasPid}, instance ${firstRun.slice(0, 8)}`);
+
+  // Hard, and with nothing sent on the way out: a crash, a machine rebooting, an
+  // idle exit that happened while nobody was watching. `serve` loses its socket
+  // and exits, ssh follows it out, and the client meets the end of a wire with
+  // no `bye` on it — which is the only shape the ladder is for.
+  run(["docker", "exec", NAME, "sh", "-c", `kill -9 ${wasPid}`]);
+  const killedAt = Date.now();
+  for (let i = 0; i < 600 && restartStates.at(-1) !== "live"; i++) await Bun.sleep(100);
+  check(
+    "a killed daemon is reconnected to rather than refused",
+    restartStates.at(-1) === "live",
+    `${((Date.now() - killedAt) / 1000).toFixed(1)}s, ${restartStates.join(" → ")}`,
+  );
+  // The pair is load-bearing rather than cosmetic. Everything the old process
+  // held is gone, and `lost` is what makes the app above hold its unsaved
+  // buffers and settle them against a server that has moved on; a restart that
+  // reported only `live` would skip that and let a stale buffer win.
+  check(
+    "and it is announced as a loss and then a connection, in that order",
+    restartStates.slice(-3).join(",") === "reconnecting,lost,live",
+    restartStates.join(" → "),
+  );
+  const nowPid = await restarting.requests.noteList({ root }).then(() => daemonPid());
+  check("it is a different process", nowPid !== wasPid && /^\d+$/.test(nowPid), `pid ${wasPid} → ${nowPid}`);
+  check(
+    "and the client is talking to it, with nobody having chosen anything",
+    (await restarting.requests.noteList({ root })).notes.length > 0,
+  );
+  restarting.close();
+
   /**
    * The password door, against sshd instances that take no keys at all
    * (remote.md §4).

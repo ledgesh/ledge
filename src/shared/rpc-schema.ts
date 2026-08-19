@@ -792,6 +792,18 @@ export type LedgeRPC = {
       // not open leaves the current one untouched and answers with the reason:
       // losing a working session to a typo would be the worse failure.
       connectionSelect: { params: { id: string }; response: { ok: boolean; error: string } };
+      // Dial now, rather than at whatever moment the shell's own patience would
+      // have reached (shared/transport.ts `recheck`). A connection that has
+      // stopped answering is retried on a beat measured in tens of seconds, and
+      // this is for the callers that know something the beat cannot: a machine
+      // that just woke, an operating system saying the network is back, a person
+      // who pressed the button because they can see it is.
+      //
+      // Nothing to report, so nothing is reported. It is not a request to the
+      // SERVER — there may be no server to ask — it is a request to this
+      // client's own shell to stop waiting, and what came of it arrives as the
+      // connection state does, on `connectionState`.
+      connectionReconnect: { params: {}; response: { ok: boolean } };
       // Add one. `hostKey` is the known_hosts line the user was shown the
       // fingerprint of and accepted (connectionProbe below) — the client pins
       // only what a person confirmed, never what a host happened to answer.

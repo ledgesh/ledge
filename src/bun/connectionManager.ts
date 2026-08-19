@@ -25,6 +25,9 @@ import { connectionInfo, createConnectionStore, type ConnectionStore } from "./c
 /** One live connection: the handlers it serves and the way to end it. */
 export interface Attached {
   requests: RequestHandlers;
+  /** Ask this connection's wire to try now (shared/transport.ts `recheck`).
+   * A no-op for a server in this process, which has no wire to ask. */
+  recheck(): void;
   /** The server's build, from its handshake. Ours, for a server in this
    * process. What the upgrade offer will read (remote.md §11). */
   build: string;
@@ -48,6 +51,16 @@ export interface ConnectionManager {
    * no-op, and it has to attach afresh once the one being pointed at is dead.
    */
   lost(id: string, detail: string): void;
+  /**
+   * The wire to `id` came back by itself, which it now can: the ladder ends in
+   * a beat rather than a wall (shared/transport.ts RETRY_EVERY_MS).
+   *
+   * The pair with `lost` exists because what `lost` records is read as "this
+   * connection needs re-attaching", and a recovery that left it set would make
+   * choosing the same connection tear down a working session to build the same
+   * one again — a page reload, and every buffer on it, for nothing.
+   */
+  restored(id: string): void;
   shutdown(): void;
 }
 
@@ -171,6 +184,15 @@ export async function createConnectionManager(deps: {
       return { ok: true, error: "" };
     },
 
+    // Not a question for the server: there may be no server to ask. It is this
+    // window's own wire being told to stop waiting for its next attempt, and
+    // what came of it arrives the way every other link change does, on
+    // `connectionState`.
+    connectionReconnect: async () => {
+      live.recheck();
+      return { ok: true };
+    },
+
     connectionAdd: async (fields) => store.add(fields),
 
     connectionUpdate: async (fields) => {
@@ -240,6 +262,12 @@ export async function createConnectionManager(deps: {
       // one can report its own end after the switch has already happened, and
       // marking the new connection dead would be worse than saying nothing.
       if (id === active.id) error = detail;
+    },
+    restored: (id) => {
+      // By id for the same reason, from the other side: a dead connection's
+      // last gasp of recovery must not clear the reason a DIFFERENT one is
+      // being reported.
+      if (id === active.id) error = "";
     },
     shutdown: () => live.shutdown(),
   };

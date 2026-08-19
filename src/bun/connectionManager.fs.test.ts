@@ -48,6 +48,7 @@ function fakeAttach(unreachable = new Set<string>()) {
         vaultState: async () => ({ state: conn.id }),
       } as unknown as RequestHandlers,
       build: `build-${conn.id}`,
+      recheck: () => log.push(`recheck:${conn.id}`),
       shutdown: () => {
         log.push(`shutdown:${conn.id}`);
         open.delete(conn.id);
@@ -199,6 +200,43 @@ describe("switching", () => {
     m.lost(LAPTOP.id, "Disconnected: another client connected to this server.");
     expect(await m.requests.connectionSelect({ id: LAPTOP.id })).toEqual({ ok: true, error: "" });
     expect(fake.log).toEqual([`attach:${LAPTOP.id}`, `attach:${LAPTOP.id}`, `shutdown:${LAPTOP.id}`]);
+  });
+
+  // The other half of the same record, and it is needed because a wire that gave
+  // up no longer stays given up: the ladder ends in a beat that keeps dialling
+  // (shared/transport.ts). A recovery that left `lost` standing would make
+  // choosing the same connection tear down a session that was working again and
+  // rebuild the identical one, which on the view's side is a page reload.
+  test("a wire that came back on its own makes selecting it a no-op again", async () => {
+    await saveConnections([LAPTOP], LAPTOP.id);
+    const fake = fakeAttach();
+    const m = await createConnectionManager({ attach: fake.attach });
+    m.lost(LAPTOP.id, "Lost the connection: host is down.");
+    m.restored(LAPTOP.id);
+    expect(await m.requests.connectionSelect({ id: LAPTOP.id })).toEqual({ ok: true, error: "" });
+    expect(fake.log).toEqual([`attach:${LAPTOP.id}`]);
+  });
+
+  // By id from this side too: a dead connection's late recovery must not clear
+  // the reason a DIFFERENT one is being reported.
+  test("and a recovery reported by a connection nobody is on clears nothing", async () => {
+    await saveConnections([LAPTOP], LAPTOP.id);
+    const fake = fakeAttach();
+    const m = await createConnectionManager({ attach: fake.attach });
+    m.lost(LAPTOP.id, "Lost the connection: host is down.");
+    m.restored(LOCAL_ID);
+    expect(await m.requests.connectionSelect({ id: LAPTOP.id })).toEqual({ ok: true, error: "" });
+    expect(fake.log).toEqual([`attach:${LAPTOP.id}`, `attach:${LAPTOP.id}`, `shutdown:${LAPTOP.id}`]);
+  });
+
+  // Not a question for the server — there may be no server to ask — but for
+  // this window's own wire, which is holding a beat it can be told to cut short.
+  test("reconnecting asks the wire being served, and nothing else", async () => {
+    await saveConnections([LAPTOP], LAPTOP.id);
+    const fake = fakeAttach();
+    const m = await createConnectionManager({ attach: fake.attach });
+    expect(await m.requests.connectionReconnect({})).toEqual({ ok: true });
+    expect(fake.log).toEqual([`attach:${LAPTOP.id}`, `recheck:${LAPTOP.id}`]);
   });
 
   // A connection reports its own end, and the one being torn down on the way
@@ -467,6 +505,7 @@ describe("editing", () => {
       return {
         requests: { vaultState: async () => ({ state: conn.destination }) } as unknown as RequestHandlers,
         build: "build",
+        recheck: () => {},
         shutdown: () => log.push(`shutdown:${conn.destination}`),
       };
     };
@@ -796,7 +835,7 @@ describe("the password door", () => {
     let refuse = false;
     const attach = async (): Promise<Attached> => {
       if (refuse) throw new Error("host is down");
-      return { requests: {} as RequestHandlers, build: "b", shutdown: () => {} };
+      return { requests: {} as RequestHandlers, build: "b", recheck: () => {}, shutdown: () => {} };
     };
     const m = await createConnectionManager({ attach, store, want: id });
     refuse = true;

@@ -262,6 +262,7 @@ export const REQUEST_METHODS = [
   "assetWrite",
   "connectionList",
   "connectionSelect",
+  "connectionReconnect",
   "connectionAdd",
   "connectionUpdate",
   "connectionRemove",
@@ -348,6 +349,7 @@ export type NativeMethod = (typeof NATIVE_METHODS)[number];
 export const CONNECTION_METHODS = [
   "connectionList",
   "connectionSelect",
+  "connectionReconnect",
   "connectionAdd",
   "connectionUpdate",
   "connectionRemove",

@@ -311,6 +311,38 @@ export function holdSaves(): void {
   held = true;
 }
 
+// Whoever is waiting for the writes that were already out to finish failing.
+const settling = new Set<() => void>();
+
+/**
+ * Resolves once no note is mid-save.
+ *
+ * For the one caller that has to see the true state of every buffer before it
+ * decides anything about them (workspace/editorPool.ts resolveStrandedNotes),
+ * and it exists because of how narrow the gap between the two halves of a
+ * reconnect has become. A save that was in flight when the wire died is failed
+ * by the transport and puts its text BACK in the buffer on the way out
+ * (`flush`), and that lands a few microtasks later than the announcement does.
+ * A server that restarted announces `lost` and `live` in the same breath
+ * (shared/transport.ts), so without this the resolution would run against an
+ * entry that still looks mid-save and looks clean, skip it, and leave the text
+ * it was carrying dirty and unsettled with nothing left to retry it.
+ *
+ * Bounded because the announcement that brings anyone here is the same event
+ * that fails every request in flight: the hold is on, so nothing new starts,
+ * and everything already started is on its way to a rejection.
+ */
+export function savesSettled(): Promise<void> {
+  if (![...docs.values()].some((e) => e.inFlight)) return Promise.resolve();
+  return new Promise<void>((resolve) => settling.add(resolve));
+}
+
+function settled(): void {
+  if ([...docs.values()].some((e) => e.inFlight)) return;
+  for (const wake of settling) wake();
+  settling.clear();
+}
+
 /**
  * Whether saving is currently suspended, which is also the record of whether a
  * buffer could be STRANDED (workspace/editorPool.ts resolveStrandedNotes).
@@ -402,6 +434,7 @@ async function flush(e: Entry): Promise<void> {
   } finally {
     e.inFlight = false;
     refreshDirty();
+    settled();
   }
 }
 

@@ -473,15 +473,23 @@ Three consequences, in the order they bite:
   seconds, so a write retried across a short background trip either lands
   once or is refused, and never applies twice.
 
-  The corollary is the phone's only dead end. A server that restarted is a new
-  instance, so the ladder stops for good rather than adopting it: sessions the
-  app believes in no longer exist, and nothing below the transport can rebuild
-  them. Recovery is choosing the connection again, which on a Mac re-attaches
-  and on a phone is the same boot as foregrounding — choosing the server already
-  selected is an answer rather than a no-op, and `lib/connections.ts` flushes and
-  reloads the page. Without that the connection row is a dead label and the app
-  waits to be force-quit, which is what a live server restart actually did
-  before this was written down.
+  What used to follow from that was the phone's only dead end: a restarted
+  server is a new instance, so the ladder refused it, and recovery meant a
+  person choosing the connection again. The refusal is gone (remote.md §7). What
+  is still failed is what was in flight under an op, which is the op log's rule
+  and the whole of it; the CONNECTION is adopted, and the two announcements it
+  arrives as (`lost`, then `live`) are what drive the reconnect mechanisms the
+  view already has — buffers settled, runs reconciled, shells re-claimed, vault
+  re-read. Sessions the app believed in do not come back, because they do not
+  exist; a phone learns that from `terminalClaim` and `inlineClaim` answering
+  the way they answer for a shell that ended, which is a sentence on screen
+  rather than a dead connection row.
+
+  Foregrounding still reloads (§5 below), and that is unchanged and still the
+  simpler answer on a phone: the shell closes the socket on the way out, so the
+  wire is never live on the way back in. What the adoption fixes is the app that
+  was NOT foregrounded — one running with the wire dropping under it — and it
+  fixes the Mac, which has no foregrounding at all.
 - **A phone and a Mac on one server used to be a fight nobody wins.** The daemon
   served one client and handed the session to whoever dialled last, so each
   displaced the other; a phone that re-dialled a displacement looped against the

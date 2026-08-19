@@ -38,7 +38,7 @@ import { captureFailures, configureLog } from "./lib/log";
 import { configureAssets } from "./lib/assets";
 import { configureSettings } from "./lib/settings";
 import { recordServerCaps } from "./lib/shell";
-import { configureConnections, recordLinkState, recordPresence, type ConnectionStatus } from "./lib/connections";
+import { configureConnections, reconnectLink, recordLinkState, recordPresence, type ConnectionStatus } from "./lib/connections";
 import { holdSaves } from "./notes/store";
 import { resolveStrandedNotes } from "./workspace/editorPool";
 import { applyAppearance } from "./lib/theme";
@@ -374,6 +374,7 @@ async function boot(requests: RequestClient): Promise<void> {
     configureConnections(connections, {
       list: () => requests.connectionList({}),
       select: (id) => requests.connectionSelect({ id }),
+      reconnect: () => requests.connectionReconnect({}),
       add: (fields) => requests.connectionAdd(fields),
       update: (fields) => requests.connectionUpdate(fields),
       remove: (id) => requests.connectionRemove({ id }),
@@ -408,6 +409,13 @@ async function boot(requests: RequestClient): Promise<void> {
   // almost always after — this lands ("unlocked" cannot survive a relaunch;
   // the fetch only distinguishes locked from none for the dialog's face).
   void refreshVaultState().catch(() => {});
+  // The operating system saying an interface came back, which is a better
+  // moment to dial than the beat's own next one: joining a network is exactly
+  // when a connection that has been failing for an hour starts working, and the
+  // beat has no way to know it happened (remote.md §7). Ignored when the link is
+  // fine, and free when it is not — the shell answers this without asking any
+  // server anything (lib/connections.ts reconnectLink).
+  window.addEventListener("online", () => reconnectLink());
   // The manual's window boots onto the manual and nothing else; every other
   // window boots onto the layout it left (remote.md §8a). A docs root that is
   // missing — an app whose docs sync failed — falls back to the ordinary boot

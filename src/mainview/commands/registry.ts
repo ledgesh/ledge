@@ -39,6 +39,7 @@ import {
   Link2,
   PanelLeft,
   Pencil,
+  PlugZap,
   Play,
   Plus,
   RefreshCw,
@@ -69,6 +70,7 @@ import { parseFrontmatter } from "../../shared/frontmatter";
 import type { NoteMeta } from "../../shared/rpc-schema";
 import { canInstallCli, canPickFolder, hasTerminal, multiWindow, runsBlocks, spawnsSessions } from "../lib/shell";
 import { docsWindow } from "../lib/windows";
+import { activeConnection, linkState, reconnectLink } from "../lib/connections";
 import { keysOf, listKeysOf, tabSelectKey, titleOf, workspaceSelectKey, type CommandId } from "./keys";
 import { chipOf } from "./format";
 import type { Command, CommandCtx, RegistryDeps } from "./types";
@@ -694,6 +696,26 @@ export function buildCommands(deps: RegistryDeps): Command[] {
       icon: ServerIcon,
       when: () => !docsWindow(),
       run: (ctx) => ctx.ui.openConnectionPicker?.(),
+    }),
+    // Ask the wire to try now rather than at its next beat (remote.md §7). The
+    // app is already trying, so this is never the only thing between a user and
+    // their notes — but a person watching a bar that says "disconnected" while
+    // their wifi visibly came back is holding information the beat does not
+    // have, and there was nothing for them to do with it.
+    //
+    // Offered only while the link is down. A "Reconnect" that is present and
+    // inert on a working connection is a verb that teaches nobody anything
+    // (interactions.md §8), and the indicator it hangs off has no such state.
+    cmd("connection.reconnect", {
+      icon: PlugZap,
+      when: () => !docsWindow() && linkState().state !== "live",
+      run: (ctx) => {
+        reconnectLink();
+        // The one report there is. Nothing waits on the dial — the answer
+        // arrives as a link state like any other — so without this a press
+        // against a server that is still unreachable looks like a dead button.
+        ctx.ui.showNotice?.(`Trying to reach ${activeConnection().name}…`);
+      },
     }),
     // Two machines at once, which switching cannot give you: a window is a
     // client of one server, so a second server is a second window (remote.md
