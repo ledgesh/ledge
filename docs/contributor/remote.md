@@ -673,6 +673,58 @@ panels that are still there — but the boot that returns finds them unshowable
 and ends them. What the alternative preserves is a run nobody can watch, stop,
 or read, which is not a kept run.
 
+**A panel says it does not know, rather than saying either thing it might.**
+Everything above is about coming back. While this client is `lost`, a panel
+left reading "Running" is the one piece of chrome in the app that claims a
+machine is doing something at this instant, and it is claiming it about a
+machine nobody here can see. So a run that was going when the ladder ran out
+goes to a fourth state, `unknown`, which is not a fourth outcome but the absence of
+one: the header reads "Disconnected", the dot stops pulsing without turning
+red, the output it already had stays, and nothing is invented in either
+direction (`mainview/editor/blocks.ts` `setRunsLink`). The alternative was to
+mark it finished, which is a lie about a program that may be four minutes into
+a deploy, or to leave it pulsing, which is a lie about a wire.
+
+- **It resolves on reconnect, and the restore comes before the question.**
+  `live` puts every unknown run back to `running` and then `inlineClaim`
+  settles which of them that was true of. The order is for the screen rather
+  than for correctness: leaving them on "Disconnected" until the answer lands
+  would put a stale word on a wire that has just come back.
+- **An unsure run is still claimed.** `runningRunIds` counts `unknown`
+  alongside `running`, and it has to: every run this client is unsure about was
+  made unsure by the very outage the claim is sent at the end of, so a claim
+  naming only the certain ones would name none of them, and the server
+  interrupts everything a claim leaves out. That is the rule above pointed
+  backwards, and getting it wrong kills exactly the long jobs the reconnect
+  exists to recover.
+- **The block stays gated.** One live run per block is what stops a re-run
+  orphaning the first one's process, and an unknown run may still be that
+  process. The block comes back when the reconnect settles what it was.
+- **Dismissing one is safe, and is how it gets stopped.** The cancel goes
+  nowhere while the wire is down, but dropping the panel drops the id from the
+  next claim, and a run the claim leaves out is one the server interrupts.
+
+**A run cannot be STARTED once the client is `lost`, and this is the one place
+the app predicts a failure rather than reporting it.** Everything else the view
+does over the wire is a request that comes back rejected, and a rejection can
+be shown. `runBlock` is a request too, but the view sends it with a `void` and
+then waits for output to arrive on its own, because that is what a run is:
+there is no reply to hold the panel open against. So a run asked for at a
+server this client has given up on rejects into nothing and leaves a panel
+reading "Running" that nothing is coming to correct. The run pair is therefore
+grayed with the reason on it and the chords answer with the same sentence,
+naming the machine (`linkDown` in `mainview/editor/blocks.ts`,
+`interactions.md` §4d). It is the only verb in the app gated on the link state;
+the rest report.
+
+The gate is `lost` and not `reconnecting`, and the distinction is the point.
+Mid-ladder a request is held and replayed, so a run asked for there starts for
+real a few seconds later; and a ladder that runs out announces `lost`, which
+marks that same panel unknown on its way past. Both endings are honest without
+help. Gating the ladder would refuse a run that was going to work, and would
+make this the one verb that treats `reconnecting` as a failure when every other
+thing the view does treats it as a wait.
+
 **The vault is re-asked too, and it is the one where being stale is not
 cosmetic.** The vault belongs to the server and relocks itself after fifteen
 idle minutes (`bun/vault.ts`). That relock is a `vaultChanged` push, dropped at a

@@ -279,6 +279,14 @@ Two other things can have become of that shell while you were away, and the term
 
 A block's output panel is the exception, and only across a restart. The panel lives in the page rather than on the server, so a wire that drops and comes back finds it still there with the run still going.
 
+Once the bar reads "disconnected" that panel reads "Disconnected" too, rather than "Running". Ledge cannot see the machine, so it neither claims the block finished nor claims it is still going. The output that already arrived stays on screen and the word says why no more is appearing. When the connection returns the panel goes back to "Running" if the server still has that run, and closes out if it does not.
+
+What the block printed while you were away does not appear. A terminal keeps a scrollback Ledge can ask for again, and an output panel keeps none, so a panel that comes back picks up from whatever the block prints next. A long build's last lines are still worth waiting for; a build whose interesting output was in the middle is worth running in the terminal drawer instead.
+
+The block underneath it will not run again meanwhile. It may still be executing over there, and a second copy of a deploy is worse than a wait.
+
+You cannot start a run at all once the bar reads "disconnected". Every block's Run and terminal buttons go gray, hovering one names the machine that cannot be reached, and ⌘↩ answers with the same sentence. While the bar still reads "reconnecting…" they stay live, and a block run there really does run: the request waits for the connection like any other and goes as soon as it is back. This is the only thing Ledge refuses outright instead of trying and telling you what came back. A run is the one request with no answer to report: Ledge sends it and then listens for output, so a block sent to a machine that is not there would open a panel reading "Running" that nothing would ever correct.
+
 A Ledge that has relaunched has no panel, and no way to show that run or stop it. So blocks left running on a server are stopped the next time Ledge connects to it, which includes switching to another connection and back. A terminal is not affected, because reattaching finds its shell where you left it.
 
 This reaches only the blocks that device started. A server can be carrying runs for more than one of your devices, and a phone connecting does not stop what your Mac left running.

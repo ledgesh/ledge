@@ -20,7 +20,7 @@ import { resolveWikiTitle, wikiRefsOf } from "../shared/wikilinks";
 import { normalizeTag, tagDirectoryOf, tagRefsOf, type TagInfo } from "../shared/tags";
 import { knownHostsHost, validatePassword } from "../shared/connections";
 import type { ConnectionInfo } from "../shared/rpc-schema";
-import { configureBridge, dispatchRunEvent, reconcileRuns } from "./editor/bridge";
+import { configureBridge, dispatchRunEvent, dispatchRunLink, reconcileRuns } from "./editor/bridge";
 import { sendRunKey } from "./editor/inlineTerm";
 import { barFaceOf, type BarFace } from "./lib/nativeBridge";
 import { configureTerminal, dispatchTerminalDetached, dispatchTerminalRelink } from "./terminal/channel";
@@ -1240,9 +1240,13 @@ window.__harness = {
   reconnects: () => reconnects,
   linkState: (state, detail) => {
     recordLinkState(state, detail);
-    if (state === "lost") holdSaves();
+    if (state === "lost") {
+      holdSaves();
+      dispatchRunLink(false);
+    }
     if (state === "live") {
       void resolveStrandedNotes();
+      dispatchRunLink(true);
       void reconcileRuns();
       dispatchTerminalRelink();
       void refreshVaultState().catch(() => {});

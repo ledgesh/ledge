@@ -215,6 +215,27 @@ function targetTrashed(ctx: CommandCtx) {
   return trashOf(ctx.state, ctx.selected.folder).find((i) => i.path === t.path) ?? null;
 }
 
+/**
+ * What a command does with a promise that did not resolve.
+ *
+ * Every one of these calls crosses to the machine the notes are on, and a
+ * REJECTION means it never got there: a wire that is down (remote.md §7), a
+ * server that refused, a disk that is full. The resolved-value paths each
+ * report their own refusals already; this is the half that used to be missing,
+ * and its absence was a menu item that answered a click with nothing at all —
+ * no note, no message, nothing to try instead.
+ *
+ * Not a gate, deliberately. A verb withheld while the wire is down would be a
+ * palette that shrinks and regrows on its own (interactions.md §8 is about what
+ * this client CANNOT do, which is a different and permanent thing), and the
+ * verb is not the problem: an outage that lasts forty seconds wants an answer,
+ * not an absence. The exception is a run, which cannot report its own failure
+ * and so is gated instead (editor/blocks.ts linkDown).
+ */
+function failed(ctx: CommandCtx): (err: unknown) => void {
+  return (err) => ctx.ui.showError?.(err instanceof Error ? err.message : String(err));
+}
+
 // The workspace a workspace-scoped command acts on: an explicit row/menu
 // target, else the selected one (how the palette forms work).
 function targetWorkspaceId(ctx: CommandCtx): string {
@@ -273,7 +294,7 @@ export function buildCommands(deps: RegistryDeps): Command[] {
       run: (ctx) => {
         if (multiWindow()) deps.openDocsWindow("");
         else if (docsSelected(ctx)) deps.closeDocs(ctx.state, ctx.dispatch);
-        else void deps.openDocs(ctx.state, ctx.dispatch);
+        else void deps.openDocs(ctx.state, ctx.dispatch).catch(failed(ctx));
       },
     }),
     // The bundled licenses, as the manual's last page. It is a page and not a
@@ -290,7 +311,7 @@ export function buildCommands(deps: RegistryDeps): Command[] {
         // By title: the corpus renumbers pages as it grows, and the H1 is what
         // survives that (bun/docsContent.ts).
         if (multiWindow() && !docsWindow()) deps.openDocsWindow("Third-Party Licenses");
-        else void deps.openDocs(ctx.state, ctx.dispatch, "Third-Party Licenses");
+        else void deps.openDocs(ctx.state, ctx.dispatch, "Third-Party Licenses").catch(failed(ctx));
       },
     }),
     // Create-or-open today's YYYY-MM-DD note and land in it. The open rides
@@ -309,7 +330,7 @@ export function buildCommands(deps: RegistryDeps): Command[] {
       run: (ctx) => {
         void deps.openDailyNote(ctx.selected.folder).then((err) => {
           if (err) ctx.ui.showError?.(err);
-        });
+        }, failed(ctx));
       },
     }),
     // The palette IS the template picker: pre-filtered to the generated
@@ -333,7 +354,7 @@ export function buildCommands(deps: RegistryDeps): Command[] {
       run: (ctx) => {
         void deps.createNote(ctx.selected.folder, STARTER_TEMPLATE).then(
           (note) => ctx.dispatch({ type: "openNote", note }),
-          (err) => ctx.ui.showError?.(err instanceof Error ? err.message : String(err)),
+          failed(ctx),
         );
       },
     }),
@@ -386,7 +407,7 @@ export function buildCommands(deps: RegistryDeps): Command[] {
         const { ws } = dailyTemplateTarget(ctx, deps);
         void deps.createNote(ws.folder, DAILY_STARTER).then(
           (note) => deps.openNoteIn(ws.folder, note),
-          (err) => ctx.ui.showError?.(err instanceof Error ? err.message : String(err)),
+          failed(ctx),
         );
       },
     }),
@@ -482,7 +503,7 @@ export function buildCommands(deps: RegistryDeps): Command[] {
       run: (ctx) => {
         void deps.createWorkspace(ctx.state, ctx.dispatch).then((err) => {
           if (err) ctx.ui.showError?.(err);
-        });
+        }, failed(ctx));
       },
     }),
     // Register an existing directory as a workspace, via the NATIVE folder
@@ -497,7 +518,7 @@ export function buildCommands(deps: RegistryDeps): Command[] {
       run: (ctx) => {
         void deps.attachWorkspace(ctx.dispatch).then((err) => {
           if (err) ctx.ui.showError?.(err);
-        });
+        }, failed(ctx));
       },
     }),
     // Enter on a focused workspace row. Not in the palette: the generated
@@ -553,7 +574,7 @@ export function buildCommands(deps: RegistryDeps): Command[] {
         }
         void deps.moveWorkspace(id, ctx.state, ctx.dispatch).then((err) => {
           if (err) ctx.ui.showError?.(err);
-        });
+        }, failed(ctx));
       },
     }),
     cmd("workspace.close", {
@@ -657,7 +678,7 @@ export function buildCommands(deps: RegistryDeps): Command[] {
         void deps.lockNoteNow(ctx.selected.folder, note.path).then((res) => {
           if (res.error) ctx.ui.showError?.(res.error);
           else if (res.notice) ctx.ui.showNotice?.(res.notice);
-        });
+        }, failed(ctx));
       },
     }),
     // Unlocked only: the rewrap needs the old master key in hand, and asking
@@ -745,7 +766,7 @@ export function buildCommands(deps: RegistryDeps): Command[] {
         void deps.installCli().then((r) => {
           if (r.ok) ctx.ui.showNotice?.(r.message);
           else ctx.ui.showError?.(r.message);
-        });
+        }, failed(ctx));
       },
     }),
     // The answer to "it crashed, what do I send you". No notice strip on
@@ -1044,7 +1065,7 @@ export function buildCommands(deps: RegistryDeps): Command[] {
         if (!choice) return;
         void deps.newNoteFromTemplate(ctx.selected.folder, choice.path).then(
           (note) => ctx.dispatch({ type: "openNote", note }),
-          (err) => ctx.ui.showError?.(err instanceof Error ? err.message : String(err)),
+          failed(ctx),
         );
       },
     });

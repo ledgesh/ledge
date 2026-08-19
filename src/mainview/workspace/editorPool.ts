@@ -10,7 +10,7 @@
 import { Transaction } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { createEditor } from "../editor/setup";
-import { handleRunEvent, pingOverlay, runningRunIds } from "../editor/blocks";
+import { handleRunEvent, pingOverlay, runningRunIds, setRunsLink } from "../editor/blocks";
 import { onRunEvent, type RunSink } from "../editor/bridge";
 import { fromDisk } from "../editor/session";
 import { readNote, stashNote } from "../notes/channel";
@@ -82,7 +82,11 @@ function applyRunEvent(view: EditorView, ev: RunEvent): void {
 // runs it still shows out. Registered and dropped together, so a view that was
 // replaced cannot go on claiming runs whose panels went with it.
 function runSink(view: EditorView): RunSink {
-  return { apply: (ev) => applyRunEvent(view, ev), live: () => runningRunIds(view.state) };
+  return {
+    apply: (ev) => applyRunEvent(view, ev),
+    live: () => runningRunIds(view.state),
+    link: (up) => setRunsLink(view, up),
+  };
 }
 
 interface Entry {

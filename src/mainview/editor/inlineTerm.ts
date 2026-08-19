@@ -694,6 +694,11 @@ export function sendRunKey(name: string): boolean {
 
 function statusText(run: RunInfo): string {
   if (run.state === "running") return "Running";
+  // Deliberately not "Stopped" or "Ended": this client cannot see the machine,
+  // so what it knows is about the connection and not about the program. The
+  // panel keeps whatever output it had, and the word says why no more is
+  // arriving (blocks.ts setRunsLink).
+  if (run.state === "unknown") return "Disconnected";
   if (run.state === "error") {
     // 128 + SIGINT: the shell's way of saying the block was Ctrl-C'd. Worth naming,
     // because it is the one non-zero status the user asked for on purpose.

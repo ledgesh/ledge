@@ -7,13 +7,14 @@
 // an id shown here that the server finished while the wire was down.
 import { describe, expect, test } from "bun:test";
 import type { RunEvent } from "../../shared/rpc-schema";
-import { configureBridge, dispatchRunEvent, onRunEvent, reconcileRuns, type RunSink } from "./bridge";
+import { configureBridge, dispatchRunEvent, dispatchRunLink, onRunEvent, reconcileRuns, type RunSink } from "./bridge";
 
 // One mounted editor: the runs it shows, and what it was told about them.
 function fakeEditor(live: string[]) {
   const applied: RunEvent[] = [];
-  const sink: RunSink = { apply: (ev) => applied.push(ev), live: () => live };
-  return { sink, applied, off: onRunEvent(sink) };
+  const links: boolean[] = [];
+  const sink: RunSink = { apply: (ev) => applied.push(ev), live: () => live, link: (up) => links.push(up) };
+  return { sink, applied, links, off: onRunEvent(sink) };
 }
 
 // The server's half: what it was asked, and what it admits to running.
@@ -100,5 +101,38 @@ describe("reconcileRuns", () => {
     expect(b.applied).toEqual([{ id: "r1", kind: "began" }]);
     a.off();
     b.off();
+  });
+
+  test("the link going and coming back reaches every sink too", () => {
+    const a = fakeEditor([]);
+    const b = fakeEditor([]);
+
+    dispatchRunLink(false);
+    dispatchRunLink(true);
+
+    // Both, not just the note in front: a run outlives the tab it is watched
+    // in, and a background note's deploy must not spend the outage claiming
+    // to be fine.
+    expect(a.links).toEqual([false, true]);
+    expect(b.links).toEqual([false, true]);
+    a.off();
+    b.off();
+  });
+
+  test("a run this client is unsure about is still claimed", async () => {
+    // What `live()` returns after an outage — runningRunIds counts "unknown"
+    // runs as well as running ones (blocks.ts), and this is why: the server
+    // interrupts every run the claim leaves out, so a client that named only
+    // what it was CERTAIN of would kill the very runs the outage made it
+    // uncertain about.
+    const editor = fakeEditor(["r1"]);
+    const claims = fakeServer(["r1"]);
+
+    dispatchRunLink(false);
+    await reconcileRuns();
+
+    expect(claims).toEqual([["r1"]]);
+    expect(editor.applied).toEqual([]);
+    editor.off();
   });
 });

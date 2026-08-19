@@ -4,13 +4,15 @@ Any fenced code block whose language is runnable gets a Run button, and the shel
 
 ## Run a block inline or in the terminal
 
-⌘↩ runs the block under the caret inline. Output streams into the lower half of the block's own card, below a divider, and stays until you dismiss it. Hovering a block shows Run and Copy, a running block's Run button becomes Stop, and the output half offers Copy Output and Dismiss.
+⌘↩ runs the block under the caret inline. Output streams into the lower half of the block's own card, below a divider, and stays until you dismiss it. Hovering a block shows Run and Copy, and the output half offers Copy Output and Dismiss. A running block's Run button is gray until its run ends, since one block runs one thing at a time. Dismiss is also how you stop a run that is still going: the panel is the only thing that can show it or stop it, so putting the panel away ends the command behind it.
 
 On a touch device the buttons do not wait to be hovered. Every block wears Run and Copy in its top right corner, sized for a finger, and one tap on Run starts it. The card leaves them a lane of their own, so they never sit over the code they run.
 
 ⇧⌘↩ sends the block to the note's terminal drawer instead (⌃` toggles the drawer). There you can keep typing after the command finishes. An inline run ends when its command does.
 
 A block offers to run only once its fence is closed. While the closing ``` is still missing there is no Run button, because what the block contains is not settled: the next closing fence you type anywhere below it becomes this block's end. The third backtick writes the closing line for you, so a block is closed before you have typed a word of it, and a block written above another one never swallows it. Pressing Enter at the end of a fence opener does the same for an opener that arrived some other way, such as a paste.
+
+A block on a note kept on another machine also needs that machine reachable. Once the connection bar reads "disconnected" the Run and terminal buttons are gray and say which machine cannot be reached, and a run that was already going says "Disconnected" until Ledge can ask about it again. A block run while the bar still reads "reconnecting…" goes as soon as the connection is back. See [[Notes on Another Machine]].
 
 On a phone the backtick is not on the letter keyboard, so the block is a verb instead: the code button on the bar above the keyboard, or "Code Block" in the command palette. It writes both fences and the language `sh`, and leaves the caret in the body, so the next thing you type is the command. Type over the `sh` to run something else.
 

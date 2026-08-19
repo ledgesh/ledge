@@ -18,7 +18,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import type { NoteMeta, TrashMeta, WorkspaceRootInfo } from "../shared/rpc-schema";
 import type { RequestClient, ViewPush } from "../shared/wire";
-import { configureBridge, dispatchRunEvent, reconcileRuns, setTerminalBusy } from "./editor/bridge";
+import { configureBridge, dispatchRunEvent, dispatchRunLink, reconcileRuns, setTerminalBusy } from "./editor/bridge";
 import {
   bytesToB64,
   configureTerminal,
@@ -92,10 +92,13 @@ export const viewPush: ViewPush = {
     // caller's boot, not a state change), which makes it exactly the moment to
     // ask what became of the runs whose events were pushed at a dead wire.
     //
-    // And of the drawer's shell, for the same reason and in the same breath. A
-    // reconnect is announced only for the SAME server (a restarted one is
-    // refused outright, shared/transport.ts), so all four questions are being
-    // asked of a machine that still has the answers.
+    // And of the drawer's shell, for the same reason and in the same breath.
+    // The machine may not be the same PROCESS it was: a restarted server is
+    // reconnected to rather than refused, and announces itself as a loss and
+    // then a connection precisely so that everything below runs
+    // (shared/transport.ts). Which is why all four are questions and none is
+    // an assumption. A server that turned over answers "I have never heard of
+    // that" to every one of them, and that is a fine answer to get.
     //
     // The third is the vault, whose `vaultChanged` was dropped with the rest.
     // Not a rare corner: the idle relock's clock is note-RPC traffic
@@ -116,12 +119,25 @@ export const viewPush: ViewPush = {
     // blur landing in there would write text typed against a note the server
     // has since moved past, and the save guard would let it win
     // (notes/store.ts holdSaves).
-    if (state === "lost") holdSaves();
+    if (state === "lost") {
+      holdSaves();
+      // And every panel that was mid-run stops claiming to be (blocks.ts
+      // setRunsLink). Here rather than at "reconnecting", to keep it in step
+      // with the hold above and with what the states mean: mid-ladder,
+      // requests wait and are expected to land, and a run whose events are
+      // seconds late is still a run.
+      dispatchRunLink(false);
+    }
     if (state === "live") {
       // First, and the only one of the five with somebody's writing at stake:
       // it decides what becomes of every buffer that never reached the server,
       // and it is what lifts the hold above once it has (editorPool.ts).
       void resolveStrandedNotes();
+      // Reopened, then asked. reconcileRuns is what actually settles them, and
+      // it is asynchronous: leaving the panels on "Disconnected" until it
+      // answers would put a stale word on screen for a round trip on a wire
+      // that has just come back.
+      dispatchRunLink(true);
       void reconcileRuns();
       dispatchTerminalRelink();
       void refreshVaultState().catch(() => {});

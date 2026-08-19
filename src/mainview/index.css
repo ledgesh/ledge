@@ -830,6 +830,12 @@ body {
 .ledge-dot-error {
   background: var(--err);
 }
+/* A run whose machine went away: the muted base, stated rather than inherited.
+   Neither the pulse (which claims it is going) nor the error red (which claims
+   it stopped) is true, and a dot that says nothing is the honest one. */
+.ledge-dot-unknown {
+  background: var(--ed-muted);
+}
 .ledge-status {
   font-size: 11px;
   font-weight: 500;

@@ -24,6 +24,7 @@ import {
 } from "./bridge";
 import { confirmFor, parseFenceInfo, type ConfirmSpec } from "./fenceInfo";
 import { hasTerminal, runsBlocks, softKeyboard } from "../lib/shell";
+import { activeConnection, linkState, subscribeConnections } from "../lib/connections";
 import { fenceCloser, fenceOpener } from "./fences";
 import { declaredHosts, frontmatterRange, profileChipAnchor } from "./frontmatter";
 import { LOCAL_HOST, parseFrontmatter } from "../../shared/frontmatter";
@@ -44,7 +45,12 @@ export interface RunInfo {
   // output panel's header: with multiple machines in play, output that does
   // not say where it came from is a misread waiting to happen.
   host: string | null;
-  state: "running" | "done" | "error";
+  // "unknown" is a run whose machine went away while it was going: it was
+  // running when the wire dropped, and whether it still is cannot be known
+  // from here. It is not a fourth outcome but the absence of one, and it
+  // resolves on reconnect — back to "running" for the runs the server still
+  // has, and to a finish for the ones it does not (bridge.ts reconcileRuns).
+  state: "running" | "done" | "error" | "unknown";
   exitCode: number | null;
   startedAt: number;
   durationMs: number | null;
@@ -93,6 +99,12 @@ export function pingOverlay(view: EditorView): void {
   view.dispatch({ effects: pingOverlayEffect.of(null) });
 }
 
+// Whether a run is over. "unknown" is not: it is a run whose ending, if it had
+// one, happened where this client could not see it.
+function ended(state: RunInfo["state"]): boolean {
+  return state === "done" || state === "error";
+}
+
 const runsField = StateField.define<RunInfo[]>({
   create: () => [],
   update(runs, tr) {
@@ -119,7 +131,21 @@ const runsField = StateField.define<RunInfo[]>({
       } else if (e.is(setRunState)) {
         next = next.map((r) =>
           r.id === e.value.id
-            ? { ...r, state: e.value.state, exitCode: e.value.exitCode, durationMs: r.startedAt ? Date.now() - r.startedAt : null }
+            ? {
+                ...r,
+                state: e.value.state,
+                exitCode: e.value.exitCode,
+                // Only an ending stamps a duration, because only an ending has
+                // one. The other two transitions are a run being confirmed
+                // started and a run losing its machine, and neither is a length
+                // of time: a header reading "Running 0 ms" was this stamping
+                // whatever moment it happened to hear about.
+                durationMs: ended(e.value.state)
+                  ? r.startedAt
+                    ? Date.now() - r.startedAt
+                    : null
+                  : r.durationMs,
+              }
             : r,
         );
       } else if (e.is(removeRun)) {
@@ -248,9 +274,16 @@ function nextId(): string {
 // live run's panel would orphan its process — still running, nothing on screen
 // to show or stop it. So one live run per block; re-running waits for (or
 // dismisses) the current one.
+//
+// A run whose machine went away counts, and has to: "unknown" means it may
+// still be executing over there, so starting a second one is exactly the
+// double-run this gate exists to prevent. The block comes back when the
+// reconnect settles which it was (reconcileRuns).
 export function isBlockRunning(state: EditorState, from: number, to: number): boolean {
   const end = state.doc.lineAt(Math.min(to, state.doc.length)).to;
-  return state.field(runsField).some((r) => r.state === "running" && r.pos >= from && r.pos <= end);
+  return state
+    .field(runsField)
+    .some((r) => (r.state === "running" || r.state === "unknown") && r.pos >= from && r.pos <= end);
 }
 
 // Whether `pos` sits in a block the run verbs would accept: a fenced block
@@ -263,6 +296,34 @@ export function runnableBlockAt(state: EditorState, pos: number): boolean {
   return !!block && block.closed && isRunnable(block.lang);
 }
 
+/**
+ * Whether this client has given up on the machine the note lives on
+ * (remote.md §7).
+ *
+ * A run is the one thing in the editor that cannot report its own failure.
+ * `runBlock` is a request like any other, but the view sends it with a `void`
+ * and then waits for output to arrive on its own, because that is what a run
+ * IS: there is no reply to hold a panel open against. So a run asked for at a
+ * server this client has stopped reaching rejects into nothing, and the panel
+ * it already opened says "Running" for as long as the note stays open, with
+ * nothing coming to correct it because nothing is running.
+ *
+ * "lost" and not "reconnecting", which is the whole precision of it. Mid-ladder
+ * a request is HELD and replayed when the wire comes back (shared/transport.ts),
+ * so a run asked for there really does start, seconds late — and if the ladder
+ * runs out instead, the `lost` that ends it marks the panel unknown on its way
+ * past (setRunsLink). Both endings are already honest. Gating the ladder would
+ * refuse a run that was going to work, and would put this one verb out of step
+ * with every other thing the view does while reconnecting.
+ *
+ * So this is a gate rather than a report, and the only one: the one place in
+ * the app where predicting the failure is the only way to tell the truth about
+ * it.
+ */
+function linkDown(): boolean {
+  return linkState().state === "lost";
+}
+
 // Whether a block can be sent to `destination` right now. The terminal drawer is
 // one serial shell per note — a block sent while it is busy queues invisibly, so
 // that gate is note-wide. Inline runs gate per block (above).
@@ -271,6 +332,7 @@ export function runnableBlockAt(state: EditorState, pos: number): boolean {
 // the note's session, so neither rule reaches across notes: their shells are
 // separate and so is their state.
 export function canRun(view: EditorView, block: { from: number; to: number }, destination: RunDestination): boolean {
+  if (linkDown()) return false;
   return destination === "terminal"
     ? !isTerminalBusy(view.state.facet(sessionIdFacet))
     : !isBlockRunning(view.state, block.from, block.to);
@@ -314,6 +376,14 @@ export function runBlock(view: EditorView, pos: number, destination: RunDestinat
   // user's own compute, and running them may be the point.
   if (block.lang === "prompt" && noteLocked(view.state)) {
     notifyUser(PROMPT_SEALED);
+    return true;
+  }
+  // Before canRun rather than inside it, for the same reason the unclosed
+  // fence is: canRun's refusals are silent and the chord's must not be. A run
+  // offered at a machine that is not there is the app's loudest untruth, so
+  // its refusal is the one that most needs saying out loud.
+  if (linkDown()) {
+    notifyUser(runOffline());
     return true;
   }
   // Checked here rather than only on the buttons, so the keymap and the palette
@@ -534,6 +604,13 @@ const PROMPT_SEALED =
 // The chord's answer for a fence with no closing line. Only the chord and the
 // palette can reach it: an unclosed block never draws the buttons.
 const BLOCK_UNCLOSED = "This code block has no closing fence, so there is nothing to run yet.";
+// The button tooltip and the chord's notice for a machine that cannot be
+// reached (linkDown). Names the machine, because on a client with several
+// servers the useful half of the sentence is which one went: the bar says the
+// same name a foot away, and a tooltip that said "the server" would leave the
+// reader to work out that they are the same fact.
+const runOffline = (): string =>
+  `Not connected to ${activeConnection().name}, so there is nowhere to run this.`;
 
 // Gray out a run button while its shell cannot take a block. The native `disabled`
 // does the work: it stops the mousedown, so the click cannot queue anything, and
@@ -661,6 +738,7 @@ const overlayPlugin = ViewPlugin.fromClass(
     onScroll: () => void;
     onKeyDown: (e: KeyboardEvent) => void;
     offBusy: () => void;
+    offLink: () => void;
 
     constructor(readonly view: EditorView) {
       this.layer = document.createElement("div");
@@ -686,6 +764,11 @@ const overlayPlugin = ViewPlugin.fromClass(
       // own update cycle (no doc, geometry, or run-state change), so the chrome has
       // to be told. Every editor subscribes; read() filters by its own note.
       this.offBusy = onTerminalBusyChange(() => this.schedule());
+      // And the same for the connection: a wire that drops grays every run
+      // button in the note, and that is invisible to the editor's own update
+      // cycle exactly like the drawer going busy. Not folded into offBusy
+      // because the two unsubscribe separately.
+      this.offLink = subscribeConnections(() => this.schedule());
       document.addEventListener("keydown", this.onKeyDown, true);
       view.scrollDOM.addEventListener("mousemove", this.onMove);
       view.scrollDOM.addEventListener("scroll", this.onScroll, { passive: true });
@@ -911,6 +994,10 @@ const overlayPlugin = ViewPlugin.fromClass(
       // quieter. runBlock refuses the chords with the same sentence, and Bun
       // re-validates behind both.
       const sealedNote = noteLocked(this.view.state);
+      // Asked once for the whole layer: it is one fact about the connection,
+      // not a fact about any block.
+      const offline = linkDown();
+      const why = offline ? runOffline() : "";
       for (const c of m.controls) {
         const el = this.layer.querySelector<HTMLElement>(`.ledge-ctl-group[data-block="${c.from}"]`);
         if (!el) continue;
@@ -918,8 +1005,11 @@ const overlayPlugin = ViewPlugin.fromClass(
         el.style.right = `${c.right}px`;
         el.classList.toggle("caret", c.caret);
         const sealed = c.lang === "prompt" && sealedNote;
-        setBusy(el.querySelector('[data-act="run"]'), c.runBusy || sealed, "block.runInline", sealed ? PROMPT_SEALED : INLINE_BUSY, m.hostHint, c.asks);
-        setBusy(el.querySelector('[data-act="term"]'), c.termBusy || sealed, "block.runInTerminal", sealed ? PROMPT_SEALED : TERM_BUSY, m.hostHint, c.asks);
+        // Sealed outranks offline: a prompt fence in a locked note will not run
+        // when the wire comes back either, and the permanent reason is the more
+        // useful one to read.
+        setBusy(el.querySelector('[data-act="run"]'), c.runBusy || sealed || offline, "block.runInline", sealed ? PROMPT_SEALED : why || INLINE_BUSY, m.hostHint, c.asks);
+        setBusy(el.querySelector('[data-act="term"]'), c.termBusy || sealed || offline, "block.runInTerminal", sealed ? PROMPT_SEALED : why || TERM_BUSY, m.hostHint, c.asks);
       }
       for (const c of m.closes) {
         const el = this.layer.querySelector<HTMLElement>(`.ledge-close-wrap[data-close="${c.id}"]`);
@@ -1015,8 +1105,14 @@ const overlayPlugin = ViewPlugin.fromClass(
             // interrupt it on the way out. The cancel is addressed by run id, so
             // it reaches exactly this run's shell and no other block's; the state
             // check keeps dismissing an old finished panel from touching anything.
+            //
+            // An "unknown" run is dismissible too, and safely: the cancel goes
+            // nowhere while the wire is down, but dropping the panel drops the
+            // id from the claim this client makes when it comes back, and a run
+            // the claim leaves out is one the server interrupts (bridge.ts
+            // reconcileRuns). Letting go of it here IS how it gets stopped.
             const run = this.view.state.field(runsField).find((r) => r.id === c.id);
-            if (run?.state === "running") cancelRun(this.view.state.facet(sessionIdFacet), c.id);
+            if (run?.state === "running" || run?.state === "unknown") cancelRun(this.view.state.facet(sessionIdFacet), c.id);
             this.view.dispatch({ effects: removeRun.of(c.id) });
           }),
         );
@@ -1044,6 +1140,7 @@ const overlayPlugin = ViewPlugin.fromClass(
 
     destroy() {
       this.offBusy();
+      this.offLink();
       document.removeEventListener("keydown", this.onKeyDown, true);
       this.view.scrollDOM.removeEventListener("mousemove", this.onMove);
       this.view.scrollDOM.removeEventListener("scroll", this.onScroll);
@@ -1156,25 +1253,48 @@ export function handleRunEvent(view: EditorView, id: string, kind: string, paylo
  * Panels are the only record a run has on this side: an editor destroyed by a
  * relock, a tab closed, a page reloaded all take theirs with them, and a run
  * this returns nothing for is one nobody here could see or stop.
+ *
+ * Which is why "unknown" is in the answer and not just "running". Every run
+ * this client is unsure about was made unsure by the very outage that this
+ * question is asked at the end of, so a filter on "running" alone would name
+ * none of them — and the server, hearing a claim that leaves them out, would
+ * interrupt the lot. The panels are on screen; they are ours; we are asking.
  */
 export function runningRunIds(state: EditorState): string[] {
   return state
     .field(runsField)
-    .filter((r) => r.state === "running")
+    .filter((r) => r.state === "running" || r.state === "unknown")
     .map((r) => r.id);
 }
 
-export function failAllRuns(view: EditorView): void {
+/**
+ * The machine these runs are on became unreachable, or reachable again
+ * (mainview/boot.tsx connectionState).
+ *
+ * Down, a run that was going becomes "unknown". Nothing about the run changed —
+ * that is the point, and it is why this is not `failAllRuns`, which is what
+ * used to be here: a panel that answers a dropped wire by saying the run ended
+ * is inventing an ending, and the run it invented one for may be four minutes
+ * into a deploy. The panel keeps its output, keeps its block gated, and says
+ * that it does not know.
+ *
+ * Up, every unknown run goes back to "running", and reconcileRuns settles which
+ * of them that was actually true of a beat later. The restore is not the
+ * answer, it is the question being reopened: until the server replies, a run
+ * that survived the outage and a run that died in it look identical from here,
+ * and "running" is the one of the two that does not need undoing if it was
+ * right.
+ */
+export function setRunsLink(view: EditorView, up: boolean): void {
+  const was = up ? "unknown" : "running";
+  const now = up ? "running" : "unknown";
   for (const r of view.state.field(runsField)) {
-    if (r.state === "running") {
-      view.dispatch({ effects: setRunState.of({ id: r.id, state: "error", exitCode: null }) });
-      const it = getInlineTerm(r.id);
-      if (it) {
-        const updated = view.state.field(runsField).find((x) => x.id === r.id);
-        if (updated) it.setState(updated);
-        it.freeze();
-      }
-    }
+    if (r.state !== was) continue;
+    view.dispatch({ effects: setRunState.of({ id: r.id, state: now, exitCode: null }) });
+    // Not frozen, either way: freezing is for a run that has finished, and the
+    // whole claim here is that this one has not been seen to.
+    const updated = view.state.field(runsField).find((x) => x.id === r.id);
+    if (updated) getInlineTerm(r.id)?.setState(updated);
   }
 }
 

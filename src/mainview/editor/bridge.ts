@@ -257,6 +257,11 @@ export function toNative(message: unknown): void {
 export interface RunSink {
   apply(ev: RunEvent): void;
   live(): string[];
+  /** The wire to the machine these runs are on went, or came back
+   * (blocks.ts setRunsLink). Third here for the same reason the second is:
+   * an editor's runs, what it still claims of them, and what it can still
+   * be told about them are one lifetime. */
+  link(up: boolean): void;
 }
 
 const runEventSinks = new Set<RunSink>();
@@ -270,6 +275,22 @@ export function onRunEvent(sink: RunSink): () => void {
 
 export function dispatchRunEvent(ev: RunEvent): void {
   for (const sink of runEventSinks) sink.apply(ev);
+}
+
+/**
+ * Tell every panel that the connection went or came back (mainview/boot.tsx).
+ *
+ * Sent to all of them rather than to the note in front, because a run outlives
+ * the tab it is looked at in: a background note with a deploy in it is exactly
+ * the panel somebody comes back to, and it must not have spent the outage
+ * claiming to be fine.
+ *
+ * Paired with reconcileRuns and ordered before it on the way up, though the
+ * order is not what makes it correct — runningRunIds counts unknown runs too,
+ * so a claim sent from either side of this names the same ids.
+ */
+export function dispatchRunLink(up: boolean): void {
+  for (const sink of runEventSinks) sink.link(up);
 }
 
 /**
