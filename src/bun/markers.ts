@@ -14,11 +14,17 @@ const OSC_PREFIX = new Uint8Array([0x1b, 0x5d, 0x31, 0x33, 0x33, 0x3b]);
 export type MarkerEvent =
   | { type: "began"; blockId: string }
   | { type: "output"; blockId: string; data: Uint8Array }
-  | { type: "ended"; blockId: string; exitCode: number };
+  | { type: "ended"; blockId: string; exitCode: number }
+  // The init line's acknowledgement: this shell can now end a block. Carries
+  // no id because it is about the SHELL and not about any run — see
+  // markerInit's last statement for what it costs to go without it.
+  | { type: "ready" };
 
 /**
- * Install the end-marker hook. Sent once, when a note's inline shell is spawned,
- * before any block runs.
+ * Install the end-marker hook. Sent on the front of a block's own line, by
+ * whichever block is the first to run on a shell that has not acknowledged it
+ * (bun/inlinePool.ts run) — not on its own at spawn, which is how it used to
+ * go out and how it came to be lost.
  *
  * The end marker cannot be the next command on the block's line. Ctrl-C aborts the
  * whole line, so the printf reporting the exit code never runs and the block reads
@@ -54,23 +60,39 @@ export type MarkerEvent =
  * block's output. The drawer's shell is a different shell and keeps the
  * option: there the prompt IS the point.
  *
- * It opens with a bare newline because it is the FIRST thing ever written to a
- * fresh pty, and on Linux the first byte of that write does not reliably
- * arrive: the master takes it before the child has finished claiming the slave
- * as its controlling terminal, and the line discipline coming up eats it. One
- * byte short produces no error. It produces `_ledge_precmd() {…}` next to a
- * `precmd_functions+=(__ledge_precmd)` naming a function that does not exist,
- * so every block on that shell begins and no block ever ends. The newline is
- * expendable: whatever is left of it is an empty command line, and the
- * definition starts on the next one. Found on a Linux server
+ * It opens with a bare newline and closes with an acknowledgement, and both
+ * are about the same hazard: this line can be damaged in transit with nothing
+ * to show for it. A pty's master takes bytes before the child has finished
+ * claiming the slave as its controlling terminal, and the line discipline
+ * coming up discards whatever is still queued. `pty.ts` now holds input until
+ * the child has spoken, which closes that window where the child IS the shell;
+ * a remote shell is one ssh writes for, and ssh can write a line of its own
+ * before the shell on the far side exists, so over a wire the window is
+ * narrowed rather than shut.
+ *
+ * The leading newline covers the cheapest version of the damage, a lost first
+ * byte: whatever is left of it is an empty command line, and the definition
+ * starts on the next one. Without it, one byte short produces no error at all
+ * — `_ledge_precmd() {…}` next to a `precmd_functions+=(__ledge_precmd)`
+ * naming a function that does not exist. Found on a Linux server
  * (scripts/probe-ssh.ts), where it was every inline run.
+ *
+ * The `R` at the end covers every larger version, because there is no shape of
+ * damage this line can suffer that leaves its last statement running. What a
+ * shell that never sends it costs is specific and total: the C marker rides on
+ * the block's own line and still arrives, so the block begins, its output is
+ * sliced correctly, and NOTHING can ever close it — the panel sits on Running
+ * for good, the prompt that follows the block is rendered as part of it, and
+ * the block's run button stays dead. `inlinePool.ts` reads the ack and puts
+ * the hook back before the next block rather than trusting one write.
  */
 export function markerInit(nonce: string): string {
   return (
     `\n__ledge_precmd() { local rc=$?; [ -n "$__ledge_id" ] || return; ` +
     `printf '\\033]133;D;%d;ledge=${nonce}:%s\\a' "$rc" "$__ledge_id"; __ledge_id=; }; ` +
     `if [ -n "$ZSH_VERSION" ]; then unsetopt PROMPT_SP; precmd_functions+=(__ledge_precmd); ` +
-    `else PROMPT_COMMAND="__ledge_precmd\${PROMPT_COMMAND:+;\$PROMPT_COMMAND}"; fi\n`
+    `else PROMPT_COMMAND="__ledge_precmd\${PROMPT_COMMAND:+;\$PROMPT_COMMAND}"; fi; ` +
+    `printf '\\033]133;R;ledge=${nonce}\\a'\n`
   );
 }
 
@@ -87,6 +109,7 @@ export function markerCommand(runner: string, nonce: string, blockId: string): s
 type Parsed =
   | { kind: "began"; id: string }
   | { kind: "ended"; id: string; code: number }
+  | { kind: "ready" }
   | { kind: "unknown" };
 
 export class MarkerParser {
@@ -138,6 +161,8 @@ export class MarkerParser {
       } else if (marker.kind === "ended") {
         if (this.openBlock === marker.id) this.openBlock = null;
         events.push({ type: "ended", blockId: marker.id, exitCode: marker.code });
+      } else if (marker.kind === "ready") {
+        events.push({ type: "ready" });
       }
       // unknown: some other OSC 133 sequence, not ours, not output.
     }
@@ -211,6 +236,11 @@ export class MarkerParser {
     if (kind === "C" && fields.length >= 2) {
       const id = this.blockId(fields[1]);
       if (id !== null) return [{ kind: "began", id }, consumed];
+    }
+    // No block id and no status: the whole payload is the nonce, so a shell
+    // that is not ours cannot claim to have installed our hook.
+    if (kind === "R" && fields.length >= 2 && fields[1] === `ledge=${this.nonce}`) {
+      return [{ kind: "ready" }, consumed];
     }
     if (kind === "D" && fields.length >= 3) {
       const code = parseInt(fields[1], 10);

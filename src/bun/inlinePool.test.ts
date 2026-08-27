@@ -12,11 +12,21 @@ const PHONE = "phone";
 
 // The byte stream a real shell would echo back: OSC 133 C when a block starts,
 // D with the exit status when its prompt returns (see markers.ts).
-const began = (id: string) => `\x1b]133;C;ledge=${NONCE}:${id}\x07`;
+// The hook's ack rides ahead of the start marker on the same line that carries
+// it (markers.ts, and `run` in inlinePool.ts), so a block beginning on a shell
+// that can end it is always these two, in this order. `unhooked` is the damaged
+// case: a line that lost its hook and kept its block.
+const ready = `\x1b]133;R;ledge=${NONCE}\x07`;
+const unhooked = (id: string) => `\x1b]133;C;ledge=${NONCE}:${id}\x07`;
+const began = (id: string) => ready + unhooked(id);
 const ended = (id: string, code = 0) => `\x1b]133;D;${code};ledge=${NONCE}:${id}\x07`;
 
 class FakeShell implements InlineShellIO {
   written = "";
+  // Kept apart from `written` because one of the things being tested is that
+  // the hook and the block go out in ONE write: a tty discards what it has not
+  // read yet, and two writes can be separated where one cannot.
+  writes: string[] = [];
   resizes: Array<[number, number]> = [];
   interrupts = 0;
   closed = false;
@@ -27,7 +37,9 @@ class FakeShell implements InlineShellIO {
   private queue: Uint8Array[] = [];
 
   write(data: string | Uint8Array): void {
-    this.written += typeof data === "string" ? data : new TextDecoder().decode(data);
+    const text = typeof data === "string" ? data : new TextDecoder().decode(data);
+    this.written += text;
+    this.writes.push(text);
   }
   drain(): Uint8Array | null {
     return this.queue.shift() ?? null;
@@ -785,5 +797,86 @@ describe("what the drain loop reads to set its cadence", () => {
     pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
     delete (shells[0] as { pending?: boolean }).pending;
     expect(pool.pending()).toBe(false);
+  });
+});
+
+// The hook that ends blocks, and what happens to a shell that never got it.
+// A pty discards whatever is queued when its line discipline comes up, and the
+// hook was the first thing written to every shell — so losing it cost that
+// shell every block it would ever run: each one began, printed, and could
+// never end (bun/markers.ts, and the panel sat on "Running" with the shell's
+// own prompt rendered inside it).
+describe("installing the hook that ends a block", () => {
+  test("it rides on the block's own line, so the two cannot be separated", () => {
+    const { pool, shells } = makePool();
+    pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
+
+    // One write, and the hook is in front of the block within it.
+    expect(shells[0].writes).toEqual([markerInit(NONCE) + markerCommand("source /tmp/a.sh", NONCE, "a")]);
+  });
+
+  test("a shell that has acked is not sent it again", () => {
+    const { pool, shells, drained } = makePool();
+    pool.run("note", "a", "cmd-a", { client: MAC });
+    shells[0].emit(began("a") + ended("a"));
+    drained();
+
+    pool.run("note", "b", "cmd-b", { client: MAC });
+    expect(shells.length).toBe(1);
+    expect(shells[0].writes[1]).toBe(markerCommand("cmd-b", NONCE, "b"));
+    expect(shells[0].writes[1]).not.toContain("__ledge_precmd");
+  });
+
+  test("a shell that never acked is sent it again with the next block", () => {
+    const { pool, shells, drained } = makePool();
+    pool.run("note", "a", "cmd-a", { client: MAC });
+    // The line arrived damaged: the block runs and ends, the hook never landed.
+    // (Contrived on this shell, which cannot really end a block without one —
+    // what is being pinned is that the pool keeps offering it, not the shell.)
+    shells[0].emit(unhooked("a") + ended("a"));
+    drained();
+
+    pool.run("note", "b", "cmd-b", { client: MAC });
+    expect(shells[0].writes[1]).toBe(markerInit(NONCE) + markerCommand("cmd-b", NONCE, "b"));
+  });
+
+  test("the ack is the pool's business and is never sent on to a client", () => {
+    const { pool, shells, drained } = makePool();
+    pool.run("note", "a", "cmd-a", { client: MAC });
+    shells[0].emit(ready);
+    // Nothing for a panel to show, and no client could act on it.
+    expect(drained()).toEqual([]);
+  });
+
+  test("stop ends a block that began on a shell with no hook", () => {
+    const { pool, shells, drained } = makePool();
+    pool.run("note", "a", "cmd-a", { client: MAC });
+    // The ack comes before the start marker on the same line, so a start
+    // marker without one is damage rather than a race: no prompt on this shell
+    // will ever report a D, and the block would sit on "Running" for good.
+    shells[0].emit(unhooked("a"));
+    drained();
+
+    pool.cancel("note", "a");
+    expect(shells[0].interrupts).toBe(1);
+    // Closed out by the pool, since nothing else can, and the shell goes with
+    // it rather than serving the next block from a state nobody can describe.
+    expect(drained()).toEqual([{ type: "ended", blockId: "a", exitCode: null }]);
+    expect(shells[0].closed).toBe(true);
+  });
+
+  test("a healthy running block is still only interrupted", () => {
+    // The guard on the rule above: an acked shell reports its own 130, and
+    // closing the run out here would replace that with a blank ending.
+    const { pool, shells, drained } = makePool();
+    pool.run("note", "a", "cmd-a", { client: MAC });
+    shells[0].emit(began("a"));
+    drained();
+
+    pool.cancel("note", "a");
+    expect(drained()).toEqual([]);
+    expect(shells[0].closed).toBe(false);
+    shells[0].emit(ended("a", 130));
+    expect(drained()).toEqual([{ type: "ended", blockId: "a", exitCode: 130 }]);
   });
 });

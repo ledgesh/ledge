@@ -71,6 +71,26 @@ describe("markerCommand / markerInit", () => {
     expect(init.indexOf("\n")).toBe(0);
   });
 
+  // What makes a lost hook detectable instead of permanent. The C marker rides
+  // on the block's own line and arrives whatever happened to the hook, so
+  // without an ack a shell that never installed one is indistinguishable from a
+  // working shell right up until the block fails to end — and by then there is
+  // nothing to be done about it.
+  test("the hook says so once it is installed", () => {
+    const init = markerInit(NONCE);
+    expect(init).toContain(`133;R;ledge=${NONCE}`);
+  });
+
+  test("the ack is the last thing on the line, so no damage can outlive it", () => {
+    // Anything that truncates this line takes the ack with it. Put earlier, a
+    // line cut after the ack and before the registration would report a hook
+    // that is not there, which is worse than no ack at all.
+    const init = markerInit(NONCE);
+    expect(init.trimEnd().endsWith(`printf '\\033]133;R;ledge=${NONCE}\\a'`)).toBe(true);
+    expect(init.indexOf("133;R;")).toBeGreaterThan(init.indexOf("precmd_functions"));
+    expect(init.indexOf("133;R;")).toBeGreaterThan(init.indexOf("PROMPT_COMMAND="));
+  });
+
   test("the hook stays quiet when no block is running", () => {
     // Prompts happen for reasons other than blocks; without this guard every one
     // of them would emit an end marker for whatever ran last.
@@ -205,9 +225,24 @@ describe("MarkerParser", () => {
       "output",
       "ended",
     ]);
-    const ids = events.map((e) => e.blockId);
+    const ids = events.map((e) => ("blockId" in e ? e.blockId : null));
     expect(ids).toEqual(["a", "a", "a", "b", "b", "b"]);
     expect(events[5]).toMatchObject({ type: "ended", blockId: "b", exitCode: 1 });
+  });
+
+  test("reports the hook's ack, and only for our own nonce", () => {
+    const p = new MarkerParser(NONCE);
+    expect(p.feed(bytes(`\x1b]133;R;ledge=${NONCE}\x07`))).toEqual([{ type: "ready" }]);
+    // Another Ledge on the same shell is not this one's hook.
+    expect(p.feed(bytes(`\x1b]133;R;ledge=someone-else\x07`))).toEqual([]);
+  });
+
+  test("the ack is not output, and does not open or close a block", () => {
+    const p = new MarkerParser(NONCE);
+    p.feed(bytes(`\x1b]133;R;ledge=${NONCE}\x07`));
+    expect(p.openBlockId).toBe(null);
+    const events = p.feed(join(begin("a"), bytes("A"), end("a", 0)));
+    expect(events.map((e) => e.type)).toEqual(["began", "output", "ended"]);
   });
 
   test("openBlockId names the block still waiting on its end marker", () => {

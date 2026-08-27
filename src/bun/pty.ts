@@ -255,6 +255,9 @@ export class PtyProcess {
   // Input the tty has not taken yet, and how far into it we got. See write().
   private outBuf: Uint8Array | null = null;
   private outOff = 0;
+  // Whether the child has ever produced a byte. Nothing is written to the tty
+  // before it has; see flush().
+  private spoken = false;
   private readonly interruptViaChar: boolean;
 
   constructor(opts: PtyOptions) {
@@ -380,6 +383,10 @@ export class PtyProcess {
    * it out a chunk per tick. Usually the echo of what did land keeps the loop
    * awake by itself; this is the case where it cannot, because the program
    * reading has echo off (a password prompt).
+   *
+   * True as well for the whole of a queue that is being held for a child which
+   * has not spoken yet (see flush), which is the same answer for the same
+   * reason: the loop must be at full speed for the tick that lets it go.
    */
   get pending(): boolean {
     return this.outBuf !== null;
@@ -413,6 +420,13 @@ export class PtyProcess {
       }
       break;
     }
+    // The child spoke, or it is never going to. Either way the queue stops
+    // being held, and it goes out on this tick rather than the next one so
+    // that waiting costs a shell's startup and not a drain interval on top.
+    if (!this.spoken && (chunks.length > 0 || this.ended)) {
+      this.spoken = true;
+      this.flush();
+    }
     if (chunks.length === 0) return null;
     if (chunks.length === 1) return chunks[0];
     const total = chunks.reduce((n, c) => n + c.length, 0);
@@ -434,10 +448,14 @@ export class PtyProcess {
    * rather than sleeping, and something has to hold the remainder — and there
    * is always a remainder to hold, because a tty in canonical mode takes only
    * one line's worth of bytes and every shell starts out that way. The first
-   * thing written to a new shell (the marker hook) and the first thing written
-   * to a remote one (a block's whole body, base64, on one line) both land in
-   * that window. Before this queue existed, that write slept in the kernel
-   * forever and took the main process with it.
+   * thing written to a shell is a block's line with the marker hook on the
+   * front of it, base64 body and all, which is exactly what lands in that
+   * window. Before this queue existed, that write slept in the kernel forever
+   * and took the main process with it.
+   *
+   * It is also what holds everything back until the child has spoken, which is
+   * a second and unrelated reason a write may not have reached the tty yet;
+   * flush() has that one.
    *
    * Unbounded on purpose: every queued byte is something someone asked to type,
    * and dropping the tail of a command is worse than holding it. A stopped
@@ -470,6 +488,33 @@ export class PtyProcess {
    * applying — so a stalled queue unblocks itself as the shell comes up.
    */
   private flush(): void {
+    // Nothing goes into a tty that has never said anything.
+    //
+    // A master accepts bytes from the moment it exists, which is before the
+    // child has finished claiming the slave as its controlling terminal — and
+    // the line discipline coming up DISCARDS whatever is still queued. There
+    // is no error and no short write: the bytes are simply gone, and the first
+    // thing written to an inline shell is the line that lets it end a block
+    // (markers.ts). A child that has produced output has a claimed tty and is
+    // reading, so waiting for one byte is what makes that window shut.
+    //
+    // Waiting has no deadline on purpose. The wait ends when the child speaks
+    // or when it dies, and a child that does neither is one whose tty nothing
+    // could have been delivered to anyway — a remote shell mid-connect is
+    // exactly that, and holding a block's command line until ssh is through is
+    // the behaviour worth having. Every call site here is an interactive shell
+    // (bun/server.ts), and those announce themselves before they read.
+    if (!this.spoken) return;
+    // The child is gone: there is nobody to take this and there never will be.
+    // Dropped rather than left queued, because a write to a dead pty fails
+    // without consuming anything, and a queue that can never empty reports
+    // `pending` forever — which is the drain loop's signal to stay at full
+    // speed (bun/server.ts).
+    if (this.ended) {
+      this.outBuf = null;
+      this.outOff = 0;
+      return;
+    }
     while (this.outBuf && !this.closed) {
       const len = this.outBuf.length - this.outOff;
       const n = Number(s.write(this.masterFD, ptr(this.outBuf, this.outOff), BigInt(len)));

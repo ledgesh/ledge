@@ -95,6 +95,13 @@ interface Slot {
   // Cancel arrived for a run that never began: close it out and discard the
   // shell (see cancel).
   abandoned: boolean;
+  // Whether this shell has acknowledged the end-marker hook (markers.ts `R`).
+  // False means one of two things and the pool cannot tell them apart: the
+  // init line is still in flight, or it never landed. Both are answered the
+  // same way — send it again with the next block — because the hook is
+  // idempotent and the alternative is a shell that begins blocks it can never
+  // end.
+  hooked: boolean;
 }
 
 /**
@@ -215,7 +222,16 @@ export class InlinePool {
       this.pendingResize.delete(id);
       slot.shell.resize(size.cols, size.rows);
     }
-    const line = markerCommand(runner, this.nonce, id);
+    // One write, so a tty that discards what it has not read yet cannot take
+    // the hook and leave the block. Prepended rather than sent separately for
+    // the same reason: the failure being prevented is exactly a line that
+    // arrives without the line before it.
+    //
+    // Re-sending is safe as often as it happens. A second registration reports
+    // nothing extra, because the first clears `__ledge_id` and every later one
+    // reads the guard and returns; and it stops for good the moment an ack
+    // arrives, which is one round trip after the shell is up.
+    const line = (slot.hooked ? "" : markerInit(this.nonce)) + markerCommand(runner, this.nonce, id);
     slot.echo += line;
     slot.shell.write(line);
   }
@@ -311,6 +327,13 @@ export class InlinePool {
           // only account a stuck shell ever gives of itself.
           if (slot.activeRun !== null && !slot.began) this.holdOrShow(slot, data, emit);
           for (const ev of slot.parser.feed(data)) {
+            // About the shell rather than about a run: nothing downstream has
+            // a panel to put it in, and a client told about it could do
+            // nothing with it either.
+            if (ev.type === "ready") {
+              slot.hooked = true;
+              continue;
+            }
             if (ev.type === "began" && ev.blockId === slot.activeRun) {
               // The block is running: its own output starts here, and the
               // prologue was what it always is, the echo of what we typed.
@@ -329,10 +352,12 @@ export class InlinePool {
           slot.spoke = true;
           this.flushPreamble(slot, emit);
         }
-        // Stopped before it ever started (see cancel): the shell cannot close
-        // this run and nothing else will, so the pool does, and the shell goes
-        // with it rather than serving the next block from an unknown state.
-        if (slot.abandoned && !slot.began && slot.activeRun !== null) {
+        // Stopped, and no marker is coming: the run never started (see cancel),
+        // or it started on a shell whose hook never landed (see interrupt).
+        // Either way the shell cannot close this run and nothing else will, so
+        // the pool does, and the shell goes with it rather than serving the
+        // next block from an unknown state.
+        if (slot.abandoned && slot.activeRun !== null) {
           this.flushPreamble(slot, emit);
           emit({ type: "ended", blockId: slot.activeRun, exitCode: null }, slot.client);
           this.dropSlot(session, slot);
@@ -477,10 +502,12 @@ export class InlinePool {
 
   private newSlot(sessionId: string, host: string): Slot {
     const shell = this.spawn(sessionId, host);
-    // Install the end-marker hook before any block can run. Its own echo lands
-    // outside every C..D pair, so the parser drops it and no block ever sees it.
-    const init = markerInit(this.nonce);
-    shell.write(init);
+    // Nothing is written here. The end-marker hook goes out with the first
+    // block instead (see run), on the same line, because a hook and a block
+    // that travel separately can arrive separately — and a shell that got the
+    // block without the hook begins it and can never end it. Nothing needs the
+    // hook before then: this is only ever reached because a run asked for a
+    // shell, and that run is the next thing written.
     return {
       shell,
       parser: new MarkerParser(this.nonce),
@@ -489,10 +516,11 @@ export class InlinePool {
       began: false,
       preamble: [],
       preambleLen: 0,
-      echo: init,
+      echo: "",
       startedAt: 0,
       spoke: false,
       abandoned: false,
+      hooked: false,
     };
   }
 
@@ -503,9 +531,17 @@ export class InlinePool {
   // Stop what a slot is running, by whichever of the two routes applies: a
   // signal for a run that began, and the abandoned flag for one that never did.
   // `cancel` states why they differ; `claim` needs the same pair.
+  //
+  // A run that began on a shell with no hook takes the second route as well,
+  // because the signal alone would not end it. The ack is printed BEFORE the
+  // start marker and on the same line as it (see run), so a start marker from
+  // an unacked shell is not a race — it is proof that the line arrived damaged,
+  // and that no prompt on that shell will ever report a D marker. Signalling it
+  // would abort the block and leave the panel on "Running" with its own Stop
+  // button the only thing that could have helped.
   private interrupt(slot: Slot): void {
     slot.shell.interrupt();
-    if (!slot.began) slot.abandoned = true;
+    if (!slot.began || !slot.hooked) slot.abandoned = true;
   }
 
   private slotFor(sessionId: string, id: string): Slot | undefined {

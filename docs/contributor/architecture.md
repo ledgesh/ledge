@@ -782,6 +782,26 @@ alike, which is what keeps all three telling one story about the note.
   dropped as echo, but ssh talks before the shell exists, so a run silent
   past the grace period streams the shell's own bytes to its panel — which
   already takes keystrokes, so a host-key question can be answered there.
+- **The hook that ends a block travels with the block, and says so when it
+  lands.** A pty master takes bytes from the moment it exists, and the line
+  discipline coming up discards whatever it has not read — no error, no short
+  write, the bytes are simply gone. The end-marker hook used to be written on
+  its own at spawn, which made it the likeliest thing in the system to be
+  lost, and losing it was silent and total: the C marker rides on the block's
+  own line and still arrives, so the block began, printed correctly, rendered
+  the shell's own prompt into its panel (nothing was open to close it) and sat
+  on "Running" for good with a dead Stop button — for that shell and every
+  block after it. Three things now hold: `pty.ts` writes nothing into a tty
+  whose child has not spoken, so the window shuts wherever the child IS the
+  shell (over ssh it narrows, since ssh can write before the far side exists);
+  `markerInit` rides on the front of the block's line in ONE write, so the two
+  cannot be separated; and it ends by printing an ack the parser reports as
+  `ready`, which the pool re-sends the hook until it hears. The ack is printed
+  BEFORE the start marker on that same line, which turns "a block began on a
+  shell with no ack" from a race into proof of damage — so `cancel` closes
+  such a run out by hand instead of signalling a shell that can never report.
+  What remains, honestly: that one block gets no exit code. Nothing can invent
+  one for a shell that was never told how to report it.
 - **Restart-applies, like settings.** Params are read at shell *spawn*; a
   live shell keeps the cwd/env it was born with, and an edited frontmatter
   takes effect on the session's next shell. The "Restart Note Shell" command

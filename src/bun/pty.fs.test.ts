@@ -88,6 +88,52 @@ async function stillBusy(pty: PtyProcess, ms: number): Promise<boolean> {
   }
 }
 
+// The window that eats the first thing written to a shell. A master takes
+// bytes from the moment it exists; the child claims the slave a moment later,
+// and the line discipline coming up discards whatever is still queued. Nothing
+// reports it — no error, no short write — and what is lost is whichever line
+// went first, which for an inline shell is the one that lets it end a block
+// (bun/markers.ts).
+describe("input written before the child has spoken", () => {
+  test("waits for it rather than going into a tty nobody has claimed", async () => {
+    // A child that stays quiet long enough to ask the question. Without the
+    // gate the tty takes this write at once — an empty input queue has room —
+    // and `pending` would already be false.
+    const pty = shell({ args: ["-c", "sleep 0.4; echo AWAKE; exec cat"] });
+    try {
+      pty.write("held-until-awake\n");
+      expect(pty.pending).toBe(true);
+
+      // It goes out on the tick that hears the child, not the one after.
+      const seen = await readUntil(pty, /AWAKE/);
+      expect(seen).not.toContain("held-until-awake");
+      await readUntil(pty, /held-until-awake/);
+      expect(pty.pending).toBe(false);
+    } finally {
+      pty.close();
+    }
+  });
+
+  test("goes out when the child dies without ever speaking", async () => {
+    // Nothing will read it and nothing needs to, but a queue held for a child
+    // that is gone would be held forever, and `pending` is what the drain loop
+    // reads to decide it may slow down (bun/server.ts).
+    const pty = shell({ args: ["-c", "exit 0"] });
+    try {
+      pty.write("nobody is listening\n");
+      const deadline = Date.now() + 5000;
+      while (Date.now() < deadline && !pty.exited) {
+        pty.drain();
+        await Bun.sleep(5);
+      }
+      expect(pty.exited).toBe(true);
+      expect(pty.pending).toBe(false);
+    } finally {
+      pty.close();
+    }
+  });
+});
+
 describe("a shell on a pty", () => {
   test("runs a command and echoes it back", async () => {
     const pty = shell();
