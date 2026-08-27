@@ -1039,15 +1039,17 @@ sibling of `dist-cli/` and `dist-native/`.
 
 **The app is a package manifest and a directory, not an Xcode project.**
 `scripts/ios-build.ts` runs `swift build` over `ios/Package.swift`, writes an
-`Info.plist`, copies the view in beside it, and hands the result to `simctl`.
+`Info.plist`, compiles the icon, copies the view in beside it, and hands the
+result to `simctl`.
 A project file would be a second, generated description of facts that are
 already legible — unreadable in a diff and unverifiable except by opening
 Xcode. Phase 3 got away with a bare `swiftc` over a glob; phase 4 has a
 dependency to resolve, which is the one thing a glob cannot do, and SwiftPM is
 the smaller of the two answers to that.
 
-Four things that build has to do that Xcode would have done quietly, each of
-which announced itself as a launch failure with no obvious cause:
+Five things that build has to do that Xcode would have done quietly. The first
+four announced themselves as launch failures with no obvious cause; the fifth
+announces itself as nothing at all:
 
 | What | Why |
 | ---- | --- |
@@ -1055,9 +1057,10 @@ which announced itself as a launch failure with no obvious cause:
 | The back-deployment shims copied into `Frameworks/` | A binary built with this toolchain and deployed to iOS 17 links a compatibility dylib for every standard-library type the runtime there lacks. Missing, it is a dyld abort at launch. The list is read out of the binary, because it belongs to the toolchain |
 | An ad hoc signature | The keychain answers `errSecMissingEntitlement` to a process with no application identity, and the device key is a keychain item (§4) |
 | Entitlements as a Mach-O section, not in the signature | The Simulator's rule, and not the device's. A signature carrying them is refused at launch with a POSIX 153 |
+| The icon catalog compiled with `actool` | `assets/Ledge.icon` is a source and iOS reads a compiled `Assets.car`. Missing, there is nothing to go wrong: the app installs, launches and works, and sits on the home screen as the grey placeholder, because an icon iOS cannot find is not an error to it |
 
-**A device build is that same directory with seven things different**, and
-`bun run ios -- --phone` is all seven. The Simulator checks almost none of
+**A device build is that same directory with eight things different**, and
+`bun run ios -- --phone` is all eight. The Simulator checks almost none of
 them; a phone checks every one, and the shared symptom of getting one wrong is
 an install that succeeds and a launch that does not.
 
@@ -1069,6 +1072,7 @@ an install that succeeds and a launch that does not.
 | Entitlements | `__TEXT,__entitlements` at link time | in the signature, and `--generate-entitlement-der` with them: iOS 15 and later read the DER copy and kill a process whose signature has only the plist |
 | Identifier | `dev.ledge.ios`, no team prefix | `<TEAMID>.dev.ledge.ios`, and it is the profile that decides |
 | The profile | none | `embedded.mobileprovision` in the bundle root |
+| The icon catalog | `actool --platform iphonesimulator` | `iphoneos`. The weakest row here: the two catalogs differ in their bytes, but a device one rendered on the Simulator when it was tried, so this is matched because it is the correct input and not because a mismatch is known to cost anything |
 | Info.plist | as committed | plus `CFBundleSupportedPlatforms` and the `DT` keys Xcode writes. installd refuses a bundle that does not claim the platform, and says the bundle is invalid rather than which key is missing |
 | Install and launch | `simctl` | `devicectl`, whose `--console` is `--console-pty` |
 

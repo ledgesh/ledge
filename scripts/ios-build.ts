@@ -23,13 +23,14 @@
 //
 // Two destinations, and `--phone` is the whole difference. The Simulator build
 // needs no signing identity, because the Simulator checks none; a device checks
-// everything, so the same bundle assembled seven ways differently is a
+// everything, so the same bundle assembled eight ways differently is a
 // different SDK, a different triple, different back-deployment shims, a real
 // identity instead of an ad hoc one, entitlements in the signature instead of a
-// Mach-O section, a provisioning profile inside the bundle, and `devicectl`
-// instead of `simctl`. Every one of them is a `phone ?` below and each is
-// commented where it sits, because each announced itself as a launch failure
-// with no obvious cause (ios.md §12).
+// Mach-O section, a provisioning profile inside the bundle, an icon catalog
+// compiled for the other platform, and `devicectl` instead of `simctl`. Every
+// one of them is a `phone ?` below and each is commented where it sits, because
+// each announced itself as a launch failure with no obvious cause (ios.md §12).
+// All but the icon, which announced itself as a grey square.
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -324,6 +325,67 @@ if (phone) {
   // its own UDID is in the list, and checks that what the signature claims is
   // a subset of what it grants.
   await Bun.write(join(APP, "embedded.mobileprovision"), Bun.file(PROFILE));
+}
+
+// --- the icon ----------------------------------------------------------------
+//
+// The Mac app's icon, compiled again for this platform. `assets/Ledge.icon` is
+// an Icon Composer bundle (electrobun.config.ts, `bun run icon`) and it already
+// names iOS among its square platforms, so none of the artwork is specific to
+// the phone. What is specific is that an `.icon` is a SOURCE: iOS reads a
+// compiled `Assets.car`, Xcode would have run `actool` over the catalog to
+// produce one, and a bundle assembled by hand has to run it by hand. Skipped,
+// the app installs and launches perfectly and sits on the home screen as the
+// grey placeholder, because a missing icon is not an error to iOS — it is an
+// icon it could not find.
+//
+// Compiled per destination like everything else here, but on weaker grounds
+// than the SDK and the triple above. The two catalogs are not the same bytes,
+// and `--platform` is the honest input to give; a device catalog installed on
+// the Simulator nonetheless rendered fine when it was tried, so nothing here
+// has been shown to break when they disagree. Matched because it is correct,
+// not because the mismatch is known to cost anything.
+//
+// The two PNGs that land beside the `.car` are the flat fallback actool emits
+// anyway, for the places that still read `CFBundleIconFiles` rather than the
+// catalog. They are 14 KB and the partial plist below names them.
+console.log("[ios] compiling the icon");
+const iconPartial = join(OUT, "icon-info.plist");
+await run(
+  [
+    "xcrun",
+    "actool",
+    "--compile",
+    APP,
+    // The catalog's name for it, which is the `.icon`'s own stem.
+    "--app-icon",
+    "Ledge",
+    "--platform",
+    PLATFORM,
+    // Both families, because Info.plist claims both in UIDeviceFamily. An iPad
+    // given only the iPhone icon scales it up and looks it.
+    "--target-device",
+    "iphone",
+    "--target-device",
+    "ipad",
+    "--minimum-deployment-target",
+    DEPLOYMENT,
+    "--output-partial-info-plist",
+    iconPartial,
+    join(REPO, "assets", "Ledge.icon"),
+  ],
+  { quiet: true },
+);
+
+// Which keys to write is read back out of actool rather than written down here,
+// because the set depends on what was asked for: `CFBundleIcons~ipad` exists
+// only because of the second `--target-device` above, and a hardcoded copy of
+// these would be a copy that stops matching the catalog beside it.
+const iconKeys = JSON.parse(
+  await run(["plutil", "-convert", "json", "-o", "-", iconPartial], { quiet: true }),
+) as Record<string, unknown>;
+for (const [key, value] of Object.entries(iconKeys)) {
+  await run(["plutil", "-replace", key, "-json", JSON.stringify(value), plistPath]);
 }
 
 // The view as a bundle resource, under the one directory BundleScheme.swift
