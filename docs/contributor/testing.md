@@ -47,6 +47,16 @@ inside a test file can be too late, and too late here means a test wiping the
 real `~/.ledge`. The fs test file re-checks the root is under the tmpdir and
 refuses to run otherwise.
 
+The same preload pins `$SHELL` to a zsh, because `settings.shell.path` falls
+back to the login shell of whoever is running the tests and both zsh and bash
+are supported. Tests that wait for a drawer's shell to come up wait for
+bracketed-paste enable, which is how zsh says its line editor is ready; macOS
+ships bash 3.2, which has no bracketed paste at all, so on a bash account those
+tests waited for a sequence that never came — which is what the CI runner did
+for as long as it was choosing its own shell. Pin anything else a test spawns
+the same way, so that a run's result does not depend on the account that
+started it.
+
 ## 3. Invariant tests
 
 When a rule in `interactions.md` or `architecture.md` can be a
