@@ -130,6 +130,39 @@ test("a task renders a checkbox; clicking it toggles the [x] in the text", async
   await expect(page.locator(".cm-line").first()).toContainText("[x]");
 });
 
+// A few characters selected on a task line draw as a few characters, not as
+// the whole line. The selection is PAINTED by CodeMirror (drawSelection), and
+// to place each end of a range it asks posAtCoords for the position at the far
+// left of that end's row. On a line whose first thing is a replaced range —
+// a task's hidden `- ` and its checkbox widget, and equally a heading's `## `
+// — that question came back at random as either the line start or the far
+// side of the widget, so the two ends of one selection disagreed about which
+// visual row they were on. drawSelection then drew the between-rows shape:
+// from the first end to the right margin, and from the left margin to the
+// second. Two characters, painted as the entire line, about half the time.
+//
+// The randomness was upstream (a tie-break in the tile scan) and is fixed in
+// @codemirror/view 6.43.8, which is the floor package.json now pins. This test
+// is here rather than in a unit file because only a real layout can be asked
+// where a selection was drawn.
+test("a few characters selected on a task line draw a few characters wide", async ({ page }) => {
+  await page.keyboard.press("Meta+a");
+  await page.keyboard.type("- [x] other test");
+
+  const lineWidth = (await page.locator(".cm-line").first().boundingBox())!.width;
+  const drawnWidth = () =>
+    page
+      .locator(".cm-selectionBackground")
+      .evaluateAll((els) => els.reduce((w, el) => w + el.getBoundingClientRect().width, 0));
+
+  // Six presses: the old failure was a coin flip per measure, so one press
+  // would have passed half the time and six catch it 63 times in 64.
+  for (let i = 0; i < 6; i += 1) {
+    await page.keyboard.press("Shift+ArrowLeft");
+    await expect.poll(drawnWidth).toBeLessThan(lineWidth / 4);
+  }
+});
+
 test("Enter on an empty quote line exits the quote in one press", async ({ page }) => {
   await page.keyboard.press("Meta+a");
   await page.keyboard.type("> 432");

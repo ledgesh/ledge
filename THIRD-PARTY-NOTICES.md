@@ -1005,7 +1005,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
-### @codemirror/view 6.43.6
+### @codemirror/view 6.43.9
 
 MIT (https://code.haverbeke.berlin/codemirror/view)
 
