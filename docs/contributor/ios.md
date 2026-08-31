@@ -123,7 +123,7 @@ an optimization to reach for with a profile in hand, not a thing to build
 first. Phase 3 says it is not the bottleneck yet: a whole boot's frames cross
 it inside the 16ms between `server` and `view` in §5's measurement.
 
-**The bridge is fifteen strings, and it is written down twice.**
+**The bridge is seventeen strings, and it is written down twice.**
 `mainview/lib/nativeBridge.ts` is the page's half and
 `ios/Sources/WebHost.swift` is Swift's; between them is a byte stream in both
 directions and a request/response channel for what only a device can answer.
@@ -366,14 +366,36 @@ password and the phone is the one client that has to generate its own (§4). It
 is the hardening a user accepts once they are already working, and the line
 below is how they install it.
 
-**The native pairing screen is the empty case, and only that.** It exists
-because a phone with no server has no page to render a dialog in, and it is
-reached on a first launch, after a host key changes under a record that still
-exists, and after the last server is removed. Every server after the first is
-added from the connection dialog like a Mac's (remote.md §8) — the same list,
-the same fingerprint step — and the key line the pairing screen hands over is
-the same line that dialog's form shows, carried across on `@hello` because it
-is a fact about the device rather than about any connection to one.
+**The native screens are for the state where there is no page.** A phone with
+no server has no web view to render the connection dialog in, and neither does a
+phone whose saved server has stopped answering: the dialog is React, and React
+is what a failed boot never reaches. Two screens cover it.
+`ServerListViewController` lists the stored servers, marks the one that will be
+dialled, and carries a row that adds another; `PairingViewController` is that
+form. The form is the ROOT of the stack rather than a step off the list when
+there are no servers at all, so a first launch is one screen and has no Back
+button pointing at an empty list.
+
+They are reached on a first launch, after a host key changes under a record that
+still exists, after the last server is removed, and from a button on the page's
+own refusal (`servers.choose`, `mainview/ios.tsx`). **The last of those is the
+case a single pairing screen missed.** A phone could only manage its servers
+from a connection it had already made, so an address that stopped answering — a
+server moved, turned off, or behind a network the phone is no longer on — left
+one control on the screen, and it was a retry that would fail the same way for
+as long as anyone pressed it. Deleting the app was the way out, which takes the
+enclave key with it.
+
+**The native side selects and adds; it does not rename, edit or remove.**
+Selecting is what Swift already does at every launch, and adding is the pairing
+form, which is here anyway. The rest are rules — may this be removed, does this
+address need pinning again — and a rule written twice in two languages has two
+answers. A phone that can reach any server at all can reach the dialog that
+holds them, so every server after the first is still added from the connection
+dialog like a Mac's (remote.md §8): the same list, the same fingerprint step.
+The key line the pairing screen hands over is the same line that dialog's form
+shows, carried across on `@hello` because it is a fact about the device rather
+than about any connection to one.
 
 The same call carries what this phone calls itself, which every other client on
 the server it dials is pushed (remote.md §7): it is what a Mac's notice says when
@@ -402,10 +424,12 @@ answer is read off `offered` afterwards.
 
 **Swift holds the list's bytes and the page holds its shape**, the same split
 `.layout.json` has on a Mac (architecture.md §6). `ServerStore` reads two fields
-out of the selection — an address to dial and a key to pin — and three bridge
-calls (`servers.list`, `servers.save`, `servers.probe`) are the whole of it. The
-alternative, a verb per operation, would have put "may this be removed" in Swift
-beside the Mac's copy of the same rule in TypeScript.
+out of the selection — an address to dial and a key to pin — and the whole of the
+bridge's half is the list itself (`servers.list`, `servers.save`), the keychain
+item that cannot travel in it (`servers.password`), the fingerprint a form needs
+before it can pin one (`servers.probe`), and the way back to the native screens
+(`servers.choose`). The alternative, a verb per operation, would have put "may
+this be removed" in Swift beside the Mac's copy of the same rule in TypeScript.
 
 One consequence to write down before it surprises someone: **deleting the app
 destroys the key.** The container goes, and the enclave reference with it. A
@@ -1259,7 +1283,7 @@ inside the Mac app.
    not with a desktop window pretending to be small. (That said phase 3 when it
    was written, and phase 3 turned out to be the wrong home: see below.)
 3. **Done. The Swift shell, without SSH.** `ios/` is a WKWebView loading
-   `dist-ios/` over a scheme of its own (§12), a bridge of fifteen strings (§2),
+   `dist-ios/` over a scheme of its own (§12), a bridge of its own (§2),
    the six client seams answered by UIKit, and a `Duplex` fed by an
    `NWConnection` to a TCP fixture on the same network. `bun run ios` builds it
    and launches it in the Simulator.

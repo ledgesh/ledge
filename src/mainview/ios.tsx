@@ -9,7 +9,8 @@
 // So the reconnect ladder, the op ids, the held requests and the instance
 // check are the SAME code the Mac runs over ssh. Nothing about being a phone
 // re-implements any of it (§2), and the parts that are genuinely a phone's —
-// the socket, the pasteboard, the keys — are the ten strings the bridge names.
+// the socket, the pasteboard, the keys — are the seventeen strings the bridge
+// names.
 import { reconnectingClient, SESSION_HOLD_MS } from "../shared/transport";
 import { sessionHold } from "../shared/wire";
 import { BUILD_VERSION } from "../shared/version";
@@ -35,8 +36,19 @@ const mark = (what: string): void => void marks.push(`${what}=${Math.round(perfo
 const painted = (): Promise<void> =>
   new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
 
+/**
+ * The bridge, where `refuse` below can reach it.
+ *
+ * A boot that fails ends on a page with no React in it, and the way off that
+ * page is a native call: the connection dialog that would otherwise answer
+ * "point this somewhere else" is a component, and there is no component tree.
+ * Null only when there was no shell to attach at all, which is the one refusal
+ * with nothing to offer.
+ */
+let bridge: Shell | null = null;
+
 async function start(): Promise<void> {
-  const shell = attachShell();
+  const shell = (bridge = attachShell());
   mark("bridge");
   // Before the first dial: the client id keys the saved layout, and a phone
   // restoring a desktop's three-pane tree onto a 390-point screen is the
@@ -177,6 +189,7 @@ function watchEditorFocus(shell: Pick<Shell, "focus">): void {
 function refuse(err: unknown): void {
   const why = err instanceof Error ? err.message : String(err);
   console.error("[ios] could not start", err);
+  bridge?.log(`[boot] refused: ${why}`);
   const root = document.getElementById("root");
   if (!root) return;
   root.textContent = "";
@@ -190,13 +203,38 @@ function refuse(err: unknown): void {
   const detail = document.createElement("p");
   detail.style.cssText = "margin:0 0 1.25rem;opacity:.7";
   detail.textContent = why;
-  const again = document.createElement("button");
-  again.style.cssText =
-    "font:inherit;padding:.5rem 1rem;border-radius:.5rem;border:1px solid currentColor;background:none;color:inherit";
-  again.textContent = "Try again";
-  again.onclick = () => window.location.reload();
-  box.append(head, detail, again);
+  const buttons = document.createElement("div");
+  buttons.style.cssText = "display:flex;gap:.5rem;flex-wrap:wrap";
+  // Retrying first, because the ordinary reason a phone cannot reach its server
+  // is that the phone moved and not that the server did.
+  buttons.append(button("Try again", () => window.location.reload()));
+  // And the way out when it did. Without this the only control on this page is
+  // one that will fail the same way for as long as anyone presses it: the list
+  // of servers is the connection dialog's, the dialog is React, and React is
+  // what a failed boot never got to. `servers.choose` hands the window back to
+  // the shell, which has its own list and can add to it (ios.md §4).
+  if (bridge) {
+    const shell = bridge;
+    buttons.append(
+      button("Choose a server", () => {
+        // The refusal goes with it, so the list says why it is being shown.
+        void shell.call("servers.choose", { because: why }).catch(() => {});
+      }),
+    );
+  }
+  box.append(head, detail, buttons);
   root.append(box);
+}
+
+/** One button on the refusal page, styled the way the page around it is: as
+ * inline text, because there is no stylesheet here to name a class from. */
+function button(label: string, onclick: () => void): HTMLButtonElement {
+  const el = document.createElement("button");
+  el.style.cssText =
+    "font:inherit;padding:.5rem 1rem;border-radius:.5rem;border:1px solid currentColor;background:none;color:inherit";
+  el.textContent = label;
+  el.onclick = onclick;
+  return el;
 }
 
 void start().catch(refuse);

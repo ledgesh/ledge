@@ -21,7 +21,7 @@ enum BarFace: String {
 /// This is the whole of what Swift does with the protocol, which is nothing:
 /// a frame arrives from the page as base64 and goes down the socket as bytes,
 /// and bytes off the socket go up as base64. No frame is parsed here and no
-/// method name is understood except the twelve in `SHELL_CALLS`
+/// method name is understood except the seventeen in `SHELL_CALLS`
 /// (mainview/lib/nativeBridge.ts), which are the things only a device can
 /// answer.
 final class WebHost: UIViewController {
@@ -35,10 +35,12 @@ final class WebHost: UIViewController {
     /// that changed, or a key the server will not accept. The page's ladder
     /// would otherwise spend the next half minute asking the same question.
     private let onRepair: (String) -> Void
-    /// Called when the list the page saved has nothing left in it to dial.
-    /// There is no local server on a phone to fall back to (remote.md §8), so
-    /// removing the last one means pairing again.
-    private let onUnpaired: () -> Void
+    /// Called when the page has no more use for this connection and wants the
+    /// shell's own server screens instead: the list it saved has nothing left
+    /// in it to dial, or the boot failed and the person holding the phone asked
+    /// to pick something else (`servers.choose`). The string is why, for the
+    /// screen to show, and is empty when nobody was refused anything.
+    private let onServers: (String) -> Void
     private let scheme = BundleScheme()
     private var webView: WKWebView!
 
@@ -74,12 +76,12 @@ final class WebHost: UIViewController {
         config: ShellConfig,
         server: ServerRecord,
         onRepair: @escaping (String) -> Void,
-        onUnpaired: @escaping () -> Void
+        onServers: @escaping (String) -> Void
     ) {
         self.config = config
         self.server = server
         self.onRepair = onRepair
-        self.onUnpaired = onUnpaired
+        self.onServers = onServers
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -337,7 +339,7 @@ final class WebHost: UIViewController {
         reply(id, ["ok": true])
         // After the reply, because this swaps the window's root view controller
         // out from under the web view that asked.
-        if now == nil { onUnpaired() }
+        if now == nil { onServers("") }
     }
 }
 
@@ -456,6 +458,19 @@ extension WebHost: WKScriptMessageHandler {
                 ServerPassword.forget(server)
                 reply(id, ["ok": true])
             }
+        // The way out of a boot that failed. The page paints its own refusal
+        // when the first connection cannot be made (mainview/ios.tsx) and its
+        // other button is a retry, which is the right answer to a phone that
+        // walked into a lift and the wrong one to a server that has moved or
+        // been turned off. This is that page asking for the screen it cannot
+        // draw: the connection dialog is React and needs a connection.
+        //
+        // Replied to before the screens are swapped, because the swap tears
+        // down the web view that asked and a call with no reply is a promise
+        // that never settles.
+        case "servers.choose":
+            reply(id, ["ok": true])
+            onServers(params["because"] as? String ?? "")
         case "servers.probe":
             probe(
                 id,

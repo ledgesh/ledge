@@ -37,7 +37,7 @@ import {
   type RequestClient,
 } from "../../shared/wire";
 
-/** What Swift implements: fifteen strings and a flat switch. */
+/** What Swift implements: seventeen strings and a flat switch. */
 export const SHELL_CALLS = [
   // The bridge's own verbs, `@`-prefixed because no schema method can ever
   // collide with them. `@hello` is asked once, before any socket exists: the
@@ -91,6 +91,12 @@ export const SHELL_CALLS = [
   // `ssh-keyscan` is on a Mac: a fingerprint, before this phone's key goes on
   // the wire and before the server has been asked to accept it (ios.md §3).
   "servers.probe",
+  // Hand the window back to the shell's own server screens, with the reason to
+  // show on them. The list above is managed from the connection dialog, which
+  // is React and so needs a connection: the one state it cannot cover is a boot
+  // that never reached a server, and this is the page in that state asking for
+  // the native list instead (mainview/ios.tsx, ios.md §4).
+  "servers.choose",
 ] as const;
 
 export type ShellCall = (typeof SHELL_CALLS)[number];
@@ -459,8 +465,9 @@ function clientSeams(
     // whatever is selected at launch, and every change to the selection is
     // followed by a reload (ios.md §5, "foregrounding is a boot"). A phone that
     // could not reach its server never renders this at all — it shows the
-    // sentence in ios.tsx instead — so there is no boot-time fallback to report
-    // the way the Mac's local server is.
+    // sentence in ios.tsx, whose way out is `servers.choose` and the native
+    // list — so there is no boot-time fallback to report the way the Mac's
+    // local server is.
     //
     // `keyPath` is empty on every row, and that is a fact rather than a
     // placeholder: this client's key is in the Secure Enclave and cannot be

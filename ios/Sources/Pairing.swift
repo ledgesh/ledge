@@ -1,6 +1,10 @@
 import UIKit
 
-/// The screen a phone starts on until it has a server (ios.md §4).
+/// The form that adds a server (ios.md §4).
+///
+/// The root of the shell's stack on a phone with no servers at all, and a step
+/// pushed off `ServerListViewController` otherwise. Which of the two it is
+/// decides only whether there is a Back button: the form is the same either way.
 ///
 /// Pairing is a line the user copies. The app shows its public key and the
 /// whole `authorized_keys` line, forced command included, exactly as
@@ -16,6 +20,10 @@ import UIKit
 final class PairingViewController: UIViewController {
     private let client: String
     private let suggestion: String
+    /// Where sshd listens on the suggested destination, or 0 for ssh's default.
+    /// Carried beside the address because the two were pinned together: a
+    /// record being paired again is a record whose port is already known.
+    private let suggestedPort: Int
     private let onPaired: (ServerRecord) -> Void
 
     private let scroll = UIScrollView()
@@ -42,11 +50,21 @@ final class PairingViewController: UIViewController {
     private var held: DeviceKey.Held?
     private var dialing: SSHTransport?
 
-    init(client: String, suggest: String, because: String?, onPaired: @escaping (ServerRecord) -> Void) {
+    init(
+        client: String,
+        suggest: String,
+        suggestPort: Int = 0,
+        because: String?,
+        onPaired: @escaping (ServerRecord) -> Void
+    ) {
         self.client = client
         self.suggestion = suggest
+        self.suggestedPort = suggestPort
         self.onPaired = onPaired
         super.init(nibName: nil, bundle: nil)
+        // The navigation bar's, not a label in the stack: this screen is inside
+        // a stack now, and a title drawn twice is a title drawn wrong.
+        title = "Pair with a server"
         reason.text = because
         reason.isHidden = because == nil
     }
@@ -82,6 +100,9 @@ final class PairingViewController: UIViewController {
             connect.isEnabled = false
         }
         field.text = suggestion
+        // Blank for ssh's default, which is what an empty field already means:
+        // printing 0 into it would be a port nobody can connect to.
+        portField.text = suggestedPort == 0 ? "" : String(suggestedPort)
     }
 
     // --- the layout -----------------------------------------------------------
@@ -92,12 +113,6 @@ final class PairingViewController: UIViewController {
         stack.alignment = .fill
         stack.isLayoutMarginsRelativeArrangement = true
         stack.layoutMargins = UIEdgeInsets(top: 24, left: 20, bottom: 24, right: 20)
-
-        let title = UILabel()
-        title.text = "Pair with a server"
-        title.font = .preferredFont(forTextStyle: .largeTitle)
-        title.adjustsFontForContentSizeCategory = true
-        title.numberOfLines = 0
 
         reason.font = .preferredFont(forTextStyle: .callout)
         reason.textColor = .systemRed
@@ -178,7 +193,7 @@ final class PairingViewController: UIViewController {
         // Mac's form asks in and the order the sentences read in: "the password
         // for that account" needs the account to have been named.
         for view in [
-            title, reason,
+            reason,
             step("1. Which machine, and which account on it."),
             field, portField,
             step("Sign in with"),

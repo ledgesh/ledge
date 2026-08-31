@@ -221,6 +221,17 @@ enum ServerStore {
         return record
     }
 
+    /// Point at one of the records already stored.
+    ///
+    /// The one write the shell's own server screen makes (`ServerList.swift`).
+    /// Not a rule and so not the webview's: which record gets dialled is what
+    /// Swift reads at every launch, and the list itself is untouched.
+    static func select(_ id: String) {
+        let stored = load()
+        guard stored.servers.contains(where: { $0.id == id }) else { return }
+        save(servers: stored.servers, selected: id)
+    }
+
     /// Forget the selected record's pin but keep the record: the case this
     /// exists for is a host key that changed, where the address is still the
     /// one the user meant and the key is the thing to look at again.

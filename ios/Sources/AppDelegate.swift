@@ -11,7 +11,12 @@ import UIKit
 final class AppDelegate: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
     private var host: WebHost?
-    private var pairing: PairingViewController?
+    /// The shell's own screens — the server list and the pairing form — when
+    /// they are what the window is showing. A navigation controller because
+    /// adding a server is a step off the list, and a step off wants a way back:
+    /// the form pushed onto it is the same form that is the ROOT on a phone
+    /// with no servers at all, where there is nothing to go back to.
+    private var chooser: UINavigationController?
 
     func application(
         _ application: UIApplication,
@@ -24,64 +29,108 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         return true
     }
 
-    /// Pairing until there is a server, then the app.
+    /// The shell's screens until there is a server to dial, then the app.
     ///
-    /// The two screens are swapped rather than stacked, so re-pairing tears the
-    /// web view down and pairing again builds a new one. That is deliberate:
+    /// The two are swapped rather than stacked, so choosing a server tears the
+    /// web view down and choosing again builds a new one. That is deliberate:
     /// the page holds a connection and half its state comes from a server, and
     /// there is no useful meaning for "the same page, pointed somewhere else".
     private func show() {
         let config = ShellConfig.current()
-        guard let server = config.server else { return showPairing(because: nil) }
+        guard let server = config.server else { return showServers(because: nil) }
         let screen = WebHost(
             config: config,
             server: server,
             onRepair: { [weak self] why in self?.repair(why) },
-            // Nothing left to dial: the page removed the last server. A phone
-            // has no local server to fall back to the way a Mac does
-            // (remote.md §8), so the screen before any of this is the answer.
-            onUnpaired: { [weak self] in self?.showPairing(because: nil) }
+            // Either the page removed the last server, or the person holding
+            // the phone asked for this list from a page that could not reach
+            // anything (mainview/ios.tsx). A phone has no local server to fall
+            // back to the way a Mac does (remote.md §8), so the screens before
+            // any of this are the answer to both.
+            onServers: { [weak self] why in self?.showServers(because: why.isEmpty ? nil : why) }
         )
-        pairing = nil
+        chooser = nil
         host = screen
         window?.rootViewController = screen
     }
 
-    /// Pairing, unconditionally.
+    /// The server list, and the pairing form when the list has nothing in it.
     ///
     /// Asked for by name rather than reached by re-reading the configuration,
     /// because `repair` below has to END somewhere: a stored record that
     /// survives being forgotten would otherwise build another web view, which
     /// would fail the same way, and ask for repair again.
-    private func showPairing(because: String?) {
-        // Whatever the selected record still says, so a pin dropped by `repair`
-        // comes back to a screen that already knows the address: the key is the
-        // thing to look at again, not the machine. Nothing selected falls back
-        // to what the launch suggested, which is how a probe points a build at
-        // a scratch server.
+    ///
+    /// A phone with no servers roots the stack at the form, so a first launch
+    /// is one screen and has no Back button pointing at an empty list. Every
+    /// other case roots it at the list, which is the screen that can get a
+    /// phone out of a saved server that stopped answering.
+    private func showServers(because: String?, pairing pairFirst: Bool = false) {
         let stored = ServerStore.load()
-        let suggestion = stored.servers.first(where: { $0.id == stored.selected })?.destination ?? ShellConfig.suggestion
-        let screen = PairingViewController(
+        let list = ServerListViewController(
+            servers: stored.servers,
+            selected: stored.selected,
+            because: because,
+            // Storing the selection is all this takes: `show` re-reads the
+            // configuration, so choosing the record already selected rebuilds
+            // the app around it, which is how this screen retries.
+            onChosen: { [weak self] id in
+                ServerStore.select(id)
+                self?.show()
+            },
+            onAdd: { [weak self] suggest, port in
+                guard let self else { return }
+                // No reason carried across: whatever sent us to the list is
+                // about a server that is already there, and repeating it over
+                // the form for a different one would be a refusal of something
+                // nobody has tried yet.
+                self.chooser?.pushViewController(
+                    self.pairingScreen(suggest: suggest, port: port, because: nil),
+                    animated: true
+                )
+            }
+        )
+        // Nothing selected falls back to what the launch suggested, which is how
+        // a probe points a build at a scratch server.
+        let selected = stored.servers.first(where: { $0.id == stored.selected })
+        let form = {
+            self.pairingScreen(
+                suggest: selected?.destination ?? ShellConfig.suggestion,
+                port: selected?.port ?? 0,
+                because: because
+            )
+        }
+        let nav = UINavigationController(rootViewController: stored.servers.isEmpty ? form() : list)
+        nav.navigationBar.prefersLargeTitles = true
+        if !stored.servers.isEmpty, pairFirst { nav.pushViewController(form(), animated: false) }
+        host = nil
+        chooser = nav
+        window?.rootViewController = nav
+    }
+
+    /// The pairing form, pre-filled. A pin dropped by `repair` comes back to a
+    /// screen that already knows the address: the key is the thing to look at
+    /// again, not the machine.
+    private func pairingScreen(suggest: String, port: Int, because: String?) -> PairingViewController {
+        PairingViewController(
             client: ShellConfig.current().client,
-            suggest: suggestion,
+            suggest: suggest,
+            suggestPort: port,
             because: because
         ) { [weak self] _ in
             self?.show()
         }
-        host = nil
-        pairing = screen
-        window?.rootViewController = screen
     }
 
     /// A failure retrying cannot fix. The pin is dropped and the destination
     /// kept: the address is still the one the user meant, and the key is the
-    /// thing to look at again.
+    /// thing to look at again, so this lands on the form rather than the list.
     private func repair(_ why: String) {
         // The page's ladder keeps dialing while this decision is being made, so
         // every attempt would otherwise ask for the same screen.
-        guard pairing == nil else { return }
+        guard chooser == nil else { return }
         ServerStore.forgetPin()
-        showPairing(because: why)
+        showServers(because: why, pairing: true)
     }
 
     // iOS suspends an app shortly after it leaves the foreground, and a

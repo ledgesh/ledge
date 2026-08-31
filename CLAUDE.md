@@ -45,7 +45,7 @@ the app as its built-in docs, via `src/bun/docsContent.ts`) lives in
   Enclave key, and all of §8's v1 works on a phone; phase 7, a real device
   rather than a Simulator, is in flight): the shell around the same React view,
   why the protocol stays in JavaScript and which half of the transport is
-  therefore portable, the fifteen-string bridge, NIOSSH and what it does not do
+  therefore portable, the seventeen-string bridge, NIOSSH and what it does not do
   for you, the enclave and the pairing line, the server list a phone keeps for
   itself, what iOS suspension does to a connection, and how a device build
   differs from a Simulator one (§12).
