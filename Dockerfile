@@ -94,8 +94,30 @@ RUN apt-get update \
 COPY --from=build /out/ledge-server /usr/local/bin/ledge-server
 COPY --from=build /out/libledge_pty.so /usr/local/bin/libledge_pty.so
 
-# One directory to mount and one to back up: notes, workspace registry, vault,
-# layout, and logs all live under the app home (remote.md §5).
+# TWO directories hold state, and only one of them is obvious.
+#
+# /data is the app home: notes, workspace registry, vault, layout, logs
+# (remote.md §5). That is the one this file used to claim was the whole
+# backup, and it is not.
+#
+# The account's home is the other. Profiles live at ~/.config/ledge/profiles
+# and are OUTSIDE the app home on purpose (architecture.md §6a: the app home is
+# the folder people sync, and layout is what keeps credentials out of a synced
+# notes folder). ~/.ssh is there too, and it is what `host:` frontmatter dials
+# out with (§6). Neither is on a volume, so `docker rm` took both: notes that
+# say `profile: prod` came back without the values, and every `host:` target
+# came back unreachable.
+#
+# The fix is a second mount rather than a second VOLUME line, and the reason is
+# the recipe this image tells people to write. A `FROM ledge-server` that runs
+# `pip install --user` or `npm i -g` into a DECLARED volume has its writes
+# discarded at build time, silently. So the run command in
+# docs/user/18-notes-on-another-machine.md names both:
+#
+#     -v ledge-data:/data -v ledge-home:/home/ledge
+#
+# `ledge-server backup-paths` (bun/backup.ts) prints both, resolved, from
+# inside the container.
 ENV LEDGE_NOTES_ROOT=/data
 VOLUME /data
 

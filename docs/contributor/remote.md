@@ -1727,6 +1727,41 @@ distinguishes: the timeout exists for the daemon an ssh conjured, and a
 supervisor restarting a container every minute for correctly deciding nobody
 was home is not a design anyone would choose.
 
+**What an operator has to back up is a question only the server can answer,
+and `backup-paths` is the verb that answers it.** `bun/backup.ts` is the whole
+of the policy: include the app home WHOLE, add every registered root the app
+home does not already contain, add `PROFILES_DIR`, and subtract the socket, the
+pidfile, `logs/`, and `.ledge-docs`. Subtracting from the app home rather than
+enumerating inside it is the load-bearing choice: a file added to the app home
+next year is then backed up by default, where the other order fails silently
+and is discovered at a restore.
+
+Two things made this a verb rather than a sentence in the manual, and both were
+bugs in what shipped:
+
+- **Profiles are outside the app home** (`architecture.md` §6a), so "back up
+  `/data`" takes every note that says `profile: prod` and none of the values.
+  The image made it worse than a documentation gap: `~/.config/ledge/profiles`
+  and `~/.ssh` are on the container's own filesystem, so `docker rm` took the
+  secrets and the `host:` credentials with it. The fix is a second mount
+  (`-v ledge-home:/home/ledge`) rather than a second `VOLUME` line, because a
+  declared volume silently discards a derived image's `RUN` writes and
+  `FROM ledge-server` is the recipe §11 tells people to write.
+- **External roots are wherever the user attached them.** The registry is the
+  only thing that knows, which is what makes the path list a runtime question.
+
+An unavailable root goes to stderr and stays out of stdout. Naming a path that
+is not there fails the whole restic run; dropping it silently is how a
+workspace leaves the backup set without anybody noticing. stdout is written
+with `process.stdout.write` rather than `console.log`, since `main` reroutes
+every console method to stderr for `serve`'s sake and must keep doing so.
+
+Ledge ships no backup engine and should not grow one. restic and rclone exist;
+what they cannot compute is which paths, and that is the whole of what this
+adds. The manual's recipe puts the repository credentials in a PROFILE rather
+than `settings.jsonc`, which is inside the app home and therefore inside the
+backup.
+
 **A server's toolchain is the user's, and TypeScript was not the exception it
 looked like.** The image carries zsh because that is settings.jsonc's default
 shell, and openssh-client because `host:` frontmatter dials out from the SERVER

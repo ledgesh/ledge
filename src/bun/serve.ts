@@ -1,12 +1,15 @@
 // `ledge-server`: this machine's notes, reachable over ssh (remote.md §3).
 //
-// Two verbs, and the split is the phase 4 change. `serve` is what a client
-// runs — `ssh <target> ledge-server serve`, and what an `authorized_keys`
-// forced command names (§4) — and it is a byte pump between stdio and the
-// daemon's socket. `daemon` is the server itself: it holds the notes, the
-// shells, and the watchers, and it outlives every connection to it (§7), which
-// is what makes a run survive the wire dropping and what lets a reconnecting
-// client replay safely.
+// Two verbs are the server, and the split is the phase 4 change. `serve` is
+// what a client runs — `ssh <target> ledge-server serve`, and what an
+// `authorized_keys` forced command names (§4) — and it is a byte pump between
+// stdio and the daemon's socket. `daemon` is the server itself: it holds the
+// notes, the shells, and the watchers, and it outlives every connection to it
+// (§7), which is what makes a run survive the wire dropping and what lets a
+// reconnecting client replay safely.
+//
+// `backup-paths` is the third and is neither: it reads the registry, prints
+// the paths an operator's backup has to cover (backup.ts), and exits.
 //
 // A pump rather than a server is also why `serve` needs no protocol knowledge
 // at all. It never parses a frame, so an ssh session cannot desynchronize one:
@@ -26,7 +29,9 @@ import {
 } from "./daemon";
 import { stdioDuplex } from "./transport";
 import { startLogging } from "./log";
-import { APP_HOME } from "./workspaces";
+import { APP_HOME, availableRoots, loadWorkspaces, roots } from "./workspaces";
+import { PROFILES_DIR } from "./spawnParams";
+import { backupSet } from "./backup";
 import { BUILD_VERSION } from "../shared/version";
 
 /**
@@ -83,6 +88,49 @@ export async function daemon(autostart = false): Promise<void> {
 }
 
 /**
+ * Print the paths a backup of this machine has to cover (backup.ts).
+ *
+ * A verb rather than a documented path list because only the server can answer
+ * it: external workspace roots are wherever the user attached them, and the
+ * registry is the only thing that knows. `remote.md` §11's rule about not
+ * making a maintenance claim on somebody else's toolchain is why this prints
+ * paths instead of uploading anything — restic and rclone already exist, and
+ * what they cannot compute is which paths.
+ *
+ * Output goes to `process.stdout` directly. `main` has already rerouted every
+ * console method to stderr and must keep doing so (one stray byte
+ * desynchronizes `serve`'s stream), so the write that IS this command's answer
+ * says so by not being a log line.
+ *
+ * The two lists come out of separate invocations because that is the shape the
+ * consumer wants:
+ *
+ *     restic backup --files-from <(ledge-server backup-paths) \
+ *                   --exclude-file <(ledge-server backup-paths --exclude)
+ */
+export async function backupPaths(argv: readonly string[]): Promise<void> {
+  await loadWorkspaces();
+
+  // Registered but not on disk: an unmounted volume, or a folder someone moved
+  // from underneath the registry. It must not go in the list (a missing path
+  // fails the whole restic run), and it must not go unsaid (a workspace
+  // silently leaving the backup set is discovered at a restore, which is the
+  // worst possible time). stderr, so a pipe still gets clean paths.
+  const missing = roots().filter((r) => !availableRoots().includes(r));
+  for (const r of missing) console.error(`[backup-paths] skipping ${r}: not on disk (unmounted volume?)`);
+
+  const secrets = !argv.includes("--no-secrets");
+  const set = backupSet({ appHome: APP_HOME, profilesDir: PROFILES_DIR, roots: availableRoots(), secrets });
+
+  if (argv.includes("--json")) {
+    process.stdout.write(`${JSON.stringify({ ...set, skipped: missing }, null, 2)}\n`);
+    return;
+  }
+  const lines = argv.includes("--exclude") ? set.exclude : set.include;
+  if (lines.length > 0) process.stdout.write(`${lines.join("\n")}\n`);
+}
+
+/**
  * The command line, as something other than a side effect of importing this.
  *
  * A published package's `bin/ledge-server.js` (npmPackage.ts) is its own
@@ -98,12 +146,24 @@ export async function main(argv: readonly string[]): Promise<never> {
   console.debug = console.error;
 
   const verb = argv[2] ?? "serve";
-  if (verb !== "serve" && verb !== "daemon") {
-    console.error("usage: ledge-server [serve|daemon [--autostart]]");
-    console.error("  serve   the protocol on stdin and stdout, attached to this machine's daemon");
-    console.error("  daemon  BE this machine's server; runs until stopped");
-    console.error("            --autostart  exit when idle; what serve passes to the one it starts");
+  if (verb !== "serve" && verb !== "daemon" && verb !== "backup-paths") {
+    console.error("usage: ledge-server [serve|daemon [--autostart]|backup-paths [options]]");
+    console.error("  serve         the protocol on stdin and stdout, attached to this machine's daemon");
+    console.error("  daemon        BE this machine's server; runs until stopped");
+    console.error("                  --autostart   exit when idle; what serve passes to the one it starts");
+    console.error("  backup-paths  the paths a backup of this machine must cover, one per line");
+    console.error("                  --exclude     print the exclusions instead of the inclusions");
+    console.error("                  --no-secrets  leave out the profiles dir");
+    console.error("                  --json        both lists, plus any root that is not on disk");
     process.exit(2);
+  }
+
+  // Reads the registry and prints; never starts or touches a daemon, so it
+  // needs no log file of its own and must not rotate the ones a running
+  // server is writing.
+  if (verb === "backup-paths") {
+    await backupPaths(argv);
+    process.exit(0);
   }
 
   // Separate files. Both can be running at once on one machine, and two
