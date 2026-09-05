@@ -33,6 +33,7 @@ import { configureWindows, dispatchDocsShow, recordWindowRole } from "./lib/wind
 import { configureAssets } from "./lib/assets";
 import { configureSettings } from "./lib/settings";
 import { configureConnections, recordLinkState, recordPresence } from "./lib/connections";
+import { hideBooting, showBooting } from "./lib/booting";
 import {
   clientSettingsTemplate,
   DEFAULT_SETTINGS,
@@ -1277,19 +1278,52 @@ window.__harness = {
 const bootRoots = store.workspaceList();
 recordWorkspaceKinds(bootRoots);
 const bootPage = new URLSearchParams(window.location.search).get("page") ?? "";
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <App
-      initial={
-        DOCS_WINDOW
-          ? docsState(DOCS, store.list(DOCS), bootPage)
-          : restoredState(
-              null,
-              bootRoots,
-              Object.fromEntries(bootRoots.map((r) => [r.root, store.list(r.root)])),
-              Object.fromEntries(bootRoots.map((r) => [r.root, store.listTrash(r.root)])),
-            )
-      }
-    />
-  </StrictMode>,
-);
+
+const render = (): void =>
+  createRoot(document.getElementById("root")!).render(
+    <StrictMode>
+      <App
+        initial={
+          DOCS_WINDOW
+            ? docsState(DOCS, store.list(DOCS), bootPage)
+            : restoredState(
+                null,
+                bootRoots,
+                Object.fromEntries(bootRoots.map((r) => [r.root, store.list(r.root)])),
+                Object.fromEntries(bootRoots.map((r) => [r.root, store.listTrash(r.root)])),
+              )
+        }
+      />
+    </StrictMode>,
+  );
+
+// The screen a boot shows while it is still waiting on a server (lib/booting.ts).
+//
+// A harness boot waits on a Map and so is never slow, which is exactly why the
+// wait is a knob: `?booting=<ms>` holds the screen up for that long before
+// rendering, in the same shape both real shells raise it — up before the waits,
+// down before the render — so a spec can look at the real element with the real
+// stylesheet in the shipping engine. `?bootingTo=` is the destination, which on
+// a phone is what `@hello` answers with.
+//
+// Without the knob the render is synchronous, exactly as it was: every other
+// spec's first paint must not move because this one exists.
+const bootingFor = Number(new URLSearchParams(window.location.search).get("booting") ?? 0);
+if (bootingFor > 0) {
+  showBooting({
+    destination: new URLSearchParams(window.location.search).get("bootingTo") ?? "",
+    // The harness's stand-in for `servers.choose` (ios.tsx): the real one hands
+    // the window back to Swift, which tears this page down. There is no shell
+    // here to hand it to, so the press is recorded and the screen stays — a
+    // spec can see that the button did something, and nothing else pretends.
+    onCancel: () => {
+      document.body.dataset["bootingCancelled"] = "1";
+    },
+  });
+  setTimeout(() => {
+    hideBooting();
+    render();
+  }, bootingFor);
+} else {
+  render();
+}

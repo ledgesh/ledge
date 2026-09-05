@@ -492,6 +492,16 @@ Three consequences, in the order they bite:
   reaches a server again 211ms later. A whole boot is cheaper than the
   bookkeeping that would avoid it.
 
+  **A boot that is not that fast has to say so.** 211ms is the good case; the
+  bad one is a phone that moved off the network its server is on, which spends
+  `SSHTransport.dialTimeout` — fifteen seconds — finding out. Every boot starts
+  on an empty `#root`, so all of that was a black screen, and the refusal at the
+  end of it was the first thing the app said. `ios.tsx` raises
+  `mainview/lib/booting.ts` before the dial, with the destination `@hello`
+  answered with and a button that hands the window back to `servers.choose`;
+  the first render takes it down. The delays are in interactions.md §4-1, and
+  they are why the 211ms case still paints nothing.
+
   The reload takes every inline run panel with it, which is a problem the
   drawer does not have — it re-attaches and replays its ring, while a run is
   only a push keyed by an id the old page owned. So the boot claims the runs it

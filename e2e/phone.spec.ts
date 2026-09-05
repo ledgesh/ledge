@@ -1812,6 +1812,17 @@ test.describe("every target a finger chooses between", () => {
     }
   });
 
+  test("the boot screen's way out, which is on screen before the app is", async ({ page }) => {
+    // The one control that exists before there is a React tree to put it in
+    // (mainview/lib/booting.ts), and so the one the `touch:` variant cannot
+    // reach: it has no class list for Tailwind to compile a rule onto, and its
+    // 44 points are written out in index.css. Which is exactly why it is swept
+    // here rather than trusted — a hand-written rule is the kind that drifts.
+    await page.goto("/harness.html?shell=ios&booting=9000&bootingTo=dan%40vps");
+    await expect(page.locator(".ledge-booting-cancel")).toBeVisible({ timeout: 8000 });
+    expect(await sweep(page)).toEqual([]);
+  });
+
   test("the find panel, which no `touch:` rule reaches", async ({ page }) => {
     // The one surface in the app that Tailwind does not style: CodeMirror's
     // panel slot, filled by editor/find.ts and sized by a JS style object

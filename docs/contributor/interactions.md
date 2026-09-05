@@ -606,6 +606,34 @@ the failure it prevents, which is running a command on the wrong box.
   session exactly where it was, with the reason in the dialog. At boot the
   same failure falls back to the local server and the indicator says
   "not reachable" rather than silently naming the wrong machine.
+- **A boot that is waiting says what it is waiting for.** Both shells start on
+  an empty `#root` and fill it once there is a server to render against, and
+  over a network that gap is seconds: a phone dialling a machine that is not
+  there waits out the whole dial timeout, fifteen of them. That was a black
+  rectangle with nothing in it and nothing to press, and the refusal at the end
+  of it was the first thing the app said — so a slow connection and a hung app
+  looked identical for as long as it took. `mainview/lib/booting.ts` fills it:
+  a spinner and "Connecting to `user@host`…", raised before the waits and
+  removed by the first render. Three rules shape it.
+  - **The reveals are delays, not timers**, the same idiom as the inline
+    terminal's waiting line: the panel fades in at 600ms and a second line
+    arrives at 4s, so a boot against a server in this process — every local
+    launch — paints none of it and costs no flash. What is asserted in the
+    suite is the delays, not a race against them (`e2e/booting.spec.ts`).
+  - **A way out only where there is somewhere to go.** On a phone the button
+    hands the window back to the shell's own server list, which is the screen a
+    failed boot ends on anyway, and it says "Choose a Different Server" rather
+    than "Cancel" or "Retry": a dial this slow is a machine that moved or went
+    away, and dialling it again is the answer that has already been tried. On a
+    Mac the wire is open before a view boots and the wait is the prefetch behind
+    it, so there is nothing a button could stop and none is drawn. It is out of
+    the tab order — `visibility: hidden`, not `opacity: 0` — until its delay is
+    up, so a Tab cannot land on a control nobody can see.
+  - **It is a button and not a command**, and so is outside §1 along with the
+    refusal page's two (`mainview/ios.tsx`). §1's matrix is about the app's
+    verbs; the registry that holds them is built by `CommandProvider`, which is
+    downstream of everything this screen is waiting for. A verb that cannot
+    exist yet cannot carry the only control on the screen.
 - **A refusal and a rejection both end as a sentence.** Every action here sets
   a busy flag before it asks, and Bun can fail to answer as well as answer no:
   the view gives a request thirty seconds (`maxRequestTime`, `main.tsx`) and

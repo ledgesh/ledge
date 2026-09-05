@@ -35,6 +35,7 @@ import { configureMenu, dispatchNativeCommand } from "./lib/menu";
 import { configureCli } from "./lib/cli";
 import { configureWindows, dispatchDocsShow, recordWindowRole } from "./lib/windows";
 import { captureFailures, configureLog } from "./lib/log";
+import { hideBooting, showBooting } from "./lib/booting";
 import { configureAssets } from "./lib/assets";
 import { configureSettings } from "./lib/settings";
 import { recordServerCaps } from "./lib/shell";
@@ -310,6 +311,16 @@ export function bootView(requests: RequestClient): Promise<void> {
 // window: fall through to the empty state, which restoredState turns into a
 // fresh unsaved note.
 async function boot(requests: RequestClient): Promise<void> {
+  // Something on screen for as long as the round trips below take, since until
+  // they land there is nothing else on it (lib/booting.ts). No destination:
+  // which machine this is talking to is `connectionList`, one of the requests
+  // being waited on, and a panel that named it would have to be told twice. No
+  // way out either — the wire is already open by the time a view boots, so the
+  // only thing a button could cancel here is the prefetch, and an app that
+  // opened without its own workspaces is not a state worth offering. The phone
+  // raises this earlier, over the dial, where both of those answers differ
+  // (ios.tsx), and this call is a no-op behind it.
+  showBooting({ destination: "" });
   let roots: WorkspaceRootInfo[] = [];
   const notesByFolder: Record<string, NoteMeta[]> = {};
   const trashByFolder: Record<string, TrashMeta[]> = {};
@@ -432,6 +443,9 @@ async function boot(requests: RequestClient): Promise<void> {
   // fine, and free when it is not — the shell answers this without asking any
   // server anything (lib/connections.ts reconnectLink).
   window.addEventListener("online", () => reconnectLink());
+  // The moment the boot screen becomes a lie: everything it was waiting on has
+  // either landed or failed, and the render below is what replaces it.
+  hideBooting();
   // The manual's window boots onto the manual and nothing else; every other
   // window boots onto the layout it left (remote.md §8a). A docs root that is
   // missing — an app whose docs sync failed — falls back to the ordinary boot

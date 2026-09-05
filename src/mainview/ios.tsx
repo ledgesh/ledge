@@ -15,6 +15,7 @@ import { reconnectingClient, SESSION_HOLD_MS } from "../shared/transport";
 import { sessionHold } from "../shared/wire";
 import { BUILD_VERSION } from "../shared/version";
 import { bootView, viewPush } from "./boot";
+import { hideBooting, showBooting } from "./lib/booting";
 import { attachShell, barFaceOf, focusReporter, nativeOverlay, type Shell } from "./lib/nativeBridge";
 import { sendRunKey } from "./editor/inlineTerm";
 import { dispatchNativeCommand } from "./lib/menu";
@@ -89,6 +90,26 @@ async function start(): Promise<void> {
     shareSheet: (text) => void shell.call("share.text", { text }).catch(() => {}),
     softKeyboard: true,
     multiWindow: false,
+  });
+
+  // Everything from here to the first paint is a wait on a machine that is not
+  // this one, and a phone dialling one that is not there waits out the whole
+  // dial timeout — fifteen seconds (SSHTransport.dialTimeout). That was a black
+  // screen with nothing in it, and refuse() below was the first thing the app
+  // said. This says it sooner, and says which machine (lib/booting.ts).
+  //
+  // Raised here rather than inside bootView, which raises it again over the
+  // prefetch, because this end knows the two things that one cannot: the
+  // destination, from the hello above, and where a person who has waited long
+  // enough should be sent. That is the shell's own server list — the screen a
+  // failed boot ends on anyway — and not a retry: a dial this slow is a server
+  // that has moved or gone away, and dialling it again is the answer that has
+  // already been tried.
+  showBooting({
+    destination,
+    onCancel: () => {
+      void shell.call("servers.choose", { because: `Gave up connecting to ${destination}.` }).catch(() => {});
+    },
   });
 
   let live = true;
@@ -191,6 +212,10 @@ function watchEditorFocus(shell: Pick<Shell, "focus">): void {
  * server to render against.
  */
 function refuse(err: unknown): void {
+  // First: this page is what the boot screen was waiting to become, and that
+  // screen is parented to <body> rather than to the #root cleared below — left
+  // up, it would cover the refusal with a claim that we are still connecting.
+  hideBooting();
   const why = err instanceof Error ? err.message : String(err);
   console.error("[ios] could not start", err);
   bridge?.log(`[boot] refused: ${why}`);
