@@ -41,6 +41,21 @@ if (pkg.version === config.app.version) {
   );
 }
 
+// --- the architecture ---------------------------------------------------------
+// v1 pinned this in electrobun.config.ts as `targets: "macos-arm64"`, so a
+// build on an Intel Mac failed there. Hutch removed the key and builds for the
+// host instead, which moves the guarantee here: 0.1.0 is arm64-only because
+// its PTY dylib and the rest of the native seam have never run on an x86_64
+// Mac, and a release must not quietly become the first test of that.
+if (process.arch === "arm64") {
+  ok(`building on ${process.arch}`);
+} else {
+  bad(
+    `this is an ${process.arch} Mac and 0.1.0 ships arm64 only`,
+    "Cut the release on Apple Silicon. Electrobun 2.x builds for the build host, so there is no target to override.",
+  );
+}
+
 // A dirty tree is not fatal: a release is sometimes cut with a local tweak in
 // hand. It is worth saying out loud, because the artifact is about to be
 // stamped with a commit that does not describe it.

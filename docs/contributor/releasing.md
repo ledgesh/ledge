@@ -31,9 +31,12 @@ Consequences of that design worth knowing: the app a user launches on day two
 is not the bundle they installed on day one, and the extraction leaves its
 `.tar` behind in Application Support.
 
-Arm64 only. `targets: "macos-arm64"` in `electrobun.config.ts` is a decision,
-not a default: an x86_64 slice would ship with the PTY dylib and the whole
-native seam untested, because there is no Intel Mac here to run it on.
+Arm64 only, and a decision rather than a default: an x86_64 slice would ship
+with the PTY dylib and the whole native seam untested, because there is no
+Intel Mac here to run it on. Electrobun 2.x builds for the build host and has
+no `targets` key to say this in, so the guarantee is `scripts/release-preflight.ts`
+refusing to start on anything but arm64. Cutting a release on an Intel Mac is
+the failure that check exists to prevent.
 
 ## 2. Version numbers
 

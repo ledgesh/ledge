@@ -36,3 +36,7 @@ playwright-report/
 
 # Internal working notes
 PLAN.md
+
+# The Electrobun devkit, projected here by `electrobun sync`. Generated, and
+# pinned by the electrobun version in package.json.
+.hutch/

@@ -14,10 +14,19 @@
     "skipLibCheck": true,
     "noFallthroughCasesInSwitch": true,
     "baseUrl": ".",
+    // Electrobun 2.x ships no SDK on npm: `node_modules/electrobun` exports a
+    // single module that throws, and the real types are projected into
+    // .hutch/devkit by `electrobun sync`. The devkit ships a tsconfig of its
+    // own to extend, but `paths` is replaced wholesale rather than merged, so
+    // extending it would drop "@/*" -- these three entries are the only
+    // specifiers this repo imports, copied from the devkit's export map.
     "paths": {
-      "@/*": ["src/mainview/*"]
+      "@/*": ["src/mainview/*"],
+      "electrobun": [".hutch/devkit/api/sdks/main/index.ts"],
+      "electrobun/bun": [".hutch/devkit/api/sdks/main/index.ts"],
+      "electrobun/view": [".hutch/devkit/api/browser/index.ts"]
     }
   },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist", "build"]
+  "include": ["src/**/*", "electrobun.config.ts", "hutch.config.ts"],
+  "exclude": ["node_modules", "dist", "build", ".hutch"]
 }

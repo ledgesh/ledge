@@ -878,6 +878,18 @@ approved set. A new dependency needs a reason the existing set genuinely
 cannot cover, stated in the PR/commit that adds it; "it has a nicer API" is
 not one. (This was a deliberate choice, not an accident of history.)
 
+**Electrobun is not in `node_modules`.** Since 2.x the npm package is a
+dependency-free bootstrap whose only module throws on import; the SDK, the
+runtime, and the Bun the app ships all come from the toolchain Hutch downloads
+into `~/.hutch` and projects into `.hutch/devkit/`. `electrobun sync` creates
+that directory, every `electrobun` command recreates it, and it is gitignored,
+so a fresh clone has no `electrobun/*` types until something runs. Two files
+carry the consequence: `tsconfig.json` maps the three specifiers this repo
+imports at their devkit paths, and `vite.config.ts` calls the devkit's own
+`electrobunViteAliases` so the view bundle resolves `electrobun/view` to the
+SDK rather than to the throwing stub. Both must be updated together if a new
+`electrobun/*` import ever appears.
+
 Dev-only tooling gets the same test but a lower bar, since it never ships:
 `@playwright/test` is in because nothing in the existing set can execute a
 real DOM (`testing.md` §5) — the canonical example of a reason that

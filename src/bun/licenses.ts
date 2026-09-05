@@ -39,25 +39,29 @@ export interface NativeComponent {
 }
 
 // The binaries in Contents/MacOS. npm cannot describe them: they arrive
-// prebuilt inside the electrobun package, so the dependency walk below sees a
-// package.json and none of what it actually ships. Hand-maintained, therefore,
-// and deliberately covering EVERY binary in the bundle — including our own —
-// so that the section answers "what is this file" for each one rather than
-// only for the ones with an obligation attached.
+// prebuilt from the Electrobun toolchain, which since 2.x is downloaded from
+// GitHub Releases rather than installed, so the dependency walk below sees a
+// bootstrap package with no dependencies and none of what it actually ships.
+// (Under 1.x the walk at least saw that package's own dependencies, and
+// reported build-time ones such as @babylonjs/core that never reached the
+// bundle; losing them makes this list the whole account, not a partial one.)
+// Hand-maintained, therefore, and deliberately covering EVERY binary in the
+// bundle — including our own — so that the section answers "what is this file"
+// for each one rather than only for the ones with an obligation attached.
 export const NATIVE_COMPONENTS: readonly NativeComponent[] = [
   {
-    name: "Bun 1.3.13",
+    name: "Bun 1.4.0",
     license: "MIT",
-    url: "https://github.com/oven-sh/bun/blob/bun-v1.3.13/LICENSE.md",
+    url: "https://github.com/oven-sh/bun/blob/bun-v1.4.0/LICENSE.md",
     note:
       "`Contents/MacOS/bun`: the runtime the main process runs on. Electrobun bundles it, so its version tracks Electrobun's rather than the `bun` on the build machine; `Contents/MacOS/bun --version` against a build is what confirms which one shipped. Bun redistributes third-party components of its own, JavaScriptCore among them, under their own licenses, and the LICENSE.md linked above carries those notices in full.",
   },
   {
-    name: "Electrobun 1.18.1",
+    name: "Electrobun 2.0.1",
     license: "MIT",
-    url: "https://github.com/blackboardsh/electrobun",
+    url: "https://github.com/blackboardsh/electrobun/blob/main/LICENSE",
     note:
-      "`Contents/MacOS/launcher`, `libNativeWrapper.dylib`, `libasar.dylib`, `zig-zstd`, and `bspatch`: the process launcher, the WKWebView bridge, and the updater's archive and patch tools, all built from the Electrobun project and covered by its license. The published npm package ships no license file of its own; MIT is what its package.json declares and what the repository states.",
+      "`Contents/MacOS/launcher`, `libElectrobunCore.dylib`, `libNativeWrapper.dylib`, `libasar.dylib`, `zig-zstd`, and `bspatch`: the process launcher, the core runtime, the WKWebView bridge, and the updater's archive and patch tools, all built from the Electrobun project and covered by its license. These reach the bundle from the toolchain Hutch downloads into `~/.hutch`, not from npm: the 2.x npm package is a dependency-free bootstrap, which is why the walk below reports nothing for it at all. It does ship a LICENSE, and MIT is what it and the repository both state.",
   },
   {
     name: "Ledge PTY trampolines",

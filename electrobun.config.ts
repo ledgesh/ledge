@@ -29,13 +29,20 @@ export default {
     postWrap: "scripts/stamp-version.ts",
   },
   build: {
-    // 0.1.0 is Apple Silicon only, deliberately: an x86_64 slice would ship
-    // with its PTY dylib and its whole native seam untested, since there is no
-    // Intel Mac here to run it on. Named rather than left as "current" so a
-    // build on a different machine cannot quietly widen the release.
-    targets: "macos-arm64",
-    // Bun main process entrypoint defaults to src/bun/index.ts. The view is built
-    // by Vite (see vite.config.ts) to dist/; we copy that output into the bundle.
+    // Bun, not the 2.x default of Cottontail. This is not a preference: the
+    // main process calls into libledge_pty.dylib through bun:ffi (ptyNative.ts)
+    // and the `ledge` shim execs Contents/MacOS/bun against cli.js
+    // (cliShim.ts), so the runtime IS the native seam here. Moving to
+    // Cottontail is a separate project, not a config edit.
+    mainProcess: "bun",
+    bun: { entrypoint: "src/bun/index.ts" },
+    // 0.1.0 is Apple Silicon only: an x86_64 slice would ship with its PTY
+    // dylib and its whole native seam untested, since there is no Intel Mac
+    // here to run it on. v1's `targets` key is gone — Hutch builds for the
+    // build host — so what used to be stated here is now a fact about the
+    // machine. release-preflight.ts refuses a release off an Intel host.
+    // The view is built by Vite (see vite.config.ts) to dist/; we copy that
+    // output into the bundle.
     copy: {
       "dist/index.html": "views/mainview/index.html",
       "dist/assets": "views/mainview/assets",
