@@ -237,7 +237,10 @@ Bun therefore validates everything and derives anything derivable:
   note's OWN root's `.ledge-trash` — per workspace root, not one shared bin,
   so the move never crosses a filesystem (no EXDEV on an external volume)
   and a restore lands back in the workspace it left. Retitle is a rename. Restore
-  is a rename. Moving a workspace (`moveRoot`) is ONE rename of the whole
+  is a rename. Moving a note between folders (`moveNote`) is a rename, within
+  one root: a note's root decides its wikilink scope, its tag directory, its
+  asset pool and its trash, so cross-root is four migrations rather than a
+  rename and is not offered. Moving a workspace (`moveRoot`) is ONE rename of the whole
   folder — cross-volume is refused (EXDEV surfaces the move-in-Finder-then-
   attach recipe) rather than becoming copy-then-unlink of every note, and
   the destination name comes from `uniqueName` like every other rename
@@ -245,7 +248,13 @@ Bun therefore validates everything and derives anything derivable:
   line goes, the folder stays, re-attachable. Exactly three code paths
   unlink a *note* — `deleteTrashed`, `emptyTrash`, `purgeTrash` — all in
   `bun/notes.ts`, all gated by `assertTrashed`, and the first two sit behind
-  a confirmation (interactions.md §4). **Anything new that unlinks a file
+  a confirmation (interactions.md §4). `assertTrashed` accepts a `.md` file
+  *visibly* inside the trash at any depth — visible meaning no dot-segment
+  below `.ledge-trash`, the same rule `trashFiles` walks by, so the guard
+  accepts exactly the set the Trash section listed. It used to require the
+  file sit directly in the trash; that broke when the trash gained folders
+  (below), because it would then refuse to restore or empty precisely the
+  notes the mirroring is for. **Anything new that unlinks a file
   joins all three lists: the guard, the confirm, and this sentence.** (Two
   `unlink`s in the repo are outside the notes tree and so outside that rule.
   `writeNote` discards its own temp file after a failed save — a dotted file
@@ -255,6 +264,29 @@ Bun therefore validates everything and derives anything derivable:
   because the updater bsdiffs from it, and deletes nothing at all when it
   cannot tell which that is. Both act on files the app wrote, named by the
   app, that no user chose and no listing shows.)
+- **The trash mirrors the workspace's folders.** A note deleted from
+  `projects/api` lands in `.ledge-trash/projects/api`, and a restore reads its
+  origin straight back off that path. The alternative — a sidecar index of
+  where each trashed note came from — is state to keep in step with a
+  directory that external tools also touch, and it answers wrongly the first
+  time someone moves a file in Finder. A note inside a dot-folder flattens to
+  the trash's top level instead: it is already invisible to `listNotes`, and
+  burying it under an invisible trash folder would make it unrecoverable from
+  the Trash section rather than merely unlisted.
+- **A folder is the only name a caller chooses, so it is the only name
+  validated.** Filenames never needed a guard: `slugOf` builds them from the
+  note's own heading and emits only `[a-z0-9-]`, so there is no name to check
+  and no way for the view to ask for a path. A folder has to match what is
+  already on disk, so it cannot be slugged into safety, and it arrives from
+  the view, from MCP and from the CLI alike. `folderPathOf` is the one gate:
+  relative only, no backslashes, no `.` or `..` segment, no dot-entry, inside
+  the root once resolved. `..` is rejected on the raw segments rather than
+  left to the containment check, so `a/../b` cannot quietly mean `b` — the
+  folder a caller names is the folder they get, or an error. `ensureFolder`
+  adds the two checks that need the disk: the write guard, and a refusal when
+  the folder (or any ancestor) is ignored, since a note `listNotes` will never
+  show is a silent disappearance. A folder is *placement*, never identity —
+  notes stay addressed by title (§4).
 - **Bun never mkdirs an external root.** A managed folder (a direct child of
   the app home) is Bun's to recreate; an external root that is missing is
   what an unmounted volume looks like, and mkdir-ing it would grow a shadow
@@ -429,8 +461,8 @@ exactly like a note — from one special root that can never be written:
 A note has two keys with two lifetimes, and they are never bound to each
 other:
 
-- **`path`** is the identity of the *file*. It changes on retitle and on
-  trash/restore.
+- **`path`** is the identity of the *file*. It changes on retitle, on
+  trash/restore, and on a move between folders.
 - **`docId`** is the identity of the *live session*: the pooled CodeMirror
   editor and the note's shells (the persistent inline-run shell plus any
   overflow shells for concurrent runs, and the terminal drawer). It is
@@ -440,6 +472,13 @@ other:
 Renaming a file must not kill the shell running inside it; that is the whole
 reason these are separate keys. Code that derives one from the other, or uses
 a path where a session is meant, is re-fusing them.
+
+A note's **folder** is part of its path, so it is placement and not identity
+either. `folderOf` derives it from the path rather than storing it, and moving
+a note leaves its `docId` alone — the editor, the undo history and the running
+shell survive a move for the same reason they survive a retitle. Nothing
+addresses a note by folder: titles resolve wikilinks and the agent surfaces
+(`shared/wikilinks.ts`), and two notes in different folders may share one.
 
 ## 5. State ownership
 

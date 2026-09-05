@@ -12,7 +12,7 @@
 // shells), and binding it to a path would mean renaming a file killed the
 // shell running inside it. One note maps to one path and one docId; they are
 // separate keys for separate lifetimes.
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { mkdir, readdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import type { Stats } from "node:fs";
 import { ASSETS_DIRNAME, type BacklinkHit, type NoteMeta, type TagHit, type TrashMeta } from "../shared/rpc-schema";
@@ -148,6 +148,101 @@ function assertNote(path: string): string {
   if (!root) throw new Error(`path outside every workspace root: ${path}`);
   if (!/\.md$/i.test(path)) throw new Error(`not a note path: ${path}`);
   return root;
+}
+
+// The path segments of `p` below `dir`, or null when `p` is not VISIBLY inside
+// it: outside, the directory itself, or holding a dot-segment anywhere below
+// `dir`. Dot-entries are the app's invisible files (.ledge-trash, .ledge-assets,
+// a project's .git), and the rule that keeps a guard and the listing it guards
+// agreeing about which files exist — what listNotes and trashFiles hide, no
+// path-taking call may accept.
+function visibleSegmentsUnder(dir: string, p: string): string[] | null {
+  const d = resolve(dir);
+  const t = resolve(p);
+  if (!isInside(d, t) || t === d) return null;
+  const parts = t.slice(d.length + 1).split(sep);
+  return parts.some((part) => part === "" || part.startsWith(".")) ? null : parts;
+}
+
+// A note's FOLDER: where inside its workspace it sits, as a root-relative path
+// with forward slashes ("projects/api"), or "" at the top level. Placement, not
+// identity — a note is still addressed by title (shared/wikilinks.ts) and still
+// keyed by docId while it is open (architecture.md §4). This is only ever the
+// answer to "which directory", and it is derived from the path rather than
+// stored, so it cannot go stale.
+export function folderOf(root: string, path: string): string {
+  const rel = relative(resolve(root), dirname(resolve(path)));
+  return rel === "" ? "" : rel.split(sep).join("/");
+}
+
+/**
+ * Resolve a caller-supplied folder against its root, or throw.
+ *
+ * This is the SECOND name that may cross the trust boundary, and the first one
+ * a caller chooses. Filenames never needed validating: `slugOf` builds them out
+ * of the note's own heading and emits only [a-z0-9-], so there was no name to
+ * check and no way for the view to ask for a path (baseFor above). A folder is
+ * different — it has to match what is already on disk, so it cannot be slugged
+ * into safety, and it arrives from the view, from MCP, and from the CLI.
+ *
+ * The rules are assetPathOf's, for the same reason: relative only (a leading
+ * slash is an absolute path, and silently reinterpreting one as root-relative
+ * is how a guard becomes a suggestion), no backslashes, no `.` or `..` segment,
+ * no dot-entry, and inside the root once resolved. `..` is rejected on the RAW
+ * segments rather than left to the containment check, so `a/../b` cannot
+ * quietly mean `b`: the folder a caller names is the folder they get, or an
+ * error.
+ *
+ * Empty (or absent) means the root itself, which is where every note lived
+ * before folders and where one still lands when nobody says otherwise.
+ */
+export function folderPathOf(root: string, folder: string | null | undefined): string {
+  const r = assertRegisteredRoot(root);
+  if (folder === null || folder === undefined) return r;
+  if (folder.includes("\\")) throw new Error(`not a folder: ${folder} (use / to separate segments)`);
+  if (folder.startsWith("/")) throw new Error(`not a folder: ${folder} (folders are relative to the workspace)`);
+  const rel = folder.trim().replace(/\/+$/, "");
+  if (rel === "") return r;
+  for (const segment of rel.split("/")) {
+    if (segment === "" || segment === "." || segment === "..") {
+      throw new Error(`not a folder: ${folder} (empty, "." and ".." segments are not allowed)`);
+    }
+    if (segment.startsWith(".")) throw new Error(`not a folder: ${folder} (dot-folders are Ledge's own and invisible to the note list)`);
+  }
+  const path = resolve(r, rel);
+  if (visibleSegmentsUnder(r, path) === null) throw new Error(`folder outside the workspace root: ${folder}`);
+  return path;
+}
+
+/**
+ * The directory a note may be written into: folderPathOf's guard, plus the two
+ * checks that need the disk, plus the mkdir.
+ *
+ * The ignore check is not a safety rule — bun/ignore.ts is about VISIBILITY —
+ * but creating a note somewhere listNotes will never show it is a silent
+ * disappearance, and the caller asking for `node_modules` has almost certainly
+ * not meant it. Refusing names the reason, which is the only way the user can
+ * act on it (`.ledgeignore` takes a `!` line).
+ */
+export async function ensureFolder(root: string, folder: string | null | undefined): Promise<string> {
+  const r = assertWritableRoot(assertRegisteredRoot(root));
+  await rootReady(r);
+  const dir = folderPathOf(r, folder);
+  if (dir !== r) {
+    // Every ANCESTOR, not just the leaf: listNotes prunes a directory whole and
+    // never visits its children, so `node_modules/mine` is invisible because of
+    // its parent and a leaf-only check would wave it through.
+    const segments = relative(r, dir).split(sep);
+    const ignore = await loadIgnore(r);
+    for (let i = 0; i < segments.length; i += 1) {
+      const rel = segments.slice(0, i + 1).join("/");
+      if (ignore.ignores(rel, true)) {
+        throw new Error(`"${rel}" is ignored in this workspace, so a note there would never appear in the list (see .ledgeignore)`);
+      }
+    }
+    await mkdir(dir, { recursive: true });
+  }
+  return dir;
 }
 
 
@@ -735,23 +830,70 @@ function reservedIn(dir: string): Set<string> {
 // and never type in leaves nothing behind. The name comes from the note's H1 if
 // it has one by then, so a note you title before your first pause never has to be
 // created as untitled.md and renamed a moment later.
-export async function createNote(root: string, text: string): Promise<NoteMeta> {
-  // Guarded here as well as in writeNote below it, so the refusal names the
-  // act ("create in the docs folder") before any name is allocated.
-  const r = assertWritableRoot(assertRegisteredRoot(root));
-  await rootReady(r);
-  const reserved = reservedIn(r);
-  const taken = new Set(await readdir(r));
+export async function createNote(root: string, text: string, folder?: string | null): Promise<NoteMeta> {
+  // ensureFolder carries the write guard (so the refusal names the act, "create
+  // in the docs folder", before any name is allocated), the root's readiness,
+  // and the folder guard. With no folder it is the root, which is where every
+  // note landed before folders existed.
+  const dir = await ensureFolder(root, folder);
+  const reserved = reservedIn(dir);
+  const taken = new Set(await readdir(dir));
   for (const name of reserved) taken.add(name);
   const name = uniqueName(baseFor(text), taken);
   reserved.add(name);
-  const path = join(r, name);
+  const path = join(dir, name);
   try {
     await writeNote(path, text);
   } finally {
     reserved.delete(name);
   }
   return metaFor(path, text);
+}
+
+// Move a note into another folder of its OWN workspace, keeping its name.
+//
+// Within one root by construction, so this is a rename(2) like every other move
+// in this file: atomic, and immune to EXDEV even when the workspace sits on
+// another volume. Cross-workspace is not offered — a note's root decides its
+// wikilink scope, its tag directory, its assets pool and its trash, so moving
+// between roots is four migrations wearing a trench coat, not a rename.
+//
+// The docId is untouched, exactly as in retitleNote: the note's editor, undo
+// history and running shell all survive the move, which is what makes it safe
+// to move a note you are sitting in (architecture.md §4).
+//
+// A trashed note is refused rather than moved. Restore is the way out of the
+// trash — it is the call that knows where the note came from — and letting a
+// move double as an untrash would leave the note's origin folder recorded
+// nowhere.
+export async function moveNote(path: string, folder: string | null): Promise<NoteMeta> {
+  const root = assertWritableRoot(assertNote(path));
+  const from = resolve(path);
+  if (isInside(trashDirOf(root), from)) {
+    throw new Error("that note is in the trash — restore it first, then move it");
+  }
+  const dir = await ensureFolder(root, folder);
+  if (dirname(from) === dir) return metaAt(from); // already there: the outcome asked for
+
+  const reserved = reservedIn(dir);
+  const taken = new Set(await readdir(dir));
+  for (const name of reserved) taken.add(name);
+  // uniqueName against the DESTINATION, because rename(2) clobbers silently
+  // (architecture.md §3). The note keeps the name its heading gave it; only
+  // when the destination already holds that name does it take a suffix.
+  const name = uniqueName(titleOf(from), taken);
+  // Held across the rename for createNote's reason: the readdir above is an
+  // await, so a second move into this folder can read the same snapshot and
+  // allocate the same name before this one lands.
+  reserved.add(name);
+  const target = join(dir, name);
+  try {
+    assertNote(target);
+    await rename(from, target);
+  } finally {
+    reserved.delete(name);
+  }
+  return metaAt(target);
 }
 
 // Move a note's file to match its heading. Returns the note where it now lives,
@@ -791,6 +933,23 @@ export async function retitleNote(path: string, text: string): Promise<NoteMeta>
   return metaFor(target, text);
 }
 
+// Where inside the trash a note's file goes: the trash MIRRORS the workspace's
+// folder structure, so a note deleted from `projects/api` lands in
+// `.ledge-trash/projects/api`. The note's own path is then the whole record of
+// where it came from — no sidecar index to keep in step, nothing to prune, and
+// an external tool poking at the folder sees the same thing Ledge does.
+//
+// A note inside a DOT-folder flattens to the trash's top level instead. Such a
+// note is invisible to listNotes already, and burying it under an invisible
+// trash folder would make it invisible to the Trash section too — unrecoverable
+// from inside the app rather than merely unlisted. The failure leans toward
+// keeping notes reachable, as it does everywhere else in this file.
+function trashSubdirOf(root: string, path: string): string {
+  const trashDir = trashDirOf(root);
+  const segments = visibleSegmentsUnder(resolve(root), dirname(resolve(path)));
+  return segments === null || segments.length === 0 ? trashDir : join(trashDir, ...segments);
+}
+
 // Delete a note by moving it aside rather than unlinking it. Same rename(2)
 // primitive as a save, so it is atomic and cheap, and it means a misclick costs
 // a trip to the Trash section rather than the note. The trash is the note's own
@@ -802,9 +961,10 @@ export async function deleteNote(path: string): Promise<string | null> {
   const root = assertWritableRoot(assertNote(path));
   const trashDir = trashDirOf(root);
   if (isInside(trashDir, path)) return null; // already trashed
-  await mkdir(trashDir, { recursive: true });
-  const taken = new Set(await readdir(trashDir));
-  const dest = join(trashDir, uniqueName(titleOf(path), taken));
+  const destDir = trashSubdirOf(root, path);
+  await mkdir(destDir, { recursive: true });
+  const taken = new Set(await readdir(destDir));
+  const dest = join(destDir, uniqueName(titleOf(path), taken));
   try {
     await rename(path, dest);
   } catch (err) {
@@ -841,34 +1001,49 @@ export async function stashNote(path: string, text: string): Promise<string> {
   touchVault();
   await rootReady(root);
   const { outgoing } = await sealFor(path, text);
-  const trashDir = trashDirOf(root);
-  await mkdir(trashDir, { recursive: true });
-  const taken = new Set(await readdir(trashDir));
-  const dest = join(trashDir, uniqueName(titleOf(path), taken));
+  // The note's own folder, mirrored, exactly as a delete records it: a restore
+  // is supposed to land BESIDE the live note, and beside means in its folder.
+  const destDir = trashSubdirOf(root, path);
+  await mkdir(destDir, { recursive: true });
+  const taken = new Set(await readdir(destDir));
+  const dest = join(destDir, uniqueName(titleOf(path), taken));
   await writeFile(dest, outgoing, "utf8");
   return dest;
 }
 
 // --- trash ------------------------------------------------------------------
 
-// Only .md files sitting directly in the root's trash count. Anything else in
-// there arrived by some route other than a delete, and is left strictly alone:
-// Empty removes exactly what the list showed, and nothing it did not.
+// Only .md files inside the root's trash count, at any depth — the trash mirrors
+// the workspace's folders (trashSubdirOf), so a deleted note may sit several
+// levels down. Anything else in there arrived by some route other than a delete
+// and is left strictly alone: Empty removes exactly what the list showed, and
+// nothing it did not.
+//
+// The walk is listNotes' walk, dot-entries and all, and that is load-bearing
+// rather than tidy: assertTrashed accepts exactly what this yields, so the guard
+// on the two unlink paths and the listing they act on cannot drift apart.
 async function trashFiles(root: string): Promise<Array<{ path: string; stat: Stats }>> {
-  const trashDir = trashDirOf(root);
-  let names: string[];
-  try {
-    names = await readdir(trashDir);
-  } catch {
-    return []; // no trash folder yet: nothing has ever been deleted here
-  }
   const out: Array<{ path: string; stat: Stats }> = [];
-  for (const name of names) {
-    if (name.startsWith(".") || !/\.md$/i.test(name)) continue;
-    const path = join(trashDir, name);
-    const s = await stat(path).catch(() => null);
-    if (s?.isFile()) out.push({ path, stat: s });
-  }
+  const walk = async (dir: string): Promise<void> => {
+    let entries;
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      return; // no trash folder yet: nothing has ever been deleted here
+    }
+    for (const entry of entries) {
+      if (entry.name.startsWith(".")) continue;
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        await walk(path);
+        continue;
+      }
+      if (!/\.md$/i.test(entry.name)) continue;
+      const s = await stat(path).catch(() => null);
+      if (s?.isFile()) out.push({ path, stat: s });
+    }
+  };
+  await walk(trashDirOf(root));
   return out;
 }
 
@@ -894,38 +1069,70 @@ export async function listTrash(root: string): Promise<TrashMeta[]> {
   return out.sort((a, b) => b.deletedAt - a.deletedAt);
 }
 
-// A trashed note must be a .md file directly inside its root's trash. Stricter
-// than the containment check live notes get, because restore and empty are the
-// two calls that can move or unlink a file, and "inside .ledge-trash" would also
-// accept the folder itself. Returns the root whose trash holds the note.
+// A trashed note must be a .md file VISIBLY inside its root's trash, at any
+// depth. Still stricter than the containment check live notes get, because
+// restore and empty are the two calls that can move or unlink a file: bare
+// containment would also accept the trash folder itself, and a dot-segment
+// would accept a file no listing ever showed.
+//
+// This is what the trash's mirrored folders cost. It used to say DIRECTLY
+// inside, which is a tighter sentence but the wrong one once a delete can put a
+// note in `.ledge-trash/projects` — the guard would refuse to restore or empty
+// exactly the notes the mirroring was for. What keeps it honest is that
+// `visibleSegmentsUnder` is the same rule trashFiles walks by, so the guard
+// accepts precisely the set the Trash section listed and nothing else.
+// (testing.md §3 names this invariant; the test moved with it.)
+//
+// Returns the root whose trash holds the note.
 function assertTrashed(path: string): string {
   const root = rootContaining(path);
-  if (!root || dirname(resolve(path)) !== trashDirOf(root) || !/\.md$/i.test(path)) {
+  if (!root || visibleSegmentsUnder(trashDirOf(root), path) === null || !/\.md$/i.test(path)) {
     throw new Error(`not a trashed note: ${path}`);
   }
   return root;
 }
 
-// Move a note back out of the trash, into the root it was deleted from. Its
+// Move a note back out of the trash, into the FOLDER it was deleted from. Its
 // old name may have been taken by a note created since, so the name is
 // allocated fresh rather than assumed free: this is a rename(2) like any
 // other, and rename(2) clobbers silently.
 //
-// It goes back to the root's top level, not to whatever subfolder it may have
-// been deleted from: nothing records the original path, and the root is where
-// notes are created anyway. Worth revisiting if nested notes ever become a
-// real thing.
+// The trash mirrors the workspace's folders, so the note's path inside the
+// trash is the record of where it belongs and nothing else has to remember it.
+// A folder emptied since the delete is recreated on the way back: the note
+// asked for that folder by sitting in it, and landing it at the top level
+// instead would quietly undo a filing decision.
+//
+// The trash's now-empty folder is left behind. Removing it would put an rmdir
+// on a path whose whole job is to be reversible, for a directory no listing
+// shows (trashFiles yields nothing for an empty one) — a cost with no reader.
 export async function restoreNote(path: string): Promise<NoteMeta> {
   // Belt: no delete can put a note in the docs root's trash, but a restore
   // WRITES into its root, so the guard holds here too.
   const root = assertWritableRoot(assertTrashed(path));
   await rootReady(root);
-  const reserved = reservedIn(root);
-  const taken = new Set(await readdir(root));
+  // Straight from the mirrored path, NOT through folderPathOf: this folder was
+  // recorded by a delete rather than typed by a caller, assertTrashed has
+  // already established it is visibly inside the trash, and re-validating a
+  // name the app itself wrote would only add a way for a restore to fail.
+  const rel = relative(trashDirOf(root), dirname(resolve(path)));
+  const dir = rel === "" ? root : join(root, rel);
+  await mkdir(dir, { recursive: true });
+  const reserved = reservedIn(dir);
+  const taken = new Set(await readdir(dir));
   for (const name of reserved) taken.add(name);
-  const target = join(root, uniqueName(titleOf(path), taken));
-  assertNote(target);
-  await rename(path, target);
+  // Reserved across the rename, like every other allocation into a directory
+  // (createNote): this read the reserved set without ever joining it, so two
+  // restores into one folder in the same tick could pick one name twice.
+  const name = uniqueName(titleOf(path), taken);
+  reserved.add(name);
+  const target = join(dir, name);
+  try {
+    assertNote(target);
+    await rename(path, target);
+  } finally {
+    reserved.delete(name);
+  }
   return metaAt(target);
 }
 

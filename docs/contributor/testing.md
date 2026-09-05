@@ -76,7 +76,13 @@ new rules should imitate:
 - row verbs live in `listKeys`, never `keys` (`keys.test.ts`);
 - the held-modifier badges show the same keys `keys.ts` binds;
 - note verbs refuse a trash target and vice versa;
-- `deleteTrashed` rejects anything not a `.md` directly inside `.ledge-trash`.
+- `deleteTrashed` rejects anything not a `.md` visibly inside `.ledge-trash`
+  — at any depth, since the trash mirrors the workspace's folders, but never
+  through a dot-segment (`notes.fs.test.ts`). The paired test asserts a nested
+  trashed note IS accepted, so widening the guard cannot be mistaken for
+  loosening it;
+- `folderPathOf` refuses absolute paths, `..`, dot-entries and every other way
+  of naming somewhere outside the workspace root (`notes.fs.test.ts`).
 
 These are the cheapest guardrails the repo has: they turn "someone will
 forget" into "the suite goes red."

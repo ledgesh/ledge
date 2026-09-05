@@ -11,18 +11,22 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readdir, readFile as readRaw, rm, stat, utimes, writeFile, writeFile as writeRaw } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve, sep } from "node:path";
+import { join, relative, resolve, sep } from "node:path";
 import { APP_HOME, attachExternal, createManaged, loadWorkspaces } from "./workspaces";
 import {
   backlinksTo,
   createNote,
   deleteNote,
+  ensureFolder,
+  folderOf,
+  folderPathOf,
   deleteTrashed,
   emptyTrash,
   isNoteLocked,
   listNotes,
   listTrash,
   lockNote,
+  moveNote,
   notesTagged,
   purgeTrash,
   readNote,
@@ -589,6 +593,148 @@ describe("stashNote", () => {
   });
 });
 
+describe("folders", () => {
+  test("a note is created in the folder asked for, and at the root when none is", async () => {
+    const top = await createNote(ROOT, "# Top\n");
+    const nested = await createNote(ROOT, "# Nested\n", "projects/api");
+    expect(relative(ROOT, top.path)).toBe("top.md");
+    expect(relative(ROOT, nested.path)).toBe(join("projects", "api", "nested.md"));
+    // Placement is not identity: both are ordinary notes to every reader.
+    expect((await listNotes(ROOT)).map((n) => n.title).sort()).toEqual(["Nested", "Top"]);
+  });
+
+  test("names enumerate per folder, so the same title in two folders is two files", async () => {
+    const a = await createNote(ROOT, "# Notes\n", "a");
+    const b = await createNote(ROOT, "# Notes\n", "b");
+    expect(relative(ROOT, a.path)).toBe(join("a", "notes.md"));
+    expect(relative(ROOT, b.path)).toBe(join("b", "notes.md")); // not notes-2.md
+    const same = await createNote(ROOT, "# Notes\n", "a");
+    expect(relative(ROOT, same.path)).toBe(join("a", "notes-2.md"));
+  });
+
+  test("folderPathOf refuses every way of naming somewhere else", () => {
+    for (const folder of [
+      "/etc",
+      " /etc", // leading whitespace must not smuggle an absolute path through
+      "/",
+      "..",
+      "../escape",
+      "projects/../../escape",
+      "a/./b",
+      "a//b",
+      ".ledge-trash",
+      ".ledge-assets",
+      "projects/.git",
+      ".hidden",
+      "a\\b",
+    ]) {
+      expect(() => folderPathOf(ROOT, folder)).toThrow();
+    }
+  });
+
+  test("folderPathOf accepts the ordinary shapes and normalizes the harmless ones", () => {
+    expect(folderPathOf(ROOT, null)).toBe(ROOT);
+    expect(folderPathOf(ROOT, "")).toBe(ROOT);
+    expect(folderPathOf(ROOT, "projects")).toBe(join(ROOT, "projects"));
+    expect(folderPathOf(ROOT, "projects/api")).toBe(join(ROOT, "projects", "api"));
+    expect(folderPathOf(ROOT, "projects/")).toBe(join(ROOT, "projects")); // a trailing slash is spelling
+    expect(folderPathOf(ROOT, " projects ")).toBe(join(ROOT, "projects"));
+  });
+
+  test("folderOf reads a note's placement back off its path", async () => {
+    const nested = await createNote(ROOT, "# Nested\n", "projects/api");
+    expect(folderOf(ROOT, nested.path)).toBe("projects/api");
+    expect(folderOf(ROOT, (await createNote(ROOT, "# Top\n")).path)).toBe("");
+  });
+
+  test("an ignored folder is refused, naming why — a note there would never be listed", async () => {
+    await expect(ensureFolder(ROOT, "node_modules")).rejects.toThrow(/ignored/);
+    // The PARENT decides: listNotes prunes the directory whole and never sees
+    // the child, so a leaf-only check would wave this through.
+    await expect(ensureFolder(ROOT, "node_modules/mine")).rejects.toThrow(/ignored/);
+    await writeFile(join(ROOT, ".ledgeignore"), "drafts/\n");
+    await expect(ensureFolder(ROOT, "drafts")).rejects.toThrow(/ignored/);
+    await rm(join(ROOT, ".ledgeignore"));
+  });
+
+  test("moveNote renames within the root and keeps the note's name", async () => {
+    const note = await createNote(ROOT, "# Shipping\n");
+    const moved = await moveNote(note.path, "projects");
+    expect(relative(ROOT, moved.path)).toBe(join("projects", "shipping.md"));
+    expect(moved.title).toBe("Shipping");
+    await expect(stat(note.path)).rejects.toThrow(); // moved, not copied
+    // And back out again: "" is the root, the same spelling createNote takes.
+    expect(relative(ROOT, (await moveNote(moved.path, "")).path)).toBe("shipping.md");
+  });
+
+  test("moveNote never clobbers, and moving where it already is costs nothing", async () => {
+    const a = await createNote(ROOT, "# Notes\n", "a");
+    await createNote(ROOT, "# Notes\n", "b");
+    const moved = await moveNote(a.path, "b");
+    expect(relative(ROOT, moved.path)).toBe(join("b", "notes-2.md"));
+    expect(await moveNote(moved.path, "b")).toMatchObject({ path: moved.path });
+  });
+
+  test("moveNote refuses a trashed note: restore is the way out of the trash", async () => {
+    const trashed = (await deleteNote((await createNote(ROOT, "# Gone\n")).path))!;
+    await expect(moveNote(trashed, "projects")).rejects.toThrow(/in the trash/);
+  });
+
+  test("a folder's deletes and restores round-trip through the mirrored trash", async () => {
+    const note = await createNote(ROOT, "# Runbook\n", "projects/api");
+    const trashed = (await deleteNote(note.path))!;
+    // The trash mirrors the workspace, so the path IS the record of where it came from.
+    expect(relative(TRASH, trashed)).toBe(join("projects", "api", "runbook.md"));
+    expect((await listTrash(ROOT)).map((t) => t.title)).toEqual(["Runbook"]);
+    const back = await restoreNote(trashed);
+    expect(relative(ROOT, back.path)).toBe(join("projects", "api", "runbook.md"));
+  });
+
+  test("a restore recreates the folder emptied since the delete", async () => {
+    const note = await createNote(ROOT, "# Runbook\n", "projects");
+    const trashed = (await deleteNote(note.path))!;
+    await rm(join(ROOT, "projects"), { recursive: true });
+    expect(relative(ROOT, (await restoreNote(trashed)).path)).toBe(join("projects", "runbook.md"));
+  });
+
+  test("same-named notes in different folders survive a delete of both", async () => {
+    // The case the flat trash could not hold: two readme.md, one bin, one name.
+    const a = await createNote(ROOT, "# Readme\n", "a");
+    const b = await createNote(ROOT, "# Readme\n", "b");
+    const ta = (await deleteNote(a.path))!;
+    const tb = (await deleteNote(b.path))!;
+    expect(relative(TRASH, ta)).toBe(join("a", "readme.md"));
+    expect(relative(TRASH, tb)).toBe(join("b", "readme.md")); // its own folder, its own name
+    expect((await listTrash(ROOT)).length).toBe(2);
+    expect(relative(ROOT, (await restoreNote(ta)).path)).toBe(join("a", "readme.md"));
+    expect(relative(ROOT, (await restoreNote(tb)).path)).toBe(join("b", "readme.md"));
+  });
+
+  test("retitling a nested note renames it in place", async () => {
+    const note = await createNote(ROOT, "# Draft\n", "projects");
+    const renamed = await retitleNote(note.path, "# Shipping Notes\n");
+    expect(relative(ROOT, renamed.path)).toBe(join("projects", "shipping-notes.md"));
+  });
+
+  test("concurrent moves into one folder do not collide", async () => {
+    // The reservation's whole job: the readdir is an await, so without it both
+    // moves read the same snapshot and rename onto the same name — and
+    // rename(2) clobbers silently.
+    const a = await createNote(ROOT, "# Notes\n", "a");
+    const b = await createNote(ROOT, "# Notes\n", "b");
+    const moved = await Promise.all([moveNote(a.path, "dest"), moveNote(b.path, "dest")]);
+    expect(new Set(moved.map((m) => m.path)).size).toBe(2);
+    expect((await readdir(join(ROOT, "dest"))).sort()).toEqual(["notes-2.md", "notes.md"]);
+  });
+
+  test("emptyTrash reaches into the mirrored folders", async () => {
+    await deleteNote((await createNote(ROOT, "# A\n", "x/y")).path);
+    await deleteNote((await createNote(ROOT, "# B\n")).path);
+    expect(await emptyTrash(ROOT)).toBe(2);
+    expect(await listTrash(ROOT)).toEqual([]);
+  });
+});
+
 describe("the unlink paths", () => {
   test("deleteTrashed removes the file for good; a second call reports it already gone", async () => {
     const trashed = (await deleteNote((await createNote(ROOT, "# Gone\n")).path))!;
@@ -597,21 +743,32 @@ describe("the unlink paths", () => {
     expect(await deleteTrashed(trashed)).toBe(false);
   });
 
-  test("refuses anything that is not a .md directly inside a registered root's trash", async () => {
+  test("refuses anything that is not a .md visibly inside a registered root's trash", async () => {
     // The guard is the whole safety story for permanent delete: it unlinks, so
     // "which paths does it accept" is the only thing standing between a Trash
     // row and an arbitrary file the view named.
     for (const path of [
       "/etc/passwd",
       join(ROOT, "live-note.md"), // a live note, not a trashed one
-      join(TRASH, "sub", "nested.md"), // not directly inside
       join(TRASH, "notes.txt"), // not a note
       TRASH, // the folder itself
       join(TRASH, "..", "escape.md"),
+      join(TRASH, ".hidden", "buried.md"), // a dot-segment: no listing ever showed it
       join(APP_HOME, ".ledge-trash", "old-world.md"), // the app home is not a root anymore
     ]) {
       expect(deleteTrashed(path)).rejects.toThrow(/not a trashed note/);
     }
+  });
+
+  test("accepts a .md nested in the trash, because that is where a folder's deletes land", async () => {
+    // The counterpart to the refusals above, and the reason the guard widened
+    // from "directly inside" (testing.md §3): the trash mirrors the workspace's
+    // folders, so refusing depth would refuse to empty exactly the notes the
+    // mirroring exists for.
+    const note = await createNote(ROOT, "# Nested\n", "projects/api");
+    const trashed = (await deleteNote(note.path))!;
+    expect(relative(TRASH, trashed)).toBe(join("projects", "api", "nested.md"));
+    expect(await deleteTrashed(trashed)).toBe(true);
   });
 
   test("emptyTrash removes exactly what listTrash showed, and nothing it did not", async () => {
