@@ -2,7 +2,7 @@
 // cli.fs.test.ts's subject; this file pins the grammar a shell user types
 // against and the shapes their terminal shows.
 import { describe, expect, test } from "bun:test";
-import { formatNoteList, hitPath, parseCliArgs, resolveWorkspaceArg, tildify } from "./cli";
+import { cwdFolder, formatNoteList, hitPath, parseCliArgs, resolveWorkspaceArg, tildify } from "./cli";
 
 describe("parseCliArgs", () => {
   test("verb, positionals, and flags separate wherever the flags sit", () => {
@@ -27,6 +27,19 @@ describe("parseCliArgs", () => {
     });
   });
 
+  test("--folder and its short alias take a value", () => {
+    expect(parseCliArgs(["new", "Idea", "-f", "projects/api"])).toEqual({
+      verb: "new",
+      positionals: ["Idea"],
+      flags: { folder: "projects/api", json: false, all: false, help: false },
+    });
+    expect(parseCliArgs(["ls", "--folder", "admin"])).toEqual({
+      verb: "ls",
+      positionals: [],
+      flags: { folder: "admin", json: false, all: false, help: false },
+    });
+  });
+
   test("a valued flag with nothing after it is an error, not an undefined", () => {
     expect(parseCliArgs(["append", "-m"])).toEqual({ error: "-m needs a value" });
     expect(parseCliArgs(["new", "--template"])).toEqual({ error: "--template needs a value" });
@@ -48,6 +61,33 @@ describe("parseCliArgs", () => {
 
   test("a bare dash is a positional (a stdin marker, not a flag)", () => {
     expect(parseCliArgs(["cat", "-"])).toMatchObject({ positionals: ["-"] });
+  });
+});
+
+describe("cwdFolder", () => {
+  const ROOT = "/ws/notes";
+
+  test("the root itself, and anywhere outside it, is no folder", () => {
+    expect(cwdFolder(ROOT, ROOT)).toBe("");
+    expect(cwdFolder("/ws/notes/", ROOT)).toBe("");
+    expect(cwdFolder("/somewhere/else", ROOT)).toBe("");
+    expect(cwdFolder("/ws/notes-other/x", ROOT)).toBe(""); // the sibling-prefix trap
+  });
+
+  test("a cwd with no workspace around it is no folder", () => {
+    expect(cwdFolder("/tmp", null)).toBe("");
+  });
+
+  test("a directory below the root names itself, nested included", () => {
+    expect(cwdFolder("/ws/notes/projects", ROOT)).toBe("projects");
+    expect(cwdFolder("/ws/notes/projects/api", ROOT)).toBe("projects/api");
+  });
+
+  test("standing in one of Ledge's own directories means the workspace, not an error", () => {
+    // .ledge-trash, .ledge-assets, a project's .git: folderPathOf refuses every
+    // one, and refusing a folder the caller never typed would be a riddle.
+    expect(cwdFolder("/ws/notes/.ledge-trash", ROOT)).toBe("");
+    expect(cwdFolder("/ws/notes/projects/.git/refs", ROOT)).toBe("");
   });
 });
 

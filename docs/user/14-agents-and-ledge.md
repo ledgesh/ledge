@@ -20,13 +20,21 @@ Notes are addressed by title, which survives renames, so an agent's references d
 
 Two boundaries hold in every case: there is no delete tool, and locked notes refuse their bodies to every agent surface (see [[Note Locking]]).
 
+## Agents and folders
+
+Two notes in different folders may share a title, so `list_notes` tells them apart: every row says which folder its note is in, and a note at the top level says nothing. Read a note by that title and the answer names its folder too.
+
+Listing, searching, and the tag tools take a `folder` to narrow to one, and it covers the folders inside it as well. The tools that address a note by title take one too, which is how an agent says which of two notes sharing a title it means. `create_note` takes one to place a new note, creating the folder if it is new, and `daily_note` takes one for the day it creates today's note.
+
+Without a folder a new note lands at the top level of the workspace, which is where your own New Note puts one. There is no tool for moving a note afterwards: filing is yours, in the sidebar ([[Notes and Workspaces]]).
+
 ## Agents know which note they are in
 
 Every shell a note spawns carries two environment variables: `LEDGE_NOTE`, the note's file, and `LEDGE_WORKSPACE`, its workspace folder. An agent launched in a note's terminal drawer picks these up through the MCP server:
 
 - `read_note` with no arguments reads the note the terminal belongs to.
 - `append_note` and `edit_note` default to that note.
-- `create_note` lands in its workspace.
+- `create_note` lands in its workspace, at the top level unless it names a folder.
 
 So "summarize this note" or "add a TODO section here" needs no explanation of what "this" means. Open the note you are working in, press ⌃` for its terminal, start your agent, and talk about "this note" and "this workspace" in plain words.
 

@@ -28,7 +28,7 @@ beforeEach(async () => {
 
 describe("openDaily", () => {
   test("creates a bare dated note when no template is configured", async () => {
-    const { meta, created } = await openDaily(ROOT, NOW);
+    const { meta, created } = await openDaily(ROOT, null, NOW);
     expect(created).toBe(true);
     expect(meta.path).toBe(join(ROOT, "2026-07-18.md"));
     expect(meta.title).toBe("2026-07-18");
@@ -36,16 +36,16 @@ describe("openDaily", () => {
   });
 
   test("a second call the same day returns the same note and mints no -2", async () => {
-    const first = await openDaily(ROOT, NOW);
-    const second = await openDaily(ROOT, NOW);
+    const first = await openDaily(ROOT, null, NOW);
+    const second = await openDaily(ROOT, null, NOW);
     expect(second.created).toBe(false);
     expect(second.meta.path).toBe(first.meta.path);
     expect(await readNote(join(ROOT, "2026-07-18-2.md"))).toBeNull();
   });
 
   test("different days are different notes", async () => {
-    await openDaily(ROOT, NOW);
-    const tomorrow = await openDaily(ROOT, new Date(2026, 6, 19, 8, 0));
+    await openDaily(ROOT, null, NOW);
+    const tomorrow = await openDaily(ROOT, null, new Date(2026, 6, 19, 8, 0));
     expect(tomorrow.created).toBe(true);
     expect(tomorrow.meta.path).toBe(join(ROOT, "2026-07-19.md"));
   });
@@ -56,7 +56,7 @@ describe("openDaily", () => {
       ROOT,
       "---\ncwd: ~/proj\ntags: journal\ntemplate: daily\n---\n\n# Daily Template\n\nCarry over [[{{yesterday}}]].\n\n```prompt\nSummarize [[{{yesterday}}]].\n```\n",
     );
-    const { meta } = await openDaily(ROOT, NOW);
+    const { meta } = await openDaily(ROOT, null, NOW);
     expect(meta.path).toBe(join(ROOT, "2026-07-18.md"));
     expect((await readNote(meta.path))?.text).toBe(
       "---\ncwd: ~/proj\ntags: journal\n---\n\n# 2026-07-18\n\nCarry over [[2026-07-17]].\n\n```prompt\nSummarize [[2026-07-17]].\n```\n",
@@ -65,7 +65,7 @@ describe("openDaily", () => {
 
   test("a plain template: true note is NOT the daily template", async () => {
     await createNote(ROOT, "---\ntemplate: true\n---\n# Meeting\n\nagenda\n");
-    const { meta } = await openDaily(ROOT, NOW);
+    const { meta } = await openDaily(ROOT, null, NOW);
     expect((await readNote(meta.path))?.text).toBe("# 2026-07-18\n");
   });
 
@@ -74,7 +74,7 @@ describe("openDaily", () => {
     // by title over the listing, not by a fixed path.
     await mkdir(join(ROOT, "journal"), { recursive: true });
     const made = await createNote(ROOT, "# 2026-07-18\n\nalready here\n");
-    const { meta, created } = await openDaily(ROOT, NOW);
+    const { meta, created } = await openDaily(ROOT, null, NOW);
     expect(created).toBe(false);
     expect(meta.path).toBe(made.path);
   });
@@ -92,17 +92,17 @@ describe("findTemplate / createFromTemplate", () => {
   test("falls back to other workspaces when the target root lacks the title", async () => {
     const other = await createManaged("Other");
     await createNote(other, "# Meeting\n\ntheirs\n");
-    const note = await createFromTemplate(ROOT, "Meeting", "Standup", NOW);
+    const note = await createFromTemplate(ROOT, "Meeting", "Standup", null, NOW);
     expect(note.path).toBe(join(ROOT, "standup.md"));
     expect((await readNote(note.path))?.text).toBe("# Standup\n\ntheirs\n");
   });
 
   test("a null title instantiates as Untitled, enumerable like any collision", async () => {
     await createNote(ROOT, "# Meeting\n\nagenda\n");
-    const first = await createFromTemplate(ROOT, "Meeting", null, NOW);
+    const first = await createFromTemplate(ROOT, "Meeting", null, null, NOW);
     expect(first.path).toBe(join(ROOT, "untitled.md"));
     expect((await readNote(first.path))?.text).toBe("# Untitled\n\nagenda\n");
-    const second = await createFromTemplate(ROOT, "Meeting", null, NOW);
+    const second = await createFromTemplate(ROOT, "Meeting", null, null, NOW);
     expect(second.path).toBe(join(ROOT, "untitled-2.md"));
   });
 
@@ -113,7 +113,7 @@ describe("findTemplate / createFromTemplate", () => {
     // own daily template gets the bare dated note, never a template it cannot
     // see from where it sits.
     expect(await findDailyTemplate(ROOT)).toBeNull();
-    expect((await readNote((await openDaily(ROOT, NOW)).meta.path))?.text).toBe("# 2026-07-18\n");
+    expect((await readNote((await openDaily(ROOT, null, NOW)).meta.path))?.text).toBe("# 2026-07-18\n");
     await createNote(ROOT, "---\ntemplate: daily\n---\n# Ours Old\n\nours old\n");
     const newest = await createNote(ROOT, "---\ntemplate: daily\n---\n# Ours New\n\nours new\n");
     // Backdate the older claimant so newest-first is deterministic.
@@ -123,14 +123,14 @@ describe("findTemplate / createFromTemplate", () => {
   });
 
   test("an explicitly named template that resolves to nothing throws", async () => {
-    expect(createFromTemplate(ROOT, "Ghost", "T", NOW)).rejects.toThrow(
+    expect(createFromTemplate(ROOT, "Ghost", "T", null, NOW)).rejects.toThrow(
       'no note titled "Ghost" to use as a template',
     );
   });
 
   test("the template: true marker never reaches an instance", async () => {
     await createNote(ROOT, "---\ntags: work\ntemplate: true\n---\n# Meeting\n\nagenda\n");
-    const note = await createFromTemplate(ROOT, "Meeting", "Standup", NOW);
+    const note = await createFromTemplate(ROOT, "Meeting", "Standup", null, NOW);
     // The rest of the frontmatter carries; the marker is stripped, so the
     // instance does not show up in the template picker itself.
     expect((await readNote(note.path))?.text).toBe("---\ntags: work\n---\n# Standup\n\nagenda\n");

@@ -60,6 +60,12 @@ function instructions(): string {
   return (
     "Ledge is the user's local Markdown notes app; these tools read and write their notes. " +
     "Notes are addressed by TITLE (their H1, case-insensitive) — titles survive file renames, paths may not. " +
+    // Folders are the one thing a listing can report that a title cannot
+    // encode, and the reason the row field exists: once notes can be filed,
+    // two of them may answer to one title. Said here rather than left to
+    // list_notes' description, because "which of these two" is a question the
+    // model has to know to ask before it reads a tool schema.
+    "Notes sit in FOLDERS inside their workspace — placement, not an address: two notes may share a title, and each list_notes row's `folder` is what tells them apart. The listing and searching tools take a `folder` to scope to one; create_note takes one to place a new note, and nothing moves a note afterwards. " +
     "Notes may carry tags — inline #hashtags in the body, or a frontmatter `tags:` line; the `tags` tool lists a workspace's tags, or the notes bearing one. " +
     // Ledge's own manual is a workspace of notes, so the read tools already
     // reach it — but an agent that never learns it exists answers questions

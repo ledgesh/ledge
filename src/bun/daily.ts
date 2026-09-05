@@ -71,10 +71,11 @@ function templateText(file: { text: string; locked?: true }, title: string): str
   return file.text;
 }
 
-// Instantiate a template into a NEW note in `root`. The template was asked
-// for by name (create_note's `template`, `ledge new --template`), so a
-// name that resolves to nothing throws rather
-// than quietly creating a bare note. Deliberately, the note need NOT carry
+// Instantiate a template into a NEW note in `root`, or in `folder` inside it
+// when one is named (create_note's placement argument, validated by
+// ensureFolder like every other). The template was asked for by name
+// (create_note's `template`, `ledge new --template`), so a name that resolves
+// to nothing throws rather than quietly creating a bare note. Deliberately, the note need NOT carry
 // the `template: true` marker: the marker is discovery (it puts a note in
 // the ⌥⌘N picker), not permission — a note you can name, you can
 // instantiate. A null `title` means "Untitled": there is no title-prompt
@@ -84,12 +85,13 @@ export async function createFromTemplate(
   root: string,
   templateTitle: string,
   title: string | null,
+  folder: string | null = null,
   now: Date = new Date(),
 ): Promise<NoteMeta> {
   const r = assertRegisteredRoot(root);
   const template = await findTemplate(templateTitle, r);
   if (!template) throw new Error(`no note titled "${templateTitle}" to use as a template`);
-  return createNote(r, instantiateTemplate(template.text, title ?? "Untitled", now));
+  return createNote(r, instantiateTemplate(template.text, title ?? "Untitled", now), folder);
 }
 
 // The same, from a PATH — the app's noteFromTemplate RPC: the ⌥⌘N picker
@@ -147,13 +149,18 @@ export async function findDailyTemplate(root: string): Promise<{ path: string; t
 // second ⌘J cannot reproduce.
 export async function openDaily(
   root: string,
+  folder: string | null = null,
   now: Date = new Date(),
 ): Promise<{ meta: NoteMeta; created: boolean }> {
   const r = assertRegisteredRoot(root);
   const title = isoDateOf(now);
+  // Resolution is workspace-wide and the folder only says where a NEW note
+  // lands, so whoever opens today's note first decides where it lives and
+  // everyone else finds it there — ⌘J after an agent filed today's note in
+  // `journal/` opens that one rather than minting a second at the root.
   const existing = resolveWikiTitle(title, await listNotes(r));
   if (existing) return { meta: existing, created: false };
   const template = await findDailyTemplate(r);
   const text = template ? instantiateTemplate(template.text, title, now) : `# ${title}\n`;
-  return { meta: await createNote(r, text), created: true };
+  return { meta: await createNote(r, text, folder), created: true };
 }

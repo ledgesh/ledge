@@ -1222,11 +1222,18 @@ app rather than growing its own dialect.
   resolution, workspace deixis, naming, and the divergence guard cannot
   drift from what agents (and the app) get. Error guidance is the handlers'
   text with tool names translated to CLI verbs (`humanize` in cli.ts).
-- **"Here" is the cwd.** A cwd inside a registered root scopes `ls`/`search`
-  (`--all` widens), anchors `new`, and tie-breaks title resolution — folded
-  into the same `$LEDGE_WORKSPACE` chain a note terminal's shells already
-  ride, not a parallel rule. `$LEDGE_NOTE` works too: `ledge append -m …`
-  in a note's terminal targets that note.
+- **"Here" is the cwd, down to the folder.** A cwd inside a registered root
+  scopes `ls`/`search` (`--all` widens), anchors `new`, and tie-breaks title
+  resolution — folded into the same `$LEDGE_WORKSPACE` chain a note terminal's
+  shells already ride, not a parallel rule. A cwd BELOW the root names a folder
+  as well, and `ls`/`search`/`tags` narrow to it while `new` creates in it,
+  because a command acting on the directory you are standing in is what a shell
+  user already knows. `-f`/`--folder` outranks it; `-w` and `--all` mean the
+  whole workspace. The exception is `today`, which takes `-f` but never the
+  cwd's folder: the day's note is identified by its date, and where it lives
+  should not depend on where its first caller happened to be standing.
+  `$LEDGE_NOTE` works too: `ledge append -m …` in a note's terminal targets
+  that note.
 - **stdout is for results, stderr for talk.** Raw markdown from `cat`, rows
   from lists, the created path from `new`, handler JSON under `--json`;
   confirmations, errors, and truncation notes go to stderr. Exit codes:

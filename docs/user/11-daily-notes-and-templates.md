@@ -52,6 +52,8 @@ The date is local wall-clock time, so a note started at 11pm belongs to today, n
 
 By default the daily note lives in the selected workspace. To send every day to one place, set `daily.workspace` in Settings (⌘,) and ⌘J goes there from anywhere.
 
+Inside that workspace it sits at the top level. `ledge today -f journal` puts one in a folder instead, and once the day's note exists everything finds it there, ⌘J included ([[The ledge CLI]]).
+
 ## The daily template
 
 Mark one note in the daily workspace with `template: daily` and every fresh daily note is stamped from it, tokens included. A template with `[[{{yesterday}}]]` near the top gives every morning a link to the day before.

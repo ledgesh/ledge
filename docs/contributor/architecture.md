@@ -128,7 +128,13 @@ its note verbs dispatch through the MCP server's own tool handlers
 both stay gated by the registry and `assertNote` with one definition. It
 adds two things of its own. **Cwd deixis**: a working directory inside a
 registered root is "here", folded into the `$LEDGE_WORKSPACE` chain (§2)
-the handlers already honor rather than a parallel rule. And **the open
+the handlers already honor rather than a parallel rule. Once notes can be
+filed, that goes one level deeper: a cwd BELOW the root names a folder too
+(`cwdFolder`), which `ls`, `search`, `tags` and `new` honor — a shell command
+acting on the directory you stand in. The folder rides as a tool argument and
+not as a third environment fact: there is no `$LEDGE_FOLDER`, because a note's
+terminal spawns in `$HOME` or the note's own `cwd:` (§6a), neither of which
+says anything about where the note is filed. And **the open
 request** (`bun/openRequest.ts`): `ledge <title>` resolves the title
 CLI-side, writes `.open-request.json` in the app home (temp-plus-rename),
 and launches/activates the app; the app consumes it — read, delete,
@@ -287,6 +293,19 @@ Bun therefore validates everything and derives anything derivable:
   the folder (or any ancestor) is ignored, since a note `listNotes` will never
   show is a silent disappearance. A folder is *placement*, never identity —
   notes stay addressed by title (§4).
+- **Selecting by folder and placing in one are different arguments, and only
+  one of them can be refused.** Every agent-facing tool that lists, searches or
+  scans takes a `folder` that FILTERS notes already found; `create_note` and
+  `daily_note` take one that PLACES a new file. The second goes through
+  `ensureFolder` above and refuses everything unsafe. The first never becomes a
+  path at all (`shared/folders.ts`: `folderScopeOf` cleans up, `folderContains`
+  selects), so it needs no guard and gets no error — a misspelled scope
+  matches nothing, which is also what a correctly spelled folder holding none
+  does,
+  and since an empty folder is not a thing Ledge shows anywhere those two cases
+  are honestly the same answer. `folderContains` is one function on both sides
+  of the boundary because the trap in it is shared: `a` must not contain its
+  sibling `ab`, in the sidebar's counts and in an agent's scope alike.
 - **The browser's folders are DERIVED from its notes, and no call lists
   directories.** `notes/folders.ts` builds the sidebar's tree out of the
   `folder` each `NoteMeta` carries, so a folder is on screen because a note is

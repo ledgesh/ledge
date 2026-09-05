@@ -95,8 +95,11 @@ new rules should imitate:
   note catches the bug, and getting it wrong unseals an image a locked note
   still shows;
 - a folder path's containment is tested against a SIBLING whose name it
-  prefixes (`folders.test.ts`): `a` must neither count `ab`'s notes nor
-  collapse it, and a `startsWith` without the separator does both;
+  prefixes (`shared/folders.test.ts`): `a` must neither count `ab`'s notes nor
+  collapse it nor scope an agent's listing to it, and a `startsWith` without
+  the separator does all three. `folderContains` is one function for exactly
+  this reason, and the CLI's `cwdFolder` is tested against the same trap
+  (`cli.test.ts`), since it answers the question from paths instead;
 - the browser's row ids are unique across the two row kinds
   (`folders.test.ts`), because `useListNav` moves focus by id and a folder
   named like a note's path would put a keystroke on the wrong row.

@@ -290,6 +290,89 @@ describe("tags", () => {
   });
 });
 
+// The cwd deixis one level deeper than the workspace. `-w` and `--all` mean
+// the whole workspace; `-f` outranks everything.
+describe("folders", () => {
+  test("a cwd inside a folder scopes ls to it, and -f names one from anywhere", async () => {
+    await run(["new", "Top"], { cwd: ROOT });
+    await run(["new", "Filed", "-f", "projects"], { cwd: ROOT });
+    const inside = await run(["ls"], { cwd: join(ROOT, "projects") });
+    expect(inside.out.join("\n")).toContain("Filed");
+    expect(inside.out.join("\n")).not.toContain("Top");
+    const named = await run(["ls", "-f", "projects"], { cwd: ROOT });
+    expect(named.out.join("\n")).toContain("Filed");
+    expect(named.out.join("\n")).not.toContain("Top");
+  });
+
+  test("naming the workspace, or going wide, means the whole of it", async () => {
+    await run(["new", "Top"], { cwd: ROOT });
+    await run(["new", "Filed", "-f", "projects"], { cwd: ROOT });
+    const here = join(ROOT, "projects");
+    expect((await run(["ls", "-w", ROOT], { cwd: here })).out.join("\n")).toContain("Top");
+    expect((await run(["ls", "--all"], { cwd: here })).out.join("\n")).toContain("Top");
+  });
+
+  test("new creates in the folder the caller is standing in", async () => {
+    const r = await run(["new", "Filed Here"], { cwd: join(ROOT, "projects", "api") });
+    expect(r.code).toBe(0);
+    expect(r.out[0]).toBe(join(ROOT, "projects", "api", "filed-here.md"));
+    expect((await readNote(r.out[0]!))?.text).toBe("# Filed Here\n");
+  });
+
+  test("-f outranks the cwd, and makes the folder", async () => {
+    const r = await run(["new", "Filed"], { cwd: join(ROOT, "projects"), stdin: "" });
+    expect(r.out[0]).toBe(join(ROOT, "projects", "filed.md"));
+    const moved = await run(["new", "Elsewhere", "-f", "admin"], { cwd: join(ROOT, "projects") });
+    expect(moved.out[0]).toBe(join(ROOT, "admin", "elsewhere.md"));
+  });
+
+  test("search and tags narrow the same way, and print folder-relative paths", async () => {
+    await run(["new", "Top"], { cwd: ROOT, stdin: "findme #here" });
+    await run(["new", "Filed", "-f", "projects"], { cwd: ROOT, stdin: "findme #here" });
+    const hits = await run(["search", "findme"], { cwd: join(ROOT, "projects") });
+    expect(hits.code).toBe(0);
+    // hitPath renders a hit under the cwd relatively: inside the folder, a
+    // grep-shaped bare filename.
+    expect(hits.out).toEqual(["filed.md:3: findme #here"]);
+    const tags = await run(["tags", "here"], { cwd: join(ROOT, "projects") });
+    expect(tags.out).toEqual(["filed.md:3: findme #here"]);
+  });
+
+  test("an empty folder says where it looked rather than 'no notes'", async () => {
+    await run(["new", "Top"], { cwd: ROOT });
+    const r = await run(["ls"], { cwd: join(ROOT, "empty") });
+    expect(r.code).toBe(0);
+    expect(r.out).toEqual([]);
+    expect(r.err.join("\n")).toContain(join(ROOT, "empty"));
+  });
+
+  test("standing in Ledge's own trash means the workspace, not a folder", async () => {
+    await run(["new", "Top"], { cwd: ROOT });
+    const r = await run(["ls"], { cwd: join(ROOT, ".ledge-trash") });
+    expect(r.out.join("\n")).toContain("Top");
+  });
+
+  test("-f picks which same-titled note cat means; the cwd's folder never does", async () => {
+    await run(["new", "Plan", "-f", "admin"], { cwd: ROOT, stdin: "the admin one" });
+    await run(["new", "Plan", "-f", "projects"], { cwd: ROOT, stdin: "the projects one" });
+    const picked = await run(["cat", "Plan", "-f", "projects"], { cwd: ROOT });
+    expect(picked.out.join("\n")).toContain("the projects one");
+    // Standing in admin/ must not narrow the ADDRESS: a title still reaches
+    // the whole workspace, or `cd` would be a way to lose notes.
+    const fromAdmin = await run(["cat", "Plan", "-f", "projects"], { cwd: join(ROOT, "admin") });
+    expect(fromAdmin.out.join("\n")).toContain("the projects one");
+    expect((await run(["cat", "Plan"], { cwd: join(ROOT, "projects") })).code).toBe(0);
+  });
+
+  test("today takes -f but never the cwd's folder — where the day's note lives should not wander", async () => {
+    const wandering = await run(["today"], { cwd: join(ROOT, "projects") });
+    expect(wandering.out[0]!.startsWith(join(ROOT, "projects") + sep)).toBe(false);
+    await rm(wandering.out[0]!, { force: true });
+    const named = await run(["today", "-f", "journal"], { cwd: ROOT });
+    expect(named.out[0]!.startsWith(join(ROOT, "journal") + sep)).toBe(true);
+  });
+});
+
 describe("workspaces", () => {
   test("one row per root, kind included — the built-in docs root leads", async () => {
     const r = await run(["workspaces"]);

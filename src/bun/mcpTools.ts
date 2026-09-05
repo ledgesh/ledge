@@ -20,6 +20,7 @@
 // Paths still work (they come back from every listing tool), and the same
 // resolveWikiTitle decides both ends' answers.
 import { resolve } from "node:path";
+import { folderScopeOf, notesUnder } from "../shared/folders";
 import type { NoteMeta } from "../shared/rpc-schema";
 import { MAX_HITS } from "../shared/search";
 import { headingOf, labelOf } from "../shared/slug";
@@ -37,6 +38,15 @@ function iso(mtimeMs: number): string {
   return new Date(mtimeMs).toISOString();
 }
 
+// A created note's folder, for the response. Present only when the note is in
+// one, matching NoteMeta and list_notes' rows — and worth saying even when the
+// caller named it, because a `folder` that names an ignored directory is
+// refused rather than silently relocated, and one nobody named lands at the
+// top level.
+function folderOut(meta: NoteMeta): { folder?: string } {
+  return meta.folder ? { folder: meta.folder } : {};
+}
+
 interface Located extends NoteMeta {
   workspace: string;
 }
@@ -48,12 +58,13 @@ interface Located extends NoteMeta {
 // When no scope was asked for, a workspace that fails to list costs itself
 // only (the boot fetch's stance); a NAMED workspace failing is the caller's
 // answer.
-async function notesIn(workspace: unknown): Promise<Located[]> {
+async function notesIn(workspace: unknown, folder: unknown = null): Promise<Located[]> {
   const roots = typeof workspace === "string" && workspace !== "" ? [assertRegisteredRoot(workspace)] : availableRoots();
+  const scope = folderScopeOf(folder);
   const out: Located[] = [];
   for (const root of roots) {
     try {
-      for (const n of await listNotes(root)) out.push({ ...n, workspace: root });
+      for (const n of notesUnder(await listNotes(root), scope)) out.push({ ...n, workspace: root });
     } catch (err) {
       if (typeof workspace === "string" && workspace !== "") throw err;
       console.error("[mcp] skipping unlistable workspace", root, err);
@@ -129,13 +140,18 @@ async function locate(args: Record<string, unknown>, opts: { forOpen?: boolean }
     const envWs = process.env["LEDGE_WORKSPACE"];
     if (envWs && !(typeof args["workspace"] === "string" && args["workspace"] !== "")) {
       try {
-        meta = resolveWikiTitle(title, await notesIn(envWs));
+        meta = resolveWikiTitle(title, await notesIn(envWs, args["folder"]));
       } catch {
         meta = null;
       }
     }
-    meta ??= resolveWikiTitle(title, await notesIn(args["workspace"]));
-    if (!meta) throw new Error(`no note titled "${title}" — titles match case-insensitively but exactly; try list_notes or search_notes`);
+    meta ??= resolveWikiTitle(title, await notesIn(args["workspace"], args["folder"]));
+    if (!meta) {
+      const scope = folderScopeOf(args["folder"]);
+      throw new Error(
+        `no note titled "${title}"${scope === "" ? "" : ` in ${scope}`} — titles match case-insensitively but exactly; try list_notes or search_notes`,
+      );
+    }
     if (meta.locked && !opts.forOpen) refuseLocked(meta.title);
     const file = await readNote(meta.path);
     if (file === null) throw new Error(`note "${title}" vanished mid-read; try again`);
@@ -214,6 +230,28 @@ const TITLE_OR_PATH_PROPS = {
   },
   path: { type: "string", description: "A note path previously returned by list_notes, search_notes, or backlinks." },
   workspace: { type: "string", description: "Restrict title resolution to one workspace root." },
+  folder: {
+    type: "string",
+    description:
+      "Restrict title resolution to one folder and its subfolders — how to say WHICH of two notes that share a title, as list_notes reports in each row's `folder`. Ignored when addressing by `path`.",
+  },
+} as const;
+
+// Two different folder arguments, and the difference is the whole point:
+// on a listing tool a folder SELECTS notes that are already there, on a
+// creating tool it PLACES a new one. Only the second reaches a filesystem
+// (through ensureFolder's guards); the first is a filter, so a folder nobody
+// has a note in simply matches nothing.
+const FOLDER_SCOPE_PROP = {
+  type: "string",
+  description:
+    "Restrict to notes in this folder and its subfolders — a workspace-relative path with forward slashes, like `projects/api`, as list_notes reports in each row's `folder`. Omit for every folder.",
+} as const;
+
+const FOLDER_PLACE_PROP = {
+  type: "string",
+  description:
+    "The folder to create the note in — a workspace-relative path with forward slashes, like `projects/api`, created if it does not exist. Omit to create at the top level of the workspace, which is where the user's own New Note puts one.",
 } as const;
 
 const CURRENT_NOTE_HINT =
@@ -233,20 +271,28 @@ export const ledgeTools: McpTool[] = [
   {
     name: "list_notes",
     description:
-      "List notes — title, path, workspace, last modified — newest first, across every available workspace or scoped to one. A note whose frontmatter declares `template: true` (or `template: daily`) carries that value in its row: those are the user's note templates, the ones create_note's `template` argument is usually pointed at — and the `daily` one is what daily_note instantiates. A row flagged `locked: true` is one of the user's private locked notes: its body cannot be read, searched, or edited by agents.",
+      "List notes — title, path, workspace, folder, last modified — newest first, across every available workspace or scoped to one, or to one folder inside it. A row's `folder` is where the note sits inside its workspace (absent at the top level); two notes may share a title, and the folder is what tells them apart. A note whose frontmatter declares `template: true` (or `template: daily`) carries that value in its row: those are the user's note templates, the ones create_note's `template` argument is usually pointed at — and the `daily` one is what daily_note instantiates. A row flagged `locked: true` is one of the user's private locked notes: its body cannot be read, searched, or edited by agents.",
     inputSchema: {
       type: "object",
-      properties: { workspace: { type: "string", description: "A workspace root from list_workspaces." } },
+      properties: {
+        workspace: { type: "string", description: "A workspace root from list_workspaces." },
+        folder: FOLDER_SCOPE_PROP,
+      },
       additionalProperties: false,
     },
     handler: async (args) => {
       await loadWorkspaces();
-      const notes = await notesIn(args["workspace"]);
+      const notes = await notesIn(args["workspace"], args["folder"]);
       return notes.map((n) => ({
         path: n.path,
         title: n.title,
         workspace: n.workspace,
         modified: iso(n.mtimeMs),
+        // Where the note sits, so an agent planning against this listing can
+        // tell two same-titled notes apart without doing path arithmetic
+        // against the workspace root. Absent for a note at the top level, the
+        // way NoteMeta itself carries it.
+        ...(n.folder ? { folder: n.folder } : {}),
         // Present-only-when-marked, like the meta itself: most rows say
         // nothing; the daily template's row says template: "daily".
         ...(n.template ? { template: n.template } : {}),
@@ -265,18 +311,26 @@ export const ledgeTools: McpTool[] = [
     handler: async (args) => {
       await loadWorkspaces();
       const n = await locate(args);
-      return { path: n.path, workspace: n.workspace, title: n.title, modified: iso(n.mtimeMs), text: n.text };
+      return {
+        path: n.path,
+        workspace: n.workspace,
+        ...(n.folder ? { folder: n.folder } : {}),
+        title: n.title,
+        modified: iso(n.mtimeMs),
+        text: n.text,
+      };
     },
   },
   {
     name: "search_notes",
     description:
-      "Full-text search over note bodies: the whole query as ONE case-insensitive substring (no fuzzy matching). Returns matching lines with 1-based line numbers, newest notes first, capped — `truncated` says whether anything was cut. Locked notes are never searched; `lockedNotesSkipped` says how many the answer therefore does not cover.",
+      "Full-text search over note bodies: the whole query as ONE case-insensitive substring (no fuzzy matching). Scopes to a workspace, or to one folder inside it. Returns matching lines with 1-based line numbers, newest notes first, capped — `truncated` says whether anything was cut. Locked notes are never searched; `lockedNotesSkipped` says how many the answer therefore does not cover.",
     inputSchema: {
       type: "object",
       properties: {
         query: { type: "string", description: "The substring to find." },
         workspace: { type: "string", description: "A workspace root from list_workspaces." },
+        folder: FOLDER_SCOPE_PROP,
       },
       required: ["query"],
       additionalProperties: false,
@@ -288,11 +342,15 @@ export const ledgeTools: McpTool[] = [
       const workspace = args["workspace"];
       const roots =
         typeof workspace === "string" && workspace !== "" ? [assertRegisteredRoot(workspace)] : availableRoots();
+      // The scope goes DOWN into searchNotes rather than filtering hits here:
+      // reading stops at the hit cap, so notes outside the folder would
+      // otherwise spend a budget the folder's own matches never see.
+      const folder = folderScopeOf(args["folder"]);
       const all: Array<{ path: string; title: string; workspace: string; mtimeMs: number; line: number; snippet: string }> = [];
       let lockedSkipped = 0;
       for (const root of roots) {
         try {
-          const res = await searchNotes(root, query);
+          const res = await searchNotes(root, query, folder);
           lockedSkipped += res.lockedSkipped;
           for (const h of res.hits) {
             all.push({ path: h.path, title: h.title, workspace: root, mtimeMs: h.mtimeMs, line: h.line, snippet: h.snippet });
@@ -353,6 +411,7 @@ export const ledgeTools: McpTool[] = [
       properties: {
         tag: { type: "string", description: "A tag, with or without its leading #. Omit for the directory." },
         workspace: { type: "string", description: "A workspace root from list_workspaces." },
+        folder: FOLDER_SCOPE_PROP,
       },
       additionalProperties: false,
     },
@@ -362,6 +421,7 @@ export const ledgeTools: McpTool[] = [
       const roots =
         typeof workspace === "string" && workspace !== "" ? [assertRegisteredRoot(workspace)] : availableRoots();
       const tag = args["tag"];
+      const folder = folderScopeOf(args["folder"]);
       // The scans are tagsIn/notesTagged (bun/notes.ts) — the same definitions
       // the app's Tags panel reads over RPC, so agents and the UI can never
       // disagree about what tags exist. Cross-workspace merge and failure
@@ -372,7 +432,7 @@ export const ledgeTools: McpTool[] = [
         let lockedSkipped = 0;
         for (const root of roots) {
           try {
-            const res = await notesTagged(root, tag);
+            const res = await notesTagged(root, tag, folder);
             lockedSkipped += res.lockedSkipped;
             for (const h of res.hits) {
               all.push({ path: h.path, title: h.title, workspace: root, mtimeMs: h.mtimeMs, line: h.line, context: h.context });
@@ -398,7 +458,7 @@ export const ledgeTools: McpTool[] = [
       let lockedSkipped = 0;
       for (const root of roots) {
         try {
-          const res = await tagsIn(root);
+          const res = await tagsIn(root, folder);
           lockedSkipped += res.lockedSkipped;
           for (const t of res.tags) {
             const entry = merged.get(normalizeTag(t.tag));
@@ -429,7 +489,7 @@ export const ledgeTools: McpTool[] = [
   {
     name: "create_note",
     description:
-      "Create a new note. Start the text with an H1 (`# Title`) — the filename is derived from it, and the title is how every other tool (and the user's [[wikilinks]]) will address the note; without one it is created as untitled. Names never clobber: a duplicate title gets a numbered file. Instead of `text`, give `template` (the title of an existing note) plus `title`: the template's text becomes the new note's body, with {{date}}, {{time}}, {{title}}, {{yesterday}}, and {{tomorrow}} substituted and its H1 replaced by `title`. With no `workspace`, the note lands in the current session's workspace (Ledge sets LEDGE_WORKSPACE in every note's shells), or in the only workspace when just one exists.",
+      "Create a new note. Start the text with an H1 (`# Title`) — the filename is derived from it, and the title is how every other tool (and the user's [[wikilinks]]) will address the note; without one it is created as untitled. Names never clobber: a duplicate title gets a numbered file. Instead of `text`, give `template` (the title of an existing note) plus `title`: the template's text becomes the new note's body, with {{date}}, {{time}}, {{title}}, {{yesterday}}, and {{tomorrow}} substituted and its H1 replaced by `title`. With no `workspace`, the note lands in the current session's workspace (Ledge sets LEDGE_WORKSPACE in every note's shells), or in the only workspace when just one exists. With no `folder` it lands at the top level of that workspace; there is no tool for moving a note afterwards, so name the folder when creating.",
     inputSchema: {
       type: "object",
       properties: {
@@ -441,12 +501,17 @@ export const ledgeTools: McpTool[] = [
         },
         title: { type: "string", description: "The new note's title, when creating from `template`." },
         workspace: { type: "string", description: "A workspace root from list_workspaces." },
+        folder: FOLDER_PLACE_PROP,
       },
       additionalProperties: false,
     },
     handler: async (args) => {
       await loadWorkspaces();
       const template = args["template"];
+      // Unvalidated here on purpose: ensureFolder owns the one name a caller
+      // gets to choose (bun/notes.ts folderPathOf), and a second opinion in
+      // front of it is how a guard turns into two guards that disagree.
+      const folder = typeof args["folder"] === "string" ? args["folder"] : null;
       if (typeof template === "string" && template.trim() !== "") {
         if (typeof args["text"] === "string" && args["text"].trim() !== "") {
           throw new Error("give either `text` or `template`, not both — the template is the note's body");
@@ -456,16 +521,16 @@ export const ledgeTools: McpTool[] = [
           throw new Error("creating from a template needs a `title` for the new note");
         }
         const root = targetWorkspace(args);
-        const meta = await createFromTemplate(root, template.trim(), title.trim());
-        return { path: meta.path, title: meta.title, workspace: root, modified: iso(meta.mtimeMs) };
+        const meta = await createFromTemplate(root, template.trim(), title.trim(), folder);
+        return { path: meta.path, title: meta.title, workspace: root, ...folderOut(meta), modified: iso(meta.mtimeMs) };
       }
       const text = args["text"];
       if (typeof text !== "string" || text.trim() === "") {
         throw new Error("give the note's text (start it with `# Title` — the title is how the note will be addressed)");
       }
       const root = targetWorkspace(args);
-      const meta = await createNote(root, text);
-      return { path: meta.path, title: meta.title, workspace: root, modified: iso(meta.mtimeMs) };
+      const meta = await createNote(root, text, folder);
+      return { path: meta.path, title: meta.title, workspace: root, ...folderOut(meta), modified: iso(meta.mtimeMs) };
     },
   },
   {
@@ -474,7 +539,14 @@ export const ledgeTools: McpTool[] = [
       "Create or open today's daily note: one note per LOCAL calendar day, titled YYYY-MM-DD. Idempotent — if a note bearing today's date as its title exists in the target workspace it is returned (`created: false`), never duplicated. A missing one is created from the target workspace's own note whose frontmatter says `template: daily` when one exists ({{tokens}} substituted, like create_note's `template`; strictly per-workspace — another workspace's daily template is never borrowed), else as a bare dated note. The workspace: an explicit argument wins, then the `daily.workspace` setting, then the current session's workspace (LEDGE_WORKSPACE), then the only workspace when just one exists.",
     inputSchema: {
       type: "object",
-      properties: { workspace: { type: "string", description: "A workspace root from list_workspaces." } },
+      properties: {
+        workspace: { type: "string", description: "A workspace root from list_workspaces." },
+        folder: {
+          ...FOLDER_PLACE_PROP,
+          description:
+            "The folder to create today's note in, if it does not exist yet. Ignored when it does: today's note is found by its title anywhere in the workspace, so whoever opens it first decides where it lives.",
+        },
+      },
       additionalProperties: false,
     },
     handler: async (args) => {
@@ -483,8 +555,9 @@ export const ledgeTools: McpTool[] = [
       // edited knob reaches the next call without restarting the server.
       const settings = await loadSettings();
       const root = dailyWorkspace(args, settings);
-      const { meta, created } = await openDaily(root);
-      return { path: meta.path, title: meta.title, workspace: root, created, modified: iso(meta.mtimeMs) };
+      const folder = typeof args["folder"] === "string" ? args["folder"] : null;
+      const { meta, created } = await openDaily(root, folder);
+      return { path: meta.path, title: meta.title, workspace: root, ...folderOut(meta), created, modified: iso(meta.mtimeMs) };
     },
   },
   {

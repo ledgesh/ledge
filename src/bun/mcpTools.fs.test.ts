@@ -611,6 +611,104 @@ describe("tags", () => {
   });
 });
 
+// Folders reach the agent surface twice, and the two are not the same
+// argument: a listing tool's `folder` SELECTS notes that already exist, a
+// creating tool's PLACES a new one. Only the second builds a path, so only the
+// second can be refused.
+describe("folders", () => {
+  test("a row says which folder its note is in, and says nothing at the top level", async () => {
+    await createNote(ROOT, "# Top\n");
+    await createNote(ROOT, "# Filed\n", "projects/api");
+    const rows = await call("list_notes", { workspace: ROOT });
+    const byTitle = new Map(rows.map((n: { title: string }) => [n.title, n]));
+    expect((byTitle.get("Filed") as { folder?: string }).folder).toBe("projects/api");
+    expect("folder" in (byTitle.get("Top") as object)).toBe(false);
+  });
+
+  test("scoping a listing takes the folder and everything under it, never its namesake sibling", async () => {
+    await createNote(ROOT, "# Top\n");
+    await createNote(ROOT, "# In Projects\n", "projects");
+    await createNote(ROOT, "# In Api\n", "projects/api");
+    await createNote(ROOT, "# In Sibling\n", "projects-old");
+    const scoped = await call("list_notes", { workspace: ROOT, folder: "projects" });
+    expect(scoped.map((n: { title: string }) => n.title).sort()).toEqual(["In Api", "In Projects"]);
+    const deeper = await call("list_notes", { workspace: ROOT, folder: "projects/api" });
+    expect(deeper.map((n: { title: string }) => n.title)).toEqual(["In Api"]);
+  });
+
+  test("a folder nobody has a note in selects nothing, and that is an answer rather than an error", async () => {
+    // A folder with no notes in it is not a thing Ledge shows anywhere, so a
+    // typo and an empty folder are the same case — and neither is worth an
+    // error an agent would have to recover from.
+    await createNote(ROOT, "# Top\n");
+    expect(await call("list_notes", { workspace: ROOT, folder: "nope" })).toEqual([]);
+    expect((await call("search_notes", { query: "Top", folder: "nope" })).hits).toEqual([]);
+  });
+
+  test("searching and the tag scans narrow to a folder too", async () => {
+    await createNote(ROOT, "# Top\nfindme #here\n");
+    await createNote(ROOT, "# Filed\nfindme #here\n", "projects");
+    const hits = await call("search_notes", { query: "findme", workspace: ROOT, folder: "projects" });
+    expect(hits.hits.map((h: { title: string }) => h.title)).toEqual(["Filed"]);
+    expect((await call("tags", { workspace: ROOT, folder: "projects" })).tags).toEqual([{ tag: "here", count: 1 }]);
+    const tagged = await call("tags", { tag: "here", workspace: ROOT, folder: "projects" });
+    expect(tagged.hits.map((h: { title: string }) => h.title)).toEqual(["Filed"]);
+  });
+
+  test("read_note says where the note it resolved sits", async () => {
+    await createNote(ROOT, "# Filed\nbody\n", "projects");
+    expect((await call("read_note", { title: "Filed" })).folder).toBe("projects");
+  });
+
+  test("a folder picks which of two notes sharing a title is meant", async () => {
+    // The ambiguity filing creates, and the argument that answers it: without
+    // one the newest wins (resolveWikiTitle's documented tie-break), which is
+    // deterministic but unsayable.
+    const old = await createNote(ROOT, "# Plan\nthe projects one\n", "projects");
+    await ageTo(old.path, 1000);
+    await createNote(ROOT, "# Plan\nthe admin one\n", "admin");
+    expect((await call("read_note", { title: "Plan" })).text).toContain("the admin one");
+    expect((await call("read_note", { title: "Plan", folder: "projects" })).text).toContain("the projects one");
+    expect(call("read_note", { title: "Plan", folder: "trips" })).rejects.toThrow('no note titled "Plan" in trips');
+  });
+
+  test("create_note puts the note in the named folder, making it, and says so", async () => {
+    const out = await call("create_note", { workspace: ROOT, text: "# Filed\n", folder: "trips/2026" });
+    expect(out.path).toBe(join(ROOT, "trips", "2026", "filed.md"));
+    expect(out.folder).toBe("trips/2026");
+    expect((await readNote(out.path))?.text).toBe("# Filed\n");
+  });
+
+  test("a template lands in the folder as well", async () => {
+    await createNote(ROOT, "---\ntemplate: true\n---\n# Meeting\n\nAgenda\n");
+    const out = await call("create_note", { workspace: ROOT, template: "Meeting", title: "Standup", folder: "admin" });
+    expect(out.folder).toBe("admin");
+    expect(out.path).toBe(join(ROOT, "admin", "standup.md"));
+  });
+
+  test("names that are not folders are refused by the store's guard, not reinterpreted", async () => {
+    // folderPathOf is the single opinion on this (bun/notes.ts): the tools add
+    // no second check, so what the app refuses the agents refuse identically.
+    expect(call("create_note", { workspace: ROOT, text: "# X\n", folder: "../escape" })).rejects.toThrow("not a folder");
+    expect(call("create_note", { workspace: ROOT, text: "# X\n", folder: "/tmp" })).rejects.toThrow("not a folder");
+    expect(call("create_note", { workspace: ROOT, text: "# X\n", folder: ".hidden" })).rejects.toThrow("not a folder");
+  });
+
+  test("daily_note files today's note, but only when it is creating one", async () => {
+    const title = isoDateOf(new Date());
+    const first = await call("daily_note", { workspace: ROOT, folder: "journal" });
+    expect(first.created).toBe(true);
+    expect(first.folder).toBe("journal");
+    expect(first.path).toBe(join(ROOT, "journal", `${title}.md`));
+    // Today's note is found by TITLE anywhere in the workspace, so a second
+    // call naming a different folder returns the one that exists rather than
+    // minting a second copy of today.
+    const second = await call("daily_note", { workspace: ROOT, folder: "elsewhere" });
+    expect(second.created).toBe(false);
+    expect(second.path).toBe(first.path);
+  });
+});
+
 // The one tool that names no note. Its contract is bun/settings.ts's
 // inspectSettings (covered there); what matters here is that the tool exists,
 // takes no arguments, and stays read-only — the tool set is what a prompt

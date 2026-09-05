@@ -12,6 +12,7 @@
 // (interactions.md R5): ↑/↓ walk rows by index, and a nested render would have
 // to flatten itself anyway to answer "which row is next". Depth is a number the
 // row indents by, and a collapsed folder simply stops emitting its subtree.
+import { folderContains } from "../../shared/folders";
 import type { NoteMeta } from "../../shared/rpc-schema";
 
 /** A note's folder as the browser reads it: "" at the top level, never
@@ -55,10 +56,7 @@ export function folderList(notes: readonly NoteMeta[]): string[] {
 
 /** How many notes sit at or below a folder — what a collapsed row hides. */
 export function countIn(notes: readonly NoteMeta[], folder: string): number {
-  return notes.filter((n) => {
-    const f = folderOf(n);
-    return f === folder || f.startsWith(`${folder}/`);
-  }).length;
+  return notes.filter((n) => folderContains(folder, folderOf(n))).length;
 }
 
 export type BrowserRow =
@@ -118,11 +116,12 @@ export function folderRowId(folder: string): string {
  * Closing a folder closes everything under it, so reopening it does not spill
  * a subtree you closed a while ago and had forgotten was open.
  *
- * The `/` in the prefix test is load-bearing: without it, closing `a` would
- * close its SIBLING `ab` as well.
+ * `folderContains` is what decides "under it" — shared with the agent
+ * surfaces' folder scoping, because the sibling-prefix trap (`a` must not
+ * close `ab`) is the same trap on both ends.
  */
 export function expandedWithout(expanded: ReadonlySet<string>, folder: string): Set<string> {
-  return new Set([...expanded].filter((f) => f !== folder && !f.startsWith(`${folder}/`)));
+  return new Set([...expanded].filter((f) => !folderContains(folder, f)));
 }
 
 /** Opening a folder opens its ancestors too: a row you cannot see is not

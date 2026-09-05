@@ -17,13 +17,22 @@
 // resolution rule, so cwd rides the existing precedence (an explicit
 // --workspace still outranks it, exactly as it outranks the env).
 //
+// Once notes can sit in FOLDERS, that fact goes one level deeper: a cwd below
+// the root names a folder as well as a workspace (cwdFolder), and ls, search,
+// tags and new honor it, because a shell command acting on the directory you
+// are standing in is the oldest contract there is. It rides as an argument
+// rather than an env var — there is no $LEDGE_FOLDER and should not be, since
+// a note's terminal spawns in $HOME or the note's own `cwd:`, neither of which
+// says anything about where the note is filed. Naming a workspace (-w) or
+// going wide (--all) means the whole of it; --folder outranks everything.
+//
 // Output discipline: results go to stdout (raw text for `cat`, one row per
 // line for lists, the handler's JSON under --json), everything conversational
 // — errors, confirmations, truncation notes — to stderr, so a pipe never has
 // to strip chatter. Exit codes are conventional: 0 ok, 1 failure (including
 // a search with no hits, grep's contract), 2 usage.
 import { homedir } from "node:os";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { serve } from "./mcp";
 import { ledgeTools, resolveNoteForOpen } from "./mcpTools";
 import { installShim, tildify } from "./cliShim";
@@ -43,6 +52,7 @@ const CLI_ENTRY = import.meta.path;
 
 export interface CliFlags {
   workspace?: string;
+  folder?: string;
   heading?: string;
   message?: string;
   template?: string;
@@ -63,9 +73,11 @@ export interface ParsedCli {
 export function parseCliArgs(argv: readonly string[]): ParsedCli | { error: string } {
   const flags: CliFlags = { json: false, all: false, help: false };
   const positionals: string[] = [];
-  const valued: Record<string, "workspace" | "heading" | "message" | "template"> = {
+  const valued: Record<string, "workspace" | "folder" | "heading" | "message" | "template"> = {
     "--workspace": "workspace",
     "-w": "workspace",
+    "--folder": "folder",
+    "-f": "folder",
     "--heading": "heading",
     "--message": "message",
     "-m": "message",
@@ -97,6 +109,26 @@ export function parseCliArgs(argv: readonly string[]): ParsedCli | { error: stri
   }
   const [verb = "", ...rest] = positionals;
   return { verb, positionals: rest, flags };
+}
+
+/**
+ * The folder the caller is standing in, relative to their workspace root — the
+ * cwd deixis one level deeper than the workspace. `cd ~/notes/projects` and
+ * `ls`, `search` and `tags` narrow to `projects`, `new` creates there: the
+ * shell contract, where a command acts on the directory you are in.
+ *
+ * "" for a cwd that is the root itself, outside every root, or below a
+ * dot-directory. That last case is Ledge's own storage (.ledge-trash,
+ * .ledge-assets) and a project's .git: none of them is a place a note may go
+ * (folderPathOf refuses them), so standing in one means the workspace, not an
+ * error about a folder the caller never typed.
+ */
+export function cwdFolder(cwd: string, root: string | null): string {
+  if (root === null) return "";
+  const rel = relative(resolve(root), resolve(cwd));
+  if (rel === "" || rel.startsWith("..")) return "";
+  const parts = rel.split(sep);
+  return parts.some((part) => part.startsWith(".")) ? "" : parts.join("/");
 }
 
 // A search hit's path the way a shell user reads one: relative when the hit
@@ -149,7 +181,8 @@ usage:
   ledge                        open the Ledge app
   ledge <title|path>           open the app AT that note (\`open\` spelled out
                                reaches a note whose title is a verb here)
-  ledge ls [--all]             list notes (scoped to the workspace containing cwd)
+  ledge ls [--all]             list notes (scoped to the workspace and folder
+                               containing cwd)
   ledge cat <title|path>       print a note's markdown
   ledge search <query...>      full-text search; prints path:line: match
   ledge tags [tag]             list tags (#name + note count), or the notes
@@ -158,6 +191,7 @@ usage:
   ledge new [title...]         create a note (body read from piped stdin)
          --template <note>     instantiate that note's text as the body
                                ({{date}}, {{time}}, {{yesterday}}, ... substituted)
+         -f <folder>           create it in that folder, made if it is new
   ledge append [title...]      append to a note; no title = the current note
          -m <text>             the text to append (or pipe it on stdin)
          --heading <h>         append at the end of that heading's section
@@ -168,6 +202,9 @@ usage:
 
 flags:
   -w, --workspace <root>       scope to one workspace (path or folder name)
+  -f, --folder <folder>        ls/search/tags: only that folder and below;
+                               new/today: create the note there;
+                               cat/append: which of two same-titled notes
   -a, --all                    ls/search: ignore the cwd workspace, go wide
   --json                       machine-readable output`;
 
@@ -195,8 +232,20 @@ async function tool(name: string, args: Record<string, unknown>): Promise<any> {
 // cat/append name a note by one argument. A ".md" suffix says path (resolved
 // against the caller's cwd, the shell contract); anything else is a title —
 // the preferred, rename-proof address, so the ambiguity tilts its way.
-function targetArgs(arg: string | null, cwd: string, scope: string | null): Record<string, unknown> {
+//
+// `folder` narrows which note a title resolves to, and it is the EXPLICIT -f
+// only, never the cwd's folder. Narrowing a survey by where you stand is the
+// shell contract; narrowing an ADDRESS by it is not — `cd projects` would
+// otherwise stop `ledge cat` reaching a note one level up, which is a way to
+// lose an address, not a way to disambiguate one.
+function targetArgs(
+  arg: string | null,
+  cwd: string,
+  scope: string | null,
+  folder: string | undefined,
+): Record<string, unknown> {
   const base: Record<string, unknown> = scope !== null ? { workspace: scope } : {};
+  if (folder !== undefined) base["folder"] = folder;
   if (arg === null) return base; // no target: the handlers fall back to $LEDGE_NOTE
   return /\.md$/i.test(arg) ? { ...base, path: resolve(cwd, arg) } : { ...base, title: arg };
 }
@@ -269,6 +318,11 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     await loadWorkspaces();
     const here = rootContaining(io.cwd());
     const scope = flags.workspace !== undefined ? resolveWorkspaceArg(flags.workspace, roots()) : null;
+    // --folder wins; naming a workspace or going wide means the whole of it;
+    // otherwise the directory the caller is standing in. "" is no folder.
+    const folder = flags.folder ?? (scope !== null || flags.all ? "" : cwdFolder(io.cwd(), here));
+    const inFolder = (args: Record<string, unknown>): Record<string, unknown> =>
+      folder === "" ? args : { ...args, folder };
     // The cwd deixis: fold "here" into the env chain the handlers already
     // honor. Restored on the way out — runCli must leave the process as it
     // found it, or in-process tests would leak one verb's cwd into the next.
@@ -278,13 +332,13 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       switch (verb) {
         case "ls": {
           const ws = scope ?? (flags.all ? null : here);
-          const notes = await tool("list_notes", ws !== null ? { workspace: ws } : {});
+          const notes = await tool("list_notes", inFolder(ws !== null ? { workspace: ws } : {}));
           if (flags.json) {
             io.out(JSON.stringify(notes, null, 2));
             return 0;
           }
           if (notes.length === 0) {
-            io.err(ws !== null ? `no notes in ${tildify(ws)}` : "no notes");
+            io.err(ws !== null ? `no notes in ${tildify(folder === "" ? ws : join(ws, folder))}` : "no notes");
             return 0;
           }
           for (const line of formatNoteList(notes)) io.out(line);
@@ -296,7 +350,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
             io.err("ledge: cat needs a title or a path (ledge ls shows both)");
             return 2;
           }
-          const n = await tool("read_note", targetArgs(arg === "" ? null : arg, io.cwd(), scope));
+          const n = await tool("read_note", targetArgs(arg === "" ? null : arg, io.cwd(), scope, flags.folder));
           if (flags.json) io.out(JSON.stringify(n, null, 2));
           else io.out((n.text as string).replace(/\n$/, ""));
           return 0;
@@ -308,7 +362,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
             return 2;
           }
           const ws = scope ?? (flags.all ? null : here);
-          const res = await tool("search_notes", ws !== null ? { query, workspace: ws } : { query });
+          const res = await tool("search_notes", inFolder(ws !== null ? { query, workspace: ws } : { query }));
           if (flags.json) {
             io.out(JSON.stringify(res, null, 2));
             return res.hits.length > 0 ? 0 : 1;
@@ -325,7 +379,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
           // goes wide.
           const arg = positionals.join(" ");
           const ws = scope ?? (flags.all ? null : here);
-          const base: Record<string, unknown> = ws !== null ? { workspace: ws } : {};
+          const base: Record<string, unknown> = inFolder(ws !== null ? { workspace: ws } : {});
           if (arg === "") {
             const res = await tool("tags", base);
             if (flags.json) {
@@ -333,7 +387,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
               return 0;
             }
             if (res.tags.length === 0) {
-              io.err(ws !== null ? `no tags in ${tildify(ws)}` : "no tags");
+              io.err(ws !== null ? `no tags in ${tildify(folder === "" ? ws : join(ws, folder))}` : "no tags");
               return 0;
             }
             const width = res.tags.reduce((w: number, t: { tag: string }) => Math.max(w, t.tag.length + 1), 0);
@@ -364,7 +418,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
               io.err("ledge: new --template needs a title for the new note");
               return 2;
             }
-            const args: Record<string, unknown> = { template: flags.template, title };
+            const args: Record<string, unknown> = inFolder({ template: flags.template, title });
             if (scope !== null) args["workspace"] = scope;
             const n = await tool("create_note", args);
             if (flags.json) io.out(JSON.stringify(n, null, 2));
@@ -376,7 +430,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
             return 2;
           }
           const text = title !== "" ? `# ${title}\n` + (body !== "" ? `\n${body}\n` : "") : `${body}\n`;
-          const n = await tool("create_note", scope !== null ? { text, workspace: scope } : { text });
+          const n = await tool("create_note", inFolder(scope !== null ? { text, workspace: scope } : { text }));
           if (flags.json) io.out(JSON.stringify(n, null, 2));
           else io.out(n.path); // the path alone: `$EDITOR $(ledge new x)` should just work
           return 0;
@@ -385,7 +439,13 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
           // Create-or-open today's note, then land in the app on it — the
           // whole point is one motion from anywhere. Path to stdout first
           // (the `new` contract: scriptable), the open ride-along after.
-          const n = await tool("daily_note", scope !== null ? { workspace: scope } : {});
+          // `--folder` only, deliberately NOT the cwd's: today's note is
+          // identified by its date, and where it lives should be the same
+          // every day rather than wherever the caller happened to be standing
+          // the first time they ran this today.
+          const args: Record<string, unknown> = scope !== null ? { workspace: scope } : {};
+          if (flags.folder !== undefined) args["folder"] = flags.folder;
+          const n = await tool("daily_note", args);
           if (flags.json) io.out(JSON.stringify(n, null, 2));
           else io.out(n.path);
           await writeOpenRequest(n.path as string);
@@ -398,7 +458,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
             io.err("ledge: append needs text — pass -m or pipe stdin");
             return 2;
           }
-          const args: Record<string, unknown> = { ...targetArgs(arg === "" ? null : arg, io.cwd(), scope), text };
+          const args: Record<string, unknown> = { ...targetArgs(arg === "" ? null : arg, io.cwd(), scope, flags.folder), text };
           if (flags.heading !== undefined) args["heading"] = flags.heading;
           const n = await tool("append_note", args);
           if (flags.json) io.out(JSON.stringify(n, null, 2));
@@ -429,7 +489,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
           // resolveNoteForOpen, not read_note: opening the app AT a note is
           // navigation, so a LOCKED title still works — the app lands on its
           // own unlock flow, and no body ever crosses this seam.
-          const n = await resolveNoteForOpen(targetArgs(arg, io.cwd(), scope));
+          const n = await resolveNoteForOpen(targetArgs(arg, io.cwd(), scope, flags.folder));
           await writeOpenRequest(n.path);
           return openApp(io);
         }

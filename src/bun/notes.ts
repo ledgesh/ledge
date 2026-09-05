@@ -41,6 +41,7 @@ import {
   vaultState,
 } from "./vault";
 import { assetPathOf, assetRefFor, imageMimeOf, rawAssetBytes, replaceAssetBytes } from "./assets";
+import { notesUnder } from "../shared/folders";
 
 // Deleted notes are moved into their own root's .ledge-trash rather than
 // unlinked. Per root, not one shared bin: the move must stay a same-filesystem
@@ -312,8 +313,15 @@ export async function listNotes(root: string): Promise<NoteMeta[]> {
 // with vault state would leak by inconsistency. The count rides back so every
 // surface can say "N locked notes not searched" where the answer would have
 // been; titles still match in quick-open, which reads metas, not bodies.
-export async function searchNotes(root: string, query: string): Promise<{ hits: SearchHit[]; lockedSkipped: number }> {
-  const metas = await listNotes(root);
+export async function searchNotes(
+  root: string,
+  query: string,
+  folder: string = "",
+): Promise<{ hits: SearchHit[]; lockedSkipped: number }> {
+  // The scope narrows the METAS, before collectHits reads a byte: the cap is
+  // "stop after MAX_HITS", so filtering afterwards would let notes outside the
+  // folder spend the budget and leave the folder's own matches unread.
+  const metas = notesUnder(await listNotes(root), folder);
   const open = metas.filter((m) => !m.locked);
   const hits = await collectHits(query, open, async (path) => (await readNote(path))?.text ?? null);
   return { hits, lockedSkipped: metas.length - open.length };
@@ -381,10 +389,10 @@ async function tagSourceOf(meta: NoteMeta): Promise<string | null> {
   return headAt(meta.path);
 }
 
-export async function tagsIn(root: string): Promise<{ tags: TagInfo[]; lockedSkipped: number }> {
+export async function tagsIn(root: string, folder: string = ""): Promise<{ tags: TagInfo[]; lockedSkipped: number }> {
   const perNote: { path: string; refs: ReturnType<typeof tagRefsOf> }[] = [];
   let lockedSkipped = 0;
-  for (const meta of await listNotes(root)) {
+  for (const meta of notesUnder(await listNotes(root), folder)) {
     if (meta.locked) lockedSkipped += 1;
     const text = await tagSourceOf(meta);
     if (text === null) continue;
@@ -400,12 +408,16 @@ export async function tagsIn(root: string): Promise<{ tags: TagInfo[]; lockedSki
 // reveal. The empty tag is refused rather than answered: it would "match"
 // nothing meaningfully, and a blank query reaching this deep is a caller bug
 // worth surfacing.
-export async function notesTagged(root: string, tag: string): Promise<{ hits: TagHit[]; lockedSkipped: number }> {
+export async function notesTagged(
+  root: string,
+  tag: string,
+  folder: string = "",
+): Promise<{ hits: TagHit[]; lockedSkipped: number }> {
   const want = normalizeTag(tag);
   if (!want) throw new Error("empty tag");
   const out: TagHit[] = [];
   let lockedSkipped = 0;
-  for (const meta of await listNotes(root)) {
+  for (const meta of notesUnder(await listNotes(root), folder)) {
     if (meta.locked) lockedSkipped += 1;
     const text = await tagSourceOf(meta); // locked: head only, tagsIn's rule
     if (text === null) continue;
