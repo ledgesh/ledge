@@ -3,9 +3,10 @@ import { EditorView, keymap, lineNumbers, drawSelection } from "@codemirror/view
 import { defaultKeymap, history, historyKeymap, indentLess, indentMore } from "@codemirror/commands";
 import { acceptCompletion } from "@codemirror/autocomplete";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
+import type { MarkdownConfig } from "@lezer/markdown";
 import { languages } from "@codemirror/language-data";
 import { syntaxHighlighting, HighlightStyle } from "@codemirror/language";
-import { tags } from "@lezer/highlight";
+import { styleTags, Tag, tags } from "@lezer/highlight";
 import { toNative } from "./bridge";
 import { dispatchDocChanged } from "./docEvents";
 import { ledgeBlocks } from "./blocks";
@@ -28,6 +29,19 @@ import { copySelection, cutSelection, pasteHere, pastePlain } from "./clipboard"
 import { settings } from "../lib/settings";
 import { softKeyboard } from "../lib/shell";
 import { keyOf } from "../commands/keys";
+
+// Inline code gets a tag of its own. @lezer/markdown styles `InlineCode` and a
+// fenced block's `CodeText` with the SAME tags.monospace, so anything hung on
+// that tag would also paint the inside of every fence whose language the
+// highlighter does not know — and fences already have their card (index.css).
+// Restyling only the InlineCode node, with a tag nothing else uses, is the
+// narrow way to reach one without the other. The backtick CodeMark children
+// keep their own processingInstruction tag, so the marks stay dim (and under
+// live preview, hidden) while the text between them takes the chip.
+const inlineCodeTag = Tag.define();
+const inlineCodeExtension: MarkdownConfig = {
+  props: [styleTags({ InlineCode: inlineCodeTag })],
+};
 
 // Ledge styles raw Markdown, and — since livePreview() landed — conceals the
 // markers where the caret is not (editor/livePreview.ts; editor.livePreview
@@ -58,6 +72,9 @@ export const highlight = HighlightStyle.define([
   // class that cancellation takes real bold down with it.
   { tag: tags.strong, class: "ledge-strong" },
   { tag: tags.emphasis, fontStyle: "italic" },
+  // Load-bearing for the same reason as the strike below: with the backticks
+  // concealed, the chip is the only thing left saying the text is code.
+  { tag: inlineCodeTag, class: "ledge-inline-code" },
   // Load-bearing under live preview: with the ~~ marks concealed, the strike
   // itself is the only thing left saying the text is struck.
   { tag: tags.strikethrough, textDecoration: "line-through" },
@@ -473,11 +490,12 @@ export function createEditor(parent: HTMLElement, doc: string, sessionId: string
         keymap.of([...defaultKeymap, ...historyKeymap]),
         // wikiLinkExtension and hashtagExtension teach the parser `[[...]]`
         // and `#tag` so both are real tree nodes in both modes; livePreview
-        // owns their styling.
+        // owns their styling. inlineCodeExtension adds no syntax — it only
+        // re-tags a node the base parser already produces (above).
         markdown({
           base: markdownLanguage,
           codeLanguages: languages,
-          extensions: [wikiLinkExtension, hashtagExtension],
+          extensions: [wikiLinkExtension, hashtagExtension, inlineCodeExtension],
         }),
         syntaxHighlighting(highlight),
         theme,

@@ -48,7 +48,7 @@ Ignoring only hides. An ignored note is absent from the sidebar and from search,
 
 ## Live preview
 
-Ledge hides Markdown syntax away from the cursor. `**bold**` shows as bold and the asterisks come back when you move the cursor into it, a link shows its label, a checkbox is clickable, and tables and images render in place.
+Ledge hides Markdown syntax away from the cursor. `**bold**` shows as bold and the asterisks come back when you move the cursor into it, a link shows its label, a checkbox is clickable, and tables and images render in place. Text in backticks is drawn on a tinted chip, so it still reads as code once the backticks themselves are hidden.
 
 Set `editor.livePreview` to `false` under This app in Settings (⌘,) and relaunch to see every character all the time. Tables and images stay as text in that mode too. Use it when you are editing syntax precisely and want the text on screen to match the text on disk.
 

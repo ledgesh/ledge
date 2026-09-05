@@ -109,6 +109,10 @@
   /* Fenced code-block panel: stronger than --panel-bg so blocks read as cards. */
   --code-panel-bg: rgba(0, 0, 0, 0.045);
   --code-panel-border: rgba(0, 0, 0, 0.1);
+  /* Inline code chip (`like this`). Its own pair rather than the panel's,
+     because a one-word span needs more contrast than a whole card does. */
+  --inline-code-bg: rgba(175, 184, 193, 0.35);
+  --inline-code-fg: #b31d28;
   --btn-hover: rgba(0, 0, 0, 0.08);
   --ok: #34c759;
   --err: #ff3b30;
@@ -140,6 +144,8 @@
   --panel-border: rgba(255, 255, 255, 0.14);
   --code-panel-bg: rgba(255, 255, 255, 0.06);
   --code-panel-border: rgba(255, 255, 255, 0.1);
+  --inline-code-bg: rgba(110, 118, 129, 0.42);
+  --inline-code-fg: #ffa198;
   --btn-hover: rgba(255, 255, 255, 0.12);
   --ok: #30d158;
   --err: #ff453a;
@@ -456,6 +462,21 @@ body {
 .ledge-strong {
   font-weight: 700;
 }
+/* Inline code (`like this`). Live preview conceals the backticks and the whole
+   editor is already monospace, so without a chip of its own inline code reads
+   as ordinary prose — the marked-up text and the text around it look the same.
+   The class comes from the HighlightStyle in editor/setup.ts, which puts the
+   InlineCode node on a tag nothing else uses; upstream shares one tag between
+   inline code and fenced-block content, and a chip behind every line of an
+   unlabelled fence is not what this is for. No border and small `em` padding:
+   an inline mark that takes horizontal room pushes the rest of its line off
+   the character grid the editor otherwise keeps. */
+.ledge-inline-code {
+  background: var(--inline-code-bg);
+  border-radius: 3px;
+  color: var(--inline-code-fg);
+  padding: 0.05em 0.25em;
+}
 /* The two lines of a Setext heading whose underline is still just the `-` of
    a list item being typed (editor/setext.ts): drawn as the prose they are
    about to go back to being. `inherit` rather than a size, so each span
@@ -499,8 +520,9 @@ body {
   font-weight: 600;
 }
 .ledge-mdtable-code {
-  background: var(--code-panel-bg);
+  background: var(--inline-code-bg);
   border-radius: 3px;
+  color: var(--inline-code-fg);
   padding: 0 3px;
 }
 /* Links inside a rendered cell open on plain click, so: the hand. */

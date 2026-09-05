@@ -237,3 +237,35 @@ test("copy yields raw markdown — concealment never touches the document", asyn
     .poll(() => page.evaluate(() => window.__harness.clipboard()))
     .toContain("**bold** stays markdown");
 });
+
+test("inline code keeps a chip of its own once the backticks conceal", async ({ page }) => {
+  // The whole editor is monospace and live preview takes the backticks away,
+  // so the chip (editor/setup.ts's inlineCodeTag -> .ledge-inline-code) is the
+  // only thing separating code from the prose it sits in.
+  await page.keyboard.press("Meta+a"); // over the title a new note opens with
+  await page.keyboard.type("run `bun test` now");
+  await page.keyboard.press("Enter");
+
+  const line = page.locator(".cm-line").first();
+  await expect(line).toHaveText("run bun test now");
+  const chip = page.locator(".ledge-inline-code");
+  await expect(chip).toHaveText("bun test");
+  // A visible background is the point; the default is transparent.
+  await expect
+    .poll(() => chip.evaluate((el) => getComputedStyle(el).backgroundColor))
+    .not.toBe("rgba(0, 0, 0, 0)");
+
+  // Revealed, the chip stays on the text and the backticks stay markers.
+  await page.keyboard.press("ArrowUp");
+  await page.keyboard.press("End");
+  for (let i = 0; i < 4; i += 1) await page.keyboard.press("ArrowLeft");
+  await expect(line).toHaveText("run `bun test` now");
+  await expect(chip).toHaveText("bun test");
+
+  // A fenced block shares the parser's tag with inline code upstream; it must
+  // not share the chip — it has the code-block card instead.
+  await page.keyboard.press("Meta+a");
+  await page.keyboard.type("```\nfenced text\n");
+  await expect(page.locator(".cm-line.ledge-code")).not.toHaveCount(0);
+  await expect(page.locator(".ledge-inline-code")).toHaveCount(0);
+});
