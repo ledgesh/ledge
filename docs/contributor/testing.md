@@ -82,7 +82,18 @@ new rules should imitate:
   trashed note IS accepted, so widening the guard cannot be mistaken for
   loosening it;
 - `folderPathOf` refuses absolute paths, `..`, dot-entries and every other way
-  of naming somewhere outside the workspace root (`notes.fs.test.ts`).
+  of naming somewhere outside the workspace root (`notes.fs.test.ts`);
+- `assetPathOf` refuses everything it refused before once the base is the
+  NOTE rather than the root: a reference that climbs out of the workspace, a
+  dot-entry the `../` steps land on, a URL, and a base that is not a `.md`
+  inside that root (`assets.test.ts`). The paired tests assert that a
+  subfolder note's `../.ledge-assets/x.png` IS served, so moving the base
+  cannot be mistaken for widening the guard;
+- the lock sweeps compare RESOLVED asset paths, never reference strings
+  (`assets.test.ts`). Both directions are tested, because a deeper note's
+  reference contains a shallower one as a substring: only sweeping the DEEP
+  note catches the bug, and getting it wrong unseals an image a locked note
+  still shows.
 
 These are the cheapest guardrails the repo has: they turn "someone will
 forget" into "the suite goes red."

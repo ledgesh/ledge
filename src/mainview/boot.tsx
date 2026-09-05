@@ -246,10 +246,11 @@ export function bootView(requests: RequestClient): Promise<void> {
   });
 
   // Note images: bytes for `![](.ledge-assets/…)` references, and the pasteboard-image
-  // half of ⌘V. References resolve against the asking note's workspace folder;
-  // the server guards both and names the pasted file.
+  // half of ⌘V. References resolve against the asking note's own folder, inside
+  // its workspace; the server guards all of it and names the pasted file.
   configureAssets({
-    read: (folder, src) => requests.assetRead({ root: folder, src }).then((r) => (r.sealed ? { sealed: true as const } : r.image)),
+    read: (folder, src, notePath) =>
+      requests.assetRead({ root: folder, src, notePath }).then((r) => (r.sealed ? { sealed: true as const } : r.image)),
     pasteImage: (folder, notePath) => requests.assetPaste({ root: folder, notePath }).then((r) => r.src),
     pickImage: (folder, notePath) => requests.assetPick({ root: folder, notePath }).then((r) => r.src),
   });

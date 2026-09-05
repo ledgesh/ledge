@@ -868,7 +868,10 @@ let pasteCount = 0;
 // outcome of a dialog, and the one "nothing is inserted" needs.
 const PICK_CANCELS = new URLSearchParams(window.location.search).get("pick") === "cancel";
 configureAssets({
-  read: async (folder, src) => assets.get(`${folder}\0${src}`) ?? null,
+  // notePath is accepted and ignored: every harness note lives at its root,
+  // so the reference IS the key. Bun's resolution against the note's folder
+  // is a filesystem behavior, covered where the filesystem is (assets.test.ts).
+  read: async (folder, src, _notePath) => assets.get(`${folder}\0${src}`) ?? null,
   // notePath is accepted (the real handler seals pastes into locked notes);
   // the fake stores plaintext either way — sealed READS are the behavior
   // surface, and no harness spec pastes into a locked note (its editor is

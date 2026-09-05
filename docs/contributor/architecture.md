@@ -341,25 +341,54 @@ Bun therefore validates everything and derives anything derivable:
   Trash operations touch only `.md` files directly in `.ledge-trash`; Empty
   Trash removes exactly what the list showed, and nothing it did not.
 - **Images are files under their workspace root, and Bun's alone to touch**
-  (`bun/assets.ts`). Pasted images land in `<root>/.ledge-assets/` — per
-  root, so a note's `![](.ledge-assets/x.png)` resolves against its own
-  folder and an external workspace carries its images with it. Saves are
-  the same temp-plus-rename as notes, names come from `uniqueName` (same
-  clobber-safety), and **nothing ever unlinks an asset**: deleting a note
-  orphans its images, deliberately — cheaper than joining the unlink list
-  above. The view reads them over `assetRead` with the asking note's root,
-  whose guard (`assetPathOf`) is assertNote's move inverted: a registered
-  root, in-root, an image-extension allowlist (without which the call would
-  read any note), and no dot-entries except `.ledge-assets` itself as the
-  first segment (the shared `ASSETS_DIRNAME` constant — the view's
-  classifier carves the same exception, from the same constant). Any
+  (`bun/assets.ts`). Pasted images land in `<root>/.ledge-assets/` — one pool
+  per root, whatever folder the pasting note is in, so two notes can share an
+  image, an external workspace carries its images with it, and the lock sweep
+  has one place to look. Saves are the same temp-plus-rename as notes, names
+  come from `uniqueName` (same clobber-safety), and **nothing ever unlinks an
+  asset**: deleting a note orphans its images, deliberately — cheaper than
+  joining the unlink list above.
+- **A reference resolves against the note that carries it, not the root**
+  (`baseDirOf`), so a note one folder down writes `../.ledge-assets/x.png`.
+  Notes live in folders, and every other tool that reads Markdown resolves an
+  image against the file it is in; a root-relative string would render in
+  Ledge and nowhere else. `assetRead` therefore takes the asking note's path
+  alongside its root, and `savePastedImage` takes it to write the reference
+  back. The base is guarded like the reference (a `.md` inside that root),
+  though the guard that matters still runs on the RESOLVED path: `assetPathOf`
+  is assertNote's move inverted — a registered root, in-root, an
+  image-extension allowlist (without which the call would read any note), and
+  no dot-entries except `.ledge-assets` itself as the first segment under the
+  root (the shared `ASSETS_DIRNAME` constant — the view's classifier carves
+  the same exception, from the same constant, and spends a leading `../` run
+  before applying it). The `..` steps are spent before anything is judged, so
+  a reference that climbs out of the root is refused exactly as before. Any
   non-dotted in-root image works too: an attached folder's own
-  `img/photo.png` renders as-is. On paste the bytes DO cross the RPC, and
-  that is remote.md §5's amendment to this rule: the pasteboard belongs to
-  the machine in front of the user, so `assetPaste` is the client's
-  (`bun/clientSeams.ts`) and hands the bytes to `assetWrite`, which names the
-  file. Between the two, the naming, the seal and the guard above all stay
-  server-side; the view still never names a file.
+  `img/photo.png` renders as-is.
+- **What compares two notes' images compares resolved paths, never reference
+  strings.** The same file is `.ledge-assets/x.png` from the root and
+  `../.ledge-assets/x.png` one folder down, so a string comparison answers
+  "not shared" for an image that is. Both lock sweeps (`assetRefsOf` and its
+  two callers in `bun/notes.ts`) resolve each note's references against that
+  note's own folder and intersect on the file. Getting this wrong is a
+  privacy bug, not a cosmetic one: Remove Lock would unseal an image a still-
+  locked note displays (locking.md §5).
+- On paste the bytes DO cross the RPC, and that is remote.md §5's amendment to
+  these rules: the pasteboard belongs to the machine in front of the user, so
+  `assetPaste` is the client's (`bun/clientSeams.ts`) and hands the bytes to
+  `assetWrite`, which names the file and answers with the reference. Between
+  the two, the naming, the seal and the guards above all stay server-side; the
+  view still never names a file.
+- **A move rewrites the note's image references; a delete does not have to.**
+  Because a reference is relative to the note, `moveNote` re-emits every one
+  that resolves, for the new folder (`rebaseAssetRefs`) — otherwise filing a
+  note breaks every picture in it. It therefore READS the note first, and
+  refuses a locked note whose vault is shut: the references live in the
+  encrypted body, and a note that arrived pointing at nothing with no way to
+  say so is the worse outcome. The trash needs none of this, which is why
+  `deleteNote` is still a bare rename: a delete and its restore change the
+  depth by the same one segment in opposite directions, and nothing renders a
+  trashed note in between.
 - **The session log** (`logs/ledge.log`, `bun/log.ts`) is the app's only
   account of itself on a machine that is not this one: Electrobun's launcher
   forwards the main process's stdout on the DEV channel only, so in a shipped

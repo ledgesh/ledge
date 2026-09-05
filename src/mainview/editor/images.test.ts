@@ -62,14 +62,31 @@ describe("imageSrcOf", () => {
     expect(imageSrcOf("javascript:alert(1)")).toBeNull();
   });
 
-  test("absolute paths, traversals and dot-entries are refused", () => {
+  test("absolute paths, dot-entries and mid-path traversals are refused", () => {
     expect(imageSrcOf("/etc/passwd.png")).toBeNull();
-    expect(imageSrcOf("../outside.png")).toBeNull();
     expect(imageSrcOf("assets/../../x.png")).toBeNull();
     expect(imageSrcOf(".ledge-trash/x.png")).toBeNull();
-    // The assets-dir exception is first-segment only, matching assetPathOf.
+    expect(imageSrcOf("../.ledge-trash/x.png")).toBeNull();
+    // The assets-dir exception is first-segment only, matching assetPathOf —
+    // first past the leading ../ run, which is spent before anything is judged.
     expect(imageSrcOf(".ledge-assets/.hidden.png")).toBeNull();
     expect(imageSrcOf("sub/.ledge-assets/x.png")).toBeNull();
+    expect(imageSrcOf("../sub/.ledge-assets/x.png")).toBeNull();
+  });
+
+  // A LEADING ../ run is how a note in a folder reaches the workspace's shared
+  // .ledge-assets, so it is attempted rather than refused. Where it lands is
+  // not this function's call: the note's depth is not in its hands, so
+  // `../outside.png` is an in-root image from `a/b/note.md` and an escape from
+  // a note at the root. assetPathOf resolves against the note and refuses what
+  // climbs out; the widget draws that as broken, the same face as a missing
+  // file, which is the same split links.ts takes.
+  test("a leading ../ run is attempted, and Bun rules on where it lands", () => {
+    expect(imageSrcOf("../.ledge-assets/x.png")).toEqual({ kind: "asset", path: "../.ledge-assets/x.png" });
+    expect(imageSrcOf("../../img/logo.png")).toEqual({ kind: "asset", path: "../../img/logo.png" });
+    expect(imageSrcOf("../outside.png")).toEqual({ kind: "asset", path: "../outside.png" });
+    // Nothing but ../ names no file at all.
+    expect(imageSrcOf("../..")).toBeNull();
   });
 
   test("a relative path without an image extension is not attempted", () => {
@@ -120,7 +137,11 @@ describe("imageModels", () => {
 
   test("an unrenderable target does not model — it stays livePreview's problem", () => {
     expect(models("![x](file:///etc/passwd)\n")).toHaveLength(0);
-    expect(models("![x](../outside.png)\n")).toHaveLength(0);
+    expect(models("![x](assets/../../x.png)\n")).toHaveLength(0);
+  });
+
+  test("a subfolder note's reference to the shared assets models", () => {
+    expect(models("![x](../.ledge-assets/x.png)\n")).toHaveLength(1);
   });
 
   test("a reference-style image (no inline URL) does not model", () => {

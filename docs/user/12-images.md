@@ -12,7 +12,9 @@ Copy an image anywhere, a screenshot or a picture from the web, and press ⌘V i
 
 Ledge embeds only when the pasteboard holds an image and no text. A pasteboard holding text pastes as text, converted from formatting where there is any ([[Notes and Workspaces]]).
 
-The file lands in `.ledge-assets/` inside the workspace folder, named by paste date. An attached project folder carries its pasted images with it, and the references stay relative. The folder is dot-prefixed so that Ledge's writes are identifiable inside a real project.
+The file lands in `.ledge-assets/` inside the workspace folder, named by paste date. One folder holds a workspace's images wherever the note that pasted them sits, so two notes can show the same picture. An attached project folder carries its pasted images with it, and the references stay relative. The folder is dot-prefixed so that Ledge's writes are identifiable inside a real project.
+
+A reference points at the file from the note that holds it, the way Markdown references work everywhere else. A note at the top of a workspace writes `.ledge-assets/pasted-2026-07-19.png`; a note one folder down writes `../.ledge-assets/pasted-2026-07-19.png` for the same file. Ledge writes the right one when you paste, and the note renders in any other Markdown editor too.
 
 ## Insert a picture you have not copied
 
@@ -27,9 +29,9 @@ A picture chosen this way is saved as a JPEG when it already is one (a photograp
 Two kinds of source draw as images:
 
 - **Web URLs.** `![](https://example.com/chart.png)` loads from the network.
-- **Workspace files.** `.ledge-assets/` pastes, and any image already in the workspace folder referenced relative to it. A note in an attached project can show the project's own `img/logo.png`.
+- **Workspace files.** `.ledge-assets/` pastes, and any image already in the workspace folder, referenced relative to the note. A note in an attached project can show the project's own `img/logo.png`, and a note in a subfolder reaches it with `../img/logo.png`.
 
-Supported formats are png, jpeg, gif, webp, avif, and svg. Absolute paths and references outside the workspace stay as text.
+Supported formats are png, jpeg, gif, webp, avif, and svg. Absolute paths stay as text. A reference that climbs out of the workspace folder draws as a broken image, the same as one naming a file that is not there.
 
 An image renders when its reference sits alone on a line and your caret is elsewhere. Click the picture, or move the caret onto its line, and it reverts to editable Markdown; move away and it draws again. This is the same reveal-on-touch behavior as tables and links.
 
@@ -40,6 +42,8 @@ A reference inline in a sentence stays compact instead: the syntax is concealed 
 ## Deleting notes and images
 
 Deleting a note leaves its images in place. A stray unused image is cheaper than an image another note still references.
+
+Moving a note to another folder leaves them in place too, and rewrites the note's references so they still point at the same files. A locked note has to be unlocked first, because its references are inside the encrypted body.
 
 The files are ordinary files, so you can grep them by name and sync them with the workspace.
 

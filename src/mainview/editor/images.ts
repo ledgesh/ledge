@@ -65,11 +65,21 @@ export function imageSrcOf(raw: string): ImageSrc | null {
   if (m) return /^https?$/i.test(m[1]!) ? { kind: "remote", url: text } : null;
   if (/^www\./i.test(text)) return { kind: "remote", url: `https://${text}` };
   if (text.startsWith("/") || text.includes("\\")) return null;
-  // The app's own assets dir is the one accepted dot-entry, and only as the
-  // first segment — the same exception assetPathOf carves out Bun-side, from
-  // the same shared constant. Deeper dots (temp files, .ledge-trash) stay out.
+  // Leading `../` steps are how a note in a subfolder reaches the workspace's
+  // shared `.ledge-assets`, so they are spent before anything is judged. Where
+  // they land is Bun's ruling, not this one: assetPathOf resolves against the
+  // note and re-checks the result against the root, and a reference that
+  // climbs out draws as broken rather than as anything.
   const parts = text.split("/");
-  if (parts.slice(parts[0] === ASSETS_DIRNAME ? 1 : 0).some((part) => part.startsWith("."))) return null;
+  let up = 0;
+  while (parts[up] === "..") up += 1;
+  const rest = parts.slice(up);
+  // Past that run, the app's own assets dir is the one accepted dot-entry, and
+  // only as the first segment — the same exception assetPathOf carves out
+  // Bun-side, from the same shared constant. Deeper dots (temp files,
+  // .ledge-trash) stay out.
+  if (rest.length === 0) return null;
+  if (rest.slice(rest[0] === ASSETS_DIRNAME ? 1 : 0).some((part) => part.startsWith("."))) return null;
   if (!IMAGE_EXT.test(text)) return null;
   return { kind: "asset", path: text };
 }
@@ -255,7 +265,7 @@ class ImageWidget extends WidgetType {
       if (!folder) {
         broken();
       } else {
-        void assetDataUrl(folder, m.src.path).then((url) => {
+        void assetDataUrl(folder, m.src.path, pathOf(view.state.facet(sessionIdFacet))).then((url) => {
           if (url === "sealed") sealed();
           else if (url) img.src = url;
           else broken();

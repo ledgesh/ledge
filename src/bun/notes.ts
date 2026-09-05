@@ -40,7 +40,7 @@ import {
   touchVault,
   vaultState,
 } from "./vault";
-import { assetPathOf, imageMimeOf, rawAssetBytes, replaceAssetBytes } from "./assets";
+import { assetPathOf, assetRefFor, imageMimeOf, rawAssetBytes, replaceAssetBytes } from "./assets";
 
 // Deleted notes are moved into their own root's .ledge-trash rather than
 // unlinked. Per root, not one shared bin: the move must stay a same-filesystem
@@ -603,21 +603,70 @@ export async function firstLockedHeader(rootsToScan: string[]): Promise<string |
 
 // The in-root image references a note's text carries (`![](…)`) — the set
 // the lock sweep seals and Remove Lock unseals. Resolution reuses the asset
-// guard: a ref that fails it (a remote URL, a traversal, a non-image) is
-// simply not an asset and not swept.
-const IMAGE_REF = /!\[[^\]]*\]\(([^()\s]+)\)/g;
-function assetRefsOf(text: string, root: string): string[] {
-  const out = new Set<string>();
+// guard, against the note's OWN folder: a ref that fails it (a remote URL, a
+// traversal out of the root, a non-image) is simply not an asset and not
+// swept.
+//
+// Both halves come back because the two sweeps below need different ones. The
+// ref is what a person reads in the shared-image notice. The PATH is
+// identity, and it has to be: references are note-relative (assets.ts), so
+// two notes in different folders write different strings for the same file —
+// `.ledge-assets/x.png` from the root and `../.ledge-assets/x.png` from a
+// subfolder. A sweep that compared reference strings would see no sharing
+// note, and Remove Lock would unseal an image a locked note still shows.
+// Keying the map by path also collapses two references to one file into one
+// seal, which the old ref-keyed Set could not.
+const IMAGE_REF = /(!\[[^\]]*\]\()([^()\s]+)(\))/g;
+interface AssetRef {
+  /** The reference as the note writes it, for the notice. */
+  ref: string;
+  /** The file it names, resolved: the only sound way to compare two notes. */
+  path: string;
+}
+function assetRefsOf(text: string, root: string, from: string): AssetRef[] {
+  const out = new Map<string, string>();
   for (const m of text.matchAll(IMAGE_REF)) {
-    const ref = m[1]!;
+    const ref = m[2]!;
     try {
-      assetPathOf(root, ref);
-      out.add(ref);
+      const path = assetPathOf(root, ref, from);
+      if (!out.has(path)) out.set(path, ref);
     } catch {
       // not an in-root image reference
     }
   }
-  return [...out];
+  return [...out].map(([path, ref]) => ({ ref, path }));
+}
+
+/**
+ * The note's text with its in-root image references rewritten for a new
+ * location. A reference is relative to the note (assets.ts), so moving the
+ * file changes what every one of them resolves to: `.ledge-assets/x.png` in a
+ * note that moves into `trips/` would name a `trips/.ledge-assets` that does
+ * not exist, and every picture in the note would break.
+ *
+ * Only references that RESOLVE from the old location are touched, and each is
+ * re-emitted for the new one. A remote URL and a non-image are left exactly as
+ * written, because neither is an asset. Whether the file is actually there is
+ * not asked: a reference to an image not pasted yet should still travel with
+ * the note rather than be quietly left aiming at the old folder.
+ *
+ * The trash needs none of this, and that is why deleteNote still just renames:
+ * a delete and its restore change the depth by the same one segment in
+ * opposite directions, so the string that is wrong while a note sits in
+ * `.ledge-trash` is right again the moment it comes back, and nothing renders
+ * a trashed note in between.
+ */
+function rebaseAssetRefs(text: string, root: string, from: string, to: string): string {
+  if (dirname(resolve(from)) === dirname(resolve(to))) return text;
+  return text.replace(IMAGE_REF, (whole, open: string, ref: string, close: string) => {
+    let asset: string;
+    try {
+      asset = assetPathOf(root, ref, from);
+    } catch {
+      return whole; // not an in-root image reference
+    }
+    return `${open}${assetRefFor(root, asset, to)}${close}`;
+  });
 }
 
 // Lock a note: mint its header (random data key wrapped by the master key,
@@ -646,21 +695,26 @@ export async function lockNote(path: string): Promise<{ meta: NoteMeta; sealedSh
   const header = mintLockedHeader(); // throws when the vault is locked
 
   const root = assertNote(path);
-  const refs = assetRefsOf(file.text, root);
+  const refs = assetRefsOf(file.text, root, path);
   const sealedShared: string[] = [];
   if (refs.length > 0) {
+    const mine = new Map(refs.map((r) => [r.path, r.ref]));
     for (const meta of await listNotes(root)) {
       if (resolve(meta.path) === resolve(path) || meta.locked) continue;
       const other = await readNote(meta.path);
       if (other === null) continue;
-      for (const ref of refs) {
-        if (other.text.includes(ref)) sealedShared.push(`${ref} (also shown by "${meta.title}")`);
+      // Each note's refs resolved against ITS folder, then intersected on the
+      // file. Comparing the strings would answer "no" for the same image in
+      // two folders, and the sweep would seal it without saying so.
+      for (const r of assetRefsOf(other.text, root, meta.path)) {
+        const ref = mine.get(r.path);
+        if (ref !== undefined) sealedShared.push(`${ref} (also shown by "${meta.title}")`);
       }
     }
-    for (const ref of refs) {
-      const bytes = await rawAssetBytes(root, ref);
+    for (const r of refs) {
+      const bytes = await rawAssetBytes(r.path);
       if (bytes === null || isSealedAsset(bytes)) continue; // gone, or already sealed
-      await replaceAssetBytes(assetPathOf(root, ref), sealAssetBytes(bytes));
+      await replaceAssetBytes(r.path, sealAssetBytes(bytes));
     }
   }
 
@@ -685,27 +739,30 @@ export async function removeLockNote(path: string): Promise<NoteMeta> {
     throw new Error(file.damaged ? "this note's locked body is damaged; restore the file from a backup first" : "unlock first");
   }
   const root = assertNote(path);
-  const refs = assetRefsOf(file.text, root);
+  const refs = assetRefsOf(file.text, root, path);
   if (refs.length > 0) {
     // Which images stay sealed: those any other locked note still references.
     // The vault is open here (file.held was false), so their bodies decrypt.
+    // Claims are collected as resolved PATHS, never as reference strings: a
+    // locked note one folder away writes the same image a different way, and
+    // a string comparison would miss its claim and unseal an image it shows.
     const claimed = new Set<string>();
     for (const meta of await listNotes(root)) {
       if (resolve(meta.path) === resolve(path) || !meta.locked) continue;
       const other = await readNote(meta.path);
       if (other === null || other.held) continue;
-      for (const ref of refs) if (other.text.includes(ref)) claimed.add(ref);
+      for (const r of assetRefsOf(other.text, root, meta.path)) claimed.add(r.path);
     }
-    for (const ref of refs) {
-      if (claimed.has(ref)) continue;
-      const bytes = await rawAssetBytes(root, ref);
+    for (const r of refs) {
+      if (claimed.has(r.path)) continue;
+      const bytes = await rawAssetBytes(r.path);
       if (bytes === null || !isSealedAsset(bytes)) continue;
       try {
-        await replaceAssetBytes(assetPathOf(root, ref), openAssetBytes(bytes));
+        await replaceAssetBytes(r.path, openAssetBytes(bytes));
       } catch (err) {
         // A damaged sealed image costs itself (stays sealed), never the
         // unlock of the note's own text.
-        console.warn("[vault] could not unseal image during Remove Lock", ref, err);
+        console.warn("[vault] could not unseal image during Remove Lock", r.ref, err);
       }
     }
   }
@@ -875,6 +932,22 @@ export async function moveNote(path: string, folder: string | null): Promise<Not
   const dir = await ensureFolder(root, folder);
   if (dirname(from) === dir) return metaAt(from); // already there: the outcome asked for
 
+  // Read BEFORE the rename, because the move has to rewrite the note's image
+  // references for its new folder (rebaseAssetRefs) and a locked note whose
+  // vault is shut cannot be read at all. Refusing here is the honest end of
+  // that: the alternative is a note that arrives with its pictures pointing at
+  // nothing and no way to tell it happened. Same "unlock first" grammar as
+  // Remove Lock, and the vault is the only thing standing in the way.
+  const file = await readNote(from);
+  if (file === null) throw new Error(`no note at ${path}`);
+  if (file.held) {
+    throw new Error(
+      file.damaged
+        ? "this note's locked body is damaged; restore the file from a backup first"
+        : "unlock first — moving a locked note rewrites the image references in its body",
+    );
+  }
+
   const reserved = reservedIn(dir);
   const taken = new Set(await readdir(dir));
   for (const name of reserved) taken.add(name);
@@ -890,6 +963,12 @@ export async function moveNote(path: string, folder: string | null): Promise<Not
   try {
     assertNote(target);
     await rename(from, target);
+    // After the rename, so the write lands on the note where it now lives.
+    // rename(2) preserves mtime, so `file.mtimeMs` is still the expectation
+    // writeNote should hold against a foreign edit — and writeNote re-seals a
+    // locked note's body on the way out, which is why this hands it plaintext.
+    const rebased = rebaseAssetRefs(file.text, root, from, target);
+    if (rebased !== file.text) await writeNote(target, rebased, file.mtimeMs);
   } finally {
     reserved.delete(name);
   }

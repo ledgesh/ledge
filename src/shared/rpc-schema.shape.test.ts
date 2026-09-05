@@ -53,12 +53,16 @@ function digest(text: string): string {
 
 describe("the schema's shape against the protocol version", () => {
   // Bump PROTOCOL_VERSION first if the change is breaking; see the header.
-  // connectionReconnect was added, and it is additive in the strongest sense
-  // available: it is a CONNECTION_METHOD, so it never becomes a frame at all
-  // (wire.ts WIRE_METHODS subtracts CLIENT_METHODS). The vocabulary the two
-  // ends actually exchange is byte-for-byte what it was, and no existing
-  // payload was touched. The pin moves and the version does not.
-  const PINNED = { protocol: 5, shape: "e411fb740716cad1" };
+  // assetRead gained an optional `notePath`, because an image reference now
+  // resolves against the note's own folder rather than the root (assets.ts).
+  // Additive, and both directions land on today's behavior: an old client
+  // sends no notePath and the server bases on the root, which is what it did
+  // for every note; a new client's notePath is ignored by an old server, which
+  // bases on the root and is right for every note an old server can hold,
+  // since a server without folder support has no note anywhere else. No
+  // payload was retyped, no field made required, no union narrowed. The pin
+  // moves and the version does not.
+  const PINNED = { protocol: 5, shape: "491fac9043b21998" };
 
   test("a payload shape does not change without someone deciding whether it breaks", async () => {
     const shape = digest(shapeOf(await Bun.file(SCHEMA).text()));

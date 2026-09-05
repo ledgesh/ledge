@@ -721,17 +721,21 @@ export type LedgeRPC = {
       // editor's rendered preview. The webview cannot touch the filesystem, so
       // the bytes ride the RPC base64-encoded. `src` is the markdown-relative
       // reference exactly as the note carries it; `root` is the workspace the
-      // referencing note lives in — the reference is only meaningful relative
-      // to its own folder. Bun guards both hard (bun/assets.ts assetPathOf: a
-      // registered root, inside it, an image-extension allowlist, no
-      // dot-entries) — the view is the least-trusted end, and without the
+      // referencing note lives in, and `notePath` is the note itself — the
+      // reference resolves against the note's own FOLDER, so a note one level
+      // down says `../.ledge-assets/x.png` for the same file the root says
+      // `.ledge-assets/x.png` for. Without `notePath` the root is the base,
+      // which is right only for a note sitting in it. Bun guards all three
+      // hard (bun/assets.ts assetPathOf: a registered root, a `.md` base
+      // inside it, the resolved path inside it, an image-extension allowlist,
+      // no dot-entries) — the view is the least-trusted end, and without the
       // extension check this call would read any note. null when missing.
       // `sealed: true` means the file exists but is a SEALED image
       // (locking.md §5) and the vault is locked: the widget shows the
       // locked-image placeholder, not a broken one. Sealed assets decrypt
       // Bun-side when the vault is open and ride back as ordinary bytes.
       assetRead: {
-        params: { root: string; src: string };
+        params: { root: string; src: string; notePath?: string | null };
         response: { image: { dataB64: string; mime: string } | null; sealed?: boolean };
       };
       // Save the pasteboard's image (if any) into the workspace root's .ledge-assets/

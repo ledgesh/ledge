@@ -1119,23 +1119,26 @@ export async function createServer(deps: { push: Audience; native: NativeDeps })
     // src passes assertions (in-root, image extension, no dot-entries)
     // before it is read, and assetWrite names the file itself — the client
     // supplies nothing but bytes and handles it was given.
-    assetRead: async ({ root, src }) => {
-      const res = await readAsset(root, src);
+    assetRead: async ({ root, src, notePath }) => {
+      const res = await readAsset(root, src, notePath);
       if (res !== null && "sealed" in res) return { image: null, sealed: true };
       return { image: res };
     },
     // The bytes arrive from whichever machine the pasteboard is on
-    // (remote.md §10); everything that decides the FILE is here. Whether the
-    // paste is sealed at birth comes from the NOTE, not from the sender: the
-    // server asks the disk if it is locked, the same two-ended stance as
-    // every guard. A notePath outside the pasting root is a client bug and
-    // pastes unsealed into nothing — the guard below throws before any write.
+    // (remote.md §10); everything that decides the FILE is here. The note
+    // decides two things and the sender neither: whether the paste is sealed
+    // at birth (the server asks the disk if the note is locked, the same
+    // two-ended stance as every guard) and which folder the returned
+    // reference is relative to. A notePath outside the pasting root is a
+    // client bug; it is dropped rather than trusted, which costs a
+    // root-relative reference and no seal.
     assetWrite: async ({ root, notePath, dataB64 }) => {
-      const seal =
+      const from =
         typeof notePath === "string" && notePath !== "" && rootContaining(notePath) === assertRegisteredRoot(root)
-          ? await isNoteLocked(notePath)
-          : false;
-      return { src: await writePastedImage(root, fromB64(dataB64), seal) };
+          ? notePath
+          : null;
+      const seal = from !== null && (await isNoteLocked(from));
+      return { src: await writePastedImage(root, fromB64(dataB64), seal, from) };
     },
     // This machine's half of the snapshot. A connected client merges its own
     // half over the top before the view sees it (remote.md §5); a server has

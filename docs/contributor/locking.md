@@ -232,14 +232,20 @@ it. Assets are therefore in scope from v1, with one structural decision:
   view-side data-URL cache is evicted on relock (§3).
 - **Locking an existing note sweeps its referenced assets**: each in-root
   image reference is sealed in place (temp-plus-rename; the reference text
-  never changes). An asset an *unlocked* note also shows is sealed anyway
-  and SURFACED as a notice naming the sharing notes — never refused,
-  because a refusal deadlocks the legitimate "lock both sharing notes"
-  flow (each blocks on the other), and never silent, because the sharing
-  note's images now need an unlock to view. Sealing merely extends the
-  lock's own visibility rule to the shared image everywhere it appears:
-  the other note's widget shows the locked face while the vault is closed
-  and the real image while it is open — nothing breaks. Rare by
+  never changes). References are note-relative (architecture.md §3), so both
+  sweeps resolve each note's references against that note's own folder and
+  compare the RESOLVED PATHS. Comparing the strings would be wrong in a way
+  that matters here and nowhere else: the same file is `.ledge-assets/x.png`
+  from a note at the root and `../.ledge-assets/x.png` from one in a folder,
+  the shared-image notice below would go silent, and Remove Lock would unseal
+  an image a still-locked note displays. An asset an *unlocked* note also
+  shows is sealed anyway and SURFACED as a notice naming the sharing notes
+  — never refused, because a refusal deadlocks the legitimate "lock both
+  sharing notes" flow (each blocks on the other), and never silent, because
+  the sharing note's images now need an unlock to view. Sealing merely
+  extends the lock's own visibility rule to the shared image everywhere it
+  appears: the other note's widget shows the locked face while the vault is
+  closed and the real image while it is open — nothing breaks. Rare by
   construction either way, since paste allocates unique names and sharing
   only happens by hand. Removing the lock reverses the sweep for assets no
   other locked note still references.
