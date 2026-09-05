@@ -127,7 +127,10 @@ test.describe("the manual's window", () => {
     expect(text).not.toContain("VANDALIZED");
   });
 
-  test("runnable blocks still run — the docs demos are live", async ({ page }) => {
+  test("read-only is no bar to running: an unmarked block on a page still runs", async ({ page }) => {
+    // The real manual marks every block `norun` (bun/docsContent.test.ts);
+    // this fixture leaves one unmarked so the read-only editor's own stance is
+    // what is tested — the mark, not the read-only page, withholds a run.
     await page.locator(".cm-line", { hasText: "echo hello from the docs" }).click();
     await page.keyboard.press("Meta+Enter");
     await expect.poll(() => page.evaluate(() => window.__harness.inlineRuns())).toHaveLength(1);

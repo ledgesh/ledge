@@ -58,9 +58,10 @@ function pointedAt(ctx: EditorClickContext): CommandId[] {
   const items: CommandId[] = [];
   if (ctx.onLink) items.push("link.open");
   if (ctx.onTask) items.push("task.toggle");
-  // Read-only is no bar to running: the manual's own shell demos are live
-  // (interactions.md §3, Documentation). The two verbs' `when` still withdraws
-  // them on a client with no surface to run in (§8), which is what greys them.
+  // Read-only is no bar to running; what withdraws these on the manual's own
+  // blocks is their `norun` mark (runnableBlockAt; interactions.md §4e). The
+  // two verbs' `when` still withdraws them on a client with no surface to run
+  // in (§8), which is what greys them.
   if (ctx.onRunnableBlock) items.push("block.runInline", "block.runInTerminal");
   return items;
 }

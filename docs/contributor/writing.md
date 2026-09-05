@@ -157,7 +157,10 @@ contains and states what happens when it runs, in the indicative. A tutorial
   fine. The reason nothing runs is
   where a manual page's shell would be: `$HOME` on whichever machine shows
   the page, this Mac or a phone's server, with no frontmatter, and the reader
-  cannot see which.
+  cannot see which. The place a new user does press Run is the welcome note a
+  fresh start opens (`src/mainview/workspace/seeds.ts`): it carries the
+  manual's own examples, live, and follows these mechanics as if it were a
+  page.
 - Link with `[[Page Title]]` on first substantive mention, not every mention.
 
 ## 11. The check

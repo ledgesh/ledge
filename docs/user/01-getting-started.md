@@ -2,7 +2,7 @@
 
 Ledge is the notebook for developers and DevOps. It runs code and commands straight from your Markdown.
 
-The manual is read-only and its code blocks do not run.
+The manual is read-only and its code blocks do not run. The note called Welcome to Ledge, which opens on a first launch and on a server that has no notes yet, is where the same examples do run.
 
 ## Your first note
 

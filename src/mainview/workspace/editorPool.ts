@@ -36,39 +36,7 @@ import { changedSpan } from "../lib/textDiff";
 import { revealHeading, revealSelection } from "./reveal";
 import type { RunEvent } from "../../shared/rpc-schema";
 import type { TabState } from "./tree";
-
-// Seed content for a note with no file yet. The very first tab shows the demo
-// note (the whole run loop on first launch); every other new tab opens as a
-// near-empty scratch note. A tab whose note is already on disk ignores these and
-// loads the file instead. Built from lines so the ``` fences don't collide with
-// JS backticks.
-const DEMO_DOC = [
-  "# Ledge",
-  "",
-  "Runnable Markdown notes. Drop a shell block below, then press Cmd+Enter inside it, or click the run button that appears when you hover the block.",
-  "",
-  "```sh",
-  'echo "hello from Ledge on Electrobun"',
-  'echo "arch: $(uname -m)"',
-  "uname -sr",
-  "```",
-  "",
-  "Output streams into a panel beneath the block. The shell is reused across runs, so cwd and environment changes persist from one block to the next.",
-  "",
-  "```sh",
-  "pwd",
-  "date",
-  "```",
-  "",
-].join("\n");
-
-// Just the H1 — the rename UI and the note's identity, nothing else. A new
-// note is the user's blank page: no sample block to delete first.
-const SCRATCH_DOC = ["# Untitled", "", ""].join("\n");
-
-function seedDoc(seed: "demo" | "scratch"): string {
-  return seed === "demo" ? DEMO_DOC : SCRATCH_DOC;
-}
+import { seedDoc } from "./seeds";
 
 // Translate a Bun-side RunEvent into the (kind, payload) shape handleRunEvent
 // understands (its vocabulary predates the RPC).

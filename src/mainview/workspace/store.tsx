@@ -24,6 +24,7 @@ import {
   type Workspace,
 } from "./tree";
 import { DEFAULT_ICON, isIconKey } from "./icons";
+import { WELCOME_TITLE } from "./seeds";
 import type { NoteMeta, TrashMeta } from "../../shared/rpc-schema";
 
 export interface AppState {
@@ -60,9 +61,9 @@ function makeWorkspace(name: string, folder: string, tab: TabState): Workspace {
 
 // The fresh-start launch state, built from one workspace folder and the notes
 // already in it (newest first, as listNotes returns them): one workspace, one
-// note — the one you edited last, or the demo note when the folder is empty.
-// That demo note is unsaved like any other new note, so a first launch you do
-// not type in still leaves the folder empty.
+// note — the one you edited last, or the welcome note (workspace/seeds.ts) when
+// the folder is empty. That welcome note is unsaved like any other new note, so
+// a first launch you do not type in still leaves the folder empty.
 //
 // This is the FALLBACK, not the normal boot: a saved session restores through
 // workspace/persist.ts, and this state is what a first launch (or a corrupt
@@ -71,7 +72,7 @@ function makeWorkspace(name: string, folder: string, tab: TabState): Workspace {
 // Exported for unit tests (store.test.ts); the app goes through WorkspaceProvider.
 export function initialState(folder: string, notes: NoteMeta[] = [], trash: TrashMeta[] = []): AppState {
   const newest = notes[0];
-  const tab = newest ? makeNoteTab(newest.path, newest.title) : makeTab("demo", "Welcome");
+  const tab = newest ? makeNoteTab(newest.path, newest.title) : makeTab("demo", WELCOME_TITLE);
   const first = makeWorkspace("Scratch", folder, tab);
   return {
     workspaces: [first],

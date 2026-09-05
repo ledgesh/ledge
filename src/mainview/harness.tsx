@@ -247,6 +247,12 @@ class FakeStore {
     data.notes.set(`${root}/${name}`, { text, mtimeMs: this.tick() });
   }
 
+  // A folder with nothing in it: `?fresh` (below) is a first launch, and a
+  // first launch is a store the seeds never reached.
+  wipe(root: string): void {
+    this.ensureRoot(root).notes.clear();
+  }
+
   seedTrash(root: string, text: string): void {
     const data = this.ensureRoot(root);
     const path = `${root}/.ledge-trash/${this.allocate(text, data.trash.keys())}`;
@@ -618,8 +624,9 @@ store.seed(
 );
 store.vault = { state: "locked", pass: "letmein" };
 // The built-in docs, attached at boot like the real registry does. Four
-// pages: Getting Started (with a runnable block — the read-only editor must
-// still run it), a second page so the docs browser is a real list, a
+// pages: Getting Started (with an UNMARKED runnable block, unlike the real
+// corpus: docs.spec.ts checks the read-only editor itself does not withhold
+// a run, `norun` does), a second page so the docs browser is a real list, a
 // third whose TITLE sorts before the others while its numbered filename
 // sorts last, so a spec can tell path order from title order, and the
 // licenses page the Help command lands on by name. Filenames are
@@ -1267,6 +1274,13 @@ window.__harness = {
   },
   store,
 };
+
+// `?fresh`: the scratch folder boots EMPTY, which is what a first launch on a
+// Mac and a first connection to a server with no notes both are, and the one
+// boot that opens the welcome note (workspace/seeds.ts) rather than a file.
+// Wiped after seeding rather than skipped during it, so the fixtures above stay
+// one list and the other specs see exactly what they always saw.
+if (new URLSearchParams(window.location.search).has("fresh")) store.wipe(SCRATCH);
 
 // Same boot shape as main.tsx: the registry first, then per-folder lists.
 // null layout: a harness run always starts from the seeded notes; restore
