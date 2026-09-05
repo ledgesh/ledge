@@ -45,6 +45,7 @@ test("typed and frontmatter tags merge; counts are notes, not occurrences", asyn
   await createTagged(page);
   // A second bearer, declared in frontmatter — the other tag source.
   await page.keyboard.press("Meta+n");
+  await page.keyboard.press("Meta+ArrowUp"); // the caret opens IN the title; this note is typed from the top
   for (const line of ["---", "tags: ledge", "---", "# Front", "", "body"]) {
     await page.keyboard.type(line);
     await page.keyboard.press("Enter");

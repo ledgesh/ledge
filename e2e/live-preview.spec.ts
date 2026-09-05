@@ -13,6 +13,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("syntax conceals when the caret leaves, reveals as it moves back in", async ({ page }) => {
+  await page.keyboard.press("Meta+ArrowUp"); // the caret opens IN the title; this note is typed from the top
   await page.keyboard.type("## Hello **world** yes");
   await page.keyboard.press("Enter"); // caret leaves the heading line
 

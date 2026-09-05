@@ -178,6 +178,13 @@ export interface RegistryDeps {
   // inline, because requestReveal lives in the editor stack and the registry
   // must stay importable by pure unit tests.
   revealBacklink(path: string, line: number, raw: string): void;
+  // Queue "open with the placeholder title selected" (editorPool
+  // requestTitleCaret) for a note this command just CREATED — called before
+  // the open, like revealBacklink, and a dep for the same reason. Every
+  // command that calls it creates an "Untitled", so the first keystroke names
+  // the note. Only creation calls it: an open of a note that already exists
+  // must not move anybody's caret.
+  revealTitle(path: string): void;
   // Move the caret to an Outline row's heading in the note's own live editor.
   // No open involved — the outline always describes the focused tab. A dep
   // for the same reason as revealBacklink: the view lookup lives in the

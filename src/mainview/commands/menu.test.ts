@@ -31,6 +31,7 @@ function stubDeps(over: Partial<RegistryDeps> = {}): RegistryDeps {
     closeDocs: noop,
     restartSession: noop,
     revealBacklink: noop,
+    revealTitle: noop,
     jumpToHeading: noop,
     openDailyNote: async () => null,
     newNoteFromTemplate: async () => ({ path: "/ws/n.md", title: "Untitled", mtimeMs: 0 }),

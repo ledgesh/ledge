@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Text } from "@codemirror/state";
-import { revealHeading, revealSelection } from "./reveal";
+import { revealHeading, revealSelection, revealTitle } from "./reveal";
 
 const doc = Text.of(["# Title", "", "the needle sits here", "last line"]);
 
@@ -65,5 +65,28 @@ describe("revealHeading", () => {
 
   test("an empty heading goes to the top rather than matching everything", () => {
     expect(revealHeading(headed, "  ")).toEqual({ anchor: 0, head: 0 });
+  });
+});
+
+describe("revealTitle", () => {
+  test("lands just inside the title, after the marker and its space", () => {
+    expect(revealTitle(doc)).toEqual({ anchor: "# ".length, head: "# ".length });
+  });
+
+  test("a placeholder title is selected, so the first keystroke replaces it", () => {
+    expect(revealTitle(doc, true)).toEqual({ anchor: "# ".length, head: doc.line(1).to });
+  });
+
+  test("skips frontmatter to the first heading a template left above it", () => {
+    const framed = Text.of(["---", "tags: journal", "---", "#   Untitled", "", "body"]);
+    const at = framed.line(4).from + "#   ".length;
+    expect(revealTitle(framed)).toEqual({ anchor: at, head: at });
+    expect(revealTitle(framed, true)).toEqual({ anchor: at, head: framed.line(4).to });
+  });
+
+  test("a note with no heading degrades to the top, not a throw", () => {
+    const bare = Text.of(["just prose", ""]);
+    expect(revealTitle(bare)).toEqual({ anchor: 0, head: 0 });
+    expect(revealTitle(bare, true)).toEqual({ anchor: 0, head: 0 });
   });
 });

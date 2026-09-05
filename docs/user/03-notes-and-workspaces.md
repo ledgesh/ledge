@@ -4,7 +4,7 @@ This page covers where your notes live and how to arrange them: the file a note 
 
 ## A note is a Markdown file
 
-Press ⌘N and start typing. The first line names the note: type `# Release Checklist` and Ledge names the file `release-checklist.md`. Change the heading and the file is renamed to follow. If two notes want the same name, the newer one gets a numbered suffix.
+Press ⌘N and start typing. A new note opens as `# Untitled` with the word Untitled selected, so what you type becomes the title: type `Release Checklist` and Ledge names the file `release-checklist.md`. The first line names the note, so changing that heading later renames the file to follow. If two notes want the same name, the newer one gets a numbered suffix.
 
 Notes are plain files, so anything can work on them: git, grep, scripts, other editors, agents. Ledge watches the folder and picks up outside changes as they happen, even while a note is open.
 

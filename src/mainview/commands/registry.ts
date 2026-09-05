@@ -352,10 +352,10 @@ export function buildCommands(deps: RegistryDeps): Command[] {
       icon: LayoutTemplate,
       when: (ctx) => !docsSelected(ctx), // creates into the selected folder
       run: (ctx) => {
-        void deps.createNote(ctx.selected.folder, STARTER_TEMPLATE).then(
-          (note) => ctx.dispatch({ type: "openNote", note }),
-          failed(ctx),
-        );
+        void deps.createNote(ctx.selected.folder, STARTER_TEMPLATE).then((note) => {
+          deps.revealTitle(note.path);
+          ctx.dispatch({ type: "openNote", note });
+        }, failed(ctx));
       },
     }),
     // The marker's verbs on the current note, exactly one visible at a time
@@ -405,10 +405,10 @@ export function buildCommands(deps: RegistryDeps): Command[] {
       },
       run: (ctx) => {
         const { ws } = dailyTemplateTarget(ctx, deps);
-        void deps.createNote(ws.folder, DAILY_STARTER).then(
-          (note) => deps.openNoteIn(ws.folder, note),
-          failed(ctx),
-        );
+        void deps.createNote(ws.folder, DAILY_STARTER).then((note) => {
+          deps.revealTitle(note.path);
+          deps.openNoteIn(ws.folder, note);
+        }, failed(ctx));
       },
     }),
     cmd("palette.notes", {
@@ -1063,10 +1063,10 @@ export function buildCommands(deps: RegistryDeps): Command[] {
       run: (ctx) => {
         const choice = templateChoices(ctx)[i];
         if (!choice) return;
-        void deps.newNoteFromTemplate(ctx.selected.folder, choice.path).then(
-          (note) => ctx.dispatch({ type: "openNote", note }),
-          failed(ctx),
-        );
+        void deps.newNoteFromTemplate(ctx.selected.folder, choice.path).then((note) => {
+          deps.revealTitle(note.path);
+          ctx.dispatch({ type: "openNote", note });
+        }, failed(ctx));
       },
     });
   }

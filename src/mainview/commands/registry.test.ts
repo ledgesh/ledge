@@ -78,6 +78,7 @@ function stubDeps(
     },
     openNoteIn: (root, note) => calls.push(`openNoteIn:${root}:${note.path}`),
     revealBacklink: (path, line, raw) => calls.push(`revealBacklink:${path}:${line}:${raw}`),
+    revealTitle: (path) => calls.push(`revealTitle:${path}`),
     jumpToHeading: (docId, line, text) => calls.push(`jumpToHeading:${docId}:${line}:${text}`),
     noteHead: () => noteHead,
     hasSelection: () => hasSelection,
@@ -370,7 +371,11 @@ describe("registry", () => {
     entry.run(ctx);
     await Bun.sleep(0);
     // The pick hands over the PATH — the concrete note, not a re-resolvable name.
-    expect(calls).toEqual([`newNoteFromTemplate:${FOLDER}:${marked.path}`]);
+    // The caret is queued before the open: a created note opens in its title.
+    expect(calls).toEqual([
+      `newNoteFromTemplate:${FOLDER}:${marked.path}`,
+      `revealTitle:${FOLDER}/untitled.md`,
+    ]);
     expect(dispatched).toEqual([
       { type: "openNote", note: { path: `${FOLDER}/untitled.md`, title: "Untitled", mtimeMs: 0 } },
     ]);
@@ -401,7 +406,10 @@ describe("registry", () => {
     find(cmds, "template.starter").run(makeCtx(initialState(FOLDER, []), dispatched));
     await Bun.sleep(0);
     // Born marked: the starter must appear in the picker it teaches about.
-    expect(calls).toEqual([`createNote:${FOLDER}:---|template: true|---|# Untitled Template`]);
+    expect(calls).toEqual([
+      `createNote:${FOLDER}:---|template: true|---|# Untitled Template`,
+      `revealTitle:${FOLDER}/untitled-template.md`,
+    ]);
     expect(dispatched).toEqual([
       { type: "openNote", note: { path: `${FOLDER}/untitled-template.md`, title: "Untitled Template", mtimeMs: 0 } },
     ]);
@@ -441,6 +449,7 @@ describe("registry", () => {
     await Bun.sleep(0);
     expect(calls).toEqual([
       `createNote:${FOLDER}:---|template: daily|---|# Daily Template`,
+      `revealTitle:${FOLDER}/untitled-template.md`,
       `openNoteIn:${FOLDER}:${FOLDER}/untitled-template.md`,
     ]);
 

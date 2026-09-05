@@ -10,7 +10,7 @@ import { openSearchPanel } from "@codemirror/search";
 import { startCompletion } from "@codemirror/autocomplete";
 import { indentLess, indentMore, selectAll } from "@codemirror/commands";
 import { EditorView } from "@codemirror/view";
-import { focusEditor, getEditorView, requestReveal } from "@/workspace/editorPool";
+import { focusEditor, getEditorView, requestReveal, requestTitleCaret } from "@/workspace/editorPool";
 import { revealSelection } from "@/workspace/reveal";
 import { openReplace } from "@/editor/find";
 import { runBlock } from "@/editor/blocks";
@@ -87,6 +87,11 @@ export const registryDeps: RegistryDeps = {
   openDailyNote: async (folder) => {
     try {
       const r = await rpcOpenDaily(folder);
+      // Only when ⌘J actually MADE today's note: revisiting one you have been
+      // writing in all day must leave its caret alone. The caret and never a
+      // selection, because the title IS the date — a first keystroke that
+      // replaced it would rename the day.
+      if (r.created) requestTitleCaret(r.open.path, false);
       dispatchExternalOpen(r.open);
       return null;
     } catch (err) {
@@ -107,6 +112,12 @@ export const registryDeps: RegistryDeps = {
   // query, re-found on the line (workspace/reveal.ts) so a file that has
   // moved on still lands on the link.
   revealBacklink: (path, line, raw) => requestReveal(path, line, raw),
+  // The caret a just-created note opens with: on its H1, which is the rename
+  // UI, with the placeholder title selected so the first keystroke names the
+  // note (workspace/reveal.ts revealTitle). Every caller here made a note
+  // titled "Untitled": ⌘J's date title is the one that goes through
+  // requestTitleCaret unselected, above.
+  revealTitle: (path) => requestTitleCaret(path, true),
   // Jump to an Outline row's heading in the note's own live editor. The
   // heading text is the reveal query (revealSelection re-finds it on the
   // line, so a doc that shifted still lands right); y "start" rather than the

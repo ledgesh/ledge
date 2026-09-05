@@ -77,6 +77,7 @@ test("# pops the tag picker with the workspace's tags; accepting completes", asy
 
 test("frontmatter tags: tokens style like the profile name", async ({ page }) => {
   await page.keyboard.press("Meta+n");
+  await page.keyboard.press("Meta+ArrowUp"); // the caret opens IN the title; this note is typed from the top
   for (const line of ["---", "tags: work, home", "---", "# Declared"]) {
     await page.keyboard.type(line);
     await page.keyboard.press("Enter");

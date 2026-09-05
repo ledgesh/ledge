@@ -20,6 +20,7 @@ test.beforeEach(async ({ page }) => {
 
 test("a typed frontmatter block dims, and the H1 behind it still titles the tab", async ({ page }) => {
   await page.keyboard.press("Meta+n");
+  await page.keyboard.press("Meta+ArrowUp"); // the caret opens IN the title; this note is typed from the top
   for (const line of ["---", "profile: petstore", "---", "# Fm Note"]) {
     await page.keyboard.type(line);
     await page.keyboard.press("Enter");
@@ -46,6 +47,7 @@ test("a typed frontmatter block dims, and the H1 behind it still titles the tab"
 test("the profile editor round-trips a variable through the palette command", async ({ page }) => {
   // A note naming a profile is what makes "Edit Note Profile…" exist at all.
   await page.keyboard.press("Meta+n");
+  await page.keyboard.press("Meta+ArrowUp"); // the caret opens IN the title; this note is typed from the top
   for (const line of ["---", "profile: petstore", "---", "# Petstore calls"]) {
     await page.keyboard.type(line);
     await page.keyboard.press("Enter");
@@ -219,6 +221,7 @@ test("a line wrong twice over annotates once, with both reasons", async ({ page 
 
 test("profile fields copy and paste through the clipboard bridge, mask notwithstanding", async ({ page }) => {
   await page.keyboard.press("Meta+n");
+  await page.keyboard.press("Meta+ArrowUp"); // the caret opens IN the title; this note is typed from the top
   for (const line of ["---", "profile: petstore", "---", "# Petstore calls"]) {
     await page.keyboard.type(line);
     await page.keyboard.press("Enter");

@@ -45,3 +45,26 @@ export function revealHeading(doc: Text, heading: string): { anchor: number; hea
   }
   return { anchor: 0, head: 0 };
 }
+
+/**
+ * Where the caret goes in a NOTE JUST CREATED: inside its title, right after
+ * the `# ` marker, so the first keystroke types into the H1 — which is the
+ * rename UI — rather than in front of the hash that makes it a heading.
+ * The first ATX heading, not line 1: a note instantiated from a template can
+ * carry frontmatter above its title. Same degradation stance as the reveals
+ * above — a note with no heading at all gets the top of the document.
+ *
+ * `placeholder` says the title is a word the app made up ("Untitled") rather
+ * than one it computed (a daily note's date): the made-up word is SELECTED,
+ * so typing the real name replaces it in one go, while a computed title only
+ * gets the caret — a stray keystroke must not eat the date the note is for.
+ */
+export function revealTitle(doc: Text, placeholder = false): { anchor: number; head: number } {
+  for (let i = 1; i <= doc.lines; i += 1) {
+    const l = doc.line(i);
+    if (!atxHeading(l.text)) continue;
+    const at = l.from + (/^#{1,6}[ \t]+/.exec(l.text)?.[0].length ?? 0);
+    return { anchor: at, head: placeholder ? l.to : at };
+  }
+  return { anchor: 0, head: 0 };
+}

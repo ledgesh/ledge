@@ -33,7 +33,7 @@ import { onVaultChanged, vaultState } from "../vault/channel";
 import { workspaceKind } from "./channel";
 import { evictAssetCache } from "../lib/assets";
 import { changedSpan } from "../lib/textDiff";
-import { revealHeading, revealSelection } from "./reveal";
+import { revealHeading, revealSelection, revealTitle } from "./reveal";
 import type { RunEvent } from "../../shared/rpc-schema";
 import type { TabState } from "./tree";
 import { seedDoc } from "./seeds";
@@ -141,7 +141,10 @@ function clearHeldFace(entry: Entry): void {
 // holds — the docId does not exist until the tab opens. One-shot: a request is
 // consumed by the first editor that can honor it, so a stale one can never
 // yank the selection around on some later tab switch.
-type RevealRequest = { line: number; query: string } | { heading: string };
+type RevealRequest =
+  | { line: number; query: string }
+  | { heading: string }
+  | { title: { placeholder: boolean } };
 
 const pendingReveals = new Map<string, RevealRequest>();
 
@@ -152,6 +155,20 @@ export function requestReveal(path: string, line: number, query: string): void {
 /** A wikilink's `#heading` anchor: reveal that heading when `path` opens. */
 export function requestHeadingReveal(path: string, heading: string): void {
   queueReveal(path, { heading });
+}
+
+/**
+ * A note that was just created: put the caret inside its title when it opens,
+ * so the first keystroke names the note. `placeholder` says the title is the
+ * app's made-up "Untitled" (selected, so typing replaces it) rather than a
+ * title the app computed, like a daily note's date (caret only). Queued like
+ * the other reveals because the file is read after the tab renders — the
+ * caret cannot be placed until the text arrives. Only creation calls this:
+ * opening a note that already exists leaves the caret where opening always
+ * put it.
+ */
+export function requestTitleCaret(path: string, placeholder: boolean): void {
+  queueReveal(path, { title: { placeholder } });
 }
 
 function queueReveal(path: string, req: RevealRequest): void {
@@ -178,9 +195,11 @@ function takeReveal(path: string, view: EditorView): void {
 
 function applyReveal(view: EditorView, req: RevealRequest): void {
   const sel =
-    "heading" in req
-      ? revealHeading(view.state.doc, req.heading)
-      : revealSelection(view.state.doc, req.line, req.query);
+    "title" in req
+      ? revealTitle(view.state.doc, req.title.placeholder)
+      : "heading" in req
+        ? revealHeading(view.state.doc, req.heading)
+        : revealSelection(view.state.doc, req.line, req.query);
   view.dispatch({
     selection: { anchor: sel.anchor, head: sel.head },
     effects: EditorView.scrollIntoView(sel.anchor, { y: "center" }),
@@ -412,6 +431,15 @@ function acquire(tab: TabState, folder: string, handlers: DocHandlers): { entry:
   // was captured at bind and tabs never change workspace, so the choice is
   // per-editor-lifetime, like every settings read.
   const view = createEditor(host, tab.path ? "" : seedDoc(tab.seed), docId, workspaceKind(folder) === "docs");
+  // A brand-new scratch note is seeded here rather than read from a file, so
+  // its caret is placed here too, and on the same terms requestTitleCaret
+  // gives a note created on disk: on the title, with the placeholder word
+  // selected, so the first keystroke names the note. The welcome note (the
+  // demo seed) is a note to read, not one to name, and keeps the top of the
+  // document.
+  if (!tab.path && tab.seed === "scratch") {
+    view.dispatch({ selection: revealTitle(view.state.doc, true) });
+  }
   const offRun = onRunEvent(runSink(view));
   // CodeMirror does not watch its container for size changes; a pane resize (a
   // divider drag, the terminal drawer opening) needs an explicit re-measure.
