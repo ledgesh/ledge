@@ -123,10 +123,10 @@ press ⌘J".
 
 Four modes, and a page commits to one:
 
-- **Tutorial** (`13-` to `16-`): a sequence the reader follows to a working
+- **Tutorial** (`16-` to `21-`): a sequence the reader follows to a working
   result. Numbered steps. No option surveys, no boundary discussion; link out
   instead.
-- **How-to / reference** (`02-` to `12-`): what a feature is, every key and
+- **How-to / reference** (`02-` to `15-`): what a feature is, every key and
   flag, ordered for lookup rather than for reading start to finish.
 - **Explanation**: rationale and trade-offs. Gets its own final section on a
   page ("Limits", "What agents cannot see"), not a sentence smuggled into

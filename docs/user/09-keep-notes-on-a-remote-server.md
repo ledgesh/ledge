@@ -100,7 +100,7 @@ Closing the last window quits Ledge.
 
 ## Install the server
 
-The other machine needs `ledge-server` on the PATH an incoming ssh gets. It is a package, so two commands install it.
+The other machine needs `ledge-server` on the PATH an incoming ssh gets. It is a package, so two commands install it. [[Tutorial: Set Up a Ledge Server]] walks through them on a fresh VPS, with an account for Ledge and the sshd hardening this page describes further down.
 
 The server runs on Bun, and where Bun goes decides where the server goes, because Bun puts global commands beside itself. On that machine, install Bun into `/usr/local` and both names land in `/usr/local/bin`, which is where the short PATH of an ssh command looks:
 
@@ -270,88 +270,16 @@ Ask the container for the image deployment, from its host:
 docker exec ledge ledge-server backup-paths
 ```
 
-## Back up to an S3-compatible bucket
+## Back up with restic
 
-restic reads both lists and encrypts on the server before anything leaves it. Any S3-compatible bucket works: S3, R2, B2, Wasabi, MinIO.
+restic reads both lists, encrypts on the server before anything leaves it, and keeps versions. Any S3-compatible bucket works: S3, R2, B2, Wasabi, MinIO. [[Tutorial: Back Up Your Notes to S3]] sets it up on an hourly systemd timer, with the repository credentials in a profile so a note can run the same backup by hand.
 
-On the server, install it, then write the repository and its credentials to a file only that account can read:
+Three things to know before you rely on any backup of a server:
 
-```sh norun
-sudo apt-get install -y restic
-install -m 600 /dev/null ~/.config/ledge/profiles/backup.env
-```
-
-```ini
-RESTIC_REPOSITORY=s3:https://ACCOUNT.r2.cloudflarestorage.com/ledge
-RESTIC_PASSWORD=a long random string
-AWS_ACCESS_KEY_ID=...
-AWS_SECRET_ACCESS_KEY=...
-```
-
-That path is a profile, so a note can also use it by name ([[Profiles and Secrets]]). Keep values unquoted: systemd reads the same file below and does not strip quotes the way a shell does.
-
-Credentials do not belong in `settings.jsonc`, which is inside the app home and therefore inside the backup.
-
-## Back up on a schedule
-
-A backup you have to remember is not a backup. On a VPS, that means a systemd timer.
-
-`/etc/systemd/system/ledge-backup.service`, with `User` and `EnvironmentFile` naming the account the server runs as:
-
-```ini
-[Unit]
-Description=Ledge backup
-
-[Service]
-Type=oneshot
-User=ledge
-EnvironmentFile=/home/ledge/.config/ledge/profiles/backup.env
-ExecStart=/bin/bash -c 'restic backup --files-from <(ledge-server backup-paths) --exclude-file <(ledge-server backup-paths --exclude)'
-```
-
-`ExecStart` names `/bin/bash` because systemd runs no shell of its own, and the two `<(...)` substitutions need one.
-
-`/etc/systemd/system/ledge-backup.timer`:
-
-```ini
-[Unit]
-Description=Ledge backup, hourly
-
-[Timer]
-OnCalendar=hourly
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-```
-
-`Persistent=true` runs a backup that was missed while the machine was off. Then start the timer:
-
-```sh norun
-sudo systemctl enable --now ledge-backup.timer
-```
-
-## Run a backup now
-
-Give a note of your own `profile: backup` in its frontmatter and put the same command in a block there:
-
-```sh norun
-restic backup --files-from <(ledge-server backup-paths) --exclude-file <(ledge-server backup-paths --exclude)
-```
-
-The block runs on the server, so the note is a button for a backup of the machine it lives on. Use it before an upgrade, or to check the timer's work. It is not a substitute for the timer.
-
-Restore one note without restoring the machine, from a shell that has the same profile loaded:
-
-```sh norun
-restic restore latest --target /tmp/restored --include '*/shipping-notes.md'
-```
-
-Three things to know before you rely on it:
-
-- Keep `RESTIC_PASSWORD` somewhere other than this server. A restore starts on a machine that has nothing on it, and a password stored only inside the backup is a backup you cannot open.
+- Keep the backup's password somewhere other than this server. A restore starts on a machine that has nothing on it, and a password stored only inside the backup is a backup you cannot open.
 - The backup holds secrets in plain text. Profile values are plain text and so are unlocked notes, so the tool has to encrypt. restic does. `aws s3 sync` and `rclone sync` do not, unless you configure them to.
 - Locked notes and the vault travel together or not at all. `.vault.json` is inside the app home, so the printed list already does this. A hand-written list that takes the notes and leaves the vault restores notes Ledge refuses to open ([[Note Locking]]).
+- Credentials do not belong in `settings.jsonc`, which is inside the app home and therefore inside the backup. A profile is outside it ([[Profiles and Secrets]]).
 
 ## What a provider snapshot does not do
 

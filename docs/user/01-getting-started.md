@@ -88,4 +88,4 @@ Two files sit there.
 
 Both are plain text. Attach them to a bug report.
 
-The manual ends with four tutorials that combine these into working routines: [[Tutorial: Run a Project from a Note]], [[Tutorial: A Daily Workflow]], [[Tutorial: Pair with an Agent]], and [[Tutorial: Keep Notes Synced]].
+The manual ends with six tutorials that combine these into working routines: [[Tutorial: Run a Project from a Note]], [[Tutorial: A Daily Workflow]], [[Tutorial: Pair with an Agent]], [[Tutorial: Keep Notes Synced]], [[Tutorial: Set Up a Ledge Server]], and [[Tutorial: Back Up Your Notes to S3]].
