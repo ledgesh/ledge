@@ -197,6 +197,8 @@ It does not limit Ledge. Blocks in your notes still run, because running them is
 
 If you also want to use ssh directly to that machine from a terminal, keep your usual key there as well. The restricted line is for Ledge alone.
 
+A phone's key arrives already restricted. The line its pairing screen hands you carries this prefix ([[Ledge on Your Phone]]).
+
 ## Expose ssh carefully
 
 A Ledge server executes the code in your notes. Anyone who can authenticate to it can run anything you could.
@@ -357,7 +359,7 @@ A snapshot also lives in the account that pays for the server, so a lost login o
 
 ## Several devices on one server
 
-A server serves every device that connects to it. Your Mac and your phone can both be on the same server at once, reading the same notes and running commands.
+A server serves every device that connects to it. Your Mac and your phone can both be on the same server at once, reading the same notes and running commands ([[Ledge on Your Phone]]).
 
 Each device keeps its own tabs and panes. The server files them under the device that arranged them, so a phone does not open into a Mac's three-pane layout.
 

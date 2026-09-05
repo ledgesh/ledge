@@ -8,6 +8,8 @@ Press ⌘N and start typing. The first line names the note: type `# Release Chec
 
 Notes are plain files, so anything can work on them: git, grep, scripts, other editors, agents. Ledge watches the folder and picks up outside changes as they happen, even while a note is open.
 
+Ledge saves as you type, a moment after you pause. ⌘S saves at once.
+
 ## A workspace is a folder
 
 The strip at the top of the sidebar lists your workspaces. Each one is a single folder of notes, and ⌘1 through ⌘9 jump between them. There are two kinds:
@@ -24,6 +26,25 @@ With a workspace row focused, or from its right-click menu:
 - Dragging reorders the strip.
 - "Move Workspace Folder…" relocates the folder on disk.
 - ⌫ closes it, which only detaches it. No files are touched, and attaching the same folder later brings everything back.
+
+## Which files become notes
+
+Every `.md` file in the workspace folder and its subfolders is a note, with two kinds of exception.
+
+Dot-prefixed files and folders are skipped, which keeps `.git` and Ledge's own `.ledge-assets` and `.ledge-trash` out of the list. So are the usual vendor and build directories, at any depth: `node_modules`, `bower_components`, `vendor`, `dist`, `build`, `out`, `target`, `coverage`, `__pycache__`, `Pods`, and `DerivedData`.
+
+A `.ledgeignore` file in the workspace folder adds your own, one pattern per line, in a small subset of gitignore's grammar:
+
+| Line | Skips |
+| --- | --- |
+| `drafts` | Any file or folder named `drafts`, at any depth. |
+| `drafts/` | Only a folder of that name. |
+| `docs/archive` | That path, counted from the workspace folder. |
+| `*.wip.md` | Names matching the glob. `*` and `?` stay within one path segment. |
+| `!build` | Nothing. It brings `build` back, and the last matching line wins. |
+| `# text` | Nothing. A comment. |
+
+Ignoring only hides. An ignored note is absent from the sidebar and from search, and a note you had open when it became ignored still saves.
 
 ## Live preview
 
@@ -71,7 +92,7 @@ An image on the pasteboard is embedded as a file instead. See [[Images]].
 
 `d` or ⌫ on a note's row, or ⌘⌫ from the editor, moves the note to the workspace's trash and shows an Undo strip for a few seconds.
 
-Nothing is lost when the strip fades. The Trash section at the bottom of the sidebar holds the note, where `r` restores it and `d` deletes it permanently after a confirmation. Trashed notes are purged after 30 days, set by `trash.ttlDays`.
+Nothing is lost when the strip fades. The Trash section at the bottom of the sidebar holds the note, where `r` restores it and `d` deletes it permanently after a confirmation. "Empty Trash…" in the command palette does that for every note in it. Trashed notes are purged after 30 days, set by `trash.ttlDays`.
 
 ## Tabs and panes
 

@@ -37,6 +37,7 @@ import tutorialDaily from "../../docs/user/15-tutorial-a-daily-workflow.md" with
 import tutorialAgent from "../../docs/user/16-tutorial-pair-with-an-agent.md" with { type: "text" };
 import tutorialSync from "../../docs/user/17-tutorial-keep-notes-synced.md" with { type: "text" };
 import anotherMachine from "../../docs/user/18-notes-on-another-machine.md" with { type: "text" };
+import onYourPhone from "../../docs/user/19-ledge-on-your-phone.md" with { type: "text" };
 // The one page not authored in docs/user/, and not authored at all: `bun run
 // licenses` generates it (src/bun/licenses.ts) and writes it to the repository
 // root, where GitHub, a packager, and anyone auditing the release all expect
@@ -71,5 +72,6 @@ export const DOC_PAGES: DocPage[] = [
   { name: "16-tutorial-pair-with-an-agent.md", text: tutorialAgent },
   { name: "17-tutorial-keep-notes-synced.md", text: tutorialSync },
   { name: "18-notes-on-another-machine.md", text: anotherMachine },
-  { name: "19-third-party-licenses.md", text: thirdParty },
+  { name: "19-ledge-on-your-phone.md", text: onYourPhone },
+  { name: "20-third-party-licenses.md", text: thirdParty },
 ];
