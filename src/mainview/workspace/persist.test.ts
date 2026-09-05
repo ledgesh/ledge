@@ -5,12 +5,13 @@
 // per-workspace split, restore also enforces the folder story: a workspace
 // needs a registered folder, tabs stay inside their own folder's notes, and
 // an unmounted folder is held dormant rather than pruned.
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import type { NoteMeta, WorkspaceRootInfo } from "../../shared/rpc-schema";
 import { initialState, reducer, type AppState } from "./store";
 import { findLeaf, firstLeaf, tabPaths, type LeafNode, type SplitNode } from "./tree";
 import { restoreLayout, restoredState, serializeLayout } from "./persist";
 import { DEFAULT_ICON } from "./icons";
+import { expandFolder, expandedIn, resetExpansion } from "../notes/expansion";
 
 function note(path: string, title: string, mtimeMs = 1): NoteMeta {
   return { path, title, mtimeMs };
@@ -24,6 +25,18 @@ const NOTES = [
   note("/r/gamma.md", "Gamma", 1),
 ];
 
+// Notes in folders, so there is a tree for the open-folder tests to be about.
+// folderList derives `projects`, `projects/api` and `admin` from these, and
+// restore prunes the saved open set against exactly that list. Both workspaces
+// get a `projects`, because a folder name two workspaces share is the case the
+// file has to keep apart.
+const filed = (path: string, title: string, folder: string): NoteMeta => ({ ...note(path, title), folder });
+const FILED = [
+  filed("/r/projects/api/spec.md", "Spec", "projects/api"),
+  filed("/r/admin/tax.md", "Tax", "admin"),
+];
+const FILED2 = [filed("/r2/projects/old.md", "Old", "projects")];
+
 const root = (folder: string, available = true): WorkspaceRootInfo => ({
   root: folder,
   kind: "managed",
@@ -31,6 +44,11 @@ const root = (folder: string, available = true): WorkspaceRootInfo => ({
 });
 const ROOTS = [root(FOLDER), root(FOLDER2)];
 const NOTES_BY = { [FOLDER]: NOTES, [FOLDER2]: [] as NoteMeta[] };
+const FILED_BY = { [FOLDER]: [...NOTES, ...FILED], [FOLDER2]: FILED2 };
+
+// Serialize now READS the live open set (notes/expansion.ts) and restore SEEDS
+// it, so a test that opened a folder would otherwise hand it to the next one.
+afterEach(resetExpansion);
 
 // A state exercising everything the layout records: two workspaces (each on
 // its own folder), a split, tab order, active tabs, focus, selection. Built
@@ -80,6 +98,34 @@ describe("round trip", () => {
     // Each folder's boot lists landed under its own key.
     expect(after!.notes[FOLDER]).toEqual(NOTES);
     expect(after!.notes[FOLDER2]).toEqual([]);
+  });
+
+  test("the open folders come back, and each workspace keeps its own", () => {
+    // Both workspaces have a `projects`. Only the first one's is open, and the
+    // file records them per workspace for the same reason the live module keys
+    // by root (notes/expansion.ts).
+    const before = richState();
+    expandFolder(FOLDER, "projects/api");
+    const text = serializeLayout(before);
+    resetExpansion(); // the relaunch: a fresh process has opened nothing
+
+    expect(restoreLayout(text, ROOTS, FILED_BY, {})).not.toBeNull();
+    expect([...expandedIn(FOLDER)].sort()).toEqual(["projects", "projects/api"]);
+    expect([...expandedIn(FOLDER2)]).toEqual([]);
+  });
+
+  test("the saved order is the folders themselves, not the order they were opened in", () => {
+    // Which matters only because the save is deduped on its own text
+    // (scheduleLayoutSave): open b then a, and an insertion-ordered list would
+    // write a layout nobody changed.
+    const s1 = richState();
+    expandFolder(FOLDER, "admin");
+    expandFolder(FOLDER, "projects");
+    const opened = serializeLayout(s1);
+    resetExpansion();
+    expandFolder(FOLDER, "projects");
+    expandFolder(FOLDER, "admin");
+    expect(serializeLayout(s1)).toBe(opened);
   });
 
   test("restored ids are fresh: docIds name live sessions, which died with the process", () => {
@@ -160,6 +206,29 @@ describe("folders", () => {
     // And with the volume back, the full layout restores.
     const remounted = restoreLayout(JSON.stringify(saved), ROOTS, NOTES_BY, {})!;
     expect(remounted.workspaces.map((w) => w.name)).toEqual(["Writing", "Workspace 2"]);
+  });
+
+  test("a dormant workspace's open folders ride through too, since nothing can prune them", () => {
+    const before = richState();
+    expandFolder(FOLDER2, "projects");
+    const text = serializeLayout(before);
+    resetExpansion();
+
+    // FOLDER2's volume is out, so its workspace is held dormant — and there is
+    // no noteList for it this session, which is exactly why its open folders
+    // are carried verbatim rather than pruned against one.
+    const out = [root(FOLDER), root(FOLDER2, false)];
+    const after = restoreLayout(text, out, FILED_BY, {})!;
+    expect([...expandedIn(FOLDER2)]).toEqual([]); // not this session: no workspace to open
+
+    const saved = serializeLayout(after);
+    expect((JSON.parse(saved) as { workspaces: Array<{ expanded: string[] }> }).workspaces[1].expanded).toEqual([
+      "projects",
+    ]);
+    // And with the volume back it opens where it was left.
+    resetExpansion();
+    restoreLayout(saved, ROOTS, FILED_BY, {});
+    expect([...expandedIn(FOLDER2)]).toEqual(["projects"]);
   });
 
   test("a layout whose only workspace is dormant falls back fresh but keeps the record on save", () => {
@@ -251,6 +320,20 @@ describe("pruning", () => {
     expect(leaf.activeTabId).toBe(leaf.tabs[1].id);
   });
 
+  test("an open folder that no longer exists is dropped, like a tab on a missing note", () => {
+    const before = richState();
+    expandFolder(FOLDER, "projects/api");
+    expandFolder(FOLDER, "gone");
+    const text = serializeLayout(before);
+    resetExpansion();
+
+    restoreLayout(text, ROOTS, FILED_BY, {});
+    // `gone` holds no note in the boot list, so the browser draws no row for
+    // it and the entry could never match one. Dropping it is what keeps a
+    // folder deleted from a shell from riding the file forever.
+    expect([...expandedIn(FOLDER)].sort()).toEqual(["projects", "projects/api"]);
+  });
+
   test("unsaved tabs are not persisted: their text lives only in the editor", () => {
     let s = initialState(FOLDER, NOTES);
     s = reducer(s, { type: "newTab" }); // a scratch tab, never typed in
@@ -313,6 +396,34 @@ describe("self-healing", () => {
     const after = restoreLayout(text, ROOTS, NOTES_BY, {})!;
     expect(after.workspaces.length).toBe(1);
     expect(after.workspaces[0].name).toBe("Good");
+  });
+
+  test("a malformed open-folder list, and a file written before there was one, both restore closed", () => {
+    const leaf = { kind: "leaf", tabs: ["/r/alpha.md"], activeIndex: 0 };
+    const ws = (folder: string, expanded: unknown) => ({ name: "W", symbol: DEFAULT_ICON, folder, expanded, root: leaf });
+    // `expanded: "projects"` is a string where a list belongs, and one of the
+    // entries in the next workspace is a number. Each costs itself; neither
+    // costs the workspace, which restores with its tabs and its folders shut.
+    const text = JSON.stringify({
+      version: 2,
+      selectedIndex: 0,
+      workspaces: [ws(FOLDER, "projects"), { ...ws(FOLDER2, ["projects", 7]), root: leaf }],
+    });
+    const after = restoreLayout(text, ROOTS, FILED_BY, {})!;
+    expect(after.workspaces.length).toBe(2);
+    expect([...expandedIn(FOLDER)]).toEqual([]);
+    expect([...expandedIn(FOLDER2)]).toEqual(["projects"]);
+
+    // No `expanded` key at all is the file an older build wrote: still a valid
+    // version 2, and all it can mean is what that build did — nothing open.
+    resetExpansion();
+    const old2 = JSON.stringify({
+      version: 2,
+      selectedIndex: 0,
+      workspaces: [{ name: "W", symbol: DEFAULT_ICON, folder: FOLDER, root: leaf }],
+    });
+    expect(restoreLayout(old2, ROOTS, FILED_BY, {})).not.toBeNull();
+    expect([...expandedIn(FOLDER)]).toEqual([]);
   });
 
   test("a malformed half of a split costs that half: the sibling takes its place", () => {

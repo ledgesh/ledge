@@ -5,6 +5,8 @@ import {
   expandedIn,
   isExpanded,
   resetExpansion,
+  seedExpansion,
+  subscribeExpansion,
   toggleFolder,
 } from "./expansion";
 
@@ -41,6 +43,29 @@ describe("expansion", () => {
     expect(isExpanded(A, "admin")).toBe(true);
     toggleFolder(A, "admin");
     expect(isExpanded(A, "admin")).toBe(false);
+  });
+
+  test("seeding replaces a workspace's set: the saved layout is the whole answer for that root", () => {
+    // Boot order in one line — the module can hold something before the file
+    // is read only in a test, but a merge would be the wrong rule either way.
+    expandFolder(A, "stale");
+    seedExpansion(A, ["projects", "projects/api"]);
+    expect([...expandedIn(A)].sort()).toEqual(["projects", "projects/api"]);
+  });
+
+  test("a change notifies listeners, which is how the layout save hears about one", () => {
+    // The browser's rows are one listener; App's debounced layout save is the
+    // other, and opening a folder reaches it by no other route (it changes no
+    // AppState). Unsubscribing has to work for the same reason.
+    let heard = 0;
+    const off = subscribeExpansion(() => {
+      heard += 1;
+    });
+    expandFolder(A, "projects");
+    collapseFolder(A, "projects");
+    off();
+    expandFolder(A, "admin");
+    expect(heard).toBe(2);
   });
 
   test("two workspaces do not share an answer for a folder name they share", () => {

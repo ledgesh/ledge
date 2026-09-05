@@ -371,3 +371,33 @@ test.describe("searching one folder", () => {
     await expect(page.getByTestId("overlay-scope")).toHaveText("projects");
   });
 });
+
+test.describe("the folders a relaunch reopens", () => {
+  // The one leg no unit test can reach. Opening a folder changes no AppState,
+  // so it arrives at the debounced layout save through a subscription (App.tsx)
+  // or it does not arrive at all — and a harness boot always starts from the
+  // seeded notes with a null layout, so what the file then SAYS, and what a
+  // relaunch makes of it, is persist.test.ts's half.
+  const savedFolders = (page: Page) =>
+    page.evaluate(() => {
+      const text = window.__harness.layout();
+      if (text === null) return null;
+      const saved = JSON.parse(text) as { workspaces: Array<{ expanded: string[] }> };
+      return saved.workspaces.flatMap((w) => w.expanded);
+    });
+
+  test("a folder you open is written into the layout, and closing it takes it back out", async ({ page }) => {
+    await folderRow(page, "projects").click();
+    await expect.poll(() => savedFolders(page)).toEqual(["projects"]);
+
+    // A nested one is saved by its full path, with its parent — which is what
+    // reopens the subtree rather than just its top row.
+    await folderRow(page, "api").click();
+    await expect.poll(() => savedFolders(page)).toEqual(["projects", "projects/api"]);
+
+    // Collapsing takes the child with it (folders.ts expandedWithout), and the
+    // file says so too: a closed folder is not remembered as half open.
+    await folderRow(page, "projects").first().click();
+    await expect.poll(() => savedFolders(page)).toEqual([]);
+  });
+});

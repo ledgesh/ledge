@@ -712,8 +712,9 @@ snapshot at construction time through `lib/settings.ts`.
 - **Settings are not session state, and neither is the registry.** Four
   ownership shapes in the app home. `settings.jsonc` is
   *human-edited preference*. `.layout.json` — which workspaces exist, their
-  names and icons, which folder each owns, the pane trees — is
-  *machine-written state* whose bytes Bun owns (`bun/layout.ts`:
+  names and icons, which folder each owns, the pane trees, and which folders
+  the note browser has open in each — is *machine-written state* whose bytes
+  Bun owns (`bun/layout.ts`:
   temp-plus-rename like a note save, and a JSON-parse gate so the view
   cannot use the fixed-name write as arbitrary byte storage) but whose
   SHAPE the **view** owns (`workspace/persist.ts`: serialize debounced on
@@ -743,7 +744,14 @@ snapshot at construction time through `lib/settings.ts`.
   UNAVAILABLE one (unmounted volume) is held dormant — dropped from the
   session, carried verbatim through saves — and restored tabs only ever
   open paths their own folder's boot `noteList` returned (paths stay opaque
-  handles, §2; a tab can never cross into another workspace's folder).
+  handles, §2; a tab can never cross into another workspace's folder). The
+  open folders are pruned against that same boot list, on the same rule: an
+  entry naming a folder no note is in any more would never match a row, so
+  it restores closed rather than riding the file forever. They are also the
+  one thing in the file that does not come from `AppState` — they live in
+  `notes/expansion.ts`, a mirrored module (§5) that `persist.ts` reads on the
+  way out and seeds on the way back, and that reaches the debounced save by
+  subscription, because opening a folder changes no reducer state.
   Never mix the files.
 - **The file is the UI — and Ledge is its editor.** There is no settings
   panel; ⌘, (`settings.open`) opens the file in an in-app dialog

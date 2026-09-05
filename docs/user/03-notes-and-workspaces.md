@@ -31,6 +31,8 @@ With a workspace row focused, or from its right-click menu:
 
 Notes can sit in folders inside the workspace, and the sidebar shows them as a tree. Click a folder to open it, click again to close it. A closed folder shows how many notes are inside. With a folder's row focused, ↑ and ↓ walk the tree and Enter opens or closes it, the same as everywhere else in the sidebar.
 
+Which folders you have open is part of the layout, so the tree comes back the way you left it at the next launch, per workspace ([[Panes and Tabs]]). A folder that is gone by then comes back closed, since there is nothing left to open.
+
 Press `/` with a folder's row focused, or choose "Search in Folder" from its right-click menu, to look only inside it ([[Finding Things]]).
 
 Press `r` with a folder's row focused, or choose "Rename Folder…" from its right-click menu, to rename it. The row turns into a text field: type the new name and press Enter, or press Escape to leave it alone. Every note in the folder, and in the folders inside it, comes along, and any of them you have open stay open.

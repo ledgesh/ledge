@@ -21,6 +21,7 @@ import { configureStoreUi, flushAll, folderOf, paramsOf } from "@/notes/store";
 import { parseWikiTarget, resolveWikiTitle } from "@/editor/wikilinks";
 import { refreshWikilinks } from "@/editor/livePreview";
 import { refreshFolder } from "@/workspace/actions";
+import { subscribeExpansion } from "@/notes/expansion";
 import { docsFolder, workspaceKind } from "@/workspace/channel";
 import { allDocIds, docsLanding, notesOf, useWorkspace, WorkspaceProvider, type AppState } from "@/workspace/store";
 import { flushLayout, scheduleLayoutSave } from "@/workspace/persist";
@@ -526,8 +527,16 @@ function Shell() {
   // (or which workspace is selected) schedules a debounced layout save. Keyed
   // on those two fields rather than the whole state, so a notes-folder refresh
   // does not rewrite a layout that did not change.
+  //
+  // Opening or closing a folder is saved with them and is the one thing here
+  // that does not arrive as a dep: it lives outside the reducer
+  // (notes/expansion.ts), so it comes in as a subscription. Re-subscribing on
+  // these same two deps is what makes the closed-over `state` safe —
+  // serializeLayout reads `workspaces` and `selectedId` and nothing else, so
+  // there is no third field this closure could be stale about.
   useEffect(() => {
     scheduleLayoutSave(state);
+    return subscribeExpansion(() => scheduleLayoutSave(state));
   }, [state.workspaces, state.selectedId]);
 
   // Notes autosave on a short debounce, so the only real exposure is quitting (or

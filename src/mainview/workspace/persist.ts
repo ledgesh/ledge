@@ -16,6 +16,14 @@
 //   and comes back reseeded with a fresh scratch tab.
 // - tab titles. The boot noteList is authoritative (a note can be retitled
 //   from a shell while Ledge is closed); a persisted title could only be stale.
+//
+// One thing it DOES save does not come from AppState: which folders the note
+// browser has open lives in notes/expansion.ts, a mirrored module rather than
+// reducer state (architecture.md §5 — several commands act on it, and a field
+// on AppState is a field every reducer test then carries). This module reaches
+// across for it on both legs. Nothing else about it changes: it is per
+// workspace, like everything else in the file, and it is arrangement, like the
+// pane tree it sits beside.
 import {
   firstLeaf,
   makeNoteTab,
@@ -32,6 +40,8 @@ import { DEFAULT_ICON, isIconKey } from "./icons";
 import type { AppState } from "./store";
 import { initialState } from "./store";
 import type { NoteMeta, TrashMeta, WorkspaceRootInfo } from "../../shared/rpc-schema";
+import { expandedIn, seedExpansion } from "../notes/expansion";
+import { folderList } from "../notes/folders";
 
 // The persisted shape, version 2 (v1 predates per-workspace folders; there is
 // no migration — the product is unreleased — so v1 text restores as null and
@@ -39,6 +49,11 @@ import type { NoteMeta, TrashMeta, WorkspaceRootInfo } from "../../shared/rpc-sc
 // handle from Bun) and tabs as note paths; restore only ever opens paths that
 // folder's boot noteList also returned, so a hand-edited file cannot smuggle
 // in another root's file — the tab∈folder invariant is enforced here.
+//
+// `expanded` arrived after the shape was named and is read defensively for
+// exactly that reason: a file written before it existed is a perfectly good
+// version-2 file whose folders are all closed, which is what the build that
+// wrote it did anyway. Nothing to migrate, so no new version.
 interface PersistedLeaf {
   kind: "leaf";
   tabs: string[];
@@ -56,6 +71,7 @@ interface PersistedWorkspace {
   name: string;
   symbol: string;
   folder: string;
+  expanded: string[];
   root: PersistedNode;
 }
 interface PersistedLayout {
@@ -71,6 +87,11 @@ interface PersistedLayout {
 // the workspace is back as it was. Reset on every restore; appended by
 // serializeLayout below.
 let dormant: PersistedWorkspace[] = [];
+
+/** A persisted list of strings, defensively: anything else is an empty one. */
+function stringList(raw: unknown): string[] {
+  return Array.isArray(raw) ? raw.filter((v): v is string => typeof v === "string") : [];
+}
 
 // Same bounds the reducer clamps live drags to (store.tsx clampRatio).
 function clampRatio(r: number): number {
@@ -123,6 +144,11 @@ export function serializeLayout(state: AppState): string {
         name: ws.name,
         symbol: ws.symbol,
         folder: ws.folder,
+        // Sorted so the text is a function of the SET rather than of the order
+        // it was built in: open a, open b, close b leaves the same folder open
+        // as opening a alone, and an insertion-ordered list would make that a
+        // byte change and so a write of a layout that did not change.
+        expanded: [...expandedIn(ws.folder)].sort(),
         root: persistNode(ws.root, ws.focusedPaneId),
       })),
       // The unmounted-volume workspaces ride along untouched, after the live
@@ -242,6 +268,7 @@ function keepDormant(raw: Record<string, unknown>, folder: string): void {
     name: typeof raw.name === "string" ? raw.name : "",
     symbol: typeof raw.symbol === "string" ? (raw.symbol as string) : DEFAULT_ICON,
     folder,
+    expanded: stringList(raw.expanded),
     root: raw.root as PersistedNode,
   });
 }
@@ -304,6 +331,17 @@ export function restoreLayout(
     // recreates it on demand, landing on Getting Started.
     if (info.kind === "docs" && tabPaths(ws.root).length === 0) continue;
     workspaces.push(ws);
+    // The open folders, pruned to folders this workspace still has — the same
+    // rule as a restored tab, on the same authority: the boot noteList, which
+    // is what folderList derives the tree from. A folder deleted or renamed
+    // from a shell while Ledge was closed simply comes back closed, which is
+    // what an entry matching no row already looked like (notes/expansion.ts);
+    // pruning is what keeps it from riding the file forever.
+    const live = new Set(folderList(notesByFolder[raw.folder] ?? []));
+    seedExpansion(
+      raw.folder,
+      stringList(raw.expanded).filter((f) => live.has(f)),
+    );
   }
   if (workspaces.length === 0) return null;
 

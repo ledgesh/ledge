@@ -83,7 +83,9 @@ There is one drawer, spanning the window below the panes, rather than one per pa
 
 Each workspace keeps its own pane tree. ⌘1 through ⌘9 switch the whole arrangement, not just the note ([[Notes and Workspaces]]).
 
-Ledge saves the layout as you change it and restores it at the next launch. Two things do not come back:
+Ledge saves the layout as you change it and restores it at the next launch. The sidebar's open folders are saved with it, so the tree comes back the way you left it too ([[Notes and Workspaces]]).
+
+Two things do not come back:
 
 - **Tabs you never typed in.** A note has no file until its first edit, so an untouched Untitled tab has nothing to restore. Its pane returns with a fresh one.
 - **Notes that moved or were deleted while Ledge was closed.** Those tabs are dropped and the rest of the layout restores around them.

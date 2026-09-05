@@ -8,10 +8,21 @@
 // ephemeral chrome, and vault/channel.ts is the same shape for the same
 // reason.
 //
-// Deliberately not persisted and not in the reducer. It is a view of a folder
-// list that is itself derived from the notes (notes/folders.ts): a workspace
-// whose folders changed on disk has nothing here to reconcile, because an
-// entry naming a folder that no longer exists simply never matches a row.
+// Not in the reducer, and not persisted BY this module: `.layout.json` carries
+// each workspace's open folders beside its pane tree, so a relaunch finds the
+// tree the way it was left (workspace/persist.ts, which reads the live set out
+// of here on its way to the file and seeds it on the way back). Which folders
+// are open is arrangement, the same kind of fact as which tabs are, so it is
+// kept in the same place. Nothing here knows there is a file.
+//
+// What holds either way is that this is a view of a folder list itself DERIVED
+// from the notes (notes/folders.ts), and that is what makes saving it cheap:
+// there is nothing to reconcile with the disk, because an entry naming a folder
+// that no longer exists simply never matches a row. Restore prunes those
+// entries anyway, on the same authority that prunes a restored tab — the boot
+// note list — so a folder deleted from a shell while Ledge was closed does not
+// sit in the file forever.
+//
 // The one thing that DOES have to be told is a rename made in the app
 // (folderRenamed below) — there the folder is the same folder and only its
 // name changed, so letting the entry stop matching would collapse a subtree
@@ -61,20 +72,32 @@ export function folderRenamed(root: string, from: string, to: string): void {
   publish(root, expandedRenamed(expandedIn(root), from, to));
 }
 
+/** Boot only: the open folders one workspace's saved layout restored
+ * (workspace/persist.ts). A set, not a merge — the file is the whole answer
+ * for that root, and at boot there is nothing yet to merge it with. */
+export function seedExpansion(root: string, folders: Iterable<string>): void {
+  publish(root, new Set(folders));
+}
+
 export function toggleFolder(root: string, folder: string): void {
   if (isExpanded(root, folder)) collapseFolder(root, folder);
   else expandFolder(root, folder);
 }
 
+/** Listen for any change to any workspace's open folders. Exported rather than
+ * inlined into the hook below because the browser's rows are no longer the only
+ * listener: the layout save subscribes too (App.tsx), since opening a folder
+ * changes what is on screen without changing AppState. */
+export function subscribeExpansion(fn: () => void): () => void {
+  subs.add(fn);
+  return () => {
+    subs.delete(fn);
+  };
+}
+
 /** The React face of the same state (the browser's rows). */
 export function useExpanded(root: string): ReadonlySet<string> {
-  return useSyncExternalStore(
-    (fn) => {
-      subs.add(fn);
-      return () => subs.delete(fn);
-    },
-    () => expandedIn(root),
-  );
+  return useSyncExternalStore(subscribeExpansion, () => expandedIn(root));
 }
 
 /** Tests only: back to a fresh app. */
