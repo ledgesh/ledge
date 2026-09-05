@@ -33,6 +33,10 @@ Notes can sit in folders inside the workspace, and the sidebar shows them as a t
 
 Press `/` with a folder's row focused, or choose "Search in Folder" from its right-click menu, to look only inside it ([[Finding Things]]).
 
+Press `r` with a folder's row focused, or choose "Rename Folder…" from its right-click menu, to rename it. The row turns into a text field: type the new name and press Enter, or press Escape to leave it alone. Every note in the folder, and in the folders inside it, comes along, and any of them you have open stay open.
+
+The field takes a name, not a path, so a rename cannot move the folder somewhere else. Ledge refuses a name another folder here already answers to, rather than merging the two: to combine two folders, move the notes across. Locked notes are no obstacle, because a rename leaves their contents untouched.
+
 There are three ways to put a note in a folder:
 
 - **Drag its row** onto a folder. Dropping it on the Notes header at the top moves it back out to the workspace itself.

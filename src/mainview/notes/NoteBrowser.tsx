@@ -15,9 +15,11 @@
 // (notes/actions.ts moveNoteTo), so the drag cannot grow behavior the menu
 // item does not have.
 //
-// There is no rename here on purpose: a note's filename follows its first-line H1
+// A NOTE has no rename here on purpose: its filename follows its first-line H1
 // (notes/store.ts), so you rename a note by retitling it in the editor, and this
-// list shows the slug that produced.
+// list shows the slug that produced. A FOLDER has one — `r` on the row, the
+// workspace strip's own gesture — because a folder has no heading to follow and
+// nothing else in the app can say what it is called.
 //
 // Both lists here (notes, trash) are keyboard-navigable row lists: ↑/↓ move the
 // focused row, and the row's verbs come from the command registry — Enter opens,
@@ -39,6 +41,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { notesUnder } from "../../shared/folders";
 import { cn } from "@/lib/utils";
 import { useListNav } from "@/lib/useListNav";
 import { useRowMenu } from "@/lib/useRowMenu";
@@ -55,11 +58,12 @@ import { focusedTab } from "@/workspace/tree";
 import { SCRATCH_DOC } from "@/workspace/seeds";
 import { useVaultState } from "@/vault/channel";
 import { FolderPicker } from "@/components/FolderPicker";
+import { RenameField } from "@/components/RenameField";
 import type { FolderRequest } from "@/commands/types";
 import { agoLabel } from "./ago";
-import { deleteNote, deleteTrashedNote, emptyTrashNow, moveNoteTo, restoreNote } from "./actions";
+import { deleteNote, deleteTrashedNote, emptyTrashNow, moveNoteTo, renameFolderTo, restoreNote } from "./actions";
 import { createNote } from "./channel";
-import { browserRows, folderList, folderOf, type BrowserRow } from "./folders";
+import { browserRows, folderList, folderOf, folderRowId, type BrowserRow } from "./folders";
 import { expandFolder, toggleFolder, useExpanded } from "./expansion";
 import { requestTitleCaret } from "@/workspace/editorPool";
 import type { NoteMeta, TrashMeta } from "./channel";
@@ -99,6 +103,17 @@ export function NoteBrowser() {
   const [notice, setNotice] = useState<string | null>(null);
   // The note just deleted, offered back. Keyed by its path in the trash.
   const [undo, setUndo] = useState<{ trashed: string; title: string } | null>(null);
+  // The folder whose row is currently a text field (folder.rename). Ephemeral
+  // chrome, so it stays in the component (architecture.md §5) — nothing
+  // outside the list reacts to a name being typed.
+  const [renaming, setRenaming] = useState<string | null>(null);
+  // A row to put focus back on, by list id. A folder's row id is its PATH
+  // (notes/folders.ts folderRowId), so a rename REPLACES the row rather than
+  // re-labelling it, and the roving tabindex has nothing left to rove from —
+  // leaving `r` as the one row verb that drops you out of the list (R5).
+  // State and not a ref: the row it names has to exist before the focus can
+  // land on it, and only a render puts it there.
+  const [refocus, setRefocus] = useState<string | null>(null);
   const nav = useListNav();
 
   // The built-in Documentation workspace: no create, no delete, no lock —
@@ -132,6 +147,21 @@ export function NoteBrowser() {
   // The note the open menu points at: its live locked flag picks which lock
   // face (and which vault verb) the menu carries.
   const menuNote = menu?.kind === "note" ? notes.find((n) => n.path === menu.path) : undefined;
+
+  // A rename field belongs to a row of the workspace it was opened in. Switching
+  // workspaces from the keyboard leaves no blur behind to close it, and a folder
+  // of the same name in the new workspace would inherit the field — and the
+  // rename.
+  useEffect(() => setRenaming(null), [selected.folder]);
+
+  // Put focus back on a row the render just replaced (a renamed folder).
+  useEffect(() => {
+    if (refocus === null) return;
+    setRefocus(null);
+    nav.containerProps.ref.current?.querySelector<HTMLElement>(`[data-list-row="${CSS.escape(refocus)}"]`)?.focus();
+    // `nav`'s ref is stable for the component's life, so `refocus` is the
+    // whole dependency.
+  }, [refocus]);
 
   // The offer expires; the note does not.
   useEffect(() => {
@@ -176,12 +206,29 @@ export function NoteBrowser() {
     });
   };
 
+  // Rename a folder in place. Every note under it is about to be at a new path,
+  // so the tabs open on them are handed over in the same breath (actions.ts
+  // renameFolderTo does the freeze dance and the expansion carry-over).
+  const rename = (folder: string, name: string) => {
+    setError(null);
+    // Built BEFORE anything awaits, from the state this render closed over:
+    // which tabs hold which note is exactly what the rename is about to
+    // invalidate.
+    const docs = new Map(notesUnder(notes, folder).map((n) => [n.path, docIdsForPath(state, n.path)] as const));
+    void renameFolderTo(selected.folder, folder, name, docs, dispatch).then((res) => {
+      setError(res.error);
+      // Back onto the row under its new name, so `r` leaves the keyboard where
+      // it found it. On a refusal the row never moved, so this is where it is.
+      setRefocus(folderRowId(res.folder ?? folder));
+    });
+  };
+
   // The browser owns the Undo strip, so it registers the hooks the delete and
   // restore commands (row menus, `d`/`r`, ⌘⌫, the palette) reach it through:
   // every path lands in the same trash-with-undo behavior. Registered via refs
   // because these close over the live state.
-  const hooks = useRef({ trash, restore, file });
-  hooks.current = { trash, restore, file };
+  const hooks = useRef({ trash, restore, file, rename });
+  hooks.current = { trash, restore, file, rename };
   useEffect(() => {
     configureUi({
       deleteNoteWithUndo: (note) => hooks.current.trash(note),
@@ -189,6 +236,8 @@ export function NoteBrowser() {
       // Move to Folder… and New Folder… both stop here for a destination; what
       // happens after the pick is decided below, by which request it was.
       pickFolder: (request) => setPicking(request),
+      // The field replaces a row, so only the list can put it there.
+      beginRenameFolder: (folder) => setRenaming(folder),
       // The browser's error strip doubles as the workspace commands' error
       // surface (a refused attach, a failed create): same sidebar, same shape
       // of failure report.
@@ -272,7 +321,10 @@ export function NoteBrowser() {
                 key={row.id}
                 row={row}
                 dropping={dropOn === row.folder}
+                renaming={renaming === row.folder}
                 rowProps={nav.rowProps(row.id, i)}
+                onRename={(name) => rename(row.folder, name)}
+                onEndRename={() => setRenaming(null)}
                 onToggle={() => toggleFolder(selected.folder, row.folder)}
                 onDropNote={(path) => {
                   const note = notes.find((n) => n.path === path);
@@ -382,6 +434,11 @@ export function NoteBrowser() {
           />
           {!readOnly && (
             <>
+              <CommandMenuItem
+                id="folder.rename"
+                target={{ kind: "folder", folder: menu.folder }}
+                onClose={() => setMenu(null)}
+              />
               <CommandMenuItem
                 id="note.newInFolder"
                 target={{ kind: "folder", folder: menu.folder }}
@@ -804,7 +861,10 @@ function NoteRow({
 function FolderRow({
   row,
   dropping,
+  renaming,
   rowProps,
+  onRename,
+  onEndRename,
   onToggle,
   onDropNote,
   onDropTarget,
@@ -812,7 +872,10 @@ function FolderRow({
 }: {
   row: Extract<BrowserRow, { kind: "folder" }>;
   dropping: boolean;
+  renaming: boolean;
   rowProps: ReturnType<ReturnType<typeof useListNav>["rowProps"]>;
+  onRename: (name: string) => void;
+  onEndRename: () => void;
   onToggle: () => void;
   onDropNote: (path: string) => void;
   onDropTarget: (folder: string | null | undefined) => void;
@@ -823,8 +886,12 @@ function FolderRow({
     <div
       {...rowProps}
       {...targetAttrs({ kind: "folder", folder: row.folder })}
-      {...press}
+      // While the field is up the row is not a row: a tap in it is a caret
+      // placement, not a toggle, and a long-press is a text selection, not a
+      // menu.
+      {...(renaming ? {} : press)}
       onDragOver={(e) => {
+        if (renaming) return; // the pointer belongs to the field
         if (!e.dataTransfer.types.includes(NOTE_DRAG)) return;
         e.preventDefault();
         e.dataTransfer.dropEffect = "move";
@@ -853,10 +920,18 @@ function FolderRow({
       ) : (
         <Folder className="size-3.5 shrink-0 text-muted-foreground" />
       )}
-      <div className="min-w-0 flex-1 truncate text-sm leading-tight">{row.name}</div>
+      {renaming ? (
+        // Seeded with the NAME, not the path: a rename says what the folder is
+        // called and not where it sits, and a field holding `projects/api`
+        // would invite a `/` the rename refuses (shared/folders.ts).
+        <RenameField initial={row.name} onCommit={onRename} onDone={onEndRename} />
+      ) : (
+        <div className="min-w-0 flex-1 truncate text-sm leading-tight">{row.name}</div>
+      )}
       {/* What the disclosure is hiding, so a collapsed folder still says how
-          much is in it. Withheld while it is open, where the rows say it. */}
-      {!row.expanded && (
+          much is in it. Withheld while it is open, where the rows say it, and
+          while it is being renamed, where the field wants the width. */}
+      {!row.expanded && !renaming && (
         <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground/70">{row.count}</span>
       )}
     </div>

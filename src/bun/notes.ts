@@ -41,7 +41,7 @@ import {
   vaultState,
 } from "./vault";
 import { assetPathOf, assetRefFor, imageMimeOf, rawAssetBytes, replaceAssetBytes } from "./assets";
-import { folderNameProblem, folderScopeOf, notesUnder } from "../shared/folders";
+import { folderLeafProblem, folderNameProblem, folderScopeOf, notesUnder } from "../shared/folders";
 
 // Deleted notes are moved into their own root's .ledge-trash rather than
 // unlinked. Per root, not one shared bin: the move must stay a same-filesystem
@@ -993,6 +993,119 @@ export async function moveNote(path: string, folder: string | null): Promise<Not
     reserved.delete(name);
   }
   return metaAt(target);
+}
+
+// Two directory entries that are the same directory. What a case-only rename
+// looks like on a case-insensitive filesystem, which APFS is by default:
+// `projects` and `Projects` are one folder, `stat` answers for both, and
+// "already exists" would be the wrong thing to say about the folder you are
+// renaming.
+async function sameEntry(a: string, b: string): Promise<boolean> {
+  const [x, y] = await Promise.all([stat(a).catch(() => null), stat(b).catch(() => null)]);
+  return x !== null && y !== null && x.dev === y.dev && x.ino === y.ino;
+}
+
+/** Is there a directory here? A missing path and a file both answer no. */
+async function isDir(path: string): Promise<boolean> {
+  return (await stat(path).catch(() => null))?.isDirectory() ?? false;
+}
+
+/**
+ * Rename a folder: ONE rename(2) of the directory, not a move of every note in
+ * it.
+ *
+ * The name changes and the parent does not, and that restriction is what makes
+ * this both cheap and safe. A note's image references are relative to the note
+ * (assets.ts), so what a move has to rewrite is DEPTH — `.ledge-assets/x.png`
+ * at the top level is `../.ledge-assets/x.png` one folder down. A rename that
+ * leaves the folder where it sits changes no note's depth, so every one of
+ * those strings is still right and this reads and writes no note's bytes at
+ * all. The asset pool is one flat directory per root (architecture.md §3), so
+ * there is nothing there to move either.
+ *
+ * Three things follow from touching no bytes. The whole folder travels in one
+ * atomic call however many notes are under it, the way `moveRoot` moves a
+ * whole workspace. A LOCKED note rides along with its vault shut, where
+ * `moveNote` has to refuse one: nothing here needs to see inside a body,
+ * because nothing inside a body is about to become wrong. And what comes back
+ * is the notes' old metadata with new paths rather than a re-read, since
+ * rename(2) moves a directory entry and does not touch a file inside it — the
+ * titles, tags, locks and mtimes `listNotes` just read are all still true.
+ *
+ * `name` is therefore one SEGMENT and not a path (shared/folders.ts
+ * folderLeafProblem). There is no spelling of it that moves the folder
+ * elsewhere: that is a different verb, with a different question to ask
+ * (which parent), and it would have to rebase every note it moved.
+ */
+export async function renameFolder(
+  root: string,
+  folder: string,
+  name: string,
+): Promise<{ folder: string; moved: Array<{ from: string; note: NoteMeta }> }> {
+  const r = assertWritableRoot(assertRegisteredRoot(root));
+  await rootReady(r);
+  const scope = folderScopeOf(folder);
+  const from = folderPathOf(r, scope);
+  if (from === r) throw new Error("the workspace's own folder is renamed in the workspace strip, not here");
+  if (!(await isDir(from))) throw new Error(`there is no "${scope}" folder in this workspace`);
+
+  const problem = folderLeafProblem(name);
+  if (problem !== null) throw new Error(`not a folder name: ${name} (${problem})`);
+  const to = join(dirname(from), name.trim());
+  if (to === from) return { folder: scope, moved: [] }; // the outcome asked for
+  const newFolder = relative(r, to).split(sep).join("/");
+
+  // rename(2) clobbers a directory quietly when it can: onto an EMPTY one it
+  // succeeds and swallows it, onto a full one it fails with a raw ENOTEMPTY.
+  // Neither is an answer, so the destination is checked here — unless it is
+  // the source, which is what a case-only rename looks like (sameEntry), and
+  // fixing the case of a name is half of what renaming is for.
+  if ((await isDir(to)) && !(await sameEntry(from, to))) {
+    throw new Error(
+      `there is already a folder called "${name.trim()}" here — one holding no notes is not in the list, but it is still on disk`,
+    );
+  }
+  // ensureFolder's check, for ensureFolder's reason: a note that listNotes
+  // will never show is a silent disappearance, and renaming a folder INTO an
+  // ignored name would take every note in it off the list at once. Only the
+  // new name needs asking about — the parent is unchanged, and it is on
+  // screen, so it is not ignored.
+  const ignore = await loadIgnore(r);
+  if (ignore.ignores(newFolder, true)) {
+    throw new Error(
+      `"${newFolder}" is ignored in this workspace, so its notes would disappear from the list (see .ledgeignore)`,
+    );
+  }
+
+  // Listed BEFORE the rename, because this is the call that knows which notes
+  // were in the folder; afterwards they are somewhere else and nothing records
+  // where they came from.
+  const before = notesUnder(await listNotes(r), scope);
+  await rename(from, to);
+  const moved = before.map((note) => {
+    const path = join(to, relative(from, note.path));
+    return { from: note.path, note: { ...note, path, folder: folderOf(r, path) } };
+  });
+
+  // The trash mirrors the workspace's folders (architecture.md §3), so it
+  // follows the rename. Without this, deleting a note out of `projects`,
+  // renaming the folder to `work` and then pressing Undo would restore that
+  // note into a resurrected `projects` sitting beside the `work` it came from.
+  //
+  // After the fact and best-effort, both deliberately. The rename the user
+  // asked for has already happened, and a mirror that would not move is not a
+  // reason to report it as failed. A destination that already exists is left
+  // alone rather than merged: those notes were deleted from a folder that
+  // really was called that, and a restore puts a note back where it came from.
+  const mirror = join(trashDirOf(r), scope);
+  const mirrorTo = join(trashDirOf(r), newFolder);
+  if ((await isDir(mirror)) && (!(await isDir(mirrorTo)) || (await sameEntry(mirror, mirrorTo)))) {
+    await rename(mirror, mirrorTo).catch((err) => {
+      console.warn("[notes] renamed the folder but not its trash", err);
+    });
+  }
+
+  return { folder: newFolder, moved };
 }
 
 // Move a note's file to match its heading. Returns the note where it now lives,

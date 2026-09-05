@@ -21,6 +21,14 @@ export interface NoteFile {
   damaged?: true;
 }
 
+// What a folder rename reports: where the folder is now, and every note that
+// travelled with it. `from` is the path the view's tabs and note list still
+// hold; `note` is the same note where it now lives.
+export interface FolderRenamed {
+  folder: string;
+  moved: Array<{ from: string; note: NoteMeta }>;
+}
+
 // What a guarded write reports: the new disk version, and where an external
 // edit went (the root's trash) when the save displaced one — null normally.
 export interface WriteResult {
@@ -53,6 +61,10 @@ interface NoteHandlers {
   retitle: (path: string, text: string) => Promise<NoteMeta>;
   // Move a note into another folder of its own workspace (rpc noteMove).
   move: (path: string, subfolder: string | null) => Promise<NoteMeta>;
+  // Rename one folder of a workspace, in place (rpc folderRename). `name` is
+  // one segment, never a path. Resolves to the folder's new root-relative
+  // path and to every note that travelled — old path beside new meta.
+  renameFolder: (folder: string, subfolder: string, name: string) => Promise<FolderRenamed>;
   remove: (path: string) => Promise<string | null>;
   trash: (folder: string) => Promise<TrashMeta[]>;
   restore: (path: string) => Promise<NoteMeta>;
@@ -159,6 +171,15 @@ export function createNote(folder: string, text: string, subfolder?: string | nu
 // editor and shell hanging off that docId.
 export function moveNote(path: string, subfolder: string | null): Promise<NoteMeta> {
   return bridge().move(path, subfolder);
+}
+
+// Rename a folder of the selected workspace, keeping it where it sits (rpc
+// folderRename). `name` is the folder's new NAME and not a path: renaming does
+// not move it, so nothing under it changes depth and no note's body is read or
+// rewritten — which is why this works on a folder holding locked notes with
+// the vault shut, where moving one does not.
+export function renameFolder(folder: string, subfolder: string, name: string): Promise<FolderRenamed> {
+  return bridge().renameFolder(folder, subfolder, name);
 }
 
 // Ask Bun to move a note's file to match its heading. Takes the note's text, not

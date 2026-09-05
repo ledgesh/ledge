@@ -69,6 +69,27 @@ export function folderNameProblem(folder: string): string | null {
   return null;
 }
 
+/**
+ * Why `name` is not a usable folder name for a RENAME, or null when it is
+ * fine. `folderNameProblem`'s rules plus the two that a single segment adds.
+ *
+ * Empty is one of them: "" is a perfectly good folder PATH (it is the root)
+ * and no kind of folder name at all, so the rule that lets the root through
+ * above has to be closed here.
+ *
+ * A separator is the other. A rename says what the folder is called; it does
+ * not say where it sits, and the two are different questions with different
+ * UI — a name is a field, a parent is a chooser. A `/` in the field is
+ * therefore a typo, not a shorthand, and reading it as one would silently
+ * reparent the folder (bun/notes.ts renameFolder).
+ */
+export function folderLeafProblem(name: string): string | null {
+  const trimmed = name.trim();
+  if (trimmed === "") return "a folder needs a name";
+  if (trimmed.includes("/")) return "a rename names a folder, it does not move it";
+  return folderNameProblem(trimmed);
+}
+
 /** The notes at or below `folder`. The whole list when the scope is the root. */
 export function notesUnder<T extends Pick<NoteMeta, "folder">>(notes: readonly T[], folder: string): T[] {
   return folder === "" ? [...notes] : notes.filter((n) => folderContains(folder, n.folder ?? ""));

@@ -24,10 +24,12 @@ import {
   emptyTrash,
   listTrash,
   moveNote as moveFile,
+  renameFolder as renameFolderFile,
   restoreNote as untrashFile,
   type NoteMeta,
 } from "./channel";
 import { forgetDoc, freezeDoc, retargetDoc } from "./store";
+import { folderRenamed } from "./expansion";
 import type { Action } from "@/workspace/store";
 
 // Re-read one workspace folder's trash. Every mutation below ends with one
@@ -165,4 +167,60 @@ export async function moveNoteTo(
   // history and the note's shells carry through the move.
   dispatch({ type: "noteRenamed", path, note });
   return { note, error: null };
+}
+
+// Rename one folder of the selected workspace. The sidebar's inline field on a
+// folder row is the only door.
+//
+// moveNoteTo's freeze dance, N notes wide and for the same reason: every note
+// under the folder is about to be at a new path, and any of them may be
+// autosaving in a pane right now. An edit landing mid-rename would write to the
+// old path — which, since Bun moved the whole DIRECTORY, means recreating the
+// old folder around one resurrected file. Frozen, the edit waits; retargetDoc
+// then aims it at wherever its note ended up, which is the new path on success
+// and the old one on failure.
+//
+// `openDocs` is every open tab on every note under the folder, keyed by the
+// path the caller knows it by (a note can be open in more than one pane). The
+// caller builds it from the store, before anything awaits.
+export async function renameFolderTo(
+  root: string,
+  folder: string,
+  name: string,
+  openDocs: ReadonlyMap<string, readonly string[]>,
+  dispatch: (action: Action) => void,
+): Promise<{ folder: string | null; error: string | null }> {
+  for (const ids of openDocs.values()) for (const id of ids) freezeDoc(id);
+  let renamed: { folder: string; moved: Array<{ from: string; note: NoteMeta }> };
+  try {
+    renamed = await renameFolderFile(root, folder, name);
+  } catch (err) {
+    for (const [path, ids] of openDocs) for (const id of ids) retargetDoc(id, path); // nothing moved
+    console.error("[notes] folder rename failed", err);
+    return { folder: null, error: err instanceof Error ? err.message : String(err) };
+  }
+  // BEFORE the dispatches, and that order is the whole of it: the open set is
+  // keyed by folder path, so the render that first shows a note at
+  // `work/beta.md` must already agree that `work` is open. Publish it
+  // afterwards and the tree collapses for a frame and springs back.
+  folderRenamed(root, folder, renamed.folder);
+  for (const { from, note } of renamed.moved) {
+    for (const id of openDocs.get(from) ?? []) retargetDoc(id, note.path);
+    // One per note, the same action a retitle and a move fire: a note's file
+    // moved and the tabs holding the old path follow it. Every docId is
+    // untouched, so every open editor, its undo history and its shells carry
+    // through — a folder rename costs no more session state than renaming one
+    // note does.
+    dispatch({ type: "noteRenamed", path: from, note });
+  }
+  // Every tab the answer did not name is unfrozen where it was. Bun lists the
+  // notes it moved from its own walk, so a tab on a note the view had and that
+  // walk did not would otherwise stay FROZEN for the rest of the session,
+  // collecting edits it never writes. Aimed at the old path, which is the
+  // honest answer: this call was told nothing about it.
+  for (const [path, ids] of openDocs) {
+    if (renamed.moved.some((m) => m.from === path)) continue;
+    for (const id of ids) retargetDoc(id, path);
+  }
+  return { folder: renamed.folder, error: null };
 }

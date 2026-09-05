@@ -27,6 +27,7 @@ import {
   listTrash,
   lockNote,
   moveNote,
+  renameFolder,
   notesTagged,
   purgeTrash,
   readNote,
@@ -770,6 +771,138 @@ describe("folders", () => {
     await deleteNote((await createNote(ROOT, "# B\n")).path);
     expect(await emptyTrash(ROOT)).toBe(2);
     expect(await listTrash(ROOT)).toEqual([]);
+  });
+});
+
+describe("renameFolder", () => {
+  test("one rename carries every note under the folder, however deep", async () => {
+    const top = await createNote(ROOT, "# Plan\n", "projcts");
+    const deep = await createNote(ROOT, "# Api\n", "projcts/api/v2");
+    const outside = await createNote(ROOT, "# Elsewhere\n", "admin");
+    const { folder, moved } = await renameFolder(ROOT, "projcts", "projects");
+    expect(folder).toBe("projects");
+    expect(moved.map((m) => m.from).sort()).toEqual([deep.path, top.path].sort());
+    expect(moved.find((m) => m.from === deep.path)?.note.folder).toBe("projects/api/v2");
+    const listed = await listNotes(ROOT);
+    expect(listed.map((n) => n.folder ?? "").sort()).toEqual(["admin", "projects", "projects/api/v2"]);
+    expect(listed.find((n) => n.title === "Elsewhere")?.path).toBe(outside.path); // untouched
+    await expect(stat(join(ROOT, "projcts"))).rejects.toThrow(); // the old name is gone
+  });
+
+  test("a sibling whose name starts the same is not swept up", async () => {
+    // folderContains' trap, on the rename side: `a` must not take `ab` with it.
+    // A prefix comparison without the separator would rename both.
+    const inside = await createNote(ROOT, "# In\n", "a");
+    const sibling = await createNote(ROOT, "# Beside\n", "ab");
+    const { moved } = await renameFolder(ROOT, "a", "c");
+    expect(moved.map((m) => m.from)).toEqual([inside.path]);
+    expect((await listNotes(ROOT)).find((n) => n.title === "Beside")?.path).toBe(sibling.path);
+  });
+
+  test("the meta comes back with the old title, tags and mtime, only the path new", async () => {
+    // rename(2) moves a directory entry and touches no file inside it, which
+    // is what lets this answer from the listing it already had instead of
+    // re-reading every note. If that ever stops being true this is the test
+    // that says so.
+    const note = await createNote(ROOT, "# Plan\n\n#roadmap\n", "old");
+    const before = (await listNotes(ROOT))[0]!;
+    const { moved } = await renameFolder(ROOT, "old", "new");
+    const after = moved[0]!.note;
+    expect(after.title).toBe(before.title);
+    expect(after.mtimeMs).toBe(before.mtimeMs);
+    expect(after.path).toBe(join(ROOT, "new", "plan.md"));
+    // And the file itself is byte-identical: nothing read it, nothing rewrote it.
+    expect(await readRaw(after.path, "utf8")).toBe("# Plan\n\n#roadmap\n");
+    expect(note.path).toBe(join(ROOT, "old", "plan.md"));
+  });
+
+  test("a locked note travels with the vault shut, where moving one is refused", async () => {
+    // The whole reason a rename is one call and not N moves. moveNote has to
+    // read a locked body to rebase its image references and refuses when it
+    // cannot; a rename changes no note's DEPTH, so those references are still
+    // right and nothing needs to see inside.
+    resetVaultForTests();
+    await createVault("test passphrase");
+    const note = await createNote(ROOT, "# Secrets\n\nplutonium\n", "old");
+    await lockNote(note.path);
+    const sealed = await readRaw(note.path, "utf8");
+    lockVault();
+    await expect(moveNote(note.path, "elsewhere")).rejects.toThrow(/unlock first/);
+    const { moved } = await renameFolder(ROOT, "old", "new");
+    expect(moved).toHaveLength(1);
+    expect(await readRaw(join(ROOT, "new", "secrets.md"), "utf8")).toBe(sealed);
+    expect(await isNoteLocked(join(ROOT, "new", "secrets.md"))).toBe(true);
+  });
+
+  test("a name is one segment: a path is refused rather than reparenting the folder", async () => {
+    await createNote(ROOT, "# A\n", "old");
+    await expect(renameFolder(ROOT, "old", "deep/new")).rejects.toThrow(/does not move it/);
+    await expect(renameFolder(ROOT, "old", "..")).rejects.toThrow(/not a folder name/);
+    await expect(renameFolder(ROOT, "old", ".hidden")).rejects.toThrow(/dot-folders/);
+    await expect(renameFolder(ROOT, "old", "  ")).rejects.toThrow(/needs a name/);
+    expect(await listNotes(ROOT)).toHaveLength(1);
+    expect((await listNotes(ROOT))[0]?.folder).toBe("old");
+  });
+
+  test("a name another folder already answers to is refused, not merged", async () => {
+    await createNote(ROOT, "# A\n", "old");
+    await createNote(ROOT, "# B\n", "new");
+    await expect(renameFolder(ROOT, "old", "new")).rejects.toThrow(/already a folder called/);
+    // Including one holding no notes, which the browser does not draw: rename(2)
+    // would swallow an empty directory without a word.
+    await mkdir(join(ROOT, "empty"));
+    await expect(renameFolder(ROOT, "old", "empty")).rejects.toThrow(/already a folder called/);
+  });
+
+  test("changing only the case of a name is a rename, not a collision", async () => {
+    // On APFS `old` and `Old` are one directory, so the existence check has to
+    // ask whether the destination is the SOURCE — and fixing the case of a
+    // name is half of what renaming is for.
+    await createNote(ROOT, "# A\n", "old");
+    const { folder } = await renameFolder(ROOT, "old", "Old");
+    expect(folder).toBe("Old");
+    expect((await listNotes(ROOT))[0]?.folder).toBe("Old");
+  });
+
+  test("the same name is the outcome asked for, not an error", async () => {
+    await createNote(ROOT, "# A\n", "keep");
+    expect(await renameFolder(ROOT, "keep", "keep")).toEqual({ folder: "keep", moved: [] });
+  });
+
+  test("the workspace's own folder has no name to change here", async () => {
+    await expect(renameFolder(ROOT, "", "anything")).rejects.toThrow(/workspace strip/);
+  });
+
+  test("a folder nothing is in is refused by name", async () => {
+    await expect(renameFolder(ROOT, "ghost", "other")).rejects.toThrow(/no "ghost" folder/);
+  });
+
+  test("renaming into an ignored name is refused, since the notes would leave the list", async () => {
+    await writeRaw(join(ROOT, ".ledgeignore"), "hidden\n");
+    await createNote(ROOT, "# A\n", "shown");
+    await expect(renameFolder(ROOT, "shown", "hidden")).rejects.toThrow(/is ignored in this workspace/);
+    expect(await listNotes(ROOT)).toHaveLength(1);
+  });
+
+  test("the trash mirror follows, so an Undo lands where the folder now is", async () => {
+    // The trash mirrors the workspace's folders. Without this, deleting a note
+    // out of `old`, renaming the folder and pressing Undo would restore it into
+    // a resurrected `old` sitting beside the `new` it came from.
+    const gone = await createNote(ROOT, "# Gone\n", "old");
+    const stays = await createNote(ROOT, "# Stays\n", "old");
+    const trashed = (await deleteNote(gone.path))!;
+    expect(relative(TRASH, trashed)).toBe(join("old", "gone.md"));
+    await renameFolder(ROOT, "old", "new");
+    expect(stays.path).toContain(join("old", "stays.md"));
+    const listed = await listTrash(ROOT);
+    expect(listed).toHaveLength(1);
+    expect(relative(ROOT, (await restoreNote(listed[0]!.path)).path)).toBe(join("new", "gone.md"));
+  });
+
+  test("the root has to be a registered workspace, like every other mutating call", async () => {
+    const stranger = join(APP_HOME, "unregistered");
+    await mkdir(join(stranger, "old"), { recursive: true });
+    await expect(renameFolder(stranger, "old", "new")).rejects.toThrow(/not a registered workspace root/);
   });
 });
 

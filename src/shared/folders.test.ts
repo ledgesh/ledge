@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { folderContains, folderNameProblem, folderScopeOf, notesUnder } from "./folders";
+import { folderContains, folderLeafProblem, folderNameProblem, folderScopeOf, notesUnder } from "./folders";
 
 const note = (path: string, folder?: string) =>
   ({ path, title: path, mtimeMs: 0, ...(folder === undefined ? {} : { folder }) }) as const;
@@ -64,6 +64,31 @@ describe("folderNameProblem", () => {
     expect(folderNameProblem("a//b")).toContain("empty");
     expect(folderNameProblem(".ledge-trash")).toContain("dot-folders");
     expect(folderNameProblem("a/.git")).toContain("dot-folders");
+  });
+});
+
+describe("folderLeafProblem", () => {
+  test("an ordinary name has no problem", () => {
+    expect(folderLeafProblem("projects")).toBeNull();
+    expect(folderLeafProblem("  projects  ")).toBeNull();
+  });
+
+  test("the root is a folder path and not a folder name", () => {
+    // The one rule folderNameProblem cannot supply: it lets "" through
+    // deliberately, because "" is where notes lived before folders.
+    expect(folderLeafProblem("")).toBe("a folder needs a name");
+    expect(folderLeafProblem("   ")).toBe("a folder needs a name");
+  });
+
+  test("a path is refused, because a rename does not move the folder", () => {
+    expect(folderLeafProblem("deep/new")).toBe("a rename names a folder, it does not move it");
+    expect(folderLeafProblem("/etc")).toBe("a rename names a folder, it does not move it");
+  });
+
+  test("everything folderNameProblem refuses is still refused, in its words", () => {
+    expect(folderLeafProblem("..")).toContain('".." segments');
+    expect(folderLeafProblem(".git")).toContain("dot-folders");
+    expect(folderLeafProblem("a\\b")).toBe("use / to separate segments");
   });
 });
 

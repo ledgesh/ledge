@@ -176,6 +176,118 @@ test.describe("creating", () => {
   });
 });
 
+test.describe("renaming a folder", () => {
+  // Located through the row kind rather than the row's text: once the field
+  // opens, the name is the input's VALUE and a hasText match finds nothing.
+  const field = (page: Page) => page.locator('[data-target-kind="folder"]').getByRole("textbox");
+
+  test("`r` opens a field on the row, and committing renames the folder", async ({ page }) => {
+    await folderRow(page, "admin").click(); // focuses the row (and opens it)
+    await page.keyboard.press("r");
+    await expect(field(page)).toBeVisible();
+    // Seeded with the NAME, not the path — a rename says what the folder is
+    // called, not where it sits.
+    await expect(field(page)).toHaveValue("admin");
+    await field(page).fill("finance");
+    await page.keyboard.press("Enter");
+    await expect(folderRow(page, "finance")).toBeVisible();
+    // And it re-sorts into place under the new name, still open, still holding
+    // its note: `finance` now comes before `projects` where `admin` did too.
+    expect(await treeRows(page)).toEqual(["finance/", "Delta", "projects/", "Alpha"]);
+    await expect(noteRow(page, "Delta")).toHaveAttribute("data-target-path", /\/finance\/delta\.md$/);
+  });
+
+  test("the menu item is the same verb", async ({ page }) => {
+    await folderRow(page, "admin").click({ button: "right" });
+    await page.getByRole("menuitem", { name: "Rename Folder…" }).click();
+    await field(page).fill("finance");
+    await page.keyboard.press("Enter");
+    await expect(folderRow(page, "finance")).toBeVisible();
+  });
+
+  test("a nested folder keeps its parent: only the last segment is the name", async ({ page }) => {
+    await folderRow(page, "projects").click();
+    await folderRow(page, "api").click();
+    await page.keyboard.press("r");
+    await expect(field(page)).toHaveValue("api"); // not "projects/api"
+    await field(page).fill("http");
+    await page.keyboard.press("Enter");
+    await expect(folderRow(page, "http")).toHaveAttribute("data-target-folder", "projects/http");
+    await expect(noteRow(page, "Gamma")).toHaveAttribute("data-target-path", /\/projects\/http\/gamma\.md$/);
+  });
+
+  test("the folders that were open stay open, under the new name", async ({ page }) => {
+    // A rename changes what a folder is CALLED, not whether it is open. The
+    // open set is keyed by path (notes/expansion.ts), so without the carry-over
+    // every row under the renamed folder would stop matching and the subtree
+    // would collapse itself.
+    await folderRow(page, "projects").click();
+    await folderRow(page, "api").click();
+    expect(await treeRows(page)).toEqual(["admin/", "projects/", "projects/api/", "Gamma", "Beta", "Alpha"]);
+    await folderRow(page, "projects").first().focus();
+    await page.keyboard.press("r");
+    await field(page).fill("work");
+    await page.keyboard.press("Enter");
+    expect(await treeRows(page)).toEqual(["admin/", "work/", "work/api/", "Gamma", "Beta", "Alpha"]);
+  });
+
+  test("the open note's tab follows every note under the folder", async ({ page }) => {
+    // Every docId is untouched, so the editor and its text live through the
+    // rename exactly as they do through a move; what changes is the file the
+    // tab points at.
+    await folderRow(page, "projects").click();
+    await noteRow(page, "Beta").click();
+    await expect(page.locator(".cm-content").first()).toContainText("beta body");
+    await folderRow(page, "projects").first().focus();
+    await page.keyboard.press("r");
+    await field(page).fill("work");
+    await page.keyboard.press("Enter");
+    await expect(noteRow(page, "Beta")).toHaveAttribute("data-target-path", /\/work\/beta\.md$/);
+    await expect(page.locator(".cm-content").first()).toContainText("beta body");
+  });
+
+  test("focus lands back on the row, so the keyboard never leaves the list", async ({ page }) => {
+    // A folder row's id is its path, so a rename REPLACES the row and the
+    // roving tabindex has nothing left to rove from (R5).
+    await folderRow(page, "admin").click();
+    await page.keyboard.press("r");
+    await field(page).fill("finance");
+    await page.keyboard.press("Enter");
+    await expect.poll(() => focusedRowKey(page)).toBe("dir:finance");
+  });
+
+  test("Escape abandons the field and renames nothing", async ({ page }) => {
+    await folderRow(page, "admin").click();
+    await page.keyboard.press("r");
+    await field(page).fill("finance");
+    await page.keyboard.press("Escape");
+    await expect(field(page)).toHaveCount(0);
+    await expect(folderRow(page, "admin")).toBeVisible();
+  });
+
+  test("keys typed in the field are typing, never row verbs", async ({ page }) => {
+    await folderRow(page, "admin").click();
+    await page.keyboard.press("r");
+    // `/` would open the scoped search and Enter is the row's disclosure; in
+    // the field they are two characters. (→ first: the field select-alls on
+    // mount, and ArrowRight collapses that to the end.)
+    await field(page).press("ArrowRight");
+    await field(page).press("/");
+    await field(page).press("r");
+    await expect(page.getByTestId("overlay-scope")).toHaveCount(0);
+    await expect(field(page)).toHaveValue("admin/r");
+  });
+
+  test("a name another folder already answers to is refused, and says so", async ({ page }) => {
+    await folderRow(page, "admin").click();
+    await page.keyboard.press("r");
+    await field(page).fill("projects");
+    await page.keyboard.press("Enter");
+    await expect(page.getByText(/already a folder called/)).toBeVisible();
+    expect(await treeRows(page)).toContain("admin/");
+  });
+});
+
 test.describe("where a note lives, once the list is flat", () => {
   test("quick-open names the folder beside the title", async ({ page }) => {
     // The sidebar answers "which folder" by position; ⌘P has no position to

@@ -73,7 +73,14 @@ describe("the schema's shape against the protocol version", () => {
   // bigger than the question and an answer to a different question. And the
   // narrowing is a selection, not a place: a `folder` the peer drops cannot
   // put a byte anywhere.
-  const PINNED = { protocol: 5, shape: "7dcd1028c73d96bb" };
+  //
+  // Then folderRename, which is a NEW METHOD and so the easiest of the three
+  // calls: it is noteMove's case exactly. A server that does not have it
+  // refuses it by name at the handshake's method check, and the rename fails
+  // saying so — loud, local, survivable (remote.md §11), which is the whole
+  // reason a missing method is not on the version's list. It changes no
+  // existing payload: nothing else in the schema was touched to add it.
+  const PINNED = { protocol: 5, shape: "05691fe7d4f4db42" };
 
   test("a payload shape does not change without someone deciding whether it breaks", async () => {
     const shape = digest(shapeOf(await Bun.file(SCHEMA).text()));

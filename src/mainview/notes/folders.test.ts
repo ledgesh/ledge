@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   browserRows,
   countIn,
+  expandedRenamed,
   expandedWith,
   expandedWithout,
   folderList,
@@ -146,5 +147,22 @@ describe("expansion", () => {
 
   test("collapsing does not take a folder whose name merely prefixes it", () => {
     expect([...expandedWithout(new Set(["a", "ab"]), "a")]).toEqual(["ab"]);
+  });
+
+  test("renaming a folder renames what is open under it, and opens nothing new", () => {
+    // A rename changes what folders are CALLED and not which are open, so the
+    // tree must look exactly the same afterwards. Keyed by path, so without
+    // this every open row under the folder would simply stop matching and the
+    // subtree would collapse itself.
+    const next = expandedRenamed(new Set(["projcts", "projcts/api", "admin"]), "projcts", "projects");
+    expect([...next].sort()).toEqual(["admin", "projects", "projects/api"]);
+  });
+
+  test("renaming does not take a folder whose name merely prefixes it", () => {
+    expect([...expandedRenamed(new Set(["a", "ab"]), "a", "c")].sort()).toEqual(["ab", "c"]);
+  });
+
+  test("a collapsed folder stays collapsed under its new name", () => {
+    expect([...expandedRenamed(new Set(["admin"]), "projcts", "projects")]).toEqual(["admin"]);
   });
 });

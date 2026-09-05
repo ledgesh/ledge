@@ -77,6 +77,11 @@ export interface UiHooks {
   // note list and its text search both), "" or absent being the whole of it.
   openOverlay(mode: "notes" | "commands" | "search", opts?: { query?: string; folder?: string }): void;
   beginRenameWorkspace(id: string): void;
+  // Put the inline rename field on a folder row of the note browser — the
+  // workspace strip's rename gesture, one register down. The browser owns it
+  // for the browser's own reason: the field replaces a ROW, and only the list
+  // knows which row that is.
+  beginRenameFolder(folder: string): void;
   // Open the icon picker on a workspace, anchored to its row in the strip.
   pickWorkspaceIcon(id: string): void;
   // Open the move-destination chooser (Sidebar's dialog) on an EXTERNAL

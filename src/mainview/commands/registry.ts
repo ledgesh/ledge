@@ -1038,6 +1038,30 @@ export function buildCommands(deps: RegistryDeps): Command[] {
         if (ctx.target?.kind === "folder") ctx.ui.openOverlay?.("search", { folder: ctx.target.folder });
       },
     }),
+    // Renaming a folder. A field on the row, not a dialog: the folder is the
+    // row and its name is the whole question, which is the workspace strip's
+    // rename gesture one register down (Sidebar.tsx, components/RenameField).
+    //
+    // What it CANNOT do is move the folder. The field takes a name and refuses
+    // a path (shared/folders.ts folderLeafProblem), which is what keeps this to
+    // one atomic rename(2) of the directory: nothing under it changes depth,
+    // so no note's image references are rewritten, no note's body is read, and
+    // a folder full of LOCKED notes renames with the vault shut — where Move
+    // to Folder… has to refuse a single one.
+    //
+    // No double-click, unlike the workspace row. A click on a folder row
+    // toggles it, so a double-click is already two acts of the row's own Enter
+    // verb (R6) and cannot also mean rename. `r` and the menu item are the two
+    // paths, which is what R2 asks for.
+    cmd("folder.rename", {
+      icon: Pencil,
+      targetKind: "folder",
+      palette: false, // acts on a specific row; there is no "current folder"
+      when: (ctx) => ctx.target?.kind === "folder" && !docsSelected(ctx),
+      run: (ctx) => {
+        if (ctx.target?.kind === "folder") ctx.ui.beginRenameFolder?.(ctx.target.folder);
+      },
+    }),
     // A folder's Enter (interactions.md R6): its primary action is showing what
     // is in it. Two faces on the row's live state, the lock pair's move, so the
     // menu item says which way it will go. The browser owns the expansion, so

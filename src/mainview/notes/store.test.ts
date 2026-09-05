@@ -140,6 +140,7 @@ function fakeBridge() {
     // Filing verbs the save controller never reaches, present because the shim
     // is one interface and it has to be whole.
     move: async (path: string): Promise<NoteMeta> => ({ path, title: "moved", mtimeMs: 0 }),
+    renameFolder: async (_root: string, folder: string) => ({ folder, moved: [] }),
     // The trash half of the bridge: nothing in the save controller touches it,
     // but the shim is one interface and it has to be whole.
     remove: async () => null,

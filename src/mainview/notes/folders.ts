@@ -124,6 +124,22 @@ export function expandedWithout(expanded: ReadonlySet<string>, folder: string): 
   return new Set([...expanded].filter((f) => !folderContains(folder, f)));
 }
 
+/**
+ * The open set after a folder is renamed: the folder and everything under it
+ * answer to their new path. A rename opens and closes nothing — the same
+ * folders are open, and only what they are called changed, so a tree that
+ * collapsed itself would be losing state to an operation that changed no
+ * state.
+ *
+ * `folderContains` decides "under it" here too, and its root case is the one
+ * thing this must not inherit: `from` is a folder with a ROW, never the
+ * workspace itself, which has no name to change.
+ */
+export function expandedRenamed(expanded: ReadonlySet<string>, from: string, to: string): Set<string> {
+  if (from === "") return new Set(expanded);
+  return new Set([...expanded].map((f) => (folderContains(from, f) ? `${to}${f.slice(from.length)}` : f)));
+}
+
 /** Opening a folder opens its ancestors too: a row you cannot see is not
  * revealed by opening it. What Move to Folder… and New Note in Folder both
  * call, so the note they just filed is on screen where it landed. */

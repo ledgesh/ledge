@@ -16,7 +16,7 @@ import { headingOf, labelOf, slugify, slugOf } from "../shared/slug";
 import { frontmatterEnd, parseFrontmatter } from "../shared/frontmatter";
 import { instantiateTemplate, isoDateOf } from "../shared/template";
 import { collectHits, type SearchHit } from "../shared/search";
-import { notesUnder } from "../shared/folders";
+import { folderContains, folderLeafProblem, folderScopeOf, notesUnder } from "../shared/folders";
 import { resolveWikiTitle, wikiRefsOf } from "../shared/wikilinks";
 import { normalizeTag, tagDirectoryOf, tagRefsOf, type TagInfo } from "../shared/tags";
 import { knownHostsHost, validatePassword } from "../shared/connections";
@@ -25,7 +25,7 @@ import { configureBridge, dispatchRunEvent, dispatchRunLink, reconcileRuns } fro
 import { sendRunKey } from "./editor/inlineTerm";
 import { barFaceOf, type BarFace } from "./lib/nativeBridge";
 import { configureTerminal, dispatchTerminalDetached, dispatchTerminalRelink } from "./terminal/channel";
-import { configureNotes, dispatchExternalOpen, dispatchNotesChanged, dispatchNotesRelink, type ExternalOpenInfo, type NoteFile } from "./notes/channel";
+import { configureNotes, dispatchExternalOpen, dispatchNotesChanged, dispatchNotesRelink, type ExternalOpenInfo, type FolderRenamed, type NoteFile } from "./notes/channel";
 import { configureVault, recordVaultState, refreshVaultState } from "./vault/channel";
 import { configureWorkspaces, recordWorkspaceKinds } from "./workspace/channel";
 import { configureClipboard } from "./lib/clipboard";
@@ -454,6 +454,32 @@ class FakeStore {
     return this.meta(data, target);
   }
 
+  // The real renameFolder in Map form: rekey every note whose path sits under
+  // the folder, leaving its name, its text and its mtime alone. No lock check
+  // and no body read, which is the real one's point — a rename does not change
+  // any note's depth, so nothing inside a body is about to become wrong.
+  renameFolder(root: string, folder: string, name: string): FolderRenamed {
+    this.assertWritable(root);
+    const data = this.ensureRoot(root);
+    const problem = folderLeafProblem(name);
+    if (problem !== null) throw new Error(`not a folder name: ${name} (${problem})`);
+    const scope = folderScopeOf(folder);
+    const next = [...scope.split("/").slice(0, -1), name.trim()].join("/");
+    if (next === scope) return { folder: scope, moved: [] };
+    const held = [...data.notes.keys()].filter((p) => this.folderOf(p) === next);
+    if (held.length > 0) throw new Error(`there is already a folder called "${name.trim()}" here`);
+    const moved: FolderRenamed["moved"] = [];
+    for (const path of [...data.notes.keys()]) {
+      if (!folderContains(scope, this.folderOf(path))) continue;
+      const target = `${root}/${next}${path.slice(`${root}/${scope}`.length)}`;
+      const note = data.notes.get(path)!;
+      data.notes.delete(path);
+      data.notes.set(target, note);
+      moved.push({ from: path, note: this.meta(data, target) });
+    }
+    return { folder: next, moved };
+  }
+
   // Mirrors the real writeNote's guard (bun/notes.ts): a mismatched base with
   // genuinely different bytes moves the disk version into the trash and the
   // incoming text wins the live path; identical bytes just adopt the disk
@@ -722,6 +748,7 @@ configureNotes({
   create: async (folder, text, subfolder) => store.create(folder, text, subfolder),
   retitle: async (path, text) => store.retitle(path, text),
   move: async (path, subfolder) => store.moveNote(path, subfolder),
+  renameFolder: async (folder, subfolder, name) => store.renameFolder(folder, subfolder, name),
   remove: async (path) => store.remove(path),
   trash: async (folder) => store.listTrash(folder),
   restore: async (path) => store.restore(path),

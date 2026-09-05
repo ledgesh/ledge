@@ -105,6 +105,13 @@ new rules should imitate:
   folder to fill `MAX_HITS` on its own, so a scope applied to the results
   answers with nothing at all. Cheap to get wrong in a refactor and invisible
   when it is, since the wrong answer is a well-formed empty list;
+- a folder RENAME reads no note's bytes (`notes.fs.test.ts`): the folder it
+  renames holds a locked note with the vault shut, and the same test asserts
+  that `moveNote` refuses that note — the control that proves the vault really
+  is shut, in the same breath. A rename that grew a read (a "hardening" that
+  copied moveNote's refusal, or a rewrite into N moves) fails here and nowhere
+  else, because for an unlocked note the two are indistinguishable from
+  outside;
 - the browser's row ids are unique across the two row kinds
   (`folders.test.ts`), because `useListNav` moves focus by id and a folder
   named like a note's path would put a keystroke on the wrong row.

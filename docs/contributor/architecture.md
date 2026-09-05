@@ -243,8 +243,20 @@ Bun therefore validates everything and derives anything derivable:
   note's OWN root's `.ledge-trash` — per workspace root, not one shared bin,
   so the move never crosses a filesystem (no EXDEV on an external volume)
   and a restore lands back in the workspace it left. Retitle is a rename. Restore
-  is a rename. Moving a note between folders (`moveNote`) is a rename, within
-  one root: a note's root decides its wikilink scope, its tag directory, its
+  is a rename. Renaming a FOLDER (`renameFolder`) is one rename of the
+  directory rather than a move of every note in it, which it can be because
+  the name changes and the parent does not: nothing under the folder changes
+  depth, so every note's image references are still right and no note's bytes
+  are read or written. That is also why a folder of LOCKED notes renames with
+  the vault shut where a single locked note cannot be moved — nothing inside a
+  body is about to become wrong. The `name` is one segment and never a path
+  (`shared/folders.ts` folderLeafProblem), because moving a folder would
+  change depth and so would have to rebase every note it moved; and an
+  existing destination is refused rather than merged, since rename(2) swallows
+  an empty directory in silence. The mirrored trash follows the rename,
+  best-effort and afterwards, so an Undo lands where the folder now is rather
+  than resurrecting the old name. Moving a note between folders (`moveNote`)
+  is a rename, within one root: a note's root decides its wikilink scope, its tag directory, its
   asset pool and its trash, so cross-root is four migrations rather than a
   rename and is not offered. Moving a workspace (`moveRoot`) is ONE rename of the whole
   folder — cross-volume is refused (EXDEV surfaces the move-in-Finder-then-
@@ -288,7 +300,10 @@ Bun therefore validates everything and derives anything derivable:
   relative only, no backslashes, no `.` or `..` segment, no dot-entry, inside
   the root once resolved. `..` is rejected on the raw segments rather than
   left to the containment check, so `a/../b` cannot quietly mean `b` — the
-  folder a caller names is the folder they get, or an error. `ensureFolder`
+  folder a caller names is the folder they get, or an error.
+  `folderLeafProblem` is those same rules plus the two that a single SEGMENT
+  adds — not empty, and no separator — for the one caller that NAMES a folder
+  without placing anything in it: `renameFolder`. `ensureFolder`
   adds the two checks that need the disk: the write guard, and a refusal when
   the folder (or any ancestor) is ignored, since a note `listNotes` will never
   show is a silent disappearance. A folder is *placement*, never identity —

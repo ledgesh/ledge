@@ -342,6 +342,19 @@ export type LedgeRPC = {
       // locked note whose vault is shut — its references are inside the
       // encrypted body (bun/notes.ts moveNote).
       noteMove: { params: { path: string; folder: string | null }; response: { note: NoteMeta } };
+      // Rename a folder of one workspace, keeping it where it sits: `name` is
+      // one SEGMENT, never a path (shared/folders.ts folderLeafProblem). One
+      // rename(2) of the directory, so it is atomic however many notes are
+      // under it and no note's bytes are read or written — which is why a
+      // LOCKED note travels with its vault shut, where noteMove has to refuse
+      // one. Nothing inside a body is about to become wrong: image references
+      // are relative to the note, and the folder's depth does not change.
+      // `moved` is every note that travelled, old path beside new meta, for
+      // the view to carry its open tabs across (notes/actions.ts).
+      folderRename: {
+        params: { root: string; folder: string; name: string };
+        response: { folder: string; moved: Array<{ from: string; note: NoteMeta }> };
+      };
       // Move a note's file to match its first-line H1, returning where it now
       // lives (possibly unmoved). The view sends the note's TEXT, not a name: Bun
       // slugs the heading itself, so the name is safe by construction and there is

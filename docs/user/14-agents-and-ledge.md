@@ -26,7 +26,7 @@ Two notes in different folders may share a title, so `list_notes` tells them apa
 
 Listing, searching, and the tag tools take a `folder` to narrow to one, and it covers the folders inside it as well. The tools that address a note by title take one too, which is how an agent says which of two notes sharing a title it means. `create_note` takes one to place a new note, creating the folder if it is new, and `daily_note` takes one for the day it creates today's note.
 
-Without a folder a new note lands at the top level of the workspace, which is where your own New Note puts one. There is no tool for moving a note afterwards: filing is yours, in the sidebar ([[Notes and Workspaces]]).
+Without a folder a new note lands at the top level of the workspace, which is where your own New Note puts one. There is no tool for moving a note afterwards, and none for renaming a folder: filing is yours, in the sidebar ([[Notes and Workspaces]]).
 
 ## Agents know which note they are in
 

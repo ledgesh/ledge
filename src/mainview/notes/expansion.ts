@@ -12,8 +12,12 @@
 // list that is itself derived from the notes (notes/folders.ts): a workspace
 // whose folders changed on disk has nothing here to reconcile, because an
 // entry naming a folder that no longer exists simply never matches a row.
+// The one thing that DOES have to be told is a rename made in the app
+// (folderRenamed below) — there the folder is the same folder and only its
+// name changed, so letting the entry stop matching would collapse a subtree
+// nobody closed.
 import { useSyncExternalStore } from "react";
-import { expandedWith, expandedWithout } from "./folders";
+import { expandedRenamed, expandedWith, expandedWithout } from "./folders";
 
 // Keyed by workspace ROOT, so switching workspaces and switching back finds
 // the tree the way it was left, and two workspaces cannot share an answer for
@@ -47,6 +51,14 @@ export function expandFolder(root: string, folder: string): void {
  * subtree you closed a while ago. */
 export function collapseFolder(root: string, folder: string): void {
   publish(root, expandedWithout(expandedIn(root), folder));
+}
+
+/** A folder was renamed: the rows under it are the same rows under new names,
+ * so the open ones stay open (folders.ts expandedRenamed). Called by the
+ * rename itself rather than derived, because an entry naming a folder that no
+ * longer exists never matches a row again — the tree would simply collapse. */
+export function folderRenamed(root: string, from: string, to: string): void {
+  publish(root, expandedRenamed(expandedIn(root), from, to));
 }
 
 export function toggleFolder(root: string, folder: string): void {

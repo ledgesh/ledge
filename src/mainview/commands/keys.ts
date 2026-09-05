@@ -239,6 +239,10 @@ export const COMMANDS = {
   // act — the CLI's `-f` and the MCP tools' `folder` have had it since agents
   // got folders, and this is the same scope for the person at the keyboard.
   "folder.search": { title: "Search in Folder", listKeys: ["/"] },
+  // `r` is the rename key one register down: it means Rename on a workspace row
+  // already, and a bare key is paired with a row KIND, so the folder row is
+  // free to spell it the same way. Nothing else on that row wanted it.
+  "folder.rename": { title: "Rename Folder…", listKeys: ["r"] },
 
   // Trash rows get the same grammar as note rows, with the verbs the trash has:
   // `r` restores, `d`/⌫ unlinks after a confirm. trash.delete is the second
