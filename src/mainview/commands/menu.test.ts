@@ -36,6 +36,11 @@ function stubDeps(over: Partial<RegistryDeps> = {}): RegistryDeps {
     openDailyNote: async () => null,
     newNoteFromTemplate: async () => ({ path: "/ws/n.md", title: "Untitled", mtimeMs: 0 }),
     createNote: async () => ({ path: "/ws/n.md", title: "Untitled", mtimeMs: 0 }),
+    // The browser's tree state, as the folder row's Expand/Collapse title
+    // reads it: closed unless a case says otherwise.
+    folderExpanded: () => false,
+    toggleFolder: noop,
+    expandFolder: noop,
     dailyRoot: () => null,
     vaultState: () => "unlocked",
     lockVaultNow: noop,

@@ -603,6 +603,22 @@ describe("folders", () => {
     expect((await listNotes(ROOT)).map((n) => n.title).sort()).toEqual(["Nested", "Top"]);
   });
 
+  test("a note's meta says which folder it is in, and says nothing at the top level", async () => {
+    // Every flat list of notes — quick-open, search, backlinks, the agents'
+    // listings — needs this to tell two same-titled notes apart. Derived from
+    // the path, so it cannot go stale; absent at the top level, which is where
+    // most notes are.
+    const top = await createNote(ROOT, "# Top\n");
+    const nested = await createNote(ROOT, "# Nested\n", "projects/api");
+    expect(top.folder).toBeUndefined();
+    expect(nested.folder).toBe("projects/api");
+    // And it survives the round trip through the listing, which is the copy
+    // the view actually holds.
+    const listed = await listNotes(ROOT);
+    expect(listed.find((n) => n.title === "Nested")?.folder).toBe("projects/api");
+    expect(listed.find((n) => n.title === "Top")?.folder).toBeUndefined();
+  });
+
   test("names enumerate per folder, so the same title in two folders is two files", async () => {
     const a = await createNote(ROOT, "# Notes\n", "a");
     const b = await createNote(ROOT, "# Notes\n", "b");

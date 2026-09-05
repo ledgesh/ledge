@@ -44,8 +44,15 @@ interface NoteHandlers {
   // Park a buffer's text in the note's trash without writing the note itself
   // (rpc noteStash). The stranded-edit path calls it and nothing else does.
   stash: (path: string, text: string) => Promise<string>;
-  create: (folder: string, text: string) => Promise<NoteMeta>;
+  // `subfolder` is where inside the workspace the note goes (root-relative,
+  // "" or null for the root itself) — the only name the view chooses, guarded
+  // Bun-side. Named apart from `folder` because in this file `folder` has
+  // always meant the workspace root, and the two must not be confused at a
+  // call site.
+  create: (folder: string, text: string, subfolder?: string | null) => Promise<NoteMeta>;
   retitle: (path: string, text: string) => Promise<NoteMeta>;
+  // Move a note into another folder of its own workspace (rpc noteMove).
+  move: (path: string, subfolder: string | null) => Promise<NoteMeta>;
   remove: (path: string) => Promise<string | null>;
   trash: (folder: string) => Promise<TrashMeta[]>;
   restore: (path: string) => Promise<NoteMeta>;
@@ -136,8 +143,16 @@ export function stashNote(path: string, text: string): Promise<string> {
   return bridge().stash(path, text);
 }
 
-export function createNote(folder: string, text: string): Promise<NoteMeta> {
-  return bridge().create(folder, text);
+export function createNote(folder: string, text: string, subfolder?: string | null): Promise<NoteMeta> {
+  return bridge().create(folder, text, subfolder);
+}
+
+// Move a note into another folder of the workspace it is already in (rpc
+// noteMove). The destination is a root-relative folder the user picked, null
+// for the workspace's top level; the note keeps its name, its docId, and the
+// editor and shell hanging off that docId.
+export function moveNote(path: string, subfolder: string | null): Promise<NoteMeta> {
+  return bridge().move(path, subfolder);
 }
 
 // Ask Bun to move a note's file to match its heading. Takes the note's text, not

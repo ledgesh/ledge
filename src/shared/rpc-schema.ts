@@ -57,6 +57,16 @@ export interface NoteMeta {
   // become the live template registry for free. Optional so the many
   // fixtures and metas that are not templates say nothing at all.
   template?: true | "daily";
+  // Where inside its workspace the note sits: a root-relative path with
+  // forward slashes ("projects/api"), ABSENT at the top level. Placement, not
+  // identity — the note is still addressed by title, and its `path` is still
+  // the handle every call takes. It rides here because every flat list of
+  // notes (quick-open, full-text search, backlinks, the sidebar tree's own
+  // grouping, the agents' listings) has to be able to say which of two
+  // same-titled notes a row means, and the folder is that answer. Derived from
+  // the path Bun-side, so it cannot go stale; optional so a workspace with no
+  // folders sends nothing extra.
+  folder?: string;
   // Present when the note is locked (its frontmatter carries the crypto
   // header, locking.md): the sidebar/⌘P lock glyph, the scans' skip,
   // and the agent listings' flag all read this. Rides the same head read
@@ -317,7 +327,21 @@ export type LedgeRPC = {
       // (and titles its tab from). Sent on a note's first edit, so a tab opened
       // and never typed in creates nothing. The root is the tab's workspace at
       // the moment of creation (tabs never move across workspaces).
-      noteCreate: { params: { root: string; text: string }; response: { note: NoteMeta } };
+      // `folder` places the new note inside the root ("projects/api",
+      // root-relative, created if missing); absent or empty is the root
+      // itself, which is where every note landed before folders existed. It
+      // is the only NAME the view chooses in this whole file — filenames are
+      // slugged from the note's own H1 — so bun/notes.ts folderPathOf guards
+      // it the way assetPathOf guards an image reference.
+      noteCreate: { params: { root: string; text: string; folder?: string | null }; response: { note: NoteMeta } };
+      // Move a note into another folder of its OWN workspace, keeping the name
+      // its heading gave it (suffixed only if the destination already holds
+      // that name). A rename(2), so the note's docId, editor, undo history and
+      // shell all live through it. `folder` null/empty is the root. Bun
+      // rewrites the note's image references for the new folder and refuses a
+      // locked note whose vault is shut — its references are inside the
+      // encrypted body (bun/notes.ts moveNote).
+      noteMove: { params: { path: string; folder: string | null }; response: { note: NoteMeta } };
       // Move a note's file to match its first-line H1, returning where it now
       // lives (possibly unmoved). The view sends the note's TEXT, not a name: Bun
       // slugs the heading itself, so the name is safe by construction and there is

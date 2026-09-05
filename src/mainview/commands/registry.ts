@@ -23,8 +23,10 @@ import {
   ExternalLink,
   FilePlus,
   FileText,
+  Folder,
   FolderInput,
   FolderOpen,
+  FolderPlus,
   Hash,
   Image,
   IndentDecrease,
@@ -66,6 +68,7 @@ import {
 } from "lucide-react";
 import { findLeaf, focusedDocId, focusedTab, leafIds } from "@/workspace/tree";
 import { notesOf, trashOf } from "@/workspace/store";
+import { SCRATCH_DOC } from "@/workspace/seeds";
 import { parseFrontmatter } from "../../shared/frontmatter";
 import type { NoteMeta } from "../../shared/rpc-schema";
 import { canInstallCli, canPickFolder, hasTerminal, multiWindow, runsBlocks, spawnsSessions } from "../lib/shell";
@@ -354,6 +357,7 @@ export function buildCommands(deps: RegistryDeps): Command[] {
       run: (ctx) => {
         void deps.createNote(ctx.selected.folder, STARTER_TEMPLATE).then((note) => {
           deps.revealTitle(note.path);
+          ctx.dispatch({ type: "noteAppeared", folder: ctx.selected.folder, note });
           ctx.dispatch({ type: "openNote", note });
         }, failed(ctx));
       },
@@ -960,6 +964,87 @@ export function buildCommands(deps: RegistryDeps): Command[] {
         if (ctx.target?.kind === "note") deps.copyText(ctx.target.path);
       },
     }),
+
+    // --- folders -------------------------------------------------------------
+    // Filing a note: the row's menu and `m` act on the row, the palette on the
+    // focused tab's note — Delete's target grammar exactly. The destination is
+    // asked for rather than typed into the command, because a folder is the one
+    // name the view chooses and the chooser is where it can also be created.
+    cmd("note.move", {
+      icon: FolderInput,
+      targetKind: "note",
+      when: (ctx) => !!targetNote(ctx) && !docsSelected(ctx),
+      run: (ctx) => {
+        const note = targetNote(ctx);
+        if (note) ctx.ui.pickFolder?.({ kind: "move", note });
+      },
+    }),
+    // A folder row's own create verb. No dialog: the folder is the row, so the
+    // only thing left to decide is the note's title, and that is the H1 — the
+    // note opens Untitled with the caret on it, like every other create.
+    cmd("note.newInFolder", {
+      icon: FilePlus,
+      targetKind: "folder",
+      palette: false, // there is no "current folder" to act on
+      when: (ctx) => ctx.target?.kind === "folder" && !docsSelected(ctx),
+      run: (ctx) => {
+        const t = ctx.target;
+        if (t?.kind !== "folder") return;
+        // The file is written NOW, unlike ⌘N's tab-that-may-never-be-typed-in:
+        // a folder is only in the browser because a note is in it
+        // (notes/folders.ts), so a deferred create would file the note into a
+        // row that is not there yet. Untitled with the caret on the title, so
+        // the first keystroke names it — every create-then-open does this.
+        deps.expandFolder(ctx.selected.folder, t.folder);
+        void deps.createNote(ctx.selected.folder, SCRATCH_DOC, t.folder).then((note) => {
+          deps.revealTitle(note.path);
+          // Into the list AND into a tab: the watcher's refresh would bring
+          // the row a moment later, and a row that arrives after the note it
+          // names is already open reads as a glitch.
+          ctx.dispatch({ type: "noteAppeared", folder: ctx.selected.folder, note });
+          ctx.dispatch({ type: "openNote", note });
+        }, failed(ctx));
+      },
+    }),
+    // New Folder… makes a folder AND the first note in it, because the browser
+    // shows the folders its notes are in (notes/folders.ts) — a folder made
+    // empty would be a folder that vanished. On a folder row it seeds the field
+    // with that folder, so nesting one inside it is a name and an Enter.
+    cmd("folder.new", {
+      icon: FolderPlus,
+      when: (ctx) => !docsSelected(ctx),
+      run: (ctx) =>
+        ctx.ui.pickFolder?.({
+          kind: "new",
+          parent: ctx.target?.kind === "folder" ? `${ctx.target.folder}/` : "",
+        }),
+    }),
+    // A folder's Enter (interactions.md R6): its primary action is showing what
+    // is in it. Two faces on the row's live state, the lock pair's move, so the
+    // menu item says which way it will go. The browser owns the expansion, so
+    // this is a hook rather than a dispatch — nothing in the store knows a
+    // folder is open.
+    // A LIVE TITLE rather than the lockOn/lockOff two-faces move, for
+    // frontmatter.edit's reason one register down: this one holds a bare key
+    // (Enter on the row), and two commands may not claim one bare key on one
+    // row kind — registry.test.ts refuses it, because the dispatcher would
+    // always fire the first. Built literally (not via cmd()) for exactly that
+    // title; keys.ts still owns the identity.
+    {
+      id: "folder.toggle",
+      title: (ctx) =>
+        ctx.target?.kind === "folder" && deps.folderExpanded(ctx.selected.folder, ctx.target.folder)
+          ? "Collapse"
+          : "Expand",
+      listKeys: listKeysOf("folder.toggle"),
+      icon: Folder,
+      targetKind: "folder",
+      palette: false, // acts on a specific row
+      when: (ctx) => ctx.target?.kind === "folder",
+      run: (ctx) => {
+        if (ctx.target?.kind === "folder") deps.toggleFolder(ctx.selected.folder, ctx.target.folder);
+      },
+    },
 
     // --- trash ---------------------------------------------------------------
     cmd("note.restore", {

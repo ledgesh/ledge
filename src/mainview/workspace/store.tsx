@@ -165,19 +165,27 @@ export type Action =
   // One workspace folder was re-read (at window focus). Replaces that folder's
   // known list and no other's.
   | { type: "notesLoaded"; folder: string; notes: NoteMeta[] }
-  // A note's file moved. `path` is where it was; `note` is where it is now. Fired
-  // from notes/actions.ts once Bun has done the rename, never before: the tab must
-  // not show a name the file does not have.
+  // A note's file moved. `path` is where it was; `note` is where it is now.
+  // Two things fire it: a retitle (the filename following the H1) and a move
+  // into another folder (notes/actions.ts moveNoteTo). Never before Bun has
+  // done the rename: the tab must not show a name the file does not have.
   | { type: "noteRenamed"; path: string; note: NoteMeta }
   // A note's file is gone (trashed). Closes its tabs wherever they are.
   | { type: "noteDeleted"; path: string }
   // One workspace folder's trash was re-read (at boot and at every refresh).
   | { type: "trashLoaded"; folder: string; items: TrashMeta[] }
-  // A trashed note came back to its folder, via Undo or the Restore button.
-  // `note` is where it landed, which need not be the name it was deleted
-  // under: its old name may have been taken since. Its tabs are NOT reopened;
-  // it simply rejoins the browser.
-  | { type: "noteRestored"; folder: string; note: NoteMeta }
+  // A note joined a workspace's list without a tab of this app's having
+  // written it: a trashed note came back (Undo, or the Restore button), or a
+  // command created one outright (New Folder…, New Note in Folder, the
+  // starter template). `note` is where it landed, which need not be the name
+  // that was asked for: an existing name may have been taken. No tab is
+  // opened here — the note simply joins the browser, and whoever wants it in
+  // front of the user dispatches openNote as well.
+  //
+  // The watcher's refresh would bring it in a moment later anyway; this is
+  // what keeps the row from arriving after the note it names is already on
+  // screen.
+  | { type: "noteAppeared"; folder: string; note: NoteMeta }
   // What a note is called on screen changed: its H1 was edited (or removed, and
   // the label fell back to the filename). Separate from noteRenamed because a
   // heading can change without the slug changing, and then no file moves at all.
@@ -436,8 +444,9 @@ export function reducer(state: AppState, action: Action): AppState {
         );
         return root === ws.root ? ws : { ...ws, root };
       });
-      // A rename never crosses folders, so the row updates in place wherever
-      // its path is found (paths are globally unique).
+      // The row is replaced wherever its old path is found (paths are globally
+      // unique) by the WHOLE new meta — which carries the new folder, so a move
+      // regroups the note in the browser's tree without a folder refresh.
       const notes = mapNoteLists(state.notes, (n) => (n.path === action.path ? action.note : n));
       return { ...state, workspaces, notes };
     }
@@ -475,7 +484,7 @@ export function reducer(state: AppState, action: Action): AppState {
     case "trashLoaded":
       return { ...state, trash: { ...state.trash, [action.folder]: action.items } };
 
-    case "noteRestored": {
+    case "noteAppeared": {
       const list = state.notes[action.folder] ?? [];
       if (list.some((n) => n.path === action.note.path)) return state;
       // Re-sorted rather than pushed to the front: a restored note keeps its real

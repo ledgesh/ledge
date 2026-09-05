@@ -137,6 +137,9 @@ function fakeBridge() {
       const slug = slugOf(text) ?? "untitled";
       return { path: `/notes/${slug}.md`, title: slug, mtimeMs: 0 };
     },
+    // Filing verbs the save controller never reaches, present because the shim
+    // is one interface and it has to be whole.
+    move: async (path: string): Promise<NoteMeta> => ({ path, title: "moved", mtimeMs: 0 }),
     // The trash half of the bridge: nothing in the save controller touches it,
     // but the shim is one interface and it has to be whole.
     remove: async () => null,

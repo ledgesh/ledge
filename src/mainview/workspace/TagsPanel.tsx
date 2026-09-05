@@ -11,7 +11,7 @@
 // standard keyboard-navigable kind (useListNav + targets, commands/
 // target.ts): a directory row's Enter drills in; an occurrence row's Enter
 // runs tag.openNote, backlink.open's open-at-the-place with a tag target.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, FileText, Hash, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ContextMenu } from "@/components/ContextMenu";
@@ -25,6 +25,7 @@ import { useRowMenu } from "@/lib/useRowMenu";
 import { listTags, notesTagged, onNotesChanged, type TagHit } from "@/notes/channel";
 import type { TagInfo } from "../../shared/tags";
 import { notesOf, useWorkspace } from "./store";
+import { FolderLabel, folderIndex } from "@/notes/FolderLabel";
 
 function tagTarget(info: TagInfo): CommandTarget {
   return { kind: "tag", tag: info.tag };
@@ -52,6 +53,9 @@ export function TagsPanel({ tag, onBack }: { tag: string | null; onBack: () => v
   // route, the direct onNotesChanged subscription is the low-latency half,
   // and the generation counter drops answers that arrive out of turn.
   const folderNotes = notesOf(state, selected.folder);
+  // Where each bearing note lives: a hit carries a path and a title, not a
+  // placement (notes/FolderLabel.tsx).
+  const folders = useMemo(() => folderIndex(folderNotes), [folderNotes]);
   const generation = useRef(0);
   useEffect(() => {
     const fetchNow = () => {
@@ -154,6 +158,7 @@ export function TagsPanel({ tag, onBack }: { tag: string | null; onBack: () => v
             <HitRow
               key={`${hit.path}:${hit.line}:${i}`}
               hit={hit}
+              folder={folders.get(hit.path)}
               rowProps={nav.rowProps(`${hit.path}:${hit.line}`, i)}
               onOpen={() => exec("tag.openNote", hitTarget(hit))}
               onContextMenu={(x, y) => setMenu({ hit, x, y })}
@@ -221,11 +226,14 @@ function TagRow({
 // reasoning: the same note tagged three times is three places to jump to.
 function HitRow({
   hit,
+  folder,
   rowProps,
   onOpen,
   onContextMenu,
 }: {
   hit: TagHit;
+  // Where the BEARING note lives, or undefined at the top level.
+  folder: string | undefined;
   rowProps: ReturnType<ReturnType<typeof useListNav>["rowProps"]>;
   onOpen: () => void;
   onContextMenu: (x: number, y: number) => void;
@@ -242,6 +250,8 @@ function HitRow({
       <div className="flex min-w-0 items-center gap-2">
         <FileText className="size-3.5 shrink-0 text-muted-foreground" />
         <span className="min-w-0 flex-1 truncate text-[13px] leading-tight">{hit.title}</span>
+        {/* Which of two same-titled notes this is (notes/FolderLabel.tsx). */}
+        <FolderLabel folder={folder} />
         <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground/60">{hit.line}</span>
       </div>
       <div className="truncate pl-[22px] text-[11px] leading-snug text-muted-foreground">

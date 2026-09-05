@@ -30,6 +30,7 @@ import {
 import { pickImageAsset } from "@/lib/assets";
 import { flushAllNow, saveNow } from "@/notes/store";
 import { lockNoteAndRefresh, lockVault, removeLockAndRefresh, vaultState } from "@/vault/channel";
+import { expandFolder, isExpanded, toggleFolder } from "@/notes/expansion";
 import {
   createNote as rpcCreateNote,
   createNoteFromTemplate,
@@ -99,7 +100,10 @@ export const registryDeps: RegistryDeps = {
     }
   },
   newNoteFromTemplate: (folder, templatePath) => createNoteFromTemplate(folder, templatePath, null),
-  createNote: (folder, text) => rpcCreateNote(folder, text),
+  createNote: (folder, text, subfolder) => rpcCreateNote(folder, text, subfolder),
+  folderExpanded: isExpanded,
+  toggleFolder,
+  expandFolder,
   // The boot-recorded resolution of daily.workspace (workspace/channel.ts) —
   // display truth for the Edit/New Daily Template faces; Bun re-resolves on
   // every actual ⌘J.

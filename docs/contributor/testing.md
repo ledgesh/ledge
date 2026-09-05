@@ -93,7 +93,13 @@ new rules should imitate:
   (`assets.test.ts`). Both directions are tested, because a deeper note's
   reference contains a shallower one as a substring: only sweeping the DEEP
   note catches the bug, and getting it wrong unseals an image a locked note
-  still shows.
+  still shows;
+- a folder path's containment is tested against a SIBLING whose name it
+  prefixes (`folders.test.ts`): `a` must neither count `ab`'s notes nor
+  collapse it, and a `startsWith` without the separator does both;
+- the browser's row ids are unique across the two row kinds
+  (`folders.test.ts`), because `useListNav` moves focus by id and a folder
+  named like a note's path would put a keystroke on the wrong row.
 
 These are the cheapest guardrails the repo has: they turn "someone will
 forget" into "the suite goes red."

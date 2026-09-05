@@ -86,6 +86,10 @@ export const MENU: readonly MenuSection[] = [
       { command: "note.new" },
       { command: "note.fromTemplate" },
       { command: "template.starter" },
+      // Beside the News rather than with the workspace verbs: a folder is
+      // where a note goes, not a place of its own — and this is the verb that
+      // makes one, note and all.
+      { command: "folder.new" },
       "---",
       { command: "workspace.new" },
       { command: "workspace.attach" },

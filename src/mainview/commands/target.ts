@@ -22,6 +22,7 @@ export interface TargetDataset {
   targetLine?: string;
   targetRaw?: string;
   targetTag?: string;
+  targetFolder?: string;
 }
 
 // The attribute a row marks itself with. The values mirror CommandTarget's
@@ -31,6 +32,11 @@ export function targetAttrs(target: CommandTarget): Record<string, string> {
     case "note":
     case "trash":
       return { "data-target-kind": target.kind, "data-target-path": target.path };
+    case "folder":
+      // A folder rides in its own attribute, not targetPath: it is a
+      // root-relative folder of the selected workspace, and a decoder that
+      // read it as a path would hand a command half a filename.
+      return { "data-target-kind": "folder", "data-target-folder": target.folder };
     case "backlink":
       return {
         "data-target-kind": "backlink",
@@ -79,6 +85,11 @@ export function targetFromDataset(d: TargetDataset): CommandTarget | undefined {
       return d.targetPath ? { kind: "note", path: d.targetPath } : undefined;
     case "trash":
       return d.targetPath ? { kind: "trash", path: d.targetPath } : undefined;
+    case "folder":
+      // An empty folder string is the workspace's top level, which is not a
+      // ROW: the tree draws no row for the root, so an empty attribute here is
+      // a half-built target, not a target on the root.
+      return d.targetFolder ? { kind: "folder", folder: d.targetFolder } : undefined;
     case "backlink": {
       // The line rides the DOM as a string; a row that lost (or garbled) it
       // yields no target at all, per the half-built-target rule above. raw may

@@ -57,6 +57,9 @@ function stubDeps(
       calls.push(`newNoteFromTemplate:${folder}:${templatePath}`);
       return { path: `${folder}/untitled.md`, title: "Untitled", mtimeMs: 0 };
     },
+    folderExpanded: () => false,
+    toggleFolder: (root, folder) => calls.push(`toggleFolder:${root}:${folder}`),
+    expandFolder: (root, folder) => calls.push(`expandFolder:${root}:${folder}`),
     createNote: async (folder, text) => {
       calls.push(`createNote:${folder}:${text.split("\n", 4).join("|")}`);
       return { path: `${folder}/untitled-template.md`, title: "Untitled Template", mtimeMs: 0 };
@@ -410,9 +413,65 @@ describe("registry", () => {
       `createNote:${FOLDER}:---|template: true|---|# Untitled Template`,
       `revealTitle:${FOLDER}/untitled-template.md`,
     ]);
+    // Into the list AND into a tab: the watcher's refresh would bring the row a
+    // moment later, and a row arriving after the note it names is already open
+    // reads as a glitch.
+    const note = { path: `${FOLDER}/untitled-template.md`, title: "Untitled Template", mtimeMs: 0 };
     expect(dispatched).toEqual([
-      { type: "openNote", note: { path: `${FOLDER}/untitled-template.md`, title: "Untitled Template", mtimeMs: 0 } },
+      { type: "noteAppeared", folder: FOLDER, note },
+      { type: "openNote", note },
     ]);
+  });
+
+  test("note.move asks the browser for a destination, on the row or on the focused note", () => {
+    // Delete's target grammar: the row menu points at a row, the palette at
+    // the note in the focused tab.
+    const state = initialState(FOLDER, [{ path: `${FOLDER}/a.md`, title: "A", mtimeMs: 1 }]);
+    const asked: unknown[] = [];
+    const ctx = { ...makeCtx(state), ui: { pickFolder: (r: unknown) => asked.push(r) } };
+    find(commands, "note.move").run({ ...ctx, target: { kind: "note", path: `${FOLDER}/a.md` } });
+    expect(asked).toEqual([{ kind: "move", note: { path: `${FOLDER}/a.md`, title: "A", mtimeMs: 1 } }]);
+  });
+
+  test("folder.new seeds the chooser with the row's folder, and with nothing from the palette", () => {
+    const state = initialState(FOLDER, []);
+    const asked: unknown[] = [];
+    const ctx = { ...makeCtx(state), ui: { pickFolder: (r: unknown) => asked.push(r) } };
+    find(commands, "folder.new").run(ctx);
+    find(commands, "folder.new").run({ ...ctx, target: { kind: "folder", folder: "projects" } });
+    // The trailing slash is what makes the next thing typed a CHILD.
+    expect(asked).toEqual([{ kind: "new", parent: "" }, { kind: "new", parent: "projects/" }]);
+  });
+
+  test("note.newInFolder expands the folder, writes the note, and opens it", async () => {
+    const calls: string[] = [];
+    const cmds = buildCommands(stubDeps(calls));
+    const dispatched: Action[] = [];
+    find(cmds, "note.newInFolder").run({
+      ...makeCtx(initialState(FOLDER, []), dispatched),
+      target: { kind: "folder", folder: "projects" },
+    });
+    await Bun.sleep(0);
+    // Expanded BEFORE the create: the row has to be open for the note to
+    // arrive somewhere on screen.
+    expect(calls).toEqual([
+      `expandFolder:${FOLDER}:projects`,
+      `createNote:${FOLDER}:# Untitled||`,
+      `revealTitle:${FOLDER}/untitled-template.md`,
+    ]);
+    expect(dispatched.map((a) => a.type)).toEqual(["noteAppeared", "openNote"]);
+  });
+
+  test("folder.toggle's title is the direction it will go", () => {
+    // A live title rather than a two-faces pair: it holds a bare key, and two
+    // commands may not claim one bare key on one row kind.
+    const state = initialState(FOLDER, []);
+    const target = { kind: "folder", folder: "projects" } as const;
+    const ctx = { ...makeCtx(state), target };
+    const titleFor = (deps: RegistryDeps) =>
+      (find(buildCommands(deps), "folder.toggle").title as (c: CommandCtx) => string)(ctx);
+    expect(titleFor(stubDeps([]))).toBe("Expand");
+    expect(titleFor({ ...stubDeps([]), folderExpanded: () => true })).toBe("Collapse");
   });
 
   test("the marker verbs follow the current note's frontmatter, one at a time", () => {

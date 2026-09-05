@@ -34,6 +34,7 @@ import {
   listNotes,
   listTrash,
   lockNote,
+  moveNote,
   notesTagged,
   purgeTrash,
   readNote,
@@ -776,7 +777,8 @@ export async function createServer(deps: { push: Audience; native: NativeDeps })
       if (res.divergedTo) console.warn("[notes] external edit preserved in trash:", res.divergedTo, "(save to", path, "won)");
       return res;
     },
-    noteCreate: async ({ root, text }) => ({ note: await createNote(root, text) }),
+    noteCreate: async ({ root, text, folder }) => ({ note: await createNote(root, text, folder) }),
+    noteMove: async ({ path, folder }) => ({ note: await moveNote(path, folder) }),
     noteRetitle: async ({ path, text }) => ({ note: await retitleNote(path, text) }),
     // The daily.workspace setting outranks the view's selected workspace
     // (that is the knob's whole job: pin where daily notes live); the

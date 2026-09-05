@@ -3,6 +3,18 @@
 // switching workspaces swaps this whole list (and the Trash section below it)
 // for the new folder's.
 //
+// A TREE, drawn as one flat list. Folders come from the notes in them
+// (notes/folders.ts) and their open/closed state from notes/expansion.ts;
+// browserRows turns the two into rows with a depth, which is all the render
+// needs. Flat because the list is keyboard-navigable: ↑/↓ walk rows by index
+// (R5), and a nested render would have to flatten itself to answer "which row
+// is next" anyway.
+//
+// A note is filed by dragging its row onto a folder (or onto the header, which
+// is the top level), or through Move to Folder… — one operation either way
+// (notes/actions.ts moveNoteTo), so the drag cannot grow behavior the menu
+// item does not have.
+//
 // There is no rename here on purpose: a note's filename follows its first-line H1
 // (notes/store.ts), so you rename a note by retitling it in the editor, and this
 // list shows the slug that produced.
@@ -12,7 +24,20 @@
 // `d` deletes, `r` restores. The rows publish their identity as data attributes
 // (commands/target.ts) and the window dispatcher reads it back, so a right-click
 // and a keystroke run the same command against the same note.
-import { CalendarDays, ChevronRight, FileText, LayoutTemplate, Lock, LockOpen, Plus, RotateCcw, Trash2 } from "lucide-react";
+import {
+  CalendarDays,
+  ChevronDown,
+  ChevronRight,
+  FileText,
+  Folder,
+  FolderOpen,
+  LayoutTemplate,
+  Lock,
+  LockOpen,
+  Plus,
+  RotateCcw,
+  Trash2,
+} from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { useListNav } from "@/lib/useListNav";
@@ -27,9 +52,16 @@ import { targetAttrs } from "@/commands/target";
 import { workspaceKind } from "@/workspace/channel";
 import { docIdsForPath, notesOf, openNotePaths, trashOf, useWorkspace } from "@/workspace/store";
 import { focusedTab } from "@/workspace/tree";
+import { SCRATCH_DOC } from "@/workspace/seeds";
 import { useVaultState } from "@/vault/channel";
+import { FolderPicker } from "@/components/FolderPicker";
+import type { FolderRequest } from "@/commands/types";
 import { agoLabel } from "./ago";
-import { deleteNote, deleteTrashedNote, emptyTrashNow, restoreNote } from "./actions";
+import { deleteNote, deleteTrashedNote, emptyTrashNow, moveNoteTo, restoreNote } from "./actions";
+import { createNote } from "./channel";
+import { browserRows, folderList, folderOf, type BrowserRow } from "./folders";
+import { expandFolder, toggleFolder, useExpanded } from "./expansion";
+import { requestTitleCaret } from "@/workspace/editorPool";
 import type { NoteMeta, TrashMeta } from "./channel";
 
 // How long the "Deleted X. Undo" strip stays up. The note does not go anywhere
@@ -44,8 +76,20 @@ export function NoteBrowser() {
   // The vault state drives the locked rows' glyph (closed vs open lock) and
   // which vault verb their menu carries.
   const vault = useVaultState();
-  // Where the right-click menu sits, keyed by path (the note's identity).
-  const [menu, setMenu] = useState<{ path: string; x: number; y: number } | null>(null);
+  // Where the right-click menu sits, and what it is about: a note (keyed by
+  // path, the note's identity) or a folder (keyed by its root-relative path).
+  // One piece of state for both, since exactly one menu is ever open.
+  const [menu, setMenu] = useState<
+    ({ kind: "note"; path: string } | { kind: "folder"; folder: string }) & { x: number; y: number } | null
+  >(null);
+  // The folder chooser, when Move to Folder… or New Folder… opened it.
+  const [picking, setPicking] = useState<FolderRequest | null>(null);
+  // The New Note button's dropdown half, where New Folder… lives.
+  const [addMenu, setAddMenu] = useState<{ x: number; y: number } | null>(null);
+  // The folder a dragged note is currently over: null for the top level (the
+  // header), undefined for nothing. Drawing the target is the whole feedback a
+  // drag gets — without it the drop is a guess.
+  const [dropOn, setDropOn] = useState<string | null | undefined>(undefined);
   // A failed delete or restore, shown under the list rather than thrown away into
   // the console.
   const [error, setError] = useState<string | null>(null);
@@ -68,19 +112,26 @@ export function NoteBrowser() {
   // filenames are numbered by the manifest (bun/docsContent.ts), which is how
   // the manual's pages keep their curated reading order in a browser that
   // otherwise alphabetizes.
-  const folderNotes = notesOf(state, selected.folder);
-  const notes = useMemo(
+  const notes = notesOf(state, selected.folder);
+  // Which folders are open, from the module the commands also write
+  // (notes/expansion.ts): Move to Folder… and New Note in Folder both have to
+  // reveal where the note landed, so the state cannot live in this component.
+  const expanded = useExpanded(selected.folder);
+  // The tree, flattened. The sort is applied WITHIN each folder by browserRows.
+  const rows = useMemo(
     () =>
-      [...folderNotes].sort((a, b) =>
+      browserRows(notes, expanded, (a, b) =>
         readOnly ? a.path.localeCompare(b.path) : a.title.localeCompare(b.title),
       ),
-    [folderNotes, readOnly],
+    [notes, expanded, readOnly],
   );
+  // Every folder of this workspace, for the chooser's list.
+  const folders = useMemo(() => folderList(notes), [notes]);
   const open = useMemo(() => openNotePaths(state), [state]);
   const current = focusedTab(selected)?.path ?? null;
   // The note the open menu points at: its live locked flag picks which lock
   // face (and which vault verb) the menu carries.
-  const menuNote = menu ? notes.find((n) => n.path === menu.path) : undefined;
+  const menuNote = menu?.kind === "note" ? notes.find((n) => n.path === menu.path) : undefined;
 
   // The offer expires; the note does not.
   useEffect(() => {
@@ -113,16 +164,31 @@ export function NoteBrowser() {
     void restoreNote(path, selected.folder, dispatch).then(setError);
   };
 
+  // File a note, from the chooser or from a drop. One path for both, so the
+  // drag cannot grow behavior the menu item does not have. The destination is
+  // expanded FIRST: the note has to arrive somewhere on screen, and expanding
+  // after the move would flash the row into a closed folder.
+  const file = (note: NoteMeta, folder: string | null) => {
+    setError(null);
+    if (folder !== null) expandFolder(selected.folder, folder);
+    void moveNoteTo(note.path, folder, docIdsForPath(state, note.path), dispatch).then((res) => {
+      setError(res.error);
+    });
+  };
+
   // The browser owns the Undo strip, so it registers the hooks the delete and
   // restore commands (row menus, `d`/`r`, ⌘⌫, the palette) reach it through:
   // every path lands in the same trash-with-undo behavior. Registered via refs
   // because these close over the live state.
-  const hooks = useRef({ trash, restore });
-  hooks.current = { trash, restore };
+  const hooks = useRef({ trash, restore, file });
+  hooks.current = { trash, restore, file };
   useEffect(() => {
     configureUi({
       deleteNoteWithUndo: (note) => hooks.current.trash(note),
       restoreTrashed: (path) => hooks.current.restore(path),
+      // Move to Folder… and New Folder… both stop here for a destination; what
+      // happens after the pick is decided below, by which request it was.
+      pickFolder: (request) => setPicking(request),
       // The browser's error strip doubles as the workspace commands' error
       // surface (a refused attach, a failed create): same sidebar, same shape
       // of failure report.
@@ -131,9 +197,55 @@ export function NoteBrowser() {
     });
   }, []);
 
+  // What the chooser's pick means. Moving files the note it was opened on;
+  // naming a NEW folder writes the first note into it, because a folder the
+  // browser cannot show is a folder that vanished (notes/folders.ts).
+  const picked = (folder: string | null) => {
+    const request = picking;
+    setPicking(null);
+    if (!request) return;
+    if (request.kind === "move") {
+      file(request.note, folder);
+      return;
+    }
+    if (folder === null) return; // "New Folder" cannot mean the workspace root
+    setError(null);
+    expandFolder(selected.folder, folder);
+    void createNote(selected.folder, SCRATCH_DOC, folder).then(
+      (note) => {
+        requestTitleCaret(note.path, true);
+        // Into the list AND into a tab, note.newInFolder's pair: the folder
+        // row exists because this note is in it, so the row and the tab have
+        // to arrive together.
+        dispatch({ type: "noteAppeared", folder: selected.folder, note });
+        dispatch({ type: "openNote", note });
+      },
+      (err: unknown) => setError(err instanceof Error ? err.message : String(err)),
+    );
+  };
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex items-baseline gap-1.5 px-3 pb-1 pt-2.5">
+      {/* The header doubles as the top level's drop target: dragging a note
+          here files it out of whatever folder it is in, which is the one
+          destination that has no row of its own. */}
+      <div
+        className={cn(
+          "flex items-baseline gap-1.5 px-3 pb-1 pt-2.5",
+          dropOn === null && "bg-accent/60",
+        )}
+        onDragOver={(e) => {
+          if (!e.dataTransfer.types.includes(NOTE_DRAG)) return;
+          e.preventDefault();
+          setDropOn(null);
+        }}
+        onDragLeave={() => setDropOn(undefined)}
+        onDrop={(e) => {
+          setDropOn(undefined);
+          const note = notes.find((n) => n.path === e.dataTransfer.getData(NOTE_DRAG));
+          if (note && folderOf(note) !== "") file(note, null);
+        }}
+      >
         <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
           Notes
         </span>
@@ -149,23 +261,41 @@ export function NoteBrowser() {
       </div>
 
       <div {...nav.containerProps} className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-2">
-        {notes.length === 0 ? (
+        {rows.length === 0 ? (
           <p className="px-2 py-1.5 text-[11px] leading-snug text-muted-foreground">
             No notes yet. A new note is saved to this workspace's folder as soon as you type in it.
           </p>
         ) : (
-          notes.map((note, i) => (
-            <NoteRow
-              key={note.path}
-              note={note}
-              current={note.path === current}
-              open={open.has(note.path)}
-              unlocked={vault === "unlocked"}
-              rowProps={nav.rowProps(note.path, i)}
-              onOpen={() => exec("note.open", { kind: "note", path: note.path })}
-              onContextMenu={(x, y) => setMenu({ path: note.path, x, y })}
-            />
-          ))
+          rows.map((row, i) =>
+            row.kind === "folder" ? (
+              <FolderRow
+                key={row.id}
+                row={row}
+                dropping={dropOn === row.folder}
+                rowProps={nav.rowProps(row.id, i)}
+                onToggle={() => toggleFolder(selected.folder, row.folder)}
+                onDropNote={(path) => {
+                  const note = notes.find((n) => n.path === path);
+                  if (note && folderOf(note) !== row.folder) file(note, row.folder);
+                }}
+                onDropTarget={setDropOn}
+                onContextMenu={(x, y) => setMenu({ kind: "folder", folder: row.folder, x, y })}
+              />
+            ) : (
+              <NoteRow
+                key={row.id}
+                note={row.note}
+                depth={row.depth}
+                current={row.note.path === current}
+                open={open.has(row.note.path)}
+                unlocked={vault === "unlocked"}
+                draggable={!readOnly}
+                rowProps={nav.rowProps(row.id, i)}
+                onOpen={() => exec("note.open", { kind: "note", path: row.note.path })}
+                onContextMenu={(x, y) => setMenu({ kind: "note", path: row.note.path, x, y })}
+              />
+            ),
+          )
         )}
       </div>
 
@@ -193,17 +323,74 @@ export function NoteBrowser() {
         </div>
       )}
 
+      {/* A split button, the workspace strip's + exactly: the wide half is New
+          Note, the chevron opens the other way to start one. New Folder…
+          needs the surface — it acts on a folder row where one exists, and a
+          workspace with no folders yet has no row to open a menu on, which
+          would leave the palette as the only door to the whole feature. */}
       {!readOnly && (
-        <button
-          className="flex items-center gap-2 border-t px-3.5 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground touch:min-h-[44px]"
-          title={tooltip("note.new")}
-          onClick={() => exec("note.new")}
-        >
-          <Plus className="size-4" /> New Note
-        </button>
+        <div className="flex border-t">
+          <button
+            className="flex flex-1 items-center gap-2 px-3.5 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground touch:min-h-[44px]"
+            title={tooltip("note.new")}
+            onClick={() => exec("note.new")}
+          >
+            <Plus className="size-4" /> New Note
+          </button>
+          <button
+            aria-label="New note options"
+            title="New note options"
+            // The narrow half of a split button, so its width is a target too:
+            // the two halves touch, and the miss creates a note.
+            className="flex items-center border-l px-2.5 text-muted-foreground hover:bg-accent hover:text-foreground touch:min-w-[44px] touch:justify-center"
+            onClick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect();
+              setAddMenu({ x: Math.max(8, r.right - 220), y: r.top - 8 });
+            }}
+          >
+            <ChevronDown className="size-3.5" />
+          </button>
+        </div>
       )}
 
-      {menu && (
+      {addMenu && (
+        <ContextMenu x={addMenu.x} y={addMenu.y} onClose={() => setAddMenu(null)}>
+          <CommandMenuItem
+            id="folder.new"
+            hint="A folder holds notes, so Ledge opens one in it"
+            onClose={() => setAddMenu(null)}
+          />
+        </ContextMenu>
+      )}
+
+      {/* A folder row's menu: its own Enter verb (Expand/Collapse, titled by
+          the live state), the note it can hold, and a folder inside it — which
+          is the only nesting path a pointer has. */}
+      {menu?.kind === "folder" && (
+        <ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)}>
+          <CommandMenuItem
+            id="folder.toggle"
+            target={{ kind: "folder", folder: menu.folder }}
+            onClose={() => setMenu(null)}
+          />
+          {!readOnly && (
+            <>
+              <CommandMenuItem
+                id="note.newInFolder"
+                target={{ kind: "folder", folder: menu.folder }}
+                onClose={() => setMenu(null)}
+              />
+              <CommandMenuItem
+                id="folder.new"
+                target={{ kind: "folder", folder: menu.folder }}
+                onClose={() => setMenu(null)}
+              />
+            </>
+          )}
+        </ContextMenu>
+      )}
+
+      {menu?.kind === "note" && (
         <ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)}>
           <CommandMenuItem
             id="note.open"
@@ -220,6 +407,14 @@ export function NoteBrowser() {
               row in this workspace is noise, not discoverability. */}
           {!readOnly && (
             <>
+          {/* Filing, above the lock faces and well clear of Delete: the two
+              verbs that move a note's file sit together, and the destructive
+              one keeps the bottom of the menu to itself (§4). */}
+          <CommandMenuItem
+            id="note.move"
+            target={{ kind: "note", path: menu.path }}
+            onClose={() => setMenu(null)}
+          />
           {/* The lock faces, two-faces like the palette (locking.md §7):
               a plain row offers Lock This Note… (greyed on templates — the
               marker exclusivity), a locked row offers Remove Lock… plus the
@@ -262,6 +457,24 @@ export function NoteBrowser() {
             </>
           )}
         </ContextMenu>
+      )}
+
+      {/* The destination chooser. One dialog for both verbs, because both ask
+          the same question (components/FolderPicker.tsx). */}
+      {picking && (
+        <FolderPicker
+          title={picking.kind === "move" ? "Move to Folder" : "New Folder"}
+          description={
+            picking.kind === "move"
+              ? `Where should “${picking.note.title}” go? Its images and links follow it.`
+              : "Name a folder for this workspace. A new note opens in it, because Ledge shows the folders its notes are in."
+          }
+          folders={folders}
+          allowRoot={picking.kind === "move"}
+          initialQuery={picking.kind === "new" ? picking.parent : ""}
+          onPick={picked}
+          onCancel={() => setPicking(null)}
+        />
       )}
     </div>
   );
@@ -481,23 +694,40 @@ function TrashRow({
 const ROW_CLASS =
   "group flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 outline-none hover:bg-accent/50 focus-visible:ring-1 focus-visible:ring-ring touch:min-h-[44px]";
 
+// The drag's own MIME type, carrying the dragged note's path. A custom type
+// rather than text/plain because dataTransfer.types is readable during
+// dragover while the DATA is not: the drop targets have to know a Ledge note
+// is coming before they may claim the drop, and a drag from outside the app
+// (a file, a selection) must fall through to whatever the page does with it.
+const NOTE_DRAG = "application/x-ledge-note";
+
+// How far a row indents per level. Small on purpose: the sidebar is narrow,
+// and a note three folders down still has to show enough of its title to be
+// recognised.
+const INDENT = 12;
+
 // `current` is the note in the focused pane's active tab; `open` is any note with
 // a tab somewhere. Clicking either way goes through openNote, which focuses the
 // existing tab rather than opening the file a second time.
 function NoteRow({
   note,
+  depth,
   current,
   open,
   unlocked,
+  draggable,
   rowProps,
   onOpen,
   onContextMenu,
 }: {
   note: NoteMeta;
+  depth: number;
   current: boolean;
   open: boolean;
   // Vault state, for the locked rows' glyph: open lock while unlocked.
   unlocked: boolean;
+  // Off in the read-only manual, where there is nowhere to drop a note.
+  draggable: boolean;
   rowProps: ReturnType<ReturnType<typeof useListNav>["rowProps"]>;
   onOpen: () => void;
   onContextMenu: (x: number, y: number) => void;
@@ -511,7 +741,17 @@ function NoteRow({
       {...rowProps}
       {...targetAttrs({ kind: "note", path: note.path })}
       {...press}
+      // A pointer gesture, not a command (interactions.md R4): its whole
+      // affordance is the drag image and the target's highlight. The long
+      // press that opens the menu belongs to touch and pen, and a held LEFT
+      // button is this — the two cannot collide (lib/useRowMenu.ts).
+      draggable={draggable}
+      onDragStart={(e) => {
+        e.dataTransfer.setData(NOTE_DRAG, note.path);
+        e.dataTransfer.effectAllowed = "move";
+      }}
       className={cn(ROW_CLASS, current && "bg-accent hover:bg-accent")}
+      style={{ paddingLeft: 8 + depth * INDENT }}
       title={note.path}
     >
       {/* A template note (frontmatter template: true) swaps the glyph — the
@@ -540,6 +780,78 @@ function NoteRow({
         {note.title}
       </div>
       {open && !current && <span className="size-1.5 shrink-0 rounded-full bg-muted-foreground/50" />}
+    </div>
+  );
+}
+
+// --- folders ---------------------------------------------------------------
+
+// One folder of the workspace. Its Enter verb is the disclosure, because a
+// folder's primary action is showing what is in it (R6) — so a click toggles
+// too, and there is nothing else a click on a folder could reasonably mean.
+//
+// It is also a drop target: dragging a note onto it files the note there. The
+// row claims the drop only for a Ledge note (NOTE_DRAG), so a file dragged in
+// from the Finder falls through rather than being silently swallowed by a row
+// that cannot do anything with it.
+function FolderRow({
+  row,
+  dropping,
+  rowProps,
+  onToggle,
+  onDropNote,
+  onDropTarget,
+  onContextMenu,
+}: {
+  row: Extract<BrowserRow, { kind: "folder" }>;
+  dropping: boolean;
+  rowProps: ReturnType<ReturnType<typeof useListNav>["rowProps"]>;
+  onToggle: () => void;
+  onDropNote: (path: string) => void;
+  onDropTarget: (folder: string | null | undefined) => void;
+  onContextMenu: (x: number, y: number) => void;
+}) {
+  const press = useRowMenu(onContextMenu, onToggle);
+  return (
+    <div
+      {...rowProps}
+      {...targetAttrs({ kind: "folder", folder: row.folder })}
+      {...press}
+      onDragOver={(e) => {
+        if (!e.dataTransfer.types.includes(NOTE_DRAG)) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        onDropTarget(row.folder);
+      }}
+      onDragLeave={() => onDropTarget(undefined)}
+      onDrop={(e) => {
+        onDropTarget(undefined);
+        const path = e.dataTransfer.getData(NOTE_DRAG);
+        if (path) onDropNote(path);
+      }}
+      className={cn(ROW_CLASS, dropping && "bg-accent ring-1 ring-ring")}
+      style={{ paddingLeft: 8 + row.depth * INDENT }}
+      title={row.folder}
+    >
+      {/* The chevron is the state; the glyph beside it says the same thing a
+          second way, which is what a row read at a glance needs. */}
+      <ChevronRight
+        className={cn(
+          "size-3 shrink-0 text-muted-foreground transition-transform",
+          row.expanded && "rotate-90",
+        )}
+      />
+      {row.expanded ? (
+        <FolderOpen className="size-3.5 shrink-0 text-muted-foreground" />
+      ) : (
+        <Folder className="size-3.5 shrink-0 text-muted-foreground" />
+      )}
+      <div className="min-w-0 flex-1 truncate text-sm leading-tight">{row.name}</div>
+      {/* What the disclosure is hiding, so a collapsed folder still says how
+          much is in it. Withheld while it is open, where the rows say it. */}
+      {!row.expanded && (
+        <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground/70">{row.count}</span>
+      )}
     </div>
   );
 }

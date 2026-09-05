@@ -1,4 +1,5 @@
-// The note operations that reach past the editor: delete, restore, and empty.
+// The note operations that reach past the editor: delete, restore, empty, and
+// move.
 //
 // Delete is the one that needs the autosave controller and the filesystem to
 // move in step.
@@ -13,15 +14,18 @@
 //   disk    -> Bun moves the file into its workspace folder's .ledge-trash
 //   settle  -> forget the note entirely, or unfreeze it if the delete failed
 //
-// Renaming needs none of this: a note's filename follows its H1 now, and that
+// RETITLING needs none of this: a note's filename follows its H1, and that
 // happens inside the save controller's own flush loop, which is already
-// serialised against writes (see syncTitle in notes/store.ts).
+// serialised against writes (see syncTitle in notes/store.ts). MOVING is a
+// rename from outside that loop, so it dances too (moveNoteTo, at the bottom).
 import {
   deleteNote as trashFile,
   deleteTrashed as unlinkTrashed,
   emptyTrash,
   listTrash,
+  moveNote as moveFile,
   restoreNote as untrashFile,
+  type NoteMeta,
 } from "./channel";
 import { forgetDoc, freezeDoc, retargetDoc } from "./store";
 import type { Action } from "@/workspace/store";
@@ -80,7 +84,7 @@ export async function restoreNote(
 ): Promise<string | null> {
   try {
     const note = await untrashFile(path);
-    dispatch({ type: "noteRestored", folder, note });
+    dispatch({ type: "noteAppeared", folder, note });
   } catch (err) {
     console.error("[notes] restore failed", err);
     return err instanceof Error ? err.message : String(err);
@@ -125,4 +129,40 @@ export async function emptyTrashNow(
   }
   dispatch({ type: "trashLoaded", folder, items: [] });
   return null;
+}
+
+// Move a note into another folder of its own workspace: the sidebar's Move to
+// Folder…, its drag-and-drop, and New Folder's follow-up all land here.
+//
+// Delete's freeze dance, for delete's reason. A note being moved from the
+// sidebar may be autosaving in a pane at the same time, and this rename does
+// NOT run inside the save controller's flush loop the way retitling does
+// (notes/store.ts syncTitle) — so an edit landing mid-move would write to the
+// old path and leave a copy of the note behind in the folder it just left.
+// Frozen, the edit waits; retargetDoc then aims it at wherever the note ended
+// up, which is the new path on success and the old one on failure.
+//
+// `docIds` is every open tab on the note (a note can be open in more than one
+// pane). Resolves to the note where it landed, for the caller to reveal.
+export async function moveNoteTo(
+  path: string,
+  subfolder: string | null,
+  docIds: string[],
+  dispatch: (action: Action) => void,
+): Promise<{ note: NoteMeta | null; error: string | null }> {
+  for (const id of docIds) freezeDoc(id);
+  let note: NoteMeta;
+  try {
+    note = await moveFile(path, subfolder);
+  } catch (err) {
+    for (const id of docIds) retargetDoc(id, path); // it did not move
+    console.error("[notes] move failed", err);
+    return { note: null, error: err instanceof Error ? err.message : String(err) };
+  }
+  for (const id of docIds) retargetDoc(id, note.path);
+  // The same action a retitle fires: a note's file moved, and the tabs holding
+  // the old path follow it. The docId is untouched, so the editor, its undo
+  // history and the note's shells carry through the move.
+  dispatch({ type: "noteRenamed", path, note });
+  return { note, error: null };
 }

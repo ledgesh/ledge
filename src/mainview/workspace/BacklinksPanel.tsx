@@ -8,7 +8,7 @@
 // commands/target.ts): Enter — or a click, or the context menu — runs
 // backlink.open, which opens the linking note with its [[link]] line revealed
 // and selected, the search overlay's open-at-the-hit.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { FileText, Link2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ContextMenu } from "@/components/ContextMenu";
@@ -21,6 +21,7 @@ import { useListNav } from "@/lib/useListNav";
 import { useRowMenu } from "@/lib/useRowMenu";
 import { backlinksOf, onNotesChanged, type BacklinkHit } from "@/notes/channel";
 import { notesOf, useWorkspace } from "./store";
+import { FolderLabel, folderIndex } from "@/notes/FolderLabel";
 import { focusedTab } from "./tree";
 
 function targetOf(hit: BacklinkHit): CommandTarget {
@@ -50,6 +51,9 @@ export function BacklinksPanel() {
   // before the folder re-list round-trips, so an agent edit shows up here as
   // fast as it does in the editor.
   const folderNotes = notesOf(state, selected.folder);
+  // Where each linking note lives: a hit carries a path and a title, not a
+  // placement (notes/FolderLabel.tsx).
+  const folders = useMemo(() => folderIndex(folderNotes), [folderNotes]);
   const generation = useRef(0);
   useEffect(() => {
     const fetchNow = () => {
@@ -120,6 +124,7 @@ export function BacklinksPanel() {
             <BacklinkRow
               key={`${hit.path}:${hit.line}:${i}`}
               hit={hit}
+              folder={folders.get(hit.path)}
               rowProps={nav.rowProps(`${hit.path}:${hit.line}`, i)}
               onOpen={() => exec("backlink.open", targetOf(hit))}
               onContextMenu={(x, y) => setMenu({ hit, x, y })}
@@ -166,11 +171,14 @@ function Hint({ children }: { children: React.ReactNode }) {
 // three times is three places to jump to.
 function BacklinkRow({
   hit,
+  folder,
   rowProps,
   onOpen,
   onContextMenu,
 }: {
   hit: BacklinkHit;
+  // Where the LINKING note lives, or undefined at the top level.
+  folder: string | undefined;
   rowProps: ReturnType<ReturnType<typeof useListNav>["rowProps"]>;
   onOpen: () => void;
   onContextMenu: (x: number, y: number) => void;
@@ -187,6 +195,8 @@ function BacklinkRow({
       <div className="flex min-w-0 items-center gap-2">
         <FileText className="size-3.5 shrink-0 text-muted-foreground" />
         <span className="min-w-0 flex-1 truncate text-[13px] leading-tight">{hit.title}</span>
+        {/* Which of two same-titled notes this is (notes/FolderLabel.tsx). */}
+        <FolderLabel folder={folder} />
         <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground/60">{hit.line}</span>
       </div>
       <div className="truncate pl-[22px] text-[11px] leading-snug text-muted-foreground">

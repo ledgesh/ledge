@@ -225,6 +225,19 @@ class FakeStore {
     throw new Error(`harness: path outside every root: ${path}`);
   }
 
+  // The names of one directory's own files, which is what the real allocator
+  // reads (readdir of the destination, not a walk): a note in `projects` does
+  // not make its name taken at the top level.
+  private namesIn(data: RootData, dir: string): Set<string> {
+    const names = new Set<string>();
+    for (const path of data.notes.keys()) {
+      if (path.startsWith(`${dir}/`) && !path.slice(dir.length + 1).includes("/")) {
+        names.add(path.slice(dir.length + 1).toLowerCase());
+      }
+    }
+    return names;
+  }
+
   private allocate(text: string, taken: Iterable<string>): string {
     const base = slugOf(text) ?? "untitled";
     const names = new Set([...taken].map((p) => p.split("/").pop()!.toLowerCase()));
@@ -233,9 +246,12 @@ class FakeStore {
     return name;
   }
 
-  seed(root: string, text: string): void {
+  // `folder` seeds the note inside a subfolder of the root (root-relative,
+  // "" for the top level), which is the only way a spec gets a tree to look at.
+  seed(root: string, text: string, folder = ""): void {
     const data = this.ensureRoot(root);
-    const path = `${root}/${this.allocate(text, data.notes.keys())}`;
+    const dir = folder ? `${root}/${folder}` : root;
+    const path = `${dir}/${this.allocate(text, this.namesIn(data, dir))}`;
     data.notes.set(path, { text, mtimeMs: this.tick() });
   }
 
@@ -265,13 +281,26 @@ class FakeStore {
     // frontmatter is what puts a note in the ⌥⌘N picker (the `daily` role
     // rides the value), and a `locked:` value marks the note locked.
     const p = parseFrontmatter(n.text).params;
+    // The real metaAt's folder: root-relative, absent at the top level. The
+    // fake derives it the same way (from the path), which is what keeps a
+    // harness tree and a real one the same shape.
+    const folder = this.folderOf(path);
     return {
       path,
       title: labelOf(headingOf(n.text), path),
       mtimeMs: n.mtimeMs,
+      ...(folder === "" ? {} : { folder }),
       ...(p.template ? { template: p.template } : {}),
       ...(p.locked !== null ? { locked: true as const } : {}),
     };
+  }
+
+  // Where inside its root a path sits, forward-slashed, "" at the top level.
+  private folderOf(path: string): string {
+    const { root } = this.rootOf(path);
+    const rel = path.slice(root.length + 1);
+    const cut = rel.lastIndexOf("/");
+    return cut < 0 ? "" : rel.slice(0, cut);
   }
 
   // --- the vault fake --------------------------------------------------------
@@ -392,12 +421,36 @@ class FakeStore {
     this.rootOf(path).data.notes.set(path, { text, mtimeMs: this.tick() });
   }
 
-  create(root: string, text: string): NoteMeta {
+  create(root: string, text: string, folder?: string | null): NoteMeta {
     this.assertWritable(root);
     const data = this.ensureRoot(root);
-    const path = `${root}/${this.allocate(text, data.notes.keys())}`;
+    const dir = folder ? `${root}/${folder}` : root;
+    const path = `${dir}/${this.allocate(text, this.namesIn(data, dir))}`;
     data.notes.set(path, { text, mtimeMs: this.tick() });
     return this.meta(data, path);
+  }
+
+  // The real moveNote in Map form: rekey the entry under the destination
+  // folder, keeping its name unless that name is taken there. The note's
+  // mtime survives, as rename(2)'s does — a move is not an edit.
+  moveNote(path: string, folder: string | null): NoteMeta {
+    this.assertWritable(path);
+    const { root, data } = this.rootOf(path);
+    const note = data.notes.get(path);
+    if (!note) throw new Error(`harness: no note at ${path}`);
+    if (this.lockedOf(note.text) && this.vault.state !== "unlocked") {
+      throw new Error("unlock first — moving a locked note rewrites the image references in its body");
+    }
+    const dir = folder ? `${root}/${folder}` : root;
+    if (path.slice(0, path.lastIndexOf("/")) === dir) return this.meta(data, path);
+    const base = path.split("/").pop()!.replace(/\.md$/i, "");
+    let name = `${base}.md`;
+    const taken = this.namesIn(data, dir);
+    for (let n = 2; taken.has(name.toLowerCase()); n += 1) name = `${base}-${n}.md`;
+    const target = `${dir}/${name}`;
+    data.notes.delete(path);
+    data.notes.set(target, note);
+    return this.meta(data, target);
   }
 
   // Mirrors the real writeNote's guard (bun/notes.ts): a mismatched base with
@@ -665,8 +718,9 @@ configureNotes({
   tagged: async (folder, tag) => store.tagged(folder, tag),
   write: async (path, text, baseMtimeMs) => store.write(path, text, baseMtimeMs),
   stash: async (path, text) => store.stash(path, text),
-  create: async (folder, text) => store.create(folder, text),
+  create: async (folder, text, subfolder) => store.create(folder, text, subfolder),
   retitle: async (path, text) => store.retitle(path, text),
+  move: async (path, subfolder) => store.moveNote(path, subfolder),
   remove: async (path) => store.remove(path),
   trash: async (folder) => store.listTrash(folder),
   restore: async (path) => store.restore(path),
@@ -1284,6 +1338,19 @@ window.__harness = {
 // Wiped after seeding rather than skipped during it, so the fixtures above stay
 // one list and the other specs see exactly what they always saw.
 if (new URLSearchParams(window.location.search).has("fresh")) store.wipe(SCRATCH);
+
+// `?folders`: the scratch workspace with its notes FILED, for the browser
+// tree's specs. Opt-in rather than part of the fixtures above, because folder
+// rows sort before note rows and the flat-list specs pin the first and last
+// row of that list (e2e/list-verbs.spec.ts). One note stays at the top level,
+// so a spec can drag between the two levels in both directions.
+if (new URLSearchParams(window.location.search).has("folders")) {
+  store.wipe(SCRATCH);
+  store.seed(SCRATCH, "# Alpha\n\nalpha body\n");
+  store.seed(SCRATCH, "# Beta\n\nbeta body\n", "projects");
+  store.seed(SCRATCH, "# Gamma\n\ngamma body\n", "projects/api");
+  store.seed(SCRATCH, "# Delta\n\ndelta body\n", "admin");
+}
 
 // Same boot shape as main.tsx: the registry first, then per-folder lists.
 // null layout: a harness run always starts from the seeded notes; restore

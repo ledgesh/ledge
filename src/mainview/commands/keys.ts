@@ -225,6 +225,14 @@ export const COMMANDS = {
   "note.delete": { title: "Delete", listKeys: ["d", "Backspace"] },
   "note.deleteCurrent": { title: "Delete Note", keys: ["Mod-Backspace"] },
   "note.copyPath": { title: "Copy Path", listKeys: ["c"] },
+  // Filing. No chord for any of the three: putting a note somewhere is a
+  // once-in-a-while act, and the N family is already spent (§2). `m` is the
+  // note row's spare mnemonic; the folder row's Enter is its disclosure,
+  // because a folder's primary action is showing what is in it.
+  "note.move": { title: "Move to Folder…", listKeys: ["m"] },
+  "note.newInFolder": { title: "New Note in Folder" },
+  "folder.new": { title: "New Folder…" },
+  "folder.toggle": { title: "Expand", listKeys: ["Enter"] },
 
   // Trash rows get the same grammar as note rows, with the verbs the trash has:
   // `r` restores, `d`/⌫ unlinks after a confirm. trash.delete is the second

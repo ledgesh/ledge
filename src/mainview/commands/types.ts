@@ -29,6 +29,11 @@ export type CommandTarget =
   | { kind: "workspace"; id: string }
   | { kind: "note"; path: string }
   | { kind: "trash"; path: string }
+  // A folder row in the note browser's tree: a ROOT-RELATIVE folder of the
+  // selected workspace ("projects/api"), never a path. A distinct kind from
+  // "note" because its verbs are different — a folder opens by disclosing what
+  // is in it, and it is the one row you can put a new note into.
+  | { kind: "folder"; folder: string }
   // A row in the Backlinks panel: the LINKING note, plus where its link sits —
   // the 1-based line and the `[[...]]` text as written, which is the reveal
   // query (workspace/reveal.ts re-finds it on the line). A distinct kind from
@@ -79,6 +84,11 @@ export interface UiHooks {
   // Trash the note and offer the Undo strip — the same path as the note list's
   // Delete, so ⌘⌫ and the menu item are one behavior.
   deleteNoteWithUndo(note: NoteMeta): void;
+  // Open the folder chooser (components/FolderPicker.tsx) — the destination
+  // question Move to Folder… and New Folder… both ask. The browser owns it
+  // because it also owns the tree the answer changes: a note filed into a
+  // collapsed folder has to arrive somewhere you can see it.
+  pickFolder(request: FolderRequest): void;
   // Bring a trashed note back — the same operation Undo uses.
   restoreTrashed(path: string): void;
   // Open the Empty Trash confirmation.
@@ -115,6 +125,13 @@ export interface UiHooks {
   // confirmation that never leaves becomes chrome.
   showNotice(message: string): void;
 }
+
+/** What the folder chooser was opened for: filing a note that exists, or
+ * naming a folder for one that does not yet. `parent` seeds the field, so New
+ * Folder… on a folder row starts inside it. */
+export type FolderRequest =
+  | { kind: "move"; note: NoteMeta }
+  | { kind: "new"; parent: string };
 
 export interface CommandCtx {
   state: AppState;
@@ -207,7 +224,18 @@ export interface RegistryDeps {
   // Create a note from literal text in `folder` — the starter template's
   // birth (registry.ts owns the text). The same channel createNote every
   // first save uses, so naming and collision behavior cannot differ.
-  createNote(folder: string, text: string): Promise<NoteMeta>;
+  createNote(folder: string, text: string, subfolder?: string | null): Promise<NoteMeta>;
+  // Which folders the browser's tree has open, and the toggle (notes/
+  // expansion.ts). Both take the workspace root first: expansion is per
+  // workspace, so two workspaces sharing a folder name do not share an answer.
+  // A dep rather than an import so registry tests are not talking to a live
+  // module-level set — and, like vaultState, it is cheap enough for a `when`
+  // and a title to ask on every render.
+  folderExpanded(root: string, folder: string): boolean;
+  toggleFolder(root: string, folder: string): void;
+  // Open a folder and its ancestors, so a note the command just put there is
+  // on screen where it landed rather than behind a closed disclosure.
+  expandFolder(root: string, folder: string): void;
   // The daily.workspace setting resolved to a registered root at boot (null =
   // unset/stale), mirrored from Bun with the workspace registry. The Edit/New
   // Daily Template faces read it so they act in the workspace ⌘J will act in,

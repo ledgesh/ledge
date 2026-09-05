@@ -213,6 +213,7 @@ export const REQUEST_METHODS = [
   "noteRead",
   "noteWrite",
   "noteCreate",
+  "noteMove",
   "noteRetitle",
   "dailyOpen",
   "noteFromTemplate",

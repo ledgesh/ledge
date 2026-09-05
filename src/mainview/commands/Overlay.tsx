@@ -34,6 +34,7 @@ import { softKeyboard } from "@/lib/shell";
 import { notesOf, useWorkspace } from "@/workspace/store";
 import { useVaultState } from "@/vault/channel";
 import { CHORD_BOOST, filterNotes, fuzzyFilter } from "@/notes/fuzzy";
+import { FolderLabel, folderIndex } from "@/notes/FolderLabel";
 import { listTags, searchNotes, type SearchHit } from "@/notes/channel";
 import { normalizeTag, type TagInfo } from "../../shared/tags";
 import { requestReveal } from "@/workspace/editorPool";
@@ -100,6 +101,9 @@ export function Overlay({
     () => (mode === "notes" ? filterNotes(q, folderNotes) : []),
     [mode, q, folderNotes],
   );
+  // Where each note lives, for the search rows: a hit carries a path and a
+  // title, not a placement, so the folder is looked up in the list that has it.
+  const folders = useMemo(() => folderIndex(folderNotes), [folderNotes]);
 
   // The tag rows' vocabulary: fetched when search mode is entered (and per
   // folder), not per keystroke — the directory changes with the notes, not
@@ -468,8 +472,9 @@ export function Overlay({
                       </span>
                       {hit.snippet.slice(hit.col + len)}
                     </span>
-                    <span className="max-w-[35%] shrink-0 truncate text-[11px] text-muted-foreground">
-                      {hit.title}
+                    <span className="flex max-w-[35%] shrink-0 items-baseline gap-1.5 truncate text-[11px] text-muted-foreground">
+                      <span className="truncate">{hit.title}</span>
+                      <FolderLabel folder={folders.get(hit.path)} />
                     </span>
                   </div>
                 );
@@ -505,7 +510,10 @@ export function Overlay({
                 ) : (
                   <FileText className="size-3.5 shrink-0 text-muted-foreground" />
                 )}
-                <span className="truncate text-sm">{note.title}</span>
+                <span className="min-w-0 flex-1 truncate text-sm">{note.title}</span>
+                {/* Which of two same-titled notes this row is
+                    (notes/FolderLabel.tsx). */}
+                <FolderLabel folder={note.folder} />
               </div>
             ))
           )}

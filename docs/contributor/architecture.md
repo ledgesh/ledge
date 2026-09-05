@@ -287,6 +287,19 @@ Bun therefore validates everything and derives anything derivable:
   the folder (or any ancestor) is ignored, since a note `listNotes` will never
   show is a silent disappearance. A folder is *placement*, never identity —
   notes stay addressed by title (§4).
+- **The browser's folders are DERIVED from its notes, and no call lists
+  directories.** `notes/folders.ts` builds the sidebar's tree out of the
+  `folder` each `NoteMeta` carries, so a folder is on screen because a note is
+  in it. Two things follow, and both are the point. An attached project does
+  not show `src/`, `dist/` and every other directory holding no note as an
+  empty row — which a `listFolders` would have had to, since `.ledgeignore`
+  answers a different question than "is this a place notes live". And the tree
+  cannot disagree with the list it came from, because there is nothing to
+  reconcile. The cost is stated rather than worked around: an EMPTY folder is
+  not a thing the browser can draw, so `folder.new` writes the first note into
+  the folder it makes, and taking the last note out of a folder takes the row
+  with it. The directory stays on disk, unlisted, which is the same bargain as
+  a `.ledge-assets` file no note references any more.
 - **Bun never mkdirs an external root.** A managed folder (a direct child of
   the app home) is Bun's to recreate; an external root that is missing is
   what an unmounted volume looks like, and mkdir-ing it would grow a shadow

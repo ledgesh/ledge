@@ -14,9 +14,15 @@ When a title search matches nothing, the list offers to search the text of every
 
 A search hit opens the note with the matched line revealed and selected, so you land on the words rather than at the top of the file.
 
+Rows name the folder a note is in, beside its title, so two notes with the same title in different folders are told apart ([[Notes and Workspaces]]). A note at the top of the workspace shows no folder.
+
 ## Wikilinks
 
 `[[Note Title]]` links to a note by its title, and `[[Note Title#Heading]]` targets a heading inside it. Typing `[[` opens a picker over the workspace's notes.
+
+A wikilink names a title, never a path, so moving a note into a folder breaks none of the links to it.
+
+Titles are matched exactly, ignoring case. If two notes in different folders share a title, the link opens the one edited most recently, so give notes you link to titles of their own.
 
 Links address the title, never the filename. A retitle renames the file without leaving a stale path behind, and nothing rewrites your other notes to keep links working. A link whose title matches nothing is styled as dangling and edits like plain text.
 

@@ -53,16 +53,17 @@ function digest(text: string): string {
 
 describe("the schema's shape against the protocol version", () => {
   // Bump PROTOCOL_VERSION first if the change is breaking; see the header.
-  // assetRead gained an optional `notePath`, because an image reference now
-  // resolves against the note's own folder rather than the root (assets.ts).
-  // Additive, and both directions land on today's behavior: an old client
-  // sends no notePath and the server bases on the root, which is what it did
-  // for every note; a new client's notePath is ignored by an old server, which
-  // bases on the root and is right for every note an old server can hold,
-  // since a server without folder support has no note anywhere else. No
-  // payload was retyped, no field made required, no union narrowed. The pin
-  // moves and the version does not.
-  const PINNED = { protocol: 5, shape: "491fac9043b21998" };
+  // Folders reached the note surfaces: NoteMeta gained an optional `folder`,
+  // noteCreate gained an optional `folder` param, and noteMove is a new
+  // method. All three are additive, and each degrades to today's behavior in
+  // both directions. A NoteMeta with no `folder` reads as the top level, which
+  // is where every note an old server holds actually is. A `folder` an old
+  // server ignores on noteCreate puts the note at the root — the placement
+  // every create had before. A noteMove an old server does not implement is
+  // refused BY NAME at the handshake's method check, which surfaces as a
+  // failed move rather than as a wrong one. Nothing was retyped, made
+  // required, or narrowed. The pin moves and the version does not.
+  const PINNED = { protocol: 5, shape: "660adb5b275509be" };
 
   test("a payload shape does not change without someone deciding whether it breaks", async () => {
     const shape = digest(shapeOf(await Bun.file(SCHEMA).text()));

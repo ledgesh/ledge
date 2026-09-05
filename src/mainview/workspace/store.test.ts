@@ -669,8 +669,8 @@ describe("trash", () => {
     expect(trashOf(s, FOLDER).map((t) => t.title)).toEqual(["old"]); // untouched
   });
 
-  test("noteRestored puts the note back in its folder's browser", () => {
-    const s = reducer(initialState(FOLDER, [note("a")]), { type: "noteRestored", folder: FOLDER, note: note("b") });
+  test("noteAppeared puts the note back in its folder's browser", () => {
+    const s = reducer(initialState(FOLDER, [note("a")]), { type: "noteAppeared", folder: FOLDER, note: note("b") });
     expect(notesOf(s, FOLDER).map((n) => n.title).sort()).toEqual(["a", "b"]);
   });
 
@@ -678,7 +678,7 @@ describe("trash", () => {
     // It keeps its real last-edited time (the trash records the deletion in
     // ctime and leaves mtime alone), so an old note restored today is still old.
     const s = reducer(initialState(FOLDER, [note("recent", 100), note("older", 10)]), {
-      type: "noteRestored",
+      type: "noteAppeared",
       folder: FOLDER,
       note: note("ancient", 1),
     });
@@ -687,13 +687,13 @@ describe("trash", () => {
 
   test("restoring a note that is somehow already listed changes nothing", () => {
     const before = initialState(FOLDER, [note("a")]);
-    expect(reducer(before, { type: "noteRestored", folder: FOLDER, note: note("a") })).toBe(before);
+    expect(reducer(before, { type: "noteAppeared", folder: FOLDER, note: note("a") })).toBe(before);
   });
 
-  test("noteRestored does not reopen the note's tab", () => {
+  test("noteAppeared does not reopen the note's tab", () => {
     // Restore puts a file back; it does not decide you want to look at it.
     const before = initialState(FOLDER);
-    const s = reducer(before, { type: "noteRestored", folder: FOLDER, note: note("a") });
+    const s = reducer(before, { type: "noteAppeared", folder: FOLDER, note: note("a") });
     expect(countTabs(selected(s).root)).toBe(countTabs(selected(before).root));
     expect(openNotePaths(s).has(`${FOLDER}/a.md`)).toBe(false);
   });

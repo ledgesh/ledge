@@ -94,10 +94,13 @@ function baseFor(text: string): string {
 // role); present-only-when-marked keeps every ordinary meta lean.
 async function metaFor(path: string, text: string): Promise<NoteMeta> {
   const p = parseFrontmatter(text).params;
+  const root = rootContaining(path);
+  const folder = root ? folderOf(root, path) : "";
   return {
     path,
     title: labelOf(headingOf(text), path),
     mtimeMs: (await stat(path)).mtimeMs,
+    ...(folder === "" ? {} : { folder }),
     ...(p.template ? { template: p.template } : {}),
     ...(p.locked !== null ? { locked: true as const } : {}),
   };
@@ -108,13 +111,22 @@ async function metaFor(path: string, text: string): Promise<NoteMeta> {
 // head read the title does (the plaintext head is DESIGNED to fit it,
 // locking.md §2), so the sidebar glyph and the scans' skip both come
 // from the listing they already had.
-async function metaAt(path: string): Promise<NoteMeta> {
+async function metaAt(path: string, root?: string): Promise<NoteMeta> {
   const head = await headAt(path);
   const p = head === null ? null : parseFrontmatter(head).params;
+  // The folder rides the meta because every surface that lists notes flatly —
+  // quick-open, full-text search, backlinks, the agents' listings — has to be
+  // able to say WHICH of two same-titled notes a row is (folders made that
+  // possible, so folders have to answer it). Derived, never stored: `root` is
+  // passed by listNotes, which has it, and looked up otherwise. Omitted at the
+  // top level, so the many notes that live there say nothing at all.
+  const r = root ?? rootContaining(path);
+  const folder = r ? folderOf(r, path) : "";
   return {
     path,
     title: labelOf(head === null ? null : headingOf(head), path),
     mtimeMs: (await stat(path)).mtimeMs,
+    ...(folder === "" ? {} : { folder }),
     ...(p?.template ? { template: p.template } : {}),
     ...(p !== null && p.locked !== null ? { locked: true as const } : {}),
   };
@@ -279,7 +291,7 @@ export async function listNotes(root: string): Promise<NoteMeta[]> {
       const path = join(dir, entry.name);
       if (ignore.ignores(relative(r, path), entry.isDirectory())) continue;
       if (entry.isDirectory()) await walk(path);
-      else if (entry.isFile() && /\.md$/i.test(entry.name)) out.push(await metaAt(path));
+      else if (entry.isFile() && /\.md$/i.test(entry.name)) out.push(await metaAt(path, r));
     }
   };
   await walk(r);

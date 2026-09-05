@@ -1,6 +1,6 @@
 # Notes and Workspaces
 
-This page covers where your notes live and how to arrange them: the file a note is, the folder a workspace is, and the tabs and panes you read them in.
+This page covers where your notes live and how to arrange them: the file a note is, the folder a workspace is, the folders you file notes into, and the tabs and panes you read them in.
 
 ## A note is a Markdown file
 
@@ -26,6 +26,28 @@ With a workspace row focused, or from its right-click menu:
 - Dragging reorders the strip.
 - "Move Workspace Folder…" relocates the folder on disk.
 - ⌫ closes it, which only detaches it. No files are touched, and attaching the same folder later brings everything back.
+
+## Folders
+
+Notes can sit in folders inside the workspace, and the sidebar shows them as a tree. Click a folder to open it, click again to close it. A closed folder shows how many notes are inside. With a folder's row focused, ↑ and ↓ walk the tree and Enter opens or closes it, the same as everywhere else in the sidebar.
+
+There are three ways to put a note in a folder:
+
+- **Drag its row** onto a folder. Dropping it on the Notes header at the top moves it back out to the workspace itself.
+- **"Move to Folder…"**, from the note's right-click menu, from the command palette, or by pressing `m` with the row focused.
+- **"New Note in Folder"**, from a folder's right-click menu, which starts a new note already in it.
+
+"Move to Folder…" opens a list of the workspace's folders. Type to narrow it, and if what you type is not a folder yet, the last row offers to create it. A name with slashes in it, like `projects/api`, makes a folder inside a folder. Nothing is created until you pick a row, so Escape leaves no empty folder behind.
+
+**"New Folder…"** is in the File menu, in the command palette, in the menu beside the New Note button, and in a folder's right-click menu, where it makes a folder inside that one. It creates the folder and opens the first note in it, because Ledge shows the folders its notes are in: a folder with nothing inside has no row.
+
+That is also why moving the last note out of a folder takes the folder's row with it. The folder itself is still on disk, and putting a note back in it brings the row back.
+
+Moving a note keeps everything about it. The file keeps its name, the tab stays open, and its images and links still work: Ledge rewrites the note's image references to point at the same pictures from where it now sits ([[Images]]). Wikilinks need no rewriting at all, because `[[Title]]` finds a note by its heading and not by its path ([[Finding Things]]).
+
+A locked note has to be unlocked before it can move, because those image references are inside the encrypted body ([[Note Locking]]).
+
+Two notes in different folders may share a title. Ledge shows the folder beside the title wherever the list is flat: quick-open, full text search, backlinks, and tag results.
 
 ## Which files become notes
 
@@ -93,6 +115,8 @@ An image on the pasteboard is embedded as a file instead. See [[Images]].
 `d` or ⌫ on a note's row, or ⌘⌫ from the editor, moves the note to the workspace's trash and shows an Undo strip for a few seconds.
 
 Nothing is lost when the strip fades. The Trash section at the bottom of the sidebar holds the note, where `r` restores it and `d` deletes it permanently after a confirmation. "Empty Trash…" in the command palette does that for every note in it. Trashed notes are purged after 30 days, set by `trash.ttlDays`.
+
+The trash mirrors your folders, so restoring a note puts it back in the folder it was deleted from, creating that folder again if it has gone.
 
 ## Tabs and panes
 
