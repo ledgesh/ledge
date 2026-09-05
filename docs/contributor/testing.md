@@ -100,6 +100,11 @@ new rules should imitate:
   the separator does all three. `folderContains` is one function for exactly
   this reason, and the CLI's `cwdFolder` is tested against the same trap
   (`cli.test.ts`), since it answers the question from paths instead;
+- a folder scope narrows a search BEFORE the scan, not after
+  (`notes.fs.test.ts`): the workspace it builds holds enough noise outside the
+  folder to fill `MAX_HITS` on its own, so a scope applied to the results
+  answers with nothing at all. Cheap to get wrong in a refactor and invisible
+  when it is, since the wrong answer is a well-formed empty list;
 - the browser's row ids are unique across the two row kinds
   (`folders.test.ts`), because `useListNav` moves focus by id and a folder
   named like a note's path would put a keystroke on the wrong row.

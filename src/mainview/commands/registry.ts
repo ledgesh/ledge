@@ -345,10 +345,9 @@ export function buildCommands(deps: RegistryDeps): Command[] {
       icon: FilePlus,
       when: (ctx) => !docsSelected(ctx), // instantiates into the selected folder
       run: (ctx) =>
-        ctx.ui.openOverlay?.(
-          "commands",
-          templateChoices(ctx).length > 0 ? TEMPLATE_PREFIX : titleOf("template.starter"),
-        ),
+        ctx.ui.openOverlay?.("commands", {
+          query: templateChoices(ctx).length > 0 ? TEMPLATE_PREFIX : titleOf("template.starter"),
+        }),
     }),
     // Creates the pre-marked cheatsheet note above and opens it for editing.
     cmd("template.starter", {
@@ -1018,6 +1017,26 @@ export function buildCommands(deps: RegistryDeps): Command[] {
           kind: "new",
           parent: ctx.target?.kind === "folder" ? `${ctx.target.folder}/` : "",
         }),
+    }),
+    // Searching one folder. The scope belongs to the OVERLAY rather than to one
+    // of its modes, so crossing to Notes with a chip keeps it: what you were
+    // looking IN survives the crossing exactly as what you were looking FOR
+    // does. Opens in text mode because that is the mode a folder row cannot
+    // otherwise get to — quick-open is one chord away and already lists the
+    // whole workspace, while "what does this folder say about X" has had no
+    // answer in the app at all, though `ledge search -f` and the MCP tools'
+    // `folder` have answered it for agents since they got folders.
+    //
+    // A SELECTING folder, not a placing one (architecture.md §3): it narrows
+    // notes already listed, never becomes a path, and so is refused by nothing.
+    cmd("folder.search", {
+      icon: TextSearch,
+      targetKind: "folder",
+      palette: false, // acts on a specific row; there is no "current folder"
+      when: (ctx) => ctx.target?.kind === "folder",
+      run: (ctx) => {
+        if (ctx.target?.kind === "folder") ctx.ui.openOverlay?.("search", { folder: ctx.target.folder });
+      },
     }),
     // A folder's Enter (interactions.md R6): its primary action is showing what
     // is in it. Two faces on the row's live state, the lock pair's move, so the

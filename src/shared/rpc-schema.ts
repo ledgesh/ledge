@@ -404,7 +404,15 @@ export type LedgeRPC = {
       // locking.md §4); the overlay renders it as a muted footer so the
       // skip is visible where the answer would have been. The same count
       // rides every body scan below.
-      noteSearch: { params: { root: string; query: string }; response: { hits: SearchHit[]; lockedSkipped: number } };
+      // `folder` narrows the scan to one folder of that workspace and the
+      // folders inside it (shared/folders.ts notesUnder), empty or absent
+      // meaning the whole workspace. It SELECTS among notes already found
+      // rather than naming a place to write, so it never becomes a path and
+      // needs no guard: a folder nothing is in simply answers with nothing.
+      // The narrowing happens before the scan reads a byte, because the hit
+      // cap is "stop after MAX_HITS" — filtering afterwards would let notes
+      // outside the folder spend the budget.
+      noteSearch: { params: { root: string; query: string; folder?: string }; response: { hits: SearchHit[]; lockedSkipped: number } };
       // The notes whose [[wikilinks]] point at this note, for the Backlinks
       // panel. Sent when the panel is open and the shown note (or its folder's
       // files, via the notesChanged push) changes. Bun owns the scan for
@@ -426,7 +434,9 @@ export type LedgeRPC = {
       // Locked notes still contribute their frontmatter `tags:` (the
       // plaintext head is where the user put them); lockedSkipped says their
       // BODY hashtags went unread.
-      tagList: { params: { root: string }; response: { tags: TagInfo[]; lockedSkipped: number } };
+      // `folder` narrows it exactly as noteSearch's does, so an overlay scoped
+      // to a folder offers that folder's tags rather than the workspace's.
+      tagList: { params: { root: string; folder?: string }; response: { tags: TagInfo[]; lockedSkipped: number } };
       // The occurrences of one tag across a workspace, newest note first —
       // the Tags panel's drill-in. Same scan as tagList over the same scope,
       // filtered to one case-folded identity; each hit carries the note plus

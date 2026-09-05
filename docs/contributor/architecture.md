@@ -294,18 +294,27 @@ Bun therefore validates everything and derives anything derivable:
   show is a silent disappearance. A folder is *placement*, never identity —
   notes stay addressed by title (§4).
 - **Selecting by folder and placing in one are different arguments, and only
-  one of them can be refused.** Every agent-facing tool that lists, searches or
-  scans takes a `folder` that FILTERS notes already found; `create_note` and
-  `daily_note` take one that PLACES a new file. The second goes through
-  `ensureFolder` above and refuses everything unsafe. The first never becomes a
-  path at all (`shared/folders.ts`: `folderScopeOf` cleans up, `folderContains`
-  selects), so it needs no guard and gets no error — a misspelled scope
-  matches nothing, which is also what a correctly spelled folder holding none
-  does,
-  and since an empty folder is not a thing Ledge shows anywhere those two cases
-  are honestly the same answer. `folderContains` is one function on both sides
-  of the boundary because the trap in it is shared: `a` must not contain its
-  sibling `ab`, in the sidebar's counts and in an agent's scope alike.
+  one of them can be refused.** Every tool or RPC that lists, searches or scans
+  takes a `folder` that FILTERS notes already found: the agent surfaces'
+  `list_notes`, `search_notes` and `tags`, the CLI's `-f`, and the
+  `noteSearch`/`tagList` RPCs behind the overlay's scope pill. `create_note`,
+  `daily_note` and `noteCreate` take one that PLACES a new file, and it goes
+  through `ensureFolder` above, which refuses everything unsafe. The selecting
+  one never becomes a path at all (`shared/folders.ts`: `folderScopeOf` cleans
+  up, `folderContains` selects), so it needs no guard and gets no error — a
+  misspelled scope matches nothing, which is also what a correctly spelled
+  folder holding none does, and since an empty folder is not a thing Ledge
+  shows anywhere those two cases are honestly the same answer.
+  `folderContains` is one function on both sides of the boundary because the
+  trap in it is shared: `a` must not contain its sibling `ab`, in the sidebar's
+  counts and in an agent's scope alike.
+- **A scope narrows before the scan, not after it.** `searchNotes` and the tag
+  scans stop reading at `MAX_HITS`, so a scope applied to the RESULTS would let
+  notes the caller excluded spend the whole budget and leave the folder's own
+  matches unread: a search answering "nothing here" about a folder that is full
+  of the word. This is why `folder` goes down to `bun/notes.ts` rather than
+  being a filter in `mcpTools.ts` or in the view, and why `notes.fs.test.ts`
+  pins it with a workspace whose noise alone fills the cap.
 - **The browser's folders are DERIVED from its notes, and no call lists
   directories.** `notes/folders.ts` builds the sidebar's tree out of the
   `folder` each `NoteMeta` carries, so a folder is on screen because a note is

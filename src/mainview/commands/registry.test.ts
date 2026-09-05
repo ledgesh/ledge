@@ -343,7 +343,9 @@ describe("registry", () => {
   test("note.fromTemplate pre-filters to the entries — or to the starter when none exist", () => {
     const marked = { ...note(`${FOLDER}/meeting.md`, "Meeting"), template: true as const };
     const overlays: string[] = [];
-    const ui = { openOverlay: (mode: string, q?: string) => overlays.push(`${mode}:${q ?? ""}`) };
+    const ui = {
+      openOverlay: (mode: string, opts?: { query?: string }) => overlays.push(`${mode}:${opts?.query ?? ""}`),
+    };
     const parent = find(commands, "note.fromTemplate");
     // Visible in every ordinary workspace, templates or none: discoverability
     // is the point of the empty state. (The one gate is the read-only docs

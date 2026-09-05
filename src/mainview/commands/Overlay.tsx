@@ -21,6 +21,14 @@
 // chip is the discoverable path that interactions.md §1a asks every verb to
 // have.
 //
+// A SCOPE narrows all of that to one folder of the workspace (Search in Folder
+// on a folder row). It belongs to the overlay rather than to a mode, so the
+// chips carry it across the way they carry the query: what you were looking IN
+// is as much a part of the question as what you were looking for. It shows as a
+// removable pill in the field, which is the whole of its state on screen —
+// nothing about a scoped overlay may be invisible, or a search that found
+// nothing would look like a workspace that holds nothing.
+//
 // A search whose query starts with "#" is also how tags surface here: rows
 // prefix-matching the workspace's tag directory render ABOVE the text hits
 // (a #tag is text too, so the hits below still find its occurrences), and
@@ -28,7 +36,7 @@
 // fourth mode and no second sigil — the "#" the search sigil already spends
 // is the one tags are written with.
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CalendarDays, Command as CommandIcon, FileText, Hash, LayoutTemplate, Lock, LockOpen, TextSearch, type LucideIcon } from "lucide-react";
+import { CalendarDays, Command as CommandIcon, FileText, Folder, Hash, LayoutTemplate, Lock, LockOpen, TextSearch, X, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { softKeyboard } from "@/lib/shell";
 import { notesOf, useWorkspace } from "@/workspace/store";
@@ -37,6 +45,7 @@ import { CHORD_BOOST, filterNotes, fuzzyFilter } from "@/notes/fuzzy";
 import { FolderLabel, folderIndex } from "@/notes/FolderLabel";
 import { listTags, searchNotes, type SearchHit } from "@/notes/channel";
 import { normalizeTag, type TagInfo } from "../../shared/tags";
+import { notesUnder } from "../../shared/folders";
 import { requestReveal } from "@/workspace/editorPool";
 import { pushLayer } from "./layers";
 import { useCommands } from "./CommandProvider";
@@ -68,10 +77,13 @@ export function Overlay({
   // it (sigils are a notes-mode, first-typed-character affair, and the one
   // seeded open lands in commands mode). note.fromTemplate's pre-filter.
   initialQuery = "",
+  // The folder the overlay opens narrowed to, "" for the whole workspace.
+  initialFolder = "",
   onClose,
 }: {
   initialMode: OverlayMode;
   initialQuery?: string;
+  initialFolder?: string;
   onClose: () => void;
 }) {
   const { state, dispatch, selected } = useWorkspace();
@@ -79,6 +91,7 @@ export function Overlay({
   // Locked rows' glyph opens with the vault — the NoteBrowser row rule.
   const vaultOpen = useVaultState() === "unlocked";
   const [query, setQuery] = useState(initialQuery);
+  const [scope, setScope] = useState(initialFolder);
   const [index, setIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -93,26 +106,40 @@ export function Overlay({
   const mode: OverlayMode = sigil ?? base;
   const isCommands = mode === "commands";
   const isSearch = mode === "search";
+  // Commands are not in a folder, so the pill is not drawn over a list it does
+  // not narrow — a scope on screen that changed nothing would be a lie about
+  // what the rows below it are. It is not FORGOTTEN, though: crossing back to
+  // Notes or Text brings it and its rows back together.
+  const showScope = scope !== "" && !isCommands;
   // Strip the mode-switch sigil before filtering; a direct chord open has none.
   const q = sigil ? query.slice(1) : query;
 
-  const folderNotes = notesOf(state, selected.folder);
+  const wsNotes = notesOf(state, selected.folder);
+  // What the note rows are drawn from: the workspace, or one folder of it and
+  // the folders inside it. Client-side, unlike the text search below, because
+  // the view already holds every title — the list it would ask Bun for is the
+  // one in its hand.
+  const folderNotes = useMemo(() => notesUnder(wsNotes, scope), [wsNotes, scope]);
   const notes = useMemo(
     () => (mode === "notes" ? filterNotes(q, folderNotes) : []),
     [mode, q, folderNotes],
   );
   // Where each note lives, for the search rows: a hit carries a path and a
   // title, not a placement, so the folder is looked up in the list that has it.
-  const folders = useMemo(() => folderIndex(folderNotes), [folderNotes]);
+  // Indexed over the WHOLE workspace, not the scope: this answers "where is
+  // this path", which does not change with what is being looked at.
+  const folders = useMemo(() => folderIndex(wsNotes), [wsNotes]);
 
   // The tag rows' vocabulary: fetched when search mode is entered (and per
-  // folder), not per keystroke — the directory changes with the notes, not
-  // with the query.
+  // workspace, and per scope), not per keystroke — the directory changes with
+  // the notes, not with the query. Scoped like the hits below it, so every row
+  // the overlay draws comes from the folder it says it is looking in; Enter on
+  // one still lands in the Tags panel, which is a workspace surface of its own.
   const [tags, setTags] = useState<TagInfo[]>([]);
   useEffect(() => {
     if (!isSearch) return;
     let stale = false;
-    listTags(selected.folder).then(
+    listTags(selected.folder, scope).then(
       (t) => {
         if (!stale) setTags(t.tags);
       },
@@ -123,7 +150,7 @@ export function Overlay({
     return () => {
       stale = true;
     };
-  }, [isSearch, selected.folder]);
+  }, [isSearch, selected.folder, scope]);
 
   // Tag rows show only for a #-leading query — the sigil route's query always
   // is one; a direct ⌥⌘P query opts in by spelling the tag as written. A bare
@@ -150,7 +177,7 @@ export function Overlay({
     }
     let stale = false;
     const timer = setTimeout(() => {
-      searchNotes(selected.folder, q).then(
+      searchNotes(selected.folder, q, scope).then(
         (h) => {
           if (stale) return;
           setHits(h.hits);
@@ -167,7 +194,7 @@ export function Overlay({
       stale = true;
       clearTimeout(timer);
     };
-  }, [isSearch, q, selected.folder]);
+  }, [isSearch, q, selected.folder, scope]);
   const items = useMemo<PaletteItem[]>(() => {
     if (!isCommands) return [];
     const visible = paletteItems(commands, ctx());
@@ -266,6 +293,13 @@ export function Overlay({
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       setIndex(Math.max(active - 1, 0));
+    } else if (e.key === "Backspace" && showScope && query === "") {
+      // Backspace out of an empty field drops the scope — the same way it
+      // drops a mode sigil. The pill is the leftmost thing in the field, so
+      // the key that deletes leftwards is the one that should take it.
+      e.preventDefault();
+      setScope("");
+      setIndex(0);
     } else if (e.key === "Enter") {
       e.preventDefault();
       // The crossing row is the only row there is when it shows, and it is
@@ -287,29 +321,68 @@ export function Overlay({
         className="flex max-h-[60vh] w-[min(520px,90vw)] flex-col overflow-hidden rounded-lg border bg-card text-card-foreground shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <input
-          ref={inputRef}
-          value={query}
-          // "Search notes  (> commands · # in text)" until the chips existed:
-          // the sigils were taught here because there was nowhere else to teach
-          // them. The chip is the better teacher — it sits on the control it
-          // describes, it is still there after you type, and it does not spend
-          // the field on instructions — so the field says what it is for again.
-          placeholder={isCommands ? "Run a command" : isSearch ? "Search inside notes" : "Search notes"}
-          spellCheck={false}
-          // WKWebView applies autocorrect/autocapitalize to a bare <input> and
-          // mangles what you type ("sh" becomes "Sh"). `autocorrect` is WebKit-only
-          // with no IDL property, hence setAttribute-style props here.
-          autoComplete="off"
-          autoCapitalize="off"
-          autoCorrect="off"
-          onChange={(e) => {
-            setQuery(e.target.value);
-            setIndex(0);
-          }}
-          onKeyDown={onKeyDown}
-          className="shrink-0 bg-transparent px-3.5 py-2.5 text-sm outline-none placeholder:text-muted-foreground touch:min-h-[44px]"
-        />
+        {/* The field is a ROW once a scope can sit in it: the pill is part of
+            the question being asked, not chrome above or below it, and reading
+            "projects | rate limit" left to right is the sentence the results
+            answer. */}
+        <div className="flex shrink-0 items-center">
+          {showScope && (
+            // Its own removal, with no second control: a pill whose ✕ is the
+            // only way out spends 24 points on a target a finger will miss,
+            // and there is nothing else clicking a scope could sensibly mean.
+            // Backspace at an empty field does the same thing (onKeyDown).
+            //
+            // 32 points on touch rather than §1a's 44, stated rather than
+            // fudged. This is a token INSIDE a 44-point field, so at 44 it
+            // would be exactly as tall as the field and stop reading as part
+            // of the query; and it is not the only way out, since every
+            // software keyboard has the Backspace that also clears it.
+            <button
+              type="button"
+              data-testid="overlay-scope"
+              // Take the tap without taking the focus — the mode chips' rule,
+              // for the same reason: the caret belongs in the field.
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                setScope("");
+                setIndex(0);
+                inputRef.current?.focus();
+              }}
+              title={`Looking in ${scope} only. Click to search the whole workspace.`}
+              className="ml-3.5 flex min-w-0 shrink items-center gap-1 rounded bg-secondary py-0.5 pl-1.5 pr-1 text-xs text-secondary-foreground touch:min-h-[32px]"
+            >
+              <Folder className="size-3 shrink-0" />
+              <span className="min-w-0 truncate">{scope}</span>
+              <X className="size-3 shrink-0 text-muted-foreground" />
+            </button>
+          )}
+          <input
+            ref={inputRef}
+            value={query}
+            // "Search notes  (> commands · # in text)" until the chips existed:
+            // the sigils were taught here because there was nowhere else to teach
+            // them. The chip is the better teacher — it sits on the control it
+            // describes, it is still there after you type, and it does not spend
+            // the field on instructions — so the field says what it is for again.
+            placeholder={isCommands ? "Run a command" : isSearch ? "Search inside notes" : "Search notes"}
+            spellCheck={false}
+            // WKWebView applies autocorrect/autocapitalize to a bare <input> and
+            // mangles what you type ("sh" becomes "Sh"). `autocorrect` is WebKit-only
+            // with no IDL property, hence setAttribute-style props here.
+            autoComplete="off"
+            autoCapitalize="off"
+            autoCorrect="off"
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setIndex(0);
+            }}
+            onKeyDown={onKeyDown}
+            // `min-w-0 flex-1` where it was `shrink-0`: the pill beside it may
+            // be a long folder name, and a field that cannot shrink would push
+            // itself off the panel rather than let the name truncate.
+            className="min-w-0 flex-1 bg-transparent px-3.5 py-2.5 text-sm outline-none placeholder:text-muted-foreground touch:min-h-[44px]"
+          />
+        </div>
 
         {/* The three modes, as three controls a finger chooses between — so 44
             points on touch (§1a), and the row that makes the sigils an
@@ -365,7 +438,7 @@ export function Overlay({
             magnifier because ⌘P is not typeable. Four row kinds, four copies of
             the size — they are four different shapes (a verb, a tag, a search
             hit, a note) rather than one component wearing four hats. */}
-        <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto p-1">
+        <div ref={listRef} data-testid="overlay-list" className="min-h-0 flex-1 overflow-y-auto p-1">
           {count === 0 ? (
             crossing ? (
               // A row, not a message: the same shape as the search hits it
@@ -388,7 +461,11 @@ export function Overlay({
                   ? "No matching commands"
                   : isSearch
                     ? q.trim() === ""
-                      ? "Type to search every note's text"
+                      // "every note" is a claim about coverage, and a scoped
+                      // overlay does not have it to make.
+                      ? showScope
+                        ? `Type to search the text of the notes in ${scope}`
+                        : "Type to search every note's text"
                       : "No matches"
                     : folderNotes.length === 0
                       ? "No notes yet"

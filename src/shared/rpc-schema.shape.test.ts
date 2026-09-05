@@ -63,7 +63,17 @@ describe("the schema's shape against the protocol version", () => {
   // refused BY NAME at the handshake's method check, which surfaces as a
   // failed move rather than as a wrong one. Nothing was retyped, made
   // required, or narrowed. The pin moves and the version does not.
-  const PINNED = { protocol: 5, shape: "660adb5b275509be" };
+  //
+  // Then the folder scope reached the two scans the overlay runs: noteSearch
+  // and tagList each gained an optional `folder`. Additive again, and the
+  // no-bump call is the same one noteCreate's `folder` got, for the same
+  // reason. An old server ignores the field and answers over the whole
+  // workspace: WIDER than asked, never other than asked — the hits are real
+  // hits in real notes, which is the difference between an answer that is
+  // bigger than the question and an answer to a different question. And the
+  // narrowing is a selection, not a place: a `folder` the peer drops cannot
+  // put a byte anywhere.
+  const PINNED = { protocol: 5, shape: "7dcd1028c73d96bb" };
 
   test("a payload shape does not change without someone deciding whether it breaks", async () => {
     const shape = digest(shapeOf(await Bun.file(SCHEMA).text()));

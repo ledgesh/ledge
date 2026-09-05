@@ -73,7 +73,9 @@ export interface UiHooks {
   showTag(tag: string): void;
   // `initialQuery` seeds the input (filter text only, never sigil-parsed):
   // how note.fromTemplate lands in the palette pre-filtered to its entries.
-  openOverlay(mode: "notes" | "commands" | "search", initialQuery?: string): void;
+  // `folder` scopes the overlay to one folder of the selected workspace (its
+  // note list and its text search both), "" or absent being the whole of it.
+  openOverlay(mode: "notes" | "commands" | "search", opts?: { query?: string; folder?: string }): void;
   beginRenameWorkspace(id: string): void;
   // Open the icon picker on a workspace, anchored to its row in the strip.
   pickWorkspaceIcon(id: string): void;

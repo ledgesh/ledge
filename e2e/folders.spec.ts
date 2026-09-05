@@ -191,3 +191,71 @@ test.describe("where a note lives, once the list is flat", () => {
     await expect(page.getByTestId("note-folder")).toHaveCount(0);
   });
 });
+
+test.describe("searching one folder", () => {
+  // Every note in the fixture says "<name> body", so one query reaches all
+  // four and the scope is the only thing that can change the answer.
+  const rows = (page: Page) => page.getByTestId("overlay-list").locator("> div");
+
+  test("Search in Folder narrows the text search to that folder and the ones inside it", async ({ page }) => {
+    await folderRow(page, "projects").click({ button: "right" });
+    await page.getByRole("menuitem", { name: "Search in Folder" }).click();
+    // The scope is on screen before a character is typed: a search that found
+    // nothing must never be mistakable for a workspace that holds nothing.
+    await expect(page.getByTestId("overlay-scope")).toHaveText("projects");
+    await page.getByPlaceholder("Search inside notes").fill("body");
+    // Beta sits in projects, Gamma one level further down in projects/api.
+    // Alpha (top level) and Delta (admin) are the controls.
+    await expect(rows(page)).toHaveCount(2);
+    await expect(page.getByTestId("overlay-list")).toContainText("Beta");
+    await expect(page.getByTestId("overlay-list")).toContainText("Gamma");
+    await expect(page.getByTestId("overlay-list")).not.toContainText("Delta");
+  });
+
+  test("`/` on a focused folder row is the same verb", async ({ page }) => {
+    await folderRow(page, "admin").click();
+    await page.keyboard.press("/");
+    await expect(page.getByTestId("overlay-scope")).toHaveText("admin");
+    await page.getByPlaceholder("Search inside notes").fill("body");
+    await expect(rows(page)).toHaveCount(1);
+    await expect(page.getByTestId("overlay-list")).toContainText("Delta");
+  });
+
+  test("the scope crosses to Notes with the chips, and clearing it widens both", async ({ page }) => {
+    // The scope belongs to the overlay, not to one of its modes: what you were
+    // looking IN survives a crossing exactly as what you were looking for does.
+    await folderRow(page, "projects").click({ button: "right" });
+    await page.getByRole("menuitem", { name: "Search in Folder" }).click();
+    await page.getByRole("button", { name: "Notes" }).click();
+    await expect(page.getByTestId("overlay-scope")).toHaveText("projects");
+    await expect(page.getByTestId("overlay-list")).not.toContainText("Alpha");
+    // The pill is its own removal, and the list widens under it.
+    await page.getByTestId("overlay-scope").click();
+    await expect(page.getByTestId("overlay-scope")).toHaveCount(0);
+    await expect(page.getByTestId("overlay-list")).toContainText("Alpha");
+  });
+
+  test("Backspace at an empty field drops the scope, the way it drops a sigil", async ({ page }) => {
+    await folderRow(page, "projects").click({ button: "right" });
+    await page.getByRole("menuitem", { name: "Search in Folder" }).click();
+    await page.getByPlaceholder("Search inside notes").fill("body");
+    await expect(rows(page)).toHaveCount(2);
+    // One Backspace per typed character empties the field but leaves the pill:
+    // the scope is not one more character of the query.
+    for (let i = 0; i < "body".length; i++) await page.keyboard.press("Backspace");
+    await expect(page.getByTestId("overlay-scope")).toHaveCount(1);
+    await page.keyboard.press("Backspace");
+    await expect(page.getByTestId("overlay-scope")).toHaveCount(0);
+  });
+
+  test("the scope is not drawn over the commands list, which it does not narrow", async ({ page }) => {
+    await folderRow(page, "projects").click({ button: "right" });
+    await page.getByRole("menuitem", { name: "Search in Folder" }).click();
+    await page.getByRole("button", { name: "Commands" }).click();
+    await expect(page.getByTestId("overlay-scope")).toHaveCount(0);
+    // Not forgotten, though: crossing back brings the scope and its rows back
+    // together.
+    await page.getByRole("button", { name: "Text" }).click();
+    await expect(page.getByTestId("overlay-scope")).toHaveText("projects");
+  });
+});

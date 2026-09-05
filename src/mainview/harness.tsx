@@ -16,6 +16,7 @@ import { headingOf, labelOf, slugify, slugOf } from "../shared/slug";
 import { frontmatterEnd, parseFrontmatter } from "../shared/frontmatter";
 import { instantiateTemplate, isoDateOf } from "../shared/template";
 import { collectHits, type SearchHit } from "../shared/search";
+import { notesUnder } from "../shared/folders";
 import { resolveWikiTitle, wikiRefsOf } from "../shared/wikilinks";
 import { normalizeTag, tagDirectoryOf, tagRefsOf, type TagInfo } from "../shared/tags";
 import { knownHostsHost, validatePassword } from "../shared/connections";
@@ -534,8 +535,8 @@ class FakeStore {
   // the same two pieces (scoped to one root), so the semantics cannot drift —
   // including the locked skip: bodies of locked notes are never scanned,
   // vault state irrelevant, and the count rides back (locking.md §4).
-  async search(root: string, query: string): Promise<{ hits: SearchHit[]; lockedSkipped: number }> {
-    const metas = this.list(root);
+  async search(root: string, query: string, scope = ""): Promise<{ hits: SearchHit[]; lockedSkipped: number }> {
+    const metas = notesUnder(this.list(root), scope);
     const open = metas.filter((m) => !m.locked);
     const hits = await collectHits(query, open, (p) => this.readNote(p));
     return { hits, lockedSkipped: metas.length - open.length };
@@ -574,9 +575,9 @@ class FakeStore {
     return meta.locked ? this.headOf(text) : text;
   }
 
-  tags(root: string): { tags: TagInfo[]; lockedSkipped: number } {
+  tags(root: string, scope = ""): { tags: TagInfo[]; lockedSkipped: number } {
     let lockedSkipped = 0;
-    const perNote = this.list(root).flatMap((meta) => {
+    const perNote = notesUnder(this.list(root), scope).flatMap((meta) => {
       if (meta.locked) lockedSkipped += 1;
       const text = this.tagSource(meta);
       return text === null ? [] : [{ path: meta.path, refs: tagRefsOf(text) }];
@@ -712,9 +713,9 @@ store.seedAt(DOCS, "04-third-party-licenses.md", "# Third-Party Licenses\n\nMIT,
 configureNotes({
   list: async (folder) => store.list(folder),
   read: async (path) => store.readFile(path),
-  search: (folder, query) => store.search(folder, query),
+  search: (folder, query, scope) => store.search(folder, query, scope),
   backlinks: async (path) => store.backlinks(path),
-  tags: async (folder) => store.tags(folder),
+  tags: async (folder, scope) => store.tags(folder, scope),
   tagged: async (folder, tag) => store.tagged(folder, tag),
   write: async (path, text, baseMtimeMs) => store.write(path, text, baseMtimeMs),
   stash: async (path, text) => store.stash(path, text),

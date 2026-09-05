@@ -36,9 +36,9 @@ interface NoteHandlers {
   // The body scans carry lockedSkipped — how many locked notes the answer
   // deliberately does not cover (locking.md §4) — for the overlay and
   // panel footers.
-  search: (folder: string, query: string) => Promise<{ hits: SearchHit[]; lockedSkipped: number }>;
+  search: (folder: string, query: string, scope: string) => Promise<{ hits: SearchHit[]; lockedSkipped: number }>;
   backlinks: (path: string) => Promise<{ backlinks: BacklinkHit[]; lockedSkipped: number }>;
-  tags: (folder: string) => Promise<{ tags: TagInfo[]; lockedSkipped: number }>;
+  tags: (folder: string, scope: string) => Promise<{ tags: TagInfo[]; lockedSkipped: number }>;
   tagged: (folder: string, tag: string) => Promise<{ hits: TagHit[]; lockedSkipped: number }>;
   write: (path: string, text: string, baseMtimeMs: number | null) => Promise<WriteResult>;
   // Park a buffer's text in the note's trash without writing the note itself
@@ -100,8 +100,13 @@ export function readNote(path: string): Promise<NoteFile | null> {
 // (shared/search.ts owns the grammar and the caps). Bun does the scanning —
 // the view never holds the corpus, only the result list. lockedSkipped rides
 // along for the overlay's footer: locked notes are never searched.
-export function searchNotes(folder: string, query: string): Promise<{ hits: SearchHit[]; lockedSkipped: number }> {
-  return bridge().search(folder, query);
+//
+// `scope` narrows it to one folder of that workspace and the folders inside
+// it; "" is the whole workspace. Bun narrows before the scan rather than the
+// view filtering after, because the hit cap would otherwise be spent on notes
+// the caller has already said it does not want.
+export function searchNotes(folder: string, query: string, scope = ""): Promise<{ hits: SearchHit[]; lockedSkipped: number }> {
+  return bridge().search(folder, query, scope);
 }
 
 // The notes whose [[wikilinks]] point at this note, for the Backlinks panel.
@@ -117,8 +122,9 @@ export function backlinksOf(path: string): Promise<{ backlinks: BacklinkHit[]; l
 // the Tags panel, the overlay's tag rows, and the # completion vocabulary —
 // Bun scans, the searchNotes stance again. Locked notes contribute exactly
 // their plaintext head's tags; lockedSkipped counts their unscanned bodies.
-export function listTags(folder: string): Promise<{ tags: TagInfo[]; lockedSkipped: number }> {
-  return bridge().tags(folder);
+// `scope` narrows to one folder, exactly as searchNotes' does.
+export function listTags(folder: string, scope = ""): Promise<{ tags: TagInfo[]; lockedSkipped: number }> {
+  return bridge().tags(folder, scope);
 }
 
 // Every occurrence of one tag across a workspace, newest note first, rows

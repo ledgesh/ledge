@@ -233,6 +233,12 @@ export const COMMANDS = {
   "note.newInFolder": { title: "New Note in Folder" },
   "folder.new": { title: "New Folder…" },
   "folder.toggle": { title: "Expand", listKeys: ["Enter"] },
+  // The one folder verb that earns a bare key. `/` is the search key every
+  // list-shaped program already spells it with, the folder row kind has only
+  // Enter spent on it, and narrowing a search is the folder's own frequent
+  // act — the CLI's `-f` and the MCP tools' `folder` have had it since agents
+  // got folders, and this is the same scope for the person at the keyboard.
+  "folder.search": { title: "Search in Folder", listKeys: ["/"] },
 
   // Trash rows get the same grammar as note rows, with the verbs the trash has:
   // `r` restores, `d`/⌫ unlinks after a confirm. trash.delete is the second

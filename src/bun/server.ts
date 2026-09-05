@@ -22,6 +22,7 @@ import { takePaste } from "./paste";
 import { readProfile, writeProfile } from "./profiles";
 import type { ClientMethod } from "../shared/wire";
 import type { RequestHandlers, ServerPush } from "../shared/wire";
+import { folderScopeOf } from "../shared/folders";
 import {
   backlinksTo,
   changeVaultPassphrase,
@@ -806,11 +807,15 @@ export async function createServer(deps: { push: Audience; native: NativeDeps })
     },
     // The scans return their lockedSkipped counts themselves (notes.ts
     // decides the skip; locking.md §4) — these are passthroughs.
-    noteSearch: async ({ root, query }) => searchNotes(root, query),
+    // `folder` narrows the scan to one folder of the workspace; absent (and
+    // every older client) means the whole of it. folderScopeOf only trims and
+    // normalizes — it is not a guard, and does not need to be: a folder
+    // selects among notes already listed and never becomes a path.
+    noteSearch: async ({ root, query, folder }) => searchNotes(root, query, folderScopeOf(folder)),
     // backlinksTo derives and guards the root itself (assertNote), the
     // per-note-call stance: the view sends only the path.
     noteBacklinks: async ({ path }) => backlinksTo(path),
-    tagList: async ({ root }) => tagsIn(root),
+    tagList: async ({ root, folder }) => tagsIn(root, folderScopeOf(folder)),
     tagNotes: async ({ root, tag }) => notesTagged(root, tag),
 
     // --- the vault (note locking) -----------------------------------------

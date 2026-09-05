@@ -31,6 +31,8 @@ With a workspace row focused, or from its right-click menu:
 
 Notes can sit in folders inside the workspace, and the sidebar shows them as a tree. Click a folder to open it, click again to close it. A closed folder shows how many notes are inside. With a folder's row focused, ↑ and ↓ walk the tree and Enter opens or closes it, the same as everywhere else in the sidebar.
 
+Press `/` with a folder's row focused, or choose "Search in Folder" from its right-click menu, to look only inside it ([[Finding Things]]).
+
 There are three ways to put a note in a folder:
 
 - **Drag its row** onto a folder. Dropping it on the Notes header at the top moves it back out to the workspace itself.

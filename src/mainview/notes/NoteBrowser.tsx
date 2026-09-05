@@ -364,12 +364,19 @@ export function NoteBrowser() {
       )}
 
       {/* A folder row's menu: its own Enter verb (Expand/Collapse, titled by
-          the live state), the note it can hold, and a folder inside it — which
-          is the only nesting path a pointer has. */}
+          the live state), searching inside it, the note it can hold, and a
+          folder inside it — which is the only nesting path a pointer has. */}
       {menu?.kind === "folder" && (
         <ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)}>
           <CommandMenuItem
             id="folder.toggle"
+            target={{ kind: "folder", folder: menu.folder }}
+            onClose={() => setMenu(null)}
+          />
+          {/* Above the readOnly gate: looking inside a folder is a read, and
+              the manual's own pages are worth searching a section of. */}
+          <CommandMenuItem
+            id="folder.search"
             target={{ kind: "folder", folder: menu.folder }}
             onClose={() => setMenu(null)}
           />

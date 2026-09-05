@@ -268,9 +268,9 @@ export function bootView(requests: RequestClient): Promise<void> {
   configureNotes({
     list: (folder) => requests.noteList({ root: folder }).then((r) => r.notes),
     read: (path) => requests.noteRead({ path }).then((r) => r.note),
-    search: (folder, query) => requests.noteSearch({ root: folder, query }),
+    search: (folder, query, scope) => requests.noteSearch({ root: folder, query, folder: scope }),
     backlinks: (path) => requests.noteBacklinks({ path }),
-    tags: (folder) => requests.tagList({ root: folder }),
+    tags: (folder, scope) => requests.tagList({ root: folder, folder: scope }),
     tagged: (folder, tag) => requests.tagNotes({ root: folder, tag }),
     write: (path, text, baseMtimeMs) => requests.noteWrite({ path, text, baseMtimeMs }),
     stash: (path, text) => requests.noteStash({ path, text }).then((r) => r.stashed),

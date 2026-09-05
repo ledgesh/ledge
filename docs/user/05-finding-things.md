@@ -16,6 +16,18 @@ A search hit opens the note with the matched line revealed and selected, so you 
 
 Rows name the folder a note is in, beside its title, so two notes with the same title in different folders are told apart ([[Notes and Workspaces]]). A note at the top of the workspace shows no folder.
 
+## Search inside one folder
+
+Right-click a folder in the sidebar and choose "Search in Folder", or press `/` with its row focused. The overlay opens with that folder's name as a pill beside the field, and every row below comes from it and the folders inside it.
+
+The pill stays put as you switch modes, so the Notes chip lists that folder's notes by title and the Text chip searches their bodies. Click the pill, or press Backspace with the field empty, to widen back out to the whole workspace.
+
+The Commands chip hides the pill while you are on it: commands are not in a folder. Switching back brings it and its rows back together.
+
+A `#` query lists that folder's tags rather than the workspace's. Enter on a tag row still opens the Tags panel, which is always the whole workspace.
+
+This is the same narrowing that `ledge search -f` and the agent tools' `folder` argument give you outside the app ([[The ledge CLI]], [[Agents and Ledge]]).
+
 ## Wikilinks
 
 `[[Note Title]]` links to a note by its title, and `[[Note Title#Heading]]` targets a heading inside it. Typing `[[` opens a picker over the workspace's notes.

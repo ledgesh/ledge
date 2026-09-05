@@ -187,7 +187,7 @@ function Shell() {
   // (state → null) before the command re-opens, and a null-derived counter
   // would land back on the same seq — same key, no remount, the very bug.
   const overlaySeq = useRef(0);
-  const [overlay, setOverlay] = useState<{ mode: OverlayMode; query: string; seq: number } | null>(null);
+  const [overlay, setOverlay] = useState<{ mode: OverlayMode; query: string; folder: string; seq: number } | null>(null);
   // The profile the editor dialog is open on, or null. Shell owns it like the
   // rest of the chrome: the command reaches it through the ui hook below.
   const [profileEditing, setProfileEditing] = useState<string | null>(null);
@@ -401,9 +401,9 @@ function Shell() {
       toggleOutline: () => openRightPanel(rightPanelRef.current === "outline" ? null : "outline"),
       toggleTags: () => openRightPanel(rightPanelRef.current === "tags" ? null : "tags"),
       showTag,
-      openOverlay: (mode, initialQuery) => {
+      openOverlay: (mode, opts) => {
         overlaySeq.current += 1;
-        setOverlay({ mode, query: initialQuery ?? "", seq: overlaySeq.current });
+        setOverlay({ mode, query: opts?.query ?? "", folder: opts?.folder ?? "", seq: overlaySeq.current });
       },
       openProfileEditor: setProfileEditing,
       openSettingsEditor: () => setSettingsEditing(true),
@@ -886,7 +886,13 @@ function Shell() {
       </div>
 
       {overlay && (
-        <Overlay key={overlay.seq} initialMode={overlay.mode} initialQuery={overlay.query} onClose={() => setOverlay(null)} />
+        <Overlay
+          key={overlay.seq}
+          initialMode={overlay.mode}
+          initialQuery={overlay.query}
+          initialFolder={overlay.folder}
+          onClose={() => setOverlay(null)}
+        />
       )}
       {profileEditing && (
         <ProfileEditor name={profileEditing} onClose={() => setProfileEditing(null)} />

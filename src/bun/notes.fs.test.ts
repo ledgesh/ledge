@@ -40,6 +40,7 @@ import {
   writeNote,
 } from "./notes";
 import { createVault, lockVault, resetVaultForTests } from "./vault";
+import { MAX_HITS, MAX_HITS_PER_NOTE } from "../shared/search";
 
 if (!resolve(APP_HOME).startsWith(resolve(tmpdir()) + sep)) {
   throw new Error(`refusing to run filesystem tests against ${APP_HOME} — is the preload configured?`);
@@ -626,6 +627,27 @@ describe("folders", () => {
     expect(relative(ROOT, b.path)).toBe(join("b", "notes.md")); // not notes-2.md
     const same = await createNote(ROOT, "# Notes\n", "a");
     expect(relative(ROOT, same.path)).toBe(join("a", "notes-2.md"));
+  });
+
+  test("a folder scope narrows the scan before the hit cap can be spent", async () => {
+    // The load-bearing half of folder-scoped search, and the one a refactor
+    // could undo without any other test noticing: collectHits STOPS at
+    // MAX_HITS, so a scope has to narrow the note list before the scan reads a
+    // byte. Filter the hits afterwards instead and the notes the caller
+    // explicitly excluded eat the whole budget, leaving the folder's own
+    // matches unread — a search that answers "nothing here" about a folder
+    // that is full of the word.
+    const wanted = await createNote(ROOT, "# Wanted\n\nneedle\n", "projects");
+    // MAX_HITS / MAX_HITS_PER_NOTE noisy notes, each newer than the one above,
+    // is exactly enough to fill the budget on its own.
+    for (let i = 0; i < MAX_HITS / MAX_HITS_PER_NOTE; i++) {
+      await createNote(ROOT, `# Noise ${i}\n\n${"needle\n".repeat(MAX_HITS_PER_NOTE)}`);
+    }
+    const wide = await searchNotes(ROOT, "needle");
+    expect(wide.hits).toHaveLength(MAX_HITS);
+    expect(wide.hits.some((h) => h.path === wanted.path)).toBe(false); // the budget is gone
+    const scoped = await searchNotes(ROOT, "needle", "projects");
+    expect(scoped.hits.map((h) => h.path)).toEqual([wanted.path]);
   });
 
   test("folderPathOf refuses every way of naming somewhere else", () => {
