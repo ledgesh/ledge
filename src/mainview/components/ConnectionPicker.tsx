@@ -27,7 +27,7 @@ import {
 } from "@/lib/connections";
 import { flushAllNow } from "@/notes/store";
 import { copyText } from "@/lib/clipboard";
-import { deviceKeyLine } from "@/lib/shell";
+import { deviceKeyLine, shareSheet } from "@/lib/shell";
 import { hostPart, parsePort, type AuthMode } from "../../shared/connections";
 import type { ConnectionInfo } from "../../shared/rpc-schema";
 
@@ -389,6 +389,7 @@ function ConnectionForm({
   // and has no path, so its form shows the line to install instead of asking
   // for a file (lib/shell.ts).
   const ownKey = deviceKeyLine();
+  const share = shareSheet();
 
   useEffect(() => firstRef.current?.focus(), []);
 
@@ -521,19 +522,26 @@ function ConnectionForm({
           a credential this connection will never present. */}
       {ownKey && auth === "key" && (
         <div className="flex flex-col gap-1">
-          {/* What the line narrows is ssh's feature set around the protocol, not
-              the protocol: what rides the forced command is terminalAttach and
-              runBlock, which is arbitrary code execution as that user by design
-              (remote.md §4a). So this says what the restriction is good for and
-              does not claim the key is harmless. */}
+          {/* What the line IS comes first: a reader who does not know it carries
+              this device's public key cannot tell why the server needs it, and
+              a sentence that opens on hardening explains the option before the
+              thing it is an option on.
+
+              What the prefix narrows is ssh's feature set around the protocol,
+              not the protocol: what rides the forced command is terminalAttach
+              and runBlock, which is arbitrary code execution as that user by
+              design (remote.md §4a). So the second sentence says what the
+              restriction is good for and stops short of "cannot open a shell",
+              which reads as a guarantee this design does not make. */}
           <span className="text-[11px] text-muted-foreground">
-            Add this line to <code className="font-mono">~/.ssh/authorized_keys</code> on the server. It stops that key
-            forwarding ports, copying files, or opening a shell.
+            Add this line to <code className="font-mono">~/.ssh/authorized_keys</code> on the server. It is this
+            device's public key, which is how that server knows to let this device in. The{" "}
+            <code className="font-mono">restrict</code> prefix keeps the key from forwarding ports or copying files.
           </span>
           <code className="select-text break-all rounded-md border border-input bg-muted/40 p-2 font-mono text-[11px]">
             {ownKey}
           </code>
-          <div>
+          <div className="flex gap-1">
             <Button
               size="sm"
               variant="ghost"
@@ -544,6 +552,16 @@ function ConnectionForm({
             >
               {copied ? "Copied" : "Copy Line"}
             </Button>
+            {/* Beside the copy rather than instead of it, and absent on a client
+                with no sheet to open (lib/shell.ts). A copy is the right verb
+                when the server is a window away; on a phone the pasteboard ends
+                at the phone, and this is the button that gets the line to the
+                machine it has to be pasted on. */}
+            {share && (
+              <Button size="sm" variant="ghost" onClick={() => share(ownKey)}>
+                Share Line
+              </Button>
+            )}
           </div>
         </div>
       )}

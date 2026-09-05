@@ -833,10 +833,23 @@ test.describe("the iOS client, and what it does not have", () => {
 
     await dialog.getByRole("button", { name: "Add Server…" }).tap();
     await expect(dialog).toContainText("authorized_keys");
-    await expect(dialog).toContainText("stops that key forwarding ports, copying files, or opening a shell");
+    // What the line is, before what the prefix on it narrows. And no claim that
+    // the key cannot open a shell: the protocol behind the forced command runs
+    // code by design (remote.md §4a).
+    await expect(dialog).toContainText("this device's public key");
+    await expect(dialog).toContainText("keeps the key from forwarding ports or copying files");
+    await expect(dialog).not.toContainText("opening a shell");
     await expect(dialog).not.toContainText("the only thing that key can do");
     await expect(dialog.getByText(/^restrict,command=/)).toBeVisible();
     await expect(dialog.getByLabel(/^Key/)).toHaveCount(0);
+
+    // The pasteboard ends at the phone and the server is elsewhere, so the line
+    // leaves by the device's share sheet as well (ios.md §4). The sheet itself
+    // is UIKit's; what the view owns is offering it and handing over the line.
+    await dialog.getByRole("button", { name: "Share Line" }).tap();
+    expect(await page.evaluate(() => (window as unknown as { harnessShared?: string[] }).harnessShared ?? [])).toEqual([
+      'restrict,command="ledge-server serve" ecdsa-sha2-nistp256 AAAAharness ledge-iphone-abc123',
+    ]);
 
     await dialog.getByLabel("Name").fill("Studio");
     await dialog.getByLabel("SSH destination").fill("dev@studio");

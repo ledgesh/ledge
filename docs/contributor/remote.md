@@ -257,6 +257,20 @@ generated in the Secure Enclave and cannot be exported (`ios.md` §4). With the
 password door beside it, that key stopped being the only way onto a server and
 became the better one.
 
+**Where Ledge is genuinely the odd one out is that generating is the ONLY
+option.** Termius, Blink and Prompt all import an existing private key — pasted,
+or opened from Files or iCloud Drive — and offer an enclave key beside it, so
+there the enclave is a property of one key rather than of the app; Termius and
+Panic then sync the importable ones between devices, which is the opposite of
+`ios.md` §4's per-device stance. Ledge imports none of that, and the reason is
+the enclave itself: it mints and never accepts, so an imported key would be
+software key material in the keychain, a strictly weaker credential than the one
+the phone already has, and a copy of the user's general-purpose key on the
+device most likely to be lost. It also inverts the transfer problem, which is
+the whole of `ios.md` §4's difficulty: the line that leaves a phone today is
+public, and an imported key would mean routing a SECRET onto one through
+AirDrop, Files or the pasteboard.
+
 **All three doors are built, on both clients.** A connection carries an `auth`
 of `key` or `password` (`shared/connections.ts`); `key` covers the key file and
 the agent, which need no secret from Ledge, and `password` is the one that does.
@@ -441,14 +455,23 @@ A connection can be narrowed to the protocol and nothing else, with an
 restrict,command="ledge-server serve" ssh-ed25519 AAAA... ledge@laptop
 ```
 
-**Ledge documents that line and never writes it.** Two reasons, and either
-would be enough. `authorized_keys` is the file that decides who may log into a
-machine, so a client that rewrites it is a client that can lock its user out of
-their own server; the blast radius of a bug there is not proportional to the
-convenience. And no comparable client does it — the database clients, the
-remote-file browsers and VS Code Remote-SSH all connect with what they are
-given and edit nothing on the far side. A verb that prepares somebody's server
-is a paradigm this app has no specific need to invent.
+**Ledge documents that line and never writes it.** The reason is the file:
+`authorized_keys` decides who may log into a machine, so a client that rewrites
+it is a client that can lock its user out of their own server, and the blast
+radius of a bug there is not proportional to the convenience.
+
+**That reason stands alone, and it used to be propped up by a false one.** This
+paragraph claimed no comparable client writes the file. That is true of the
+comparables it named — the database clients, the remote-file browsers and VS
+Code Remote-SSH all connect with what they are given and edit nothing on the far
+side — and false of the category `ios.md` joined. Termius has "Export to host",
+which appends the public key to a chosen server's `authorized_keys` at a
+configurable path; Secure ShellFish has an Install Key tool that does several
+servers in one pass and can ask another device for help when a server takes only
+a password. Installing the key from the client is the norm on a phone, not a
+paradigm nobody has invented. What follows from that is one thing only: the
+argument for not doing it is the file, and it should never again be "nobody does
+this".
 
 **It is hardening and not a gate, which is a fact about sshd rather than a
 policy.** A forced command OVERRIDES what the client asked to run; it does not
@@ -487,17 +510,26 @@ ledge-server serve`, because the forced command reaches into the container
 (§11). Since the only thing Ledge does with the line is show it, the whole cost
 of that difference is showing the right one.
 
-**Considered and dropped: a pairing flow that wrote the file itself.** The
-server would open a short enrollment window, hand out a QR carrying the
-destination, its own host key line and a one-shot credential, and write the
-real key when the client presented it. It reads well, it deletes every typed
-character, and it fails both tests above at once: it is Ledge writing somebody's
-`authorized_keys`, and under Docker it additionally needs that file bind-mounted
-into the container, which widens what a container compromise reaches. The two
-problems it was really solving are answered elsewhere and more cheaply — a
-fingerprint nobody wants to compare is the ordinary first-connect prompt every
-ssh client shows (§4), and a server binary that is not installed yet is §11's
-one-step install, which a password door reaches without touching the file.
+**Considered and dropped: an enrollment window with a QR.** The server would
+open a short window, hand out a QR carrying the destination, its own host key
+line and a one-shot credential, and write the real key when the client presented
+it. It reads well, it deletes every typed character, and it is Ledge writing
+somebody's `authorized_keys` — plus, under Docker, it needs that file
+bind-mounted into the container, which widens what a container compromise
+reaches. The two problems it was really solving are answered elsewhere and more
+cheaply: a fingerprint nobody wants to compare is the ordinary first-connect
+prompt every ssh client shows (§4), and a server binary that is not installed
+yet is §11's one-step install, which a password door reaches without touching
+the file.
+
+**Still open, and not what that paragraph rejected: installing the line over the
+password door.** `ssh-copy-id` made a verb — sign in once with the password the
+form already takes, append the line, reconnect on the key. It needs no
+enrollment window, no QR, no one-shot credential and no server-side change,
+which is every part of the design above that made it expensive. It is still
+Ledge writing somebody's `authorized_keys`, so the objection at the top of this
+section still applies to it and it is still not built; what is no longer true is
+that it was considered. It was not. The thing that was considered is the QR.
 
 ## 5. State ownership: server or client
 

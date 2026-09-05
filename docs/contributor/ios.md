@@ -123,7 +123,7 @@ an optimization to reach for with a profile in hand, not a thing to build
 first. Phase 3 says it is not the bottleneck yet: a whole boot's frames cross
 it inside the 16ms between `server` and `view` in §5's measurement.
 
-**The bridge is seventeen strings, and it is written down twice.**
+**The bridge is eighteen strings, and it is written down twice.**
 `mainview/lib/nativeBridge.ts` is the page's half and
 `ios/Sources/WebHost.swift` is Swift's; between them is a byte stream in both
 directions and a request/response channel for what only a device can answer.
@@ -346,16 +346,31 @@ which is a posture to name in `docs/user/` rather than debug in the field.
 of the enclave rather than being a policy: a key that cannot be exported
 cannot be shared.
 
-**Pairing is a line the user copies, and that is the part of v1 that does not
-survive contact.** The app shows its public key and the whole
-`authorized_keys` line, forced command included, exactly as remote.md §4a
+**Pairing is a line the user copies or shares, and the copy alone is the part
+of v1 that did not survive contact.** The app shows its public key and the
+whole `authorized_keys` line, forced command included, exactly as remote.md §4a
 writes it. Getting that line onto the server is the user's problem, which is
 the same problem the Mac client has and the same one
 `docs/user/18-notes-on-another-machine.md` documents — except that it is not
 the same difficulty. On a Mac the line is copied between two windows on one
-screen; on a phone it is base64 retyped, or emailed to yourself to finish the
-job somewhere else, which is a pairing screen that works by telling you to go
-use a computer.
+screen; on a phone a pasteboard ends at the phone, and the machine the line has
+to be pasted on is the one that is not in the user's hand.
+
+**So the line leaves by the device's share sheet.** `Natives.share` is a
+`UIActivityViewController` over one string: AirDrop to the Mac, a message, a
+note to self, whatever that device has. Both forms offer it beside Copy line —
+the native pairing screen directly, and the connection dialog across
+`share.text`, the bridge's eighteenth string (§2) — because both show the same
+line and the second one is reached from a phone too. It is the answer to
+"emailed to yourself to finish the job somewhere else", which was the honest
+description of what this screen used to ask for.
+
+**What the step says was rewritten with it.** It opens on what the line IS,
+this device's public key and why that server needs it, and puts the `restrict`
+prefix second, as ports and files rather than as "cannot open a shell". The old
+sentence explained the hardening option before naming the thing it is an option
+on, and its last clause read as a guarantee remote.md §4a is explicit about not
+making.
 
 The answer is that it stops being the only door. remote.md §4 takes a password
 or a key like every other ssh client, and on a phone that is three fields and
@@ -874,7 +889,14 @@ reach its server never renders the dialog at all — it shows `ios.tsx`'s senten
 Choosing the server already selected stays a real answer rather than a no-op:
 that is how a phone reconnects after the ladder gives up (§5).
 
-`softKeyboard` is the shell's third, and the only one that changes an editor
+`shareSheet` rides beside it and is the same fact one step along: the line has
+to reach a machine that is not this one, and a phone's pasteboard cannot carry
+it there. A callback rather than a boolean, because the only client with a sheet
+reaches it across the bridge and nothing else in the view can; a client that
+says nothing has none, so the button is absent on a Mac rather than present and
+failing.
+
+`softKeyboard` is the last of the shell's own, and the only one that changes an editor
 rather than a verb. The read-only documentation editor stays focusable on a Mac
 on purpose — find, ⌘C and ⌘↩ on the manual's own runnable blocks all need it —
 and a phone has none of those chords while the focus costs half the screen to a

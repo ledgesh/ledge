@@ -21,7 +21,7 @@ enum BarFace: String {
 /// This is the whole of what Swift does with the protocol, which is nothing:
 /// a frame arrives from the page as base64 and goes down the socket as bytes,
 /// and bytes off the socket go up as base64. No frame is parsed here and no
-/// method name is understood except the seventeen in `SHELL_CALLS`
+/// method name is understood except the eighteen in `SHELL_CALLS`
 /// (mainview/lib/nativeBridge.ts), which are the things only a device can
 /// answer.
 final class WebHost: UIViewController {
@@ -517,6 +517,12 @@ extension WebHost: WKScriptMessageHandler {
             PhotoPicker.pick(over: self) { [weak self] base64 in self?.reply(id, base64) }
         case "link.open":
             reply(id, ["ok": Natives.linkOpen(params["url"] as? String ?? "")])
+        case "share.text":
+            // Answered when the sheet is UP, unlike `photos.pick` above: the
+            // page is not waiting on what the user picks, and there is nothing
+            // for it to do with the answer. Presenting is the whole of the
+            // call.
+            reply(id, ["ok": Natives.share(params["text"] as? String ?? "", over: self, from: nil)])
         case "menu.set":
             // There is no menu bar on a phone. The page answers this itself and
             // never gets here; the case exists so that a page which does ask

@@ -7,6 +7,10 @@ import UIKit
 /// nobody is looking at. The Mac's copies are bun/clientSeams.ts; these are the
 /// same seams for a device where the answers are UIKit's.
 ///
+/// The share sheet is here for a different reason from the rest: not because
+/// the far machine is the wrong one to ask, but because it is the machine the
+/// answer has to reach. See `share` below.
+///
 /// Two of them are not here. The menu bar, because a phone has none and the
 /// page answers `menuSet` itself (ios.md §11); and the picture library, which
 /// has its own file because it is the only seam that puts a screen up and waits
@@ -45,6 +49,33 @@ enum Natives {
             let png = image.pngData()
         else { return "" }
         return png.base64EncodedString()
+    }
+
+    /// Put a string in front of the system share sheet: AirDrop, Messages,
+    /// Mail, Notes, whatever the device has (ios.md §4).
+    ///
+    /// One caller's worth of generality on purpose. What crosses it is the
+    /// `authorized_keys` line, which has to reach a machine that is not this
+    /// one, and the pasteboard cannot carry it there. Nothing else in the app
+    /// shares anything, so this takes a string rather than growing an activity
+    /// item protocol for a case that does not exist yet.
+    ///
+    /// `from` is not decoration. On an iPad the sheet is a popover and UIKit
+    /// traps on one with no anchor, so a caller with a button hands it over and
+    /// a caller without gets the middle of the presenting view.
+    @discardableResult
+    static func share(_ text: String, over host: UIViewController, from anchor: UIView?) -> Bool {
+        guard !text.isEmpty else { return false }
+        let sheet = UIActivityViewController(activityItems: [text], applicationActivities: nil)
+        if let popover = sheet.popoverPresentationController {
+            popover.sourceView = anchor ?? host.view
+            if anchor == nil {
+                popover.sourceRect = CGRect(x: host.view.bounds.midX, y: host.view.bounds.midY, width: 0, height: 0)
+                popover.permittedArrowDirections = []
+            }
+        }
+        host.present(sheet, animated: true)
+        return true
     }
 
     /// Open a link on the device in the user's hand, which is what made this a

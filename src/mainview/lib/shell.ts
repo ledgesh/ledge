@@ -28,6 +28,9 @@ interface Shell {
   /** This client's own `authorized_keys` line, or "" where it has no key of
    * its own to install. */
   deviceKey: string;
+  /** Hand a string to the device's own share sheet, or null on a client with
+   * no such sheet to open. */
+  shareSheet: ((text: string) => void) | null;
   /** Whether focusing text puts a keyboard on screen, over the page. */
   softKeyboard: boolean;
   /** Whether this client can open a second window. */
@@ -38,6 +41,7 @@ let shell: Shell = {
   runsBlocks: true,
   hasTerminal: true,
   deviceKey: "",
+  shareSheet: null,
   softKeyboard: false,
   multiWindow: true,
 };
@@ -95,6 +99,25 @@ export function spawnsSessions(): boolean {
  */
 export function deviceKeyLine(): string {
   return shell.deviceKey;
+}
+
+/**
+ * The device's share sheet, or null where there is none (ios.md §4).
+ *
+ * It exists for one string, which is the one above. A Mac copies that line
+ * between two windows on one screen; a phone has the server nowhere on it, so
+ * the clipboard ends at the device holding it and the line has to leave by
+ * AirDrop, a message or a note to self. The sheet is how a phone hands a
+ * string to another machine, and the alternative it replaces is retyping
+ * base64.
+ *
+ * The callback rather than a boolean, because the only client that has one
+ * reaches it across the bridge and nothing else in the view can (ios.tsx). A
+ * client that says nothing has none, so the button is absent on a Mac rather
+ * than present and failing (interactions.md §4).
+ */
+export function shareSheet(): ((text: string) => void) | null {
+  return shell.shareSheet;
 }
 
 /**

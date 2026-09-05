@@ -9,7 +9,7 @@
 // So the reconnect ladder, the op ids, the held requests and the instance
 // check are the SAME code the Mac runs over ssh. Nothing about being a phone
 // re-implements any of it (§2), and the parts that are genuinely a phone's —
-// the socket, the pasteboard, the keys — are the seventeen strings the bridge
+// the socket, the pasteboard, the keys — are the eighteen strings the bridge
 // names.
 import { reconnectingClient, SESSION_HOLD_MS } from "../shared/transport";
 import { sessionHold } from "../shared/wire";
@@ -83,6 +83,10 @@ async function start(): Promise<void> {
     runsBlocks: true,
     hasTerminal: false,
     deviceKey: key,
+    // And the way that line leaves the phone. The connection form offers it
+    // beside Copy Line, because a copy on a phone can only be pasted on the
+    // phone and the server is not there (ios.md §4).
+    shareSheet: (text) => void shell.call("share.text", { text }).catch(() => {}),
     softKeyboard: true,
     multiWindow: false,
   });

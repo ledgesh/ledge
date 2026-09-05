@@ -6,10 +6,12 @@ import UIKit
 /// pushed off `ServerListViewController` otherwise. Which of the two it is
 /// decides only whether there is a Back button: the form is the same either way.
 ///
-/// Pairing is a line the user copies. The app shows its public key and the
-/// whole `authorized_keys` line, forced command included, exactly as
+/// Pairing is a line the user copies or shares. The app shows its public key
+/// and the whole `authorized_keys` line, forced command included, exactly as
 /// remote.md §4 writes it; getting that line onto the server is the user's
-/// problem in v1, which is the same problem the Mac client has today.
+/// problem, which is the same problem the Mac client has today and a harder one
+/// here, because the server is not on this device and neither is the
+/// pasteboard's other end (ios.md §4).
 ///
 /// The host key is confirmed here rather than scanned. `ssh-keyscan` fetches a
 /// key and a later connection trusts what was written down; this asks about the
@@ -36,6 +38,8 @@ final class PairingViewController: UIViewController {
     private let passwordField = UITextField()
     private let keyStep = UILabel()
     private let copy = UIButton(type: .system)
+    private let share = UIButton(type: .system)
+    private let buttons = UIStackView()
     private let passwordNote = UILabel()
     private let connect = UIButton(type: .system)
     private let status = UILabel()
@@ -128,6 +132,23 @@ final class PairingViewController: UIViewController {
         copy.setTitle("Copy line", for: .normal)
         copy.addTarget(self, action: #selector(copyLine), for: .touchUpInside)
 
+        // Beside the copy and not instead of it. A pasteboard ends at the
+        // device holding it, and the machine this line has to be pasted on is
+        // the one that is not in the user's hand: without a sheet the way off
+        // the phone is AirDrop by way of another app, or retyping base64
+        // (ios.md §4).
+        share.setTitle("Share line", for: .normal)
+        share.addTarget(self, action: #selector(shareLine), for: .touchUpInside)
+
+        buttons.axis = .horizontal
+        buttons.spacing = 16
+        buttons.alignment = .center
+        buttons.addArrangedSubview(copy)
+        buttons.addArrangedSubview(share)
+        // A spacer, so two buttons sit together at the leading edge rather than
+        // splitting the width between them.
+        buttons.addArrangedSubview(UIView())
+
         authPicker.selectedSegmentIndex = 0
         authPicker.addTarget(self, action: #selector(authChanged), for: .valueChanged)
 
@@ -179,12 +200,18 @@ final class PairingViewController: UIViewController {
         status.textColor = .secondaryLabel
         status.numberOfLines = 0
 
-        // Says what the restriction is good for rather than claiming the key is
-        // harmless: it narrows ssh's feature set around the protocol, and the
-        // protocol behind the forced command runs code by design (remote.md
-        // §4a).
+        // What the line IS comes first. A reader who does not know it carries
+        // this device's public key cannot tell why the server needs it, and a
+        // step that opens on hardening is explaining the option before the
+        // thing it is an option on.
+        //
+        // Then what the restriction is good for, rather than a claim that the
+        // key is harmless: it narrows ssh's feature set around the protocol,
+        // and the protocol behind the forced command runs code by design
+        // (remote.md §4a). "Cannot open a shell" was true at the ssh layer and
+        // read as a guarantee this design does not make.
         keyStep.text =
-            "2. Add this line to ~/.ssh/authorized_keys on the server. It stops that key forwarding ports, copying files, or opening a shell."
+            "2. Add this line to ~/.ssh/authorized_keys on the server. It is this device's public key, which is how that server knows to let this device in. The restrict prefix keeps the key from forwarding ports or copying files."
         keyStep.font = .preferredFont(forTextStyle: .body)
         keyStep.adjustsFontForContentSizeCategory = true
         keyStep.numberOfLines = 0
@@ -198,7 +225,7 @@ final class PairingViewController: UIViewController {
             field, portField,
             step("Sign in with"),
             authPicker,
-            keyStep, keyBox, copy,
+            keyStep, keyBox, buttons,
             passwordField, passwordNote,
             connect, spinner, status,
         ] {
@@ -244,6 +271,14 @@ final class PairingViewController: UIViewController {
         say("Copied. Paste it on the server, then connect.")
     }
 
+    /// The line, to anywhere the device can send a string.
+    ///
+    /// No status line after it: the sheet is its own feedback, it may be
+    /// cancelled, and what happens after AirDrop is on the other machine.
+    @objc private func shareLine() {
+        Natives.share(keyBox.text, over: self, from: share)
+    }
+
     @objc private func authChanged() {
         say("")
         showAuthFields()
@@ -253,7 +288,7 @@ final class PairingViewController: UIViewController {
     /// stack view collapses a hidden arranged subview and this way the order
     /// is declared once, above.
     private func showAuthFields() {
-        for view in [keyStep, keyBox, copy] { view.isHidden = byPassword }
+        for view in [keyStep, keyBox, buttons] { view.isHidden = byPassword }
         for view in [passwordField, passwordNote] { view.isHidden = !byPassword }
     }
 

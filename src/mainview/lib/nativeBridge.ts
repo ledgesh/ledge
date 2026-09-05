@@ -37,7 +37,7 @@ import {
   type RequestClient,
 } from "../../shared/wire";
 
-/** What Swift implements: seventeen strings and a flat switch. */
+/** What Swift implements: eighteen strings and a flat switch. */
 export const SHELL_CALLS = [
   // The bridge's own verbs, `@`-prefixed because no schema method can ever
   // collide with them. `@hello` is asked once, before any socket exists: the
@@ -73,6 +73,11 @@ export const SHELL_CALLS = [
   // waits for a person — and answers "" for a cancel, which is the common case.
   "photos.pick",
   "link.open",
+  // The device's own share sheet, for the one string a phone has to get onto
+  // another machine: its `authorized_keys` line (ios.md §4). The clipboard ends
+  // at the device holding it, so a copy button on a phone is a line that leaves
+  // by retyping; this is the call that lets it leave by AirDrop instead.
+  "share.text",
   "menu.set",
   // Which servers this phone knows (remote.md §8). Swift holds the bytes and
   // dials the selection; every rule about what may be added, renamed or removed

@@ -75,6 +75,17 @@ configureShell({
   // client already has, and whether the read-only editor is a text field the
   // software keyboard would rise over.
   deviceKey: FAKING_IOS ? 'restrict,command="ledge-server serve" ecdsa-sha2-nistp256 AAAAharness ledge-iphone-abc123' : "",
+  // The sheet is UIKit's and there is none here, so the fake records the ask on
+  // the window instead: a spec can see that the button is offered and that it
+  // hands over the line, which is the whole of the view's half.
+  shareSheet: FAKING_IOS
+    ? (text: string) => {
+        (window as unknown as { harnessShared: string[] }).harnessShared = [
+          ...((window as unknown as { harnessShared?: string[] }).harnessShared ?? []),
+          text,
+        ];
+      }
+    : null,
   softKeyboard: FAKING_IOS,
   // A phone shows one app at a time, so a window and a client are the same
   // thing there in a way they stopped being on the Mac (remote.md §8a).
