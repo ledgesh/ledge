@@ -222,6 +222,15 @@ function dailyWorkspace(args: Record<string, unknown>, settings: Settings): stri
   }
 }
 
+// And where inside it: an explicit ask wins, then the daily.folder setting,
+// then the top level. Unlike create_note's folder there is a standing answer
+// to fall back on, because ⌘J creates a note nobody typed a destination for —
+// which is the whole reason the knob exists.
+function dailyFolder(args: Record<string, unknown>, settings: Settings): string | null {
+  if (typeof args["folder"] === "string") return args["folder"];
+  return settings.daily.folder || null;
+}
+
 const TITLE_OR_PATH_PROPS = {
   title: {
     type: "string",
@@ -536,7 +545,7 @@ export const ledgeTools: McpTool[] = [
   {
     name: "daily_note",
     description:
-      "Create or open today's daily note: one note per LOCAL calendar day, titled YYYY-MM-DD. Idempotent — if a note bearing today's date as its title exists in the target workspace it is returned (`created: false`), never duplicated. A missing one is created from the target workspace's own note whose frontmatter says `template: daily` when one exists ({{tokens}} substituted, like create_note's `template`; strictly per-workspace — another workspace's daily template is never borrowed), else as a bare dated note. The workspace: an explicit argument wins, then the `daily.workspace` setting, then the current session's workspace (LEDGE_WORKSPACE), then the only workspace when just one exists.",
+      "Create or open today's daily note: one note per LOCAL calendar day, titled YYYY-MM-DD. Idempotent — if a note bearing today's date as its title exists in the target workspace it is returned (`created: false`), never duplicated. A missing one is created from the target workspace's own note whose frontmatter says `template: daily` when one exists ({{tokens}} substituted, like create_note's `template`; strictly per-workspace — another workspace's daily template is never borrowed), else as a bare dated note. The workspace: an explicit argument wins, then the `daily.workspace` setting, then the current session's workspace (LEDGE_WORKSPACE), then the only workspace when just one exists. The folder inside it: an explicit argument, then the `daily.folder` setting, then the top level.",
     inputSchema: {
       type: "object",
       properties: {
@@ -544,7 +553,7 @@ export const ledgeTools: McpTool[] = [
         folder: {
           ...FOLDER_PLACE_PROP,
           description:
-            "The folder to create today's note in, if it does not exist yet. Ignored when it does: today's note is found by its title anywhere in the workspace, so whoever opens it first decides where it lives.",
+            "The folder to create today's note in, if it does not exist yet. Overrides the user's `daily.folder` setting, which is otherwise where it goes. Ignored when today's note already exists: it is found by its title anywhere in the workspace, so whoever opens it first decides where it lives.",
         },
       },
       additionalProperties: false,
@@ -555,8 +564,7 @@ export const ledgeTools: McpTool[] = [
       // edited knob reaches the next call without restarting the server.
       const settings = await loadSettings();
       const root = dailyWorkspace(args, settings);
-      const folder = typeof args["folder"] === "string" ? args["folder"] : null;
-      const { meta, created } = await openDaily(root, folder);
+      const { meta, created } = await openDaily(root, dailyFolder(args, settings));
       return { path: meta.path, title: meta.title, workspace: root, ...folderOut(meta), created, modified: iso(meta.mtimeMs) };
     },
   },

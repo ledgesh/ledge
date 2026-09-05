@@ -225,13 +225,13 @@ describe("parseSettings", () => {
     // Every settings file seeded before the section existed lacks it — that
     // must read as "unset", not as a problem.
     const { settings, problems } = parseSettings({}, "server");
-    expect(settings.daily).toEqual({ workspace: "" });
+    expect(settings.daily).toEqual({ workspace: "", folder: "" });
     expect(problems).toEqual([]);
   });
 
   test("daily.workspace accepts strings, empty included; a non-string costs the field", () => {
     const good = parseSettings({ daily: { workspace: "~/notes/journal" } }, "server");
-    expect(good.settings.daily).toEqual({ workspace: "~/notes/journal" });
+    expect(good.settings.daily).toEqual({ workspace: "~/notes/journal", folder: "" });
     expect(good.problems).toEqual([]);
 
     const bad = parseSettings({ daily: { workspace: 3 } }, "server");
@@ -239,9 +239,26 @@ describe("parseSettings", () => {
     expect(bad.problems).toEqual(['"daily.workspace" must be a string']);
   });
 
+  test("daily.folder takes a folder name and reports one that is not, keeping ⌘J working", () => {
+    const good = parseSettings({ daily: { folder: "journal/2026" } }, "server");
+    expect(good.settings.daily.folder).toBe("journal/2026");
+    expect(good.problems).toEqual([]);
+
+    // The same shape rule the store applies when it makes the directory, so
+    // the settings editor says so while the file is being written. Degraded
+    // to "" rather than thrown: a typo here must not break the keystroke.
+    const bad = parseSettings({ daily: { folder: "../escape" } }, "server");
+    expect(bad.settings.daily.folder).toBe("");
+    expect(bad.problems).toEqual(['"daily.folder" is not a folder: ../escape (empty, "." and ".." segments are not allowed)']);
+
+    const dotted = parseSettings({ daily: { folder: ".ledge-trash" } }, "server");
+    expect(dotted.settings.daily.folder).toBe("");
+    expect(dotted.problems[0]).toContain("dot-folders");
+  });
+
   test("the retired daily.template field points at the template: daily marker", () => {
     const { settings, problems } = parseSettings({ daily: { workspace: "", template: "Daily Template" } }, "server");
-    expect(settings.daily).toEqual({ workspace: "" });
+    expect(settings.daily).toEqual({ workspace: "", folder: "" });
     expect(problems).toEqual([
       '"daily.template" is retired — mark the note itself with `template: daily` frontmatter instead',
     ]);

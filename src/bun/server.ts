@@ -782,12 +782,15 @@ export async function createServer(deps: { push: Audience; native: NativeDeps })
     noteRetitle: async ({ path, text }) => ({ note: await retitleNote(path, text) }),
     // The daily.workspace setting outranks the view's selected workspace
     // (that is the knob's whole job: pin where daily notes live); the
-    // selected one is the deixis fallback. The response is shaped as an
-    // external open so the view's one workspace-select-then-open path
+    // selected one is the deixis fallback. daily.folder then says where
+    // inside it, and only matters on the day the note is created — an
+    // existing one is found by its title wherever it already sits, so moving
+    // the knob does not move the notes already filed. The response is shaped
+    // as an external open so the view's one workspace-select-then-open path
     // handles it (see the schema comment).
     dailyOpen: async ({ root }) => {
       const target = resolveConfiguredWorkspace(settings.daily.workspace, roots()) ?? assertRegisteredRoot(root);
-      const { meta, created } = await openDaily(target);
+      const { meta, created } = await openDaily(target, settings.daily.folder || null);
       return { open: { ...meta, root: target }, created };
     },
     noteFromTemplate: async ({ root, templatePath, title }) => ({

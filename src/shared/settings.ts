@@ -20,6 +20,8 @@
 // the reason `parseSettings` can say "this whole section is read from the
 // other file" in one sentence a user can act on.
 
+import { folderNameProblem } from "./folders";
+
 // The appearance knob's values: follow the OS, or pin one side.
 export const THEMES = ["system", "light", "dark"] as const;
 export type Theme = (typeof THEMES)[number];
@@ -136,7 +138,17 @@ export interface Settings {
   // reported, never an error. WHICH note seeds the day is NOT here: mark
   // that note `template: daily` in its own frontmatter — the retired
   // `template` field named a note by title, which went stale on rename.
-  daily: { workspace: string };
+  // `folder` pins WHERE INSIDE that workspace, for anyone who keeps a journal
+  // in one: a workspace-relative path with forward slashes, empty meaning the
+  // top level, which is where every note goes when nobody says otherwise. It
+  // earns its knob on the same argument one level down — ⌘J creates a note
+  // unasked, so the only way to say where is in advance — and it degrades
+  // differently from `workspace` on purpose. A name that is not a folder name
+  // is reported and ignored: the file is the settings UI, and a typo must not
+  // break ⌘J. A name the store then REFUSES (an ignored folder, say) is an
+  // error at the keystroke instead, because that message names the exact fix
+  // and a daily note quietly landing somewhere else is the worse failure.
+  daily: { workspace: string; folder: string };
   // There is deliberately no templates section: which notes are templates is
   // corpus data, not configuration — a note declares itself with
   // `template: true` frontmatter, and the ⌥⌘N picker reads the live note
@@ -209,7 +221,7 @@ export const DEFAULT_SETTINGS: Settings = Object.freeze({
     },
     hostInterpreters: {},
   },
-  daily: { workspace: "" },
+  daily: { workspace: "", folder: "" },
 });
 
 // What first launch writes to settings.jsonc: every default spelled out, with
@@ -325,7 +337,11 @@ export function settingsTemplate(shellPath: string): string {
     // in the app, the nearest one at the CLI), which scatters daily notes if
     // you work in more than one. (WHICH note seeds the day is not a setting:
     // mark a note \`template: daily\` in its frontmatter.)
-    "workspace": ""
+    "workspace": "",
+    // Which folder inside that workspace, like "journal" or "log/2026".
+    // Empty means the top level. Only used when a day's note is CREATED: an
+    // existing one is found by its date wherever it already sits.
+    "folder": ""
   }
 }
 `;
@@ -452,6 +468,7 @@ export function parseSettings(raw: unknown, home: SettingsHome): { settings: Set
       },
       daily: {
         workspace: optStr(daily, "workspace", "daily.workspace", problems),
+        folder: folderName(daily, "folder", "daily.folder", problems),
       },
     },
     problems,
@@ -518,6 +535,20 @@ function str(
 // Like str, but "" is a meaning, not a typo: these fields spell "unset" as an
 // empty string so the seeded file can show the knob blank and stay valid JSON
 // without nulls.
+// A folder name, or "" — the same shape rule the store applies when it turns
+// one into a directory (shared/folders.ts, bun/notes.ts folderPathOf), asked
+// here so the settings editor can say so while the file is being written
+// rather than at the next ⌘J. A bad name degrades to "": every other knob
+// falls back to its default rather than failing a launch, and this one is
+// reported in `problems` like the rest.
+function folderName(o: Record<string, unknown>, key: string, label: string, problems: string[]): string {
+  const value = optStr(o, key, label, problems);
+  const problem = folderNameProblem(value);
+  if (problem === null) return value;
+  problems.push(`"${label}" is not a folder: ${value} (${problem})`);
+  return "";
+}
+
 function optStr(
   o: Record<string, unknown>,
   key: string,

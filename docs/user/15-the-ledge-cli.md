@@ -60,7 +60,7 @@ ledge new "API Rollout"      # creates ~/Notes/projects/api-rollout.md
 
 `-f` is also how you say which of two notes sharing a title you mean: `ledge cat "Plan" -f projects`. The folder you are standing in never does that, only `-f`, so a title always reaches the whole workspace no matter where you run it from.
 
-`ledge today` is the one exception. It takes `-f`, but it ignores the folder you are standing in, because today's note is found by its date and where it lives should not depend on where you happened to be when you first ran it.
+`ledge today` is the one exception. It takes `-f`, which overrides the `daily.folder` setting for that call, but it ignores the folder you are standing in: today's note is found by its date, and where it lives should not depend on where you happened to be when you first ran it ([[Daily Notes and Templates]]).
 
 Inside a note's terminal drawer it also knows the note, so a bare `ledge append -m "TODO: check the logs"` appends to the note the terminal belongs to.
 

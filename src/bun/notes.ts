@@ -41,7 +41,7 @@ import {
   vaultState,
 } from "./vault";
 import { assetPathOf, assetRefFor, imageMimeOf, rawAssetBytes, replaceAssetBytes } from "./assets";
-import { notesUnder } from "../shared/folders";
+import { folderNameProblem, folderScopeOf, notesUnder } from "../shared/folders";
 
 // Deleted notes are moved into their own root's .ledge-trash rather than
 // unlinked. Per root, not one shared bin: the move must stay a same-filesystem
@@ -201,10 +201,12 @@ export function folderOf(root: string, path: string): string {
  * The rules are assetPathOf's, for the same reason: relative only (a leading
  * slash is an absolute path, and silently reinterpreting one as root-relative
  * is how a guard becomes a suggestion), no backslashes, no `.` or `..` segment,
- * no dot-entry, and inside the root once resolved. `..` is rejected on the RAW
- * segments rather than left to the containment check, so `a/../b` cannot
- * quietly mean `b`: the folder a caller names is the folder they get, or an
- * error.
+ * no dot-entry, and inside the root once resolved. All but the last are shape,
+ * and shape is `folderNameProblem` in shared/folders.ts — the settings
+ * validator has to ask the same question about `daily.folder` with no root in
+ * reach, and this gate composes its message from that answer so the two can
+ * never come to disagree about what a folder may be called. Containment stays
+ * here, because it is the only part that needs a root.
  *
  * Empty (or absent) means the root itself, which is where every note lived
  * before folders and where one still lands when nobody says otherwise.
@@ -212,16 +214,10 @@ export function folderOf(root: string, path: string): string {
 export function folderPathOf(root: string, folder: string | null | undefined): string {
   const r = assertRegisteredRoot(root);
   if (folder === null || folder === undefined) return r;
-  if (folder.includes("\\")) throw new Error(`not a folder: ${folder} (use / to separate segments)`);
-  if (folder.startsWith("/")) throw new Error(`not a folder: ${folder} (folders are relative to the workspace)`);
-  const rel = folder.trim().replace(/\/+$/, "");
+  const problem = folderNameProblem(folder);
+  if (problem !== null) throw new Error(`not a folder: ${folder} (${problem})`);
+  const rel = folderScopeOf(folder);
   if (rel === "") return r;
-  for (const segment of rel.split("/")) {
-    if (segment === "" || segment === "." || segment === "..") {
-      throw new Error(`not a folder: ${folder} (empty, "." and ".." segments are not allowed)`);
-    }
-    if (segment.startsWith(".")) throw new Error(`not a folder: ${folder} (dot-folders are Ledge's own and invisible to the note list)`);
-  }
   const path = resolve(r, rel);
   if (visibleSegmentsUnder(r, path) === null) throw new Error(`folder outside the workspace root: ${folder}`);
   return path;

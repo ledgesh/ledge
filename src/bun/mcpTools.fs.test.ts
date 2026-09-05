@@ -694,6 +694,28 @@ describe("folders", () => {
     expect(call("create_note", { workspace: ROOT, text: "# X\n", folder: ".hidden" })).rejects.toThrow("not a folder");
   });
 
+  test("the daily.folder setting says where today's note goes, and an argument outranks it", async () => {
+    const title = isoDateOf(new Date());
+    await writeFile(SETTINGS_PATH, JSON.stringify({ daily: { workspace: ROOT, folder: "journal" } }));
+    const configured = await call("daily_note");
+    expect(configured.folder).toBe("journal");
+    expect(configured.path).toBe(join(ROOT, "journal", `${title}.md`));
+
+    // The knob only decides the day it CREATES: moving it does not move the
+    // notes already filed, because the day's note is found by its title.
+    await writeFile(SETTINGS_PATH, JSON.stringify({ daily: { workspace: ROOT, folder: "elsewhere" } }));
+    expect((await call("daily_note")).path).toBe(configured.path);
+  });
+
+  test("a daily.folder that is not a folder name is ignored, so the keystroke still works", async () => {
+    // parseSettings reports it and degrades to "" (shared/settings.ts): the
+    // file is the settings UI, and a typo there must not break ⌘J.
+    await writeFile(SETTINGS_PATH, JSON.stringify({ daily: { workspace: ROOT, folder: "../escape" } }));
+    const out = await call("daily_note");
+    expect(out.path).toBe(join(ROOT, `${isoDateOf(new Date())}.md`));
+    expect("folder" in out).toBe(false);
+  });
+
   test("daily_note files today's note, but only when it is creating one", async () => {
     const title = isoDateOf(new Date());
     const first = await call("daily_note", { workspace: ROOT, folder: "journal" });

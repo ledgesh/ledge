@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { folderContains, folderScopeOf, notesUnder } from "./folders";
+import { folderContains, folderNameProblem, folderScopeOf, notesUnder } from "./folders";
 
 const note = (path: string, folder?: string) =>
   ({ path, title: path, mtimeMs: 0, ...(folder === undefined ? {} : { folder }) }) as const;
@@ -38,6 +38,32 @@ describe("folderScopeOf", () => {
   test("a trailing slash is how a shell user spells a folder", () => {
     expect(folderScopeOf("projects/")).toBe("projects");
     expect(folderScopeOf(" projects/api// ")).toBe("projects/api");
+  });
+});
+
+describe("folderNameProblem", () => {
+  test("an ordinary folder, nested or not, has no problem", () => {
+    expect(folderNameProblem("projects")).toBeNull();
+    expect(folderNameProblem("projects/api/v2")).toBeNull();
+    expect(folderNameProblem("projects/")).toBeNull();
+  });
+
+  test("the root is a folder name too", () => {
+    expect(folderNameProblem("")).toBeNull();
+    expect(folderNameProblem("  ")).toBeNull();
+  });
+
+  test("every way of naming somewhere else is a problem, and says which", () => {
+    expect(folderNameProblem("/etc")).toBe("folders are relative to the workspace");
+    expect(folderNameProblem(" /etc")).toBe("folders are relative to the workspace");
+    // A bare slash must not strip itself down to meaning the root.
+    expect(folderNameProblem("/")).toBe("folders are relative to the workspace");
+    expect(folderNameProblem("a\\b")).toBe("use / to separate segments");
+    expect(folderNameProblem("../escape")).toContain('".." segments');
+    expect(folderNameProblem("a/../b")).toContain('".." segments');
+    expect(folderNameProblem("a//b")).toContain("empty");
+    expect(folderNameProblem(".ledge-trash")).toContain("dot-folders");
+    expect(folderNameProblem("a/.git")).toContain("dot-folders");
   });
 });
 

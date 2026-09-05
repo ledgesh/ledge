@@ -43,6 +43,18 @@ describe("openDaily", () => {
     expect(await readNote(join(ROOT, "2026-07-18-2.md"))).toBeNull();
   });
 
+  test("a folder files the day's note, and a later day follows the folder in force then", async () => {
+    const filed = await openDaily(ROOT, "journal", NOW);
+    expect(filed.meta.path).toBe(join(ROOT, "journal", "2026-07-18.md"));
+    expect(filed.meta.folder).toBe("journal");
+    // The folder decides only where a note is CREATED: today's is found by
+    // title wherever it sits, so the same day asked for elsewhere is the one
+    // already filed, while tomorrow follows the new answer.
+    expect((await openDaily(ROOT, "elsewhere", NOW)).meta.path).toBe(filed.meta.path);
+    const tomorrow = await openDaily(ROOT, "elsewhere", new Date(2026, 6, 19, 8, 0));
+    expect(tomorrow.meta.path).toBe(join(ROOT, "elsewhere", "2026-07-19.md"));
+  });
+
   test("different days are different notes", async () => {
     await openDaily(ROOT, null, NOW);
     const tomorrow = await openDaily(ROOT, null, new Date(2026, 6, 19, 8, 0));

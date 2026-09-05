@@ -661,10 +661,17 @@ snapshot at construction time through `lib/settings.ts`.
   daily notes for anyone with more than one workspace, and "where is
   today's note?" is the feature's one promise; it stays a KNOB because a
   workspace is not a note — there is no corpus object to carry the fact. A
-  value naming no registered root degrades warned). Additions should be
-  argued in those terms. The boundary also runs the other way — corpus
-  data must not become a knob: WHICH notes are templates briefly lived
-  here as a title list (`templates.notes`), and WHICH note seeds the daily
+  value naming no registered root degrades warned) and the folder inside it
+  (`daily.folder`: the same argument one level down — ⌘J creates a note
+  nobody typed a destination for, so the only place to say "my journal lives
+  in `journal/`" is in advance. It degrades differently on purpose: a value
+  that is not a folder NAME is reported and ignored, since the file is the
+  UI and a typo must not break the keystroke, but a name the store then
+  refuses is an error at the keystroke, because that message names the exact
+  fix and a daily note quietly landing elsewhere is the worse failure).
+  Additions should be argued in those terms. The boundary also runs the other
+  way — corpus data must not become a knob: WHICH notes are templates briefly
+  lived here as a title list (`templates.notes`), and WHICH note seeds the daily
   as a title field (`daily.template`); both were retired for the
   `template:` frontmatter marker (`true`, or `daily` for the ⌘J role),
   because config naming notes by title needed hand-editing, applied at

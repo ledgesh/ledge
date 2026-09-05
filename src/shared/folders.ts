@@ -38,6 +38,37 @@ export function folderScopeOf(folder: unknown): string {
   return typeof folder === "string" ? folder.trim().replace(/\/+$/, "") : "";
 }
 
+/**
+ * Why `folder` is not a usable folder NAME, phrased as the parenthetical the
+ * errors carry, or null when it is fine. The root ("" and every spelling of
+ * it) is fine: it is where notes lived before folders.
+ *
+ * These are the shape rules only. Containment — is the resolved path actually
+ * inside this workspace — needs a root and stays in `folderPathOf`
+ * (bun/notes.ts), which composes its message from what this returns. It lives
+ * here because the settings validator has to ask the same question about
+ * `daily.folder` with no root and no filesystem in reach, and two statements
+ * of what a folder may be called is one more than the rule can survive.
+ */
+export function folderNameProblem(folder: string): string | null {
+  const trimmed = folder.trim();
+  if (trimmed.includes("\\")) return "use / to separate segments";
+  // Tested on the trimmed name but BEFORE trailing slashes are stripped, so
+  // that a leading space cannot smuggle `/etc` through as an empty segment and
+  // a bare `/` cannot strip itself down to the root.
+  if (trimmed.startsWith("/")) return "folders are relative to the workspace";
+  const rel = folderScopeOf(trimmed);
+  if (rel === "") return null;
+  for (const segment of rel.split("/")) {
+    // `..` is rejected on the RAW segments rather than left to a containment
+    // check, so `a/../b` cannot quietly mean `b`: the folder a caller names is
+    // the folder they get, or an error.
+    if (segment === "" || segment === "." || segment === "..") return 'empty, "." and ".." segments are not allowed';
+    if (segment.startsWith(".")) return "dot-folders are Ledge's own and invisible to the note list";
+  }
+  return null;
+}
+
 /** The notes at or below `folder`. The whole list when the scope is the root. */
 export function notesUnder<T extends Pick<NoteMeta, "folder">>(notes: readonly T[], folder: string): T[] {
   return folder === "" ? [...notes] : notes.filter((n) => folderContains(folder, n.folder ?? ""));
