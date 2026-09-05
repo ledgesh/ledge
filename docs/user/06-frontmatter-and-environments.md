@@ -28,11 +28,7 @@ A bad line costs only itself, never the rest of the block. Ledge writes what it 
 
 Notes in an attached project workspace use that project folder as their `cwd`, so they usually need no frontmatter. Notes in a managed workspace default to your home folder.
 
-Here is where this note's shells start:
-
-```sh
-echo "this note's shells start in $PWD"
-```
+Inside a block, `$PWD` is that directory.
 
 ## env and envFile: environment variables
 

@@ -6,9 +6,9 @@ This builds on [[Agents and Ledge]]. The examples use Claude Code, but any MCP-s
 
 ## 1. Connect the agent
 
-Install the shell command with "Install Shell Command (ledge)" in the palette, then connect the agent to Ledge's MCP server:
+Install the shell command with "Install Shell Command (ledge)" in the palette, then connect the agent to Ledge's MCP server from a terminal:
 
-```sh
+```sh norun
 claude mcp add ledge -- ledge mcp
 ```
 

@@ -22,9 +22,9 @@ The port goes in its own field, not in the address: write `ledge@vps`, not `ledg
 
 Leave it blank whenever you can. Blank means your ssh config decides, so an alias from `~/.ssh/config` keeps whatever `Port` it already sets.
 
-Ledge then fetches that machine's host key and shows you its fingerprint. Compare it against what the machine reports for itself:
+Ledge then fetches that machine's host key and shows you its fingerprint. Compare it against what the machine reports for itself, in a shell on that machine:
 
-```sh
+```sh norun
 ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
 ```
 
@@ -94,15 +94,15 @@ Closing the last window quits Ledge.
 
 The other machine needs `ledge-server` on the PATH an incoming ssh gets. It is a package, so two commands install it.
 
-The server runs on Bun, and where Bun goes decides where the server goes, because Bun puts global commands beside itself. Install Bun into `/usr/local` and both names land in `/usr/local/bin`, which is where the short PATH of an ssh command looks:
+The server runs on Bun, and where Bun goes decides where the server goes, because Bun puts global commands beside itself. On that machine, install Bun into `/usr/local` and both names land in `/usr/local/bin`, which is where the short PATH of an ssh command looks:
 
-```sh
+```sh norun
 curl -fsSL https://bun.sh/install | sudo BUN_INSTALL=/usr/local bash
 ```
 
 Then the server, into the same place:
 
-```sh
+```sh norun
 sudo BUN_INSTALL=/usr/local bun add -g ledge-server
 ```
 
@@ -118,26 +118,26 @@ Blocks need zsh or bash on that machine. Ledge spawns the account's login shell 
 
 Worth doing once, because Ledge reports the failure it catches as a server that is not installed. A remote shell that cannot find a command says only that, so that is all the app has to go on.
 
-Ledge starts the server by running `ledge-server serve` over ssh. A command run that way gets a short PATH and reads no shell profile, so both `ledge-server` and the `bun` its first line names have to be on that PATH already. From your Mac:
+Ledge starts the server by running `ledge-server serve` over ssh. A command run that way gets a short PATH and reads no shell profile, so both `ledge-server` and the `bun` its first line names have to be on that PATH already. From your Mac's own terminal:
 
-```sh
+```sh norun
 ssh you@machine 'command -v ledge-server; command -v bun'
 ```
 
 Two paths printed means the machine is ready to add.
 
-Nothing printed means Bun is installed for one user rather than system-wide, which is what a machine that already had Bun before you started usually has. Its global commands are then in `~/.bun/bin`, which an incoming ssh does not search, and `bun pm bin -g` on that machine confirms where they went. Linking both names into a system directory fixes it without reinstalling anything:
+Nothing printed means Bun is installed for one user rather than system-wide, which is what a machine that already had Bun before you started usually has. Its global commands are then in `~/.bun/bin`, which an incoming ssh does not search, and `bun pm bin -g` on that machine confirms where they went. Linking both names into a system directory, on that machine, fixes it without reinstalling anything:
 
-```sh
+```sh norun
 sudo ln -s "$(bun pm bin -g)/ledge-server" /usr/local/bin/ledge-server
 sudo ln -s "$(command -v bun)" /usr/local/bin/bun
 ```
 
 ## Build the server from a checkout
 
-Only if you want a build of your own. The package is the ordinary way.
+Only if you want a build of your own. The package is the ordinary way. From a checkout of the repository:
 
-```sh
+```sh norun
 bun run build:native
 bun build src/bun/serve.ts --compile --outfile ledge-server
 ```
@@ -148,9 +148,9 @@ The `.so` holds two C functions the terminal needs. Without it beside the binary
 
 ## Run the server in Docker
 
-The repository ships a `Dockerfile`. Build and run it:
+The repository ships a `Dockerfile`. Build and run it from a checkout on the machine that will host the container:
 
-```sh
+```sh norun
 docker build -t ledge-server .
 docker run -d --name ledge --restart unless-stopped -v ledge-data:/data -v ledge-home:/home/ledge ledge-server
 ```
@@ -237,7 +237,7 @@ Ledge backs nothing up. `ledge-server backup-paths` prints the paths a backup ha
 
 Run it as the account the server runs as, on the machine the server runs on:
 
-```sh
+```sh norun
 ledge-server backup-paths
 ```
 
@@ -254,9 +254,9 @@ A registered folder that is missing right now is left out, with a line on stderr
 
 Everything on this page works the same whether the server is a package on a VPS, a build of your own, or the image. The paths differ, so ask the machine rather than assuming them. On a VPS they are all under the account's home. In the image the app home is `/data` and the profiles are under `/home/ledge`, which is why that deployment mounts two volumes.
 
-Ask the container for the image deployment:
+Ask the container for the image deployment, from its host:
 
-```sh
+```sh norun
 docker exec ledge ledge-server backup-paths
 ```
 
@@ -264,9 +264,9 @@ docker exec ledge ledge-server backup-paths
 
 restic reads both lists and encrypts on the server before anything leaves it. Any S3-compatible bucket works: S3, R2, B2, Wasabi, MinIO.
 
-Install it, then write the repository and its credentials to a file only that account can read:
+On the server, install it, then write the repository and its credentials to a file only that account can read:
 
-```sh
+```sh norun
 sudo apt-get install -y restic
 install -m 600 /dev/null ~/.config/ledge/profiles/backup.env
 ```
@@ -315,25 +315,25 @@ Persistent=true
 WantedBy=timers.target
 ```
 
-`Persistent=true` runs a backup that was missed while the machine was off.
+`Persistent=true` runs a backup that was missed while the machine was off. Then start the timer:
 
-```sh
+```sh norun
 sudo systemctl enable --now ledge-backup.timer
 ```
 
 ## Run a backup now
 
-Give a note `profile: backup` in its frontmatter and put the same command in a block:
+Give a note of your own `profile: backup` in its frontmatter and put the same command in a block there:
 
-```sh
+```sh norun
 restic backup --files-from <(ledge-server backup-paths) --exclude-file <(ledge-server backup-paths --exclude)
 ```
 
 The block runs on the server, so the note is a button for a backup of the machine it lives on. Use it before an upgrade, or to check the timer's work. It is not a substitute for the timer.
 
-Restore one note without restoring the machine:
+Restore one note without restoring the machine, from a shell that has the same profile loaded:
 
-```sh
+```sh norun
 restic restore latest --target /tmp/restored --include '*/shipping-notes.md'
 ```
 

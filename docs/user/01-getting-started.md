@@ -2,33 +2,37 @@
 
 Ledge is the notebook for developers and DevOps. It runs code and commands straight from your Markdown.
 
-This page is the manual, and it has a window of its own. Your notes are in the window behind this one, still where you left them. The manual is read-only: you can select, copy, and run everything here, but writing happens in your own notes. Close this window when you are done, or leave it open beside them.
+The manual is read-only and its code blocks do not run.
 
-## Run your first block
+## Your first note
 
-Put the cursor in the block below and press ⌘↩, or hover the block and click Run. The output streams into a panel beneath it.
+A note with a shell block in it:
 
-```sh
+```sh norun
 curl -s https://api.github.com/zen
 ```
 
-That was a real shell. Any fenced block whose language is runnable gets a Run button: `sh`, `python`, `node`, and others, configurable in Settings. ⇧⌘↩ sends a block to the note's terminal drawer instead. See [[Running Code]].
+⌘↩ inside the block, or the Run button on it (a tap, on a phone), runs it. One line of output streams into a panel beneath the block.
+
+That is a real shell, and it is the whole idea: any fenced block whose language is runnable gets a Run button. `sh`, `python`, `node`, and others are runnable out of the box, and the list is a setting. ⇧⌘↩ sends a block to the note's terminal drawer instead. See [[Running Code]].
 
 ## The shell persists between blocks
 
-Each note keeps one shell for inline runs, so state carries from block to block. Run these two in order:
+Each note keeps one shell for inline runs, so state carries from block to block. A note with these two blocks, run in order:
 
-```sh
+```sh norun
 cd /tmp
 export FLAVOR=nautical
 ```
 
-```sh
+```sh norun
 pwd
 echo "this shell is feeling $FLAVOR"
 ```
 
-Every note also has a full terminal: press ⌃` to open the drawer. It is a separate shell from the inline one, and it belongs to this note alone.
+prints `/tmp` and `this shell is feeling nautical` under the second one. The `cd` and the `export` happened in the same shell the second block ran in.
+
+Every note also has a full terminal: ⌃` opens the drawer. It is a separate shell from the inline one, and it belongs to that note alone.
 
 ## Point a note at a project
 

@@ -15,11 +15,7 @@ The strip at the top of the sidebar lists your workspaces. Each one is a single 
 - **Attached.** "Attach Folder as Workspace…" (in the command palette, or the + button's menu) turns a folder you already have into a workspace, usually a project you work on. Its `.md` files become notes where they are, and each of those notes runs its blocks in the project folder with no frontmatter ([[Running Code]]).
 - **Managed.** ⇧⌘N creates a workspace whose folder Ledge makes for you inside `~/.ledge`. Its notes default to your home folder, and `cwd:` frontmatter points them elsewhere ([[Frontmatter and Environments]]).
 
-Managed workspace folders live here:
-
-```sh
-ls ~/.ledge
-```
+Managed workspace folders live in `~/.ledge`.
 
 With a workspace row focused, or from its right-click menu:
 

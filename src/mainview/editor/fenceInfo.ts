@@ -13,10 +13,14 @@
 // line-range highlighters write `{1,3}`. A note carried in from any of those
 // must not start refusing to run because a word here was not ours.
 //
-// The one attribute Ledge reads today is `confirm` (interactions.md §4b): a
-// modal stands between the run chord and execution. `confirmFor` below is the
-// whole policy, kept here beside the grammar so the parse and the meaning are
-// tested together.
+// Ledge reads two attributes. `confirm` (interactions.md §4b) stands a modal
+// between the run chord and execution; `norun` (§4e) takes the run verbs away
+// from a block that is in the note to be read or copied, not run — an install
+// step for some other machine, a line for a server's authorized_keys. The
+// manual is the first user: its fences are live buttons, and half of them are
+// commands aimed at a machine that is not the one showing the page.
+// `confirmFor` and `noRun` below are the whole policy, kept here beside the
+// grammar so the parse and the meaning are tested together.
 
 /** A fence opener's language and attributes. */
 export interface FenceInfo {
@@ -123,4 +127,19 @@ export function confirmFor(attrs: Map<string, string>, noteDefault: boolean): Co
   if (OFF.has(value.toLowerCase())) return null;
   if (ON.has(value.toLowerCase())) return { message: null };
   return { message: value };
+}
+
+/**
+ * Whether the fence is marked `norun`: no run pair on the card, and the chords
+ * answer with a notice rather than executing (interactions.md §4e). Copy stays.
+ *
+ * Per block only — there is no note-wide form, because a note none of whose
+ * blocks should run is a note without runnable languages. `norun=no` is the
+ * off switch, for symmetry with `confirm`; any other value leaves the mark in
+ * force, since a word that is there is more likely a typo'd yes than a no.
+ */
+export function noRun(attrs: Map<string, string>): boolean {
+  const raw = attrs.get("norun");
+  if (raw === undefined) return false;
+  return !OFF.has(raw.trim().toLowerCase());
 }

@@ -133,9 +133,10 @@ Four modes, and a page commits to one:
   every paragraph.
 
 The reference pages had drifted into tutorial voice ("Here is a live one,
-harmless on purpose") and the tutorials into essay voice. Runnable examples
-stay in the reference pages: they are Ledge's whole point. The prose around
-them is what changes.
+harmless on purpose") and the tutorials into essay voice. Nothing in the
+manual runs (§10), so a reference page *describes*: it shows what a note
+contains and states what happens when it runs, in the indicative. A tutorial
+*instructs*, and its instructions are carried out in the reader's own notes.
 
 ## 10. Mechanics for `docs/user/`
 
@@ -144,8 +145,19 @@ them is what changes.
   (`docs/contributor/` wraps at 80 as usual.)
 - The H1 is the page title and the wikilink target. Changing it means
   updating every `[[Title]]` in the corpus, so change it only with reason.
-- Keep runnable code fences runnable and honest: a fence in the manual is a
-  live button in the app.
+- The manual describes; it never demonstrates. Nothing in it runs: every
+  fence in a runnable language is marked `norun` on its opener
+  (interactions.md §4e; `src/bun/docsContent.test.ts` fails on a page that
+  forgets), and no sentence asks the reader to act on the page they are
+  reading. Show an example as the contents of a note, in the indicative ("A
+  note with these two blocks, run in order:"), and state the result in prose
+  ("prints `/tmp`") rather than inviting the reader to see it. A block that
+  only existed to be pressed is cut, not kept as decoration. Instructions
+  that act in the reader's own notes ("press ⌘N", "run Attach Folder…") are
+  fine. The reason nothing runs is
+  where a manual page's shell would be: `$HOME` on whichever machine shows
+  the page, this Mac or a phone's server, with no frontmatter, and the reader
+  cannot see which.
 - Link with `[[Page Title]]` on first substantive mention, not every mention.
 
 ## 11. The check

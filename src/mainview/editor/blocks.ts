@@ -22,7 +22,7 @@ import {
   requestRunConfirm,
   type RunDestination,
 } from "./bridge";
-import { confirmFor, parseFenceInfo, type ConfirmSpec } from "./fenceInfo";
+import { confirmFor, noRun, parseFenceInfo, type ConfirmSpec } from "./fenceInfo";
 import { hasTerminal, runsBlocks, softKeyboard } from "../lib/shell";
 import { activeConnection, linkState, subscribeConnections } from "../lib/connections";
 import { fenceCloser, fenceOpener } from "./fences";
@@ -68,6 +68,10 @@ interface Block {
   // The fence's confirm marker resolved against the note's default, or null
   // when this block runs straight through (editor/fenceInfo.ts).
   confirm: ConfirmSpec | null;
+  // Whether the fence is marked `norun`: here to be read or copied, not run
+  // from this note (editor/fenceInfo.ts, interactions.md §4e). Everything
+  // that offers to RUN hangs off this too.
+  norun: boolean;
 }
 
 // --- Run state -------------------------------------------------------------
@@ -219,7 +223,7 @@ function readBlock(state: EditorView["state"], from: number, to: number): Block 
   if (lastBody >= firstBody) {
     code = doc.sliceString(doc.line(firstBody).from, doc.line(lastBody).to);
   }
-  return { from, to, lang, code, closed, confirm: confirmFor(info.attrs, noteConfirms(state)) };
+  return { from, to, lang, code, closed, confirm: confirmFor(info.attrs, noteConfirms(state)), norun: noRun(info.attrs) };
 }
 
 // Every fenced block in the document, as the facts its chrome is built from.
@@ -228,7 +232,7 @@ function readBlock(state: EditorView["state"], from: number, to: number): Block 
 // loud on screen.
 function eachBlock(
   state: EditorView["state"],
-  cb: (b: { from: number; to: number; lang: string | null; asks: boolean; closed: boolean }) => void,
+  cb: (b: { from: number; to: number; lang: string | null; asks: boolean; closed: boolean; norun: boolean }) => void,
 ): void {
   const noteDefault = noteConfirms(state);
   syntaxTree(state).iterate({
@@ -241,6 +245,7 @@ function eachBlock(
         lang: info.lang,
         asks: confirmFor(info.attrs, noteDefault) !== null,
         closed: fenceClosed(state, node.from, node.to),
+        norun: noRun(info.attrs),
       });
     },
   });
@@ -287,13 +292,14 @@ export function isBlockRunning(state: EditorState, from: number, to: number): bo
 }
 
 // Whether `pos` sits in a block the run verbs would accept: a fenced block
-// whose language is runnable and whose closing fence is there. Asked by the
-// editor's context menu before it offers Run Block Inline (interactions.md
-// §11) — an unterminated fence has no agreed body (§4c), so the menu leaves
-// the pair out rather than offering a run that answers with a notice.
+// whose language is runnable, whose closing fence is there, and which is not
+// marked `norun`. Asked by the editor's context menu before it offers Run
+// Block Inline (interactions.md §11) — an unterminated fence has no agreed
+// body (§4c) and a marked one has declined (§4e), so the menu leaves the pair
+// out rather than offering a run that answers with a notice.
 export function runnableBlockAt(state: EditorState, pos: number): boolean {
   const block = blockAt(state, pos);
-  return !!block && block.closed && isRunnable(block.lang);
+  return !!block && block.closed && !block.norun && isRunnable(block.lang);
 }
 
 /**
@@ -365,6 +371,13 @@ export function runBlock(view: EditorView, pos: number, destination: RunDestinat
   // because a key that does nothing reads as a broken key.
   if (!block.closed) {
     notifyUser(BLOCK_UNCLOSED);
+    return true;
+  }
+  // A fence marked `norun` has declined (interactions.md §4e): the buttons are
+  // absent, and the chord and the palette answer rather than run, same shape
+  // as the unclosed case above.
+  if (block.norun) {
+    notifyUser(BLOCK_NORUN);
     return true;
   }
   // A ```prompt fence's contract is "pipe this body to the agent CLI" — in a
@@ -604,6 +617,10 @@ const PROMPT_SEALED =
 // The chord's answer for a fence with no closing line. Only the chord and the
 // palette can reach it: an unclosed block never draws the buttons.
 const BLOCK_UNCLOSED = "This code block has no closing fence, so there is nothing to run yet.";
+// The chord's answer for a fence marked `norun`. Says what the mark is for,
+// because the person pressing ⌘↩ on it is usually the reader of a note that
+// someone else (the manual, say) marked, not its author.
+const BLOCK_NORUN = "This block is marked norun: it is here to read or copy, not to run from this note.";
 // The button tooltip and the chord's notice for a machine that cannot be
 // reached (linkDown). Names the machine, because on a client with several
 // servers the useful half of the sentence is which one went: the bar says the
@@ -686,6 +703,9 @@ interface ControlSpec {
   // (rebuild), so this rides in the signature below: the buttons have to
   // appear the moment the closing fence is typed.
   closed: boolean;
+  // Whether the fence is marked `norun`: no run pair either, and for the same
+  // reason it rides here — the pair has to go the moment the word is typed.
+  norun: boolean;
   // Whether a click here opens the confirmation first. Said on the button, in
   // the same breath as the host: where a run will happen and whether it will
   // stop to ask are the two things worth knowing BEFORE the click.
@@ -874,7 +894,7 @@ const overlayPlugin = ViewPlugin.fromClass(
       const termBusy = isTerminalBusy(view.state.facet(sessionIdFacet));
 
       const controls: ControlSpec[] = [];
-      eachBlock(view.state, ({ from, to, lang, asks, closed }) => {
+      eachBlock(view.state, ({ from, to, lang, asks, closed, norun }) => {
         const openLine = view.state.doc.lineAt(from);
         let c: { top: number } | null = null;
         try {
@@ -898,6 +918,7 @@ const overlayPlugin = ViewPlugin.fromClass(
           termBusy,
           asks,
           closed,
+          norun,
         });
       });
 
@@ -964,7 +985,7 @@ const overlayPlugin = ViewPlugin.fromClass(
             : null;
 
       const sig =
-        controls.map((c) => `${c.from}:${c.lang}:${c.closed ? "closed" : "open"}`).join("|") +
+        controls.map((c) => `${c.from}:${c.lang}:${c.closed ? "closed" : "open"}:${c.norun ? "norun" : "runs"}`).join("|") +
         "#" +
         closes.map((c) => c.id).join("|") +
         "#fm:" +
@@ -1039,8 +1060,11 @@ const overlayPlugin = ViewPlugin.fromClass(
         // its pair with the sealed reason as tooltip (see the comment there),
         // so the buttons are born gray, never live.
         //
-        // An UNCLOSED fence is the one case that gets no pair at all, rather
-        // than a disabled one with a reason. The usual argument for the gray
+        // An UNCLOSED fence and a fence marked `norun` are the two cases that
+        // get no pair at all, rather than a disabled one with a reason. The
+        // marked one is simplest: its author said the block is not for running
+        // here, and a grey button offering to would contradict the note.
+        // The unclosed one is the subtler case. The usual argument for the gray
         // button (a missing control is a mystery) does not apply: this block
         // has no end yet because it is still being typed, and a run pair that
         // blinks into existence on the fence line the user is halfway through
@@ -1056,7 +1080,7 @@ const overlayPlugin = ViewPlugin.fromClass(
         // Separately, because the pair is not a unit: the phase after v1 runs
         // blocks on a phone that still has no drawer, and there the ▶ is the
         // whole group.
-        const runnable = isRunnable(c.lang) && c.closed;
+        const runnable = isRunnable(c.lang) && c.closed && !c.norun;
         if (runnable && runsBlocks()) {
           const runBtn = iconButton(PLAY_ICON, tooltip("block.runInline"), (e) => {
             e.preventDefault();

@@ -4,9 +4,9 @@ Ledge is built to be worked by AI agents as well as by you. An agent CLI such as
 
 ## Connect an agent
 
-Ledge ships an MCP server. `ledge mcp` serves it on stdio, so install the `ledge` command first (see [[The ledge CLI]]). Any MCP-speaking agent can use it. For Claude Code it is one line:
+Ledge ships an MCP server. `ledge mcp` serves it on stdio, so install the `ledge` command first (see [[The ledge CLI]]). Any MCP-speaking agent can use it. For Claude Code it is one line, in your own terminal:
 
-```sh
+```sh norun
 claude mcp add ledge -- ledge mcp
 ```
 
@@ -34,13 +34,13 @@ So "summarize this note" or "add a TODO section here" needs no explanation of wh
 
 A fenced block whose language is `prompt` is an agent run. Write instructions in it and press ⌘↩. The block's text is piped to the agent CLI in one-shot mode, and the output streams into the panel below like any other run ([[Running Code]]).
 
-Try this one if you have Claude Code installed and connected:
+A prompt fence in a note might read:
 
-```prompt
-Read this note and reply with a one-sentence summary of what prompt fences do.
+```prompt norun
+Summarize this note in one sentence.
 ```
 
-In your own notes, instructions can change things: "append a Next steps section to this note", or "create a note titled Retro from what we discussed above".
+The answer streams into the panel beneath it. Instructions can also change things: "append a Next steps section to this note", or "create a note titled Retro from what we discussed above".
 
 The block runs from the note's own shell, so the agent inherits the note's `cwd`, `env`, and the environment variables above.
 

@@ -26,7 +26,9 @@ The palette offers this only while your notes are on this Mac. `ledge` ships wit
 | `ledge today` | Opens today's daily note in the app. |
 | `ledge <title>` | Opens the app at that note. `ledge` alone just opens the app. |
 
-```sh
+In a terminal, once the shim is on your PATH:
+
+```sh norun
 ledge ls
 ledge search "spawn params"
 ledge cat "Shipping Notes"

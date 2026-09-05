@@ -103,3 +103,44 @@ test("typing the closing fence brings the run pair with it", async ({ page }) =>
   await page.keyboard.press("Meta+Enter");
   await expect.poll(() => page.evaluate(() => window.__harness.inlineRuns())).toHaveLength(1);
 });
+
+// The other fence that declines to run (interactions.md §4e): one marked
+// `norun`. The manual's recipes are the reason — an install command aimed at
+// a server is a live button on the machine reading the page — but the mark is
+// any note's to use.
+test("a fence marked norun draws copy alone, and the chord says why", async ({ page }) => {
+  await write(page, "# Untitled\n\n```sh\npwd\n```\n\n```sh norun\nsudo apt-get install -y restic\n```\n");
+
+  // The marked block is closed and its language is runnable; the word alone
+  // takes the pair away. Copy stays, because copying is not running.
+  await expect(page.locator('[data-act="run"]')).toHaveCount(1);
+  await expect(page.locator('[data-act="term"]')).toHaveCount(1);
+  const groups = page.locator(".ledge-ctl-group");
+  await expect(groups).toHaveCount(2);
+  await expect(groups.nth(1).locator("button")).toHaveCount(1);
+  await groups.nth(1).locator("button").dispatchEvent("mousedown", { button: 0 });
+  await expect.poll(() => page.evaluate(() => window.__harness.clipboard())).toBe("sudo apt-get install -y restic");
+
+  await page.locator(".cm-line", { hasText: "apt-get" }).click();
+  await page.keyboard.press("Meta+Enter");
+  await expect(page.getByText("marked norun", { exact: false })).toBeVisible();
+  expect(await page.evaluate(() => window.__harness.inlineRuns())).toHaveLength(0);
+  await page.keyboard.press("Meta+Shift+Enter");
+  expect(await page.evaluate(() => window.__harness.termPastes())).toHaveLength(0);
+});
+
+test("typing norun onto a fence takes the pair away, and deleting it brings it back", async ({ page }) => {
+  await write(page, "# Untitled\n\n```sh\npwd\n```\n");
+  await expect(page.locator('[data-act="run"]')).toHaveCount(1);
+
+  // Up from the body: the opener's marks are concealed until the caret is on
+  // the line, so its text is not there to click.
+  await page.locator(".cm-line", { hasText: "pwd" }).click();
+  await page.keyboard.press("ArrowUp");
+  await page.keyboard.press("End");
+  await page.keyboard.type(" norun");
+  await expect(page.locator('[data-act="run"]')).toHaveCount(0);
+
+  for (let i = 0; i < " norun".length; i += 1) await page.keyboard.press("Backspace");
+  await expect(page.locator('[data-act="run"]')).toHaveCount(1);
+});

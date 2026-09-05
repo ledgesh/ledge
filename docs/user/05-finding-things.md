@@ -20,7 +20,7 @@ A search hit opens the note with the matched line revealed and selected, so you 
 
 Links address the title, never the filename. A retitle renames the file without leaving a stale path behind, and nothing rewrites your other notes to keep links working. A link whose title matches nothing is styled as dangling and edits like plain text.
 
-Click a rendered link to follow it. When the caret is inside a link and the raw text shows, ⌘-click instead. Try it: [[Running Code]].
+Click a rendered link to follow it. When the caret is inside a link and the raw text shows, ⌘-click instead.
 
 ## Backlinks and outline
 

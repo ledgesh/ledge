@@ -48,12 +48,6 @@ rm -rf ./cache
 ```
 ````
 
-Here is a live one, harmless. Press Run, or ⌘↩ with the caret inside it:
-
-```sh confirm
-echo "this one asked first"
-```
-
 The dialog shows the block's code, names where it is about to run, and opens with Cancel focused, so a stray Return does nothing. Nothing runs while the dialog is up. Cancelling remembers nothing, and the next ⌘↩ asks again. There is no "don't ask again".
 
 Four ways to set it:
@@ -79,16 +73,32 @@ On a note that declares several machines ([[Remote Hosts]]) you pick the machine
 
 This is a speedbump against muscle memory, not a lock. Anyone who can edit the note can delete the word.
 
+## Keep a block from running
+
+Add `norun` after the language and the block gets no Run button. ⌘↩ on it says so instead of running:
+
+````markdown
+```sh norun
+sudo systemctl enable --now ledge-backup.timer
+```
+````
+
+Use it for a command that belongs on some other machine, or in some other directory, than the note's shell: an install step for a server, a line for a project's terminal, a command you are quoting rather than keeping. The block still highlights as `sh`, and Copy still copies it.
+
+`norun=no` turns it back off, the same way `confirm=no` does. Like `confirm`, the word lives in the fence's info string, so other renderers ignore it and it travels with the block.
+
+The manual's own blocks are all marked this way, which is why none of them has a Run button.
+
 ## Shell blocks share one shell
 
 Shell blocks (`sh`, `bash`, `zsh`) run in the note's persistent inline shell. There is one per note, so a `cd`, an exported variable, or an activated virtualenv carries into the next run.
 
-```sh
+```sh norun
 count=$((${count:-0} + 1))
 echo "run number $count"
 ```
 
-Run that twice and the number climbs, because it is the same shell both times.
+The first run prints `run number 1` and the second `run number 2`, because both ran in the same shell.
 
 The terminal drawer is a separate shell from the inline one. Both belong to this note alone, and both start where the note's frontmatter points them (`cwd`, `env`, and the rest: see [[Frontmatter and Environments]]).
 
@@ -121,7 +131,7 @@ This setting is about shells on the machine holding the notes, so a remote works
 
 Languages with an interpreter mapping (`python`, `node`, `ruby`, `ts`, `php`, and others) run as a file handed to that interpreter, one fresh process per run. No state carries between runs.
 
-```python
+```python norun
 import platform
 print(f"hello from Python {platform.python_version()}")
 ```
@@ -134,7 +144,7 @@ That runtime is the app's, not a server's. A note kept on another machine runs i
 
 A `redis` block is a list of commands, fed to `redis-cli` one line at a time.
 
-```redis
+```redis norun
 PING
 INFO server
 ```
@@ -159,7 +169,7 @@ SQL is the common case. Add `"sql"` to `runnable` and this to `interpreters`:
 
 Relaunch, and `sql` fences run against whatever `DATABASE_URL` the note's frontmatter names, the same way `REDIS_URL` works above.
 
-```sql
+```sql norun
 select count(*) from orders where created_at > now() - interval '1 day';
 ```
 

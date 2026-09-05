@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { confirmFor, parseFenceInfo } from "./fenceInfo";
+import { confirmFor, noRun, parseFenceInfo } from "./fenceInfo";
 
 const attrsOf = (line: string) => Object.fromEntries(parseFenceInfo(line).attrs);
 
@@ -73,5 +73,33 @@ describe("confirmFor", () => {
     expect(of("```sh confirm=no", true)).toBeNull();
     expect(of("```sh confirm=off", true)).toBeNull();
     expect(of('```sh confirm="Really?"', true)).toEqual({ message: "Really?" });
+  });
+});
+
+describe("noRun", () => {
+  const of = (line: string) => noRun(parseFenceInfo(line).attrs);
+
+  test("no marker: the block runs", () => {
+    expect(of("```sh")).toBe(false);
+    expect(of("```sh confirm")).toBe(false);
+  });
+
+  test("the bare flag and the on-words mark the block", () => {
+    expect(of("```sh norun")).toBe(true);
+    expect(of("```sh norun=yes")).toBe(true);
+    expect(of("```sh NORUN=true")).toBe(true);
+  });
+
+  test("an off-word is the escape hatch, and any other value keeps the mark", () => {
+    expect(of("```sh norun=no")).toBe(false);
+    expect(of("```sh norun=off")).toBe(false);
+    // A word that is there is a typo'd yes before it is a no.
+    expect(of("```sh norun=maybe")).toBe(true);
+  });
+
+  test("it rides beside confirm without disturbing it", () => {
+    const attrs = parseFenceInfo("```sh norun confirm").attrs;
+    expect(noRun(attrs)).toBe(true);
+    expect(confirmFor(attrs, false)).toEqual({ message: null });
   });
 });
