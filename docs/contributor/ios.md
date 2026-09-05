@@ -351,7 +351,7 @@ of v1 that did not survive contact.** The app shows its public key and the
 whole `authorized_keys` line, forced command included, exactly as remote.md §4a
 writes it. Getting that line onto the server is the user's problem, which is
 the same problem the Mac client has and the same one
-`docs/user/18-notes-on-another-machine.md` documents — except that it is not
+`docs/user/09-keep-notes-on-a-remote-server.md` documents — except that it is not
 the same difficulty. On a Mac the line is copied between two windows on one
 screen; on a phone a pasteboard ends at the phone, and the machine the line has
 to be pasted on is the one that is not in the user's hand.

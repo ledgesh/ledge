@@ -199,7 +199,7 @@ failure rather than the release.
 ## 6. Publishing the server package
 
 The app is half of a release. `ledge-server` on npm is the other half, and it
-is what `docs/user/18-notes-on-another-machine.md` tells a user to install on
+is what `docs/user/09-keep-notes-on-a-remote-server.md` tells a user to install on
 the machine their notes live on. A release that ships the app without it leaves
 that page describing a package that does not exist.
 

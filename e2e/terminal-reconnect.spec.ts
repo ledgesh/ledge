@@ -65,7 +65,7 @@ test.beforeEach(async ({ page }) => {
 
 // The promise the user is given: a build carries on while you are on a train,
 // and its output is waiting when you come back
-// (docs/user/18-notes-on-another-machine.md). What makes it true is that the
+// (docs/user/09-keep-notes-on-a-remote-server.md). What makes it true is that the
 // bytes were kept in the server's ring and the drawer asks for them.
 test("an open drawer replays what its shell printed while the wire was down", async ({ page }) => {
   await page.evaluate(() =>

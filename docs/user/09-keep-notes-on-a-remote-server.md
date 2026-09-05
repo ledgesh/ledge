@@ -1,10 +1,18 @@
-# Notes on Another Machine
+# Keep Notes on a Remote Server
 
-Ledge can keep your notes on a different machine and run this app as the window onto it. The other machine holds the notes, spawns the shells, and keeps them running; this one draws them. The transport is ssh, so there is no account to make and no service to sign up for.
+Ledge can keep your notes on a server and run this app as the window onto it. The server holds the notes, spawns the shells, and keeps them running; this app draws them. The transport is ssh, so there is no account to make and no service to sign up for.
 
-One machine at a time from this app. The connection bar above the workspace strip always names the one you are typing into. A machine can serve several of your devices at once.
+One server at a time per window. The connection bar above the workspace strip always names the one you are typing into, and a server can serve several of your devices at once.
 
-This is a different feature from [[Remote Hosts]], and the difference matters. `host:` frontmatter says where a *block* runs. A connection says where the *note lives*. They compose: a note stored on your VPS can carry `host: prod`, and the VPS makes that outbound ssh connection, so this app never holds credentials for prod.
+Ledge has two ways to involve a remote machine, and they answer different questions.
+
+| | The note | Its blocks |
+| --- | --- | --- |
+| A `host:` line in the note ([[Run Code on Remote Hosts]]) | Stays where it is | Run over ssh on the host it names |
+| A server connection ([[Keep Notes on a Remote Server]]) | Lives on the server | Run on the server |
+| Both | Lives on the server | Run on the host, which the server dials |
+
+This page is the second row. [[Run Code on Remote Hosts]] is the first, and the two compose: a note kept on your VPS can carry `host: prod`, and the VPS makes that outbound ssh connection, so this app never holds credentials for prod.
 
 ## Add a server
 

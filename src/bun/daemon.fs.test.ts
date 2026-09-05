@@ -382,7 +382,7 @@ describe("one drawer, one owner", () => {
 describe("a drawer whose wire dropped", () => {
   // The ordinary case, and the one the user is promised: a build carries on
   // while you are on a train, and its output is waiting when you come back
-  // (docs/user/18-notes-on-another-machine.md). The ring is the only place
+  // (docs/user/09-keep-notes-on-a-remote-server.md). The ring is the only place
   // those bytes still exist — they were pushed at a connection that had gone.
   test("claims back everything the shell printed while it was away", async () => {
     const { socketPath } = await daemonIn({ idleMs: 60_000 });

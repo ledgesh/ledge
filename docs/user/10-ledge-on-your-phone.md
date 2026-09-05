@@ -1,6 +1,6 @@
 # Ledge on Your Phone
 
-Ledge runs on an iPhone or iPad as a window onto a server. The phone holds no notes: it reaches a machine running `ledge-server` over ssh, the way a Mac does in [[Notes on Another Machine]], and shows you what is there.
+Ledge runs on an iPhone or iPad as a window onto a server. The phone holds no notes: it reaches a server over ssh, the way a Mac does in [[Keep Notes on a Remote Server]], and shows you what is there.
 
 Set the server up first. "Install the server" on that page is the whole of it, and a server that already serves your Mac needs nothing more.
 
@@ -16,7 +16,7 @@ restrict,command="ledge-server serve" ecdsa-sha2-nistp256 AAAA... ledge-iphone-3
 
 Copy line puts it on the phone's pasteboard. Share line hands it to AirDrop, Messages, or any app that can carry it to a machine with a shell on the server, which is where the pasteboard on a phone falls short. Add it to `~/.ssh/authorized_keys` there. The comment at the end names the phone, so the line is easy to find again when you want to revoke it.
 
-The line arrives already restricted, in the way "Restrict the key to Ledge" on [[Notes on Another Machine]] describes: the phone's key can speak Ledge's protocol and nothing else. It names `ledge-server` by its bare name, so the server has to be on the PATH an incoming ssh gets ("Check that ssh can find the server" on the same page). For the Docker deployment, change the command in the line to the `docker exec` form shown there.
+The line arrives already restricted, in the way "Restrict the key to Ledge" on [[Keep Notes on a Remote Server]] describes: the phone's key can speak Ledge's protocol and nothing else. It names `ledge-server` by its bare name, so the server has to be on the PATH an incoming ssh gets ("Check that ssh can find the server" on the same page). For the Docker deployment, change the command in the line to the `docker exec` form shown there.
 
 The second part is the machine: `user@host`, and a port when sshd is not on 22. A phone reads no `~/.ssh/config`, so write the address out.
 
@@ -26,7 +26,7 @@ The third is Connect. The phone dials the server, shows its host key fingerprint
 
 Choose "A password" under Sign in with and type the password for that account. The phone keeps it in its own keychain, and no key line has to be installed.
 
-The trade-off is the one described on [[Notes on Another Machine]]: a password reaches a fresh machine today, and a key is the better long-term answer. A server with `PasswordAuthentication no` refuses it.
+The trade-off is the one described on [[Keep Notes on a Remote Server]]: a password reaches a fresh machine today, and a key is the better long-term answer. A server with `PasswordAuthentication no` refuses it.
 
 ## When the phone cannot reach its server
 
@@ -40,7 +40,7 @@ Removing the last server returns the phone to the pairing screen. Deleting the a
 
 ## More than one server
 
-Inside the app the connection bar works as on a Mac: tap it to add, edit, remove, or switch servers, with the same fingerprint step ([[Notes on Another Machine]]). The form shows the phone's key line where a Mac's shows a key path, with Share Line beside Copy Line.
+Inside the app the connection bar works as on a Mac: tap it to add, edit, remove, or switch servers, with the same fingerprint step ([[Keep Notes on a Remote Server]]). The form shows the phone's key line where a Mac's shows a key path, with Share Line beside Copy Line.
 
 A phone and a Mac can be on one server at once. Each keeps its own tabs, and a note's terminal has one owner between them.
 

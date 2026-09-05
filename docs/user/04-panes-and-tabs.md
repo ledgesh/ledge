@@ -94,7 +94,7 @@ Ledge reopens the windows you left open, each at the position and size you left 
 
 If a position no longer exists, because you unplugged the display it was on or the display got smaller, Ledge keeps the size and centers the window on the display that best matches.
 
-New Window in the File menu opens another one. A window belongs to one machine, so a second window is how you have two machines open at once ([[Notes on Another Machine]]).
+New Window in the File menu opens another one. A window is on one server at a time, so a second window is how you have two servers open at once ([[Keep Notes on a Remote Server]]).
 
 The help button in the top right opens this manual in a window of its own, so reading it costs you nothing you had open. Pressing it again brings that window forward rather than opening a second one. It is the one window Ledge does not reopen at the next launch, since it is a button away.
 

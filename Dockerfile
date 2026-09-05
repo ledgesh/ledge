@@ -112,7 +112,7 @@ COPY --from=build /out/libledge_pty.so /usr/local/bin/libledge_pty.so
 # the recipe this image tells people to write. A `FROM ledge-server` that runs
 # `pip install --user` or `npm i -g` into a DECLARED volume has its writes
 # discarded at build time, silently. So the run command in
-# docs/user/18-notes-on-another-machine.md names both:
+# docs/user/09-keep-notes-on-a-remote-server.md names both:
 #
 #     -v ledge-data:/data -v ledge-home:/home/ledge
 #

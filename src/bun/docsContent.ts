@@ -26,18 +26,18 @@ import panesAndTabs from "../../docs/user/04-panes-and-tabs.md" with { type: "te
 import findingThings from "../../docs/user/05-finding-things.md" with { type: "text" };
 import frontmatterEnvs from "../../docs/user/06-frontmatter-and-environments.md" with { type: "text" };
 import profilesSecrets from "../../docs/user/07-profiles-and-secrets.md" with { type: "text" };
-import remoteHosts from "../../docs/user/08-remote-hosts.md" with { type: "text" };
-import dailyTemplates from "../../docs/user/09-daily-notes-and-templates.md" with { type: "text" };
-import images from "../../docs/user/10-images.md" with { type: "text" };
-import noteLocking from "../../docs/user/11-note-locking.md" with { type: "text" };
-import agents from "../../docs/user/12-agents-and-ledge.md" with { type: "text" };
-import cli from "../../docs/user/13-the-ledge-cli.md" with { type: "text" };
-import tutorialProject from "../../docs/user/14-tutorial-run-a-project.md" with { type: "text" };
-import tutorialDaily from "../../docs/user/15-tutorial-a-daily-workflow.md" with { type: "text" };
-import tutorialAgent from "../../docs/user/16-tutorial-pair-with-an-agent.md" with { type: "text" };
-import tutorialSync from "../../docs/user/17-tutorial-keep-notes-synced.md" with { type: "text" };
-import anotherMachine from "../../docs/user/18-notes-on-another-machine.md" with { type: "text" };
-import onYourPhone from "../../docs/user/19-ledge-on-your-phone.md" with { type: "text" };
+import remoteHosts from "../../docs/user/08-run-code-on-remote-hosts.md" with { type: "text" };
+import remoteServer from "../../docs/user/09-keep-notes-on-a-remote-server.md" with { type: "text" };
+import onYourPhone from "../../docs/user/10-ledge-on-your-phone.md" with { type: "text" };
+import dailyTemplates from "../../docs/user/11-daily-notes-and-templates.md" with { type: "text" };
+import images from "../../docs/user/12-images.md" with { type: "text" };
+import noteLocking from "../../docs/user/13-note-locking.md" with { type: "text" };
+import agents from "../../docs/user/14-agents-and-ledge.md" with { type: "text" };
+import cli from "../../docs/user/15-the-ledge-cli.md" with { type: "text" };
+import tutorialProject from "../../docs/user/16-tutorial-run-a-project.md" with { type: "text" };
+import tutorialDaily from "../../docs/user/17-tutorial-a-daily-workflow.md" with { type: "text" };
+import tutorialAgent from "../../docs/user/18-tutorial-pair-with-an-agent.md" with { type: "text" };
+import tutorialSync from "../../docs/user/19-tutorial-keep-notes-synced.md" with { type: "text" };
 // The one page not authored in docs/user/, and not authored at all: `bun run
 // licenses` generates it (src/bun/licenses.ts) and writes it to the repository
 // root, where GitHub, a packager, and anyone auditing the release all expect
@@ -61,17 +61,17 @@ export const DOC_PAGES: DocPage[] = [
   { name: "05-finding-things.md", text: findingThings },
   { name: "06-frontmatter-and-environments.md", text: frontmatterEnvs },
   { name: "07-profiles-and-secrets.md", text: profilesSecrets },
-  { name: "08-remote-hosts.md", text: remoteHosts },
-  { name: "09-daily-notes-and-templates.md", text: dailyTemplates },
-  { name: "10-images.md", text: images },
-  { name: "11-note-locking.md", text: noteLocking },
-  { name: "12-agents-and-ledge.md", text: agents },
-  { name: "13-the-ledge-cli.md", text: cli },
-  { name: "14-tutorial-run-a-project.md", text: tutorialProject },
-  { name: "15-tutorial-a-daily-workflow.md", text: tutorialDaily },
-  { name: "16-tutorial-pair-with-an-agent.md", text: tutorialAgent },
-  { name: "17-tutorial-keep-notes-synced.md", text: tutorialSync },
-  { name: "18-notes-on-another-machine.md", text: anotherMachine },
-  { name: "19-ledge-on-your-phone.md", text: onYourPhone },
+  { name: "08-run-code-on-remote-hosts.md", text: remoteHosts },
+  { name: "09-keep-notes-on-a-remote-server.md", text: remoteServer },
+  { name: "10-ledge-on-your-phone.md", text: onYourPhone },
+  { name: "11-daily-notes-and-templates.md", text: dailyTemplates },
+  { name: "12-images.md", text: images },
+  { name: "13-note-locking.md", text: noteLocking },
+  { name: "14-agents-and-ledge.md", text: agents },
+  { name: "15-the-ledge-cli.md", text: cli },
+  { name: "16-tutorial-run-a-project.md", text: tutorialProject },
+  { name: "17-tutorial-a-daily-workflow.md", text: tutorialDaily },
+  { name: "18-tutorial-pair-with-an-agent.md", text: tutorialAgent },
+  { name: "19-tutorial-keep-notes-synced.md", text: tutorialSync },
   { name: "20-third-party-licenses.md", text: thirdParty },
 ];

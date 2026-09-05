@@ -76,7 +76,7 @@ Everything the server owns sits under one directory: the notes, the workspace re
 
 ## Docker
 
-The Ledge repository ships a `Dockerfile` for the container deployment, where the image's PID 1 is the daemon and the host's sshd reaches in with `docker exec`. See [Notes on another machine](https://github.com/ledgesh/ledge/blob/main/docs/user/18-notes-on-another-machine.md) in the manual.
+The Ledge repository ships a `Dockerfile` for the container deployment, where the image's PID 1 is the daemon and the host's sshd reaches in with `docker exec`. See [Keep Notes on a Remote Server](https://github.com/ledgesh/ledge/blob/main/docs/user/09-keep-notes-on-a-remote-server.md) in the manual.
 
 ## License
 

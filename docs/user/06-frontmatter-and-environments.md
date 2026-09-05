@@ -2,7 +2,7 @@
 
 A note can declare how its shells spawn: which directory they start in, which environment variables they carry, and which machine they run on. Those declarations live in a frontmatter block at the top of the note.
 
-This page covers the block itself and the directory and environment keys. Secrets have their own page ([[Profiles and Secrets]]), as does running on other machines ([[Remote Hosts]]).
+This page covers the block itself and the directory and environment keys. Secrets have their own page ([[Profiles and Secrets]]), as does running on other machines ([[Run Code on Remote Hosts]]).
 
 ## The frontmatter block
 
@@ -56,7 +56,7 @@ After editing the block, run "Restart Note Shell" from the command palette (â‡§â
 | `env:` | Environment variables, set inline. |
 | `envFile:` | Dotenv file to load, resolved against `cwd`. |
 | `profile:` | Named env file outside the notes folder, for secrets. See [[Profiles and Secrets]]. |
-| `host:` | Machines the note's blocks run on. See [[Remote Hosts]]. |
+| `host:` | Machines the note's blocks run on. See [[Run Code on Remote Hosts]]. |
 | `tags:` | Tags, the same vocabulary as inline `#hashtags`. See [[Finding Things]]. |
 | `template:` | `true` lists the note in the New Note from Template picker; `daily` makes it the daily template. See [[Daily Notes and Templates]]. |
 | `confirm:` | `true` makes every runnable block in the note ask before running. A single block opts out with `confirm=no` on its fence. See [[Running Code]]. |

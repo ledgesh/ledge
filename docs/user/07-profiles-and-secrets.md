@@ -44,4 +44,4 @@ A profile edit applies to newly spawned shells, like every frontmatter change. R
 
 ## Profiles stay on this machine
 
-When a note runs its blocks on a remote host over ssh, Ledge does not send the profile ([[Remote Hosts]]). A secret passed on a remote command line would be visible in that machine's process table to anyone who can list processes. If a remote run needs credentials, put them on the remote machine.
+When a note runs its blocks on a remote host over ssh, Ledge does not send the profile ([[Run Code on Remote Hosts]]). A secret passed on a remote command line would be visible in that machine's process table to anyone who can list processes. If a remote run needs credentials, put them on the remote machine.

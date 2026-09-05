@@ -61,7 +61,7 @@ Vendor and build directories such as `node_modules` are ignored. If the listing 
 
 Each of these is one line of frontmatter or one new block away:
 
-- A deploy note with `host: deploy@prod` runs its blocks on the server instead of your machine ([[Remote Hosts]]).
+- A deploy note with `host: deploy@prod` runs its blocks on the server instead of your machine ([[Run Code on Remote Hosts]]).
 - A `prompt` fence such as "Read the test output above and suggest a fix" puts an agent in the loop ([[Agents and Ledge]]).
 - Wikilinks tie the playbook to design and incident notes, and backlinks (⌥⌘L) tie them back ([[Finding Things]]).
 

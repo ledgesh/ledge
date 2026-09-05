@@ -1825,7 +1825,7 @@ restructuring `serve.ts`'s argv guard would need to run a file.
 
 **The install is a package, and the reason is that npm already solves both
 problems the compiled binary had.** Two commands ending in `bun add -g
-ledge-server` are what `docs/user/18-notes-on-another-machine.md` now says, and
+ledge-server` are what `docs/user/09-keep-notes-on-a-remote-server.md` now says, and
 `src/bun/npmPackage.ts` is what makes it true.
 
 The two things this section used to name as prerequisites were both real, and
@@ -2199,7 +2199,7 @@ Each phase leaves the app shippable.
 5. **Done.** Linux, and the debt. The PTY port (`ptyNative.ts`'s `PLATFORM`,
    the `#if defined(__linux__)` in the C, the `.so` that
    `scripts/build-native.ts` now also builds), the `Dockerfile`, and
-   `docs/user/18-notes-on-another-machine.md`. `pty.fs.test.ts` is the port's
+   `docs/user/09-keep-notes-on-a-remote-server.md`. `pty.fs.test.ts` is the port's
    proof and runs on both libcs; the whole server suite runs on glibc in the
    container.
    The ssh round trip is `bun run probe:ssh` (§13): a real sshd, a real

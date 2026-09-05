@@ -12,7 +12,7 @@ On a touch device the buttons do not wait to be hovered. Every block wears Run a
 
 A block offers to run only once its fence is closed. While the closing ``` is still missing there is no Run button, because what the block contains is not settled: the next closing fence you type anywhere below it becomes this block's end. The third backtick writes the closing line for you, so a block is closed before you have typed a word of it, and a block written above another one never swallows it. Pressing Enter at the end of a fence opener does the same for an opener that arrived some other way, such as a paste.
 
-A block on a note kept on another machine also needs that machine reachable. Once the connection bar reads "disconnected" the Run and terminal buttons are gray and say which machine cannot be reached, and a run that was already going says "Disconnected" until Ledge can ask about it again. A block run while the bar still reads "reconnecting…" goes as soon as the connection is back. See [[Notes on Another Machine]].
+A block in a note kept on a remote server also needs that server reachable. Once the connection bar reads "disconnected" the Run and terminal buttons are gray and say which machine cannot be reached, and a run that was already going says "Disconnected" until Ledge can ask about it again. A block run while the bar still reads "reconnecting…" goes as soon as the connection is back. See [[Keep Notes on a Remote Server]].
 
 On a phone the backtick is not on the letter keyboard, so the block is a verb instead: the code button on the bar above the keyboard, or "Code Block" in the command palette. It writes both fences and the language `sh`, and leaves the caret in the body, so the next thing you type is the command. Type over the `sh` to run something else.
 
@@ -24,7 +24,7 @@ An inline run can ask you things. When it prints its first output it takes the k
 
 If you pressed ⌘↩ and carried on writing, the run does not take the keyboard. Your caret moved on, so your typing stays in the note.
 
-If the connection to that machine drops, the panel stops taking your typing and the line reads "not connected" instead. It takes typing again as soon as the connection is back ([[Notes on Another Machine]]).
+If the connection to the server drops, the panel stops taking your typing and the line reads "not connected" instead. It takes typing again as soon as the connection is back ([[Keep Notes on a Remote Server]]).
 
 To leave a running command, press Escape twice (the first Escape goes to the program, in case it wanted it) or ⌘Escape. While a full-screen program such as `vim` holds the panel, every Escape belongs to it, and ⌘Escape is the way out.
 
@@ -67,7 +67,7 @@ redis-cli -n 0 flushdb
 ```
 ````
 
-On a note that declares several machines ([[Remote Hosts]]) you pick the machine first, and the question names it. The last thing you read before running is which machine you are running on.
+On a note that declares several machines ([[Run Code on Remote Hosts]]) you pick the machine first, and the question names it. The last thing you read before running is which machine you are running on.
 
 `confirm` lives in the fence's info string, which other Markdown renderers ignore. The block still highlights as `sh` on GitHub and in any editor, and the marker travels with the block when you copy it into another note.
 
@@ -125,7 +125,7 @@ A shell that is not installed refuses the run and names the path it could not fi
 
 When the shell is zsh, Ledge spawns it with `-o interactive_comments` on top of your `args`. That is what makes a `#` line a comment in the terminal drawer, where the block is typed into the shell rather than sourced from a file. zsh leaves the option off by default, so without it the drawer answers a comment line with `command not found: #`. Put `+o interactive_comments` in `args` to keep zsh's own behavior.
 
-This setting is about shells on the machine holding the notes, so a remote workspace reads the copy on its own server. A note with a `host:` line runs its blocks in the host's own shell instead ([[Remote Hosts]]).
+This setting is about shells on the machine holding the notes, so a workspace on a remote server reads the copy on that server. A note with a `host:` line runs its blocks in the host's own shell instead ([[Run Code on Remote Hosts]]).
 
 ## Interpreted languages
 
@@ -138,7 +138,7 @@ print(f"hello from Python {platform.python_version()}")
 
 TypeScript uses the Bun runtime bundled with the app, so `ts` blocks run with nothing installed.
 
-That runtime is the app's, not a server's. A note kept on another machine runs its `ts` blocks on whatever `bun` that machine has, and says `command not found` when it has none ([[Notes on Another Machine]]).
+That runtime is the app's, not a server's. A note kept on a remote server runs its `ts` blocks on whatever `bun` the server has, and says `command not found` when it has none ([[Keep Notes on a Remote Server]]).
 
 ## Redis and Valkey
 
@@ -159,7 +159,7 @@ Settings (⌘,) holds both lists:
 
 - `blocks.runnable` names the fence languages that get a Run button.
 - `blocks.interpreters` maps a language to the command that runs it. Values may carry flags, such as `"python3 -u"`.
-- `blocks.hostInterpreters` overrides interpreters per machine, for runs a note sends over ssh ([[Remote Hosts]]).
+- `blocks.hostInterpreters` overrides interpreters per machine, for runs a note sends over ssh ([[Run Code on Remote Hosts]]).
 
 SQL is the common case. Add `"sql"` to `runnable` and this to `interpreters`:
 

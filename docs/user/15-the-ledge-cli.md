@@ -8,7 +8,7 @@ Run "Install Shell Command (ledge)" from the command palette, or `ledge install`
 
 It writes a small shim onto your PATH (Homebrew's bin, `/usr/local/bin`, or `~/.local/bin`, whichever works) pointing at this copy of Ledge. If you move the app, run it again.
 
-The palette offers this only while your notes are on this Mac. `ledge` ships with the app and a server carries no copy of it, so the command is absent whenever Ledge is pointed at another machine ([[Notes on Another Machine]]).
+The palette offers this only while your notes are on this Mac. `ledge` ships with the app and a server carries no copy of it, so the command is absent whenever Ledge is pointed at a remote server ([[Keep Notes on a Remote Server]]).
 
 ## The verbs
 
