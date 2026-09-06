@@ -181,6 +181,12 @@ file, or a sign the code needs better names. Move the rationale to the page
 in `docs/contributor/` that owns it and cite the section, the way
 `src/bun/docsContent.test.ts` cites §10.
 
+`src/shared/rpc-schema.ts` is exempt from the ceiling. Its per-method comments
+are the protocol's reference documentation: one method states its caller, its
+null case, which end decides what, and the guards it interacts with. A method
+whose comment needs eight lines to do that keeps them. Sections 3 to 7 still
+apply there.
+
 > **Don't:**
 >
 > ```js
@@ -196,9 +202,10 @@ in `docs/contributor/` that owns it and cite the section, the way
 >
 > ```js
 > // Close as retryable, not as `bye`. Most daemon exits are temporary: an
-> // idle timeout, a service restart, a SIGTERM sent by hand. `bye` would
-> // tell the client the server is gone for good, so its Reconnect button
-> // would stop working. Displacement below is where `bye` gets sent.
+> // idle timeout, a service restart, a SIGTERM sent by hand. Said as final,
+> // this would end the client's reconnect ladder and leave nothing dialling
+> // until somebody pressed Reconnect (shared/transport.ts). The displacing
+> // close in `accept` above is the one that is final.
 > ```
 
 ## 12. The check
