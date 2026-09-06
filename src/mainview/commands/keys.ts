@@ -243,6 +243,12 @@ export const COMMANDS = {
   // already, and a bare key is paired with a row KIND, so the folder row is
   // free to spell it the same way. Nothing else on that row wanted it.
   "folder.rename": { title: "Rename Folder…", listKeys: ["r"] },
+  // The note row's destructive pair, on the folder row: a bare key is paired
+  // with a row KIND, so `d`/⌫ can mean Delete on both without either shadowing
+  // the other. The ellipsis is trash.delete's, and for a weaker reason — the
+  // dialog is there to say how many notes are under a collapsed row, not
+  // because this cannot be undone (interactions.md §4).
+  "folder.delete": { title: "Delete Folder…", listKeys: ["d", "Backspace"] },
 
   // Trash rows get the same grammar as note rows, with the verbs the trash has:
   // `r` restores, `d`/⌫ unlinks after a confirm. trash.delete is the second

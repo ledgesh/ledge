@@ -27,6 +27,7 @@ import {
   backlinksTo,
   changeVaultPassphrase,
   createNote,
+  deleteFolder,
   deleteNote,
   deleteTrashed,
   emptyTrash,
@@ -782,6 +783,7 @@ export async function createServer(deps: { push: Audience; native: NativeDeps })
     noteCreate: async ({ root, text, folder }) => ({ note: await createNote(root, text, folder) }),
     noteMove: async ({ path, folder }) => ({ note: await moveNote(path, folder) }),
     folderRename: ({ root, folder, name }) => renameFolder(root, folder, name),
+    folderDelete: ({ root, folder }) => deleteFolder(root, folder),
     noteRetitle: async ({ path, text }) => ({ note: await retitleNote(path, text) }),
     // The daily.workspace setting outranks the view's selected workspace
     // (that is the knob's whole job: pin where daily notes live); the

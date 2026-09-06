@@ -25,7 +25,7 @@ import { configureBridge, dispatchRunEvent, dispatchRunLink, reconcileRuns } fro
 import { sendRunKey } from "./editor/inlineTerm";
 import { barFaceOf, type BarFace } from "./lib/nativeBridge";
 import { configureTerminal, dispatchTerminalDetached, dispatchTerminalRelink } from "./terminal/channel";
-import { configureNotes, dispatchExternalOpen, dispatchNotesChanged, dispatchNotesRelink, type ExternalOpenInfo, type FolderRenamed, type NoteFile } from "./notes/channel";
+import { configureNotes, dispatchExternalOpen, dispatchNotesChanged, dispatchNotesRelink, type ExternalOpenInfo, type FolderDeleted, type FolderRenamed, type NoteFile } from "./notes/channel";
 import { configureVault, recordVaultState, refreshVaultState } from "./vault/channel";
 import { configureWorkspaces, recordWorkspaceKinds } from "./workspace/channel";
 import { configureClipboard } from "./lib/clipboard";
@@ -480,6 +480,28 @@ class FakeStore {
     return { folder: next, moved };
   }
 
+  // The real deleteFolder in Map form: every note under the folder, each
+  // through the same `remove` a single delete goes through, so the fake gets
+  // the trash entries and the undo handles for free. No directories to prune —
+  // there are none here, only paths, which is precisely the sense in which an
+  // emptied folder stops existing.
+  deleteFolder(root: string, folder: string): FolderDeleted {
+    this.assertWritable(root);
+    const data = this.ensureRoot(root);
+    const scope = folderScopeOf(folder);
+    // The real one's refusal, carried because the harness is what the specs
+    // drive: folderContains("") is true of every note, so without this the
+    // workspace's own row would empty it.
+    if (scope === "") throw new Error("a workspace is closed from the workspace strip, not deleted here");
+    const trashed: FolderDeleted["trashed"] = [];
+    for (const path of [...data.notes.keys()]) {
+      if (!folderContains(scope, this.folderOf(path))) continue;
+      const to = this.remove(path);
+      if (to !== null) trashed.push({ from: path, to });
+    }
+    return { trashed };
+  }
+
   // Mirrors the real writeNote's guard (bun/notes.ts): a mismatched base with
   // genuinely different bytes moves the disk version into the trash and the
   // incoming text wins the live path; identical bytes just adopt the disk
@@ -749,6 +771,7 @@ configureNotes({
   retitle: async (path, text) => store.retitle(path, text),
   move: async (path, subfolder) => store.moveNote(path, subfolder),
   renameFolder: async (folder, subfolder, name) => store.renameFolder(folder, subfolder, name),
+    deleteFolder: async (folder, subfolder) => store.deleteFolder(folder, subfolder),
   remove: async (path) => store.remove(path),
   trash: async (folder) => store.listTrash(folder),
   restore: async (path) => store.restore(path),

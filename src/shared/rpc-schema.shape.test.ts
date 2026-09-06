@@ -80,7 +80,15 @@ describe("the schema's shape against the protocol version", () => {
   // saying so — loud, local, survivable (remote.md §11), which is the whole
   // reason a missing method is not on the version's list. It changes no
   // existing payload: nothing else in the schema was touched to add it.
-  const PINNED = { protocol: 5, shape: "05691fe7d4f4db42" };
+  //
+  // Then folderDelete, on folderRename's argument word for word — a new
+  // method, refused by name by a server that predates it, touching no payload
+  // that already existed. Worth saying once that it is not the interesting
+  // half of deleting a folder: what a peer of either age does to the notes is
+  // `noteDelete`'s move into the trash, which both ends have always had, so an
+  // old server cannot half-delete a folder. It answers the whole call or none
+  // of it.
+  const PINNED = { protocol: 5, shape: "a51a2fc0e12f5890" };
 
   test("a payload shape does not change without someone deciding whether it breaks", async () => {
     const shape = digest(shapeOf(await Bun.file(SCHEMA).text()));

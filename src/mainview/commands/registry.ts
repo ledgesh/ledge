@@ -1062,6 +1062,32 @@ export function buildCommands(deps: RegistryDeps): Command[] {
         if (ctx.target?.kind === "folder") ctx.ui.beginRenameFolder?.(ctx.target.folder);
       },
     }),
+    // Deleting a folder, which means deleting the notes in it: a folder is a
+    // row because notes are in it, so this is a verb on THOSE NOTES spelled as
+    // a verb on the row, the same shape the rename has. Every one of them goes
+    // to the trash, each on its own, and the folder stops being listed because
+    // nothing is in it — which is what losing the last note has always done to
+    // a folder here.
+    //
+    // It is confirmed, and NOT for §4's reason: nothing is unlinked, the Undo
+    // strip follows, and every note is in the Trash section afterwards. The
+    // dialog is there because a collapsed row does not say what is under it —
+    // `d` on `projects` can be forty notes across a dozen subfolders, and the
+    // count is the one thing the row cannot show. That is Remove Lock…'s
+    // precedent (interactions.md §4): a confirm for a consequence you cannot
+    // see rather than for one you cannot undo. Which is also why it is a
+    // confirm AND an undo — the dialog answers "how many", the strip answers
+    // "I meant Cancel".
+    cmd("folder.delete", {
+      icon: Trash2,
+      targetKind: "folder",
+      destructive: true,
+      palette: false, // acts on a specific row; there is no "current folder"
+      when: (ctx) => ctx.target?.kind === "folder" && !docsSelected(ctx),
+      run: (ctx) => {
+        if (ctx.target?.kind === "folder") ctx.ui.confirmDeleteFolder?.(ctx.target.folder);
+      },
+    }),
     // A folder's Enter (interactions.md R6): its primary action is showing what
     // is in it. Two faces on the row's live state, the lock pair's move, so the
     // menu item says which way it will go. The browser owns the expansion, so

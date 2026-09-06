@@ -27,6 +27,11 @@
 // (folderRenamed below) — there the folder is the same folder and only its
 // name changed, so letting the entry stop matching would collapse a subtree
 // nobody closed.
+//
+// A DELETE is told nothing, and that is the same rule rather than an omission:
+// the folder is gone, so its entry matches no row, and the next restore prunes
+// it. Leaving it is what makes Undo put the tree back the way it was — the
+// folder returns already open, because nobody ever closed it.
 import { useSyncExternalStore } from "react";
 import { expandedRenamed, expandedWith, expandedWithout } from "./folders";
 

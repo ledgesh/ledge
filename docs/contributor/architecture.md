@@ -255,7 +255,23 @@ Bun therefore validates everything and derives anything derivable:
   existing destination is refused rather than merged, since rename(2) swallows
   an empty directory in silence. The mirrored trash follows the rename,
   best-effort and afterwards, so an Undo lands where the folder now is rather
-  than resurrecting the old name. Moving a note between folders (`moveNote`)
+  than resurrecting the old name. Deleting a FOLDER (`deleteFolder`) takes
+  the opposite trade deliberately: N renames, one per note, and not one
+  rename of the directory into the trash. The trash mirrors the workspace's
+  folders (below), so for everything `listNotes` shows the two land in the
+  same places — but a directory move also carries what the list does NOT
+  show (a dot-folder, an ignored subtree, an image, any file that is not a
+  note) somewhere `trashFiles` will not list it, which BURIES it rather than
+  deleting it, and that is the objection the dot-folder rule below already
+  answers. So it moves exactly the notes the list showed, and each keeps its
+  own entry in the Trash section and its own Restore. The emptied
+  directories then go, deepest first and by `rmdir` only: `rmdir` refuses a
+  directory that still holds something, and that refusal IS the guard —
+  whatever is left is something the call was never allowed to move, so it
+  keeps its folder. No file is unlinked, so this joins none of the three
+  lists below; it is here because the alternative is worse than untidy, an
+  invisible empty directory refusing a later rename onto its own name.
+  Moving a note between folders (`moveNote`)
   is a rename, within one root: a note's root decides its wikilink scope, its tag directory, its
   asset pool and its trash, so cross-root is four migrations rather than a
   rename and is not offered. Moving a workspace (`moveRoot`) is ONE rename of the whole

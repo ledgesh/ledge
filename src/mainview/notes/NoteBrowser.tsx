@@ -46,7 +46,7 @@ import { cn } from "@/lib/utils";
 import { useListNav } from "@/lib/useListNav";
 import { useRowMenu } from "@/lib/useRowMenu";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { ContextMenu } from "@/components/ContextMenu";
+import { ContextMenu, MenuDivider } from "@/components/ContextMenu";
 import { useCommands } from "@/commands/CommandProvider";
 import { CommandMenuItem } from "@/commands/CommandMenuItem";
 import { configureUi } from "@/commands/glue";
@@ -61,7 +61,15 @@ import { FolderPicker } from "@/components/FolderPicker";
 import { RenameField } from "@/components/RenameField";
 import type { FolderRequest } from "@/commands/types";
 import { agoLabel } from "./ago";
-import { deleteNote, deleteTrashedNote, emptyTrashNow, moveNoteTo, renameFolderTo, restoreNote } from "./actions";
+import {
+  deleteFolderTo,
+  deleteNote,
+  deleteTrashedNote,
+  emptyTrashNow,
+  moveNoteTo,
+  renameFolderTo,
+  restoreNote,
+} from "./actions";
 import { createNote } from "./channel";
 import { browserRows, folderList, folderOf, folderRowId, type BrowserRow } from "./folders";
 import { expandFolder, toggleFolder, useExpanded } from "./expansion";
@@ -101,8 +109,16 @@ export function NoteBrowser() {
   // failure (where the CLI shim landed). Unlike an error it expires — a
   // confirmation that never leaves becomes chrome.
   const [notice, setNotice] = useState<string | null>(null);
-  // The note just deleted, offered back. Keyed by its path in the trash.
-  const [undo, setUndo] = useState<{ trashed: string; title: string } | null>(null);
+  // The notes just deleted, offered back, keyed by where each landed in the
+  // trash. A LIST because deleting a folder deletes the notes in it: the strip
+  // is the same strip and Undo is the same restore, N times over. `label` is
+  // the whole sentence rather than a title, since the two cases do not share
+  // a shape ("Deleted “Plan”" against "Deleted 5 notes in “projects”").
+  const [undo, setUndo] = useState<{ paths: string[]; label: string } | null>(null);
+  // The folder waiting on its delete confirmation (folder.delete). Ephemeral
+  // chrome like `renaming`, and the browser's because the count in the dialog
+  // comes from the list it is already holding.
+  const [deletingFolder, setDeletingFolder] = useState<string | null>(null);
   // The folder whose row is currently a text field (folder.rename). Ephemeral
   // chrome, so it stays in the component (architecture.md §5) — nothing
   // outside the list reacts to a name being typed.
@@ -184,7 +200,7 @@ export function NoteBrowser() {
       setError(res.error);
       // No trashed path means the file was already gone, so there is nothing to
       // offer back and an Undo button would be a lie.
-      setUndo(res.trashed ? { trashed: res.trashed, title: note.title } : null);
+      setUndo(res.trashed ? { paths: [res.trashed], label: `Deleted “${note.title}”` } : null);
     });
   };
 
@@ -192,6 +208,19 @@ export function NoteBrowser() {
     setError(null);
     setUndo(null);
     void restoreNote(path, selected.folder, dispatch).then(setError);
+  };
+
+  // The Undo strip's button: one note, or a folder's worth. Sequential and not
+  // concurrent, which is the one way N restores differ from one — a restore
+  // lands its note under a free name in its folder, and two racing for the same
+  // name would both take it. A failure is reported and the rest still run:
+  // eight notes of nine back beats stopping at the one that will not come.
+  const undoAll = async (paths: readonly string[]) => {
+    setError(null);
+    setUndo(null);
+    let failure: string | null = null;
+    for (const path of paths) failure = (await restoreNote(path, selected.folder, dispatch)) ?? failure;
+    setError(failure);
   };
 
   // File a note, from the chooser or from a drop. One path for both, so the
@@ -223,12 +252,35 @@ export function NoteBrowser() {
     });
   };
 
+  // Delete a folder, which means deleting the notes in it. The open tabs are
+  // collected BEFORE anything awaits, for rename's reason: which tabs hold
+  // which note is exactly what this is about to invalidate.
+  const removeFolder = (folder: string) => {
+    setError(null);
+    const doomed = notesUnder(notes, folder);
+    const docs = new Map(doomed.map((n) => [n.path, docIdsForPath(state, n.path)] as const));
+    void deleteFolderTo(selected.folder, folder, docs, dispatch).then((res) => {
+      setError(res.error);
+      // Nothing trashed means nothing to offer back, so no strip — a refusal,
+      // or a folder whose notes were already gone from disk.
+      const n = res.trashed.length;
+      setUndo(
+        n > 0
+          ? {
+              paths: res.trashed.map((t) => t.to),
+              label: `Deleted ${n === 1 ? "1 note" : `${n} notes`} in “${folder}”`,
+            }
+          : null,
+      );
+    });
+  };
+
   // The browser owns the Undo strip, so it registers the hooks the delete and
   // restore commands (row menus, `d`/`r`, ⌘⌫, the palette) reach it through:
   // every path lands in the same trash-with-undo behavior. Registered via refs
   // because these close over the live state.
-  const hooks = useRef({ trash, restore, file, rename });
-  hooks.current = { trash, restore, file, rename };
+  const hooks = useRef({ trash, restore, file, rename, removeFolder });
+  hooks.current = { trash, restore, file, rename, removeFolder };
   useEffect(() => {
     configureUi({
       deleteNoteWithUndo: (note) => hooks.current.trash(note),
@@ -238,6 +290,7 @@ export function NoteBrowser() {
       pickFolder: (request) => setPicking(request),
       // The field replaces a row, so only the list can put it there.
       beginRenameFolder: (folder) => setRenaming(folder),
+      confirmDeleteFolder: (folder) => setDeletingFolder(folder),
       // The browser's error strip doubles as the workspace commands' error
       // surface (a refused attach, a failed create): same sidebar, same shape
       // of failure report.
@@ -363,12 +416,10 @@ export function NoteBrowser() {
 
       {undo && (
         <div className="flex items-center gap-2 border-t px-3 py-1.5 text-[11px]">
-          <span className="min-w-0 flex-1 truncate text-muted-foreground">
-            Deleted “{undo.title}”
-          </span>
+          <span className="min-w-0 flex-1 truncate text-muted-foreground">{undo.label}</span>
           <button
             className="shrink-0 font-medium text-primary hover:underline touch:min-h-[44px] touch:px-2"
-            onClick={() => restore(undo.trashed)}
+            onClick={() => void undoAll(undo.paths)}
           >
             Undo
           </button>
@@ -449,6 +500,16 @@ export function NoteBrowser() {
                 target={{ kind: "folder", folder: menu.folder }}
                 onClose={() => setMenu(null)}
               />
+              {/* Below a divider, which §4 asks for: a destructive item does
+                  not sit flush against the safe sibling above it, and the two
+                  New… verbs are exactly what a slip would land on. */}
+              <MenuDivider />
+              <CommandMenuItem
+                id="folder.delete"
+                target={{ kind: "folder", folder: menu.folder }}
+                onClose={() => setMenu(null)}
+                hint="Its notes are recoverable from Trash"
+              />
             </>
           )}
         </ContextMenu>
@@ -521,6 +582,29 @@ export function NoteBrowser() {
             </>
           )}
         </ContextMenu>
+      )}
+
+      {/* Deleting a folder deletes the notes in it, and the count is the whole
+          reason this asks: a collapsed row does not say whether `d` costs one
+          note or forty. Not an irreversibility warning — every one of them is
+          in the Trash a line below, and the Undo strip comes up behind this —
+          so the body says where they went rather than that they are gone. */}
+      {deletingFolder !== null && (
+        <ConfirmDialog
+          title={`Delete “${deletingFolder}”?`}
+          body={
+            notesUnder(notes, deletingFolder).length === 1
+              ? "Its 1 note moves to the Trash, where Undo and Restore bring it back."
+              : `Its ${notesUnder(notes, deletingFolder).length} notes move to the Trash, including everything in the folders inside it. Undo and Restore bring them back.`
+          }
+          confirmLabel="Delete Folder"
+          onConfirm={() => {
+            const folder = deletingFolder;
+            setDeletingFolder(null);
+            removeFolder(folder);
+          }}
+          onCancel={() => setDeletingFolder(null)}
+        />
       )}
 
       {/* The destination chooser. One dialog for both verbs, because both ask

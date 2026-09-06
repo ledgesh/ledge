@@ -27,6 +27,7 @@ import {
   listTrash,
   lockNote,
   moveNote,
+  deleteFolder,
   renameFolder,
   notesTagged,
   purgeTrash,
@@ -903,6 +904,107 @@ describe("renameFolder", () => {
     const stranger = join(APP_HOME, "unregistered");
     await mkdir(join(stranger, "old"), { recursive: true });
     await expect(renameFolder(stranger, "old", "new")).rejects.toThrow(/not a registered workspace root/);
+  });
+});
+
+describe("deleteFolder", () => {
+  test("every note under the folder goes to the trash, however deep, and the folder goes with them", async () => {
+    const top = await createNote(ROOT, "# Plan\n", "projects");
+    const deep = await createNote(ROOT, "# Api\n", "projects/api/v2");
+    const outside = await createNote(ROOT, "# Elsewhere\n", "admin");
+    const { trashed } = await deleteFolder(ROOT, "projects");
+    expect(trashed.map((t) => t.from).sort()).toEqual([deep.path, top.path].sort());
+    expect((await listNotes(ROOT)).map((n) => n.folder ?? "")).toEqual(["admin"]);
+    expect((await listNotes(ROOT))[0]?.path).toBe(outside.path); // untouched
+    // The directory too, and the subdirectory under it: an emptied folder is
+    // invisible either way, but one left on disk would refuse a later rename
+    // onto its name.
+    await expect(stat(join(ROOT, "projects"))).rejects.toThrow();
+  });
+
+  test("each note lands in its own mirrored folder, so a restore rebuilds the folder around it", async () => {
+    // What makes this reversible, and why it is N deletes rather than one
+    // directory move: the trash mirrors the workspace's folders, so every note
+    // keeps its own origin and the Trash section lists it as itself.
+    await createNote(ROOT, "# Plan\n", "projects");
+    await createNote(ROOT, "# Api\n", "projects/api");
+    const { trashed } = await deleteFolder(ROOT, "projects");
+    expect(trashed.map((t) => relative(TRASH, t.to)).sort()).toEqual(
+      [join("projects", "plan.md"), join("projects", "api", "api.md")].sort(),
+    );
+    expect((await listTrash(ROOT)).length).toBe(2);
+    for (const { to } of trashed) await restoreNote(to);
+    expect((await listNotes(ROOT)).map((n) => n.folder ?? "").sort()).toEqual(["projects", "projects/api"]);
+  });
+
+  test("a sibling whose name starts the same is not swept up", async () => {
+    // folderContains' trap on the delete side: `a` must not take `ab` with it.
+    await createNote(ROOT, "# In\n", "a");
+    const sibling = await createNote(ROOT, "# Beside\n", "ab");
+    const { trashed } = await deleteFolder(ROOT, "a");
+    expect(trashed).toHaveLength(1);
+    expect((await listNotes(ROOT)).map((n) => n.path)).toEqual([sibling.path]);
+  });
+
+  test("a file the note list never showed is left alone, and keeps its folder", async () => {
+    // The reason this is N deletes rather than one rename of the directory
+    // into the trash. Anything that is not a note would land somewhere the
+    // Trash section cannot list (it shows .md only), so it would be buried
+    // rather than deleted. rmdir refusing a folder that still has something in
+    // it is the guard, not a failure.
+    await createNote(ROOT, "# Plan\n", "projects");
+    await writeRaw(join(ROOT, "projects", "diagram.png"), "PNG", "utf8");
+    const { trashed } = await deleteFolder(ROOT, "projects");
+    expect(trashed).toHaveLength(1);
+    expect(await readRaw(join(ROOT, "projects", "diagram.png"), "utf8")).toBe("PNG");
+    expect(await listNotes(ROOT)).toEqual([]); // the folder is gone from the list all the same
+  });
+
+  test("an ignored subtree keeps its notes and its folder", async () => {
+    // The same rule with the frightening witness: these are real notes, and
+    // .ledgeignore is why the walk never saw them. A directory move would have
+    // taken them somewhere nothing lists.
+    await writeRaw(join(ROOT, ".ledgeignore"), "projects/drafts\n");
+    await mkdir(join(ROOT, "projects", "drafts"), { recursive: true });
+    await writeRaw(join(ROOT, "projects", "drafts", "wip.md"), "# Wip\n", "utf8");
+    await createNote(ROOT, "# Plan\n", "projects");
+    const { trashed } = await deleteFolder(ROOT, "projects");
+    expect(trashed).toHaveLength(1);
+    expect(await readRaw(join(ROOT, "projects", "drafts", "wip.md"), "utf8")).toBe("# Wip\n");
+  });
+
+  test("a locked note goes with the vault shut, like a folder rename", async () => {
+    // Deleting reads no body either: it moves the file and the sealed bytes
+    // travel intact, so a locked note is still locked in the trash.
+    resetVaultForTests();
+    await createVault("test passphrase");
+    const note = await createNote(ROOT, "# Secrets\n\nplutonium\n", "old");
+    await lockNote(note.path);
+    const sealed = await readRaw(note.path, "utf8");
+    lockVault();
+    const { trashed } = await deleteFolder(ROOT, "old");
+    expect(trashed).toHaveLength(1);
+    expect(await readRaw(trashed[0]!.to, "utf8")).toBe(sealed);
+    expect(await isNoteLocked(trashed[0]!.to)).toBe(true);
+  });
+
+  test("the workspace's own folder is not a folder row, and is refused", async () => {
+    await createNote(ROOT, "# A\n");
+    await expect(deleteFolder(ROOT, "")).rejects.toThrow(/workspace strip/);
+    expect(await listNotes(ROOT)).toHaveLength(1);
+  });
+
+  test("a folder that is not there is refused, which is also what a second delete gets", async () => {
+    await createNote(ROOT, "# A\n", "old");
+    await deleteFolder(ROOT, "old");
+    await expect(deleteFolder(ROOT, "old")).rejects.toThrow(/no "old" folder/);
+  });
+
+  test("the root has to be a registered workspace, like every other mutating call", async () => {
+    const stranger = join(APP_HOME, "unregistered");
+    await mkdir(join(stranger, "old"), { recursive: true });
+    await writeRaw(join(stranger, "old", "a.md"), "# A\n", "utf8");
+    await expect(deleteFolder(stranger, "old")).rejects.toThrow(/not a registered workspace root/);
   });
 });
 

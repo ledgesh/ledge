@@ -19,6 +19,7 @@
 // serialised against writes (see syncTitle in notes/store.ts). MOVING is a
 // rename from outside that loop, so it dances too (moveNoteTo, at the bottom).
 import {
+  deleteFolder as deleteFolderFile,
   deleteNote as trashFile,
   deleteTrashed as unlinkTrashed,
   emptyTrash,
@@ -223,4 +224,60 @@ export async function renameFolderTo(
     for (const id of ids) retargetDoc(id, path);
   }
   return { folder: renamed.folder, error: null };
+}
+
+export interface FolderDeleteResult {
+  // Every note that went, old path beside where it landed — what Undo restores
+  // from. Empty on a refusal, and also when the folder held nothing the walk
+  // could still see.
+  trashed: Array<{ from: string; to: string }>;
+  error: string | null;
+}
+
+// Delete a folder: renameFolderTo's freeze dance, deleteNote's ending.
+//
+// Every note under the folder is about to be in the trash, and any of them may
+// be autosaving in a pane right now. Frozen, that edit waits; then the answer
+// says which notes actually went, and each of those docs is FORGOTTEN rather
+// than retargeted — the file is in the trash, so the pending text has nowhere
+// to go and must be dropped rather than flushed. forgetDoc leaves nothing for
+// the editor teardown (releaseDoc) to write, so closing the tabs cannot
+// resurrect a note the user just deleted.
+//
+// `openDocs` is every open tab on every note under the folder, keyed by the
+// path the caller knows it by, built from the store before anything awaits.
+export async function deleteFolderTo(
+  root: string,
+  folder: string,
+  openDocs: ReadonlyMap<string, readonly string[]>,
+  dispatch: (action: Action) => void,
+): Promise<FolderDeleteResult> {
+  for (const ids of openDocs.values()) for (const id of ids) freezeDoc(id);
+  let deleted: { trashed: Array<{ from: string; to: string }> };
+  try {
+    deleted = await deleteFolderFile(root, folder);
+  } catch (err) {
+    for (const [path, ids] of openDocs) for (const id of ids) retargetDoc(id, path); // nothing moved
+    console.error("[notes] folder delete failed", err);
+    return { trashed: [], error: err instanceof Error ? err.message : String(err) };
+  }
+  const gone = new Set(deleted.trashed.map((t) => t.from));
+  for (const path of gone) {
+    for (const id of openDocs.get(path) ?? []) forgetDoc(id);
+    // One per note, the same action a single delete fires: the tabs on it
+    // close and the note leaves the list.
+    dispatch({ type: "noteDeleted", path });
+  }
+  // Every tab the answer did not name is unfrozen where it was — renameFolderTo's
+  // reason exactly. Bun deletes the notes ITS walk found, so a tab on a note the
+  // view had and that walk did not (ignored since, gone from disk) would
+  // otherwise stay frozen for the rest of the session, collecting edits it never
+  // writes. Aimed at the old path, which is the honest answer: this call was
+  // told nothing about it, and unlike the deleted ones that file is still there.
+  for (const [path, ids] of openDocs) {
+    if (gone.has(path)) continue;
+    for (const id of ids) retargetDoc(id, path);
+  }
+  void refreshTrash(root, dispatch);
+  return { trashed: deleted.trashed, error: null };
 }

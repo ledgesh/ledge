@@ -401,3 +401,62 @@ test.describe("the folders a relaunch reopens", () => {
     await expect.poll(() => savedFolders(page)).toEqual([]);
   });
 });
+
+test.describe("deleting a folder", () => {
+  // Deleting a folder deletes the notes in it, so what the specs check is that
+  // the right ones went: the folder's own, at every depth, and nothing beside
+  // it. The dialog is here because a collapsed row does not say how many that
+  // is, which is the one thing these can check that a unit test cannot.
+  const dialog = (page: Page) => page.getByRole("alertdialog");
+
+  test("`d` asks first, naming the count a collapsed row cannot show", async ({ page }) => {
+    await folderRow(page, "projects").first().click(); // focuses it, and opens it
+    await folderRow(page, "projects").first().click(); // closed again: the count is now hidden
+    await page.keyboard.press("d");
+    await expect(dialog(page)).toContainText("Delete “projects”?");
+    // Beta and Gamma — the second is a level further down, which is exactly
+    // what the row was not saying.
+    await expect(dialog(page)).toContainText("Its 2 notes move to the Trash");
+  });
+
+  test("confirming takes every note under it, however deep, and leaves the rest", async ({ page }) => {
+    await folderRow(page, "projects").click();
+    await page.keyboard.press("d");
+    await page.getByRole("button", { name: "Delete Folder" }).click();
+    // The folder goes because nothing is in it any more, and `api` goes with
+    // it: neither is a row a list of notes can still produce.
+    await expect.poll(() => treeRows(page)).toEqual(["admin/", "Alpha"]);
+    await expect(noteRow(page, "Delta")).toBeHidden(); // still in admin/, still collapsed
+    await expect(noteRow(page, "Alpha")).toBeVisible();
+  });
+
+  test("cancelling changes nothing", async ({ page }) => {
+    await folderRow(page, "projects").click();
+    await page.keyboard.press("d");
+    await page.getByRole("button", { name: "Cancel" }).click();
+    await expect(dialog(page)).toHaveCount(0);
+    expect(await treeRows(page)).toEqual(["admin/", "projects/", "projects/api/", "Beta", "Alpha"]);
+  });
+
+  test("Undo brings the whole folder back", async ({ page }) => {
+    await folderRow(page, "projects").click();
+    await page.keyboard.press("d");
+    await page.getByRole("button", { name: "Delete Folder" }).click();
+    await expect(page.getByText("Deleted 2 notes in “projects”")).toBeVisible();
+    await page.getByRole("button", { name: "Undo" }).click();
+    // One click, both notes: the strip holds a LIST now, and Undo is the same
+    // restore run over it. Where each one lands is the trash mirroring the
+    // workspace's folders, which the harness's trash is too flat to model —
+    // that half is notes.fs.test.ts's, against a real filesystem.
+    await expect(noteRow(page, "Beta")).toBeVisible();
+    await expect(noteRow(page, "Gamma")).toBeVisible();
+  });
+
+  test("the menu item is the same verb", async ({ page }) => {
+    await folderRow(page, "admin").click({ button: "right" });
+    await page.getByRole("menuitem", { name: "Delete Folder…" }).click();
+    await expect(dialog(page)).toContainText("Its 1 note moves to the Trash");
+    await page.getByRole("button", { name: "Delete Folder" }).click();
+    await expect.poll(() => treeRows(page)).toEqual(["projects/", "Alpha"]);
+  });
+});

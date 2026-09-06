@@ -96,6 +96,11 @@ export interface UiHooks {
   // because it also owns the tree the answer changes: a note filed into a
   // collapsed folder has to arrive somewhere you can see it.
   pickFolder(request: FolderRequest): void;
+  // Open the confirmation for deleting a folder, which deletes the notes in
+  // it. Confirmed not because it is irreversible — every note lands in the
+  // trash and the Undo strip follows — but because a collapsed row does not
+  // say how many notes are under it, and the dialog does (interactions.md §4).
+  confirmDeleteFolder(folder: string): void;
   // Bring a trashed note back — the same operation Undo uses.
   restoreTrashed(path: string): void;
   // Open the Empty Trash confirmation.

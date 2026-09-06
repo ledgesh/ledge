@@ -355,6 +355,21 @@ export type LedgeRPC = {
         params: { root: string; folder: string; name: string };
         response: { folder: string; moved: Array<{ from: string; note: NoteMeta }> };
       };
+      // Delete a folder of one workspace by deleting the notes in it — every
+      // one, at any depth, each moved into the trash exactly as `noteDelete`
+      // moves one. NOT a directory move, though the trash mirrors the
+      // workspace's folders and one would land the notes in the same places:
+      // a directory move also takes what the note list does not show
+      // (dot-folders, ignored subtrees, images), and the Trash section lists
+      // only notes, so that would bury rather than delete it (bun/notes.ts
+      // deleteFolder). The emptied directories are then removed, deepest
+      // first, and only while `rmdir` accepts them — so anything left behind
+      // keeps its folder. `trashed` is every note that went, old path beside
+      // where it landed, which is what Undo restores from (notes/actions.ts).
+      folderDelete: {
+        params: { root: string; folder: string };
+        response: { trashed: Array<{ from: string; to: string }> };
+      };
       // Move a note's file to match its first-line H1, returning where it now
       // lives (possibly unmoved). The view sends the note's TEXT, not a name: Bun
       // slugs the heading itself, so the name is safe by construction and there is

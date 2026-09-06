@@ -1,11 +1,20 @@
 // A modal confirmation, deliberately rare.
 //
-// Delete does not use this and should not: it moves a note to the trash, where
-// Undo and Restore are waiting, so a prompt would cost a click every time to
-// guard against something already reversible. The unprompted callers are the
-// two actions that destroy a note outright — Empty Trash, and Delete
-// Permanently on one trashed note — and nothing else should join them without
-// also being an unlink (interactions.md §4).
+// Deleting a NOTE does not use this and should not: it moves the note to the
+// trash, where Undo and Restore are waiting, so a prompt would cost a click
+// every time to guard against something already reversible. Two callers are
+// here because they destroy a note outright — Empty Trash, and Delete
+// Permanently on one trashed note — and nothing new that unlinks may skip
+// them (interactions.md §4).
+//
+// Two more are here for a CONSEQUENCE rather than for an unlink, which is the
+// narrower door and worth stating so it stays narrow. Remove Lock: nothing is
+// destroyed, but the body is readable again by anything that syncs the folder.
+// Delete Folder: everything lands in the trash and the Undo strip comes up
+// behind the dialog, but a collapsed row does not say whether it holds one
+// note or forty, and the dialog is where that number gets said. What does not
+// earn one is an action whose extent is on screen and whose undo is a click —
+// which is every other delete in the app.
 //
 // The one caller the USER opts into is a run marked `confirm` on its fence
 // (§4b): it is here rather than in its own component because a confirmation

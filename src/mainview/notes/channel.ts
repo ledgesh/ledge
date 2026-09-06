@@ -29,6 +29,15 @@ export interface FolderRenamed {
   moved: Array<{ from: string; note: NoteMeta }>;
 }
 
+// What a folder delete reports: every note that went to the trash, `from` the
+// path the view's tabs and note list still hold, `to` where it landed — the
+// handle Undo restores each of them from, exactly as a single delete returns
+// one (bun/notes.ts deleteFolder). Notes the walk did not see are not in here
+// and were not touched.
+export interface FolderDeleted {
+  trashed: Array<{ from: string; to: string }>;
+}
+
 // What a guarded write reports: the new disk version, and where an external
 // edit went (the root's trash) when the save displaced one — null normally.
 export interface WriteResult {
@@ -65,6 +74,9 @@ interface NoteHandlers {
   // one segment, never a path. Resolves to the folder's new root-relative
   // path and to every note that travelled — old path beside new meta.
   renameFolder: (folder: string, subfolder: string, name: string) => Promise<FolderRenamed>;
+  // Delete one folder of a workspace by deleting the notes in it (rpc
+  // folderDelete). Resolves to every note that went to the trash.
+  deleteFolder: (folder: string, subfolder: string) => Promise<FolderDeleted>;
   remove: (path: string) => Promise<string | null>;
   trash: (folder: string) => Promise<TrashMeta[]>;
   restore: (path: string) => Promise<NoteMeta>;
@@ -180,6 +192,15 @@ export function moveNote(path: string, subfolder: string | null): Promise<NoteMe
 // the vault shut, where moving one does not.
 export function renameFolder(folder: string, subfolder: string, name: string): Promise<FolderRenamed> {
   return bridge().renameFolder(folder, subfolder, name);
+}
+
+// Delete a folder of the selected workspace (rpc folderDelete): every note in
+// it, at any depth, moved into the trash exactly as deleting one note is. The
+// folder then stops being listed because nothing is in it, and the emptied
+// directories are removed — except any still holding something the note list
+// never showed, which keeps its folder.
+export function deleteFolder(folder: string, subfolder: string): Promise<FolderDeleted> {
+  return bridge().deleteFolder(folder, subfolder);
 }
 
 // Ask Bun to move a note's file to match its heading. Takes the note's text, not

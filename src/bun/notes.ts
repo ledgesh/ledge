@@ -13,7 +13,7 @@
 // shell running inside it. One note maps to one path and one docId; they are
 // separate keys for separate lifetimes.
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
-import { mkdir, readdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, rmdir, stat, unlink, writeFile } from "node:fs/promises";
 import type { Stats } from "node:fs";
 import { ASSETS_DIRNAME, type BacklinkHit, type NoteMeta, type TagHit, type TrashMeta } from "../shared/rpc-schema";
 import { headingOf, labelOf, slugOf, titleOf } from "../shared/slug";
@@ -1185,6 +1185,84 @@ export async function deleteNote(path: string): Promise<string | null> {
     return null;
   }
   return dest;
+}
+
+/**
+ * Delete a folder by deleting the notes in it — every one, at any depth, each
+ * by the same rename into the trash a single delete uses.
+ *
+ * A folder is a row because notes are in it (mainview/notes/folders.ts), so
+ * deleting one is a verb on THOSE NOTES spelled as a verb on the row, exactly
+ * as renaming one is. The folder stops being shown because nothing is in it
+ * any more, which is what a folder losing its last note has always done here.
+ *
+ * NOT one rename(2) of the directory into the trash, though that is what
+ * `renameFolder` does and it would be cheaper. The trash mirrors the
+ * workspace's folders (architecture.md §3), so for everything Ledge LISTS the
+ * two land in the same place — but a directory move also sweeps what the list
+ * does not show: dot-folders, `.ledgeignore`d subtrees, the asset pool if a
+ * folder ever held one, any file that is not a note. `trashFiles` yields only
+ * `.md`, so none of that would appear in the Trash section: it would be BURIED
+ * rather than deleted, which is the outcome the dot-folder rule already
+ * refuses. Moving exactly what the list showed and nothing it did not is Empty
+ * Trash's sentence, and it is this one too.
+ *
+ * So each note keeps its own trashed identity: it lands in its own folder's
+ * mirror under a free name, the Trash section lists it, and Restore reads its
+ * origin off that path and rebuilds the folder around it. Undoing a folder
+ * delete is N restores rather than a second mechanism (notes/actions.ts).
+ *
+ * A LOCKED note goes with its vault shut, for renameFolder's reason: this
+ * moves files and reads no body.
+ */
+export async function deleteFolder(
+  root: string,
+  folder: string,
+): Promise<{ trashed: Array<{ from: string; to: string }> }> {
+  const r = assertWritableRoot(assertRegisteredRoot(root));
+  await rootReady(r);
+  const scope = folderScopeOf(folder);
+  const dir = folderPathOf(r, scope);
+  // The root is not a folder row, and it has no delete: a workspace leaves in
+  // the workspace strip, which detaches the folder and unlinks nothing.
+  if (dir === r) throw new Error("a workspace is closed from the workspace strip, not deleted here");
+  if (!(await isDir(dir))) throw new Error(`there is no "${scope}" folder in this workspace`);
+
+  // Listed before anything moves, and that list is the authority on what this
+  // call may touch — the same walk the browser drew the folder from.
+  const trashed: Array<{ from: string; to: string }> = [];
+  for (const note of notesUnder(await listNotes(r), scope)) {
+    const to = await deleteNote(note.path);
+    // null is "already gone" — deleted in Finder between the walk and here,
+    // which is the outcome asked for. It just has nothing to offer back.
+    if (to !== null) trashed.push({ from: note.path, to });
+  }
+
+  await pruneEmptyDirs(dir);
+  return { trashed };
+}
+
+/**
+ * Remove a deleted folder's directories, deepest first, now their notes are in
+ * the trash.
+ *
+ * `rmdir` refuses a directory with anything left in it, and that refusal is
+ * the GUARD rather than an error to handle: whatever is still in there is
+ * something this call was never allowed to move — an image, an ignored
+ * subtree, a dot-folder — so the directory stays and none of it is touched.
+ * Best-effort throughout, since the notes are already in the trash and a
+ * directory that will not go is no reason to report the delete as failed.
+ *
+ * This unlinks no FILE, so it joins none of the three lists in architecture.md
+ * §3. It earns its place because the alternative is worse than untidy: the
+ * emptied directory is invisible to `listNotes`, so a later `renameFolder`
+ * onto that name would be refused by a folder the user believes they deleted.
+ */
+async function pruneEmptyDirs(dir: string): Promise<void> {
+  for (const entry of await readdir(dir, { withFileTypes: true }).catch(() => [])) {
+    if (entry.isDirectory()) await pruneEmptyDirs(join(dir, entry.name));
+  }
+  await rmdir(dir).catch(() => {});
 }
 
 /**

@@ -39,6 +39,10 @@ Press `r` with a folder's row focused, or choose "Rename Folder…" from its rig
 
 The field takes a name, not a path, so a rename cannot move the folder somewhere else. Ledge refuses a name another folder here already answers to, rather than merging the two: to combine two folders, move the notes across. Locked notes are no obstacle, because a rename leaves their contents untouched.
 
+Press `d` or ⌫ with a folder's row focused, or choose "Delete Folder…" from its right-click menu, to delete it. Ledge asks first, and says how many notes that is, because a closed folder does not show what is inside it. Every note in the folder goes to the Trash, including the ones in the folders inside it. "Undo" in the strip at the bottom of the sidebar brings them all back at once, and the Trash section can restore them one at a time later on.
+
+Anything in the folder that is not a note stays where it is: an image you put there yourself, say, or a folder you told Ledge to ignore. The row goes either way, because Ledge only shows folders with notes in them.
+
 There are three ways to put a note in a folder:
 
 - **Drag its row** onto a folder. Dropping it on the Notes header at the top moves it back out to the workspace itself.

@@ -497,7 +497,7 @@ Row verbs, by row kind. Each fires only while a row of that kind has focus
 | Row       | Enter             | `d` / `⌫`                  | other |
 | --------- | ----------------- | -------------------------- | ----- |
 | Note      | Open              | Delete (to trash, undoable) | `c` Copy Path, `m` Move to Folder…; menu: the lock faces + the state-matching vault verb (locking.md §7) |
-| Folder    | Expand / Collapse | —                          | `r` Rename Folder…, `/` Search in Folder; menu: Rename Folder…, Search in Folder, New Note in Folder, New Folder… (nested). Still no destructive verb, and the rename is not one wearing a hat: a folder is a row because notes are in it, so renaming one is a verb on THOSE NOTES spelled as a verb on the row, and every one of them travels. What the browser still cannot do to a folder is make an empty one, delete one, or keep one after the last note leaves |
+| Folder    | Expand / Collapse | Delete Folder… (confirmed, then undoable) | `r` Rename Folder…, `/` Search in Folder; menu: Rename Folder…, Search in Folder, New Note in Folder, New Folder… (nested), then Delete Folder… under a divider. Neither mutating verb is a verb on the folder wearing a hat: a folder is a row only in that notes are in it, so a rename is a verb on THOSE NOTES and every one of them travels, and a delete is a verb on those notes and every one of them goes to the trash. The row then goes because nothing is in it, which is what losing the last note has always done. The confirm is §4's unseen-extent case, not its unlink case. What the browser still cannot do is make an empty folder, or keep one after the last note leaves |
 | Trash     | —                 | Delete Permanently… (confirmed) | `r` Restore |
 | Workspace | Switch to it      | Close Workspace            | `r` Rename, `i` Change Icon |
 | Backlink  | Open at the link  | —                          | menu: Copy Path (the note-row command on the linking note) |
@@ -517,6 +517,16 @@ Row verbs, by row kind. Each fires only while a row of that kind has focus
   command opens the dialog rather than deleting, so the row verb (`d`), the
   menu item, and the button cannot diverge into an unconfirmed path. Anything
   that unlinks a file, rather than moving it aside, joins this list.
+- **Reversible destruction whose EXTENT is off screen → a confirmation that
+  says how big it is, and the undo as well.** One action: **Delete Folder**,
+  which deletes the notes in the folder. They all land in the trash and the
+  Undo strip comes up behind the dialog, so this is not the class above — the
+  dialog is there because a collapsed row does not say whether `d` costs one
+  note or forty, and that count is the one thing the row cannot show. Remove
+  Lock… (§5) is the same door for a different cost: nothing is destroyed, but
+  the body becomes readable again by anything that syncs the folder. What
+  earns a click here is a dialog that ANSWERS something; one that only asks
+  belongs on the first bullet and is the tax it describes.
 - **Arrangement loss (close tab / pane / workspace, restart a note's shells)
   → neither.** No data is destroyed; notes stay on disk. Closing a workspace
   detaches its folder from the registry but unlinks nothing — the folder is
