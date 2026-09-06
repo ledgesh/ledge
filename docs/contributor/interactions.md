@@ -552,6 +552,16 @@ the failure it prevents, which is running a command on the wrong box.
   machine at all times. A fact you have to go looking for prevents nothing. It
   is deliberately distinct from the drawer's `host:` badge (§4a): that says
   where a *block* will run, this says where the *note lives*.
+- **It is drawn as a control, not as a status line.** A labelled two-line row:
+  "Notes on" above the machine's name, the machine's icon beside both, and a
+  switcher's chevrons at the end. The chevrons become the dial-now arrow
+  whenever the bar means Reconnect rather than the switcher. Trouble takes a
+  third line of its own — "not reachable", "reconnecting…", "disconnected" — so
+  a long machine name and a dropped wire never compete for the same few pixels
+  of a narrow sidebar. The label is what makes the name mean something: "v1"
+  alone says nothing about what it names. The size is what puts it in scope
+  order: everything below the bar belongs to the machine on it, so it reads
+  larger than the section headings it sits above rather than smaller.
 - **It also says who else is on that machine, and only when somebody is.** One
   other device is named; past that it counts, with the names in the hover
   (remote.md §7). Nothing at all is drawn while you are alone, which is nearly

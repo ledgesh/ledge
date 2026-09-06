@@ -10,7 +10,7 @@
 // Distinct from the `host:` badge a terminal drawer wears, which says where
 // one block will RUN. This says where the note lives.
 import { useEffect, useState } from "react";
-import { Laptop, PlugZap, Server, TriangleAlert, Users } from "lucide-react";
+import { ChevronsUpDown, Laptop, PlugZap, RotateCw, Server, TriangleAlert, Users } from "lucide-react";
 import { useCommands } from "@/commands/CommandProvider";
 import { tooltip } from "@/commands/format";
 import { activeConnection, connectionStatus, linkState, presence, subscribeConnections } from "@/lib/connections";
@@ -46,6 +46,17 @@ export function ConnectionBar() {
   const verb = dropped ? "connection.reconnect" : "connection.switch";
   const Icon = fellBack || link.state === "lost" ? TriangleAlert : dropped ? PlugZap : local ? Laptop : Server;
   const trouble = fellBack || (dropped ? link.detail : "");
+  // The state gets its own line rather than a corner of the name's, so a long
+  // machine name and a dropped wire stop competing for the same few pixels in
+  // a narrow sidebar. Nothing is drawn while the link is fine, which is what
+  // keeps the resting bar two lines tall.
+  const state = fellBack
+    ? "not reachable"
+    : link.state === "reconnecting"
+      ? "reconnecting…"
+      : link.state === "lost"
+        ? "disconnected"
+        : "";
   // Who else is on this machine (remote.md §7). Nothing at all when nobody is,
   // which is nearly always: a count that says "1 device" while you are alone is
   // noise in the one strip that must stay readable at a glance. One other is
@@ -55,6 +66,10 @@ export function ConnectionBar() {
   const others = presence();
   const company = others.length === 0 ? "" : others.length === 1 ? others[0]!.label || "another device" : `${others.length} devices`;
   const names = others.map((o) => o.label || "an unnamed device").join(", ");
+  // The trailing glyph names the verb, so the two things the bar can do are
+  // told apart before the click rather than by it: a switcher's chevrons, or
+  // the dial-now arrow while the link is down.
+  const Verb = dropped ? RotateCw : ChevronsUpDown;
 
   return (
     <button
@@ -66,25 +81,40 @@ export function ConnectionBar() {
       // destination is the fact.
       title={`${trouble || (local ? "Notes on this Mac" : `Notes on ${conn.destination}`)} — ${tooltip(verb)}`}
       onClick={() => exec(verb)}
-      // 21 points, flush against the workspace strip below it, for the control
-      // that replaces every note, tab, tag and shell on screen (§1a). The text
-      // stays 11px: this is a physical target, not a bigger label.
-      className="flex w-full items-center gap-1.5 border-b px-2 py-1 text-left text-[11px] text-muted-foreground hover:bg-accent/50 touch:min-h-[44px]"
+      // Sized as the control it is rather than as a status line. It scopes
+      // every note, tab, tag and shell below it (§4-1), so it outranks the
+      // section labels it sits above: a labelled two-line row, flush against
+      // the workspace strip, and past 44 points on its own without the touch
+      // minimum having to raise it (§1a). The label is what makes the machine's
+      // name mean something — "v1" alone says nothing about what it names.
+      className="flex w-full shrink-0 items-center gap-2 border-b px-2.5 py-2 text-left hover:bg-accent/50 touch:min-h-[44px]"
     >
-      <Icon className={`size-3 shrink-0 ${trouble ? "text-destructive" : ""}`} />
-      <span className="min-w-0 flex-1 truncate">{conn.name}</span>
-      {company && (
-        // Its own title rather than a clause in the button's: the full list is
-        // what a hover over this chip should say, and the button's tooltip is
-        // about switching machines.
-        <span className="flex max-w-[50%] shrink-0 items-center gap-1 truncate" title={`Also on this server: ${names}`} data-presence={others.length}>
-          <Users className="size-3 shrink-0" />
-          <span className="truncate">{company}</span>
+      <Icon className={`size-4 shrink-0 ${trouble ? "text-destructive" : "text-muted-foreground"}`} />
+      <span className="min-w-0 flex-1 leading-tight">
+        <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+          {/* The label never truncates and the chip does: this phrase is two
+              fixed words and the chip is a device name of any length, so at the
+              narrowest sidebar (App's SIDEBAR_MIN) the one with a tooltip
+              behind it is the one that gives way. */}
+          <span className="shrink-0">Notes on</span>
+          {company && (
+            // Its own title rather than a clause in the button's: the full list is
+            // what a hover over this chip should say, and the button's tooltip is
+            // about switching machines.
+            <span className="flex min-w-0 flex-1 items-center justify-end gap-1" title={`Also on this server: ${names}`} data-presence={others.length}>
+              <Users className="size-3 shrink-0" />
+              <span className="truncate">{company}</span>
+            </span>
+          )}
         </span>
-      )}
-      {fellBack && <span className="shrink-0 text-destructive">not reachable</span>}
-      {!fellBack && link.state === "reconnecting" && <span className="shrink-0">reconnecting…</span>}
-      {!fellBack && link.state === "lost" && <span className="shrink-0 text-destructive">disconnected</span>}
+        <span className="block truncate text-[13px] font-medium text-foreground">{conn.name}</span>
+        {state && (
+          <span className={`block truncate text-[11px] ${link.state === "reconnecting" && !fellBack ? "text-muted-foreground" : "text-destructive"}`}>
+            {state}
+          </span>
+        )}
+      </span>
+      <Verb className="size-3.5 shrink-0 text-muted-foreground" />
     </button>
   );
 }

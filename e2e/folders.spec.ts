@@ -338,7 +338,9 @@ test.describe("searching one folder", () => {
     // looking IN survives a crossing exactly as what you were looking for does.
     await folderRow(page, "projects").click({ button: "right" });
     await page.getByRole("menuitem", { name: "Search in Folder" }).click();
-    await page.getByRole("button", { name: "Notes" }).click();
+    // Exact, because a role name matches as a substring by default and the
+    // connection bar is a button whose name begins "Notes on" (§4-1).
+    await page.getByRole("button", { name: "Notes", exact: true }).click();
     await expect(page.getByTestId("overlay-scope")).toHaveText("projects");
     await expect(page.getByTestId("overlay-list")).not.toContainText("Alpha");
     // The pill is its own removal, and the list widens under it.
