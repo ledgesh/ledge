@@ -74,21 +74,24 @@ describe("parseFrontmatter", () => {
   });
 
   test("locked carries its value opaquely; only an empty one costs the line", () => {
-    // The value's structure is Bun's (vault.ts parseLockedHeader) — the
-    // grammar stores whatever non-empty string is there, so a DAMAGED header
-    // still reads as locked (refuse-to-decrypt, never unlocked-after-all).
+    // The value's structure belongs to Bun (vault.ts parseLockedHeader). This
+    // grammar stores whatever non-empty string is there, so a damaged header
+    // still counts as locked. Bun then refuses to decrypt it, and the note
+    // never opens as if it had been unlocked all along.
     expect(parseFrontmatter(fm("locked: not-even-close\n")).params.locked).toBe("not-even-close");
     const { params, problems } = parseFrontmatter(fm("locked:\n"));
     expect(params.locked).toBeNull();
     expect(problems).toHaveLength(1);
-    // An INDENTED locked under env: is an env var named locked, not a header.
+    // A locked line indented under env: is an env var named locked, not a
+    // header.
     expect(parseFrontmatter(fm("env:\n  locked: yes\n")).params.locked).toBeNull();
   });
 
   test("template takes exactly true, false, or daily; anything else costs the line", () => {
     expect(parseFrontmatter(fm("template: true\n")).params.template).toBe(true);
     expect(parseFrontmatter(fm("template: false\n")).params.template).toBe(false);
-    // The `daily` value claims the role: this template seeds each day's note.
+    // `template: daily` claims the daily role. The template holding it seeds
+    // each day's note.
     expect(parseFrontmatter(fm("template: daily\n")).params.template).toBe("daily");
     const { params, problems } = parseFrontmatter(fm("template: yes\n"));
     expect(params.template).toBe(false);
@@ -99,8 +102,9 @@ describe("parseFrontmatter", () => {
     expect(parseFrontmatter(fm("confirm: true\n")).params.confirm).toBe(true);
     expect(parseFrontmatter(fm("confirm: false\n")).params.confirm).toBe(false);
     const { params, problems } = parseFrontmatter(fm("confirm: always\n"));
-    // A typo must not read as "asks first": the key exists so the user KNOWS
-    // which blocks pause, and a silent yes is as wrong as a silent no.
+    // The parser does not read a typo as "asks first". It falls back to false
+    // and reports the line rather than guessing in silence. The key exists so
+    // the note's author can tell which blocks pause.
     expect(params.confirm).toBe(false);
     expect(problems).toEqual([{ line: 2, message: `"confirm" must be true or false: "always"` }]);
   });
@@ -143,7 +147,9 @@ describe("parseFrontmatter", () => {
   });
 
   test("an unknown key is reported, not silently ignored", () => {
-    // Silence would read as "my frontmatter does nothing"; say so instead.
+    // The parser reports the key instead of skipping it. Silence would leave
+    // the note's author with frontmatter that does nothing and no way to see
+    // why.
     const { params, problems } = parseFrontmatter(fm("cwds: /x\ncwd: /y\n"));
     expect(problems).toEqual([{ line: 2, message: `unknown key "cwds"` }]);
     expect(params.cwd).toBe("/y");
@@ -157,8 +163,11 @@ describe("parseFrontmatter", () => {
   });
 
   test("a profile name is safe by construction or refused", () => {
-    // The name becomes a filename under the profiles dir: separators and dots
-    // would make "which file is this?" a security question instead of a lookup.
+    // The name becomes a filename under the profiles dir, so the parser
+    // accepts only letters, digits, "-" and "_" (isProfileName in
+    // frontmatter.ts). No separators and no dots means no traversal and no
+    // ".env"-style hidden file. Everything else, spaces included, is refused,
+    // so nothing in the name needs escaping where it is used as a path.
     for (const bad of ["../evil", ".hidden", "a/b", "a.env", "petstore prod"]) {
       const { params, problems } = parseFrontmatter(fm(`profile: ${bad}\n`));
       expect(params.profile).toBeNull();
@@ -180,8 +189,9 @@ describe("parseFrontmatter", () => {
   });
 
   test("a problem names the line it is on, counting the opening fence as 1", () => {
-    // The editor draws each message beside its own line, so the number is the
-    // whole reason the report is useful rather than merely present.
+    // The editor draws each message beside the line the problem names
+    // (mainview/editor/frontmatter.ts). A number that is off by one puts the
+    // message beside the wrong line.
     const { problems } = parseFrontmatter(fm("cwd: /x\nnonsense\nprofile: 9 bad\n"));
     expect(problems).toEqual([
       { line: 3, message: `not a "key: value" line: "nonsense"` },
@@ -190,15 +200,16 @@ describe("parseFrontmatter", () => {
   });
 
   test("blank and comment lines are counted, not skipped", () => {
-    // They are structure-neutral to the GRAMMAR, but they still occupy a line
-    // and everything below them shifts down by one.
+    // The grammar ignores them, but they still occupy a line, so everything
+    // below them shifts down by one.
     const { problems } = parseFrontmatter(fm("\n# just a note\n\ncwds: /x\n"));
     expect(problems).toEqual([{ line: 5, message: `unknown key "cwds"` }]);
   });
 
   test("one line can be wrong more than once", () => {
-    // Per-token degradation means a tags: line reports each refusal, and the
-    // editor joins them onto that line rather than showing only the first.
+    // Degradation is per token, so a tags: line reports each refused token.
+    // The editor joins the messages onto that line rather than showing only
+    // the first.
     const { problems } = parseFrontmatter(fm("tags: 123 456 ok\n"));
     expect(problems.map((p) => p.line)).toEqual([2, 2]);
   });
@@ -282,9 +293,9 @@ describe("parseFrontmatter", () => {
   });
 
   test("tags: takes the bracketed list too, the form other tools write", () => {
-    // The YAML flow sequence is how Obsidian and most Markdown editors spell
-    // a tag list, and a notes folder is shared ground: the brackets come off
-    // around the whole value, and nothing else about the line changes.
+    // The parser takes the brackets off around the whole value and changes
+    // nothing else. Obsidian and most Markdown editors spell a tag list as
+    // this YAML flow sequence. A notes folder is often shared with them.
     const bracketed = parseFrontmatter(fm("tags: [ops, runbook]\n"));
     expect(bracketed.params.tags).toEqual(["ops", "runbook"]);
     expect(bracketed.problems).toEqual([]);
@@ -295,16 +306,16 @@ describe("parseFrontmatter", () => {
   });
 
   test("an unbalanced bracket stays the typo it looks like", () => {
-    // Only a MATCHED wrapping pair is punctuation. Reporting the odd one is
-    // what keeps a half-typed list from reading as a shorter one.
+    // Only a matched wrapping pair is punctuation. The parser reports the odd
+    // bracket, so a half-typed list does not read as a shorter one.
     const { params, problems } = parseFrontmatter(fm("tags: [ops, runbook\n"));
     expect(params.tags).toEqual(["runbook"]);
     expect(problems.length).toBe(1);
   });
 
   test("tags: [] declares no tags, and is not a problem", () => {
-    // An explicitly empty list is a choice; a bare `tags:` is an unfinished
-    // line, which is why only that one is reported.
+    // An explicitly empty list is a choice. A bare `tags:` is an unfinished
+    // line, so only that one is reported.
     const { params, problems } = parseFrontmatter(fm("tags: []\n"));
     expect(params.tags).toEqual([]);
     expect(problems).toEqual([]);

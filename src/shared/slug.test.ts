@@ -15,8 +15,8 @@ describe("headingOf", () => {
   });
 
   test("only the FIRST line counts", () => {
-    // A note whose heading is further down is not titled by it: the rule has to
-    // be something you can see without scrolling.
+    // A heading below the first line does not title the note. The rule has to
+    // be one a reader can see without scrolling.
     expect(headingOf("some prose\n# Later Heading")).toBeNull();
     expect(headingOf("\n# After a blank line")).toBeNull();
   });
@@ -27,7 +27,7 @@ describe("headingOf", () => {
   });
 
   test("a # without whitespace is not a heading", () => {
-    // CommonMark agrees, and it keeps "#hashtag" from naming a note.
+    // CommonMark agrees, and the rule keeps "#hashtag" from naming a note.
     expect(headingOf("#hashtag\nbody")).toBeNull();
   });
 
@@ -48,15 +48,17 @@ describe("headingOf and frontmatter", () => {
   });
 
   test("the conventional blank line under the fence does not cost the title", () => {
-    // Every frontmatter-bearing tool trains this habit; strict-first-line here
-    // would rename the note to untitled for leaving one blank line.
+    // Every tool that writes frontmatter trains the habit of leaving a blank
+    // line under the closing fence. A strict first-line rule would leave the
+    // note untitled.
     expect(headingOf("---\ncwd: /x\n---\n\n# Shipping Notes\nbody")).toBe("Shipping Notes");
     expect(headingOf("---\ncwd: /x\n---\n\n\n# Spaced Out\n")).toBe("Spaced Out");
   });
 
   test("a bare note keeps the strict first-line rule", () => {
-    // Without a fence, the blank first line still means "opens with something
-    // other than a heading" — frontmatter loosens nothing for plain notes.
+    // Without a fence, a blank first line still means the note opens with
+    // something other than a heading. Blank lines are skipped only after a
+    // closing fence.
     expect(headingOf("\n# After a blank line")).toBeNull();
   });
 
@@ -146,9 +148,9 @@ describe("labelOf", () => {
   });
 
   test("a note with no heading falls back to its filename", () => {
-    // Deleting an H1 does not rename the file, so shipping-notes.md really is
-    // still "shipping-notes". Saying so beats showing "Untitled", which would be
-    // wrong AND identical for every de-titled note in the list.
+    // Deleting an H1 does not rename the file, so the label for
+    // shipping-notes.md is still "shipping-notes". "Untitled" would be wrong,
+    // and identical for every note in the list whose heading was deleted.
     expect(labelOf(null, "/notes/shipping-notes.md")).toBe("shipping-notes");
   });
 
@@ -162,7 +164,8 @@ describe("labelOf", () => {
   });
 
   test("the label is the heading verbatim, not its slug", () => {
-    // The whole point: the file is shipping-notes.md, the label is not.
+    // The file is shipping-notes-v1-2.md. The label keeps the punctuation and
+    // case the heading had.
     expect(labelOf("Shipping Notes: v1.2!", "/notes/shipping-notes-v1-2.md")).toBe("Shipping Notes: v1.2!");
   });
 });
@@ -174,8 +177,8 @@ describe("labelOf caps a runaway heading", () => {
   });
 
   test("a paragraph-length heading is truncated with an ellipsis", () => {
-    // Nothing stops an H1 being a whole paragraph, and it would otherwise ride
-    // through the store in full just to be clipped by CSS.
+    // An H1 can be a whole paragraph. Without the cap, the store would carry
+    // the full text only for CSS to clip it.
     const label = labelOf("word ".repeat(500), "/notes/x.md");
     expect(label.length).toBeLessThanOrEqual(124);
     expect(label.endsWith("...")).toBe(true);

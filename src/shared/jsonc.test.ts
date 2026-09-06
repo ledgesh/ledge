@@ -58,7 +58,7 @@ describe("stripJsonc", () => {
   test("never throws: unterminated string and comment fall through to JSON.parse", () => {
     expect(() => stripJsonc('{ "a": "unclosed')).not.toThrow();
     expect(() => stripJsonc('{ /* unclosed')).not.toThrow();
-    expect(() => parse('{ "a": "unclosed')).toThrow(); // JSON.parse is the complainer
+    expect(() => parse('{ "a": "unclosed')).toThrow(); // JSON.parse throws here, not stripJsonc
   });
 
   test("genuinely broken JSON is still broken after stripping", () => {

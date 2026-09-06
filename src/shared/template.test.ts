@@ -9,9 +9,10 @@ import {
   timeOf,
 } from "./template";
 
-// A fixed local instant: 2026-07-18 23:30 — late enough that UTC has already
-// rolled to the 19th in every timezone west of Greenwich, which is what makes
-// the "local, not UTC" assertions bite.
+// A fixed local instant: 2026-07-18 23:30, late enough that UTC has already
+// rolled to the 19th in every timezone west of Greenwich. The "local, not
+// UTC" assertions below catch a UTC implementation only there. Moving NOW to
+// an earlier hour leaves them testing nothing.
 const NOW = new Date(2026, 6, 18, 23, 30);
 
 describe("isoDateOf", () => {
@@ -103,7 +104,7 @@ describe("forceTitle", () => {
 
   test("replaces the H1 under a frontmatter block, per headingOf's rule", () => {
     const fm = "---\ncwd: ~/proj\n---\n";
-    // headingOf skips blank lines under the fence — the replace must hit the
+    // headingOf skips blank lines under the fence. The replace must hit the
     // same line it reads, not the blank one.
     expect(forceTitle(`${fm}\n# Daily Template\n\nbody\n`, "2026-07-18")).toBe(
       `${fm}\n# 2026-07-18\n\nbody\n`,

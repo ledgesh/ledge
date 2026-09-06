@@ -12,9 +12,9 @@ import {
 } from "./settings";
 import { stripJsonc } from "./jsonc";
 
-// Every case names the home it is reading as, because that is now half the
-// question: the same object parsed as the other file's is a list of sections
-// that live somewhere else.
+// Every case says which home parseSettings reads the object as. The same
+// object read as the other home is a list of sections that live somewhere
+// else (architecture.md §6).
 describe("parseSettings", () => {
   test.each(["server", "client"] as const)("an empty %s file yields the defaults, problem-free", (home) => {
     const { settings, problems } = parseSettings({}, home);
@@ -23,8 +23,9 @@ describe("parseSettings", () => {
   });
 
   test("prompt fences are runnable out of the box, feeding claude on stdin", () => {
-    // The trailing `<` is load-bearing (runner.test.ts explains); this pins
-    // the default so an edit there cannot silently unmap agent blocks.
+    // The trailing `<` is load-bearing (runner.test.ts explains it). This
+    // pins the default interpreter, so editing that default cannot silently
+    // unmap agent blocks.
     expect(DEFAULT_SETTINGS.blocks.runnable).toContain("prompt");
     expect(DEFAULT_SETTINGS.blocks.interpreters["prompt"]).toBe("LEDGE_PROMPT_BLOCK=1 claude --allowedTools mcp__ledge -p <");
   });
@@ -98,7 +99,8 @@ describe("parseSettings", () => {
       expect(settings.appearance.theme).toBe(theme);
       expect(problems).toEqual([]);
     }
-    // Near-misses are typos, not intent — and the message names the whole set.
+    // A near-miss spelling is a typo, so the theme falls back to the default.
+    // The message names the whole set of accepted values.
     const { settings, problems } = parseSettings({ appearance: { theme: "Dark" } }, "client");
     expect(settings.appearance.theme).toBe("system");
     expect(problems).toEqual(['"appearance.theme" must be one of "system", "light", "dark"']);
@@ -222,8 +224,8 @@ describe("parseSettings", () => {
   });
 
   test("an absent daily section defaults silently (seed-frozen files)", () => {
-    // Every settings file seeded before the section existed lacks it — that
-    // must read as "unset", not as a problem.
+    // Every settings file seeded before the section existed lacks it. A
+    // missing section must read as "unset", not as a problem.
     const { settings, problems } = parseSettings({}, "server");
     expect(settings.daily).toEqual({ workspace: "", folder: "" });
     expect(problems).toEqual([]);
@@ -244,9 +246,10 @@ describe("parseSettings", () => {
     expect(good.settings.daily.folder).toBe("journal/2026");
     expect(good.problems).toEqual([]);
 
-    // The same shape rule the store applies when it makes the directory, so
-    // the settings editor says so while the file is being written. Degraded
-    // to "" rather than thrown: a typo here must not break the keystroke.
+    // parseSettings applies the same folder-shape rule the store applies when
+    // it makes the directory, so the settings editor reports a bad folder
+    // while the file is being written. The value degrades to "" instead of
+    // throwing, so a typo does not break ⌘J.
     const bad = parseSettings({ daily: { folder: "../escape" } }, "server");
     expect(bad.settings.daily.folder).toBe("");
     expect(bad.problems).toEqual(['"daily.folder" is not a folder: ../escape (empty, "." and ".." segments are not allowed)']);
@@ -272,10 +275,11 @@ describe("parseSettings", () => {
   });
 });
 
-// The half of the split that a user actually meets: a settings.jsonc written
-// before the boundary existed still has all seven sections in it, and the
-// three that moved have to read as "ignored, and here is why" rather than as
-// settings that quietly stopped working.
+// The user-visible half of the two-file split. A settings.jsonc written
+// before the split still holds all seven sections. parseSettings reports the
+// three sections that moved to the other file as ignored and names the
+// reason, so none of them stop working without a message. The merge machinery
+// is tested in "the two homes" below.
 describe("a section in the wrong file", () => {
   test("the server's file reports the client's sections and does not read them", () => {
     const { settings, problems } = parseSettings(
@@ -283,8 +287,8 @@ describe("a section in the wrong file", () => {
       "server",
     );
     expect(settings.shell.path).toBe("/bin/bash");
-    // Not 22: the value here is inert, and the client's own file is what the
-    // font size is read from.
+    // Not 22: the value in the server's file is inert. The font size is read
+    // from the client's own file.
     expect(settings.editor.fontSize).toBe(DEFAULT_SETTINGS.editor.fontSize);
     expect(settings.appearance.theme).toBe("system");
     expect(problems).toEqual([
@@ -314,10 +318,11 @@ describe("a section in the wrong file", () => {
 });
 
 describe("the two homes", () => {
-  // The compile-time half is `satisfies Record<keyof Settings, SettingsHome>`
-  // on SETTINGS_HOMES itself: a section added without a home does not build.
-  // This is the runtime half — that every section is claimed exactly once, and
-  // that the merge takes each from the file that claims it.
+  // The compile-time half is the `satisfies` clause on SETTINGS_HOMES:
+  // `Record<keyof Settings, SettingsHome>` means a section added without a
+  // home does not build. These tests are the runtime half: every section is
+  // claimed exactly once, and the merge takes each section from the file that
+  // claims it.
   test("every section has a home", () => {
     for (const key of Object.keys(DEFAULT_SETTINGS) as Array<keyof Settings>) {
       expect(["server", "client"]).toContain(homeOf(key));
@@ -341,16 +346,16 @@ describe("the two homes", () => {
     for (const key of Object.keys(DEFAULT_SETTINGS) as Array<keyof Settings>) {
       expect(merged[key]).toEqual((SETTINGS_HOMES[key] === "server" ? server : client)[key]);
     }
-    // Spelled out, so the two lines that matter are readable without running
-    // the loop above in your head.
+    // These two assertions spell out the cases that matter, so they read
+    // without tracing the loop above.
     expect(merged.shell.path).toBe("/bin/bash");
     expect(merged.editor.fontSize).toBe(18);
   });
 });
 
-// The seeded files and the compiled defaults must be the same settings — a
-// default edited in one place but not the other would ship a first launch that
-// disagrees with itself.
+// The seeded files and the compiled defaults must be the same settings. If a
+// default were edited in one place but not the other, the file written on
+// first launch would not match what the app actually does.
 describe("the seeded templates", () => {
   test.each([
     ["server", settingsTemplate(DEFAULT_SETTINGS.shell.path)],
@@ -361,8 +366,9 @@ describe("the seeded templates", () => {
     expect(settings).toEqual(DEFAULT_SETTINGS);
   });
 
-  // Literally, not through a validator fallback: a template that omitted a
-  // field would pass the test above on the default it was missing.
+  // The template is compared literally, not through a validator fallback. A
+  // template that omitted a field would pass the test above on the default
+  // that filled the gap.
   test.each([
     ["server", settingsTemplate(DEFAULT_SETTINGS.shell.path)],
     ["client", clientSettingsTemplate(DEFAULT_SETTINGS)],
@@ -373,9 +379,9 @@ describe("the seeded templates", () => {
     for (const key of mine) expect(raw[key]).toEqual(DEFAULT_SETTINGS[key]);
   });
 
-  // The client template is generated because it has a second job: carrying an
-  // existing install's values across when the split happens. If it did not
-  // substitute them, everyone's font size would silently reset on upgrade.
+  // The client template is generated so it can carry an existing install's
+  // values across when the split happens. A template that did not substitute
+  // them would silently reset every user's font size on upgrade.
   test("the client template carries the values it is given, comments intact", () => {
     const text = clientSettingsTemplate({
       ...DEFAULT_SETTINGS,

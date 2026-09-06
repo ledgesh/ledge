@@ -35,7 +35,8 @@ describe("parseDotenv (the spawn parse)", () => {
 
 describe("parseDotenvDoc (the editing parse)", () => {
   test("entries carry their line and their RAW value", () => {
-    // Quotes stay: the user wrote them and will read them back in the editor.
+    // Quotes stay in the raw value: the user typed them, and the editor
+    // shows them again.
     const rows = parseDotenvDoc('# header\nA=1\n\nURL="https://x/#y"\nexport B=2\n');
     expect(rows).toEqual([
       { line: 1, key: "A", value: "1", exported: false },

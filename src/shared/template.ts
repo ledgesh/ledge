@@ -1,17 +1,19 @@
-// Template instantiation: {{token}} substitution plus H1 forcing.
+// Template instantiation: {{token}} substitution plus H1 forcing
+// (architecture.md §1).
 //
-// Shared because both ends need it and they must agree: Bun instantiates
-// templates when a note is created (daily notes, create_note, `ledge new
-// --template`), and the harness's fake store must produce the same bytes for
-// the e2e specs to mean anything. Pure over (text, title, now) — the caller
-// supplies the clock — so the whole grammar is specifiable by its tests.
+// Bun instantiates a template when a note is created (daily notes,
+// create_note, `ledge new --template`), and the e2e harness's fake store
+// instantiates them the same way. The code is shared because the two must
+// produce the same bytes, or the e2e specs prove nothing. The functions are
+// pure over (text, title, now): the caller supplies the clock, so the tests
+// can specify the whole grammar.
 //
-// The vocabulary is deliberately a closed set of five words, not a scripting
-// language: the dynamic tier of a template is a prompt fence in its body,
-// which this module passes through (substituted, but never run). Unknown
-// tokens survive verbatim — degradation over failure, the frontmatter.ts
-// stance — which is also why there is no escape syntax: a template that needs
-// a literal "{{date}}" is a corner not worth a grammar.
+// The vocabulary is a closed set of five words, not a scripting language. A
+// template's dynamic tier is a prompt fence in its body, which this module
+// substitutes but never runs. Unknown tokens come back verbatim: degradation
+// over failure, the stance frontmatter.ts takes line by line. A known token
+// cannot be escaped, because a template needing a literal "{{date}}" is a
+// corner not worth a grammar.
 
 import { frontmatterEnd, parseFrontmatter } from "./frontmatter";
 import { headingOf } from "./slug";
@@ -22,10 +24,10 @@ export interface TemplateVars {
   now: Date;
 }
 
-// Local calendar date, YYYY-MM-DD. Deliberately NOT toISOString().slice(0,10)
-// (the assets.ts pasted-image spelling): that is UTC, and a daily note started
-// at 11pm must be today's, not tomorrow's. The two idioms coexist on purpose —
-// an asset name only has to be unique, a daily title has to be *right*.
+// Local calendar date, YYYY-MM-DD. Not toISOString().slice(0,10), which is
+// UTC: a daily note started at 11pm would come out as tomorrow's. assets.ts
+// uses the UTC spelling for pasted-image names, where the name only has to be
+// unique.
 export function isoDateOf(d: Date): string {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -37,9 +39,9 @@ export function timeOf(d: Date): string {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-// Adjacent calendar days via the Date constructor, not string math: month and
-// year rollover (and the DST days that are 23 or 25 hours long) are its
-// problem, not ours.
+// Adjacent calendar days via the Date constructor, not string math. The
+// constructor handles month and year rollover, and the DST days that are 23
+// or 25 hours long.
 function shiftDay(d: Date, days: number): Date {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate() + days);
 }
@@ -47,11 +49,10 @@ function shiftDay(d: Date, days: number): Date {
 const TOKEN = /\{\{\s*([a-z]+)\s*\}\}/gi;
 
 /**
- * Replace the known {{tokens}} — date, time, title, yesterday, tomorrow —
- * everywhere in the text, fence bodies included: a prompt fence saying
- * "Summarize [[{{yesterday}}]]" is exactly what templates are for. Unknown
- * tokens are returned verbatim, so a fence containing unrelated {{x}} (or
- * shell ${...}) is untouched.
+ * Replace the known {{tokens}} (date, time, title, yesterday, tomorrow)
+ * everywhere in the text, fence bodies included, so a prompt fence can say
+ * "Summarize [[{{yesterday}}]]". Unknown tokens are returned verbatim: a
+ * fence containing an unrelated {{x}} or a shell ${...} is untouched.
  */
 export function renderTemplate(text: string, vars: TemplateVars): string {
   const values: Record<string, string> = {
@@ -65,14 +66,15 @@ export function renderTemplate(text: string, vars: TemplateVars): string {
 }
 
 /**
- * Make the text's H1 be `# <title>`: replace the line headingOf would take the
- * title from, or insert one after the frontmatter block when there is none.
+ * Make the text's H1 be `# <title>`: replace the line headingOf would take
+ * the title from, or insert one after the frontmatter block when there is
+ * none. Text whose H1 is already the title comes back unchanged. A template
+ * that wrote "# {{title}}" reaches this function that way, because
+ * renderTemplate runs first.
  *
- * This is load-bearing, not cosmetic: a template's own H1 is its title
- * ("Daily Template"), and without the force every instance would inherit it —
- * slug-colliding into daily-template-2.md, and never resolvable by the date
- * title the daily feature promises. A template whose H1 is already the target
- * (e.g. it wrote "# {{title}}" and renderTemplate ran first) is left alone.
+ * Without the force, every instance would inherit the template's own H1
+ * ("Daily Template"). The slugs would collide into daily-template-2.md, and
+ * the date title the daily feature promises would never resolve.
  */
 export function forceTitle(text: string, title: string): string {
   const heading = headingOf(text);
@@ -95,17 +97,18 @@ export function forceTitle(text: string, title: string): string {
 }
 
 // The line that marks a note as a template, as frontmatter.ts accepts it: a
-// top-level `template: ...` inside the block. Only unindented lines qualify —
-// an indented `template:` is an env var under `env:`, and stripping it would
-// change what the note's shells are born with.
+// top-level `template: ...` inside the block. Only unindented lines qualify.
+// An indented `template:` is an env var under `env:`, and stripping it would
+// change the environment the note's shells start with.
 const MARKER = /^template\s*:/;
 
 /**
  * Remove the note's `template:` frontmatter line, whatever its value. Every
- * instantiation runs this: the marker means "offer me in the template picker",
- * and without the strip every instance would inherit it and the picker would
- * fill with copies. A block emptied by the strip loses its fences too; one
- * that still says anything else (cwd, tags, even a comment) keeps them.
+ * instantiation runs this. Ledge offers a note in the template picker when
+ * the marker is present. Without the strip every instance would keep the
+ * marker, and the picker would fill with copies. A block emptied by the strip
+ * loses its fences too. A block that still holds any other line (cwd, tags,
+ * even a comment) keeps them.
  */
 export function stripTemplateMarker(text: string): string {
   const end = frontmatterEnd(text);
@@ -120,11 +123,11 @@ export function stripTemplateMarker(text: string): string {
 }
 
 /**
- * Declare (or undeclare) the note as a template: the view's "Make This Note a
- * Template" verb. Off is exactly the instantiation strip; on appends the line
- * at the end of the block — where it cannot split the `env:` map — creating
- * the block when the note has none. On is idempotent: a note already marked
- * comes back unchanged.
+ * Declare or undeclare the note as a template. The view's "Make This Note a
+ * Template" verb calls this. Off runs the same strip that instantiation runs.
+ * On appends the line at the end of the block, where it cannot split the
+ * `env:` map, and creates the block when the note has none. On is idempotent:
+ * a note already marked comes back unchanged.
  */
 export function setTemplateMarker(text: string, on: boolean): string {
   if (!on) return stripTemplateMarker(text);
@@ -137,9 +140,10 @@ export function setTemplateMarker(text: string, on: boolean): string {
 }
 
 /**
- * The one entry instantiators use: drop the template marker, substitute, then
- * force the H1. The result is what createNote receives, so the note's
- * filename comes out of the same H1-slug flow as every other note.
+ * The one entry point instantiators use: drop the template marker, substitute
+ * the tokens, then force the H1, in that order. The result is what createNote
+ * receives, so the note's filename comes out of the same H1-slug flow as every
+ * other note.
  */
 export function instantiateTemplate(text: string, title: string, now: Date): string {
   return forceTitle(renderTemplate(stripTemplateMarker(text), { title, now }), title);

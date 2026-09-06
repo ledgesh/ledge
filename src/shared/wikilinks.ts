@@ -1,10 +1,9 @@
 // The pure half of wikilinks: what a `[[...]]` target means and which note a
-// title names. The CodeMirror half — the parse node, the picker, the click
-// handling — stays in mainview/editor/wikilinks.ts; these functions sit in
-// shared/ because both ends need the SAME answer: the view resolves links to
-// draw and follow them, and Bun's MCP server resolves the very same titles for
-// agents (read_note by title, backlinks). Same reasoning as shared/search.ts —
-// one definition instead of a mirrored pair that drifts.
+// title names. The CodeMirror half (parse node, picker, click handling) is in
+// mainview/editor/wikilinks.ts. These sit in shared/ because both ends must
+// give the same answer: the view resolves links to draw and follow them, and
+// Bun's MCP server resolves the same titles (read_note by title, backlinks).
+// Same reasoning as shared/search.ts: one definition, not a pair that drifts.
 
 /** What a store must say about a note before a title can resolve to it. */
 export interface WikiNote {
@@ -14,7 +13,7 @@ export interface WikiNote {
 
 /** A wikilink's inner text, split into the note title and the optional
  * `#heading` anchor. Null when there is no title to resolve (`[[#h]]`,
- * whitespace) — such a link is dangling by construction. */
+ * whitespace). Such a link always dangles. */
 export function parseWikiTarget(raw: string): { title: string; heading: string | null } | null {
   const hash = raw.indexOf("#");
   const title = (hash < 0 ? raw : raw.slice(0, hash)).trim();
@@ -24,11 +23,11 @@ export function parseWikiTarget(raw: string): { title: string; heading: string |
 }
 
 /**
- * The note `title` names, or null. Case-insensitive exact match — not fuzzy:
- * a link that silently opened the *nearest* title would follow typos to the
- * wrong note, and dangling-when-wrong is the honest failure. An exact-case
- * match wins over a case-folded one; remaining ties go to the first in list
- * order (newest mtime first, as the store holds them).
+ * The note `title` names, or null. The match is exact and case-insensitive,
+ * never fuzzy: opening the nearest title would follow a typo to the wrong
+ * note, so a wrong title dangles instead. An exact-case match wins over a
+ * case-folded one. Remaining ties go to the first in list order (newest mtime
+ * first, as the store holds them).
  */
 export function resolveWikiTitle<N extends WikiNote>(title: string, notes: readonly N[]): N | null {
   const want = title.trim().toLowerCase();
@@ -43,7 +42,7 @@ export function resolveWikiTitle<N extends WikiNote>(title: string, notes: reado
 }
 
 /** One wikilink occurrence in a note's text, located by 1-based line. `raw`
- * is the matched `[[...]]` text exactly as written — the backlinks panel's
+ * is the matched `[[...]]` text exactly as written. The backlinks panel's
  * reveal re-finds it on the line (workspace/reveal.ts revealSelection), so it
  * must be the file's own spelling, not a normalized reconstruction. */
 export interface WikiRef {
@@ -53,19 +52,18 @@ export interface WikiRef {
   raw: string;
 }
 
-// The editor grammar in one regex: `[[` then at least one character that is
-// not a bracket or newline, then `]]` — a lone `]` inside aborts the link
-// there too (the grammar requires the first `]` to be the closer).
+// The editor grammar in one regex: `[[`, then at least one character that is
+// not a bracket or newline, then `]]`. A lone `]` inside ends the match there
+// too, because the grammar requires the first `]` to be the closer.
 const WIKI_RE = /\[\[([^\[\]\n]+)\]\]/g;
 
 /**
  * Every wikilink target in `text`, for backlink scans. Textual, not a full
- * markdown parse: fenced code blocks are skipped (a ``` fence is where pasted
- * logs and code live, and a bracketed pattern in them is not a link — the
- * editor grammar agrees), but inline `code` spans are not — a `[[x]]` inside
- * backticks counts here and not in the editor. Backlinks are advisory
- * navigation, and that sliver of imprecision is not worth running a markdown
- * parser Bun-side.
+ * markdown parse. Fenced code blocks are skipped, as the editor grammar skips
+ * them: a fence holds pasted logs and code, whose brackets are not links.
+ * Inline `code` spans are not skipped, so `[[x]]` in backticks counts here but
+ * not in the editor. That imprecision only affects backlink navigation, so it
+ * is not worth running a markdown parser on the Bun side.
  */
 export function wikiRefsOf(text: string): WikiRef[] {
   const out: WikiRef[] = [];
@@ -78,15 +76,15 @@ export function wikiRefsOf(text: string): WikiRef[] {
   return out;
 }
 
-// The one fence walk every textual scanner here shares. A fenced block spans
-// its delimiters inclusive; an open fence closes only on a fence line of the
-// same character, at least as long, with nothing after it (CommonMark's
-// rule); any other fence-ish line inside is content of the fence; an
-// unclosed fence swallows to the end. `info` is the opening line's info
-// string ("prompt" for a runnable prompt fence).
+// The fence walk every textual scanner here shares. A fenced block spans its
+// delimiters inclusive. An open fence closes only on a fence line of the same
+// character, at least as long, with nothing after it (CommonMark's rule). Any
+// other fence-ish line inside is content of the fence, and an unclosed fence
+// runs to the last line.
 interface FenceSpan {
   from: number; // 0-based line of the opening fence
   to: number; // 0-based line of the closing fence (or the last line, unclosed)
+  // The opening line's info string. "prompt" marks a runnable prompt fence.
   info: string;
 }
 
@@ -107,9 +105,9 @@ function fenceSpans(lines: readonly string[]): FenceSpan[] {
   return out;
 }
 
-/** Yields only the CONTENT lines — everything outside every fence span.
- * Exported for shared/tags.ts: the inline `#tag` scan skips fenced code by
- * the same walk as the wikilink scan, one definition instead of a drift. */
+/** Yields only the content lines, everything outside every fence span.
+ * Exported for shared/tags.ts, whose inline `#tag` scan skips fenced code by
+ * this same walk rather than by a second copy that could drift. */
 export function* contentLines(lines: readonly string[]): Generator<{ line: string; i: number }> {
   const spans = fenceSpans(lines);
   let s = 0;
@@ -123,17 +121,18 @@ export function* contentLines(lines: readonly string[]): Generator<{ line: strin
 
 // --- headings ---------------------------------------------------------------
 // The `#heading` half of the wikilink grammar, shared for the same reason as
-// the title half: the view reveals [[note#heading]] anchors (workspace/
-// reveal.ts) and the MCP server appends under them (append_note's `heading`),
-// and both must agree on what counts as a heading.
+// the title half. The view reveals [[note#heading]] anchors
+// (workspace/reveal.ts) and the MCP server appends under them (append_note's
+// `heading`). Both must agree on what counts as a heading.
 
 // An ATX heading line: `## Title`, with an optional closing run of #s. Setext
-// headings are deliberately out — this grammar is typed by people looking at
-// rendered notes, where ATX is what Ledge's own headings are.
+// headings do not count, and that is the rule rather than a gap to fill in:
+// people type headings while looking at rendered notes, where Ledge's own
+// headings are ATX.
 const ATX_LINE = /^(#{1,6})\s+(.+?)(?:\s+#+\s*)?$/;
 
-/** The heading a line carries, or null. Grammar only — fence context is the
- * caller's problem (headingsOf is the fence-aware scan). */
+/** The heading a line carries, or null. Grammar only: the caller handles
+ * fence context (headingsOf is the fence-aware scan). */
 export function atxHeading(line: string): { level: number; text: string } | null {
   const m = ATX_LINE.exec(line);
   return m ? { level: m[1]!.length, text: m[2]!.trim() } : null;
@@ -146,8 +145,9 @@ export interface NoteHeading {
   line: number;
 }
 
-/** Every heading in `text`, in document order — fence-aware, so a `# comment`
- * inside a code block is neither a target nor a section boundary. */
+/** Every heading in `text`, in document order. The scan is fence-aware, so a
+ * `# comment` inside a code block is neither a target nor a section
+ * boundary. */
 export function headingsOf(text: string): NoteHeading[] {
   const out: NoteHeading[] = [];
   for (const { line, i } of contentLines(text.split("\n"))) {
@@ -158,26 +158,18 @@ export function headingsOf(text: string): NoteHeading[] {
 }
 
 /**
- * `text` with `addition` appended — at the end of the note, or (given a
- * `heading`) at the end of that heading's section. Null only when a heading
- * was named and no heading matches (case-insensitive, whitespace-trimmed,
- * first match wins — the same rule the reveal anchor uses). A section runs
- * to the next heading of the same or shallower level, so appending under
- * `## Sub` stays inside it while appending under `# Top` lands after all of
- * Top's subsections.
- *
- * "The end" floats above trailing ```prompt blocks: a runnable prompt fence
- * at the end of a note (or section) is its control, not its content — the
- * user types an instruction there and runs it, possibly many times — and
- * appending BELOW it interleaves results with the button that produced them.
- * Additions land above the trailing run of prompt blocks; every other fence
- * (a ```sh snippet, say) is content and appends go after it as written.
- *
- * Block normalization: one blank line before the addition, one before
- * whatever follows, a run of section-trailing blanks collapsing to that.
- * `addition` is spliced as given — strip its leading blank lines and
- * trailing whitespace first (the MCP handler does), or the separator
- * doubles.
+ * `text` with `addition` appended, at the end of the note or (given a
+ * `heading`) at the end of that heading's section. A section runs to the next
+ * heading of the same or shallower level, so appending under `## Sub` stays
+ * inside it while appending under `# Top` lands after all of Top's
+ * subsections. Null when a heading was named and none matches
+ * (case-insensitive, whitespace-trimmed, first match wins: the same rule the
+ * reveal anchor uses). A trailing run of ```prompt blocks stays last, so the
+ * addition lands above it, and after every other fence (architecture.md §1).
+ * One blank line separates the addition from what comes before and after it,
+ * and a run of section-trailing blanks collapses to that. The caller strips
+ * `addition`'s leading blank lines and trailing whitespace first (the MCP
+ * handler does), or the separator doubles.
  */
 export function appendToNote(text: string, addition: string, heading: string | null = null): string | null {
   const lines = text.split("\n");

@@ -12,7 +12,8 @@ describe("folderContains", () => {
   });
 
   test("a folder does not contain its sibling with the same prefix", () => {
-    // The bug the `/` in the prefix test exists to prevent.
+    // A regression guard: a prefix test without the `/` made `ab` a child
+    // of `a` (folders.ts, folderContains).
     expect(folderContains("a", "ab")).toBe(false);
     expect(folderContains("projects", "projects-old")).toBe(false);
   });
@@ -56,7 +57,8 @@ describe("folderNameProblem", () => {
   test("every way of naming somewhere else is a problem, and says which", () => {
     expect(folderNameProblem("/etc")).toBe("folders are relative to the workspace");
     expect(folderNameProblem(" /etc")).toBe("folders are relative to the workspace");
-    // A bare slash must not strip itself down to meaning the root.
+    // folderNameProblem tests for a leading slash before it strips trailing
+    // ones. Otherwise `/` would reduce to "", meaning the root, and pass.
     expect(folderNameProblem("/")).toBe("folders are relative to the workspace");
     expect(folderNameProblem("a\\b")).toBe("use / to separate segments");
     expect(folderNameProblem("../escape")).toContain('".." segments');
@@ -74,8 +76,8 @@ describe("folderLeafProblem", () => {
   });
 
   test("the root is a folder path and not a folder name", () => {
-    // The one rule folderNameProblem cannot supply: it lets "" through
-    // deliberately, because "" is where notes lived before folders.
+    // folderNameProblem allows "". The root is where notes lived before
+    // folders. Only folderLeafProblem refuses it.
     expect(folderLeafProblem("")).toBe("a folder needs a name");
     expect(folderLeafProblem("   ")).toBe("a folder needs a name");
   });

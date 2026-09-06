@@ -1,55 +1,48 @@
 // The wire between a Ledge client and a Ledge server (remote.md §3).
 //
-// Both ends speak it and neither owns it, which is why it sits in shared/:
+// Both ends speak it and neither owns it, so it sits in shared/:
 // shared/transport.ts is the client's half and bun/transport.ts the server's,
 // over a child process's pipes here and an ssh child there. Nothing in this
-// file does I/O — it turns bytes into messages and back, and that is all,
-// which is also what lets the client's half run in a webview (ios.md §2)
-// rather than being reimplemented in Swift.
+// file does I/O: it turns bytes into messages and back, and that is all. Doing
+// no I/O is what lets the client's half run in a webview (ios.md §2) instead
+// of being rewritten in Swift.
 //
 // A frame is a 4-byte big-endian length, a 1-byte type, then that many bytes
 // of payload. Type 0 is a JSON control frame: requests, responses, the
 // schema's push messages, and the heartbeat. Type 1 is a binary payload whose
 // first 4 bytes are the id of the control frame it belongs to.
 //
-// A binary frame is sent IMMEDIATELY BEFORE the control frame that claims it,
-// and a receiver holds at most one. Ordering on a stream is guaranteed, so
-// that rule turns "which payload is this" into "the one that just arrived" —
-// no correlation table, no partial state a peer can grow, and a second binary
-// frame with no control frame between them is a desync rather than a queue.
+// A binary frame is sent immediately before the control frame that claims it,
+// and a receiver holds at most one. Stream order is guaranteed, so the payload
+// a control frame refers to is always the one that just arrived. No
+// correlation table is needed, no partial state a peer can grow, and two
+// binary frames with no control frame between them are a desync rather than a
+// queue.
 //
-// The frame parser is the entire new attack surface a forced-command key
+// The frame parser is the whole new attack surface a forced-command key
 // exposes (remote.md §4), so it does as little as it can: a fixed header, a
-// hard length cap checked BEFORE any buffering, no allocation sized by a
-// number the peer chose, and structural validation of every control message
-// on arrival. The client is the least-trusted end (remote.md §2) and a frame
-// it sent is the least-trusted thing it sends.
+// hard length cap checked before any buffering, no allocation sized by a
+// number the peer chose, and structural validation of every control message on
+// arrival. The client is the least-trusted end (remote.md §2), and a frame it
+// sent is the least-trusted thing it sends.
 import type { LedgeRPC } from "./rpc-schema";
 
 /**
  * Bumped when the framing changes, when the control messages change shape, or
- * when a PAYLOAD changes shape under a name that stays the same. A peer
- * speaking a different one is refused, never partially understood.
- *
- * This is now the ONLY thing that refuses a peer, and the list above is the
- * whole of what it covers: incompatibilities a caller cannot see coming, where
- * carrying on means one end reading the other's bytes as something they are
- * not. A method one end has and the other does not is NOT on that list — it is
- * loud, local, and survivable, and §11 has how it is handled instead.
- *
- * The cost of that split is that this number is bumped by a person rather than
- * derived, so `rpc-schema.shape.test.ts` is the tripwire: it fails when the
- * schema's types change without this line changing, and the fix is to answer
- * the question it asks.
+ * when a payload changes shape under a name that stays the same. A peer on a
+ * different version is refused rather than partly understood. This and the
+ * role check are now the only refusals (remote.md §11). A person bumps this
+ * number rather than deriving it, so `rpc-schema.shape.test.ts` fails when the
+ * schema's types change and this line does not.
  */
 export const PROTOCOL_VERSION = 5;
 
 export const FRAME_HEADER_BYTES = 5;
 
-/** Big enough for a scrollback replay (256 KB of pty bytes, base64) and a
- * pasted screenshot; small enough that a lying length is refused rather than
- * allocated. A payload that genuinely needs more than this is a design bug at
- * this boundary, not a reason to raise the number. */
+/** The cap on one frame. Big enough for a scrollback replay (256 KB of pty
+ * bytes, base64) and a pasted screenshot, small enough that a lying length is
+ * refused rather than allocated. A payload that needs more than this is a
+ * design bug at this boundary, not a reason to raise the number. */
 export const MAX_FRAME_BYTES = 64 * 1024 * 1024;
 
 export const CONTROL_FRAME = 0;
@@ -59,9 +52,9 @@ export type Frame =
   | { type: typeof CONTROL_FRAME; text: string }
   | { type: typeof BINARY_FRAME; id: number; bytes: Uint8Array };
 
-/** A stream that cannot be parsed. Always fatal to the connection: there is no
- * resynchronizing a length-prefixed protocol once its framing is in doubt, and
- * pretending otherwise is how a desync becomes silent data corruption. */
+/** A stream that cannot be parsed. Always fatal to the connection: a
+ * length-prefixed protocol cannot resynchronize once its framing is in doubt,
+ * and carrying on turns a desync into silent data corruption. */
 export class WireError extends Error {
   override readonly name = "WireError";
 }
@@ -74,78 +67,56 @@ export interface Hello {
   role: "client" | "server";
   protocol: number;
   build: string;
-  // What this end can actually be asked to do, and what it may push: the
-  // server's WIRE_METHODS and PUSH_MESSAGES, sent as the names themselves
-  // rather than as a hash of them.
-  //
-  // A hash could only ever answer "same or different", and the two ends being
-  // different is not the same as their being incompatible — which is the whole
-  // reason these are here (§11). A LIST answers the question a client actually
-  // has, which is "can this server do the thing I am about to ask for", and it
-  // answers it before the ask rather than after.
-  //
-  // Empty from a client, which serves nothing over this wire: CLIENT_METHODS
-  // are answered at home and CLIENT_PUSHES are raised at home. Empty from a
-  // server too if it predates the fields, and empty is read as "says nothing,
-  // so assume it can do anything" — which is exactly the behavior a client had
-  // before it was told, and it fails at the one call rather than at the
-  // connection.
-  //
-  // Both are intersected with this end's own lists on arrival, so a peer
-  // cannot grow this client's memory by sending a million names: what is kept
-  // is bounded by our own surface, not by the peer's.
+  // What this end can be asked to do, and what it may push: the server's
+  // WIRE_METHODS and PUSH_MESSAGES, as the names themselves rather than a hash
+  // of them (remote.md §11 for why a list). Empty from a client, which answers
+  // CLIENT_METHODS and raises CLIENT_PUSHES at home, and empty from a server
+  // that predates the fields. Empty reads as "says nothing, so assume it can
+  // do anything", so the one call fails rather than the connection. Both are
+  // intersected with this end's own lists on arrival, so a peer cannot grow
+  // this client's memory by sending a million names.
   methods: string[];
   pushes: string[];
   // Who is connecting. The server files this client's saved layout under it
   // (remote.md §5), so a phone does not inherit a desktop's three-pane
   // arrangement and the same Mac gets its own back. Identity belongs to the
-  // CONNECTION rather than to each request: a client cannot forget to send it,
-  // and no handler needs a parameter it would only ever fill in one way.
+  // connection rather than to each request: a client cannot forget to send it,
+  // and no handler needs a parameter it would fill in only one way.
   //
-  // Empty from a server, and empty is allowed from a client too — one that has
-  // no layout to keep simply has no id, and the server files it under a shared
-  // key rather than refusing the connection over a preference.
+  // Empty from a server, and empty is allowed from a client too. A client with
+  // no layout to keep has no id, and the server files it under a shared key
+  // rather than refusing the connection over a preference.
   client: string;
-  // What that device calls itself: a Mac's hostname, a phone's device name.
-  // The id above is opaque and always will be, because it keys files; this is
-  // the half a person can read, and it exists because "another device took
-  // your shell" is a worse sentence than "iPhone took your shell" (remote.md
-  // §7, presence).
-  //
-  // The device's own name for itself rather than one the user types here: both
-  // ends already have one, and a name nobody set is a name nobody has to keep
-  // in sync with the machine it is about.
-  //
-  // Empty from a server — a server is named by the connection that reaches it,
-  // which is the user's own word for it (remote.md §8) — and empty is allowed
-  // from a client, which is then simply an unnamed device on screen.
-  //
-  // Bounded and stripped of control characters on arrival (`cleanLabel`): the
-  // client is the least-trusted end (remote.md §2), and this is the one string
-  // it chooses that another client's screen displays.
+  // What that device calls itself: a Mac's hostname, a phone's device name,
+  // taken from the device rather than typed by the user. The id above is
+  // opaque and always will be, because it keys files; this is the half a
+  // person can read. Presence uses it (remote.md §7), so a user sees "iPhone
+  // took your shell" rather than "another device took your shell". Empty from
+  // a server, which is named instead by the connection that reaches it, the
+  // user's own word for it (remote.md §8). Empty is allowed from a client,
+  // which is then an unnamed device on screen. Bounded and stripped of control
+  // characters on arrival (`cleanLabel`): the client is the least-trusted end
+  // (remote.md §2), and this is the one string it chooses that another
+  // client's screen displays.
   label: string;
-  // Which RUN of the server this is: a nonce minted once per daemon process,
+  // Which run of the server this is: a nonce minted once per daemon process,
   // empty from a client. A reconnecting client replays what was in flight
   // under the same op ids, and the op log that makes that safe lives in the
-  // server's memory (bun/opLog.ts) — so a DIFFERENT instance answering is the
+  // server's memory (bun/opLog.ts), so a different instance answering is the
   // one case where replaying would apply a write twice. Comparing this is how
   // a client tells "the wire came back" from "the server came back".
   instance: string;
   // How long this client asks the server to keep its sessions alive after the
-  // connection ends, in milliseconds; 0 from a client that does not ask.
-  //
-  // From a server it is the other half of the same number: the longest hold it
-  // will grant, stated before it has heard anyone ask. The two hellos CROSS
-  // rather than answering each other — the server sends its own the moment the
-  // socket opens — so a grant cannot travel back in this handshake. Both ends
-  // instead apply `sessionHold` to the pair and reach the same number, which
-  // costs no round trip and leaves the term the server's (remote.md §7).
-  //
-  // Absent from a peer that predates the field, and 0 there means no hold,
-  // which is the behavior that peer already had. That is why this does not bump
-  // PROTOCOL_VERSION: neither the framing nor the message set changed shape,
-  // and refusing an older peer outright would be a worse answer than the one it
-  // already gives.
+  // connection ends, in milliseconds; 0 from a client that does not ask. From
+  // a server it is the longest hold it will grant, stated before it has heard
+  // anyone ask. The two hellos cross rather than answering each other, so no
+  // grant travels back in this handshake: both ends apply `sessionHold` to the
+  // pair and reach the same number, which costs no round trip and leaves the
+  // term the server's (remote.md §7). Absent from a peer that predates the
+  // field, where 0 means no hold, the behavior that peer already had. So this
+  // does not bump PROTOCOL_VERSION: neither the framing nor the message set
+  // changed shape, and refusing an older peer would be a worse answer than the
+  // one it already gives.
   hold: number;
 }
 
@@ -158,9 +129,9 @@ export type WireMessage =
   | Hello
   // A client asking the server to run one of the schema's request handlers.
   // `op` is the dedupe key (remote.md §7): present on everything a replay
-  // could apply twice, absent on the reads where running it again IS running
-  // it once. `bin` says a binary frame just arrived carrying one of this
-  // payload's fields.
+  // could apply twice, absent on the reads where running it again is the same
+  // as running it once. `bin` says a binary frame just arrived carrying one of
+  // this payload's fields.
   | { t: "req"; id: number; m: string; p: unknown; op?: string; bin?: number }
   | { t: "res"; id: number; r: unknown; bin?: number }
   // A handler that threw. Only the message travels: a stack trace names the
@@ -169,39 +140,31 @@ export type WireMessage =
   // One of the schema's webview messages, server to client, unsolicited.
   | { t: "push"; m: string; p: unknown; bin?: number }
   // The heartbeat (remote.md §7). A client that has heard nothing for a while
-  // asks whether the server is still on the other end, and a server answers
-  // the moment it is asked.
+  // asks, and a server answers the moment it is asked. It runs in that
+  // direction only: `ping` is a client's to send and `pong` a server's. The
+  // client is the end with a reconnect ladder to climb, an indicator to draw,
+  // and a network under it that goes away. The server only has to listen,
+  // since a client that has gone silent has gone. Either frame arriving from
+  // the wrong side is a peer out of sync, refused like every other frame sent
+  // in the wrong direction.
   //
-  // One direction only, and that asymmetry is the design rather than a corner
-  // cut. The client is the end that has a ladder to climb, an indicator to
-  // draw, and a network under it that goes away; the server only has to LISTEN,
-  // because a client that is alive says so on its own schedule and one that has
-  // gone silent is a client that has gone. So `ping` is a client's to send and
-  // `pong` a server's, and either one arriving from the wrong side is a peer
-  // out of sync — refused there like every other frame sent in the wrong
-  // direction, rather than answered out of politeness.
-  //
-  // No fields, no id. What a client learns from a pong is not WHICH probe was
-  // answered but that the far end is still there, and the same is true of any
-  // other frame arriving — so nothing has to be correlated, and there is
-  // nothing here for a peer to lie about the size of.
+  // No fields, no id. A pong says the far end is still there, not which probe
+  // was answered, and so does any other frame arriving. Nothing has to be
+  // correlated, and there is nothing here for a peer to lie about the size of.
   | { t: "ping" }
   | { t: "pong" }
   // The last frame before a deliberate hangup, carrying why. A refused
   // handshake has no request to answer, so without this the client would see
   // only a closed pipe and could not say what was wrong.
   //
-  // `back` is the server saying it expects to be reachable again: it is
-  // stopping, not refusing. A goodbye is otherwise the end of the line for that
-  // client (shared/transport.ts), which is right for a displaced connection and
-  // wrong for a restart, because a restart is the one outage a server can
-  // announce and every other kind is announced by nothing at all.
-  //
-  // Absent means final, which is the behavior a peer that predates the field
-  // already had, and is why this does not bump PROTOCOL_VERSION (`hold` above
-  // for the same reasoning): the framing and the message set are unchanged, and
-  // an old server on the far end costs a press of Reconnect rather than a
-  // refused connection.
+  // `back` is the server saying it is stopping rather than refusing, and
+  // expects to be reachable again. A goodbye otherwise ends the line for that
+  // client (shared/transport.ts), which is right for a displaced connection
+  // and wrong for a restart. A restart is the one outage a server can
+  // announce; no other kind is announced at all. Absent means final, the
+  // behavior a peer that predates the field already had, so this does not bump
+  // PROTOCOL_VERSION either (`hold` above, same reasoning): an old server on
+  // the far end costs a press of Reconnect rather than a refused connection.
   | { t: "bye"; why: string; back?: boolean };
 
 // --- the method surface ------------------------------------------------------
@@ -211,9 +174,9 @@ type PushMessage = keyof LedgeRPC["webview"]["messages"];
 
 /**
  * Every request the protocol carries. The server dispatches by name into its
- * own handler map, so this list is not what makes a call work; it exists so a
- * client can be BUILT from it (it has no handlers to enumerate) and so the two
- * ends can fingerprint what they each believe the protocol is.
+ * own handler map, so this list is not what makes a call work. It exists so a
+ * client can be built from it (a client has no handlers to enumerate) and so
+ * the two ends can fingerprint what they each believe the protocol is.
  */
 export const REQUEST_METHODS = [
   "workspaceList",
@@ -311,9 +274,9 @@ export const PUSH_MESSAGES = [
 
 /**
  * Pushes the client shell raises itself, which no server may send. The mirror
- * of CLIENT_METHODS below on the other direction of the wire: the state of a
- * connection is a fact about the wire, and the end holding the far side of a
- * dropped one is in no position to report it.
+ * of CLIENT_METHODS below, on the other direction of the wire: a connection's
+ * state is a fact about the wire, and the end holding the far side of a
+ * dropped one cannot report it.
  */
 export const CLIENT_PUSHES = ["connectionState", "docsShow"] as const satisfies readonly PushMessage[];
 
@@ -321,27 +284,23 @@ export type ClientPush = (typeof CLIENT_PUSHES)[number];
 
 // --- what never becomes a frame ----------------------------------------------
 //
-// The lists above name what the protocol carries; these name what it refuses
-// to. They are here rather than beside their implementation because every
-// shell needs them and the shells are in different languages' worth of
-// different places: bun/clientSeams.ts serves the first group on a Mac,
-// bun/connectionManager.ts the second, and mainview/lib/nativeBridge.ts serves
-// both on iOS, where the implementations are Swift's and only the LIST is
-// portable (ios.md §2). bun/server.ts refuses exactly these names, keyed by
-// ClientMethod, so a name added here without a matching refusal fails to
-// compile.
+// The lists above name what the protocol carries; these name what it refuses.
+// They sit here rather than beside their implementations because every shell
+// needs them and the shells are in different places, in different languages:
+// bun/clientSeams.ts serves the first group on a Mac, bun/connectionManager.ts
+// the second, and mainview/lib/nativeBridge.ts serves both on iOS, where the
+// implementations are Swift's and only the list is portable (ios.md §2).
+// bun/server.ts refuses exactly these names, keyed by ClientMethod, so a name
+// added here without a matching refusal fails to compile.
 
 /**
  * The native ten: the pasteboard, the picture library, the browser, the menu
- * bar, and the windows.
+ * bar, and the windows. All of them belong to the device in front of the user.
  *
- * The pasteboard you copied from, the photos you took, the browser that should
- * open a link, the menu bar at the top of the screen and the windows on it all
- * belong to the device in front of the user. Answering them on the server
- * reaches the wrong machine — a VPS's empty pasteboard, a file dialog opened on
- * a screen nobody is looking at, a link opened in a browser nobody is looking
- * at, a menu bar that does not exist and takes ⌘Q with it (remote.md §10), a
- * window on a machine with no screen.
+ * Answering them on the server reaches the wrong machine: a VPS's empty
+ * pasteboard, a file dialog opened on a screen nobody is looking at, a link
+ * opened in a browser nobody is looking at, a menu bar that does not exist and
+ * takes ⌘Q with it (remote.md §10), a window on a machine with no screen.
  */
 export const NATIVE_METHODS = [
   "clipboardRead",
@@ -358,7 +317,7 @@ export const NATIVE_METHODS = [
 
 export type NativeMethod = (typeof NATIVE_METHODS)[number];
 
-/** The six the view drives connections with. Which servers this app can
+/** The seven the view drives connections with. Which servers this app can
  * connect to is nobody's business but this app's: a server asked to list them
  * would be answering about somebody else's client (remote.md §8). */
 export const CONNECTION_METHODS = [
@@ -381,25 +340,25 @@ export type ClientMethod = (typeof CLIENT_METHODS)[number];
 const CLIENT_ONLY = new Set<string>(CLIENT_METHODS);
 
 /**
- * The requests that actually become frames: every name a SERVER answers.
+ * The requests that actually become frames: every name a server answers.
  *
- * CLIENT_METHODS are subtracted because no frame ever carries one — the client
- * shell answers them at home and bun/server.ts refuses them by name — so what a
- * server would have to change to match a new one is nothing. This is the list
- * the fingerprint below is taken over, and subtracting them there is the point:
- * a window verb, a clipboard flavor or a sixth way to edit a connection is a
- * fact about a client, and it must not refuse a server that is running the same
- * protocol perfectly well.
+ * CLIENT_METHODS are subtracted because no frame ever carries one. The client
+ * shell answers them at home and bun/server.ts refuses them by name, so a
+ * server has nothing to change when one is added. This is also the list
+ * `hello()` declares to the peer, and the subtraction matters there too. A
+ * window verb, a clipboard flavor or another way to edit a connection is a
+ * fact about a client. Comparing one against a server must not refuse a server
+ * that is running the same protocol perfectly well (remote.md §11).
  *
- * PUSH_MESSAGES needs no such subtraction — CLIENT_PUSHES is already a separate
- * list, for the same reason on the other direction of the wire.
+ * PUSH_MESSAGES needs no such subtraction, since CLIENT_PUSHES is already a
+ * separate list, for the same reason on the other direction of the wire.
  */
 export const WIRE_METHODS: readonly RequestMethod[] = REQUEST_METHODS.filter((m) => !CLIENT_ONLY.has(m));
 
-// Exhaustiveness, in the direction `satisfies` cannot see. It refuses a name
-// the schema does not have; these refuse a schema name the lists do not have,
-// and the compiler's error is the missing method's own name. Between them,
-// adding to rpc-schema.ts without adding here does not build.
+// Exhaustiveness, in the direction `satisfies` cannot see. `satisfies` refuses
+// a name the schema does not have; these types refuse a schema name the lists
+// do not have, and the compiler's error is the missing method's own name.
+// Between them, adding to rpc-schema.ts without adding here does not build.
 type MissingRequest = Exclude<RequestMethod, (typeof REQUEST_METHODS)[number]>;
 type MissingPush = Exclude<PushMessage, (typeof PUSH_MESSAGES)[number] | ClientPush>;
 const everyRequestListed: MissingRequest extends never ? true : MissingRequest = true;
@@ -410,8 +369,8 @@ void everyPushListed;
 // --- the same surface as handler maps ----------------------------------------
 //
 // The lists above name the protocol; these three give it a shape a transport
-// can dispatch into. They are here rather than beside a server because both
-// ends need them: a client PRESENTS a RequestHandlers it satisfies over the
+// can dispatch into. They sit here rather than beside a server because both
+// ends need them: a client presents a RequestHandlers it satisfies over the
 // wire, and shared/transport.ts is the code that does it.
 
 /**
@@ -424,7 +383,7 @@ export type ViewPush = {
 };
 
 /**
- * What a SERVER may push. CLIENT_PUSHES are subtracted rather than stubbed:
+ * What a server may push. CLIENT_PUSHES are subtracted rather than stubbed:
  * `connectionState` is a fact about the wire, and the end on the far side of a
  * dropped one cannot report it (remote.md §7). Leaving it in this type would
  * hand every server a method whose only correct implementation is not to call
@@ -447,11 +406,11 @@ export type RequestHandlers = {
 /**
  * The same map from the calling side, where every answer is a promise.
  *
- * An IMPLEMENTOR may answer synchronously and often does — half of
- * bun/server.ts's handlers are plain functions — so RequestHandlers admits
- * both. A CALLER cannot: the answer may be on another machine, and code that
- * reads it has to await either way. Stating that separately is what lets the
- * view be written once against `requests.noteList({…}).then(…)` and bound to
+ * An implementor may answer synchronously and often does (half of
+ * bun/server.ts's handlers are plain functions), so RequestHandlers admits
+ * both. A caller cannot: the answer may be on another machine, and code that
+ * reads it has to await either way. Stating that separately lets the view be
+ * written once against `requests.noteList({…}).then(…)` and bound to
  * Electrobun on the Mac and to a socket on iOS (ios.md §2). Assignable to
  * RequestHandlers, never the other way round.
  */
@@ -468,10 +427,10 @@ export type RequestClient = {
  * one twice is indistinguishable from running it once. Everything else carries
  * an `op` and the server dedupes on it (remote.md §7).
  *
- * Stated as the READS rather than as the writes on purpose. A method nobody
- * classified then defaults to being deduped, which costs an entry in a bounded
- * window; the other default costs a note saved twice, its own divergence guard
- * tripping on its own bytes, and a trash copy of the user's work.
+ * The list names the reads rather than the writes, so a method nobody
+ * classified defaults to being deduped. That costs an entry in a bounded
+ * window. The other default would cost a note saved twice, its own divergence
+ * guard tripping on its own bytes, and a trash copy of the user's work.
  */
 export const READ_ONLY_METHODS = [
   "workspaceList",
@@ -483,11 +442,11 @@ export const READ_ONLY_METHODS = [
   "tagNotes",
   "trashList",
   "terminalStatus",
-  // The one entry here that is not simply a read, and it earns its place both
-  // ways. It writes at most `owner = the caller`, which is where a second
-  // attempt would leave it anyway. And it must be RE-ASKED rather than answered
-  // from the op record: a claim is a question about right now, and a recorded
-  // answer would tell a client it still holds a shell that has since moved.
+  // The one entry here that is not simply a read. It writes at most
+  // `owner = the caller`, which is where a second attempt would leave it
+  // anyway. And it must be re-asked rather than answered from the op record: a
+  // claim is a question about right now, and a recorded answer would tell a
+  // client it still holds a shell that has since moved.
   "terminalClaim",
   "profileRead",
   "settingsGet",
@@ -499,9 +458,9 @@ export const READ_ONLY_METHODS = [
 
 const READ_ONLY = new Set<string>(READ_ONLY_METHODS);
 
-/** Whether a request must carry an `op`. Unknown names answer true: this is
- * asked about a method the caller is ABOUT to send, and defaulting an
- * unrecognized one to "dedupe it" is the harmless direction. */
+/** Whether a request must carry an `op`. An unknown name answers true: the
+ * caller is about to send that method, and defaulting an unrecognized one to
+ * "dedupe it" is the harmless direction. */
 export function needsOp(method: string): boolean {
   return !READ_ONLY.has(method);
 }
@@ -514,19 +473,19 @@ export function needsOp(method: string): boolean {
  * payload, so a nested one (assetRead's image, which may be null) is reachable
  * without a rule per shape.
  *
- * The SCHEMA still says base64 everywhere, and the view still receives base64:
+ * The schema still says base64 everywhere, and the view still receives base64.
  * Electrobun's bridge is JSON either way, so this is an optimization for the
- * hop that has a network in it and a no-op for the one that does not. What it
- * buys is the 33% base64 costs, on exactly the two payloads big enough to care
- * — a screenshot and a scrollback replay.
+ * hop that has a network in it and a no-op for the one that does not. It saves
+ * the 33% base64 costs on the two payloads big enough to matter: a screenshot
+ * and a scrollback replay.
  */
 export const BINARY_FIELDS: Readonly<Record<string, readonly string[]>> = {
   "req:assetWrite": ["dataB64"],
   "res:assetRead": ["image", "dataB64"],
   "res:terminalAttach": ["dataB64"],
-  // The same scrollback by another name, and absent on the two answers that
-  // carry none: hoistBinary skips a field that is not there, so "held" and
-  // "gone" cost no frame.
+  // The same scrollback terminalAttach returns. The "held" and "gone" answers
+  // carry no dataB64, and hoistBinary skips a field that is not there, so
+  // those cost no frame.
   "res:terminalClaim": ["dataB64"],
   "push:terminalOutput": ["dataB64"],
 };
@@ -536,13 +495,12 @@ export function binaryPath(kind: "req" | "res" | "push", method: string): readon
 }
 
 /**
- * Pull the base64 out of a payload and return it as bytes, with the field
- * blanked in a shallow copy. null when the field is absent or empty — a
- * missing image is a `null` in the payload and not an empty frame, and an
- * empty string costs a frame to say nothing.
- *
- * Copies only the objects along the path, so the caller's payload is untouched
- * and the rest of it is shared rather than cloned.
+ * Pull the base64 at `path` out of a payload and return it as bytes, with the
+ * field blanked in a shallow copy. Returns null when the field is absent or
+ * empty: a missing image stays `null` in the payload, and an empty string is
+ * skipped rather than sent as a frame carrying nothing. Only the objects along
+ * the path are copied, so the caller's payload is untouched and the rest of it
+ * is shared.
  */
 export function hoistBinary(payload: unknown, path: readonly string[]): { payload: unknown; bytes: Uint8Array } | null {
   const at = walk(payload, path);
@@ -550,7 +508,7 @@ export function hoistBinary(payload: unknown, path: readonly string[]): { payloa
   return { payload: replace(payload, path, ""), bytes: fromBase64(at.value) };
 }
 
-/** The inverse: put the bytes back where the sender took them from. */
+/** The inverse of hoistBinary: put the bytes back at `path`, as base64. */
 export function restoreBinary(payload: unknown, path: readonly string[], bytes: Uint8Array): unknown {
   return replace(payload, path, toBase64(bytes));
 }
@@ -574,11 +532,11 @@ function replace(payload: unknown, path: readonly string[], value: string): unkn
 }
 
 /**
- * The TC39 builtins rather than `Buffer`, and not `atob` either. Both
- * conversions are on the path of every keystroke's echo, so they have to be the
- * native ones; and a client half that runs in a webview (ios.md §2) has no
- * `Buffer` to reach for. Bun and WebKit both have these — the harness's WebKit
- * was probed for it, since it is the engine lineage the app ships in.
+ * The TC39 base64 builtins, rather than `Buffer` or `atob`. Both conversions
+ * run on every keystroke's echo, so they have to be native. The client half
+ * also runs in a webview, which has no `Buffer` (ios.md §2). Bun and WebKit
+ * both have these builtins: the harness's WebKit was probed for them, since it
+ * is the engine lineage the app ships in.
  */
 export function toBase64(bytes: Uint8Array): string {
   return bytes.toBase64();
@@ -589,13 +547,11 @@ export function fromBase64(text: string): Uint8Array {
 }
 
 /**
- * Which of the peer's declared names this end also knows.
- *
- * The intersection, and in that order on purpose: `mine` bounds the result, so
- * what a connection retains is the size of our own surface however many names
- * the peer sent. A peer that declares nothing gets null rather than an empty
- * set — "said nothing" and "said it can do nothing" are opposite answers, and
- * conflating them would take every call down against a server that simply
+ * Which of the peer's declared names this end also knows. The result is the
+ * intersection, and it is `mine` that gets filtered, so what a connection
+ * keeps is bounded by this end's own surface however many names the peer sent.
+ * A peer that declares nothing gets null rather than an empty set: empty would
+ * read as "can do nothing" and take every call down against a server that
  * predates the field.
  */
 export function declared(theirs: readonly string[], mine: readonly string[]): Set<string> | null {
@@ -612,10 +568,10 @@ export function hello(
   hold = 0,
   label = "",
 ): Hello {
-  // Filled from the role rather than passed in. What an end serves is a fact
-  // about which end it is, not a decision either caller gets to make, and a
-  // server that could forget to declare its methods would be a server that
-  // silently reads as "assume it can do anything".
+  // `serves` comes from the role rather than from a caller: which methods an
+  // end serves follows from which end it is. A server that could forget to
+  // declare its methods would send a hello that silently reads to the peer as
+  // "assume it can do anything".
   const serves = role === "server";
   return {
     t: "hello",
@@ -625,10 +581,10 @@ export function hello(
     methods: serves ? [...WIRE_METHODS] : [],
     pushes: serves ? [...PUSH_MESSAGES] : [],
     client,
-    // Cleaned on the way out as well as on the way in. The rule belongs to the
-    // wire rather than to whichever shell asked the operating system for a
-    // name, and a device whose name has a newline in it should not be able to
-    // send one to a server that predates the check.
+    // Cleaned on the way out as well as on the way in, so the rule belongs to
+    // the wire rather than to whichever shell asked the operating system for a
+    // name. A device name with a newline in it must not reach a server that
+    // predates the check.
     label: cleanLabel(label),
     instance,
     hold,
@@ -637,12 +593,11 @@ export function hello(
 
 /**
  * How long a server keeps its sessions for a client that has gone away: what
- * the client asked for, under the server's own ceiling.
- *
- * Both ends compute it, from the pair of hellos, because those cross on the
- * wire (see `Hello.hold`). A client asking for a day is not refused; it is
- * granted the longest this server keeps a process for nobody
- * (bun/daemon.ts `HOLD_MAX_MS`), and it can see that it was clamped.
+ * the client asked for, under the server's own ceiling. That ceiling is the
+ * longest this server keeps a process for nobody (bun/daemon.ts
+ * `HOLD_MAX_MS`). An over-long ask is clamped rather than refused, and the
+ * client can see that it was clamped. Both ends compute it from the pair of
+ * hellos, which cross on the wire (see `Hello.hold`).
  */
 export function sessionHold(asked: number, ceiling: number): number {
   return Math.max(0, Math.min(asked, ceiling));
@@ -653,20 +608,20 @@ export function sessionHold(asked: number, ceiling: number): number {
  * Both versions are always named: "incompatible" with no numbers in it is a
  * message nobody can act on (remote.md §11).
  *
- * Two refusals, and they are the two things that cannot be survived. A peer on
- * the wrong END of the wire is answering questions it has no business
- * answering. A peer on another PROTOCOL_VERSION may put different bytes behind
- * the same names, and a partially understood protocol is how silent
- * data-shaped bugs happen.
+ * Only two things refuse. A peer on the wrong end of the wire answers
+ * questions it has no business answering. A peer on another PROTOCOL_VERSION
+ * may put different bytes behind the same names, and a partly understood
+ * protocol makes silent data-shaped bugs.
  *
- * What is deliberately NOT a refusal is either end knowing a name the other
- * does not. That was refused here until it became clear what it cost: two
- * window verbs no server has ever answered refused every deployed server, and
- * a rule that stops a whole connection over a method nobody was going to call
- * makes the client and the server a matched pair that must ship together
- * forever. A missing method now fails at the call that needs it, naming itself
- * and both builds, and everything else on the connection keeps working. A
- * differing BUILD is not a refusal either — it is what the upgrade offer reads.
+ * A name one end knows and the other does not is not a refusal, and must not
+ * become one again. It was refused here until a fingerprint over the method
+ * surface refused every deployed server the moment `windowDocs` and
+ * `windowRole` were added, two verbs no server has ever answered. A rule like
+ * that makes the client and the server a matched pair that must ship together
+ * forever (remote.md §11). Such a call now fails on its own, naming itself and
+ * both builds, and everything else on the connection keeps working. A
+ * differing build is not a refusal either, and is what the upgrade offer
+ * reads.
  */
 export function checkHello(peer: Hello, expect: "client" | "server"): string | null {
   if (peer.role !== expect) return `expected to be talking to a ${expect}, and the peer says it is a ${peer.role}`;
@@ -677,14 +632,11 @@ export function checkHello(peer: Hello, expect: "client" | "server"): string | n
 }
 
 /**
- * Which end to upgrade, in a sentence, appended to the two numbers.
- *
- * The numbers are the diagnosis and this is the instruction, and a user needs
- * both: "protocol version 4 on the server, 5 here" says what is wrong to
- * somebody who already knows what this number is, and says nothing at all to
- * everybody else. Always the OLDER end, whichever end that turns out to be:
- * two builds that disagree do not meet in the middle, and the older one is the
- * one that has never heard of the newer.
+ * Which end to upgrade, in a sentence appended to the two version numbers.
+ * The numbers are the diagnosis and this is the instruction: "protocol version
+ * 4 on the server, 5 here" says nothing to a user who does not already know
+ * what the number is. It always names the older end, whichever that turns out
+ * to be, since the older build is the one that has never heard of the newer.
  */
 function upgrade(peer: Hello): string {
   const weAreOlder = PROTOCOL_VERSION < peer.protocol;
@@ -736,8 +688,8 @@ export function encodeBinary(id: number, bytes: Uint8Array): Uint8Array {
 
 /**
  * Structural validation of one control frame. Every field a dispatcher will
- * touch is checked here, so nothing downstream has to ask whether `m` is a
- * string: the check is at the boundary or it is nowhere.
+ * touch is checked here, at the boundary, so nothing downstream has to ask
+ * whether `m` is a string.
  */
 export function parseControl(text: string): WireMessage {
   let raw: unknown;
@@ -753,20 +705,16 @@ export function parseControl(text: string): WireMessage {
       if (m["role"] !== "client" && m["role"] !== "server") return bad("a hello with no role");
       if (typeof m["protocol"] !== "number") return bad("a hello with no protocol version");
       if (typeof m["build"] !== "string") return bad("a hello with no build");
-      // A peer that predates the field is not refused here: checkHello owns
-      // compatibility, and it will refuse this one on the protocol version
-      // with both numbers named, which is a far better message than "a hello
-      // with no client".
+      // A peer that predates the `client` field is not refused here.
+      // checkHello owns compatibility and refuses this one on the protocol
+      // version with both numbers named, which reads better than "a hello with
+      // no client".
       if (m["client"] !== undefined && typeof m["client"] !== "string") return bad("a hello with a non-string client");
-      // The label is not checked, it is CLEANED: refusing a connection over a
-      // device name would be refusing to talk to a phone about a string nobody
-      // reads twice, and there is no shape it could have that this does not
-      // reduce to something displayable (`cleanLabel`).
       if (m["instance"] !== undefined && typeof m["instance"] !== "string") return bad("a hello with a non-string instance");
-      // Structural, unlike the two above, because this one is arithmetic the
-      // server does on a number the client chose: a NaN would make every
-      // comparison against it false, and the timer it ends up in would be armed
-      // for nothing. Absent is still fine, and means no hold.
+      // Structural, unlike the type checks above, because the server does
+      // arithmetic on this number and the client chose it: a NaN makes every
+      // comparison against it false, and the timer it ends up in would be
+      // armed for nothing. Absent is still fine, and means no hold.
       if (m["hold"] !== undefined && (typeof m["hold"] !== "number" || !Number.isFinite(m["hold"]) || m["hold"] < 0)) {
         return bad("a hello with an unusable hold");
       }
@@ -776,14 +724,17 @@ export function parseControl(text: string): WireMessage {
         protocol: m["protocol"],
         build: m["build"],
         // Absent is empty rather than a refusal, and empty means "declared
-        // nothing" — `declared()` reads that as the permissive answer. Anything
-        // that is not a string is DROPPED rather than refused: the list is
-        // intersected with our own names before it is used, so a number in it
-        // could never have matched one, and hanging up over it would be
-        // refusing a connection on behalf of a name that does not exist.
+        // nothing", which `declared()` reads as the permissive answer. A
+        // non-string entry is dropped rather than refused: the list is
+        // intersected with this end's own names before use, so a number in it
+        // could never have matched one, and hanging up over it would refuse a
+        // connection on behalf of a name that does not exist.
         methods: names(m["methods"]),
         pushes: names(m["pushes"]),
         client: typeof m["client"] === "string" ? m["client"] : "",
+        // The label is cleaned rather than checked. `cleanLabel` reduces any
+        // shape to something displayable, and refusing a connection over a
+        // device name would hang up on a phone over a cosmetic string.
         label: cleanLabel(m["label"]),
         instance: typeof m["instance"] === "string" ? m["instance"] : "",
         hold: typeof m["hold"] === "number" ? m["hold"] : 0,
@@ -810,9 +761,8 @@ export function parseControl(text: string): WireMessage {
       return {
         t: "bye",
         why: typeof m["why"] === "string" ? m["why"] : "no reason given",
-        // Only a literal true grants it. Anything else — absent, a string, a
-        // number a peer hoped would be truthy — is the final goodbye that a
-        // `bye` has always been.
+        // Only a literal true sets `back`. Anything else (absent, a string, a
+        // number a peer hoped would be truthy) leaves the bye final.
         ...(m["back"] === true ? { back: true } : {}),
       };
     // Nothing to validate, because there is nothing on them. Whatever else the
@@ -834,48 +784,43 @@ function isId(v: unknown): v is number {
   return typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
 }
 
-/** Long enough for a nonce and a counter, short enough that a million of them
- * is still a rounding error. The window that holds them is bounded by count
- * too; this bounds each entry. */
+/** The cap on an op id: long enough for a nonce and a counter, short enough
+ * that a million of them is still a rounding error. The window that holds them
+ * is bounded by count as well; this bounds each entry. */
 const MAX_OP_CHARS = 128;
 
-/** Longer than any hostname a machine reports about itself, short enough to
- * sit in a sidebar. A label past it is cut rather than refused: what is on
- * screen is a name, and the first 64 characters of one still name something. */
+/** The cap on a device label: longer than any hostname a machine reports about
+ * itself, short enough to sit in a sidebar. A longer label is cut rather than
+ * refused, since its first 64 characters still name the device. */
 const MAX_LABEL_CHARS = 64;
 
 /**
- * A device name, made safe to hold and to show.
- *
- * Two things a peer must not decide for us. How much memory this costs: the
- * server keeps one per connection and pushes it to every other client, so an
- * unbounded string is an unbounded push. And what it can DO on arrival: a
- * newline in a sidebar is a broken row, and an escape sequence in a line
- * somebody tails from a server log is a terminal doing what the label said.
- * Neither is a reason to hang up on a phone, so both are simply removed.
+ * A device name, made safe to hold and to show. The length is capped: the
+ * server keeps one label per connection and pushes it to every other client,
+ * so an unbounded string is an unbounded push. Control characters are removed:
+ * a newline breaks a sidebar row, and an escape sequence runs in whatever
+ * terminal tails the server log. Neither is a reason to hang up on a phone.
  */
 function cleanLabel(v: unknown): string {
   return typeof v === "string" ? v.replace(/\p{Cc}/gu, " ").slice(0, MAX_LABEL_CHARS).trim() : "";
 }
 
 /**
- * A declared method or push list, made safe to hold.
- *
- * Not a string is not a name, so it is dropped. What is left is capped, and
- * that cap is the only reason this is not a one-line filter: `declared()`
- * intersects the result with our own surface and would bound it anyway, but
- * this runs FIRST, on an array whose length the peer chose. A hello listing ten
- * million methods must not be built into a ten-million-entry Set on the way to
- * being thrown away.
+ * A declared method or push list, made safe to hold. A non-string is not a
+ * name, so it is dropped, and what is left is capped. That cap is the only
+ * reason this is not a one-line filter: `declared()` would bound the result
+ * anyway by intersecting it with this end's own surface, but this runs first,
+ * on an array whose length the peer chose. A hello listing ten million methods
+ * must not become a ten-million-entry Set before it is thrown away.
  */
 function names(v: unknown): string[] {
   if (!Array.isArray(v)) return [];
   return v.filter((n): n is string => typeof n === "string").slice(0, MAX_DECLARED_NAMES);
 }
 
-/** Comfortably over the real surface (about 70 requests and 10 pushes) and far
- * under a number worth allocating for. A peer with more names than this to
- * declare is not a Ledge server. */
+/** The cap on a declared name list: comfortably over the real surface (about
+ * 70 requests and 10 pushes) and far under a number worth allocating for. A
+ * peer with more names than this to declare is not a Ledge server. */
 const MAX_DECLARED_NAMES = 512;
 
 // Absent stays absent. Spreading `{op: undefined}` would put the key in the
@@ -903,9 +848,9 @@ export class FrameDecoder {
     for (;;) {
       if (this.buf.length - off < FRAME_HEADER_BYTES) break;
       const len = readU32(this.buf, off);
-      // Before buffering, not after: the cap is worth having precisely because
-      // it refuses a peer that claims 4 GB, and waiting for the bytes to
-      // arrive first would be agreeing to hold them.
+      // Checked before buffering, not after: the cap exists to refuse a peer
+      // that claims 4 GB, and waiting for those bytes to arrive first would
+      // mean holding them.
       if (len > MAX_FRAME_BYTES) throw new WireError(`the peer announced a ${len}-byte frame, over the ${MAX_FRAME_BYTES}-byte cap`);
       if (this.buf.length - off - FRAME_HEADER_BYTES < len) break;
       const type = this.buf[off + 4]!;
@@ -941,19 +886,17 @@ function concat(a: Uint8Array, b: Uint8Array): Uint8Array {
 
 // --- the binary companion, both directions -----------------------------------
 //
-// The rule at the top of this file, as the two objects that keep it. Here
-// rather than in a transport because BOTH transports need it and neither owns
-// it: the server writes companion frames and the client writes them, and the
-// halves live in different files now (shared/transport.ts and bun/transport.ts).
+// The two objects that keep the binary-frame rule at the top of this file.
+// They live here rather than in a transport because both transports need them
+// and neither owns them: the client's half is shared/transport.ts and the
+// server's is bun/transport.ts, and both write companion frames.
 
 /**
  * Write one control message, with the payload's bulky base64 field (if it has
- * one) as a binary frame immediately before it.
- *
- * Before, not after, and it matters: the receiver holds at most one waiting
- * binary frame, so "the bytes that just arrived" is the whole correlation
- * story. Sending them afterwards would mean a control frame that references
- * something not yet in hand, which is a state a peer could leave open.
+ * one) as a binary frame immediately before it. Before, not after: the
+ * receiver holds at most one waiting binary frame, so correlation is only
+ * "the bytes that just arrived". Sending them afterwards would mean a control
+ * frame referencing bytes not yet in hand, a state a peer could leave open.
  */
 export function writeMessage(
   write: (b: Uint8Array) => void,
@@ -989,11 +932,10 @@ function nextBinaryId(): number {
 
 /**
  * The receiving side of the same rule: hold the bytes until the next control
- * frame claims them, and refuse a second binary frame before that happens.
- *
- * Refusing is the point. A peer that can queue binary frames can make the
- * other end hold megabytes on the promise of a control frame it never sends,
- * and the cap on one frame does nothing about a thousand of them.
+ * frame claims them, and refuse a second binary frame before that happens. A
+ * peer that could queue binary frames could make this end hold megabytes on
+ * the promise of a control frame it never sends, and the cap on one frame does
+ * nothing about a thousand of them.
  */
 export class BinaryHolder {
   private held: { id: number; bytes: Uint8Array } | null = null;
@@ -1008,9 +950,8 @@ export class BinaryHolder {
   claim(msg: WireMessage, kind: "req" | "res" | "push", method: string): unknown {
     const bin = msg.t === "req" || msg.t === "res" || msg.t === "push" ? msg.bin : undefined;
     const body = msg.t === "req" ? msg.p : msg.t === "res" ? msg.r : msg.t === "push" ? msg.p : null;
-    // Held bytes are NOT dropped by a message that did not ask for them: that
-    // would turn a desync into a silent truncation, and idle() below is what
-    // catches it.
+    // A message that did not ask for bytes does not drop held ones: that would
+    // turn a desync into a silent truncation. idle() below catches it instead.
     if (bin === undefined) return body;
     const held = this.held;
     this.held = null;
@@ -1020,8 +961,8 @@ export class BinaryHolder {
     return restoreBinary(body, path, held.bytes);
   }
 
-  /** A control frame that claimed nothing leaves nothing held: bytes with no
-   * claimant are a desync, not a spare. */
+  /** True when no bytes are waiting. A control frame that claimed no bytes
+   * must leave none behind: bytes with no claimant are a desync. */
   idle(): boolean {
     return this.held === null;
   }

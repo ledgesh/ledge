@@ -1,24 +1,24 @@
 // User preferences: the shape of settings, the defaults, and the validator.
-// Lives in shared/ because both ends need it — Bun parses the files and
-// applies the Bun-side settings (shell, trash TTL); the view receives the
+// Lives in shared/ because both ends need it. Bun parses the files and
+// applies the settings it owns (shell, trash TTL); the view receives the
 // validated snapshot over RPC and applies the rest (fonts, runnable fences).
+// architecture.md §6 says what earns a knob: a setting exists only where the
+// hardcoded default demonstrably fails someone, and it applies at launch,
+// never live.
 //
-// The policy for what belongs in here is architecture.md ("Settings");
-// the short version: a setting exists only where the hardcoded default
-// demonstrably fails someone, and it applies at launch, never live.
+// One shape, two homes (remote.md §5). `Settings` is a single interface, but
+// each section is a fact about one of two things: the machine holding the
+// notes (which shell to spawn, how long the trash keeps things, what a
+// ```python fence runs) or the screen in front of the user (font sizes, the
+// theme, whether markdown syntax is concealed). The first kind lives in the
+// server's settings.jsonc, the second in the client's, and SETTINGS_HOMES
+// below is the only place that mapping is written down. A phone's font size
+// is not a VPS's font size, and no server can know whether the Mac in front
+// of the user is in dark mode.
 //
-// ONE SHAPE, TWO HOMES (remote.md §5). `Settings` is a single interface, but
-// each of its sections is a fact about one of two things: the machine holding
-// the notes (which shell to spawn, how long the trash keeps things, what a
-// ```python fence runs) or the screen in front of you (font sizes, the theme,
-// whether markdown syntax is concealed). The first kind lives in the SERVER's
-// settings.jsonc, the second in the CLIENT's, and SETTINGS_HOMES below is the
-// only place that mapping is written down. A phone's font size is not a VPS's
-// font size, and no server can know whether this Mac is in dark mode.
-//
-// The split is by section, not by field, which is not a simplification: it is
-// the reason `parseSettings` can say "this whole section is read from the
-// other file" in one sentence a user can act on.
+// The split is by section, not by field, so `parseSettings` can report "this
+// whole section is read from the other file" in one sentence a user can act
+// on.
 
 import { folderNameProblem } from "./folders";
 
@@ -30,135 +30,135 @@ export interface Settings {
   // The login shell every PTY runs (per-note inline-run shells and terminal
   // drawers alike). Applied Bun-side at spawn.
   shell: { path: string; args: string[] };
-  // `livePreview` conceals markdown syntax where the caret is not
-  // (editor/livePreview.ts). The knob earns its place as the escape hatch,
-  // not a preference: the raw view is the app's original deliberate stance,
-  // and precise syntax editing (or any concealment bug) demonstrably needs a
-  // way back to text-on-screen-is-text-on-disk. Code block CONTENT is never
-  // concealed either way — only the fence marks are.
+  // `livePreview` conceals markdown syntax away from the caret
+  // (editor/livePreview.ts). A code block's content is never concealed either
+  // way; only the fence marks are. The knob is an escape hatch, not a
+  // preference: the raw view is the app's original stance, and precise syntax
+  // editing (or a concealment bug) needs a way back to
+  // text-on-screen-is-text-on-disk.
   editor: { fontSize: number; livePreview: boolean };
   terminal: { fontSize: number };
   // Light or dark. "system" (the default) follows the Mac's appearance, which
-  // is what the app has always done and what almost everyone wants; the two
+  // is what the app has always done and what almost everyone wants. The two
   // forced values exist because the OS setting demonstrably fails people whose
-  // appearance is not a preference — a Mac on the automatic day/night schedule
-  // flipping a notebook mid-session, a projector or a bright room where one
-  // side is simply unreadable, a screenshot that has to match the docs. Read
-  // at launch like every setting, but "system" keeps tracking the OS live
+  // appearance is not a preference: a Mac on the automatic day/night schedule
+  // flipping a notebook mid-session, a bright room or projector where one side
+  // is unreadable, a screenshot that has to match the docs. The value is read
+  // at launch like every setting, but "system" keeps tracking the OS
   // afterwards: that is the OS changing, not the setting.
   appearance: { theme: Theme };
   // How long a deleted note stays recoverable before the launch-time purge
   // evicts it (bun/notes.ts purgeTrash).
   trash: { ttlDays: number };
-  // Code-fence languages that get a Run button (editor/blocks.ts). Matched
-  // case-insensitively against the fence's info string. A user's list
-  // REPLACES this one (that is how a language is un-mapped) — and since
-  // bun/settings.ts seeds settings.jsonc with the defaults written out in
-  // full, an existing install's file has this list frozen at seed time:
-  // adding a language to the default below does NOT reach seeded files, so
-  // announce such additions (the user adds the word to their own list).
+  // `runnable` lists the code-fence languages that get a Run button
+  // (editor/blocks.ts), matched case-insensitively against the fence's info
+  // string. A user's list replaces this one, which is how a language is
+  // un-mapped. bun/settings.ts seeds settings.jsonc with the defaults written
+  // out in full, so an existing install's list is frozen at seed time. Adding
+  // a language below does not reach a seeded file: announce such additions.
+  // The user then adds the word to their own list.
   //
   // `interpreters` maps a fence language to the command that runs its temp
   // file (bun/runner.ts). A language with no entry is sourced into the note's
-  // shell — that is what makes ```sh blocks carry cwd/env across runs, and it
-  // is also the extension point: add `"sql": "psql -f"` here (and to
-  // `runnable`) and sql fences run, against whatever connection the note's own
-  // env names (frontmatter `env:`/`envFile:`/`profile:`), because the value is
-  // shell text expanded in the note's shell: `"psql \"$DATABASE_URL\" -f"` is
-  // one entry that means a different database per note. Which engine `sql`
-  // means is exactly why it is not a default: unlike "which python", there is
-  // no answer that works for most people, and a wrong guess would source
-  // `DELETE FROM ...` into zsh. Values are inserted verbatim into a shell
-  // line, so they may carry flags ("python3 -u") and must be quoted by the
-  // user if the path has spaces. The literal value "bun" is special-cased to
-  // the bun runtime bundled with the app, so TypeScript runs without a bun on
-  // PATH. User entries MERGE over these defaults (a venv python should not
-  // cost you node), so to un-map a language remove it from `runnable` instead.
+  // shell instead, which is what makes ```sh blocks carry cwd and env across
+  // runs. Values are inserted verbatim into a shell line, so they may carry
+  // flags ("python3 -u") and the user must quote a path with spaces. The
+  // literal value "bun" is special-cased to the bun runtime bundled with the
+  // app, so TypeScript runs without a bun on PATH. User entries merge over
+  // these defaults (pointing python at a venv should not un-map node), so to
+  // un-map a language remove it from `runnable` instead.
   //
-  // A ```prompt fence is an agent run: the default maps it to Claude Code's
-  // print mode, with a trailing `<` so the shell feeds the block body to the
-  // CLI on stdin — values are shell text, so redirection composes, and
-  // `claude -p /tmp/file` without it would read the PATH as the prompt.
-  // Because the block runs from the note's own shell, the agent inherits the
-  // note's cwd, env, and the $LEDGE_NOTE/$LEDGE_WORKSPACE facts, so a prompt
-  // block saying "this note" resolves through the Ledge MCP server exactly
-  // as it would in the terminal drawer. `--allowedTools mcp__ledge`
-  // pre-authorizes that server's tools, because print mode is
-  // non-interactive: there is no one to answer a permission prompt, so
-  // without it a write-intent block runs to completion and then reports it
-  // was not allowed to write. Granting exactly the Ledge tools is safe by
-  // the same argument as the server's own stance — they are guarded by the
-  // registry and path asserts, and touch nothing the block's shell could not
-  // already touch. Every OTHER permission still applies. The LEDGE_PROMPT_BLOCK=1
+  // The map is also the extension point. Adding `"sql": "psql -f"` here and
+  // "sql" to `runnable` makes sql fences run. The value is shell text expanded
+  // in the note's shell, so it can read the note's own env: the one entry
+  // `"psql \"$DATABASE_URL\" -f"` means a different database per note
+  // (frontmatter `env:`/`envFile:`/`profile:`). Which engine `sql` means is
+  // why it gets no default: unlike "which python", that question has no answer
+  // that works for most people, and a wrong guess would source
+  // `DELETE FROM ...` into zsh.
+  //
+  // A ```prompt fence is an agent run. The default maps it to Claude Code's
+  // print mode with a trailing `<`, so the shell feeds the block body to the
+  // CLI on stdin. Values are shell text, so redirection composes, and
+  // `claude -p /tmp/file` without the `<` would read the path as the prompt.
+  // The block runs from the note's own shell, so the agent inherits the note's
+  // cwd, env, and the $LEDGE_NOTE/$LEDGE_WORKSPACE facts: a prompt block
+  // saying "this note" resolves through the Ledge MCP server exactly as it
+  // would in the terminal drawer. Point the entry at another stdin-reading
+  // CLI to switch agents. A run shows nothing until it finishes, because
+  // print mode buffers its answer.
+  //
+  // `--allowedTools mcp__ledge` pre-authorizes the Ledge MCP server's tools,
+  // because print mode is non-interactive: with no one to answer a permission
+  // prompt, a write-intent block would run to completion and then report it
+  // was not allowed to write. Granting exactly the Ledge tools is safe by the
+  // same argument as the server's own stance: they are guarded by the registry
+  // and path asserts, and touch nothing the block's shell could not already
+  // touch. Every other permission still applies. The LEDGE_PROMPT_BLOCK=1
   // prefix marks the session as a one-shot for the same reason: nobody can
-  // answer a follow-up question either, and without being told, the model
-  // ends its reply asking one (the MCP server's initialize instructions read
-  // the marker and say "act, don't ask" — bun/mcp.ts). Expect silence until
-  // the run finishes: print mode buffers its answer. Point the entry at
-  // another stdin-reading CLI to switch agents.
+  // answer a follow-up question either, and a model that is not told this
+  // ends its reply asking one. The MCP server's initialize instructions read
+  // the marker and say "act, don't ask" (bun/mcp.ts).
   //
-  // A ```redis fence is a list of redis-cli commands, fed on stdin by the same
-  // trailing `<`. It earns a default where `sql` does not, on both counts:
-  // the fence word names one canonical client (a Valkey server speaks the
-  // same protocol, so `redis-cli` drives it — point the entry at `valkey-cli`
-  // if that is the binary you have), and the default target is honest with no
-  // configuration at all, because `${REDIS_URL:-...}` falls back to localhost,
-  // which is the machine a dev's redis is actually on. Set REDIS_URL in a
-  // note's frontmatter env (or a profile, for a URL with a password in it) and
-  // the same fence points at staging. The default spelling is
-  // `-u "${REDIS_URL:-...}"` rather than a bare `${REDIS_URL:+-u "$REDIS_URL"}`
-  // because zsh does not word-split an unquoted expansion: the conditional form
-  // would hand redis-cli `-u redis://host` as ONE argument.
+  // A ```redis fence is a list of redis-cli commands, fed on stdin by the
+  // same trailing `<`. It gets a default where `sql` does not, on both counts.
+  // The fence word names one canonical client: a Valkey server speaks the same
+  // protocol, so `redis-cli` drives it, and the entry can point at `valkey-cli`
+  // if that is the binary present. The default target needs no configuration,
+  // because `${REDIS_URL:-...}` falls back to localhost, which is the machine
+  // a dev's redis is actually on. Set REDIS_URL in a note's frontmatter env
+  // (or a profile, for a URL with a password in it) and the same fence points
+  // at staging. The default spelling is `-u "${REDIS_URL:-...}"` rather than
+  // a bare `${REDIS_URL:+-u "$REDIS_URL"}` because zsh does not word-split an
+  // unquoted expansion: the conditional form would hand redis-cli
+  // `-u redis://host` as one argument.
   //
   // `hostInterpreters` overrides `interpreters` per target machine, for runs
-  // a note's `host:` frontmatter sends elsewhere: the base map runs verbatim
-  // on every machine, and "which python" can have a different answer on
-  // prod than here — the same fact that earned `interpreters` its existence,
-  // one axis up. Keys are host patterns matched against the run's ssh
-  // destination ("deploy@prod-01", or the reserved "local"); `*` matches any
-  // run of characters, so one entry covers a numbered fleet
-  // ("deploy@anypost-*"). Every matching section merges over the base in
-  // file order, later keys winning. Machine facts live HERE, not in
-  // frontmatter: the same host appears in many notes, and its toolchain
-  // layout is one fact about one machine, not a per-note choice.
+  // a note's `host:` frontmatter sends elsewhere: the base map otherwise runs
+  // verbatim everywhere, and "which python" can differ on prod. Keys are host
+  // patterns matched against the run's ssh destination ("deploy@prod-01", or
+  // the reserved "local"), `*` matches any run of characters (one entry covers
+  // a numbered fleet: "deploy@anypost-*"), and every matching section merges
+  // over the base in file order, later keys winning. Why this is a setting
+  // rather than frontmatter: architecture.md §6.
   blocks: {
     runnable: string[];
     interpreters: Record<string, string>;
     hostInterpreters: Record<string, Record<string, string>>;
   };
-  // Daily notes: one note per LOCAL calendar day, titled YYYY-MM-DD, reached
-  // by ⌘J / `ledge today` (create-or-open, idempotent). `workspace` pins
-  // where they live — a registered root's absolute path (~ expands) or its
-  // folder name. It earns its knob because the deixis default (the selected
-  // workspace in the app, cwd at the CLI) demonstrably scatters daily notes
-  // for anyone with more than one workspace, and "where is today's note?" is
-  // the feature's one promise — and it stays a knob because a workspace is
-  // not a note: there is no corpus object to carry the fact. Empty string
-  // means unset (deixis); a value naming no registered root degrades,
-  // reported, never an error. WHICH note seeds the day is NOT here: mark
-  // that note `template: daily` in its own frontmatter — the retired
-  // `template` field named a note by title, which went stale on rename.
-  // `folder` pins WHERE INSIDE that workspace, for anyone who keeps a journal
-  // in one: a workspace-relative path with forward slashes, empty meaning the
-  // top level, which is where every note goes when nobody says otherwise. It
-  // earns its knob on the same argument one level down — ⌘J creates a note
-  // unasked, so the only way to say where is in advance — and it degrades
-  // differently from `workspace` on purpose. A name that is not a folder name
-  // is reported and ignored: the file is the settings UI, and a typo must not
-  // break ⌘J. A name the store then REFUSES (an ignored folder, say) is an
-  // error at the keystroke instead, because that message names the exact fix
-  // and a daily note quietly landing somewhere else is the worse failure.
+  // Daily notes: one note per local calendar day, titled YYYY-MM-DD, reached
+  // by ⌘J or `ledge today` (create-or-open, idempotent). `workspace` names
+  // where they live: a registered root's absolute path (~ expands) or its
+  // folder name. An empty string means unset, and the deixis default applies
+  // (the selected workspace in the app, cwd at the CLI). That default
+  // demonstrably scatters daily notes for anyone with more than one
+  // workspace. "Where is today's note?" is the feature's one promise, so the
+  // knob is earned. It stays a knob because a workspace is not a note: there
+  // is no corpus object to carry the fact. A value naming no registered root
+  // degrades to the default, reported, never an error.
+  //
+  // Which note seeds the day is not set here. Mark that note with
+  // `template: daily` in its own frontmatter. The retired `template` field
+  // named a note by title, which went stale on rename.
+  //
+  // `folder` names where inside that workspace, for anyone who keeps a
+  // journal in one: a workspace-relative path with forward slashes, empty
+  // meaning the top level. It degrades differently from `workspace`. A name
+  // that is not a folder name is reported and ignored, so a typo cannot break
+  // ⌘J. A name the store then refuses (an ignored folder, say) is an error at
+  // the keystroke instead, because that message names the exact fix. Both
+  // arguments, and why the knob is earned: architecture.md §6.
   daily: { workspace: string; folder: string };
-  // There is deliberately no templates section: which notes are templates is
-  // corpus data, not configuration — a note declares itself with
-  // `template: true` frontmatter, and the ⌥⌘N picker reads the live note
-  // lists. A registry here would need hand-editing, restart to apply, and
-  // would go stale against renames; the marker needs none of that.
+  // There is no templates section. Which notes are templates is corpus data,
+  // not configuration: a note declares itself with `template: true`
+  // frontmatter, and the ⌥⌘N picker reads the live note lists. A registry
+  // here would need hand-editing, would apply only after a restart, and would
+  // go stale against renames.
 }
 
-// Which file each section is read from. The `satisfies` is the point: a
-// section added to `Settings` without an entry here does not compile, so
-// nobody can add a knob without deciding whose fact it is.
+// Which file each section is read from. A section added to `Settings` without
+// an entry here does not compile, thanks to the `satisfies` clause, so no knob
+// can be added without deciding whose fact it is.
 export type SettingsHome = "server" | "client";
 
 export const SETTINGS_HOMES = {
@@ -177,9 +177,9 @@ export function homeOf(section: keyof Settings): SettingsHome {
 
 /**
  * The snapshot the view runs on: each section taken from the file that owns
- * it. Both arguments are full `Settings` because each file parses into one
- * (the sections it does not own hold defaults), which keeps every consumer
- * reading one whole object and unaware there were ever two files.
+ * it. Both arguments are a full `Settings` because each file parses into one,
+ * holding defaults in the sections it does not own. Every consumer then reads
+ * one whole object and need not know there were ever two files.
  */
 export function mergeSettings(server: Settings, client: Settings): Settings {
   return {
@@ -224,23 +224,21 @@ export const DEFAULT_SETTINGS: Settings = Object.freeze({
   daily: { workspace: "", folder: "" },
 });
 
-// What first launch writes to settings.jsonc: every default spelled out, with
-// the comments AS the documentation — the file is the settings UI
-// (architecture.md §6), so it has to explain itself in user terms. The
-// comments here are the user-facing distillation of the field docs on
-// `Settings` above; keep the two telling the same story. A drift test in
-// settings.test.ts pins the template to DEFAULT_SETTINGS, so a default cannot
-// change without this file changing with it — but remember the seed only
-// reaches NEW installs (an existing file is never rewritten): announce default
-// changes, don't just edit them here.
+// What first launch writes to settings.jsonc, every default spelled out. The
+// file is the settings UI (architecture.md §6), so its comments are the
+// documentation, restating the `Settings` field docs above in user terms:
+// keep the two saying the same thing. A drift test in settings.test.ts pins
+// the template to DEFAULT_SETTINGS, so a default cannot change without this
+// file changing too. The seed only reaches new installs (an existing file is
+// never rewritten), so announce a default change rather than only editing it.
 //
-// `shellPath` is substituted rather than written in because the right answer
-// differs per machine and this file cannot ask: `shared/` reaches for nothing
-// only Bun has (shared/portable.test.ts), and the default is the account's own
-// login shell where Ledge supports it (bun/spawnParams.ts `resolveShellPath`).
-// The seeded file gets that CONCRETE path, never a sentinel like "auto": the
-// file is the settings UI, so it has to say what will actually run and stay
-// editable to something else on one line.
+// `shellPath` is an argument because the answer differs per machine and this
+// file cannot ask: nothing in shared/ may depend on Bun
+// (shared/portable.test.ts). Bun passes the account's own login shell where
+// Ledge supports it (bun/spawnParams.ts `resolveShellPath`). The seeded file
+// gets that concrete path, never a sentinel like "auto": the file is the
+// settings UI, so it has to name what will run and stay editable to something
+// else on one line.
 export function settingsTemplate(shellPath: string): string {
   return `// Ledge settings, for the machine holding the notes. The file is the settings
 // UI: edit it here (⌘,), relaunch to apply; no setting applies live. This is
@@ -347,13 +345,13 @@ export function settingsTemplate(shellPath: string): string {
 `;
 }
 
-// The client's half of the file. Both templates are generated, but this one
-// substitutes every value rather than the one the server's cannot know: it has
-// two jobs the server's has one of, seeding a fresh install with the defaults
-// AND carrying an existing install's values across when the split happens
-// (bun/clientSettings.ts). Substituting the values keeps one set of comments
-// doing both, where a constant template plus a patcher would mean either
-// losing the comments or editing JSONC text.
+// The client's half of the settings file. Both templates are generated, but
+// this one substitutes every value rather than only the one the server's
+// cannot know: it has two jobs where the server's has one. It seeds a fresh
+// install with the defaults, and it carries an existing install's values
+// across at the split (bun/clientSettings.ts). One set of comments serves both
+// jobs; a fixed template plus a patcher would either lose the comments or have
+// to edit JSONC text.
 //
 // A drift test round-trips this through parseSettings, so a knob added to a
 // client section without a line here fails.
@@ -392,27 +390,27 @@ export function clientSettingsTemplate(s: Settings): string {
 `;
 }
 
-// Validate one parsed settings file into a full Settings, field by field: a
-// bad value costs THAT field (it falls back to its default and is reported in
-// `problems`), never the rest of the file and never a crash. A hand-edited
-// JSON file is the UI here, so a typo has to degrade as gently as a blank
-// field in a form would.
+// Validates one parsed settings file into a full Settings, field by field. A
+// bad value costs only that field: it falls back to its default and is listed
+// in `problems`, never taking down the rest of the file and never crashing.
+// A hand-edited JSON file is the UI here, so a typo has to stay recoverable.
 //
-// `home` says WHICH file this is (see SETTINGS_HOMES). Sections belonging to
-// the other one are not read — they take their defaults and are reported, so
-// a value left behind by the split reads as "this is ignored, and here is
-// where it went" rather than as a setting that silently does nothing. The
-// result is still a full Settings; mergeSettings puts the two halves together.
+// The `home` argument says which file this is (see SETTINGS_HOMES). Sections
+// belonging to the other file are not read: they take their defaults and are
+// reported, so a value left behind by the split reads as ignored with a
+// pointer to where it went rather than as a setting that silently does
+// nothing. The result is still a full Settings, and mergeSettings joins the
+// two halves.
 export function parseSettings(raw: unknown, home: SettingsHome): { settings: Settings; problems: string[] } {
   const problems: string[] = [];
   const d = DEFAULT_SETTINGS;
   const root = isRecord(raw) ? raw : {};
   if (!isRecord(raw)) problems.push("the settings file is not a JSON object");
 
-  // A misspelled section would otherwise be silently ignored, which reads as
-  // "my setting does nothing" — say so instead. "templates" gets its own
-  // message: the section existed briefly (a list of template note titles) and
-  // a file still carrying it deserves the pointer, not a shrug.
+  // Report a misspelled section instead of ignoring it, which would read as
+  // "my setting does nothing". "templates" gets its own message: it was
+  // briefly a real section (a list of template note titles), so a file still
+  // carrying it gets a pointer to what replaced it.
   for (const key of Object.keys(root)) {
     if (key === "templates") {
       problems.push(`"templates" is retired — mark a note with \`template: true\` frontmatter instead`);
@@ -420,9 +418,9 @@ export function parseSettings(raw: unknown, home: SettingsHome): { settings: Set
     else if (SETTINGS_HOMES[key as keyof Settings] !== home) problems.push(elsewhere(key as keyof Settings));
   }
 
-  // Only this file's own sections are read; the rest resolve to `{}` and every
-  // field below falls back to its default, which is exactly what the merge
-  // discards in favor of the other file's answer.
+  // Read only this file's own sections. The rest resolve to `{}`, so every
+  // field below falls back to its default. mergeSettings discards those
+  // defaults in favor of the other file's values.
   const mine = (key: keyof Settings) => (SETTINGS_HOMES[key] === home ? section(root, key, problems) : {});
   const shell = mine("shell");
   const editor = mine("editor");
@@ -431,8 +429,8 @@ export function parseSettings(raw: unknown, home: SettingsHome): { settings: Set
   const trash = mine("trash");
   const blocks = mine("blocks");
   const daily = mine("daily");
-  // Like the retired "templates" section: the field existed briefly (a note
-  // title), and a file still carrying it deserves the pointer, not silence.
+  // Like the retired "templates" section: `daily.template` was briefly a real
+  // field (a note title), so a file still carrying it gets a pointer.
   if ("template" in daily) {
     problems.push(`"daily.template" is retired — mark the note itself with \`template: daily\` frontmatter instead`);
   }
@@ -443,8 +441,8 @@ export function parseSettings(raw: unknown, home: SettingsHome): { settings: Set
         path: str(shell, "path", "shell.path", d.shell.path, problems),
         args: strings(shell, "args", "shell.args", d.shell.args, problems),
       },
-      // Font sizes are bounded to what a human could plausibly want: outside
-      // 6–72 is far more likely a typo (or a lost decimal point) than intent.
+      // Font sizes are bounded to 6 through 72. A value outside that range is
+      // more likely a typo, or a lost decimal point, than a real preference.
       editor: {
         fontSize: num(editor, "fontSize", "editor.fontSize", d.editor.fontSize, 6, 72, problems),
         livePreview: bool(editor, "livePreview", "editor.livePreview", d.editor.livePreview, problems),
@@ -475,12 +473,12 @@ export function parseSettings(raw: unknown, home: SettingsHome): { settings: Set
   };
 }
 
-// blocks.hostInterpreters: an object of host pattern -> language map. Degrades
-// per host section (a section that is not an object costs that host alone) and
-// then per entry inside it, via the same stringMap every language map uses.
-// Host patterns are kept verbatim — case and "*"s are the matcher's business
+// Validates blocks.hostInterpreters: an object of host pattern -> language
+// map. A host section that is not an object costs that host alone, and
+// degrades per entry inside it via the same stringMap every language map uses.
+// Host patterns are kept verbatim: case and "*" are the matcher's business
 // (bun/runner.ts interpretersFor), and a pattern that matches nothing is not
-// an error, just a section that never applies.
+// an error.
 function hostMaps(blocks: Record<string, unknown>, problems: string[]): Record<string, Record<string, string>> {
   const v = blocks["hostInterpreters"];
   if (v === undefined) return {};
@@ -495,11 +493,11 @@ function hostMaps(blocks: Record<string, unknown>, problems: string[]): Record<s
   return out;
 }
 
-// The message for a section that is in the wrong file. Said in terms of what
-// the section IS rather than of a path, because shared/ knows neither file's
-// location and the two ends may not even be the same machine. The values are
-// carried across once, at the split (bun/clientSettings.ts), so this is a
-// leftover to delete rather than a setting to move by hand.
+// The message for a section that is in the wrong file. It describes the
+// section rather than naming a path: shared/ knows neither file's location,
+// and the two ends may not be the same machine. bun/clientSettings.ts carries
+// the values across once at the split, so the section left behind is a
+// leftover to delete, not a setting to move by hand.
 function elsewhere(section: keyof Settings): string {
   return SETTINGS_HOMES[section] === "client"
     ? `"${section}" describes this screen, so it moved to this app's own settings; the copy here does nothing`
@@ -532,15 +530,16 @@ function str(
   return fallback;
 }
 
-// Like str, but "" is a meaning, not a typo: these fields spell "unset" as an
-// empty string so the seeded file can show the knob blank and stay valid JSON
-// without nulls.
-// A folder name, or "" — the same shape rule the store applies when it turns
-// one into a directory (shared/folders.ts, bun/notes.ts folderPathOf), asked
-// here so the settings editor can say so while the file is being written
-// rather than at the next ⌘J. A bad name degrades to "": every other knob
-// falls back to its default rather than failing a launch, and this one is
-// reported in `problems` like the rest.
+// Like str, but "" is a meaning here rather than a typo: folderName and optStr
+// spell "unset" as an empty string, so the seeded file can show the knob blank
+// and stay valid JSON without nulls.
+//
+// folderName returns a folder name, or "". It applies the shape rule the store
+// uses when it turns a name into a directory (shared/folders.ts, bun/notes.ts
+// folderPathOf), so a bad name is reported while the file is being edited
+// rather than at the next ⌘J. A bad name falls back to "" and is listed in
+// `problems`, the way every other field falls back to its default rather than
+// failing a launch.
 function folderName(o: Record<string, unknown>, key: string, label: string, problems: string[]): string {
   const value = optStr(o, key, label, problems);
   const problem = folderNameProblem(value);
@@ -562,9 +561,9 @@ function optStr(
   return "";
 }
 
-// A closed set of spellings: anything else is a typo (or a value from a newer
-// Ledge), and the message names every accepted word so the file can be fixed
-// without opening the manual.
+// Accepts a closed set of spellings. Anything else is a typo, or a value from
+// a newer Ledge. The message names every accepted word, so the file can be
+// fixed without opening the manual.
 function oneOf<T extends string>(
   o: Record<string, unknown>,
   key: string,
@@ -594,9 +593,10 @@ function strings(
   return fallback;
 }
 
-// Validates per ENTRY, not per map: one bad value costs that language alone,
-// matching the file's per-field degradation everywhere else. Keys are fence
-// info strings, matched case-insensitively like `runnable`, so lowercase them.
+// Validates per entry, not per map: one bad value costs that language alone,
+// matching the per-field fallback everywhere else in the file. Keys are fence
+// info strings, matched case-insensitively like `runnable`, so this
+// lowercases them.
 function stringMap(
   o: Record<string, unknown>,
   key: string,

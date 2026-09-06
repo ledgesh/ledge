@@ -1,21 +1,18 @@
-// Full-text search over note bodies — the matcher behind the noteSearch RPC,
-// and the cross-note counterpart of the editor's ⌘F.
+// Full-text search over note bodies: the matcher behind the noteSearch RPC,
+// and the cross-note counterpart of the editor's ⌘F. Ledge matches the whole
+// trimmed query as one case-insensitive substring. There is no fuzzy matching.
+// The subsequence scoring in mainview/notes/fuzzy.ts suits titles, which are
+// short names. It is wrong for bodies, where "shnt" aligning across a
+// paragraph is noise no ranking can rescue.
 //
-// The grammar is deliberately the plainest thing a search box can promise: the
-// whole query, trimmed, as ONE case-insensitive substring. No fuzziness — the
-// subsequence scoring in mainview/notes/fuzzy.ts is right for titles, where
-// every item is a short name, and wrong for bodies, where "shnt" aligning
-// across a paragraph is noise no ranking can rescue. A substring either
-// matches or it does not, which is the promise a body search actually makes.
-//
-// Lives in shared/, not bun/, because the matcher is contract rather than
-// plumbing: Bun executes it over the files it owns (bun/notes.ts searchNotes),
-// and the e2e harness's fake store must mirror the real store's semantics
-// exactly (testing.md §5) — one definition instead of a mirrored pair
-// that drifts.
+// The matcher is contract rather than plumbing, so it lives in shared/, not
+// bun/. Bun runs it over the files it owns (bun/notes.ts searchNotes), and the
+// e2e harness's fake store must mirror the real store's semantics exactly
+// (testing.md §5). One definition keeps the two from drifting.
 
-/** One matched line, carrying the note it lives in (the NoteMeta fields ride
- * along flat so a hit is self-sufficient: enough to list, open, and reveal). */
+/** One matched line plus the note it came from. The NoteMeta fields sit flat
+ * on the hit, so a caller can list, open, and reveal it without a second
+ * lookup. */
 export interface SearchHit {
   path: string;
   title: string;
@@ -28,21 +25,23 @@ export interface SearchHit {
   col: number;
 }
 
-/** A matched line before it knows which note it belongs to. */
+/** A matched line, without the note it came from. */
 export interface LineHit {
   line: number;
   snippet: string;
   col: number;
 }
 
-// Caps, so one pasted log file cannot drown the list (per note) and the
-// payload stays a result list rather than a corpus (total). Both are visible
-// truncation: the overlay shows what made the cut, newest notes first.
+// Caps on the result set. The per-note cap keeps one pasted log file from
+// filling the list; the total cap keeps the payload a result list rather than
+// a copy of the corpus. Both truncate visibly: the overlay shows what made the
+// cut, newest notes first.
 export const MAX_HITS_PER_NOTE = 5;
 export const MAX_HITS = 100;
 
-// A snippet is one result row, not a paragraph: window long lines around the
-// match, keeping a little context ahead of it so the match reads in place.
+// A snippet fills one result row, so snip() windows a long line around the
+// match. SNIPPET_LEAD keeps a little context before the match, so the match
+// does not sit flush against the left edge of the row.
 const SNIPPET_MAX = 160;
 const SNIPPET_LEAD = 24;
 
@@ -59,8 +58,8 @@ function snip(line: string, col: number, len: number): { snippet: string; col: n
 }
 
 // Every line of `text` matching `query`, in document order, at most one hit
-// per line (the first occurrence stands for the line — a second one on the
-// same line adds a row without adding information).
+// per line. Only the first occurrence on a line is reported: a second hit on
+// the same line would add a row without adding information.
 export function searchText(query: string, text: string, limit = MAX_HITS_PER_NOTE): LineHit[] {
   const q = query.trim().toLowerCase();
   if (q === "" || limit <= 0) return [];
@@ -75,18 +74,18 @@ export function searchText(query: string, text: string, limit = MAX_HITS_PER_NOT
   return out;
 }
 
-/** What a store must say about a note before its text is worth reading. */
+/** The fields a store supplies for a note before collectHits reads its text. */
 export interface NoteRef {
   path: string;
   title: string;
   mtimeMs: number;
 }
 
-// Search every note, newest text read lazily: `notes` arrives in the rank
-// order results keep (both stores hand it over newest-first, the same order
-// the sidebar shows), and reading stops once MAX_HITS is reached, so a query
-// that saturates on recent notes never reads the old ones at all. `readText`
-// returning null (a note deleted mid-search) costs that note and nothing else.
+// Search every note, reading a note's body only when the loop reaches it. The
+// results keep the order of `notes`: both stores pass it newest-first, the
+// order the sidebar shows. Reading stops at MAX_HITS, so a query that fills up
+// on recent notes never reads the older ones. `readText` returning null (a
+// note deleted mid-search) costs that note and nothing else.
 export async function collectHits(
   query: string,
   notes: readonly NoteRef[],

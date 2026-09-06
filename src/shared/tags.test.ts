@@ -34,7 +34,7 @@ describe("inlineTagsOfLine", () => {
     expect(inlineTagsOfLine("#123 #2024")).toEqual([]);
     expect(inlineTagsOfLine("#fff")).toEqual([{ tag: "fff", col: 0, raw: "#fff" }]);
     expect(inlineTagsOfLine("#_draft")).toEqual([{ tag: "_draft", col: 0, raw: "#_draft" }]);
-    // Digits are fine once a letter anchors the tag.
+    // Digits are fine once the token has a letter.
     expect(inlineTagsOfLine("#v2")).toEqual([{ tag: "v2", col: 0, raw: "#v2" }]);
   });
 
@@ -96,8 +96,8 @@ describe("tagRefsOf", () => {
       { tag: "ops", line: 2, raw: "ops" },
       { tag: "runbook", line: 2, raw: "#runbook" },
     ]);
-    // `raw` is what a reveal re-finds on the line, so stripping the brackets
-    // must leave every token a verbatim substring of it.
+    // `raw` is what a reveal re-finds on the line. Stripping the brackets
+    // must leave every token a verbatim substring of that line.
     for (const r of refs) expect("tags: [ops, #runbook]").toContain(r.raw);
   });
 
@@ -110,22 +110,25 @@ describe("tagRefsOf", () => {
   });
 
   test("the block itself is never scanned for inline tags", () => {
-    // "#" opens a comment there, and values legitimately contain # (URLs).
+    // In frontmatter, "#" opens a comment, and a URL in a value contains a "#".
     const refs = tagRefsOf("---\n# a note about #stuff\nenv:\n  URL: https://x/#frag\n---\n# T\n");
     expect(refs).toEqual([]);
   });
 
-  // The walk in tagRefsOf and the switch in parseFrontmatter locate the
-  // `tags:` key independently; these hold them to the same answer.
+  // These cases check that tagRefsOf and parseFrontmatter agree. They locate
+  // the `tags:` key independently, in separate code.
   const agreeing = [
     "---\ntags: work\ntags: home\n---\n# T\n", // repeated line replaces
     "---\ntags: work\ntags:\n---\n# T\n", // empty repeat keeps the earlier list
     "---\nenv:\n  tags: not-a-tag-key\n---\n# T\n", // indented tags: is an env var
     "---\n# tags: commented out\n---\n# T\n", // comment line is not the key
-    "---\ntags: Work work 123\n---\n# T\n", // dedupe + per-token degradation
+    // Dedupe folds case. Degradation is per token, as for `host:`:
+    // splitTagList refuses "123" and parseFrontmatter reports a problem for
+    // it, and the tags beside it survive.
+    "---\ntags: Work work 123\n---\n# T\n",
     '---\ntags: "work home"\n---\n# T\n', // quoted values unquote first
-    "---\ntags: [work, home]\n---\n# T\n", // the bracketed list, unbracketed once
-    "---\ntags: [work\n---\n# T\n", // an unmatched bracket refuses its token
+    "---\ntags: [work, home]\n---\n# T\n", // unbracket strips a matched pair
+    "---\ntags: [work\n---\n# T\n", // the "[" stays on, so isTagToken refuses it
     "---\ntags: []\n---\n# T\n", // an explicitly empty list is empty, not absent
     "---\ntags: work\ntags: []\n---\n# T\n", // and it replaces, like any repeat
   ];

@@ -1,15 +1,11 @@
-// The client's half on its own, with nothing from src/bun in the room.
-//
-// bun/transport.test.ts covers the CONVERSATION, which needs a server and so
-// belongs where the server does. This file covers what the client does when
-// the other end is a hand of bytes: the handshake it refuses, the failures it
-// reports, and fedDuplex, which is the transport a caller drives itself —
-// Bun.listen's data callback today and Swift calling into the webview on iOS
-// (ios.md §2).
-//
-// The imports are the assertion. If this file ever needs `../bun/anything`,
-// the split in phase 1 of ios.md has come undone, and portable.test.ts says so
-// in the general case.
+// The client's half on its own, with no import from src/bun: the handshakes
+// it refuses, the failures it reports, and fedDuplex, the transport a caller
+// drives itself. Bun.listen's data callback drives one today, and Swift
+// drives one from the webview on iOS (ios.md §2). The conversation between
+// the two ends needs a server, so bun/transport.test.ts covers that instead.
+// The imports here are the assertion. Needing `../bun/anything` would mean
+// the phase 1 split of ios.md has come undone, and portable.test.ts asserts
+// that in the general case.
 import { describe, expect, test } from "bun:test";
 import {
   clientConnection,
@@ -32,8 +28,8 @@ import {
   type WireMessage,
 } from "./wire";
 
-/** A server that is entirely under the test's thumb: it says exactly what it
- * is told to say, and records what the client said back. */
+/** A stand-in server the test drives: it says only what it is told to say,
+ * and records what the client said back. */
 function peer() {
   const heard: WireMessage[] = [];
   const decoder = new FrameDecoder();
@@ -65,7 +61,7 @@ function nowherePush(): ServerPush {
 
 const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
 
-// --- the duplex somebody else drives -----------------------------------------
+// --- fedDuplex, the duplex a caller drives -----------------------------------
 
 describe("fedDuplex", () => {
   function sink(): { io: { write(b: Uint8Array): void; close(): void }; wrote: Uint8Array[]; closed: () => boolean } {
@@ -78,8 +74,9 @@ describe("fedDuplex", () => {
     };
   }
 
-  // The race the buffering exists for: creating a duplex and giving it to a
-  // connection is two statements, and a server greets the moment it is built.
+  // Buffering exists for this race. Creating a duplex and giving it to a
+  // connection takes two statements, and a server greets the moment it is
+  // built.
   test("bytes fed before anyone is listening are delivered when someone is, in order", () => {
     const d = fedDuplex(sink().io);
     d.feed(new Uint8Array([1]));
@@ -91,11 +88,11 @@ describe("fedDuplex", () => {
     expect(seen).toEqual([1, 2, 3]);
   });
 
-  // A peer that says its piece and hangs up immediately still gets read: the
-  // close must not overtake the bytes that came before it. Asserted in BOTH
-  // attach orders, because a consumer setting onClose first is a consumer that
-  // would otherwise be told the wire is gone before it hears the last thing
-  // said on it — and the Swift shell is a consumer this file has never seen.
+  // A peer that speaks and hangs up at once still gets read: the close must
+  // not overtake the bytes before it. test.each covers both attach orders. A
+  // consumer that sets onClose first would otherwise be told the wire is gone
+  // before it hears the last bytes sent on it. The Swift shell is one such
+  // consumer, and this file never sees it.
   test.each([
     ["onData first", true],
     ["onClose first", false],
@@ -186,14 +183,15 @@ describe("a client facing a server that will not talk", () => {
     server.greet({ protocol: 99, build: "0.9.0" });
     await expect(client.ready).rejects.toThrow(/protocol version 99/);
     await expect(client.requests.vaultState({})).rejects.toThrow(/protocol version 99/);
-    // The client's own hello and nothing after it: a request never went out
-    // over a connection whose protocol was already in doubt.
+    // One write, the client's own hello. No request goes out over a
+    // connection whose protocol is already in doubt.
     expect(server.writes()).toBe(1);
   });
 
-  // The type is what the ssh caller branches on: everything else that fails on
-  // the way to a server is explained better by ssh's stderr, and this is the
-  // one failure where stderr holds nothing but the far end's startup banner
+  // The ssh caller branches on the error type. A version mismatch is the one
+  // failure where ssh's stderr holds nothing but the far end's startup
+  // banner. Every other failure on the way to a server is explained better by
+  // that stderr, so a mismatch is the only one that earns a type of its own
   // (bun/index.ts, bun/connections.ts `explainDial`).
   test("a version mismatch is typed, so ssh's leftovers cannot outrank it", async () => {
     const server = peer();
@@ -208,9 +206,9 @@ describe("a client facing a server that will not talk", () => {
   test("a server that hangs up before greeting is typed the same way, since the verdict is the same one", async () => {
     const server = peer();
     const client = clientConnection(server.duplex, { push: nowherePush(), build: "0.1.0" });
-    // The mirror image: the two hellos cross, and this is the far end deciding
-    // first. Same disagreement, same sentence, so the caller must not have to
-    // tell them apart.
+    // The mirror image of the test above: the two hellos cross and the far
+    // end decides first. Same disagreement and same sentence, so the caller
+    // must not have to tell the two apart.
     server.say({ t: "bye", why: "protocol version 5 on the client (build 0.1.0), 4 here. Update ledge-server on this machine." });
     await expect(client.ready).rejects.toBeInstanceOf(Refused);
   });
@@ -221,14 +219,14 @@ describe("a client facing a server that will not talk", () => {
     server.greet();
     await client.ready;
     server.say({ t: "bye", why: "another client took this session" });
-    // ssh's account of a wire that died mid-session is worth having; only the
-    // handshake's verdict outranks it.
+    // ssh's account of a wire that dropped mid-session is worth having. Only
+    // the handshake's verdict outranks it.
     await expect(client.closed).resolves.toBeUndefined();
     expect(client.farewell()).toEqual({ why: "another client took this session", back: false });
   });
 
-  // Not a hang. A caller that awaits a request on a connection that is already
-  // gone has to be told so, or the app sits on a promise nothing will settle.
+  // Not a hang. A request made on a connection that is already gone has to
+  // reject, or the app waits on a promise nothing will settle.
   test("a request made after the wire died rejects rather than waiting", async () => {
     const server = peer();
     const client = clientConnection(server.duplex, { push: nowherePush(), build: "0.1.0" });
@@ -251,9 +249,9 @@ describe("a client facing a server that will not talk", () => {
 
 // --- a server that knows fewer methods than this client (remote.md §11) -------
 //
-// The half of compatibility the handshake stopped refusing over. A connection
-// to an older server has to WORK, minus the calls that server has never heard
-// of, and those have to fail in a way a caller can act on.
+// The half of compatibility the handshake no longer refuses over. A connection
+// to an older server has to work, minus the calls that server has never heard
+// of. Those calls have to fail in a way a caller can act on.
 
 describe("a server that does not have every method", () => {
   const without = (...gone: string[]) => ({
@@ -286,8 +284,8 @@ describe("a server that does not have every method", () => {
     const before = server.writes();
     await expect(client.requests.vaultUnlock({ passphrase: "x" })).rejects.toThrow(/vaultUnlock/);
     await expect(client.requests.vaultUnlock({ passphrase: "x" })).rejects.toThrow(/0\.0\.9/);
-    // Refused here, so it never left: no round trip to be told what the
-    // handshake already said.
+    // Refused locally, so the request never left: no round trip to be told
+    // what the handshake already said.
     expect(server.writes()).toBe(before);
   });
 
@@ -304,8 +302,9 @@ describe("a server that does not have every method", () => {
     expect((err as Unsupported).method).toBe("vaultUnlock");
   });
 
-  // What a palette asks before it offers a command (interactions.md §8): better
-  // an absent verb than one that apologizes after you pick it.
+  // The palette asks this before it offers a command (interactions.md §8). It
+  // leaves out a verb the client cannot run rather than offering one that
+  // fails when picked.
   test("a caller can ask before it calls", async () => {
     const server = peer();
     const client = clientConnection(server.duplex, { push: nowherePush(), build: "0.1.0" });
@@ -315,9 +314,9 @@ describe("a server that does not have every method", () => {
     expect(client.supports("vaultUnlock")).toBe(false);
   });
 
-  // A server that predates the field says nothing, and saying nothing is not
-  // saying no: it gets the behavior it had before anyone asked, which is that
-  // the call goes out and the server answers for itself.
+  // A server that predates the field declares nothing, which is not the same
+  // as declaring no support. It gets the behavior it had before the field
+  // existed: the call goes out and the server answers for itself.
   test("a server that declares nothing is assumed to do everything", async () => {
     const server = peer();
     const client = clientConnection(server.duplex, { push: nowherePush(), build: "0.1.0" });
@@ -331,10 +330,10 @@ describe("a server that does not have every method", () => {
     await pending;
   });
 
-  // Two refusals that must not read as one. "This server is too old" invites an
-  // upgrade; a clipboard is never coming to a VPS however new it is (remote.md
-  // §10), and telling someone to upgrade for one would send them after a fix
-  // that does not exist.
+  // Two refusals that must not read as one. "This server is too old" invites
+  // an upgrade, but a VPS has no desktop, so no server version will ever
+  // serve the clipboard (remote.md §10). An upgrade message would send the
+  // user after a fix that does not exist.
   test("a method that is the client's own is refused as that, not as an old server", async () => {
     const server = peer();
     const client = clientConnection(server.duplex, { push: nowherePush(), build: "0.1.0" });
@@ -345,8 +344,8 @@ describe("a server that does not have every method", () => {
     expect(client.supports("clipboardRead")).toBe(false);
   });
 
-  // A name the server declares that this client has never heard of is simply
-  // not in the intersection, and asking about it is not a crash.
+  // A name the server declares that this client has never heard of falls
+  // outside the intersection. Asking about it returns false, not an error.
   test("a name only the server knows is not something this client can call", async () => {
     const server = peer();
     const client = clientConnection(server.duplex, { push: nowherePush(), build: "0.1.0" });
@@ -359,9 +358,9 @@ describe("a server that does not have every method", () => {
 
 // --- the heartbeat (remote.md §7) ---------------------------------------------
 
-/** The heartbeat's timer, cranked by hand. Twenty seconds of silence costs a
- * function call here, so nothing below waits for a clock — which is the reason
- * the timer is injectable at all. */
+/** The heartbeat's timer, driven by hand. Twenty seconds of silence costs one
+ * function call here, so no test below waits for a real clock. That is why the
+ * timer is injectable. */
 function ticker() {
   const ticks = new Set<() => void>();
   return {
@@ -372,7 +371,7 @@ function ticker() {
     beat(times = 1) {
       for (let i = 0; i < times; i++) for (const tick of [...ticks]) tick();
     },
-    /** How many timers are live, which is how a cancelled one is proved. */
+    /** How many timers are live. Cancelling a timer lowers this count. */
     running: () => ticks.size,
   };
 }
@@ -390,9 +389,9 @@ describe("a client whose wire has gone quiet", () => {
   }
 
   // The whole trace, once, because every count below is read off it. Beat 1
-  // has just heard the server's hello and said its own, so it asks nothing;
-  // beats 2, 3 and 4 each send a probe into the dark; beat 5 is the one that
-  // gives up, having asked three times and been ignored three times.
+  // has just heard the server's hello and sent its own, so it asks nothing.
+  // Beats 2, 3 and 4 each send a probe, and none of the three is answered.
+  // Beat 5 gives up.
   test("it is given up on after three probes go unanswered, and not before", async () => {
     const { server, beats, client, probes } = connect();
     server.greet();
@@ -406,10 +405,10 @@ describe("a client whose wire has gone quiet", () => {
     // still arrive in time.
     expect(server.isClosed()).toBe(false);
 
-    // Both ways a request can meet the verdict: one already in the pending map
-    // when it lands, and one that reaches `call` a moment after. Each has to
-    // say why, or the app reports a wire that closed for a wire that was never
-    // closed at all.
+    // Both ways a request can meet the verdict: one already in the pending
+    // map when it lands, and one that reaches `call` a moment after. Each
+    // rejection has to name the silence. Without it the app announces a
+    // closed connection, and nothing ever closed the wire.
     const inFlight = client.requests.vaultState({});
     await settle();
     beats.beat();
@@ -419,15 +418,11 @@ describe("a client whose wire has gone quiet", () => {
     await client.closed;
   });
 
-  // What a lid opening looks like from in here: the timer did not fire for an
-  // hour, so nothing was counted, and the counters describe a wire that stopped
-  // existing while nobody was watching.
-  //
-  // Counting ticks is why this never DECLARES the connection dead on waking —
-  // that rule is what keeps a phone from dropping a session it still has. This
-  // is the other half of it: having not declared anything, ask, now, rather than
-  // spend the next twenty seconds looking connected to an ssh whose far end
-  // exited hours ago.
+  // A closed lid, seen from this test. The timer did not fire for an hour, so
+  // nothing was counted and the counters describe an unwatched wire that is
+  // very likely gone. Counting ticks is why a wake never declares a connection
+  // dead. Since it declared nothing, the client probes at once instead of
+  // looking connected to a dead ssh for twenty seconds (remote.md §7).
   test("a client that was suspended asks at once, rather than counting to twenty", async () => {
     let clock = 0;
     const { server, beats, client, probes } = connect({ now: () => clock });
@@ -439,9 +434,9 @@ describe("a client whose wire has gone quiet", () => {
     expect(probes()).toBe(1);
     expect(server.isClosed()).toBe(false);
 
-    // And that one probe is the whole budget, because the question here is not
-    // whether the wire is slow. One more silence and it is over: five seconds
-    // rather than twenty.
+    // That one probe is the whole budget: the question after a wake is not
+    // whether the wire is slow. One more silence ends it, five seconds after
+    // waking rather than twenty.
     clock += 5_000;
     beats.beat();
     expect(server.isClosed()).toBe(true);
@@ -458,15 +453,17 @@ describe("a client whose wire has gone quiet", () => {
     beats.beat();
     server.say({ t: "pong" });
 
-    // The whole budget back, exactly as any other answer buys.
+    // A pong after the gap restores the whole budget, like any other answer.
     clock += 5_000;
     beats.beat(4);
     expect(server.isClosed()).toBe(false);
   });
 
-  // The rule has to be about time that DID NOT PASS in here, not about time
-  // passing: a client left running for a week beats on schedule the whole way
-  // and must never take its own longevity for a suspension.
+  // The suspend rule compares the clock between one beat and the next, so
+  // this test injects `now`. Only a gap longer than the whole budget counts
+  // as a suspension. A client left running for a week beats on schedule the
+  // whole way, so every gap stays one interval. It must never read its own
+  // uptime as a suspension.
   test("a beat that arrives on time is never mistaken for one that did not", async () => {
     let clock = 0;
     const { server, beats, client, probes } = connect({ now: () => clock });
@@ -476,8 +473,8 @@ describe("a client whose wire has gone quiet", () => {
       clock += 5_000;
       beats.beat();
     }
-    // The ordinary five-beat trace from the top of this describe, unchanged: a
-    // beat mistaken for a suspension would have spent its budget in two.
+    // The ordinary five-beat trace from the top of this describe, unchanged.
+    // A beat mistaken for a suspension would have spent the budget in two.
     expect(probes()).toBe(3);
     expect(server.isClosed()).toBe(true);
   });
@@ -489,19 +486,19 @@ describe("a client whose wire has gone quiet", () => {
     beats.beat(2);
     expect(probes()).toBe(1);
     server.say({ t: "pong" });
-    // Four more beats: three fresh probes, and then the beat that would have
-    // been fatal had that pong counted for nothing. Three beats here would
-    // survive either way, which is a test that proves nothing.
+    // Four more beats: three fresh probes, then the beat that would have
+    // closed the connection had that pong counted for nothing. Three beats
+    // here would survive either way and prove nothing.
     beats.beat(4);
     expect(server.isClosed()).toBe(false);
     beats.beat();
     expect(server.isClosed()).toBe(true);
   });
 
-  // The rule that exists for the far end rather than for this one: a client
-  // watching a build scroll past hears constantly and would otherwise say
-  // nothing for the length of the build, which is exactly what the server
-  // collects a connection for (bun/transport.ts silentMs).
+  // This rule exists for the far end. The server hangs up on a connection
+  // that stays silent for too long (bun/transport.ts silentMs). A client
+  // watching build output hears constantly, but without this rule it would
+  // send nothing for the length of the build.
   test("a client that is only listening still speaks", async () => {
     const { server, beats, client, probes } = connect();
     server.greet();
@@ -510,8 +507,8 @@ describe("a client whose wire has gone quiet", () => {
       server.say({ t: "pong" });
       beats.beat();
     }
-    // One on every beat but the first, which still counts this client's own
-    // hello as having spoken.
+    // One probe on every beat but the first, which still counts this client's
+    // own hello as having spoken.
     expect(probes()).toBe(4);
     expect(server.isClosed()).toBe(false);
   });
@@ -531,9 +528,9 @@ describe("a client whose wire has gone quiet", () => {
     expect(probes()).toBe(0);
   });
 
-  // A bound the handshake never had. `ConnectTimeout` covers a dial that does
-  // not land; a server that accepts the connection and then says nothing at all
-  // left `ready` pending for as long as the app was open.
+  // A bound the handshake did not have. `ConnectTimeout` covers a dial that
+  // does not land. A server that accepts the connection and then says nothing
+  // used to leave `ready` pending for as long as the app was open.
   test("a server that accepts a connection and never greets is given up on", async () => {
     const { beats, client, probes } = connect();
     beats.beat(4);
@@ -555,9 +552,9 @@ describe("a client whose wire has gone quiet", () => {
     expect(beats.running()).toBe(0);
   });
 
-  // The other direction of the asymmetry in wire.ts: a server that probes its
-  // client is a server this client does not understand, and a frame arriving
-  // from the wrong side is never answered out of politeness.
+  // The other direction of the asymmetry in wire.ts: only a client probes. A
+  // ping from the server is a frame from the wrong side, so the client closes
+  // the connection rather than answering it.
   test("a server that sends a probe of its own is refused", async () => {
     const { server, client } = connect();
     server.greet();
@@ -568,9 +565,9 @@ describe("a client whose wire has gone quiet", () => {
   });
 });
 
-// The interface is the whole contract between this file and a transport, so a
-// duplex that implements it and nothing else has to work. This is what the
-// Swift shell will hand over: an object with four members and no lineage.
+// The Duplex interface is the whole contract between the client and a
+// transport, so an object that implements it and nothing else has to work.
+// That is what the Swift shell hands over: four members and no base class.
 test("any object shaped like a Duplex will do", async () => {
   let sent: Uint8Array[] = [];
   const bare: Duplex = {

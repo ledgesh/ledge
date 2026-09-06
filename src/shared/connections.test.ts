@@ -1,10 +1,8 @@
-// The half of a connection both clients hold (remote.md §8).
-//
-// These are the refusals that stand between a text field and ssh's argv, so
-// they are tested where they live rather than through either client: the Mac
-// reaches them through bun/connections.ts and the phone reaches them from the
-// webview, and a rule that only one of the two enforced would be a rule the
-// other one could be talked out of.
+// The half of a connection both clients hold (remote.md §8): the refusals
+// that stand between a text field and ssh's argv. They are tested here rather
+// than through either client. The Mac reaches them through
+// bun/connections.ts, and the phone reaches them from the webview. A client
+// that skipped one of these rules would accept what the other refuses.
 import { describe, expect, test } from "bun:test";
 import {
   DEFAULT_PORT,
@@ -33,8 +31,8 @@ describe("validating what someone typed", () => {
     expect(validateConnection({ ...ok, name })).toContain("name");
   });
 
-  // The refusals that matter: a leading "-" reads as an ssh OPTION once the
-  // destination becomes argv, and whitespace would split one argument into two.
+  // A leading "-" reads as an ssh option once the destination becomes argv.
+  // Whitespace splits one argument into two.
   test.each([
     ["-oProxyCommand=touch /tmp/pwned", "an option"],
     ["laptop; rm -rf /", "a command"],
@@ -45,8 +43,8 @@ describe("validating what someone typed", () => {
   });
 });
 
-// keyscan takes a host; the user half of a destination is ssh's business, not
-// the host key's.
+// keyscan takes a host, so hostPart drops the user half of a destination. A
+// host key does not depend on which account connects.
 describe("the host half of a destination", () => {
   test.each([
     ["dev@laptop", "laptop"],
@@ -69,9 +67,9 @@ describe("a pin belongs to one host", () => {
     expect(pinnedHost("")).toBe("");
   });
 
-  // Editing an address to point at another machine invalidates the pin. Keeping
-  // it would refuse every later connection with a message about a CHANGED host
-  // key, which is the most alarming possible wording for "you typed a new name".
+  // Editing an address to point at another machine invalidates the pin.
+  // Keeping it would refuse every later connection with a changed-host-key
+  // warning, which reads as an attack when the user only edited the address.
   test("a pin does not follow a connection to another host", () => {
     expect(pinFitsHost("laptop ssh-ed25519 AAAA", "dev@laptop")).toBe(true);
     // The user half is not the host half: changing the account keeps the pin.
@@ -79,19 +77,21 @@ describe("a pin belongs to one host", () => {
     expect(pinFitsHost("laptop ssh-ed25519 AAAA", "dev@vps")).toBe(false);
   });
 
-  // "Your own ssh already trusts this host" is a pin too — in the user's file
-  // rather than Ledge's — so there is nothing here to invalidate.
+  // Neither pin names a host, so there is nothing here to invalidate. An
+  // empty pin means Ledge stored none because the user's own ssh already
+  // trusts the host. A two-field pin is a phone's, and pinFitsHost cannot
+  // check it (see pinnedHost above).
   test("no pin of Ledge's own fits anywhere", () => {
     expect(pinFitsHost("", "dev@anywhere")).toBe(true);
     expect(pinFitsHost("ssh-ed25519 AAAA", "dev@anywhere")).toBe(true);
   });
 
-  // known_hosts indexes a non-default port as `[host]:port`, so the pin is
-  // taken and compared in that shape or it matches nothing at connect time.
+  // known_hosts indexes a non-default port as `[host]:port`. The pin is taken
+  // and compared in that shape, or it matches nothing at connect time.
   test("a port is part of which host a pin belongs to", () => {
     expect(pinFitsHost("[laptop]:2222 ssh-ed25519 AAAA", "dev@laptop", 2222)).toBe(true);
-    // The same machine on another port is another entry, and really can offer
-    // another key.
+    // The same machine on another port is a separate known_hosts entry, and can
+    // offer a different key.
     expect(pinFitsHost("[laptop]:2222 ssh-ed25519 AAAA", "dev@laptop", 2022)).toBe(false);
     expect(pinFitsHost("[laptop]:2222 ssh-ed25519 AAAA", "dev@laptop", PORT_UNSET)).toBe(false);
     expect(pinFitsHost("laptop ssh-ed25519 AAAA", "dev@laptop", 2222)).toBe(false);
@@ -99,8 +99,9 @@ describe("a pin belongs to one host", () => {
 });
 
 describe("ports", () => {
-  // 22 is not written down: ssh writes the bare host for the default port, and
-  // an unset port means "ssh decides" and never reaches known_hosts at all.
+  // ssh writes the bare host for the default port, so 22 never appears in a
+  // known_hosts entry. An unset port leaves the choice to ssh and never reaches
+  // known_hosts at all.
   test("known_hosts spells a non-default port and only that", () => {
     expect(knownHostsHost("dev@laptop", PORT_UNSET)).toBe("laptop");
     expect(knownHostsHost("dev@laptop", DEFAULT_PORT)).toBe("laptop");
@@ -108,8 +109,9 @@ describe("ports", () => {
     expect(knownHostsHost("laptop", 2222)).toBe("[laptop]:2222");
   });
 
-  // An empty field and a typo are different answers: the first is the ordinary
-  // case, the second has to reach the user rather than silently become 22.
+  // An empty field parses as unset, which is the ordinary case. A typo parses
+  // as null, which the caller refuses: the typo has to reach the user rather
+  // than silently become 22.
   test("an empty port is unset; anything that is not a port is null", () => {
     expect(parsePort("")).toBe(PORT_UNSET);
     expect(parsePort("  ")).toBe(PORT_UNSET);

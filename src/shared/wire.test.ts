@@ -1,8 +1,8 @@
-// The frame codec is the one piece of Ledge a machine on the other end of an
-// ssh connection gets to feed bytes to (remote.md §4), so its failure modes
-// are the interesting part: a length that lies, a type nobody defined, a frame
-// that arrives one byte at a time. Everything here is values in and values
-// out; the connection that uses it is transport.test.ts.
+// Tests for the frame codec. It is the one piece of Ledge a machine on the
+// other end of an ssh connection gets to feed bytes to (remote.md §4), so
+// these tests are adversarial: a length that lies, a type nobody defined, a
+// frame that arrives one byte at a time. They pass values in and check values
+// out. The connection that uses the codec is tested in transport.test.ts.
 import { describe, expect, test } from "bun:test";
 import {
   BINARY_FRAME,
@@ -72,8 +72,8 @@ describe("framing", () => {
     expect(parseControl(textOf(frames[1]))).toEqual({ t: "res", id: 7, r: null });
   });
 
-  // The one property a pipe guarantees nothing about. A frame split anywhere
-  // has to survive, so it is split everywhere.
+  // A pipe can split a chunk at any byte, so this test splits the frame at
+  // every offset in it.
   test("a frame split at any byte boundary still arrives whole", () => {
     const bytes = encodeControl(REQ);
     for (let at = 0; at <= bytes.length; at++) {
@@ -123,8 +123,8 @@ describe("framing", () => {
     expect([...frame.bytes]).toEqual([9, 9]);
   });
 
-  // The cap is the whole reason a hostile length is not a memory bug, so it
-  // has to be refused on the header, before a single payload byte is held.
+  // The cap keeps a hostile length from becoming a memory bug. The decoder
+  // refuses it on the header, before it holds any payload bytes.
   test("an announced length over the cap is refused before its bytes arrive", () => {
     const header = new Uint8Array(5);
     const huge = MAX_FRAME_BYTES + 1;
@@ -175,14 +175,15 @@ describe("control messages", () => {
     for (const msg of all) expect(parseControl(JSON.stringify(msg))).toEqual(msg);
   });
 
-  // The heartbeat carries nothing, so there is nothing on it for a peer to lie
-  // about the size of — and whatever it does put there goes no further.
+  // A ping carries no fields, so a peer has nothing on it to lie about the
+  // size of. Anything the peer does attach is dropped at the parse.
   test("a probe arrives with nothing on it, whatever the peer attached", () => {
     expect(parseControl('{"t":"ping","p":{"big":"payload"},"id":7}')).toEqual({ t: "ping" });
   });
 
-  // The peer chose every byte of this, so the checks are at the boundary or
-  // they are nowhere (remote.md §2).
+  // The peer chose every byte of this text, so the checks are at the boundary
+  // or they are nowhere: nothing downstream re-validates a control message
+  // (remote.md §2).
   test.each([
     ["not JSON at all", "{"],
     ["a bare number", "42"],
@@ -206,8 +207,8 @@ describe("control messages", () => {
     expect(() => parseControl(text)).toThrow(WireError);
   });
 
-  // The only field allowed to be missing: a hangup with no stated reason is
-  // still a hangup, and refusing it would mean losing the close.
+  // On a bye, `why` may be missing. A hangup with no stated reason is still a
+  // hangup, and refusing it would drop the close.
   test("a bye with no reason is accepted and says so", () => {
     expect(parseControl('{"t":"bye"}')).toEqual({ t: "bye", why: "no reason given" });
   });
@@ -238,8 +239,9 @@ describe("the handshake", () => {
   });
 
   // The regression this whole mechanism exists for. `windowDocs` and
-  // `windowRole` are the client shell's own, no server has ever answered one,
-  // and under the old fingerprint they refused every deployed server.
+  // `windowRole` belong to the client shell and no server has ever answered
+  // one. The old fingerprint counted them, so it refused every deployed
+  // server.
   test("a server that knows fewer methods than this client is NOT refused", () => {
     const older = hello("server", "0.1.0");
     older.methods = older.methods.filter((m) => m !== "vaultUnlock" && m !== "noteLock");
@@ -256,8 +258,9 @@ describe("the handshake", () => {
   test("a server declares what it serves, and a client declares nothing", () => {
     expect(hello("server", "0.1.0").methods).toEqual([...WIRE_METHODS]);
     expect(hello("server", "0.1.0").pushes).toEqual([...PUSH_MESSAGES]);
-    // Every CLIENT_METHOD is answered at home, so none of them is a promise a
-    // server makes: this is the subtraction that stopped the churn.
+    // The client answers every CLIENT_METHOD itself, so a server does not
+    // declare them. Subtracting them stopped servers being refused over
+    // methods only the client answers.
     for (const m of CLIENT_METHODS) expect(hello("server", "0.1.0").methods).not.toContain(m);
     expect(hello("client", "0.1.0").methods).toEqual([]);
     expect(hello("client", "0.1.0").pushes).toEqual([]);
@@ -268,9 +271,9 @@ describe("the handshake", () => {
       expect(declared(["a", "b", "zzz"], ["a", "b", "c"])).toEqual(new Set(["a", "b"]));
     });
 
-    // "Said nothing" and "said it can do nothing" are opposite answers, and
-    // reading the first as the second would take every call down against a
-    // server that predates the field.
+    // An empty list means the peer declared nothing, not that it can do
+    // nothing. Reading an empty list as "can do nothing" would fail every
+    // call against a server that predates the field.
     test("a peer that declared nothing is unknown, not empty", () => {
       expect(declared([], ["a", "b"])).toBeNull();
     });
@@ -296,16 +299,15 @@ describe("the handshake", () => {
     expect(parsed.pushes).toEqual([]);
   });
 
-  // Deliberately not a refusal: differing builds are what the upgrade offer
-  // reads (remote.md §11), and refusing them would make every version bump a
-  // hard stop.
+  // Not a refusal. The upgrade offer reads the differing build (remote.md
+  // §11), and refusing it would make every version bump a hard stop.
   test("a differing build alone is not a refusal", () => {
     expect(checkHello(hello("server", "0.2.0"), "server")).toBeNull();
   });
 
-  // Identity rides the handshake rather than each request (remote.md §5): the
-  // server files this client's layout under it, and a client cannot forget to
-  // send something the connection carries for it.
+  // The client id rides the handshake rather than each request (remote.md
+  // §5). The server files this client's layout under it, and a request cannot
+  // omit an id the connection already carries.
   test("a client names itself, and a server names nobody", () => {
     expect(hello("client", "0.1.0", "abc-123").client).toBe("abc-123");
     expect(hello("server", "0.1.0").client).toBe("");
@@ -316,9 +318,10 @@ describe("the handshake", () => {
     expect(parseControl(JSON.stringify(sent))).toEqual(sent);
   });
 
-  // Not a refusal on its own: a peer old enough to omit the field fails on the
-  // protocol version instead, which names both numbers and is the message
-  // worth showing. An id of the wrong TYPE is still garbage and is refused.
+  // A missing client id is not a refusal on its own. A peer old enough to
+  // omit the field fails on the protocol version instead. That refusal names
+  // both version numbers and is the message worth showing. A client id of the
+  // wrong type is refused.
   test("a hello with no client reads as no id; a non-string one is refused", () => {
     expect(parseControl('{"t":"hello","role":"client","protocol":2,"schema":"a","build":"b"}')).toMatchObject({
       client: "",
@@ -328,20 +331,19 @@ describe("the handshake", () => {
     );
   });
 
-  // A client that keeps no id is a client with no layout of its own, not a
-  // client that cannot connect.
+  // A client that keeps no id gets no layout of its own. It still connects.
   test("an empty id is accepted", () => {
     expect(checkHello(hello("client", "0.1.0", ""), "client")).toBeNull();
   });
 
-  // Two numbers under one name: what the client asks for, and the most the
-  // server will do. Which is which is decided by the role, because the hellos
-  // cross rather than answering each other.
+  // The `hold` field carries two numbers under one name: what the client asks
+  // for, and the most the server will do. The role decides which one it is,
+  // because the two hellos cross rather than answer each other.
   test("the ask and the ceiling ride the same field, one from each end", () => {
     expect(hello("client", "0.1.0", "abc-123", "", 300_000).hold).toBe(300_000);
     expect(hello("server", "0.1.0", "", "one-server", 600_000).hold).toBe(600_000);
-    // And by default nobody asks and nobody offers: a desktop client is not
-    // suspended out from under its connection, and has no reason to.
+    // The default is zero at both ends. A desktop client is not suspended out
+    // from under its connection, so it has no reason to ask for a hold.
     expect(hello("client", "0.1.0").hold).toBe(0);
     expect(hello("server", "0.1.0").hold).toBe(0);
   });
@@ -351,17 +353,20 @@ describe("the handshake", () => {
     expect(parseControl(JSON.stringify(sent))).toEqual(sent);
   });
 
-  // Absent is lenient for the same reason the client id is: a peer old enough
-  // to omit it fails on the protocol version instead, which names both numbers.
+  // An absent hold is lenient for the same reason an absent client id is: a
+  // peer old enough to omit it fails on the protocol version instead, and
+  // that refusal names both version numbers.
   test("a hello with no hold asks for nothing", () => {
     expect(parseControl('{"t":"hello","role":"client","protocol":2,"schema":"a","build":"b"}')).toMatchObject({
       hold: 0,
     });
   });
 
-  // Stricter than the two strings beside it, because this one is arithmetic
-  // the server does on a number the client chose: NaN compares false against
-  // everything, and the timer it reached would be armed for nothing.
+  // The hold is checked more strictly than the two strings beside it (the
+  // client id and the label), because the server does arithmetic on a number
+  // the client chose. NaN compares false against everything: daemon.ts's
+  // `hold > 0` drops it without a word, and a NaN that reached the timer
+  // would arm it for nothing.
   test.each([
     ["a string", '"soon"'],
     ["not a number", "null"],
@@ -372,9 +377,10 @@ describe("the handshake", () => {
     expect(() => parseControl(text)).toThrow(WireError);
   });
 
-  // The readable half of who is connecting (remote.md §7). The id keys files;
-  // this is what another client's chrome shows, which is why it is the one
-  // string in the handshake that is cleaned rather than trusted or refused.
+  // The label is the readable half of who is connecting (remote.md §7). The
+  // client id keys files; the label is what another client's chrome shows.
+  // That is why it is the one handshake string cleaned rather than trusted or
+  // refused.
   test("a device's name for itself rides the handshake, and survives the round trip", () => {
     const sent = hello("client", "0.1.0", "abc-123", "", 0, "Studio");
     expect(sent.label).toBe("Studio");
@@ -387,9 +393,9 @@ describe("the handshake", () => {
     expect(checkHello(hello("client", "0.1.0", "abc-123"), "client")).toBeNull();
   });
 
-  // Cleaned, not refused: hanging up on a phone over its device name would cost
-  // a session to gain nothing, and every one of these reduces to something a
-  // sidebar can hold.
+  // A bad label is cleaned, not refused. Hanging up on a phone over its
+  // device name would lose a session for nothing, and each of these becomes a
+  // string a sidebar can hold.
   test.each([
     ["absent", undefined, ""],
     ["not a string", 7, ""],
@@ -401,22 +407,23 @@ describe("the handshake", () => {
     expect(parseControl(text)).toMatchObject({ label: want });
   });
 
-  // Bounded because the server keeps one per connection and pushes it to every
-  // other client: a peer that chooses the length chooses what that costs.
+  // The label is capped because the server keeps one per connection and
+  // pushes it to every other client. Without the cap the peer would decide
+  // how much memory and how much push traffic the server spends.
   test("a label longer than the cap is cut, not refused", () => {
     const long = "n".repeat(500);
     const seen = parseControl(
       JSON.stringify({ t: "hello", role: "client", protocol: 2, schema: "a", build: "b", label: long }),
     ) as { label: string };
     expect(seen.label.length).toBe(64);
-    // And the same rule on the way out, so a device with an unusable name
-    // cannot send one to a server that predates the check.
+    // hello() applies the same cap on the way out, so a device with an
+    // over-long name cannot send one to a server that predates the check.
     expect(hello("client", "0.1.0", "abc-123", "", 0, long).label.length).toBe(64);
   });
 });
 
-// The client names what it wants, the server names what it will do, and the
-// term is the server's because the process being kept alive is the server's
+// The client asks for a hold and the server names the ceiling. The ceiling is
+// the server's because the process being kept alive is the server's
 // (remote.md §7, bun/daemon.ts HOLD_MAX_MS).
 describe("the session hold", () => {
   test("an ask the server keeps that long is granted whole", () => {
@@ -427,17 +434,17 @@ describe("the session hold", () => {
     expect(sessionHold(86_400_000, 600_000)).toBe(600_000);
   });
 
-  // Both of the ways this ends up zero, and they mean the same thing to the
-  // daemon: nothing here is worth keeping a process for.
+  // Both ways the hold comes to zero. Either one tells the daemon to keep no
+  // process for this session.
   test("nothing offered and nothing asked both come to nothing", () => {
     expect(sessionHold(300_000, 0)).toBe(0);
     expect(sessionHold(0, 600_000)).toBe(0);
     expect(sessionHold(-1, 600_000)).toBe(0);
   });
 
-  // The reason it is one function rather than a rule each end keeps: they
-  // compute it from opposite sides of the same pair and must not disagree,
-  // and no reply carries the answer back.
+  // sessionHold is one shared function rather than a rule each end keeps.
+  // Both ends compute it from opposite sides of the same pair. No reply
+  // carries the answer back, so the two results must agree on their own.
   test("both ends reach the same number without either being told", () => {
     const ASK = 300_000;
     const CEILING = 600_000;
@@ -448,17 +455,16 @@ describe("the session hold", () => {
 });
 
 describe("what a server declares", () => {
-  // The lists are checked against the schema at COMPILE time in both
-  // directions (wire.ts); these are the properties a type cannot state.
+  // wire.ts checks the lists against the schema in both directions at compile
+  // time. These tests cover the properties a type cannot state.
   test("the method lists have no duplicates", () => {
     expect(new Set(REQUEST_METHODS).size).toBe(REQUEST_METHODS.length);
     expect(new Set(PUSH_MESSAGES).size).toBe(PUSH_MESSAGES.length);
     expect(new Set(WIRE_METHODS).size).toBe(WIRE_METHODS.length);
   });
 
-  // What a client answers at home is not a promise a server makes, so it has no
-  // business in what a server declares — nor, before this, in the fingerprint
-  // that used to refuse over it.
+  // A client answers these itself, so a server does not declare them. The old
+  // fingerprint counted them and refused connections over the difference.
   test("nothing the client serves itself is declared", () => {
     for (const m of CLIENT_METHODS) expect(WIRE_METHODS).not.toContain(m);
     for (const m of CLIENT_PUSHES) expect(PUSH_MESSAGES).not.toContain(m);
@@ -468,8 +474,8 @@ describe("what a server declares", () => {
     for (const m of ["noteRead", "noteWrite", "terminalInput", "vaultUnlock"] as const) {
       expect(WIRE_METHODS).toContain(m);
     }
-    // The two lists together are the whole request surface, with nothing
-    // falling between them.
+    // WIRE_METHODS and CLIENT_METHODS together are the whole request surface,
+    // and no method is missing from both.
     expect([...WIRE_METHODS, ...CLIENT_METHODS].sort()).toEqual([...REQUEST_METHODS].sort());
   });
 });
@@ -486,15 +492,15 @@ describe("which requests carry an op (remote.md §7)", () => {
     expect(needsOp("noteDelete")).toBe(true);
     expect(needsOp("terminalInput")).toBe(true);
     expect(needsOp("openRequestTake")).toBe(true);
-    // It reads like a question and it is not one: an unclaimed run is
-    // interrupted by the asking, so a replay must be answered from the record
-    // rather than run again against whatever is going by then.
+    // inlineClaim reads like a question but changes something: asking
+    // interrupts an unclaimed run. A replay has to be answered from the
+    // record rather than run again against whatever is running by then.
     expect(needsOp("inlineClaim")).toBe(true);
   });
 
-  // The list is stated as the READS so that the default is to dedupe. A method
-  // nobody classified costs an entry in a bounded window; the other default
-  // costs a note written twice.
+  // READ_ONLY_METHODS lists the reads, so an unclassified method is deduped.
+  // That costs one entry in a bounded window. The opposite default would cost
+  // a note written twice.
   test("a name nobody has classified is deduped rather than replayed blind", () => {
     expect(needsOp("somethingAddedNextYear")).toBe(true);
   });
@@ -527,12 +533,11 @@ describe("payloads that ride binary frames", () => {
     expect(lifted.payload).toEqual({ image: { dataB64: "", mime: "image/png" } });
   });
 
-  // Every base64 that reaches hoistBinary was written by toBase64 a few lines
-  // earlier: the pty drain loop's output, a file the server read, a paste the
-  // client encoded. So a string that is not base64 is a bug in this codebase,
-  // and the builtin refusing it is better than Buffer's old habit of decoding
-  // the prefix and discarding the rest — which would have put SHORT bytes on
-  // the wire and called it a success.
+  // Every base64 string reaching hoistBinary was written by toBase64 a few
+  // lines earlier: pty drain output, a file the server read, a paste the
+  // client encoded. A string that is not base64 is therefore a bug in this
+  // codebase. The builtin throws on it. Buffer used to decode the valid
+  // prefix and drop the rest, putting short bytes on the wire as a success.
   test("a field that is not base64 is refused rather than truncated", () => {
     expect(() => hoistBinary({ sessionId: "s", dataB64: "not base64!" }, ["dataB64"])).toThrow();
   });
@@ -550,9 +555,9 @@ describe("payloads that ride binary frames", () => {
 });
 
 describe("client-only pushes", () => {
-  // The mirror of CLIENT_METHODS: a server has no business reporting the state
-  // of a wire it is on the far side of, so the name is simply not in the list
-  // the transport routes.
+  // CLIENT_PUSHES mirrors CLIENT_METHODS. A server does not report the state
+  // of a connection it sits on the far side of, so connectionState is absent
+  // from PUSH_MESSAGES, the list the transport routes.
   test("connectionState never crosses the wire", () => {
     expect(CLIENT_PUSHES).toContain("connectionState");
     expect(PUSH_MESSAGES as readonly string[]).not.toContain("connectionState");

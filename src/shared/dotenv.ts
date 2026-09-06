@@ -1,19 +1,17 @@
-// Dotenv files (profiles, envFiles): KEY=value per line, # comments, blank
-// lines, an optional `export ` prefix so a file pasted from a shell script
-// just works.
+// Dotenv files (profiles, envFiles): KEY=value per line, with # comments,
+// blank lines, and an optional `export ` prefix. A file pasted out of a
+// shell script works as it stands.
 //
-// Shared because both ends read the format: Bun merges these files into a
-// shell's spawn env (bun/spawnParams.ts), and the view's profile editor
-// (components/ProfileEditor.tsx) shows them as key/value rows. Two views of
-// one text, two parses:
+// The module is in `src/shared/` because both ends read the format: Bun
+// merges these files into a shell's spawn env (bun/spawnParams.ts), and the
+// view's profile editor (components/ProfileEditor.tsx) shows them as
+// key/value rows. So the module parses the text two ways:
 //
-// - `parseDotenv` is the SPAWN parse: name-validated, quotes stripped, bad
-//   lines reported — what the shell should actually receive.
-// - `parseDotenvDoc` / `serializeDotenv` are the EDITING pair: values stay
-//   raw (quotes and all — the user wrote them and will read them back), and
-//   everything that is not an entry — comments, blanks, even junk lines — is
-//   preserved verbatim through an edit. The profile file is still the user's
-//   file; a dialog that silently ate its comments would be rewriting it.
+// - `parseDotenv` is the spawn parse: names validated, quotes stripped, bad
+//   lines reported.
+// - `parseDotenvDoc` and `serializeDotenv` are the editing pair: values stay
+//   raw (quotes and all, since the user wrote them and will read them back),
+//   and comments, blanks and junk lines survive an edit verbatim.
 import { isEnvName, unquote } from "./frontmatter";
 
 /** Spawn parse: the vars a shell should receive (see header). */
@@ -34,19 +32,19 @@ export function parseDotenv(text: string): { vars: Record<string, string>; probl
       problems.push(`"${key}" is not a usable variable name`);
       continue;
     }
-    // The value may be empty ("KEY=" deliberately blanks a variable) and may
-    // contain further "=" (base64, URLs with query strings).
+    // The value may be empty ("KEY=" blanks a variable) and may contain
+    // further "=" (base64, URLs with query strings).
     vars[key] = unquote(stripped.slice(eq + 1).trim());
   }
   return { vars, problems };
 }
 
-/** One entry line as the editor sees it: raw value, position remembered. */
+/** One entry line as the editor sees it: the raw value and its line number. */
 export interface DotenvRow {
   // Index into the text's lines; the join key for serializeDotenv.
   line: number;
   key: string;
-  // Raw text after the "=", trimmed but NOT unquoted: what the user wrote.
+  // Raw text after the "=", trimmed but not unquoted: what the user wrote.
   value: string;
   exported: boolean;
 }
@@ -68,9 +66,9 @@ export function parseDotenvDoc(text: string): DotenvRow[] {
 /**
  * Write edited rows back into `text`. A row with a `line` replaces that line
  * (verbatim when nothing about it changed, so untouched lines keep their
- * exact bytes); an entry line with no surviving row is deleted; a row with
+ * exact bytes). An entry line with no surviving row is deleted. A row with
  * `line: null` is appended at the end. Comments, blanks, and junk lines pass
- * through untouched — see the header for why that is the contract.
+ * through untouched; the header says why that is the contract.
  */
 export function serializeDotenv(
   text: string,

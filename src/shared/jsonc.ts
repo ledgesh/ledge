@@ -1,19 +1,20 @@
-// JSONC → JSON: strip `//` and `/* */` comments and trailing commas so the
-// result feeds JSON.parse. Settings.jsonc is hand-edited with the comments AS
-// the documentation, so the file format has to tolerate them — and trailing
-// commas ride along because they are the single most common hand-edit typo,
-// and "the whole file falls back to defaults" is a steep price for one comma.
+// `stripJsonc` turns JSONC into JSON: it removes `//` and `/* */` comments
+// and trailing commas so the result feeds JSON.parse. settings.jsonc is
+// hand-edited and its comments are its documentation, so the format has to
+// tolerate them. A trailing comma is the most common hand-edit typo, and
+// JSON.parse rejects one: the parse fails and Bun runs on defaults.
 //
 // Lives in shared/ because both ends parse the same text: Bun at launch
 // (bun/settings.ts) and the settings editor dialog for its live validation
-// (components/SettingsEditor.tsx). The two must agree on what the file means,
-// so there is exactly one stripper.
+// (components/SettingsEditor.tsx). Bun and the dialog must read the file the
+// same way, so there is exactly one stripper: do not write a second
+// (architecture.md §6).
 //
-// Comments are replaced by spaces (newlines kept), not deleted: offsets and
-// line numbers in any JSON.parse error still point at the user's actual file.
-// The scanner is deliberately lenient — an unterminated string or comment
-// strips to end-of-text and lets JSON.parse be the one to complain; this
-// function never throws.
+// The stripper writes spaces over comments instead of deleting them, and
+// keeps the newlines. Offsets and line numbers in a JSON.parse error then
+// still point at the user's own file. The scanner is lenient: it strips an
+// unterminated string or comment to end-of-text and leaves JSON.parse to
+// complain. stripJsonc never throws.
 
 export function stripJsonc(text: string): string {
   return stripTrailingCommas(stripComments(text));
@@ -53,9 +54,10 @@ function stripComments(text: string): string {
   return out;
 }
 
-// Runs on comment-free text, so the lookahead only has whitespace to cross.
-// The comma is dropped exactly when the next meaningful character closes the
-// container; a comma inside a string is string content like any other.
+// Drops a comma exactly when the next meaningful character closes the
+// container, `}` or `]`, and drops no other comma. Runs on comment-free
+// text, so the lookahead only has whitespace to cross. A comma inside a
+// string is string content like any other.
 function stripTrailingCommas(text: string): string {
   let out = "";
   let i = 0;
@@ -82,8 +84,9 @@ function stripTrailingCommas(text: string): string {
   return out;
 }
 
-// Index just past the closing quote of the string starting at `start`
-// (text[start] is `"`), honoring backslash escapes; end-of-text if unclosed.
+// Returns the index just past the closing quote of the string starting at
+// `start`. The caller must pass a `start` that indexes a `"`. The scan
+// honors backslash escapes, and returns end-of-text for an unclosed string.
 function endOfString(text: string, start: number): number {
   let i = start + 1;
   const n = text.length;

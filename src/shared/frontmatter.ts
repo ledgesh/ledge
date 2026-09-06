@@ -1,32 +1,31 @@
 // Per-note shell parameters, read from a YAML-subset frontmatter block at the
-// top of the note.
+// top of the note (architecture.md §6a).
 //
-// Shared because both ends need it and they must agree: the view parses a
-// note's frontmatter to send spawn params over sessionConfigure, and slug.ts
-// uses the block's extent so a frontmatter note's title is still its first
-// content line, not "---". Hand-rolled rather than a yaml dependency
-// (architecture.md §8): the accepted grammar is deliberately a flat
-// `key: value` list plus one indented map under `env:`, which is ~all of what
-// these params need and small enough to be fully specified by its tests.
+// Shared because both ends parse the block and must agree on it. The view
+// parses a note's frontmatter to send spawn params over sessionConfigure.
+// slug.ts uses the block's extent, so a frontmatter note's title is its first
+// content line rather than "---". The grammar is hand-rolled rather than a
+// yaml dependency (architecture.md §8). It is a flat `key: value` list plus
+// one indented map under `env:`. That covers what these params need, and it is
+// small enough for its tests to specify fully.
 //
-// Only the block's SHAPE lives here. What the values mean at spawn — ~
-// expansion, cwd fallback, profile file resolution, env precedence — is
+// Only the block's shape lives here. What the values mean at spawn (~
+// expansion, cwd fallback, profile file resolution, env precedence) is
 // Bun-side policy, applied where the shell is spawned.
 //
 // Validation degrades per line, parseSettings-style: a bad line costs that
-// line, never the rest of the block and never a crash. The note is
-// hand-edited text; a typo has to degrade as gently as one in settings.jsonc
-// does — and, like settings.jsonc, it has to SAY SO. Every refusal here is a
-// `problem` carrying the line it is on, and the editor draws each one beside
-// its line (mainview/editor/frontmatter.ts). These strings are therefore
-// user-facing text: they follow docs/contributor/writing.md, which is why
-// none of them contains an em dash.
+// line, never the rest of the block and never a crash. A note is hand-edited
+// text, like settings.jsonc, so one typo must not cost the writer the rest of
+// what they wrote.
 //
-// The alternative, silence, is what this block shipped with, and it is the
-// worst failure available to a feature made of machinery you cannot see
-// working: a misspelled key means the note's shells quietly spawn as though
-// the line were not there. The one thing a user then has to go on is that
-// nothing happened.
+// Every refusal is a `problem` carrying the line it is on, and the editor
+// draws each one beside its line (mainview/editor/frontmatter.ts). These
+// messages are user-facing text, so they follow docs/contributor/writing.md
+// and contain no em dashes.
+//
+// Silence is what this block shipped with, and the problem list replaced it.
+// An ignored misspelled key spawns the note's shells as though the line were
+// not there, and nothing tells the writer why.
 
 /** Parameters a note may declare. null / {} / [] mean "not declared". */
 export interface NoteParams {
@@ -41,44 +40,44 @@ export interface NoteParams {
   env: Record<string, string>;
   // The machines this note's blocks may execute on: ssh destinations
   // (`user@host`, an ssh-config alias), or the reserved word "local". Empty
-  // means undeclared — everything runs locally, as before the key existed.
-  // More than one entry means every run asks which member to target; the list
-  // is an allowlist, enforced Bun-side (bun/index.ts resolveHost).
+  // means undeclared, and everything runs locally, as it did before the key
+  // existed. More than one entry means every run asks which member to target.
+  // The list is an allowlist, enforced Bun-side (bun/index.ts resolveHost).
   hosts: string[];
   // The note's declared tags, spelled as written (leading "#" stripped;
   // identity is case-folded at comparison time, shared/tags.ts normalizeTag).
-  // The one key that never feeds a spawn: it lives here — and rides
-  // sessionConfigure inertly — because the block has ONE parser, not because
-  // the shell cares. Inline #hashtags in the body are the other tag source;
-  // shared/tags.ts tagRefsOf merges the two.
+  // Never feeds a spawn. It lives here, and rides sessionConfigure inertly,
+  // because the block has one parser. Inline #hashtags in the body are the
+  // other tag source, and shared/tags.ts tagRefsOf merges the two.
   tags: string[];
-  // Whether the note declares itself a template (`template: true`): the note
-  // appears in the "New Note from Template…" picker, and instantiating it
-  // strips this line (shared/template.ts) so instances are not templates too.
-  // The value `daily` claims a ROLE on top of that: this template is the one
-  // ⌘J / `ledge today` instantiates for each day's note (bun/daily.ts
-  // findDailyTemplate). In the corpus rather than in settings.jsonc
-  // deliberately: which notes are templates — and which one is the daily —
-  // is a fact about the notes, and marking one is editing a note: no
-  // registry to keep in sync, no restart to apply it, nothing to go stale
-  // when the note retitles. Like tags, it never feeds a spawn; it lives here
-  // because the block has one parser.
+  // Whether the note declares itself a template: `true`, `false`, or `daily`
+  // (architecture.md §6a). A template appears in the "New Note from
+  // Template…" picker, and instantiating it strips this line
+  // (shared/template.ts) so instances are not templates too. `daily` names the
+  // one template ⌘J and `ledge today` instantiate for each day's note
+  // (bun/daily.ts findDailyTemplate). Which notes are templates, and which one
+  // is the daily, is a fact about the notes, so the marker lives in the note
+  // rather than in settings.jsonc: no registry to keep in sync, no restart to
+  // apply it, nothing to go stale when the note retitles. Like tags, it never
+  // feeds a spawn; it lives here because the block has one parser.
   template: boolean | "daily";
   // Whether every runnable block in this note asks before it executes
-  // (interactions.md §4b): the whole-note stance for a runbook where the
-  // blocks are all consequential. A per-block `confirm` attribute on the fence
-  // wins over it in both directions, so one harmless block in such a note can
-  // still opt out with `confirm=no`. Never feeds a spawn: it lives here
-  // because the block has one parser, and because "does this note's code ask
-  // first" is a fact about the note, not a setting about the app.
+  // (interactions.md §4b). The key is the whole-note stance for a runbook
+  // whose blocks are all consequential. A per-block `confirm` attribute on the
+  // fence wins over it in both directions, so one harmless block in such a
+  // runbook can still opt out with `confirm=no`. Whether a note's blocks ask
+  // first is a fact about the note, not a setting about the app. Never feeds a
+  // spawn; it lives here because the block has one parser.
   confirm: boolean;
-  // The note-locking crypto header (locking.md §2): non-null means the
-  // note's body on disk is ciphertext. The VALUE's structure is Bun's
-  // (bun/vault.ts parseLockedHeader); here it is one opaque string, parsed
-  // like every key because the block has one grammar. Unlike template: this
-  // is Bun-OWNED text — a save can never mint or drop it (writeNote
-  // re-stamps from disk), only the Lock/Remove Lock commands can — so the
-  // editor completion deliberately never offers it. Never feeds a spawn.
+  // The note-locking crypto header (locking.md §2): non-null means the note's
+  // body on disk is ciphertext. Bun owns the value's structure (bun/vault.ts
+  // parseLockedHeader); here it is one opaque string, parsed like every key
+  // because the block has one grammar. Unlike `template:`, this text is
+  // Bun-owned: a save can never mint or drop it, only the Lock and Remove Lock
+  // commands can. writeNote re-stamps the header from disk on every save, and
+  // a hand-typed `locked:` line in an unlocked note is stripped with a warning
+  // (bun/notes.ts sealFor), so the editor completion never offers the key.
+  // Never feeds a spawn.
   locked: string | null;
 }
 
@@ -87,12 +86,11 @@ export const LOCAL_HOST = "local";
 
 /**
  * One thing wrong with the block, and the note line it is on (1-based, so it
- * indexes a CodeMirror document directly). The line rides along because the
- * only consumer is a per-line surface: the editor draws the message beside
- * the line it belongs to (mainview/editor/frontmatter.ts). Deriving it there
- * instead would mean a second walk of the block, and the parser's line
- * discipline is subtle enough that shared/tags.ts needed an invariant test to
- * keep ITS second walk honest. One walk, no drift.
+ * indexes a CodeMirror document directly). The editor draws each message
+ * beside its line (mainview/editor/frontmatter.ts), so the parser reports the
+ * line rather than making the editor walk the block again. A second walk
+ * drifts: shared/tags.ts needed an invariant test to keep its own in step with
+ * this parser's line counting.
  */
 export interface FrontmatterProblem {
   line: number;
@@ -103,58 +101,58 @@ export interface Frontmatter {
   params: NoteParams;
   problems: FrontmatterProblem[];
   // Offset of the first content character after the closing fence (0 when the
-  // note has no frontmatter). This is the one field slug.ts and the editor's
-  // block styling need; they must agree with the parser on where the block
-  // ends, which is why it is returned rather than recomputed.
+  // note has no frontmatter). slug.ts and the editor's block styling need it
+  // and must agree with the parser on where the block ends, so the parser
+  // returns it rather than letting them recompute it.
   end: number;
 }
 
 // Exactly three dashes, alone on the line. `\s*$` swallows trailing spaces and
-// a stray \r (pasted CRLF text) — both invisible, so both would otherwise make
-// a block silently stop being one.
+// a stray \r from pasted CRLF text. Both are invisible, so without this the
+// note's frontmatter would go unrecognised with nothing on the line to show
+// why.
 const FENCE = /^---\s*$/;
 
-// The profile name becomes a filename under the profiles dir, so it is safe by
-// construction or not accepted at all — the same trust move as slugify: no
-// separators and no dots means no traversal, no ".env"-style hidden files, and
-// nothing to escape. Exported because Bun re-checks the name at resolution
-// (bun/spawnParams.ts): the view is the least-trusted end of the RPC, so the
-// parser's check is the typo message and Bun's is the guard — and they must be
-// the SAME predicate, or a name could pass one and surprise the other.
+// The profile name becomes a filename under the profiles dir, so the accepted
+// charset is safe by construction, the same move as slugify. No separators and
+// no dots means no traversal, no ".env"-style hidden files, and nothing to
+// escape. Exported because Bun re-checks the name at resolution
+// (bun/spawnParams.ts): the view is the least-trusted end of the RPC. This
+// check is the typo message and Bun's is the guard, so both ends must use this
+// one predicate, or a name could pass one and surprise the other.
 export function isProfileName(name: string): boolean {
   return /^[A-Za-z0-9_-]+$/.test(name);
 }
 
 // An ssh destination (`host`, `user@host`, an ssh-config alias) or "local".
-// The charset covers all of those; what it excludes is what matters: a leading
-// "-" would read as an ssh OPTION when the destination becomes argv (option
-// injection), and whitespace/quotes/commas never appear in a real destination
-// but would break the list syntax and the remote command line. Same
-// parser-checks/Bun-guards split as isProfileName: the view's check is the
-// typo message, Bun re-applies the SAME predicate where the value is used
-// (bun/index.ts resolveHost).
+// The charset accepts all four spellings. A leading "-" is refused because the
+// destination becomes argv, where it would read as an ssh option (option
+// injection). Whitespace, quotes and commas are refused because they would
+// break the list syntax and the remote command line, and no real destination
+// contains them. As with isProfileName, this check is the typo message and Bun
+// re-applies the same predicate where the value is used (bun/index.ts
+// resolveHost).
 export function isHostName(name: string): boolean {
   return /^[A-Za-z0-9_.@:-]+$/.test(name) && !name.startsWith("-");
 }
 
-// A tag as BOTH grammars accept it: the inline `#tag` scanner
-// (shared/tags.ts) and the `tags:` list here must agree on what counts as a
-// tag, or a note could declare a tag it can never write inline. Letters (any
-// script), digits, "_", "-", "/" — and at least one letter or "_", so `#123`
-// and `#2024` stay plain text (an issue number, a year — not a tag). "/" is
-// an accepted spelling (`project/ledge`) with no hierarchy semantics.
+// What both tag grammars accept: letters (any script), digits, "_", "-" and
+// "/", plus at least one letter or "_", so an issue number like `#123` or a
+// year like `#2024` stays plain text. "/" is an accepted spelling
+// (`project/ledge`) with no hierarchy semantics. The inline `#tag` scanner
+// (shared/tags.ts) and the `tags:` list here share this predicate; otherwise
+// a note could declare a tag it can never write inline.
 export function isTagToken(token: string): boolean {
   return /^[\p{L}\p{N}_/-]+$/u.test(token) && /[\p{L}_]/u.test(token);
 }
 
 /**
  * Split a `tags:` value into its accepted tags and the tokens refused.
- * `tag` is the spelling with any leading "#" stripped; `raw` is the token
- * exactly as written (the reveal re-finds it on the line — `unbracket` keeps
- * every token a verbatim substring of the line, so it still can). Case-folded
- * dedupe, first spelling wins. Exported for shared/tags.ts, which locates
- * the `tags:` line for occurrence refs: what the two ends accept from that
- * line must be the SAME list, so the split lives once, here.
+ * `tag` is the spelling with any leading "#" stripped. `raw` is the token
+ * exactly as written, which the reveal re-finds on the line: `unbracket`
+ * keeps every token a verbatim substring of the line. Dedupe is case-folded
+ * and the first spelling wins. shared/tags.ts calls this when it locates the
+ * `tags:` line for occurrence refs, so both ends accept the same list.
  */
 export function splitTagList(value: string): {
   accepted: { tag: string; raw: string }[];
@@ -173,11 +171,11 @@ export function splitTagList(value: string): {
   return { accepted, rejected };
 }
 
-// Env var names as execve and every shell agree on them. Anything else (spaces,
-// "=", unicode) would be legal in envp but unreachable from a shell, which for
-// a notes app means it is a typo. Shared with the dotenv parsing in
-// bun/spawnParams.ts: what counts as a usable name must not depend on which
-// file it was written in.
+// Env var names as execve and every shell agree on them. Anything else
+// (spaces, "=", unicode) is legal in envp but unreachable from a shell, so in
+// a note it is a typo. The dotenv parsing in bun/spawnParams.ts shares this
+// predicate, so a name means the same thing whether it was written in a note
+// or in a profile file.
 export function isEnvName(name: string): boolean {
   return /^[A-Za-z_][A-Za-z0-9_]*$/.test(name);
 }
@@ -185,9 +183,9 @@ export function isEnvName(name: string): boolean {
 /**
  * Where a note's frontmatter block ends: the offset just past the closing
  * fence's newline, or 0 if the note has none. A block only exists when the
- * note's very FIRST line is `---` and a closing `---` line follows: an
- * unterminated opener is treated as content (it is a markdown thematic break),
- * not as a block that swallowed the whole note.
+ * note's first line is `---` and a closing `---` line follows. An
+ * unterminated opener counts as content, a markdown thematic break, rather
+ * than as a block that swallowed the whole note.
  */
 export function frontmatterEnd(text: string): number {
   const firstNl = text.indexOf("\n");
@@ -216,13 +214,13 @@ export function parseFrontmatter(text: string): Frontmatter {
   const innerStart = text.indexOf("\n") + 1;
   const inner = text.slice(innerStart, end).replace(/\r?\n?---\s*$/, "");
 
-  // Indented lines are only meaningful directly under `env:`; this tracks
-  // whether we are inside that map.
+  // Indented lines are only meaningful directly under `env:`. This tracks
+  // whether the loop is inside that map.
   let inEnv = false;
 
-  // Line 1 is the opening fence, so the first inner line is line 2; the loop
+  // Line 1 is the opening fence, so the first inner line is line 2. The loop
   // advances this before its body, and `problem` closes over it so no report
-  // site has to remember to carry the number.
+  // site has to pass the number.
   let lineNumber = 1;
   const problem = (message: string) => problems.push({ line: lineNumber, message });
 
@@ -230,9 +228,9 @@ export function parseFrontmatter(text: string): Frontmatter {
     lineNumber += 1;
     const line = rawLine.replace(/\r$/, "");
     const trimmed = line.trim();
-    // Blank lines and full-line comments are structure-neutral: they neither
-    // end the env map nor start one. (Inline comments are NOT stripped — a
-    // value may legitimately contain "#", as in a URL fragment.)
+    // Blank lines and full-line comments neither end the env map nor start
+    // one. Inline comments are not stripped, because a value may contain "#"
+    // (a URL fragment, for instance).
     if (!trimmed || trimmed.startsWith("#")) continue;
 
     const colon = trimmed.indexOf(":");
@@ -279,8 +277,8 @@ export function parseFrontmatter(text: string): Frontmatter {
       case "host": {
         // One line, space- or comma-separated: `host: web1, deploy@prod`.
         // Neither separator can appear in a real ssh destination, so a flat
-        // list needs no new grammar. Per-token degradation, env-style: a bad
-        // token costs itself, the machines beside it stay reachable.
+        // list needs no new grammar. A bad token costs itself, as in `env`:
+        // the machines beside it stay reachable.
         if (!value) {
           problem(`"host" must name at least one machine (or "local")`);
           break;
@@ -296,12 +294,12 @@ export function parseFrontmatter(text: string): Frontmatter {
       case "tags": {
         // One line, space- or comma-separated, brackets optional:
         // `tags: work, #project/ledge` and `tags: [work, project/ledge]` are
-        // the same list (splitTagList/unbracket). A leading "#" per token is
-        // accepted and stripped — people write tags the way the body spells
-        // them. Per-token degradation, host-style: a bad token costs itself,
-        // the tags beside it survive. Note `tags: []` is not empty-valued: an
-        // explicitly empty list declares no tags and is no more a problem
-        // than omitting the line, where a bare `tags:` is a line left unfinished.
+        // the same list (splitTagList/unbracket). A leading "#" on a token is
+        // accepted and stripped, so tags can be written the way the body
+        // spells them. A bad token costs itself, as in `host`: the tags beside
+        // it survive. `tags: []` declares no tags and is no more a problem
+        // than omitting the line. A bare `tags:` is an unfinished line, and it
+        // is reported.
         if (!value) {
           problem(`"tags" must name at least one tag`);
           break;
@@ -314,32 +312,34 @@ export function parseFrontmatter(text: string): Frontmatter {
         break;
       }
       case "template":
-        // Exactly true, false, or daily: any other value is a typo, and
-        // defaulting a typo to "is a template" would surprise harder than
-        // the reverse.
+        // Exactly true, false, or daily. Any other value is reported as a
+        // typo rather than defaulting to true. Defaulting would make a note a
+        // template without the writer asking for one.
         if (value === "true") params.template = true;
         else if (value === "false") params.template = false;
         else if (value === "daily") params.template = "daily";
         else problem(`"template" must be true, false, or daily: "${value}"`);
         break;
       case "confirm":
-        // Exactly true or false. A typo defaulting to "asks first" would be
-        // the harmless direction, but it would also be a silent one: the
-        // whole point of the key is that the user knows which blocks pause.
+        // Exactly true or false. Defaulting a typo to "asks first" would be
+        // the harmless direction, but it would also be a silent one, and the
+        // key exists so the writer knows which blocks pause.
         if (value === "true") params.confirm = true;
         else if (value === "false") params.confirm = false;
         else problem(`"confirm" must be true or false: "${value}"`);
         break;
       case "locked":
         // Opaque here; bun/vault.ts owns the structure. A non-empty value
-        // marks the note locked EVEN when malformed — a damaged header must
-        // read as damage (refuse to decrypt), never as "unlocked after all".
+        // marks the note locked even when malformed: the vault then refuses to
+        // decrypt a damaged header, where dropping it would leave the parser
+        // reporting an unlocked note.
         if (value) params.locked = value;
         else problem(`"locked" is machine-written by Lock This Note: an empty value does nothing`);
         break;
       default:
-        // Same reasoning as parseSettings: a misspelled key silently ignored
-        // reads as "my frontmatter does nothing" — say so instead.
+        // Report the key rather than ignoring it, as parseSettings does. A
+        // silently ignored misspelling leaves the writer with frontmatter
+        // that does nothing and no reason why.
         problem(`unknown key "${key}"`);
     }
   }
@@ -359,21 +359,18 @@ export function unquote(v: string): string {
   return v;
 }
 
-// Strip one pair of wrapping brackets, unquote's sibling and the same
-// concession: `tags: [ops, runbook]` means what it looks like. That is YAML's
-// flow sequence, and it is how Obsidian and most Markdown tools spell a tag
-// list — a notes folder is shared ground (architecture.md §3), so a list
-// written the way every other editor writes it must not read here as two
-// broken tokens. The grammar itself does not grow: this is one value's
-// punctuation coming off, not a new value TYPE, which is why the block's
-// multi-line `- item` sequence is still refused (it would be one).
+// Strip one pair of wrapping brackets, unquote's sibling, so
+// `tags: [ops, runbook]` parses as the same list as `tags: ops, runbook`. That
+// is YAML's flow sequence, the spelling Obsidian and most Markdown tools use,
+// and a notes folder is shared ground (architecture.md §3). This takes
+// punctuation off one value and adds no value type to the grammar. A
+// multi-line `- item` sequence would add one, so the block still refuses it.
 //
 // Only a matched, wrapping pair, so `tags: [ops` stays the typo it looks like
-// and is reported as one. Nothing legitimate is caught: no bracket can appear
-// inside a tag (isTagToken), so a stripped pair can only ever have been
-// punctuation. Exported for mainview/editor/frontmatter.ts, which must take
-// the brackets off at the same place or the form the parser accepts would
-// render as two refused tokens.
+// and is reported as one. No bracket can appear inside a tag (isTagToken), so
+// a stripped pair was always punctuation. mainview/editor/frontmatter.ts must
+// take the brackets off at the same point, or a value the parser accepts would
+// render there as two refused tokens.
 export function unbracket(v: string): string {
   if (v.length >= 2 && v[0] === "[" && v[v.length - 1] === "]") return v.slice(1, -1);
   return v;

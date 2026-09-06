@@ -1,7 +1,7 @@
-// The pure wikilink decisions: how a target splits into title + heading,
-// which note a title resolves to, and what a backlink scan counts as a link.
-// (The `[[...]]` grammar and the picker are CodeMirror seams, tested in
-// mainview/editor/wikilinks.test.ts.)
+// Covers the pure wikilink decisions: how a target splits into a title and a
+// heading, which note a title resolves to, and what a backlink scan counts as
+// a link. The `[[...]]` grammar and the picker are CodeMirror seams, tested in
+// mainview/editor/wikilinks.test.ts.
 import { describe, expect, test } from "bun:test";
 import { appendToNote, headingsOf, parseWikiTarget, resolveWikiTitle, wikiRefsOf } from "./wikilinks";
 
@@ -61,8 +61,8 @@ describe("wikiRefsOf", () => {
   });
 
   test("raw keeps the file's own spelling, not the parsed normalization", () => {
-    // The title trims and the empty heading drops, but `raw` must stay what a
-    // reveal can re-find in the line verbatim.
+    // parseWikiTarget trims the title and drops the empty heading. `raw` must
+    // stay what a reveal can re-find in the line verbatim.
     expect(wikiRefsOf("x [[ Spaced #]] y")).toEqual([
       { title: "Spaced", heading: null, line: 1, raw: "[[ Spaced #]]" },
     ]);
@@ -86,8 +86,8 @@ describe("wikiRefsOf", () => {
   });
 
   test("a fence closes only on its own character and length", () => {
-    // The ~~~ line inside a ``` fence is content, and a shorter ```` closer
-    // does not close a ````` fence.
+    // A ~~~ line inside a ``` fence is content. A shorter ```` closer does
+    // not close a ````` fence.
     expect(wikiRefsOf("```\n~~~\n[[A]]\n```\n[[B]]")).toEqual([{ title: "B", heading: null, line: 5, raw: "[[B]]" }]);
     expect(wikiRefsOf("`````\n```\n[[A]]\n`````\n[[B]]")).toEqual([{ title: "B", heading: null, line: 5, raw: "[[B]]" }]);
   });
@@ -112,8 +112,8 @@ describe("headingsOf", () => {
   });
 });
 
-// The splice behind append_note. Every case asserts the full result text:
-// block spacing IS the behavior here.
+// The splice behind append_note. Every case asserts the full result text.
+// The block spacing is what these cases check.
 describe("appendToNote", () => {
   const NOTE = "# Jokes\n\n## Puns\n\nfirst pun\n\n## Long Ones\n\na long joke\n";
 
@@ -168,10 +168,10 @@ describe("appendToNote", () => {
     expect(appendToNote("## A\nbody", "x", "A")).toBe("## A\nbody\n\nx\n");
   });
 
-  // The trailing-prompt-block rule: a runnable ```prompt fence at the end is
-  // the note's control, and additions accumulate ABOVE it — the exact "add a
-  // joke to this note" note, where the block would otherwise wedge every
-  // result between itself and the content.
+  // appendToNote floats a trailing prompt block. A runnable ```prompt fence
+  // at the end is the note's control, so appends land above it. In an "add a
+  // joke to this note" note, appending below the block would put every result
+  // between the block and the content.
   test("an end-append lands above a trailing prompt block", () => {
     const note = "# Jokes\n\n> joke one\n\n```prompt\nadd another joke\n```\n";
     expect(appendToNote(note, "> joke two")).toBe(
