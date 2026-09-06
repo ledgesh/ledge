@@ -1,6 +1,6 @@
 // The MCP dispatcher's protocol decisions, against fake tools: what gets a
 // reply, what gets an error, and how tool results and failures are framed.
-// The real tools run against a real filesystem in mcpTools.fs.test.ts; the
+// The real tools run against a real filesystem in mcpTools.fs.test.ts. The
 // spawned-process seam (stdio framing end to end) is mcp.stdio.fs.test.ts.
 import { afterEach, describe, expect, test } from "bun:test";
 import { createDispatcher, type McpTool } from "./mcp";
@@ -55,9 +55,10 @@ describe("lifecycle", () => {
   });
 });
 
-// The initialize instructions are the deixis lever: launched from a note's
-// terminal, the server TELLS the agent which note "this note" is, instead of
-// hoping it discovers the no-argument fallback in a tool description.
+// The initialize instructions state the deixis facts (mcp.ts
+// `instructions`). Launched from a note's terminal, the server reads
+// $LEDGE_NOTE and names that note's path. "This note" then resolves without
+// the model finding read_note's no-argument fallback in a tool description.
 describe("instructions", () => {
   const SAVED = new Map<string, string | undefined>(
     ["LEDGE_NOTE", "LEDGE_WORKSPACE", "LEDGE_PROMPT_BLOCK"].map((k) => [
@@ -96,8 +97,9 @@ describe("instructions", () => {
   });
 
   test("they teach the tag convention whatever the launch context", async () => {
-    // The initialize instructions are the steering lever: an agent that never
-    // hears about tags will never write one.
+    // An agent that never hears about tags never writes a tag. The
+    // instructions name both tag syntaxes up front, where the model reads
+    // them without opening the `tags` tool's description.
     delete process.env["LEDGE_NOTE"];
     delete process.env["LEDGE_WORKSPACE"];
     const text = await initInstructions();
@@ -107,17 +109,18 @@ describe("instructions", () => {
   });
 
   test("they point at the built-in manual and the settings tool, whatever the launch context", async () => {
-    // Ledge's own manual is a workspace the read tools already reach, but an
+    // The built-in manual is a workspace the read tools already reach, but an
     // agent that never learns it exists answers Ledge questions from training
-    // data. Same lever as the deixis facts: stated, not left to inference.
+    // data. The instructions name it rather than rely on the model inferring
+    // it from list_workspaces' `kind`.
     delete process.env["LEDGE_NOTE"];
     delete process.env["LEDGE_WORKSPACE"];
     const text = await initInstructions();
     expect(text).toContain('`kind: "docs"`');
     expect(text).toContain("search_notes");
     expect(text).toContain("`settings` tool");
-    // The two facts an agent must pass on rather than act on: nothing here
-    // writes settings, and a change lands at the next launch.
+    // Two settings facts an agent reports rather than acts on: no tool here
+    // writes the settings file, and a change takes effect at the next launch.
     expect(text).toContain("Nothing here writes it");
     expect(text).toContain("next launch");
   });
@@ -131,8 +134,11 @@ describe("instructions", () => {
   });
 
   test("a prompt-block run is told it is one-shot: act, don't ask", async () => {
-    // Print mode has nobody on the other end; without this the model ends
-    // with "let me know if…" aimed at a closed pipe.
+    // A runnable ```prompt fence sets LEDGE_PROMPT_BLOCK=1 in its command
+    // (the default `prompt` interpreter in shared/settings.ts). That command
+    // runs the agent in print mode, where the user cannot reply. The
+    // instructions tell the model to act and report briefly rather than end
+    // with a follow-up question.
     process.env["LEDGE_NOTE"] = "/ws/current.md";
     process.env["LEDGE_PROMPT_BLOCK"] = "1";
     const text = await initInstructions();

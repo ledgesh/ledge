@@ -1,22 +1,23 @@
 // The handlers the client keeps for itself.
 //
-// Most of the protocol is a question about the notes, and the answer is on the
-// machine that holds them. A few are the opposite: the pasteboard you copied
-// from, the browser that should open a link, and the menu bar at the top of
-// the screen all belong to the device in front of the user, and answering them
-// on the server would reach the wrong machine — a VPS's empty pasteboard, a
-// link opened in a browser nobody is looking at, a menu bar that does not
-// exist and takes ⌘Q with it (remote.md §10). So does the list of servers this
-// app can connect to, which is nobody's business but this app's (§8).
+// Most of the protocol is a question about the notes, and the machine that
+// holds them answers. A few belong to the device in front of the user: the
+// pasteboard, the browser that opens a link, the menu bar. On a server those
+// reach the wrong machine: an empty pasteboard, a browser nobody is looking
+// at, a menu bar that does not exist and takes ⌘Q with it (remote.md §10).
 //
-// So the client shell serves them itself, whether it is talking to a server in
-// its own process or to one across an ssh connection, and they never become
-// frames. bun/server.ts implements the same names as refusals: the handler map
-// is total by construction, and a call that reaches the server's copy is a
-// wiring bug that should say so rather than quietly return an empty string.
+// The list of servers this app can connect to is the app's own for a
+// different reason. A server has no business knowing which servers this client
+// can reach (§8).
 //
-// This module imports no Electrobun. The two genuinely native bits arrive as
-// optional dependencies, exactly as bun/server.ts takes its folder dialog.
+// The client shell serves them all itself, local server or remote, so they
+// never become frames. bun/server.ts implements the same names as refusals
+// that throw, typed so the map cannot lose one. A call that reaches the
+// server's copy reports the wiring bug instead of returning an empty answer.
+//
+// This module imports no Electrobun. The native pieces arrive as optional
+// dependencies (ClientNative below), the way bun/server.ts takes its folder
+// dialog.
 import { readClipboardHtml, readClipboardImage, readClipboardText, writeClipboard } from "./clipboard";
 import { loadClientSettings, readClientSettingsFile, writeClientSettingsFile } from "./clientSettings";
 import { mergeSettings, type Settings } from "../shared/settings";
@@ -27,64 +28,65 @@ export interface ClientNative {
   // The pasteboard's available flavors, or null where they cannot be read.
   // Null means "ask the pasteboard anyway" (clipboardReadRich fails open).
   clipboardFormats?(): string[] | null;
-  // Hand the view's menu description to the platform. A no-op off macOS.
+  // Hands the view's menu description to the platform. A no-op off macOS.
   setMenu?(items: unknown[]): void;
-  // Open another window, which is another client of another server
-  // (remote.md §8a). Absent on a shell that has one window and can only ever
-  // have one, which is what makes the verb disappear rather than fail.
+  // Opens another window, which is another client of another server
+  // (remote.md §8a). Absent on a shell that can only ever have one window. The
+  // view then leaves the verb out rather than offering one that fails
+  // (mainview/lib/shell.ts multiWindow).
   newWindow?(): void;
-  // Open the manual's window on `page` ("" for its landing page), or raise it
-  // and show that page where it is already open. Absent for newWindow's
+  // Opens the manual's window on `page` ("" for its landing page), or raises
+  // it and shows that page where it is already open. Absent for newWindow's
   // reason, and the caller then opens the manual in the window it has.
   docsWindow?(page: string): void;
-  // Whether THIS window is the manual's, and the page it was opened to show.
-  // Absent on a shell whose one window is never it.
+  // Whether this window is the manual's, and the page it was opened to show.
+  // Absent on a shell whose one window is never the manual's.
   windowRole?(): { docs: boolean; page: string };
   // The pasteboard's image, as PNG bytes. Defaults to the osascript route
-  // (bun/clipboard.ts). Injectable for two reasons that point the same way: a
-  // client that is not a Mac reads its pasteboard some other way, and a test
-  // suite must never read the developer's own — which is why the paste seam
-  // is the one that takes a dependency and the text ones do not.
+  // (bun/clipboard.ts). Optional for two reasons: a client that is not a Mac
+  // reads its pasteboard some other way, and the tests must not read the
+  // developer's own pasteboard (clientSeams.test.ts injects one). That is why
+  // the two image seams take a dependency and the text ones are imported from
+  // ./clipboard.
   readImage?(): Promise<Uint8Array | null>;
   // A picture chosen from this device, as PNG bytes, or null where the user
-  // cancelled. The macOS file dialog here and PHPicker on iOS (ios.md §11).
-  // Optional for readImage's reasons and one more: a client with no picker is a
-  // client where Insert Image… answers null, which is what a cancelled picker
-  // answers too, so the seam degrades into the outcome the view already
-  // handles.
+  // cancelled. The macOS file dialog here (bun/index.ts), PHPicker on iOS
+  // (ios.md §11). Optional for readImage's reasons and one more. A shell with
+  // no picker makes Insert Image… answer null. A cancelled picker answers null
+  // too, and the view already handles that.
   pickImage?(): Promise<Uint8Array | null>;
 }
 
-// NATIVE_METHODS, CONNECTION_METHODS and CLIENT_METHODS are shared/wire.ts's:
-// this module is one shell's implementation of the first group, and iOS has
-// another (ios.md §2). The list has to outlive both.
+// NATIVE_METHODS, CONNECTION_METHODS and CLIENT_METHODS live in
+// shared/wire.ts, not here. This module implements the first group for the Mac
+// shell. mainview/lib/nativeBridge.ts implements it for iOS (ios.md §2). Every
+// shell needs the lists, so the lists have to outlive any one shell.
 
-// Whether clipboardReadRich should pay for the osascript spawn. Fails open in
-// both directions that mean "we do not know": a platform with no format list
-// (null) and a list that came back empty both ask the pasteboard anyway, so a
-// wrong answer costs ~100ms and never the paste.
+// Whether clipboardReadRich should pay for the osascript spawn. Both answers
+// that mean the flavors are unknown (a null list, an empty one) ask the
+// pasteboard anyway, so a wrong answer costs about 100ms and never the paste.
 export function wantsHtml(formats: string[] | null): boolean {
   return formats === null || formats.length === 0 || formats.includes("html");
 }
 
 /**
- * The whole map a client shell should serve: the server's handlers, with the
+ * The whole map a client shell serves: the server's handlers, with the
  * client's own answers laid over the top.
  *
- * Two kinds of overlay, and the difference is worth keeping straight. The names
- * in CLIENT_METHODS never reach the server at all. The three settings entries
- * WRAP it: a settings file has two homes (remote.md §5), the server owns one,
- * this owns the other, and the view is handed one merged snapshot that does
- * not mention there were two.
+ * The overlay works two ways. The native names below replace the server's
+ * copies, which never run. The three settings entries wrap the server's copy
+ * instead. A settings file has two homes (remote.md §5): the server owns one
+ * and this owns the other, and the view gets one merged snapshot that does not
+ * mention there were two.
  *
- * Applied identically whether `base` came from a server in this process or
- * from one across an ssh connection, which is what stops the remote path from
- * being the only place any of this runs.
+ * `base` may be a server in this process or one across an ssh connection. The
+ * overlay is the same either way, so the in-process server exercises it too
+ * and the ssh path is not the only place it runs.
  */
 export async function clientOverlay(base: RequestHandlers, native: ClientNative): Promise<RequestHandlers> {
-  // Read once at boot, exactly like the server reads its own: settings apply
-  // at launch, never live (architecture.md, "Settings"), so a snapshot taken
-  // here is the snapshot for the process.
+  // The client's settings, read once here. Settings apply at launch and never
+  // live (architecture.md §6), the rule the server's half follows too. One
+  // snapshot therefore serves the whole process.
   const mine: Settings = await loadClientSettings();
   return {
     ...base,
@@ -106,29 +108,32 @@ export async function clientOverlay(base: RequestHandlers, native: ClientNative)
 }
 
 /**
- * The ten themselves. `server` is where the one of them that produces a FILE
- * sends its bytes: reading a pasteboard and naming a file in a workspace are
- * different machines' jobs, and this is the seam between them.
+ * The ten native handlers (shared/wire.ts NATIVE_METHODS). `server` is where
+ * the two that produce a file, assetPaste and assetPick, send their bytes:
+ * this device reads the pasteboard or the picker, and the machine holding the
+ * notes names the file.
  */
 export function clientSeams(
   native: ClientNative,
   server: Pick<RequestHandlers, "assetWrite"> = { assetWrite: async () => ({ src: null }) },
 ): Pick<RequestHandlers, NativeMethod> {
   return {
-    // The webview cannot reach the pasteboard itself (a views:// page is not a
-    // secure context, so navigator.clipboard is absent), which is why copy and
-    // paste are an RPC at all rather than a browser API.
+    // Copy and paste are an RPC rather than a browser API because the webview
+    // cannot reach the pasteboard. A views:// page is not a secure context, so
+    // navigator.clipboard is absent there (bun/clipboard.ts).
     clipboardWrite: async ({ text }) => {
       await writeClipboard(text);
       return { ok: true };
     },
     clipboardRead: async () => ({ text: await readClipboardText() }),
     // Text and the HTML flavor together, for the editor's ⌘V. The two reads
-    // run concurrently because the HTML one is an osascript spawn: ~100ms
-    // serialized onto every paste is a keystroke that feels stuck. AppKit is
-    // asked first whether there is any HTML at all (wantsHtml above), which
-    // skips that spawn for every copy made inside Ledge — pbcopy writes text
-    // alone — and for a terminal selection.
+    // run concurrently because the HTML one is an osascript spawn, and
+    // serializing about 100ms onto every paste is a visible delay.
+    //
+    // AppKit is asked first whether there is any HTML at all (clipboardFormats
+    // above, which bun/index.ts answers with Utils.clipboardAvailableFormats).
+    // That skips the spawn for a copy made inside Ledge (pbcopy writes text
+    // alone) and for a terminal selection.
     clipboardReadRich: async () => {
       const [text, html] = await Promise.all([
         readClipboardText(),
@@ -136,43 +141,44 @@ export function clientSeams(
       ]);
       return { text, html };
     },
-    // ⌘V of an image. The pasteboard is this device's (a VPS has none), the
-    // file is the server's: the bytes go over as base64 the schema declares
-    // and the wire sends as a binary frame, and the NAME comes back. The view
-    // still never names a file, and neither does this — the authority the
-    // move cost is exactly none (remote.md §5).
+    // ⌘V of an image. This device reads the pasteboard (a VPS has none) and
+    // the server writes the file. The schema declares base64, and the wire
+    // sends it as a binary frame. The name comes back. Neither the view nor
+    // this end names a file (remote.md §5).
     //
-    // No image on the pasteboard answers null without troubling the server,
-    // which is the common case: ⌘V with text on the pasteboard reaches here
-    // only after the editor has already declined to paste it as text.
+    // No image on the pasteboard answers null without a round trip. That is
+    // the common case here: ⌘V with text on the pasteboard reaches this
+    // handler only after the editor has declined to paste it as text.
     assetPaste: async ({ root, notePath }) => {
       const bytes = await (native.readImage ?? readClipboardImage)();
       if (!bytes || bytes.length === 0) return { src: null };
       return server.assetWrite({ root, notePath, dataB64: Buffer.from(bytes).toString("base64") });
     },
-    // The same trip from a picker rather than a pasteboard. Identical below the
-    // first line, deliberately: what differs between "paste an image" and
-    // "insert an image" is where the bytes come from and nothing else, and the
-    // half that names the file is the server's in both cases.
+    // The same trip from a picker rather than a pasteboard. Only the first
+    // line differs, which is where the bytes come from. The server names the
+    // file for both.
     assetPick: async ({ root, notePath }) => {
       const bytes = await native.pickImage?.();
       if (!bytes || bytes.length === 0) return { src: null };
       return server.assetWrite({ root, notePath, dataB64: Buffer.from(bytes).toString("base64") });
     },
-    // The native menu bar, shaped entirely by the view (commands/menu.ts). The
-    // shell hands it to the platform and nothing more: the `action` strings are
-    // command ids it never interprets, which is what keeps the registry the one
-    // place a command is defined.
+    // The native menu bar, shaped by the view (commands/menu.ts). The shell
+    // passes `items` to the platform and interprets nothing in it: the
+    // `action` strings are command ids, so the registry stays the one place a
+    // command is defined.
     menuSet: async ({ items }) => {
       native.setMenu?.(items);
       return { ok: true };
     },
-    // Another window, and so another client (remote.md §8a). The shell opens it
-    // on the local server the way a launch does; everything about which machine
-    // it ends up on is the ordinary connectionSelect from inside it.
+    // Another window, and so another client (remote.md §8a). The shell opens
+    // it on the local connection the way a launch does (bun/index.ts
+    // openWindow). Moving it to another machine is an ordinary
+    // connectionSelect from inside it.
     //
-    // `ok: false` where there is no second window to give, which the view reads
-    // once at boot to decide whether to offer the verb at all.
+    // `ok: false` where there is no second window to give. Whether the verb is
+    // offered at all is decided without calling this (mainview/lib/shell.ts
+    // multiWindow), and the New Window command ignores the answer
+    // (mainview/lib/windows.ts).
     windowNew: async () => {
       if (!native.newWindow) return { ok: false };
       native.newWindow();
@@ -180,8 +186,7 @@ export function clientSeams(
     },
     // The manual's window: one per app, raised rather than duplicated. The
     // shell decides whether that means opening a window or activating the one
-    // that is already showing it — the view knows only that the manual is
-    // somewhere else now.
+    // already showing the manual. The view is not told which happened.
     windowDocs: async ({ page }) => {
       if (!native.docsWindow) return { ok: false };
       native.docsWindow(page);
@@ -190,11 +195,11 @@ export function clientSeams(
     // Which window this view is in, asked once at boot. A shell that has one
     // window answers for it: it is never the manual's.
     windowRole: async () => native.windowRole?.() ?? { docs: false, page: "" },
-    // openableUrl is the guard here, not a convenience: `open` treats a
-    // non-URL argument as a file path (and launches .app bundles), so only the
-    // allowlisted schemes may pass. This is the boundary, and the view's own
-    // check is styling (architecture.md §2) — the url arrives from a note,
-    // which is to say from anywhere.
+    // openableUrl is the guard, not a convenience. `open` treats a non-URL
+    // argument as a file path and launches .app bundles, so only the
+    // allowlisted schemes pass (shared/links.ts). The url arrives from a note,
+    // so this is the boundary. The view's own check is styling
+    // (architecture.md §2).
     linkOpen: async ({ url }) => {
       const target = openableUrl(url);
       if (!target) return { ok: false };

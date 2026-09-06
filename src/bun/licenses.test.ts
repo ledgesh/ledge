@@ -30,8 +30,8 @@ describe("normalizeRepo", () => {
     expect(normalizeRepo("codemirror/state")).toBe("https://github.com/codemirror/state");
   });
 
-  // A link is a convenience; a wrong link is worse than none, because it is
-  // the thing a reader would follow to find the canonical text.
+  // The link is a convenience. A wrong one is worse than none: a reader
+  // follows it to find the canonical license text.
   test("anything unrecognizable is no link rather than a guess", () => {
     expect(normalizeRepo(undefined)).toBeNull();
     expect(normalizeRepo({})).toBeNull();
@@ -63,8 +63,9 @@ describe("licenseFilesOf", () => {
     expect(licenseFilesOf(["LICENSE.BSD"])).toEqual(["LICENSE.BSD"]);
   });
 
-  // Apache-2.0 §4(d): the NOTICE file travels with the license, so it is
-  // collected too — after it, since it is an addendum and not the grant.
+  // Apache-2.0 §4(d) requires the NOTICE file to travel with the license, so
+  // licenseFilesOf collects it too. NOTICE sorts after the license files: it
+  // is an addendum, not the grant.
   test("NOTICE is kept, and kept last", () => {
     expect(licenseFilesOf(["NOTICE.md", "license.md"])).toEqual(["license.md", "NOTICE.md"]);
   });
@@ -75,8 +76,8 @@ describe("licenseFilesOf", () => {
 });
 
 describe("renderNotices", () => {
-  // The H1 is the note title in the built-in docs (bun/docs.ts), so the first
-  // line is load-bearing rather than decorative.
+  // The first line is the title of a built-in docs page: docsContent.ts
+  // compiles this file into the manual, and a page's title is its H1.
   test("the file leads with its title", () => {
     expect(renderNotices([]).split("\n")[0]).toBe("# Third-Party Licenses");
   });
@@ -87,8 +88,9 @@ describe("renderNotices", () => {
     expect(out).toContain("```\n" + text + "\n```");
   });
 
-  // Markdown would eat a notice that contains its own fence, and a notice that
-  // has been eaten is not a notice.
+  // A notice containing its own fence would close the block early, and the
+  // rest would render as Markdown. fenceFor picks a fence longer than any run
+  // of backticks in the text.
   test("a text containing a fence gets a longer one", () => {
     const text = "Example:\n\n```\nrm -rf /\n```";
     const out = renderNotices([pkg({ texts: [{ file: "LICENSE", text }] })]);
@@ -99,7 +101,7 @@ describe("renderNotices", () => {
     const out = renderNotices([pkg({ name: "electrobun", license: "MIT" })]);
     expect(out).toContain("### electrobun 1.0.0");
     expect(out).toContain("The published package contains no license file.");
-    // The standard MIT wording, which a fabricated notice would have to use.
+    // An invented MIT notice would have to carry this standard wording.
     expect(out).not.toContain("Permission is hereby granted");
   });
 
@@ -108,25 +110,27 @@ describe("renderNotices", () => {
     expect(renderNotices([pkg()])).toContain("\nMIT\n");
   });
 
-  // The freshness check below compares two renders of the same tree; it can
-  // only mean something if rendering is a function of its input alone.
+  // The freshness check below compares a fresh render against the committed
+  // file, which is itself an earlier render of the same tree. That comparison
+  // only means something if renderNotices depends on its input alone.
   test("the same input renders the same file", () => {
     const input = [pkg({ texts: [{ file: "LICENSE", text: "MIT" }] })];
     expect(renderNotices(input)).toBe(renderNotices(input));
   });
 });
 
-// The point of the whole module (testing.md §3): the rule is "everything we
-// redistribute is attributed", and this is the rule as a test.
+// The invariant the module exists for (testing.md §3): everything the app
+// redistributes is attributed. These tests enforce it.
 describe("THIRD-PARTY-NOTICES.md", () => {
   const committed = readFileSync(join(ROOT, "THIRD-PARTY-NOTICES.md"), "utf8");
   const packages = collectPackages(ROOT);
 
-  // The two tests that read the INSTALLED tree need one to be there. It always
-  // is on a machine that builds the app; it is not in the server's container
-  // (`Dockerfile`), which carries no npm dependencies because the server has
-  // none — and comparing the notices file against an empty walk would fail for
-  // saying nothing rather than for being stale.
+  // Two tests below read the installed tree, so they skip when node_modules is
+  // missing. A machine that builds the app has one. The server's container
+  // (`Dockerfile`) does not, because the server has no npm dependencies. There
+  // collectPackages marks every declared dependency "not installed", so the
+  // render would differ from the committed file without the file having
+  // drifted.
   const installed = existsSync(join(ROOT, "node_modules"));
 
   test.skipIf(!installed)("is current with the installed production tree", () => {
@@ -144,8 +148,8 @@ describe("THIRD-PARTY-NOTICES.md", () => {
   });
 
   test.skipIf(!installed)("reaches past the direct dependencies into their own", () => {
-    // react does not vendor its scheduler; a walk that stopped at the top
-    // level would attribute the one and not the other.
+    // scheduler arrives through react-dom rather than as a declared
+    // dependency. A walk that stopped at the top level would miss it.
     expect(packages.map((p) => p.name)).toContain("scheduler");
   });
 

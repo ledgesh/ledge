@@ -1,29 +1,24 @@
-// remote.md §3's first sentence as a test: **the server opens no port.**
+// The server opens no port, and this file checks that. remote.md §3 says
+// what no port removes: TLS, certificate rotation, an ingress, and an
+// authentication system of Ledge's own. An `authorized_keys` forced command
+// (remote.md §4a) can only narrow what ssh already let in. It cannot restrict
+// a socket that answered someone directly. One added line would break the
+// claim, so a test checks it rather than a review.
 //
-// Everything §4 does rests on that. TLS, certificate rotation, an ingress and
-// an authentication system of Ledge's own are all absent because there is
-// nothing listening to authenticate to, and an `authorized_keys` forced
-// command can only narrow what ssh already let in — it cannot restrict a
-// socket that answered somebody directly.
+// The scan covers the whole repository, not just `src/`, so nothing listens
+// anywhere, the tools included. A fixture cannot come back in `scripts/`, the
+// corner where it would be least noticed. The scan was `src/` while ios.md
+// §14 phase 3 had a fixture that opened a port (`lan-bridge.ts`, safe because
+// `scripts/` is in no build). Phase 4 gave the phone a real ssh transport.
+// The fixture lost its only client, and deleting it let the scan widen.
 //
-// The claim is one sentence and its violation is one line, which is exactly
-// the ratio that makes it worth a test rather than a review.
+// The one port a developer's machine opens is Vite's. `playwright.config.ts`
+// asks for it by name. It is a dependency's dev server, which a test run
+// starts and no build ships.
 //
-// **The scan is the whole repository**, not just `src/`. It was `src/` while
-// ios.md phase 3 had a fixture that deliberately opened one (`lan-bridge.ts`,
-// safe because `scripts/` is in no build); phase 4 gave the phone a real ssh
-// transport, the fixture lost its only client, and deleting it made the
-// stronger claim available. Nothing here listens, anywhere, including the
-// tools — so a fixture cannot be reintroduced in the corner where it would be
-// least noticed.
-//
-// The one port a developer's machine does open is Vite's, which
-// `playwright.config.ts` asks for by name: a dependency's dev server, launched
-// by a test run, shipped nowhere.
-//
-// Source is scanned rather than behavior observed, for portable.test.ts's
-// reason: a test that merely ran the code would prove this process opened no
-// port today, not that no code path can.
+// The scan reads source rather than running the code, for portable.test.ts's
+// reason: running the code would show that this process opened no port today,
+// not that no code path can.
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -45,7 +40,8 @@ function sources(dir: string): string[] {
   return out;
 }
 
-/** Prose may say "listen on a port"; code may not do it. */
+/** Strips comments so the checks below see only code. Prose may say "listen
+ * on a port"; code may not do it. */
 function code(text: string): string {
   return text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
 }
@@ -54,9 +50,11 @@ const files = sources(REPO);
 const relative = (path: string): string => path.slice(REPO.length + 1);
 const named = files.map((p) => [relative(p), p] as const);
 
-// Bun.listen with a type parameter, which daemon.ts has. Anything up to the
-// call's own paren, so a generic containing its own angle brackets still
-// matches.
+// ANY_LISTEN matches every `Bun.listen`. UNIX_LISTEN matches only the calls
+// whose options object opens with `unix:`, which is how daemon.ts writes it.
+// daemon.ts also passes a type parameter, so the pattern allows one. It
+// matches up to the call's paren, so a type parameter with angle brackets
+// inside it still matches.
 const ANY_LISTEN = /\bBun\s*\.\s*listen\b/g;
 const UNIX_LISTEN = /\bBun\s*\.\s*listen\s*(?:<[^(]*>)?\s*\(\s*\{\s*unix\s*:/g;
 
@@ -69,19 +67,20 @@ describe("nothing in this repository opens a port", () => {
 
   test.each(named)("%s", (name, path) => {
     const text = code(readFileSync(path, "utf8"));
-    // Every listen is a unix socket listen. Counted rather than pattern-tested
-    // so that a file with one of each is caught by the file that has the
-    // legitimate one — daemon.ts is where a second, TCP listen would most
-    // plausibly be added.
+    // Every listen in the file is a unix socket listen. Comparing the two
+    // counts, rather than looking for a single unix match, fails a file that
+    // has a listen of each kind: daemon.ts gaining a TCP listen beside its
+    // unix one.
     expect({ file: name, listens: count(text, ANY_LISTEN), unix: count(text, UNIX_LISTEN) }).toEqual({
       file: name,
       listens: count(text, UNIX_LISTEN),
       unix: count(text, UNIX_LISTEN),
     });
-    // A port by another route. `Bun.serve` is an HTTP server; the node
-    // builtins are the same thing spelled older. `node:crypto`, `node:fs`,
-    // `node:os` and `node:path` are the only ones this repo uses, so the list
-    // costs nothing to keep closed.
+    // A port by another route. `Bun.serve` is an HTTP server, and the node
+    // builtins below are the older way to open one. The node builtins this
+    // repo imports are `node:crypto`, `node:fs`, `node:fs/promises`,
+    // `node:os` and `node:path`, so forbidding the network ones costs
+    // nothing.
     for (const [what, pattern] of [
       ["Bun.serve", /\bBun\s*\.\s*serve\s*\(/],
       ["a network builtin", /["']node:(?:net|http|https|http2|tls|dgram)["']/],
@@ -91,12 +90,12 @@ describe("nothing in this repository opens a port", () => {
   });
 });
 
-// The build boundary is real and it points one way. `scripts/` is in no build:
-// not electrobun.config.ts's copy map, not `build:cli`, not the Dockerfile. So
-// a tool may import the app's modules — `scripts/licenses.ts` runs
-// `src/bun/licenses.ts`, which is how that logic is testable at all — and the
-// app may never import a tool, because doing so would quietly make a
-// developer's script part of what ships.
+// The build boundary points one way. Nothing in `scripts/` ships: not through
+// electrobun.config.ts's copy map, not through `build:cli`, not into the
+// Docker image. A tool may import the app's modules (`scripts/licenses.ts`
+// calls `src/bun/licenses.ts`, which is what makes that logic testable). The
+// app may never import a tool, because that would quietly make a developer's
+// script part of what ships.
 describe("src/ does not import the tools", () => {
   const inSrc = named.filter(([name]) => name.startsWith("src/"));
   test.each(inSrc)("%s", (name, path) => {

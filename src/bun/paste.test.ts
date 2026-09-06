@@ -17,7 +17,8 @@ describe("paste formats", () => {
   test("both trim trailing newlines, which would be extra blank lines", () => {
     expect(bracketedPaste("echo hi\n\n")).toBe("\x1b[200~echo hi\x1b[201~\r");
     expect(plainPaste("echo hi\n\n")).toBe("echo hi\r");
-    // Newlines INSIDE a multi-line block are the block; only the tail goes.
+    // Newlines inside a multi-line block are part of the block.
+    // bracketedPaste and plainPaste trim only the trailing ones.
     expect(plainPaste("a\nb\n")).toBe("a\nb\r");
   });
 });
@@ -45,8 +46,9 @@ describe("takePaste at a prompt", () => {
   });
 
   test("a busy shell holds the queue however long it runs", () => {
-    // everReady: this shell HAS a bracketed-paste mode, so silence means a job
-    // is running, not a shell that cannot say so. The quiet rule must not fire.
+    // everReady: this shell has a bracketed-paste mode, so silence here means a
+    // job is running, not a shell that has no way to announce a prompt. The
+    // quiet rule only covers shells that have never announced the mode.
     const t = shell({ everReady: true, pasteQueue: ["deploy"], lastOut: 1000 });
     expect(takePaste(t, 1000 + QUIET_MS * 100)).toBeNull();
     expect(t.pasteQueue).toEqual(["deploy"]);
@@ -61,8 +63,9 @@ describe("takePaste on a shell with no bracketed-paste mode", () => {
   });
 
   test("waits for the shell to say anything at all first", () => {
-    // lastOut 0 is a shell that has not printed its banner or prompt yet.
-    // "Quiet" is only meaningful after something has been heard.
+    // lastOut 0 is a shell that has not printed its banner or prompt yet. The
+    // quiet period runs from the last output, so a shell that has printed
+    // nothing has nothing to measure from.
     const t = shell({ pasteQueue: ["echo hi"], lastOut: 0 });
     expect(takePaste(t, 10_000_000)).toBeNull();
   });
@@ -77,9 +80,9 @@ describe("takePaste on a shell with no bracketed-paste mode", () => {
   });
 
   test("the second paste waits out its own quiet period, not the first one's", () => {
-    // The release stamps lastOut itself. Without that, both pastes would go on
-    // the same tick — the echo of the first has not come back yet — and the
-    // second would land inside the first command's run.
+    // The release stamps lastOut itself. Without that, both pastes would go out
+    // on the same tick, because the echo of the first has not come back yet.
+    // The second would land inside the first command's run.
     const t = shell({ pasteQueue: ["one", "two"], lastOut: 1000 });
     expect(takePaste(t, 1500)).toBe(plainPaste("one"));
     expect(takePaste(t, 1500)).toBeNull();
@@ -87,8 +90,10 @@ describe("takePaste on a shell with no bracketed-paste mode", () => {
   });
 
   test("a prompt seen later takes over from the fallback", () => {
-    // Some shells only enable the mode once their rc files have run; the real
-    // signal must win as soon as it exists.
+    // Some shells only enable the mode once their rc files have run. The
+    // announced prompt must win as soon as it exists: the quiet branch skips
+    // any shell that has ever been ready, and server.ts sets everReady in the
+    // same step as promptReady.
     const t = shell({ pasteQueue: ["one"], lastOut: 1000, promptReady: true, everReady: true });
     expect(takePaste(t, 1000)).toBe(bracketedPaste("one"));
   });

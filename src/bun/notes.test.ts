@@ -1,7 +1,8 @@
-// The store's pure remainders. uniqueName and isInside moved to
-// bun/workspaces.ts with the per-workspace split (their tests moved to
-// workspaces.test.ts); the path-guard refusals that need registered roots
-// live in notes.fs.test.ts, where roots exist to register.
+// The note store's tests that touch no filesystem, what is left after the
+// rest moved out. uniqueName and isInside went to bun/workspaces.ts with the
+// per-workspace split, and their tests to workspaces.test.ts. The path-guard
+// refusals that need registered roots live in notes.fs.test.ts, which works
+// against a real filesystem and so has real directories to register.
 import { describe, expect, test } from "bun:test";
 import { deleteTrashed, notesTagged, titleOf } from "./notes";
 
@@ -17,8 +18,9 @@ describe("titleOf", () => {
 
 describe("notesTagged", () => {
   test("an empty tag is refused before any filesystem work", async () => {
-    // "" and "#" both normalize to nothing: a blank query this deep is a
-    // caller bug, not a scan that matches nothing.
+    // "" and "#" both normalize to nothing. notesTagged throws rather than
+    // scanning: a blank query this deep is a caller bug, not a scan that
+    // matches nothing.
     expect(notesTagged("/anywhere", "")).rejects.toThrow(/empty tag/);
     expect(notesTagged("/anywhere", "#")).rejects.toThrow(/empty tag/);
   });
@@ -26,8 +28,9 @@ describe("notesTagged", () => {
 
 describe("deleteTrashed", () => {
   test("a path outside every registered root is refused before any filesystem work", async () => {
-    // Whatever other test files registered, nothing under /etc or a bare
-    // /tmp/.ledge-trash can be a workspace root: these fail on root membership.
+    // Nothing under /etc or a bare /tmp/.ledge-trash can be a workspace root,
+    // whatever other test files have registered. assertTrashed refuses both
+    // paths on root membership.
     expect(deleteTrashed("/etc/passwd")).rejects.toThrow(/not a trashed note/);
     expect(deleteTrashed("/tmp/.ledge-trash/x.md")).rejects.toThrow(/not a trashed note/);
   });

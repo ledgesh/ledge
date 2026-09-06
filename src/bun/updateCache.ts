@@ -1,28 +1,11 @@
-// Housekeeping for Electrobun's self-extraction folder. The self-extracting
-// wrapper in the DMG unpacks the real app out of a `<hash>.tar` and leaves
-// that tar behind — 80MB per build, in
-// `~/Library/Application Support/<identifier>/<channel>/self-extraction/`.
-// Nothing ever removes it, so every version a user installs costs another
-// copy forever.
-//
-// The tar is NOT garbage, which is why this prunes rather than empties: the
-// updater bsdiffs from the CURRENT version's tar to the next one, and a
-// missing baseline downgrades a patch into a full-bundle download
-// (`local-tar-missing` in electrobun's Updater). So the live hash's tar
-// stays and everything else goes — the previous versions' tars, which can
-// never be a baseline again, and the `.patch` and `from-<hash>.tar` scratch
-// files a patch run writes on its way through.
-//
-// This unlinks, which in this repo is a thing to justify (architecture.md
-// §3). It is not in the notes tree: these are files Electrobun wrote into
-// Application Support, named by content hash, that no listing shows and no
-// user chose. The note rule — rename into `.ledge-trash`, never unlink — is
-// about documents someone could want back. A stale tar is a cache.
-//
-// Nothing here imports `electrobun/bun`: that module boots the whole
-// Electrobun runtime on import, and a folder of tars is answerable without
-// it. `index.ts` supplies the two facts only Electrobun knows — where it
-// extracts, and which hash is running.
+// Housekeeping for Electrobun's self-extraction folder
+// (`~/Library/Application Support/<identifier>/<channel>/self-extraction/`).
+// The DMG's self-extracting wrapper unpacks the real app out of a `<hash>.tar`
+// and leaves that 80MB tar behind. Nothing in Electrobun removes it, so
+// without this prune every installed version would cost another copy. The
+// unlink sits outside architecture.md §3's rename-not-unlink rule: these are
+// files the app wrote, named by content hash, that no user chose and no
+// listing shows.
 import { rm } from "node:fs/promises";
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
@@ -32,12 +15,15 @@ export const EXTRACTION_DIRNAME = "self-extraction";
 
 // --- pure core (unit-tested in updateCache.test.ts) --------------------------
 
-/** Which entries of the self-extraction folder are safe to delete, given the
- * hash of the version currently running.
+/** The entries of the self-extraction folder that are safe to delete, given
+ * `liveHash`, the hash of the version currently running. The live tar stays
+ * as the updater's bsdiff baseline (a missing one turns a patch into a
+ * full-bundle download: `local-tar-missing` in electrobun's Updater). Older
+ * versions' tars can never be a baseline again, so they go, along with the
+ * `.patch` and `from-<hash>.tar` scratch files a patch run writes.
  *
- * A null `liveHash` deletes nothing. Not knowing which tar is the baseline is
- * exactly the case where guessing costs a user a full download, and the cost
- * of skipping a prune is disk we were already spending. */
+ * A null `liveHash` deletes nothing. Deleting the wrong tar costs a user a
+ * full download, and keeping them all only costs disk. */
 export function staleExtractionFiles(entries: string[], liveHash: string | null): string[] {
   if (!liveHash) return [];
   const keep = `${liveHash}.tar`;
@@ -46,10 +32,11 @@ export function staleExtractionFiles(entries: string[], liveHash: string | null)
 
 // --- the files ---------------------------------------------------------------
 
-/** Delete the stale entries of one self-extraction folder. Split from the
- * caller below so it can be tested, and live-probed, against a real folder:
- * importing `electrobun/bun` boots the whole Electrobun runtime, which a
- * filesystem test has no business doing. */
+/** Delete the stale entries of one self-extraction folder, and return the
+ * names removed. `dir` and `liveHash` are arguments, so a test or a live
+ * probe can run this against a real folder. Deriving them here would mean
+ * importing `electrobun/bun`, which boots the whole Electrobun runtime.
+ * `index.ts` derives them and passes them in. */
 export async function pruneExtractionDir(dir: string, liveHash: string | null): Promise<string[]> {
   let entries: string[];
   try {
@@ -60,8 +47,8 @@ export async function pruneExtractionDir(dir: string, liveHash: string | null): 
 
   const removed: string[] = [];
   for (const name of staleExtractionFiles(entries, liveHash)) {
-    // recursive for `from-<hash>.tar`'s Windows sibling (`temp-<hash>/`) and
-    // for a directory that a half-finished extraction left named like a tar.
+    // An entry can be a directory rather than a file: a half-finished
+    // extraction leaves one named like a tar. `recursive` removes that too.
     try {
       await rm(join(dir, name), { recursive: true, force: true });
       removed.push(name);

@@ -1,6 +1,7 @@
-// The CLI's pure half: argv parsing and row formatting. What a verb DOES is
-// cli.fs.test.ts's subject; this file pins the grammar a shell user types
-// against and the shapes their terminal shows.
+// The CLI's pure half: argv parsing, the cwd and workspace arguments that
+// pick a scope, path shortening, and row formatting. These tests pin the
+// argument grammar and the text the terminal prints. cli.fs.test.ts covers
+// what a verb does against a real filesystem.
 import { describe, expect, test } from "bun:test";
 import { cwdFolder, formatNoteList, hitPath, parseCliArgs, resolveWorkspaceArg, tildify } from "./cli";
 
@@ -71,7 +72,9 @@ describe("cwdFolder", () => {
     expect(cwdFolder(ROOT, ROOT)).toBe("");
     expect(cwdFolder("/ws/notes/", ROOT)).toBe("");
     expect(cwdFolder("/somewhere/else", ROOT)).toBe("");
-    expect(cwdFolder("/ws/notes-other/x", ROOT)).toBe(""); // the sibling-prefix trap
+    // a sibling whose name merely starts with the root's is outside it: a
+    // startsWith test on the root would take /ws/notes-other for a folder
+    expect(cwdFolder("/ws/notes-other/x", ROOT)).toBe("");
   });
 
   test("a cwd with no workspace around it is no folder", () => {
@@ -84,8 +87,10 @@ describe("cwdFolder", () => {
   });
 
   test("standing in one of Ledge's own directories means the workspace, not an error", () => {
-    // .ledge-trash, .ledge-assets, a project's .git: folderPathOf refuses every
-    // one, and refusing a folder the caller never typed would be a riddle.
+    // folderPathOf (bun/notes.ts) rejects a dot-folder as a destination, so
+    // no note can be created in .ledge-trash, .ledge-assets or a project's
+    // .git. The caller never typed such a folder, so standing in one means
+    // the workspace rather than an error.
     expect(cwdFolder("/ws/notes/.ledge-trash", ROOT)).toBe("");
     expect(cwdFolder("/ws/notes/projects/.git/refs", ROOT)).toBe("");
   });

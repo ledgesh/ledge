@@ -1,11 +1,11 @@
-// The window list against a real filesystem. The geometry is proved in
-// windowFrame.test.ts; this proves the bytes land in the CLIENT home's file
-// (remote.md §5 — a window's position is a fact about this screen, not about
-// the machine holding the notes), that a corrupt one degrades to "boot at the
-// default" instead of throwing on the launch path, and that no listNotes can
-// see it.
+// The window list against a real filesystem. windowFrame.test.ts covers the
+// geometry; the tests here check that the bytes land in the client home's
+// file, that a corrupt file boots at the default frame instead of throwing on
+// the launch path, and that listNotes never sees it.
 //
-// Same preload-scratch-home arrangement and same guard as layout.fs.test.ts.
+// The file is client-side because a window's position is a fact about this
+// screen, not about the server holding the notes (remote.md §5). Same preload
+// scratch home and same guard as layout.fs.test.ts.
 import { beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -40,8 +40,9 @@ describe("readWindows / writeWindows", () => {
     expect(readWindows(LOCAL_ID)).toEqual([{ frame: { x: 12, y: 34, width: 1024, height: 768 }, connection: "vps-1" }]);
   });
 
-  // The whole point of the list: two windows on two machines come back as two
-  // windows on two machines (remote.md §8a).
+  // Windows read back in the order they were written, each keeping the
+  // connection it was saved with. A window is a client, so the file holds one
+  // entry per window (remote.md §8a).
   test("several windows keep their order and their servers", () => {
     writeWindows([one(1, LOCAL_ID), one(2, "vps-1"), one(3, "laptop-1")]);
     expect(readWindows(LOCAL_ID).map((w) => w.connection)).toEqual([LOCAL_ID, "vps-1", "laptop-1"]);
@@ -58,35 +59,38 @@ describe("readWindows / writeWindows", () => {
     expect((await readdir(CLIENT_HOME)).filter((n) => n.includes(".tmp-"))).toEqual([]);
   });
 
-  // This runs before any window exists, so a throw here is a launch that never
-  // draws anything. It has to be an empty list, always.
+  // readWindows runs before any window exists (index.ts), so a throw here is a
+  // launch that draws nothing. Unreadable bytes read back as an empty list.
+  // index.ts turns that into one window at the default frame.
   test("a corrupt file is an empty list, not a throw", async () => {
     ensureClientHomeSync();
     await writeFile(WINDOW_PATH, "{ half a wri", "utf8");
     expect(readWindows(LOCAL_ID)).toEqual([]);
   });
 
-  // An entry that lost its connection string is still a window, and it opens
-  // where a window with nothing else to go on opens.
+  // An entry with no connection string is still a window. Its connection
+  // becomes the fallback argument readWindows was called with. index.ts
+  // passes the stored launch selection there.
   test("an entry with no connection falls back to the launch selection", async () => {
     ensureClientHomeSync();
     await writeFile(WINDOW_PATH, JSON.stringify({ version: 2, windows: [{ x: 1, y: 1, width: 900, height: 700 }] }), "utf8");
     expect(readWindows("vps-1")).toEqual([{ frame: { x: 1, y: 1, width: 900, height: 700 }, connection: "vps-1" }]);
   });
 
-  // The file held one bare frame before there could be more than one window,
-  // and the only record of where that window was pointed is the stored
-  // selection (connectionStore.ts launchSelection).
+  // Before there could be more than one window, the file held one bare frame
+  // and no connection. The stored selection is the only record of where that
+  // window pointed (connectionStore.ts launchSelection).
   test("the single frame an older install saved becomes one window on the stored selection", async () => {
     ensureClientHomeSync();
     await writeFile(WINDOW_PATH, JSON.stringify({ x: 7, y: 8, width: 800, height: 600 }), "utf8");
     expect(readWindows("vps-1")).toEqual([{ frame: { x: 7, y: 8, width: 800, height: 600 }, connection: "vps-1" }]);
   });
 
-  // The move into the client home has to carry an existing install's window
-  // position with it, and has to leave one file behind, not two: a copy would
-  // mean the next save updates one of them and the launch after that could
-  // read either.
+  // A read that finds nothing at WINDOW_PATH renames the app-home file into
+  // the client home, so an existing install keeps its window position. It
+  // renames rather than copies, leaving one file with that position. Two
+  // files would let the next save update one of them, and the launch after
+  // that could read either.
   test("an app-home window file from before the client home is moved across", async () => {
     await writeFile(LEGACY_WINDOW_PATH, JSON.stringify({ x: 7, y: 8, width: 800, height: 600 }), "utf8");
     expect(readWindows(LOCAL_ID)).toEqual([{ frame: { x: 7, y: 8, width: 800, height: 600 }, connection: LOCAL_ID }]);

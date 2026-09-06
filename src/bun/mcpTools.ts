@@ -1,24 +1,21 @@
-// The MCP server's tools: what an agent may learn from the notes, plus the
-// write tier that joined once the read tier proved out. Every tool routes
-// through bun/notes.ts, so the registry and assertNote guards gate agents
-// exactly as they gate the webview — and a write arrives with the store's
-// invariants intact: create_note names files by H1 slug through uniqueName
-// (an agent cannot choose a filename, let alone clobber one), append_note
-// and edit_note save through writeNote's baseMtimeMs guard (a concurrent
-// edit is moved to the trash, never destroyed), and the running app sees any
-// of them as an ordinary external edit through its watcher — the same
-// survivability story the agent's own shell already had.
+// The MCP server's tools: what an agent may read from the notes, and the
+// writes it may make. Every tool routes through bun/notes.ts, so the registry
+// and assertNote guards gate agents the way they gate the webview, and a
+// write gets the store's invariants: uniqueName's H1-slug filenames, which an
+// agent neither picks nor clobbers, writeNote's baseMtimeMs guard, and the
+// watcher that shows the app the result as an external edit (architecture.md
+// §1).
 //
-// One tool is not about notes at all: `settings` reads the user's
-// settings.jsonc so an agent can answer "why is my python block using the
-// wrong python" from their actual configuration instead of guessing. It reads
-// and never writes, for the reason bun/settings.ts states at inspectSettings.
+// `settings` is the one tool that names no note. It reads the user's
+// settings.jsonc, so an agent answers "why is my python block using the wrong
+// python" from their configuration instead of guessing. It never writes, for
+// the reason bun/settings.ts gives at inspectSettings.
 //
-// Notes are addressed by TITLE first — the same rename-proof choice wikilinks
-// made (shared/wikilinks.ts): filenames follow the H1, so a path an agent
-// remembered last session may have rotted, while the title still resolves.
-// Paths still work (they come back from every listing tool), and the same
-// resolveWikiTitle decides both ends' answers.
+// Notes are addressed by title first, the rename-proof choice wikilinks made
+// (shared/wikilinks.ts). Filenames follow the H1, so a path an agent
+// remembered last session may be stale while the title still resolves. Paths
+// still work (every listing tool returns them), and the same resolveWikiTitle
+// decides both ends' answers.
 import { resolve } from "node:path";
 import { folderScopeOf, notesUnder } from "../shared/folders";
 import type { NoteMeta } from "../shared/rpc-schema";
@@ -39,10 +36,10 @@ function iso(mtimeMs: number): string {
 }
 
 // A created note's folder, for the response. Present only when the note is in
-// one, matching NoteMeta and list_notes' rows — and worth saying even when the
-// caller named it, because a `folder` that names an ignored directory is
-// refused rather than silently relocated, and one nobody named lands at the
-// top level.
+// one, matching NoteMeta and list_notes' rows. The response reports it even
+// when the caller named the folder: a `folder` naming an ignored directory is
+// refused rather than silently relocated (bun/notes.ts ensureFolder), and a
+// note created with no folder lands at the top level.
 function folderOut(meta: NoteMeta): { folder?: string } {
   return meta.folder ? { folder: meta.folder } : {};
 }
@@ -51,13 +48,11 @@ interface Located extends NoteMeta {
   workspace: string;
 }
 
-// Every note an agent may see, newest first — across all available workspaces
-// or scoped to one. The cross-workspace merge keeps the newest-first order
-// resolveWikiTitle's tie rule assumes, so an ambiguous title resolves to the
-// most recently touched note, same as a wikilink would in its own workspace.
-// When no scope was asked for, a workspace that fails to list costs itself
-// only (the boot fetch's stance); a NAMED workspace failing is the caller's
-// answer.
+// Every note an agent may see, newest first: across all available workspaces,
+// or scoped to one. resolveWikiTitle's tie rule assumes that order, so an
+// ambiguous title resolves to the most recently touched note, as a wikilink
+// would in its own workspace. With no workspace named, one that fails to
+// list is skipped (the boot fetch's stance); a named one's failure throws.
 async function notesIn(workspace: unknown, folder: unknown = null): Promise<Located[]> {
   const roots = typeof workspace === "string" && workspace !== "" ? [assertRegisteredRoot(workspace)] : availableRoots();
   const scope = folderScopeOf(folder);
@@ -73,25 +68,21 @@ async function notesIn(workspace: unknown, folder: unknown = null): Promise<Loca
   return out.sort((a, b) => b.mtimeMs - a.mtimeMs);
 }
 
-// The note a {title, path, workspace} triple names, with its text in hand.
-// Title resolves across every workspace unless one is named; path just has
-// to pass the guards. NO arguments at all falls back to $LEDGE_NOTE — the
-// deixis chain: Ledge stamps the variable into every note shell's spawn
-// (bun/index.ts sessionFacts), the agent CLI launched there inherits it, and
-// so does this server, spawned by the agent. "The note I am sitting in"
-// then needs no argument. The env names a path, so it can go stale if the
-// note renames itself after the shell spawned — the error says so, because
-// the fix (address it by title) is not guessable from "not found".
-// The one refusal every content tool shares (locking.md §8): a locked
-// note's body is never available to an agent, whatever the vault's state in
-// the app — the lock is FOR this surface. locate() is the shared resolver
-// read_note/append_note/edit_note/backlinks all pass through, so refusing
-// here refuses everywhere at once; steering text, not a bare error, because
-// what a tool says is what an agent does next.
+// The refusal every content tool shares: a locked note's body never reaches
+// an agent, whatever state the app's vault is in. Agent surfaces are what
+// note locking exists to block (locking.md §8). read_note, append_note,
+// edit_note and backlinks all resolve through locate(), so refusing here
+// refuses in all four. The message points at list_notes, which flags them.
 function refuseLocked(title: string): never {
   throw new Error(`"${title}" is locked; its body is not available to agents (locked notes are the user's private notes — list_notes flags them)`);
 }
 
+// The note a {title, path, workspace} triple names, with its text. A title
+// resolves across every workspace unless one is named; a path only has to
+// pass the guards. With no arguments, $LEDGE_NOTE names the note: a note
+// shell's spawn stamps it (bun/spawnParams.ts stampSessionFacts), and the
+// agent CLI and this server inherit it (architecture.md §2). A rename after
+// that spawn leaves the path stale, so the error says to use the title.
 async function locate(args: Record<string, unknown>, opts: { forOpen?: boolean } = {}): Promise<Located & { text: string }> {
   const { title } = args;
   let path = typeof args["path"] === "string" && args["path"] !== "" ? (args["path"] as string) : null;
@@ -117,9 +108,9 @@ async function locate(args: Record<string, unknown>, opts: { forOpen?: boolean }
     }
     const p = resolve(path);
     // `file.locked` and not `held`: the flag refuses even when the app's
-    // vault happens to be unlocked and file.text is real plaintext. forOpen
-    // resolves WITHOUT the body (resolveNoteForOpen strips text): pointing
-    // the app at a locked note is navigation, not disclosure.
+    // vault is unlocked and file.text is real plaintext. forOpen skips the
+    // refusal because resolveNoteForOpen drops the text: pointing the app at
+    // a locked note navigates to it without disclosing the body.
     if (file.locked && !opts.forOpen) refuseLocked(labelOf(headingOf(file.text), p));
     return {
       path: p,
@@ -130,12 +121,12 @@ async function locate(args: Record<string, unknown>, opts: { forOpen?: boolean }
     };
   }
   if (typeof title === "string" && title.trim() !== "") {
-    // The current workspace breaks ties, the way the editor already does: a
-    // [[wikilink]] in the current note resolves within its own workspace, so
-    // an agent launched from that note should agree with it when the same
-    // title exists elsewhere. An explicit workspace argument is a narrower
-    // scope and already wins; a stale $LEDGE_WORKSPACE (or a title that only
-    // exists elsewhere) costs nothing — the global pass decides as before.
+    // The current workspace breaks ties, the way the editor does: a
+    // [[wikilink]] resolves within its own note's workspace, so an agent
+    // launched from a note agrees with it when the same title exists
+    // elsewhere. An explicit workspace argument is narrower and wins already.
+    // A stale $LEDGE_WORKSPACE, or a title only found elsewhere, costs
+    // nothing: the global pass below decides.
     let meta: Located | null = null;
     const envWs = process.env["LEDGE_WORKSPACE"];
     if (envWs && !(typeof args["workspace"] === "string" && args["workspace"] !== "")) {
@@ -162,25 +153,24 @@ async function locate(args: Record<string, unknown>, opts: { forOpen?: boolean }
 }
 
 /**
- * Resolve a note to point the APP at (`ledge <title>` / `ledge open`): the
- * CLI's one resolution that must reach locked notes — opening one lands on
- * the app's own unlock flow, no body crosses this seam (text is dropped
- * here; in the CLI process the vault is never unlocked anyway). Lives in
- * this module so the CLI keeps acquiring semantics from the handler layer,
- * never beside it (architecture.md §1).
+ * Resolve a note for the app to open (`ledge <title>` / `ledge open`). This
+ * is the one CLI resolution that must reach locked notes: opening one lands
+ * on the app's own unlock flow. No body crosses the seam. The text is
+ * dropped here, and the CLI process has no unlocked vault to read one with.
+ * It lives in this module so the CLI takes its semantics from the handler
+ * layer instead of restating them (architecture.md §1).
  */
 export async function resolveNoteForOpen(args: Record<string, unknown>): Promise<{ path: string; title: string; workspace: string }> {
   const n = await locate(args, { forOpen: true });
   return { path: n.path, title: n.title, workspace: n.workspace };
 }
 
-// The workspace a created note lands in. An explicit argument wins; with
-// none, $LEDGE_WORKSPACE — stamped beside $LEDGE_NOTE into every note shell's
-// spawn — means "here"; with no environment either, a sole workspace is
-// unambiguous. Only past all three is it the agent's problem, and the error
-// says what would fix it. The env can name a since-detached root (facts are
-// spawn-time), so its failure explains itself instead of leaking the bare
-// guard message for a path the agent never supplied.
+// The workspace a created note lands in. An explicit argument wins. With
+// none, $LEDGE_WORKSPACE names the current one (a note shell's spawn stamps
+// it beside $LEDGE_NOTE); failing that, a lone workspace is unambiguous.
+// Past all three the error names what would fix it. The variable can name a
+// root detached since the spawn, so that case gets its own message instead
+// of the bare guard message for a path the agent never supplied.
 function targetWorkspace(args: Record<string, unknown>): string {
   const asked = args["workspace"];
   if (typeof asked === "string" && asked !== "") return assertRegisteredRoot(asked);
@@ -205,10 +195,10 @@ function targetWorkspace(args: Record<string, unknown>): string {
   );
 }
 
-// Where today's note lives: an explicit ask wins, then the daily.workspace
-// setting, then the ordinary deixis chain. Only the daily tool consults the
-// setting — create_note keeps its existing chain untouched — and only here
-// does the no-workspace error learn to mention the knob that would pin it.
+// Where today's note lives: an explicit argument, then the daily.workspace
+// setting, then targetWorkspace's chain. Only this tool reads the setting;
+// create_note's chain is unchanged. When targetWorkspace finds no workspace,
+// this function rethrows its error with the daily.workspace hint appended.
 function dailyWorkspace(args: Record<string, unknown>, settings: Settings): string {
   const asked = args["workspace"];
   if (typeof asked === "string" && asked !== "") return assertRegisteredRoot(asked);
@@ -222,10 +212,10 @@ function dailyWorkspace(args: Record<string, unknown>, settings: Settings): stri
   }
 }
 
-// And where inside it: an explicit ask wins, then the daily.folder setting,
-// then the top level. Unlike create_note's folder there is a standing answer
-// to fall back on, because ⌘J creates a note nobody typed a destination for —
-// which is the whole reason the knob exists.
+// And where inside it: an explicit argument, then the daily.folder setting,
+// then the top level. create_note's folder has no such standing fallback. The
+// setting exists because ⌘J creates a note without asking the user where to
+// put it.
 function dailyFolder(args: Record<string, unknown>, settings: Settings): string | null {
   if (typeof args["folder"] === "string") return args["folder"];
   return settings.daily.folder || null;
@@ -246,11 +236,10 @@ const TITLE_OR_PATH_PROPS = {
   },
 } as const;
 
-// Two different folder arguments, and the difference is the whole point:
-// on a listing tool a folder SELECTS notes that are already there, on a
-// creating tool it PLACES a new one. Only the second reaches a filesystem
-// (through ensureFolder's guards); the first is a filter, so a folder nobody
-// has a note in simply matches nothing.
+// Two folder arguments with different jobs. On a listing tool a folder selects
+// notes that are already there; on a creating tool it places a new one. Only
+// the second reaches the filesystem, through ensureFolder's guards. The first
+// is a filter, so a folder holding no notes matches nothing.
 const FOLDER_SCOPE_PROP = {
   type: "string",
   description:
@@ -297,13 +286,12 @@ export const ledgeTools: McpTool[] = [
         title: n.title,
         workspace: n.workspace,
         modified: iso(n.mtimeMs),
-        // Where the note sits, so an agent planning against this listing can
-        // tell two same-titled notes apart without doing path arithmetic
-        // against the workspace root. Absent for a note at the top level, the
-        // way NoteMeta itself carries it.
+        // Where the note sits, so an agent can tell two same-titled notes
+        // apart without doing path arithmetic against the workspace root.
+        // Absent for a note at the top level, as on NoteMeta itself.
         ...(n.folder ? { folder: n.folder } : {}),
-        // Present-only-when-marked, like the meta itself: most rows say
-        // nothing; the daily template's row says template: "daily".
+        // Present only when the note is marked, as on the meta: most rows
+        // carry nothing, and a daily template's row carries template: "daily".
         ...(n.template ? { template: n.template } : {}),
         // Agents plan against listings, so a note whose body will refuse
         // must say so in the row (locking.md §8).
@@ -351,9 +339,10 @@ export const ledgeTools: McpTool[] = [
       const workspace = args["workspace"];
       const roots =
         typeof workspace === "string" && workspace !== "" ? [assertRegisteredRoot(workspace)] : availableRoots();
-      // The scope goes DOWN into searchNotes rather than filtering hits here:
-      // reading stops at the hit cap, so notes outside the folder would
-      // otherwise spend a budget the folder's own matches never see.
+      // searchNotes takes the folder scope, rather than this handler
+      // filtering the hits it returns. Reading stops at the hit cap, so notes
+      // outside the folder would otherwise spend a budget the folder's own
+      // matches never get.
       const folder = folderScopeOf(args["folder"]);
       const all: Array<{ path: string; title: string; workspace: string; mtimeMs: number; line: number; snippet: string }> = [];
       let lockedSkipped = 0;
@@ -376,9 +365,9 @@ export const ledgeTools: McpTool[] = [
       return {
         hits: hits.map(({ mtimeMs, ...h }) => ({ ...h, modified: iso(mtimeMs) })),
         truncated: all.length > MAX_HITS,
-        // Scoped-answer honesty (locking.md §8): an agent must know its
-        // answer does not cover the user's locked notes. Present only when
-        // non-zero, so an unlocked corpus reads exactly as before.
+        // An agent has to know its answer does not cover the user's locked
+        // notes (locking.md §8). Present only when non-zero, so an answer
+        // over a corpus with no locked notes keeps its old shape.
         ...(lockedSkipped > 0 ? { lockedNotesSkipped: lockedSkipped } : {}),
       };
     },
@@ -392,11 +381,12 @@ export const ledgeTools: McpTool[] = [
     handler: async (args) => {
       await loadWorkspaces();
       const target = await locate(args);
-      // The scan is backlinksTo (bun/notes.ts) — the same definition the app's
-      // Backlinks panel reads over RPC, workspace-scoped because wikilinks
-      // are. Its hits carry the panel's extra fields (mtimeMs, the raw match);
-      // this response keeps its original shape — agent output should not
-      // churn under a UI feature.
+      // The scan is backlinksTo (bun/notes.ts), the same definition the app's
+      // Backlinks panel reads over RPC. It is workspace-scoped because
+      // wikilinks are. Its hits carry more than this response returns (a
+      // NoteMeta's mtimeMs, and `raw`, which the panel's reveal re-finds on
+      // the line). The mapping below returns path, title, line and context,
+      // and drops the rest, so what the panel needs stays out of the response.
       const scan = await backlinksTo(target.path);
       const backlinks = scan.backlinks.map(({ path, title, line, context }) => ({
         path,
@@ -431,11 +421,11 @@ export const ledgeTools: McpTool[] = [
         typeof workspace === "string" && workspace !== "" ? [assertRegisteredRoot(workspace)] : availableRoots();
       const tag = args["tag"];
       const folder = folderScopeOf(args["folder"]);
-      // The scans are tagsIn/notesTagged (bun/notes.ts) — the same definitions
-      // the app's Tags panel reads over RPC, so agents and the UI can never
-      // disagree about what tags exist. Cross-workspace merge and failure
-      // stance are search_notes': unscoped, a workspace that fails to scan
-      // costs itself only; a NAMED one failing is the caller's answer.
+      // The scans are tagsIn/notesTagged (bun/notes.ts), the same definitions
+      // the app's Tags panel reads over RPC, so agents and the UI cannot
+      // disagree about what tags exist. The cross-workspace merge and the
+      // failure stance match search_notes: with no workspace named, one that
+      // fails to scan is skipped; a named one's failure throws to the caller.
       if (typeof tag === "string" && normalizeTag(tag) !== "") {
         const all: Array<{ path: string; title: string; workspace: string; mtimeMs: number; line: number; context: string }> = [];
         let lockedSkipped = 0;
@@ -456,8 +446,9 @@ export const ledgeTools: McpTool[] = [
         return {
           hits: hits.map(({ mtimeMs, ...h }) => ({ ...h, modified: iso(mtimeMs) })),
           truncated: all.length > MAX_HITS,
-          // Locked notes still show their frontmatter tags (the plaintext
-          // head); the count says their BODY hashtags went unscanned.
+          // Locked notes still contribute their frontmatter tags (the
+          // plaintext head). The count says their body hashtags went
+          // unscanned.
           ...(lockedSkipped > 0 ? { lockedNoteBodiesSkipped: lockedSkipped } : {}),
         };
       }
@@ -490,9 +481,9 @@ export const ledgeTools: McpTool[] = [
     description:
       "Read the user's Ledge settings: the raw text of their settings.jsonc, comments and all. The file IS Ledge's settings UI (they edit it in the app with ⌘,), and its comments document every knob, so one call gives both what they have configured and what the knobs mean. `problems` lists values Ledge would reject at the next launch, empty when the file is clean. This tool is READ-ONLY and has no writing sibling: to change a setting, tell the user the exact line to add or edit, and that Ledge applies settings at the next launch, not live. For how a feature works rather than how it is configured, search the built-in manual (the `docs` workspace from list_workspaces).",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
-    // No workspace argument and no registry lookup: settings are GLOBAL, one
-    // file in the app home (architecture.md §6). The only tool here that does
-    // not name a note.
+    // No workspace argument and no registry lookup: settings are global
+    // rather than per workspace, and this reads the server's file in the app
+    // home (architecture.md §6). It is the only tool here that names no note.
     handler: async () => inspectSettings(),
   },
   {
@@ -517,9 +508,10 @@ export const ledgeTools: McpTool[] = [
     handler: async (args) => {
       await loadWorkspaces();
       const template = args["template"];
-      // Unvalidated here on purpose: ensureFolder owns the one name a caller
-      // gets to choose (bun/notes.ts folderPathOf), and a second opinion in
-      // front of it is how a guard turns into two guards that disagree.
+      // The `folder` argument is not validated here: ensureFolder owns the
+      // one name a caller gets to choose (bun/notes.ts folderPathOf,
+      // architecture.md §3). A check in front of it would be a second guard
+      // that could disagree with the first.
       const folder = typeof args["folder"] === "string" ? args["folder"] : null;
       if (typeof template === "string" && template.trim() !== "") {
         if (typeof args["text"] === "string" && args["text"].trim() !== "") {
@@ -560,8 +552,9 @@ export const ledgeTools: McpTool[] = [
     },
     handler: async (args) => {
       await loadWorkspaces();
-      // Per call, not at module load: matching loadWorkspaces' stance, so an
-      // edited knob reaches the next call without restarting the server.
+      // This handler reads the settings per call, not at module load,
+      // matching loadWorkspaces: an edited setting reaches the next call
+      // without restarting the server.
       const settings = await loadSettings();
       const root = dailyWorkspace(args, settings);
       const { meta, created } = await openDaily(root, dailyFolder(args, settings));
@@ -659,14 +652,16 @@ export const ledgeTools: McpTool[] = [
         );
       }
       let edited = parts.join(newText);
-      // Notes end in a newline; only an edit that ate the note's last one
-      // (old_text reaching EOF, replacement without it) trips this.
+      // Notes end in a newline. This only fires when the edit removed the
+      // note's last one: old_text reached the end of the file, and the
+      // replacement went in without it.
       if (!edited.endsWith("\n")) edited += "\n";
       const res = await writeNote(n.path, edited, n.mtimeMs);
       const out: Record<string, unknown> = {
         path: n.path,
         // Recomputed from the edited text, the way locate() computed it: the
-        // edit may have rewritten the H1, and the old title would misaddress.
+        // edit may have rewritten the H1, and the old title would then name
+        // the wrong note.
         title: labelOf(headingOf(edited), n.path),
         workspace: n.workspace,
         modified: iso(res.mtimeMs),

@@ -1,7 +1,7 @@
-// The docs sync against a real filesystem: the corpus lands in DOCS_ROOT at
-// boot, matches-in-place are left untouched, external edits are overwritten
-// (the folder is machine-written, like .layout.json), and pages the manifest
-// dropped are RETIRED by rename, never unlinked. The app home is the
+// The docs folder against a real filesystem: at boot syncDocs makes DOCS_ROOT
+// match the corpus. A matching page is left untouched. An external edit is
+// overwritten (the folder is machine-written, like .layout.json). A page the
+// manifest dropped is retired by rename, never unlinked. The app home is the
 // preload's scratch dir (bunfig.toml), same guard as workspaces.fs.test.ts.
 import { beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
@@ -55,7 +55,7 @@ describe("syncDocs", () => {
     await syncDocs([PAGES[0]!]); // shells.md left the manifest (an upgrade)
     const listed = await readdir(DOCS_ROOT);
     expect(listed).not.toContain("shells.md");
-    // The bytes survive under the dotted retired dir, invisible to listNotes.
+    // The bytes stay under the .retired folder, which listNotes skips.
     expect(await readFile(join(DOCS_ROOT, ".retired", "shells.md"), "utf8")).toBe(PAGES[1]!.text);
     expect((await listNotes(DOCS_ROOT)).map((n) => n.title)).toEqual(["Getting Started"]);
   });
@@ -75,7 +75,7 @@ describe("syncDocs", () => {
     expect(retitleNote(page, "# Renamed\n")).rejects.toThrow(/read-only/);
     expect(deleteNote(page)).rejects.toThrow(/read-only/);
     expect(lockNote(page)).rejects.toThrow(/read-only/);
-    // Nothing moved or changed under any of them.
+    // None of the five refusals changed a byte or added a note.
     expect(await readFile(page, "utf8")).toBe(PAGES[0]!.text);
     expect((await listNotes(DOCS_ROOT)).length).toBe(PAGES.length);
   });
@@ -88,7 +88,8 @@ describe("syncDocs", () => {
     const page = metas.find((n) => n.title === "Getting Started")!;
     const file = await readNote(page.path);
     expect(file?.text).toContain("# Getting Started");
-    // And the read-only gate holds against the very page the read served.
+    // The read succeeded, and the read-only gate still refuses a write to that
+    // same page.
     expect(writeNote(page.path, "# Getting Started\n\nvandalized\n")).rejects.toThrow(/read-only/);
   });
 });

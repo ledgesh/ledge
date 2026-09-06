@@ -1,22 +1,24 @@
-// Attribution for everything the app redistributes: the npm packages the build
-// draws on, and the native binaries sitting in the bundle beside them.
-// `bun run licenses` renders it to THIRD-PARTY-NOTICES.md; licenses.test.ts
-// re-renders and compares, so a dependency added without regenerating turns
-// the suite red rather than shipping unattributed. MIT and BSD both ask that
-// their notice travel with the binary, which makes this file a shipping
-// artifact and not paperwork: docsContent.ts compiles it into the built-in
-// docs, so it reaches the user's copy and not only the repository.
+// Attribution for everything the app redistributes: the npm packages the
+// build draws on, and the native binaries in the bundle. `bun run licenses`
+// renders it to THIRD-PARTY-NOTICES.md; licenses.test.ts re-renders and
+// compares, so a dependency added without regenerating turns the suite red
+// rather than shipping unattributed. MIT and BSD ask that their notice
+// travel with the binary. docsContent.ts compiles THIRD-PARTY-NOTICES.md
+// into the built-in docs, so it reaches the user's copy and not only the
+// repository.
 //
-// This module lives under src/ rather than beside scripts/licenses.ts because
-// src/ is where the test runner looks (bunfig.toml roots `bun test` there) —
-// the same split as ptyNative.ts and scripts/build-native.ts, pure core here
-// and the runner over there. Nothing in the app imports it, so none of it
-// reaches the bundle.
+// This module sits under src/ rather than beside scripts/licenses.ts because
+// tests are colocated (testing.md §1). Pure core here and the runner in
+// scripts/, the same split as ptyNative.ts and scripts/build-native.ts.
+// Nothing in the app imports it, so none of it reaches the bundle.
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 export interface LicenseText {
-  /** The file it came from, named so a reader can go check it. */
+  /**
+   * The file's name in the package directory, such as `LICENSE.md`. A reader
+   * of the notices follows the name back to the original.
+   */
   file: string;
   text: string;
 }
@@ -34,20 +36,20 @@ export interface NativeComponent {
   name: string;
   license: string;
   url: string;
-  /** Which files in the bundle this covers, and anything a reader needs told. */
+  /** Which files in the bundle this covers, and what each one is. */
   note: string;
 }
 
-// The binaries in Contents/MacOS. npm cannot describe them: they arrive
-// prebuilt from the Electrobun toolchain, which since 2.x is downloaded from
-// GitHub Releases rather than installed, so the dependency walk below sees a
-// bootstrap package with no dependencies and none of what it actually ships.
-// (Under 1.x the walk at least saw that package's own dependencies, and
-// reported build-time ones such as @babylonjs/core that never reached the
-// bundle; losing them makes this list the whole account, not a partial one.)
-// Hand-maintained, therefore, and deliberately covering EVERY binary in the
-// bundle — including our own — so that the section answers "what is this file"
-// for each one rather than only for the ones with an obligation attached.
+// A hand-maintained list of the binaries inside Ledge.app, most of them in
+// Contents/MacOS. The dependency walk below cannot see them: they arrive
+// prebuilt from the Electrobun toolchain, which Hutch downloads rather than
+// npm installing (architecture.md §8), so the walk finds only a
+// dependency-free bootstrap package. Under 1.x the walk did see that
+// package's dependencies, and reported build-time ones such as
+// @babylonjs/core that never reached the bundle. Losing those costs no
+// coverage, so this list is the whole account. Every binary is listed, this
+// project's own included, so a reader can look up any file in the bundle and
+// not only the ones carrying an obligation.
 export const NATIVE_COMPONENTS: readonly NativeComponent[] = [
   {
     name: "Bun 1.4.0",
@@ -72,19 +74,24 @@ export const NATIVE_COMPONENTS: readonly NativeComponent[] = [
   },
 ];
 
-// Files worth reproducing. NOTICE earns its place separately: Apache-2.0 §4(d)
-// requires it be passed along with the license, and @babylonjs/core is the
-// package that makes that concrete here.
+// The files worth reproducing. NOTICE is matched separately because
+// Apache-2.0 §4(d) requires it travel with the license. Nothing the walk
+// below reaches publishes one now: @babylonjs/core still ships a NOTICE.md
+// in node_modules, but the Electrobun 2.x walk no longer reaches it, and the
+// playwright packages that carry one are devDependencies.
 const LICENSE_FILE = /^(LICEN[CS]E|COPYING)([-.].*)?$/i;
 const NOTICE_FILE = /^NOTICE([-.].*)?$/i;
 
-/** The license-ish files in a package directory, licenses first, then NOTICE. */
+/** The license files in a directory listing, licenses first and NOTICE last. */
 export function licenseFilesOf(names: readonly string[]): string[] {
   const sorted = [...names].sort();
   return [...sorted.filter((n) => LICENSE_FILE.test(n)), ...sorted.filter((n) => NOTICE_FILE.test(n))];
 }
 
-/** `git+https://github.com/x/y.git` and its cousins reduced to a browsable URL. */
+/**
+ * A package.json repository field as a browsable https URL, or null. Handles
+ * the `git+`, `git://`, and `ssh://git@` prefixes and a trailing `.git`.
+ */
 export function normalizeRepo(repository: unknown): string | null {
   const raw =
     typeof repository === "string"
@@ -93,7 +100,7 @@ export function normalizeRepo(repository: unknown): string | null {
         ? (repository as { url: string }).url
         : null;
   if (!raw) return null;
-  // The shorthand forms npm accepts in place of a URL.
+  // The owner/name shorthand npm accepts in place of a URL.
   if (/^[\w.-]+\/[\w.-]+$/.test(raw)) return `https://github.com/${raw}`;
   const url = raw
     .replace(/^git\+/, "")
@@ -103,15 +110,15 @@ export function normalizeRepo(repository: unknown): string | null {
   return url.startsWith("http") ? url : null;
 }
 
-/** What the package says it is licensed as, across the two shapes npm has used. */
+/** The license the package declares, across the field shapes npm has used. */
 export function declaredLicense(pkg: {
   license?: unknown;
   licenses?: unknown;
 }): string {
   if (typeof pkg.license === "string") return pkg.license;
-  // The pre-2015 form: an array of {type, url}. Rare, but `licenses` outliving
-  // `license` in an unmaintained package is exactly when attribution is hard
-  // to reconstruct by hand.
+  // Two legacy shapes: `license` as a {type, url} object, and the pre-2015
+  // `licenses` as an array of them. Rare, but they outlive `license` in
+  // unmaintained packages, where attribution is hard to reconstruct by hand.
   if (typeof (pkg.license as { type?: unknown } | null)?.type === "string") {
     return (pkg.license as { type: string }).type;
   }
@@ -124,10 +131,10 @@ export function declaredLicense(pkg: {
   return "UNKNOWN";
 }
 
-// Walk the PRODUCTION closure: package.json's `dependencies`, then theirs, and
-// so on. Not devDependencies, which never reach a user, and not the bundler's
-// actual output either — see the note renderNotices writes into the file about
-// why the superset is the right set.
+// Walk the production closure: package.json's `dependencies`, then theirs,
+// and so on. devDependencies are skipped because they never reach a user. The
+// bundler's actual output is not consulted either; renderNotices writes the
+// reason for listing the superset into the file itself.
 export function collectPackages(root: string): PackageNotice[] {
   const modules = join(root, "node_modules");
   const rootPkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
@@ -144,10 +151,10 @@ export function collectPackages(root: string): PackageNotice[] {
     try {
       pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
     } catch {
-      // An optional dependency that did not install for this platform. Nothing
-      // is redistributed that is not installed, so there is nothing to
-      // attribute — but say so, because a silent skip and a missing package
-      // look identical in the output.
+      // An optional dependency that did not install for this platform. It is
+      // not redistributed, so there is nothing to attribute. The row is still
+      // written, as "not installed", because a silent skip and a missing
+      // package look identical in the output.
       found.set(name, { name, version: "not installed", license: "UNKNOWN", repository: null, texts: [] });
       continue;
     }
@@ -175,10 +182,10 @@ export function collectPackages(root: string): PackageNotice[] {
   return [...found.values()].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 }
 
-// A fence long enough to survive whatever backticks the text contains. License
-// texts are quoted rather than inlined so that Markdown leaves them alone: a
-// BSD notice full of asterisks would otherwise render as emphasis, and a
-// reproduced notice that has been reformatted is not the notice.
+// A fence longer than any run of backticks in the text. License texts go
+// inside a fence so that Markdown leaves them alone: a BSD notice full of
+// asterisks would otherwise render as emphasis, and the notice has to be
+// reproduced as written.
 function fenceFor(text: string): string {
   let longest = 0;
   for (const run of text.match(/`+/g) ?? []) longest = Math.max(longest, run.length);
@@ -190,10 +197,11 @@ function trimText(text: string): string {
 }
 
 /**
- * The whole file. Deterministic by construction — no dates, no machine paths,
- * no dependence on directory order — because the test compares this against
- * what is committed, and a generator that varies between runs can only be
- * enforced by ignoring it.
+ * The whole of THIRD-PARTY-NOTICES.md. The output does not vary between runs:
+ * no dates, no machine paths, and no dependence on directory order, since
+ * collectPackages and licenseFilesOf sort what they return. licenses.test.ts
+ * compares this against the committed file, which works only on a generator
+ * that depends on nothing but its input.
  */
 export function renderNotices(packages: readonly PackageNotice[]): string {
   const out: string[] = [];
@@ -235,10 +243,10 @@ export function renderNotices(packages: readonly PackageNotice[]): string {
     out.push(p.repository ? `${p.license} (${p.repository})` : p.license);
     out.push("");
     if (p.texts.length === 0) {
-      // Nothing is invented here. A package that publishes no license text
-      // gets its declared id and a pointer, which is all anyone can honestly
-      // reproduce; writing out the standard text under a guessed copyright
-      // holder would be a fabricated notice.
+      // A package that publishes no license text gets its declared id and a
+      // pointer to the project, and nothing more. Writing out the standard
+      // text of that license would mean guessing a copyright holder, which
+      // would make the notice a fabrication.
       out.push(
         "The published package contains no license file. The license above is the one its package.json declares; the canonical text is with the project.",
       );
@@ -257,8 +265,8 @@ export function renderNotices(packages: readonly PackageNotice[]): string {
     }
   }
 
-  // Joined as-is: a pass that tidied blank lines would reach inside the quoted
-  // notices too, and a reformatted notice is not the notice. The section
+  // Joined as-is. A pass that tidied blank lines would reach inside the quoted
+  // notices as well, and they have to be reproduced as written. The section
   // builders above are what keep the spacing even.
   return `${out.join("\n").trimEnd()}\n`;
 }

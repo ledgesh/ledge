@@ -1,17 +1,19 @@
-// Nothing in the manual runs (writing.md §10). A fence in a doc page is a live
-// button on whichever machine shows the page — this Mac, or a phone's server —
-// in `$HOME` with no frontmatter, and the reader cannot see which. So every
-// fence whose language Ledge could run must carry `norun` on its opener
-// (interactions.md §4e). This is the check that a new page, or a new example
-// on an old one, cannot forget it.
+// Nothing in the manual runs (writing.md §10). A fence in a doc page would be
+// a live button on whichever machine shows the page, this Mac or a phone's
+// server, and the reader cannot see which. Its shell would start in `$HOME`,
+// since a manual page carries no frontmatter to say otherwise. So every fence
+// in a runnable language carries `norun` on its opener (interactions.md §4e).
+// This test fails a page that leaves one unmarked, a new page or a new
+// example on an old one.
 import { describe, expect, test } from "bun:test";
 import { noRun, parseFenceInfo } from "../mainview/editor/fenceInfo";
 import { DEFAULT_SETTINGS } from "../shared/settings";
 import { DOC_PAGES } from "./docsContent";
 
-// The defaults, plus `sql`: Running Code shows it as the language to add, and
-// a manual whose own example goes live the moment a reader follows that advice
-// would be the one fence the rule missed.
+// RUNNABLE is the runnable defaults plus `sql`, which is not one of them.
+// Running Code tells the reader to add `sql` to `runnable`. For a reader who
+// does, that page's own `sql` example would go live, so the example carries
+// `norun` and this test checks `sql` fences too.
 const RUNNABLE = new Set([...DEFAULT_SETTINGS.blocks.runnable, "sql"].map((l) => l.toLowerCase()));
 
 // Top-level fence openers only. A fence inside a ```` quoting block is body

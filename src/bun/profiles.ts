@@ -1,31 +1,33 @@
 // The Bun end of profiles: named env files under PROFILES_DIR, injected at
 // shell spawn into any note whose frontmatter names them (spawnParams.ts).
 // This module owns the files: creation, and the read/write pair behind the
-// view's profile editor.
+// view's in-app profile editor (architecture.md §6a).
 //
-// Ledge's own editor dialog is the profile UI — the OS editor was never an
-// option (macOS binds no application to ".env"; `open` fails with
-// LSApplicationNotFound on a stock system), and settings.jsonc now opens
-// in-app too, so every config file edits inside Ledge. The file stays a
-// plain dotenv on disk — greppable, hand-editable, and the editor's saves
-// preserve comments (shared/dotenv.ts) — so hand edits and dialog edits
-// coexist rather than compete.
+// The editor is in-app because macOS binds no application to ".env": `open`
+// fails with LSApplicationNotFound on a stock system. settings.jsonc opens
+// in-app too, so every config file edits inside Ledge. The files stay plain
+// dotenv on disk, greppable and hand-editable, and editor saves keep comments
+// and untouched lines verbatim (shared/dotenv.ts), so a hand-edited file
+// survives a dialog save.
 import { join } from "node:path";
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { isProfileName } from "../shared/frontmatter";
 import { PROFILES_DIR } from "./spawnParams";
 
-// The whole trust story for profileOpen: the name arrives from the view and
-// becomes a filename, so it is checked with the same predicate the parser
-// used — anything else (separators, dots) must throw, and there is a test
-// saying so.
+// Refuse any profile name that could steer the path. The name arrives from
+// the view and becomes a filename, so it runs through isProfileName, the same
+// check the frontmatter parser uses: letters, digits, "-" and "_" only.
+// Separators and dots throw. Both the read and the write path call this first,
+// and profiles.test.ts asserts the rejections.
 export function assertProfileName(name: string): string {
   if (!isProfileName(name)) throw new Error(`not a profile name: ${name}`);
   return name;
 }
 
-// Seeded so the very first open documents its own format and its reason for
-// existing, the way the seeded settings.jsonc documents its knobs.
+// The header seeded into a new profile file. It shows the format on the first
+// open and says why the folder sits outside the notes root. The seeded
+// settings.jsonc documents its knobs the same way (settingsTemplate in
+// shared/settings.ts).
 function seedText(name: string): string {
   return [
     `# Ledge profile "${name}": KEY=value per line (# comments, export prefix ok).`,
@@ -37,10 +39,11 @@ function seedText(name: string): string {
 }
 
 /**
- * Make sure a profile's env file exists — created seeded and 0600 (it will
- * hold secrets) — and return its path. The create is exclusive ("wx"), same
- * as the settings seed: an existing file is never rewritten, whatever the
- * reason it could not be created.
+ * Create the profile's env file if it is missing, seeded and 0600 because it
+ * holds secrets, and return its path. The "wx" flag is what refuses to
+ * overwrite an existing file, as in the settings seed. The catch discards the
+ * EEXIST that refusal raises, and every other create failure with it, so the
+ * path still comes back and readProfile fails at its own read instead.
  */
 export async function ensureProfileFile(name: string): Promise<string> {
   assertProfileName(name);
@@ -57,10 +60,10 @@ export async function readProfile(name: string): Promise<string> {
 
 /**
  * Save the editor's serialized text back. Atomic like a note save (temp file
- * in the same dir, then rename) so a crash mid-save leaves the old secrets or
- * the new, never half a file — and the temp carries 0600 from birth, so the
- * secrets are never readable through a fresh file's default mode even for a
- * moment.
+ * in the same directory, then rename): a crash mid-save leaves the old
+ * secrets or the new, never half a file. The temp file is created 0600, so
+ * the secrets are never readable by other users, not even for the moment
+ * before the rename.
  */
 export async function writeProfile(name: string, text: string): Promise<void> {
   assertProfileName(name);

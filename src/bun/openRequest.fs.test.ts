@@ -1,8 +1,9 @@
-// The CLI → app open-request file, both halves against a real filesystem.
-// The decisions worth pinning: a take CONSUMES (every failure costs exactly
-// the request, never a retry loop), staleness has a cutoff (a request is
-// "now", not a standing instruction), and the path is re-guarded on the app
-// side (the file sits in user-writable ground).
+// Tests both halves of the CLI → app open-request file against a real
+// filesystem. Taking a request deletes the file before it validates anything.
+// A failure therefore costs the request, and nothing retries. A request past
+// the cutoff opens nothing: it means "open this now", not a standing
+// instruction. The app re-checks the path (a registered root, a .md name)
+// because the file sits in user-writable ground (architecture.md §2).
 import { beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";

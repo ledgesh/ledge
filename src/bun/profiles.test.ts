@@ -4,13 +4,17 @@ import { join } from "node:path";
 import { assertProfileName, ensureProfileFile, readProfile, writeProfile } from "./profiles";
 import { PROFILES_DIR } from "./spawnParams";
 
-// PROFILES_DIR points at a scratch dir here (test-preload.ts), same deal as
-// the notes root: these tests touch a real filesystem, never the real config.
+// test-preload.ts points PROFILES_DIR at a scratch directory, the way it does
+// the notes root. These tests write actual files, never the profiles
+// directory of the account running them.
 
 describe("assertProfileName", () => {
   test("a name that could steer the path is refused", () => {
-    // The name becomes a filename; this guard is the entire trust story for
-    // profileOpen, which takes it from the least-trusted end of the RPC.
+    // The name becomes a filename, and it arrives from the view. Nothing
+    // else validates it: the profileRead and profileWrite RPCs hand the name
+    // straight to readProfile and writeProfile (server.ts), and the
+    // assertProfileName those two call is the only check on the way to the
+    // filesystem.
     for (const bad of ["../evil", "a/b", "a\\b", ".hidden", "name.env", "", "a b"]) {
       expect(() => assertProfileName(bad)).toThrow();
     }
@@ -27,8 +31,8 @@ describe("ensureProfileFile", () => {
     const path = await ensureProfileFile("fresh");
     expect(path).toBe(join(PROFILES_DIR, "fresh.env"));
     const text = await readFile(path, "utf8");
-    // The seed documents the format and names the frontmatter line that uses
-    // it — the file is the UI, so it explains itself.
+    // The seed documents the KEY=value format and names the frontmatter line
+    // that selects the profile.
     expect(text).toContain("profile: fresh");
     expect(text).toContain("KEY=value");
     // Secrets file: owner-only.
@@ -60,7 +64,9 @@ describe("readProfile / writeProfile (the editor's load/save)", () => {
     await writeProfile("modes", "A=1\n");
     const path = join(PROFILES_DIR, "modes.env");
     expect(((await stat(path)).mode & 0o777).toString(8)).toBe("600");
-    // The atomic-save temp is dotted and renamed away; nothing may linger.
+    // The atomic save writes a dotted temp file and renames it into place.
+    // writeProfile unlinks that temp when the write or the rename throws, so
+    // the directory holds no leftover either way.
     const { readdir } = await import("node:fs/promises");
     expect((await readdir(PROFILES_DIR)).filter((n) => n.includes(".tmp-"))).toEqual([]);
   });

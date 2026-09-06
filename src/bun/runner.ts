@@ -1,22 +1,17 @@
-// Turns one fenced block into the line its note's shell will run.
-//
-// Every block still executes THROUGH the note's zsh (inlinePool.ts) so the
-// OSC 133 marker protocol keeps slicing output per block; what varies by
-// language is only the line we hand that shell. Shell blocks are `source`d so
-// their cd/export persist into the note's next block — that persistence is the
-// point of the persistent shell, and only sourcing can provide it. Interpreted
-// blocks (python, node, ...) run their temp file under an interpreter instead:
-// a child of the shell, so it inherits the note's cwd/env but cannot mutate
-// them — which is the only semantics an interpreter can honestly offer.
-//
-// The interpreter is resolved by the shell from the command in
-// settings.blocks.interpreters ("python3" means the login shell's PATH answers
-// "which python", same as it would in the terminal drawer). Pure so the whole
-// mapping is unit-testable; index.ts owns the file write and the shells.
+// Turns one fenced block into the line its note's shell will run, the only
+// part of a run that varies by language. Every block goes through the note's
+// zsh (inlinePool.ts), so the OSC 133 markers keep slicing output per block
+// (markers.ts). Shell blocks are `source`d, since sourcing is the only way
+// their cd and export reach the note's next block. Interpreted blocks (python,
+// node, ...) run their temp file under an interpreter, a child of the shell
+// that inherits the note's cwd and env but cannot change them. The interpreter
+// comes from settings.blocks.interpreters, resolved by the shell against its
+// own PATH (architecture.md §6). This module is pure; server.ts writes the
+// file and owns the shells.
 
 /** What to write where, and the line that runs it. */
 export interface RunnerSpec {
-  // "shell" sources into the note's persistent shell; "interpreter" execs a
+  // "shell" sources into the note's persistent shell. "interpreter" execs a
   // child. Callers branch on this: the terminal drawer pastes shell blocks as
   // their literal code (visible, editable, in history) but interpreted blocks
   // as their runner line.
@@ -24,15 +19,15 @@ export interface RunnerSpec {
   path: string;
   contents: string;
   command: string;
-  // True when the block targets a remote host: `command` then carries the
-  // block body in-band (base64 through the shell to the REMOTE /tmp) and the
-  // caller must NOT write `path` locally — it is a path on another machine.
+  // True when the block targets a remote host. `command` then carries the
+  // block body in-band (base64 through the shell to the remote /tmp), and the
+  // caller must not write `path` locally: it names a path on another machine.
   remote: boolean;
 }
 
-// Temp-file extension per fence language. Mostly cosmetic — the interpreter is
-// told the file explicitly — except for bun, which picks its TS/JS loader from
-// the extension.
+// Temp-file extension per fence language. Mostly cosmetic, since the
+// interpreter is told the file explicitly. The exception is bun, which picks
+// its TS or JS loader from the extension.
 const EXT: Record<string, string> = {
   python: "py", python3: "py", py: "py",
   ruby: "rb", rb: "rb",
@@ -42,47 +37,38 @@ const EXT: Record<string, string> = {
 };
 
 /**
- * What to pass as `bunPath` for a run on THIS machine: the running binary when
- * it is a bun, and "" when it is not.
+ * Returns what to pass as `bunPath` for a run on this machine: `execPath` when
+ * the running binary is a bun, and "" when it is not. The app's main process
+ * is a bun (Electrobun ships one as `Ledge.app/Contents/MacOS/bun`), so a
+ * ```ts fence runs there with nothing installed. `ledge-server` is that same
+ * bun with the server compiled into it, and a compiled binary runs only its
+ * embedded program. It gets "" instead, so its fences use the PATH's `bun`:
+ * they run where one is installed, and say "command not found" where none is
+ * (remote.md §11).
  *
- * The "bun" special case exists so a ```ts fence needs nothing installed, and
- * that is true of the app because its main process IS a bun (Electrobun ships
- * one as `Ledge.app/Contents/MacOS/bun`, the binary the launcher execs). It is
- * NOT true of `ledge-server`, which is that same bun with the server compiled
- * into it: `bun build --compile` makes a binary that runs its embedded program
- * and nothing else, so `ledge-server run /tmp/ledge-run-x.ts` answered a
- * TypeScript block with the server's own usage text and exit 2. "" resolves
- * the token to the PATH's `bun` instead, which is the honest answer on a
- * server: it runs where one is installed and says "command not found" where
- * none is.
- *
- * By binary name, the same test daemon.ts makes for the same underlying fact:
- * a compiled binary is named after the program inside it, never `bun`.
+ * The check is the binary's name. A compiled binary is named after the program
+ * inside it, never `bun`. daemon.ts checks the same way, for the same reason.
  */
 export function bundledBun(execPath: string): string {
   return /(^|\/)bun$/.test(execPath) ? execPath : "";
 }
 
 /**
- * Build the run for block `id`. `bunPath` is the bun this machine ships with,
- * or "" where it ships none (`bundledBun` above decides which): the
- * interpreter value "bun" resolves to it so TypeScript works with no bun
- * install, and as its own OS process it keeps user code out of the main
- * process that owns the notes.
+ * Builds the run for block `id`. `bunPath` is the bun this machine ships with,
+ * or "" where it ships none (`bundledBun` above decides which), and the
+ * interpreter value "bun" resolves to it, so TypeScript works with no bun
+ * install. Each interpreted block runs as its own OS process, which keeps user
+ * code out of the main process that owns the notes.
  *
  * `remote` builds the same run for a shell that lives on another machine
- * (bun/remoteSpawn.ts). Two things change and only these two:
- * - The temp file cannot be written from here, so the command writes it
- *   in-band — the body rides base64 through the shell itself into the remote
- *   /tmp, then runs exactly as it would locally. base64 because it makes any
- *   body a single quiet argument (no quoting, no heredoc collisions), and
- *   `--decode` because that spelling is the one GNU and BSD share.
- * - "bun" means the REMOTE PATH's bun, not the bundled one: the bundle's
- *   absolute path is meaningless over there. A host without bun fails with
- *   the shell's own "command not found", which names the actual problem.
- * Everything else — which languages exist, extensions, the php tag — is the
- * same mapping, deliberately: a fence must mean the same thing on every
- * machine the note may target.
+ * (bun/remoteSpawn.ts, architecture.md §6a). Two things change and only these
+ * two. The temp file cannot be written from here, so the command sends the
+ * body base64 through the shell into the remote /tmp and runs it there
+ * (`remoteWrite` below; `--decode` is the spelling GNU and BSD share). And
+ * "bun" means the remote PATH's bun, because the bundled one's absolute path
+ * is meaningless on the remote host. The rest of the mapping (which languages
+ * exist, extensions, the php tag) is the same on both paths, so a fence means
+ * the same thing on every machine the note may target.
  */
 export function runnerFor(
   id: string,
@@ -99,17 +85,18 @@ export function runnerFor(
     const command = remote ? remoteWrite(code, path, `source ${path}`) : `source ${path}`;
     return { kind: "shell", path, contents: code, command, remote };
   }
-  // A user-mapped language we have no extension for uses the fence word
-  // itself, scrubbed: the fence line is note text, and a temp-file name is no
-  // place for its punctuation.
+  // A user-mapped language with no entry in EXT falls back to the fence word
+  // itself, scrubbed of punctuation. The fence line is note text, so it can
+  // hold characters a temp-file name should not.
   const ext = EXT[key] ?? (key.replace(/[^a-z0-9]/g, "") || "txt");
   const path = `/tmp/ledge-run-${id}.${ext}`;
   // `php file` emits code outside <?php tags as literal output, and a php
-  // fence in a note is usually the bare statements — supply the tag.
+  // fence in a note is usually the bare statements, so runnerFor adds the tag.
   const contents = ext === "php" && !/^\s*<\?/.test(code) ? `<?php\n${code}` : code;
-  // Quoted because the app bundle can live under a path with spaces; user
-  // values are NOT quoted (they are commands, possibly with flags). No bundled
-  // bun reads the same as a remote one: the PATH's, or its absence, honestly.
+  // `bunPath` is quoted because the app bundle can live under a path with
+  // spaces. User values are left unquoted: they are commands, possibly with
+  // flags. With no bundled bun, the line uses `bun run` off the PATH, the same
+  // line a remote run gets.
   const cmd = interpreter === "bun" ? (remote || !bunPath ? "bun run" : `"${bunPath}" run`) : interpreter;
   const run = `${cmd} ${path}`;
   return { kind: "interpreter", path, contents, command: remote ? remoteWrite(contents, path, run) : run, remote };
@@ -124,12 +111,13 @@ function remoteWrite(contents: string, path: string, run: string): string {
 }
 
 /**
- * The interpreter map for a run on `host` ("local", or an ssh destination):
- * the base `interpreters` with every matching `blocks.hostInterpreters`
- * section merged over it, in file order, later keys winning. This is where
- * "which python" gets its per-machine answer — the base map is the local one
- * and the default everywhere, and a host whose toolchain lives elsewhere
- * overrides only the languages it names (settings.jsonc documents the shape).
+ * Returns the interpreter map for a run on `host` ("local", or an ssh
+ * destination): the base `interpreters`, then every matching
+ * `blocks.hostInterpreters` section merged over it in file order, later keys
+ * winning. This is where "which python" gets its per-machine answer. The base
+ * map is the local one and the default everywhere, and a host that installs
+ * its interpreters somewhere else overrides only the languages it names
+ * (settings.jsonc documents the shape).
  */
 export function interpretersFor(
   host: string,
@@ -142,11 +130,11 @@ export function interpretersFor(
   return out;
 }
 
-// `*` matches any run of characters; everything else is literal, whole-string,
-// case-sensitive (ssh config Host patterns are case-sensitive too, and an ssh
-// alias's case is the user's own spelling). The same deliberately tiny pattern
-// language as .ledgeignore: numbered fleets ("deploy@anypost-*") are the use
-// case, full regex is a tax.
+// `*` matches any run of characters. Everything else is literal, matched
+// whole-string and case-sensitively (ssh config Host patterns are
+// case-sensitive too, and an ssh alias's case is the user's own spelling).
+// `*` is the whole grammar: numbered fleets ("deploy@anypost-*") are the use
+// case, and nothing here needs full regex.
 export function hostGlobMatches(pattern: string, host: string): boolean {
   const rx = pattern.split("*").map(escapeRegex).join(".*");
   return new RegExp(`^${rx}$`).test(host);

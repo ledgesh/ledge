@@ -14,8 +14,9 @@ import type { NoteParams } from "../shared/frontmatter";
 const HOME = "/home/u";
 const PROFILES = "/home/u/.config/ledge/profiles";
 
-// A filesystem as two maps: dirs that exist, files and their text. Warnings
-// are captured so tests can assert the degradation happened out loud.
+// A fake filesystem as two maps: the directories that exist, and the files
+// with their text. Warnings are captured so a test can assert that a failure
+// warned rather than passing silently.
 function fakeFs(opts: { dirs?: string[]; files?: Record<string, string> } = {}) {
   const warns: string[] = [];
   const deps: SpawnDeps = {
@@ -63,8 +64,9 @@ describe("resolveSpawn: cwd", () => {
   });
 
   test("a missing directory falls back to home, out loud", () => {
-    // Passing it through would _exit(125) the child (pty.ts) and the shell
-    // would just silently die at birth.
+    // Passing a missing directory through would make the spawn trampoline
+    // _exit(125) on the failed chdir (dist-native/ledge_pty.c, called from
+    // pty.ts), so the shell would exit before running anything.
     const { deps, warns } = fakeFs();
     const r = resolveSpawn(params({ cwd: "/gone" }), BASE, deps, HOME, PROFILES);
     expect(r.cwd).toBe(HOME);
@@ -117,8 +119,10 @@ describe("resolveSpawn: env layers", () => {
   });
 
   test("TERM is pinned whatever any layer says", () => {
-    // A note that exports TERM would not get a different terminal, it would
-    // get a broken one: xterm.js is the terminal regardless.
+    // TERM is pinned back to the base value: xterm.js is the terminal
+    // whatever a note claims (architecture.md §6a). A note that exported
+    // another TERM would not get a different terminal, it would get a broken
+    // one.
     const { deps } = fakeFs({ files: { [`${PROFILES}/p.env`]: "TERM=dumb\n" } });
     const r = resolveSpawn(params({ profile: "p", env: { TERM: "vt100" } }), BASE, deps, HOME, PROFILES);
     expect(r.env["TERM"]).toBe("xterm-256color");
@@ -133,10 +137,11 @@ describe("resolveSpawn: env layers", () => {
 
 describe("resolveSpawn: host-terminal identity is scrubbed", () => {
   test("the launching terminal's identity vars do not reach note shells", () => {
-    // The app inherited these from the terminal `bun run dev` ran in; inside
-    // a Ledge PTY every one of them is a false fact. CMUX_SURFACE_ID is the
-    // load-bearing example: cmux's `claude` PATH shim keys on it and injects
-    // session hooks that then fail in a session cmux never owned.
+    // The app inherits these from the terminal it was launched in, such as
+    // the one `bun run dev` ran in, and none of them is true inside a Ledge
+    // PTY. CMUX_SURFACE_ID is the one that does visible damage: cmux's
+    // `claude` PATH shim reads it and installs session hooks, which then fail
+    // in a session cmux does not own.
     const { deps } = fakeFs();
     const base = {
       ...BASE,
@@ -152,8 +157,7 @@ describe("resolveSpawn: host-terminal identity is scrubbed", () => {
       if (key in BASE) continue;
       expect(key in r.env).toBe(false);
     }
-    // The legitimate base survives untouched — TERM included (it is Ledge's
-    // own, already pinned).
+    // The rest of the base env survives, TERM included (Ledge pins it).
     expect(r.env["TERM"]).toBe("xterm-256color");
     expect(r.env["PATH"]).toBe("/usr/bin");
   });
@@ -166,8 +170,9 @@ describe("resolveSpawn: host-terminal identity is scrubbed", () => {
   });
 
   test("a note can opt one back in: the scrub is base-layer only", () => {
-    // Driving the outer cmux over its socket from a note shell is a
-    // legitimate want; frontmatter env applies after the scrub.
+    // Frontmatter env applies after the scrub, so setting one of these names
+    // there puts it back. A note can ask for the outer cmux's socket in order
+    // to drive that terminal from a note shell.
     const { deps } = fakeFs();
     const r = resolveSpawn(
       params({ env: { CMUX_SOCKET_PATH: "/tmp/cmux.sock" } }),
@@ -190,8 +195,9 @@ describe("resolveSpawn degrades, never throws", () => {
   });
 
   test("a forged profile name is refused at resolution, not just in the parser", () => {
-    // The parser's check is a typo message; this one guards the RPC path,
-    // where the least-trusted end could send a name the parser never saw.
+    // The parser checks the name too, but only to report a typo. This check
+    // guards the RPC path, where a profile name can arrive from the
+    // least-trusted end without passing the parser.
     const { deps, warns } = fakeFs({ files: { [`${PROFILES}/../evil.env`]: "X=1" } });
     const r = resolveSpawn(params({ profile: "../evil" }), BASE, deps, HOME, PROFILES);
     expect(r.env["X"]).toBeUndefined();
@@ -222,21 +228,26 @@ describe("resolveSpawn degrades, never throws", () => {
   });
 });
 
-// Which shell binary, as opposed to which argv. The ladder is pure so a Mac
-// can test what a Linux box resolves to and back: `installed` IS the machine.
+// Which shell binary, not which argv. resolveShellPath is pure, so the
+// `installed` predicate stands in for the machine: a Mac can test what a
+// Linux box resolves to, and the other way round.
 describe("resolveShellPath", () => {
   const installed = (...paths: string[]) => (p: string) => paths.includes(p);
 
   test("the account's own login shell wins, because -i sources its rc files", () => {
-    // The whole point on a server: a box whose owner lives in .bashrc must not
-    // be handed a zsh with none of their PATH, aliases or functions.
+    // `shell.args` defaults to `-i` (shared/settings.ts), so the shell
+    // sources the account's rc files. On a server whose owner configured
+    // bash, a zsh would come up with none of their PATH, aliases or
+    // functions.
     expect(resolveShellPath("/bin/bash", installed("/bin/bash", "/bin/zsh"))).toBe("/bin/bash");
     expect(resolveShellPath("/bin/zsh", installed("/bin/bash", "/bin/zsh"))).toBe("/bin/zsh");
   });
 
   test("a login shell Ledge cannot read markers from is passed over, not spawned", () => {
-    // dash IS /bin/sh on Debian, and it has neither precmd_functions nor
-    // PROMPT_COMMAND: taking it would move the silent failure, not fix it.
+    // dash, which is /bin/sh on Debian, has neither precmd_functions nor
+    // PROMPT_COMMAND; the init line's syntax is not valid fish at all. So
+    // bun/markers.ts cannot install the hook that ends a block in either.
+    // Spawning one would move the silent failure rather than remove it.
     expect(resolveShellPath("/bin/dash", installed("/bin/dash", "/bin/bash"))).toBe("/bin/bash");
     expect(resolveShellPath("/usr/bin/fish", installed("/usr/bin/fish", "/bin/bash"))).toBe("/bin/bash");
   });
@@ -266,7 +277,7 @@ describe("shellRefusal and shellCaveat", () => {
   const installed = (...paths: string[]) => (p: string) => paths.includes(p);
 
   test("a shell that is not there is refused, by name", () => {
-    // The failure being prevented: fork succeeds, execve does not, and the
+    // Without this refusal the fork succeeds and the exec does not, so the
     // block ends with no output, no error and no exit code.
     const why = shellRefusal("/bin/zsh", installed("/bin/bash"));
     expect(why).toContain("/bin/zsh");
@@ -283,8 +294,10 @@ describe("shellRefusal and shellCaveat", () => {
   });
 
   test("an unsupported shell that EXISTS is a caveat, never a refusal", () => {
-    // It runs the drawer perfectly well; only block slicing is lost. Refusing
-    // would take the working half away from someone who chose it.
+    // The terminal drawer still works with an unsupported shell. Only inline
+    // runs are hurt: they run, but cannot report their output or exit codes.
+    // Refusing to spawn it would take the working half away from someone who
+    // chose that shell.
     expect(shellRefusal("/usr/bin/fish", installed("/usr/bin/fish"))).toBe(null);
     expect(shellCaveat("/usr/bin/fish")).toContain("inline runs");
     expect(shellCaveat("/bin/zsh")).toBe(null);
@@ -304,9 +317,9 @@ describe("resolveShellArgs", () => {
   });
 
   test("any other shell is spawned with exactly its configured args", () => {
-    // bash's interactive shells enable comments themselves, and `-o
-    // interactive_comments` is not even a bash set option: passing it would
-    // stop the shell from starting at all.
+    // bash enables comments in interactive shells on its own, and
+    // `-o interactive_comments` is not a bash set option. Passing it would
+    // stop bash from reaching a prompt.
     expect(resolveShellArgs("/bin/bash", ["-i"])).toEqual(["-i"]);
     expect(resolveShellArgs("/opt/homebrew/bin/fish", ["-i"])).toEqual(["-i"]);
   });
@@ -343,8 +356,10 @@ describe("stampSessionFacts", () => {
   });
 
   test("the names are Ledge's: a user layer that set them is overridden", () => {
-    // resolveSpawn merged frontmatter/profile/envFile first; the stamp runs
-    // after, so a note cannot claim to be a different note.
+    // resolveSpawn merges envFile, profile and frontmatter env first.
+    // stampSessionFacts runs after them, so a note cannot claim to be a
+    // different note: LEDGE_NOTE and LEDGE_WORKSPACE are Ledge's names, never
+    // the note's.
     const env: Record<string, string> = { LEDGE_NOTE: "/etc/passwd", LEDGE_WORKSPACE: "/" };
     stampSessionFacts(env, facts);
     expect(env["LEDGE_NOTE"]).toBe("/ws/plan.md");

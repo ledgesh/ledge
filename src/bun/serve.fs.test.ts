@@ -1,18 +1,16 @@
-// The spawned-process seam: the actual `bun src/bun/serve.ts` an ssh session
-// would launch, spoken to over its real stdin and stdout by the real client
-// end. transport.test.ts proves the conversation and wire.test.ts the codec;
-// what only this can prove is the assembly — `serve` finds or starts this
-// machine's daemon, the daemon boots createServer with no window attached, the
-// handlers answer through the frame codec across two process boundaries,
-// NOTHING but frames reaches stdout, and the §2 guards refuse a request that
-// arrived over a pipe exactly as they refuse one that arrived in-process
-// (remote.md §13).
-//
-// The child gets its own scratch home, built by hand: it is a separate
-// process, so the preload's root does not reach it, and writing the registry
-// file directly is what "the app ran here earlier" looks like to a server.
-// The daemon it starts lives in that home too, which is what makes killing it
-// afterwards safe — nothing here can reach the real one.
+// The spawned-process seam: `serve.ts` in a process of its own, driven over
+// its real stdin and stdout by the real client end. An ssh session launches
+// the compiled `ledge-server serve`, which is this same entry (remote.md §1).
+// transport.test.ts covers the conversation and wire.test.ts the codec. Only
+// this covers the assembly: the daemon `serve` finds or starts, headless
+// handlers answering through the frame codec across two process boundaries,
+// stdout carrying frames and nothing else, and the §2 guards refusing over a
+// pipe as they refuse in-process (remote.md §13).
+
+// The child gets its own scratch home, written by hand. It is a separate
+// process, so the preload's root does not reach it, and a registry file on
+// disk is what "the app ran here earlier" looks like to a server. The daemon
+// it starts lives in that home too, so nothing here can reach the real one.
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -32,9 +30,9 @@ const push = new Proxy({}, { get: (_t, m: string) => (p: unknown) => pushes.push
 
 let client: ClientConnection;
 
-/** The daemon outlives the `serve` that started it — that is the whole point
- * (remote.md §7) — so a test that starts one has to stop it, or it sits on a
- * deleted scratch home until its idle timer fires a minute later. */
+/** Stop the daemon a test started. The daemon outlives the `serve` that
+ * started it (remote.md §7), so one left behind sits on a deleted scratch home
+ * until its idle timer fires a minute later (daemon.ts, IDLE_EXIT_MS). */
 async function stopDaemon(home: string): Promise<void> {
   try {
     const pid = Number((await readFile(join(home, ".server.pid"), "utf8")).trim());
@@ -89,16 +87,17 @@ test("a note created over the connection lands on disk under its own heading", a
   expect(await Bun.file(note.path).text()).toBe("# Wired Up\n\nbody\n");
 });
 
-// The invariant that keeps "the client is the least-trusted end" honest: the
-// transport changed, the guard did not, and its refusal is what the caller
-// gets rather than a file.
+// The path guards refuse over the wire as they refuse in-process (remote.md
+// §2). The transport changed and the guard did not: the caller gets the
+// refusal rather than the file.
 test("a path outside the workspace roots is refused over the wire", async () => {
   await expect(client.requests.noteRead({ path: join(HOME, "..", ".ssh", "id_rsa") })).rejects.toThrow();
   await expect(client.requests.noteWrite({ path: "/etc/hosts", text: "x", baseMtimeMs: null })).rejects.toThrow();
 });
 
-// Absent is not the same as cancelled: a headless server says why there is no
-// dialog instead of answering the way a dismissed one would (remote.md §5).
+// Absent is not the same as cancelled. A headless server says why it has no
+// dialog, while a dismissed dialog answers with a null root and no error
+// (remote.md §5).
 test("a headless server refuses to attach a folder, with a reason", async () => {
   const res = (await client.requests.workspaceAttach({})) as { root: string | null; error: string | null };
   expect(res.root).toBeNull();
@@ -106,12 +105,11 @@ test("a headless server refuses to attach a folder, with a reason", async () => 
 });
 
 // The same shape one verb over. A server has no CLI to put on its PATH: the
-// shim execs the runtime and entry that wrote it, and there is no cli.js beside
-// this module in a checkout any more than there is one inside a compiled
-// `ledge-server`. The answer rides the boot handshake so the palette can leave
-// the verb out (mainview/lib/shell.ts), and the call refuses in a sentence
-// rather than with the shim's "the CLI entry is missing at …", which names a
-// path no user has ever seen and tells them to rebuild the app.
+// shim execs the runtime and entry that wrote it, and neither a checkout nor
+// a compiled `ledge-server` has a cli.js beside server.ts (its CLI_ENTRY).
+// The boot handshake carries the answer, so the palette can leave the verb
+// out (mainview/lib/shell.ts). A call that asks anyway gets a sentence rather
+// than the shim's error about a path no user has seen (NO_CLI in server.ts).
 test("a server has no CLI to install, and says so on the handshake and again if asked", async () => {
   const { cliShim } = (await client.requests.workspaceList({})) as { cliShim: boolean };
   expect(cliShim).toBe(false);
@@ -120,11 +118,11 @@ test("a server has no CLI to install, and says so on the handshake and again if 
   expect(res.message).toContain("no CLI to install");
 });
 
-// The other half of remote.md §10, and the reason the refusals are throws: a
-// server that answered `{text: ""}` here would look exactly like an empty
-// clipboard, and the bug would live in whatever the user pasted next. The real
-// client never gets this far — bun/index.ts overlays clientSeams over every
-// connection — so this is the assertion that the overlay is load-bearing.
+// The other half of remote.md §10. The refusals throw because a server that
+// answered `{text: ""}` would look like an empty clipboard, and the bug would
+// show up in whatever got pasted next. The real client never reaches them:
+// bun/index.ts wraps every connection's handlers in clientOverlay, so this
+// test is the assertion that the overlay is load-bearing.
 test("the clipboard and the browser are not the server's to answer", async () => {
   await expect(client.requests.clipboardRead({})).rejects.toThrow("remote.md §10");
   await expect(client.requests.clipboardReadRich({})).rejects.toThrow("remote.md §10");
@@ -133,13 +131,12 @@ test("the clipboard and the browser are not the server's to answer", async () =>
   await expect(client.requests.menuSet({ items: [] })).rejects.toThrow("remote.md §10");
 });
 
-// A separate process on purpose, and its own home: this one's stdout is
-// captured raw rather than decoded by a connection, so a stray log line has
-// somewhere to show up. One byte of one would desynchronize every session
-// above, which is why the rule gets a test rather than the benefit of the
-// doubt. The legacy settings.json seeded below is there to GUARANTEE the boot
-// path console.logs something, since a log that never happens proves nothing
-// about where logs go.
+// This test reads stdout raw instead of decoding it through a connection, so
+// a stray log line has somewhere to show up. It runs in its own process, with
+// its own scratch home. One stray byte desynchronizes a length-prefixed
+// stream with no way back, and every connection in this file rides one. The
+// legacy settings.json seeded below makes the boot path log a line, so the
+// log assertion at the end has something to find.
 test("stdout carries frames and nothing else; the server's own logging is on stderr", async () => {
   const home = await mkdtemp(join(tmpdir(), "ledge-serve-stdout-"));
   const ws = join(home, "ws");
@@ -180,12 +177,13 @@ test("stdout carries frames and nothing else; the server's own logging is on std
     }
   }
 
-  // Until the ANSWER, not until a frame count: a connection also arrives to a
-  // presence push (bun/daemon.ts), and counting frames would close stdin
-  // between that and the response this test is here to read.
+  // Drain until the response, not until a frame count. A connection also
+  // arrives to a presence push (bun/daemon.ts, announcePresence), so counting
+  // frames would close stdin between that push and the response this test
+  // reads.
   await drain(() => heard.some((m) => (m as { t: string }).t === "res"));
-  // Only now: closing stdin is a hangup, and a server is right to drop the
-  // answer it was about to write to a client that has gone.
+  // Only now: closing stdin is a hangup, and a server drops the answer it was
+  // about to write to a client that has gone.
   await proc.stdin.end();
   await drain(() => false);
 
@@ -199,19 +197,19 @@ test("stdout carries frames and nothing else; the server's own logging is on std
   expect(heard).toContainEqual({ t: "res", id: 1, r: { state: "none" } });
 
   expect(err).toContain("[serve] ledge-server");
-  // console.log rerouted rather than dropped: a server nobody can hear is its
-  // own kind of bug. It lands in the DAEMON's log now, not on this process's
-  // stderr — `serve` is a byte pump and the boot happened one process over
-  // (remote.md §1).
+  // console.log is rerouted rather than dropped, because the server's own
+  // diagnostics still have to be readable somewhere. The line lands in the
+  // daemon's log, not on this process's stderr: `serve` is a byte pump and the
+  // boot happened one process over (remote.md §1).
   expect(await readFile(join(home, "logs", "ledge-server.log"), "utf8")).toContain("[settings] migrated");
 
   await stopDaemon(home);
   await rm(home, { recursive: true, force: true });
 });
 
-// The socket, the pid file, and the promise that a run outlives its client
-// (remote.md §7). Everything above talks THROUGH a connection; this is about
-// what is still there when one goes away.
+// The socket, the pid file, and a run outliving its client (remote.md §7).
+// Everything above talks through a connection. This test is about what is
+// still there once one goes away.
 test("the daemon outlives the connection that started it, and says where it is", async () => {
   const home = await mkdtemp(join(tmpdir(), "ledge-daemon-"));
   await mkdir(join(home, "ws"), { recursive: true });
@@ -239,8 +237,8 @@ test("the daemon outlives the connection that started it, and says where it is",
   });
   await second.ready;
   expect(await second.requests.layoutGet({})).toEqual({ text: '{"kept":true}' });
-  // The same process, not a fresh one: a second `serve` attaches, it does not
-  // start a rival.
+  // The same process, not a fresh one: a second `serve` attaches to the
+  // running daemon rather than starting another.
   expect(Number((await readFile(join(home, ".server.pid"), "utf8")).trim())).toBe(pid);
   second.close();
 

@@ -1,30 +1,28 @@
 // What a request already did, so a replay does not do it again (remote.md §7).
 //
-// A connection that drops takes its in-flight requests with it, and the client
+// A connection that drops takes its in-flight requests with it. The client
 // cannot tell which of them the server had already run: a `noteWrite` whose
-// answer was lost is indistinguishable from one that never arrived. So the
-// client re-sends them after reconnecting, and this is what makes that safe.
+// answer was lost looks the same as one that never arrived. The client
+// re-sends them after reconnecting, and this log is what makes that safe.
 //
-// The failure it exists to prevent is specific and nasty. A save applied twice
-// finds its own bytes on disk the second time, fails the `baseMtimeMs`
-// divergence guard, and trash-copies the user's own work as somebody else's
-// change. With this, the divergence guard goes back to meaning what it has
-// always meant: somebody else wrote the file.
+// A replayed `noteWrite` carries a `baseMtimeMs` that its own first
+// application already made stale, so it meets the divergence guard writeNote
+// keeps for a foreign write (bun/notes.ts). remote.md §7 has the rule for
+// every mutating call.
 //
-// It belongs to the SERVER, not to a connection — a window that only spans one
-// connection would be forgotten at the exact moment it is needed. The daemon
-// creates one and hands it to every connection it accepts.
+// The log belongs to the server, not to a connection: the daemon creates one
+// and hands it to every connection it accepts (bun/daemon.ts).
 
 /** The recorded outcome of one op, or the promise that is still producing it. */
 type Entry = { at: number; result: Promise<unknown> };
 
 export interface OpLog {
   /**
-   * Run `exec` under `key`, or answer from the record if this key has been
-   * seen. A key still in flight gets the SAME promise rather than a second
-   * run: a client that reconnects fast enough can replay a request the server
-   * is still working on, and two writes racing each other is the very thing
-   * this prevents.
+   * Run `exec` under `key`, or answer from the record when this key has been
+   * seen. A key still in flight gets the same promise back, rather than
+   * running `exec` a second time. A client that reconnects fast enough
+   * replays a request the server is still working on, and running it again
+   * would leave two writes racing each other.
    */
   run(key: string, exec: () => Promise<unknown>): Promise<unknown>;
   size(): number;
@@ -33,23 +31,24 @@ export interface OpLog {
 /**
  * Bounded by count and by age, both small.
  *
- * The window only has to cover requests that were IN FLIGHT when a link
- * dropped, because those are the only ones a client replays — a handful, not a
- * history. 64 entries is far more than that, and two minutes is longer than
- * the reconnect ladder runs before it gives up. Sizing it generously would
- * mean holding recorded RESULTS, and one of them (terminalAttach's scrollback
- * replay) is a quarter megabyte.
+ * The window only has to cover the requests that were in flight when a link
+ * dropped. Those are the only ones a client replays: a handful, not a
+ * history. The default `limit` of 64 entries is far more than that. The
+ * default `ttlMs` of two minutes outlasts the reconnect ladder, which ends
+ * after about half a minute (shared/transport.ts). Every entry keeps the
+ * result it recorded, and one of those (terminalAttach's scrollback) runs to
+ * a quarter megabyte, so a wider window costs real memory.
  *
- * Failures are recorded too. A refusal is an answer: replaying a `noteWrite`
- * that was refused for a locked vault must be refused again, not retried into
- * a different one.
+ * Failures are recorded too. A replayed `noteWrite` that was refused because
+ * the vault is locked is refused again, rather than run a second time for a
+ * different answer.
  */
 export function createOpLog(opts?: { limit?: number; ttlMs?: number; now?: () => number }): OpLog {
   const limit = opts?.limit ?? 64;
   const ttlMs = opts?.ttlMs ?? 120_000;
   const now = opts?.now ?? (() => Date.now());
-  // Insertion-ordered, which is what makes the oldest entry the first one out
-  // without a second structure to sort.
+  // A Map iterates in insertion order, so the oldest entry is the first one
+  // out and eviction needs no second structure to sort.
   const seen = new Map<string, Entry>();
 
   function evict(): void {
@@ -69,12 +68,13 @@ export function createOpLog(opts?: { limit?: number; ttlMs?: number; now?: () =>
     run(key, exec) {
       const hit = seen.get(key);
       if (hit) return hit.result;
-      // Stored BEFORE the first await, so a replay that arrives in the same
-      // tick finds the promise rather than an empty map.
+      // Nothing between here and the `seen.set` below may await: a replay
+      // arriving in the same tick has to find this promise, not an empty map.
       const result = exec();
-      // Nothing else awaits this copy, and an op that failed is answered from
-      // the record; without the catch its rejection is unhandled the moment it
-      // settles and Bun takes the process down for it.
+      // Mark `result` handled. A rejection with no handler attached counts as
+      // unhandled the moment it settles, and Bun ends the process over it. The
+      // derived promise is dropped; the record and the caller both get
+      // `result` itself.
       void result.catch(() => {});
       seen.set(key, { at: now(), result });
       evict();

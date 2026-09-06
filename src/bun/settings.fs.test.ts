@@ -1,8 +1,8 @@
 // loadSettings against a real filesystem: the first-launch seed, the JSONC
-// tolerance, the settings.json -> settings.jsonc migration, and — most
-// important — the promise that a broken file is never rewritten. Home and
-// guard match notes.fs.test.ts (scratch app home via src/test-preload.ts; see
-// bunfig.toml).
+// tolerance, the settings.json to settings.jsonc migration, and the rule that
+// a broken file is never rewritten. The app home is a scratch temp dir, set by
+// src/test-preload.ts (see bunfig.toml). The guard below re-checks that, the
+// same way notes.fs.test.ts does.
 import { beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -19,13 +19,13 @@ import {
   writeSettingsFile,
 } from "./settings";
 
-// What the seed writes on THIS machine. The shell path in it is resolved per
-// machine (bun/spawnParams.ts), so these tests name it the way the seed does
-// and leave the ladder itself to spawnParams.test.ts, which can vary the
-// filesystem without owning one.
+// What the seed writes on this machine. The shell path in it is resolved per
+// machine (bun/spawnParams.ts), so these tests name it the way the seed does.
+// spawnParams.test.ts covers the resolution ladder itself, with an
+// `installed` predicate standing in for the machine.
 const SEEDED_TEMPLATE = settingsTemplate(seededShellPath());
 
-// The defaults as THIS machine gets them. Only the shell differs: everything
+// The defaults as this machine gets them. Only the shell differs: everything
 // else in DEFAULT_SETTINGS is portable, and that one field is resolved against
 // the filesystem so a Linux box is not handed a macOS path.
 const SEEDED_DEFAULTS = {
@@ -51,15 +51,16 @@ beforeEach(async () => {
 describe("loadSettings", () => {
   test("first launch: returns defaults and seeds the commented template", async () => {
     expect(await loadSettings()).toEqual(SEEDED_DEFAULTS);
-    // The seeded file is the template verbatim — the knobs documented in
-    // comments — and the template ↔ defaults agreement is pinned in
-    // shared/settings.test.ts.
+    // The seeded file is the template verbatim, comments and all. The
+    // comments are the knob documentation. shared/settings.test.ts pins that
+    // the template and DEFAULT_SETTINGS agree.
     expect(await readFile(SETTINGS_PATH, "utf8")).toBe(SEEDED_TEMPLATE);
   });
 
-  // The bug this whole seam exists for: a settings.jsonc with no shell section
-  // used to hand a Linux server the macOS literal in DEFAULT_SETTINGS, and the
-  // pty forked into a child that died at execve with nothing to show for it.
+  // The bug this seam exists for: a settings.jsonc with no shell section used
+  // to hand a Linux server the macOS literal in DEFAULT_SETTINGS. The pty
+  // forked a child that died at execve, so the block ended with no output, no
+  // error and no exit code.
   test("a file that names no shell gets this machine's, not the portable literal", async () => {
     await writeFile(SETTINGS_PATH, '{ "trash": { "ttlDays": 7 } }');
     const s = await loadSettings();
@@ -67,9 +68,9 @@ describe("loadSettings", () => {
     expect(s.trash.ttlDays).toBe(7);
   });
 
-  // The other side of it: a path the user wrote is theirs. Substituting one
-  // that works would leave the file showing a shell that is not the one that
-  // spawned, and the file is the settings UI.
+  // The other side of that: a path the user wrote stays theirs. The file is
+  // the settings UI (architecture.md §6). Substituting one that works would
+  // leave it showing a shell other than the one that spawned.
   test("a shell the user named is kept even when this machine cannot run it", async () => {
     await writeFile(SETTINGS_PATH, JSON.stringify({ shell: { path: "/bin/nope" } }));
     expect((await loadSettings()).shell.path).toBe("/bin/nope");
@@ -94,7 +95,8 @@ describe("loadSettings", () => {
     const broken = '{ "editor": { "fontSize": } }';
     await writeFile(SETTINGS_PATH, broken);
     expect(await loadSettings()).toEqual(SEEDED_DEFAULTS);
-    // Byte-for-byte: the file is the user's, mid-edit; fixing it is theirs to do.
+    // Byte-for-byte: the file is the user's, mid-edit. loadSettings does not
+    // repair it.
     expect(await readFile(SETTINGS_PATH, "utf8")).toBe(broken);
   });
 
@@ -107,10 +109,10 @@ describe("loadSettings", () => {
     expect(await readFile(SETTINGS_PATH, "utf8")).toBe(text);
   });
 
-  // The other half of the split (remote.md §5), from the server's side: an
-  // install written before the boundary existed still carries the client's
-  // sections, and this file has to ignore them and say so rather than apply a
-  // font size nobody can see.
+  // The server side of the settings split (remote.md §5). An install written
+  // before the boundary existed still carries the client's sections. The
+  // server reports those sections as problems. It does not apply them: a font
+  // size set on a server changes nothing anyone can see.
   test("a client section left behind by the split is reported, not applied", async () => {
     await writeFile(SETTINGS_PATH, JSON.stringify({ editor: { fontSize: 18 }, trash: { ttlDays: 7 } }));
     const s = await loadSettings();
@@ -136,7 +138,7 @@ describe("loadSettings", () => {
     await writeFile(LEGACY_SETTINGS_PATH, '{ "trash": { "ttlDays": 9 } }');
     const s = await loadSettings();
     expect(s.trash.ttlDays).toBe(13);
-    // The legacy file is left alone — never merged, never deleted.
+    // The legacy file is left alone: never merged, never deleted.
     expect(await exists(LEGACY_SETTINGS_PATH)).toBe(true);
   });
 });
@@ -163,10 +165,10 @@ describe("readSettingsFile / writeSettingsFile", () => {
   });
 });
 
-// What the MCP `settings` tool hands an agent. The point of the shape is that
-// one call answers both halves of a settings question: what the user has set
-// (their text), and what the knobs are (the template's comments, which the
-// text still carries on an unmodified install).
+// What the MCP `settings` tool hands an agent. One call answers both halves of
+// a settings question: what the user has set (their text), and what the knobs
+// are (the template's comments, which the text still carries on an unmodified
+// install).
 describe("inspectSettings", () => {
   test("returns the raw text with its comments intact, plus the path", async () => {
     const text = '{\n  // my venv\n  "blocks": { "interpreters": { "python": "~/.venvs/app/bin/python" } }\n}\n';
@@ -174,15 +176,15 @@ describe("inspectSettings", () => {
     const seen = await inspectSettings();
     expect(seen.text).toBe(text);
     expect(seen.path).toBe(SETTINGS_PATH);
-    // Comments survive: an agent advising on a knob has to see the
+    // Comments survive the read. An agent advising on a knob needs the
     // documentation that lives in them.
     expect(seen.text).toContain("// my venv");
     expect(seen.problems).toEqual([]);
   });
 
   test("a fresh install reads as the documented template", async () => {
-    // The seeded template is the whole reference: an agent asked about a knob
-    // on an install nobody has customized still gets every knob's comment.
+    // The seeded template documents every knob, so an agent asked about one
+    // on an install nobody has customized still gets that knob's comment.
     expect((await inspectSettings()).text).toBe(SEEDED_TEMPLATE);
   });
 
@@ -201,7 +203,7 @@ describe("inspectSettings", () => {
     const seen = await inspectSettings();
     expect(seen.problems.length).toBe(1);
     expect(seen.problems[0]).toContain("entirely on defaults");
-    // The agent still gets the text: reading a file the user is mid-edit on
+    // The agent still gets the text. Reading a file the user is mid-edit on
     // is how it can tell them which line broke.
     expect(seen.text).toBe(broken);
     expect(await readFile(SETTINGS_PATH, "utf8")).toBe(broken);

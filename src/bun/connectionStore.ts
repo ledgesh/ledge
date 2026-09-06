@@ -1,16 +1,15 @@
 // The list of servers this app can reach, and the file it lives in.
 //
-// Shared by every window (remote.md §8a). A machine you have paired with is a
-// fact about this Mac rather than about one of its windows, so the records, the
-// pins and the client ids filed against them are process state, and exactly one
-// thing owns `connections.json`. What is NOT here is which connection a window
-// points at: that is the window's, and bun/connectionManager.ts is one per
-// window.
+// One store for the whole process, shared by every window (remote.md §8a).
+// The records, the pins and the client ids filed against them are facts about
+// this Mac. Writes go through `saveConnections` (bun/connections.ts), and
+// outside tests this module is its only caller.
 //
-// The split is the whole reason this module exists. Two windows writing one
-// selection would mean the last one to switch decided where the next launch
-// opened; two windows each holding their own copy of the LIST would mean a
-// connection added in one is invisible in the other until it is restarted.
+// Which connection a window points at is not here. Each window has its own
+// bun/connectionManager.ts, and the pointer lives there. Two windows writing
+// one selection would let the last one to switch decide where the next launch
+// opened. Two windows each holding a copy of the list would hide a connection
+// added in one from the other.
 import {
   loadConnections,
   LOCAL_CONNECTION,
@@ -35,10 +34,10 @@ export interface ConnectionStore {
   /**
    * Where a window with nothing else to go on opens.
    *
-   * The stored `selected` key, which stops being written once there is a window
-   * list to write instead (bun/windowFrame.ts). It is read for exactly two
-   * cases: an install upgrading across §8a, which has a selection and no window
-   * list, and a client home whose window list could not be read.
+   * Returns the stored `selected` key, which the window list replaced as the
+   * record of where a window opens (bun/windowFrame.ts). Two conditions fall
+   * back to it. An install upgrading across remote.md §8a has a selection but
+   * no window list. A client home's window list may fail to read.
    */
   launchSelection(): string;
   /** Record that a connection answered, for the list's "last reached". */
@@ -49,19 +48,20 @@ export interface ConnectionStore {
     port: number;
     keyPath: string;
     auth: AuthMode;
-    /** The plaintext, on its way to the keychain and nowhere else. Ignored
-     * unless `auth` is "password". */
+    /** The plaintext password, which goes to the keychain and nowhere else.
+     * Ignored unless `auth` is "password". */
     password: string;
     hostKey: string;
   }): Promise<{ id: string; error: string }>;
   /**
-   * An edit, checked but NOT stored: the record it would become, or the reason
-   * it may not.
+   * Check an edit without storing it: returns the record it would become, or
+   * the reason it may not.
    *
-   * Two steps because the caller holds a wire that was built the old way, and
-   * re-opening it has to happen before anything is committed — an address that
-   * does not answer must cost no more than a typo in the add form does. `write`
-   * below is the other half, and nothing is persisted until it runs.
+   * Two steps so the caller can re-open its wire in between.
+   * bun/connectionManager.ts re-opens when how the connection is made changed
+   * and its window is on that connection. An address that does not answer then
+   * costs no more than a typo in the add form does. `write` below stores the
+   * record, and nothing in the list changes until it runs.
    */
   reviewUpdate(fields: {
     id: string;
@@ -76,19 +76,18 @@ export interface ConnectionStore {
     hostKey: string | null;
   }): Promise<{ conn: Connection | null; error: string }>;
   /**
-   * Put the credential where the next dial will look for it, and hand back the
-   * way to put it back.
+   * Store the credential where the next dial will look for it, and return a
+   * `restore` that undoes the store.
    *
-   * The caller re-opens the wire between the two, so this cannot be folded into
-   * `write`: the dial is what PROVES a password, and proving it means the new
-   * one has to be in the keychain before ssh runs. A dial that then fails must
-   * leave the connection exactly as it was, which is what `restore` is for.
+   * Separate from `write` because the caller re-opens the wire between the
+   * two. The dial is what proves a password, so the new one has to be in the
+   * keychain before ssh runs. `restore` puts the old credential back when that
+   * dial fails, leaving the connection as it was.
    *
-   * Reading the old password back to be able to restore it is the one place in
-   * the app that reads a stored password into memory. It is the user's own
-   * secret, in the user's own process, for as long as one ssh takes to fail,
-   * and the alternative is an edit that mistypes a password and destroys the
-   * working one on its way to reporting the failure.
+   * Restoring means holding the old password in memory (bun/secrets.ts
+   * `swapPassword`): the user's own secret, in the user's own process, for as
+   * long as one ssh takes to fail. Without it, an edit that mistyped a
+   * password would destroy the working one while reporting the failure.
    */
   swapPassword(id: string, auth: AuthMode, password: string | null): Promise<{ error: string; restore: () => Promise<void> }>;
   /** Store an edit that `reviewUpdate` passed and the caller has committed to. */
@@ -96,12 +95,11 @@ export interface ConnectionStore {
   remove(id: string): Promise<{ ok: boolean; error: string }>;
   probe(destination: string, port: number): Promise<{ hostKey: string; fingerprint: string; keyType: string; error: string }>;
   /**
-   * Which connections a window is pointed at right now, so `remove` can refuse
-   * one that is in use by ANY window rather than only by the one asking.
+   * Which connections the windows are pointed at right now, so `remove` can
+   * refuse one that any window is using rather than only the one asking.
    *
-   * A function rather than a set this module maintains: the windows are the
-   * shell's, they come and go with AppKit, and a store that tracked them would
-   * be tracking something it cannot see.
+   * A function rather than a set this module keeps: the windows belong to the
+   * shell and come and go with AppKit, so the store cannot see them.
    */
   inUse(): Iterable<string>;
 }
@@ -109,11 +107,12 @@ export interface ConnectionStore {
 /**
  * The keychain, as four functions (bun/secrets.ts).
  *
- * A seam rather than a direct import so that a test suite can exercise the
- * password door without writing to the login keychain hundreds of times a day.
- * The real thing is a native seam and is proved by the live probe (testing.md
- * §6); what is worth testing here is the ORDER — which of the write, the dial
- * and the record happens first, and what is put back when one of them fails.
+ * A seam rather than a direct import, so tests can exercise the password door
+ * without writing to the login keychain (testing.md §4). The keychain itself
+ * is a native seam, proved by the live probe (testing.md §6). The tests that
+ * stub it (bun/connectionManager.fs.test.ts `fakeSecrets`) check the order:
+ * which of the write, the dial and the record happens first, and what is put
+ * back when one of them fails.
  */
 export interface Secrets {
   store(id: string, password: string): Promise<{ ok: boolean; error: string }>;
@@ -144,8 +143,8 @@ export function connectionInfo(c: Connection): ConnectionInfo {
 
 export async function createConnectionStore(deps: {
   now?: () => number;
-  /** Defaults to nothing in use, which is what every test and the first moment
-   * of boot both want. */
+  /** Which connections the windows hold. Defaults to nothing in use; the app
+   * passes a real one (bun/index.ts, bun/connectionManager.ts). */
   inUse?: () => Iterable<string>;
   /** Defaults to the real keychain. */
   secrets?: Secrets;
@@ -155,18 +154,18 @@ export async function createConnectionStore(deps: {
   const secrets = deps.secrets ?? REAL_SECRETS;
   const loaded = await loadConnections();
   let connections = loaded.connections;
-  // Loaded once and written back unchanged. The window list is the authority on
-  // where a window opens; keeping this key inert rather than deleting it means
-  // an install that downgrades, or one whose window list is lost, still lands
-  // on the server it was last using instead of on this Mac.
+  // Loaded once and written back unchanged. The window list is the authority
+  // on where a window opens (bun/windowFrame.ts). The key stays anyway, for an
+  // install that downgrades or one whose window list is lost. Either still
+  // opens on the server it was last using, not on this Mac.
   const selected = loaded.selected;
 
   async function persist(): Promise<void> {
     try {
       await saveConnections(connections, selected);
     } catch (err) {
-      // A list that cannot be written costs the NEXT launch its records, not
-      // this session its connections.
+      // A list that cannot be written costs the next launch its records. This
+      // session keeps the connections it has.
       console.error("[connect] could not save the connection list:", reason(err));
     }
   }
@@ -194,17 +193,18 @@ export async function createConnectionStore(deps: {
         name: name.trim(),
         destination: destination.trim(),
         port,
-        // No key is offered on the password door (`PubkeyAuthentication=no`),
-        // so a path left behind in the form is dropped rather than stored as a
-        // field with no effect that a later reader would have to explain.
+        // No key is offered on the password door (`PubkeyAuthentication=no`,
+        // bun/connections.ts), so a path left behind in the form is dropped.
+        // Storing it would leave a field with no effect, which a later reader
+        // would have to explain.
         keyPath: auth === "password" ? "" : keyPath.trim(),
         auth,
         hostKey: hostKey.trim(),
         lastReached: 0,
       };
-      // The secret first: a record naming a password door that has no password
-      // behind it is a connection that can only fail, and it would fail with
-      // ssh's words rather than with the keychain's.
+      // The secret goes in before the record. A record naming a password door
+      // with no password behind it can only fail, and it would fail with ssh's
+      // error rather than with the keychain's.
       if (auth === "password") {
         const stored = await secrets.store(conn.id, password);
         if (!stored.ok) return { id: "", error: stored.error };
@@ -221,8 +221,8 @@ export async function createConnectionStore(deps: {
       const refusal = validateConnection({ name, destination, keyPath, port });
       if (refusal) return { conn: null, error: refusal };
       if (auth === "password") {
-        // Null means "keep what is stored", which is only an answer when there
-        // is something stored. A connection moved onto the password door with
+        // Null means "keep what is stored", which is only an answer when
+        // something is stored. A connection moved onto the password door with
         // nothing behind it would dial, find no secret, and be refused by the
         // far end for a reason that is on this machine.
         if (password === null) {
@@ -232,11 +232,11 @@ export async function createConnectionStore(deps: {
           if (unusable) return { conn: null, error: unusable };
         }
       }
-      // Null keeps what is pinned; a line replaces it. Either way a pin is a
-      // claim about one machine, and carrying one to another address would
-      // refuse every later connection with a message about a CHANGED host key
-      // — so the caller reads the new machine's fingerprint instead
-      // (remote.md §4), and this is what makes forgetting to impossible.
+      // Null keeps what is pinned, a line replaces it. A pin is a claim about
+      // one machine, so carrying one to another address would refuse every
+      // later connection with a changed-host-key message. The check below
+      // refuses the edit instead and asks for the new host's fingerprint, so a
+      // stale pin cannot travel to a new address (remote.md §4).
       const pin = hostKey === null ? before.hostKey : hostKey.trim();
       // The port is part of the claim: a pin is indexed by `[host]:port` in
       // known_hosts, so moving a connection to a different port on the same
@@ -258,11 +258,10 @@ export async function createConnectionStore(deps: {
 
     swapPassword: async (id, auth, password) => {
       const before = connections.find((c) => c.id === id);
-      // Two ways there is nothing to swap, and between them they are every
-      // rename and every re-address: a connection that was on the key door and
-      // stays there has no secret to move, and one on the password door whose
-      // form did not ask for a new password keeps the one it has. Neither
-      // should cost a keychain spawn.
+      // There is nothing to swap in two cases. A connection that was on the
+      // key door and stays there has no secret to move. One on the password
+      // door whose form did not ask for a new password keeps the one it has.
+      // Neither needs a keychain call.
       if (auth === "key" && before?.auth === "key") return NOTHING_SWAPPED;
       if (auth === "password" && password === null) return NOTHING_SWAPPED;
       return secrets.swap(id, auth === "password" ? password : null);
@@ -283,15 +282,15 @@ export async function createConnectionStore(deps: {
       if (!gone) return { ok: false, error: "There is no such connection." };
       connections = connections.filter((c) => c.id !== id);
       // saveConnections re-renders the known_hosts file from what is left, so
-      // removing a connection removes its pin in the same breath — and the id
-      // this client was known by there goes with it, which is what keeps the
-      // map bounded by the list (remote.md §8a).
+      // removing a connection removes its pin too. forgetClientId then drops
+      // the client id filed against it, which keeps that map bounded by the
+      // list (remote.md §8a).
       await persist();
       await forgetClientId(id);
-      // And its password, for the same reason the pin goes: a credential that
+      // Its password goes for the same reason as the pin: a credential that
       // outlived the connection it belonged to is one nothing in the app can
-      // show, edit, or delete. Only when the record used one, so removing an
-      // ordinary connection costs no keychain call at all.
+      // show, edit, or delete. Only a password-door record stored one, so
+      // removing a key-door connection makes no keychain call at all.
       if (gone.auth === "password") await secrets.forget(id);
       return { ok: true, error: "" };
     },
@@ -303,7 +302,8 @@ export async function createConnectionStore(deps: {
   };
 }
 
-/** A swap that moved nothing, so undoing it is also nothing. */
+/** The result of a swap that moved nothing: no error, and a `restore` that
+ * does nothing. */
 const NOTHING_SWAPPED = { error: "", restore: async (): Promise<void> => {} };
 
 function reason(err: unknown): string {

@@ -1,7 +1,8 @@
-// installShim against a real filesystem — every dir a scratch one. The
-// candidates are ALWAYS passed explicitly here: the real defaults include
-// /opt/homebrew/bin, which on a dev machine exists, is writable, and must
-// never receive a test's shim.
+// installShim against a real filesystem. Every directory is a scratch one.
+// Always pass an explicit dir or an explicit candidate list, so installShim
+// never probes the real defaults. Those defaults start with /opt/homebrew/bin.
+// That directory exists on a dev machine and is writable, and must never
+// receive a test's shim.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";

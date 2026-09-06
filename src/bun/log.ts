@@ -1,31 +1,28 @@
-// The session log: `logs/ledge.log` in the app home, plus the previous
-// session's copy beside it. It exists because a shipped build has nowhere
-// else to put a stack trace — Electrobun's launcher only forwards the main
-// process's stdout on the dev channel, so on a user's Mac every console line
-// this app writes goes to /dev/null. "It just closed" is then the entire bug
-// report, and there is no second attempt: the run that crashed is gone.
-//
-// Hence rotate-on-launch rather than rotate-by-day. After a crash the user
-// relaunches — that is the first thing anyone does — and the session that
-// died has to survive that relaunch to be worth anything. It is
-// `ledge.previous.log`, spelled out, because the person opening this folder
-// was sent here by a menu item and should not have to guess what `.1` means.
-//
-// In the app home (so `LEDGE_NOTES_ROOT` isolates it) rather than the Mac's
-// `~/Library/Logs/Ledge`: every probe and test in this repo redirects the app
-// home and would otherwise scribble on the real log, and the Help menu item
-// makes the location discoverable without leaning on convention.
+// The session log: `logs/ledge.log` in the app home, with the previous
+// session's copy beside it. Electrobun's launcher forwards the main
+// process's stdout only on the dev channel, so a shipped build has nowhere
+// else to put a stack trace. "It just closed" is the whole bug report, and
+// the crashed run cannot be repeated, so the log has to be written before
+// anyone asks for it. Location and rotation: architecture.md §3.
 import { appendFileSync, mkdirSync, renameSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { APP_HOME } from "./workspaces";
 
+// The app home rather than `~/Library/Logs/Ledge`: every probe and test in
+// this repo redirects the app home with `LEDGE_NOTES_ROOT` and would
+// otherwise write to the real log. The Help menu's "Reveal Log in Finder"
+// opens this folder, so the rotated file is named `ledge.previous.log`
+// rather than `ledge.log.1`. The name says what the file is.
 export const LOG_DIR = join(APP_HOME, "logs");
 export const LOG_PATH = join(LOG_DIR, "ledge.log");
 export const PREV_LOG_PATH = join(LOG_DIR, "ledge.previous.log");
 
-// Two files of this, worst case. A log that can fill a disk is a bug of its
-// own, and rotating rather than truncating keeps the RECENT end — the half a
-// crash is in.
+// The size that triggers rotation, and rotation keeps one previous file, so
+// `logs/` holds two of roughly this size. The check in `append` counts the
+// characters that process has appended since its last rotation rather than
+// measuring the file, and it runs before the write, so one entry can leave a
+// file past this. Rotating rather than truncating keeps the recent end, the
+// half a crash is in.
 export const MAX_LOG_BYTES = 4 * 1024 * 1024;
 
 export type LogSource = "bun" | "view";
@@ -33,9 +30,9 @@ export type LogLevel = "info" | "warn" | "error";
 
 // --- pure core (unit-tested in log.test.ts) ----------------------------------
 
-// One console argument as text. Errors are unwrapped to their stack — the
-// default `String(err)` drops it, which is the one part of an error worth
-// keeping in a file nobody is watching live.
+// One console argument as text. An Error becomes its stack: `String(err)`
+// drops the stack, and the stack is the part worth keeping in a file nobody
+// is watching live.
 export function formatArg(arg: unknown): string {
   if (typeof arg === "string") return arg;
   if (arg instanceof Error) return arg.stack ?? `${arg.name}: ${arg.message}`;
@@ -43,14 +40,16 @@ export function formatArg(arg: unknown): string {
   try {
     return JSON.stringify(arg) ?? String(arg);
   } catch {
-    // Cyclic, or a getter that throws. Both are worth a line saying so rather
-    // than taking the whole log entry down with them.
+    // JSON.stringify throws on a cyclic value, or on a getter that throws.
+    // `String(arg)` is the fallback for both. It sits outside the try, so a
+    // value whose own `toString` throws still takes the entry down.
     return String(arg);
   }
 }
 
-// Newlines are kept: a stack trace across ten lines is the payload, not noise,
-// and nothing parses this file — it is read by a person who was handed it.
+// One log line: timestamp, source, level, then the formatted arguments.
+// Newlines inside an argument are kept, because a stack trace across ten
+// lines is the payload. Nothing parses this file; a person reads it.
 export function formatLine(at: Date, source: LogSource, level: LogLevel, args: unknown[]): string {
   const stamp = at.toISOString();
   const body = args.map(formatArg).join(" ");
@@ -59,10 +58,12 @@ export function formatLine(at: Date, source: LogSource, level: LogLevel, args: u
 
 // --- the files ---------------------------------------------------------------
 
-// Best-effort throughout: logging that can throw turns a diagnostic into a
-// second failure. Every entry point here swallows, and none of them may call
-// back into the patched console (see below) or the first disk error becomes an
-// infinite loop.
+// Logging is best-effort, because a logging call that throws turns a
+// diagnostic into a second failure. `sizeOf`, `rotate`, `append` and
+// `revealLog` swallow what the filesystem throws at them, and `sizeOf`
+// reports 0 for a file it cannot stat. None of them may call back into the
+// patched console (startLogging below), or the first disk error recurses
+// forever.
 function sizeOf(path: string): number {
   try {
     return statSync(path).size;
@@ -71,10 +72,10 @@ function sizeOf(path: string): number {
   }
 }
 
-// Which file this PROCESS logs to. The app and a server daemon can be running
-// at once on one machine (remote.md §1), and two processes appending to one
-// file interleave their lines and race each other's rotation — so each names
-// its own, and `logs/` holds both side by side.
+// Which file this process logs to. The app and a server daemon can both be
+// running on one machine (remote.md §1). Two processes appending to one file
+// interleave their lines and race each other's rotation, so each names its
+// own and `logs/` holds them side by side.
 let logPath = LOG_PATH;
 let prevPath = PREV_LOG_PATH;
 
@@ -83,12 +84,16 @@ export function logToFile(basename: string): void {
   prevPath = join(LOG_DIR, `${basename}.previous.log`);
 }
 
+// Moves the current log aside. `startLogging` calls this at launch rather
+// than rotating by day: the first thing anyone does after a crash is
+// relaunch, and the log of the session that died has to survive that.
+// `append` calls it again at the size cap.
 export function rotate(): void {
   try {
     mkdirSync(LOG_DIR, { recursive: true });
     if (sizeOf(logPath) > 0) renameSync(logPath, prevPath);
   } catch {
-    // A log we cannot rotate is a log we append to. Still better than none.
+    // A failed rotation is not fatal: the session appends to the existing log.
   }
 }
 
@@ -102,13 +107,12 @@ export function append(text: string): void {
   try {
     appendFileSync(logPath, text);
   } catch {
-    // The folder can vanish under a running app — someone tidying ~/.ledge,
-    // a scratch home wiped between tests — and a log that gives up for the
-    // rest of the session at that point is a log that is not there when it
-    // matters. One mkdir, one retry, then silence: read-only home, full
-    // disk, revoked permission all end here, and warning about any of them
-    // would recurse through the patched console straight back into this
-    // function.
+    // The log folder can vanish under a running app: someone tidying
+    // ~/.ledge, a scratch home wiped between tests. One mkdir and one retry
+    // recover that, and the session keeps logging. `append` gives up
+    // silently on every other cause (read-only home, full disk, revoked
+    // permission), because warning would recurse through the patched
+    // console back into this function.
     try {
       mkdirSync(LOG_DIR, { recursive: true });
       appendFileSync(logPath, text);
@@ -119,18 +123,18 @@ export function append(text: string): void {
   written += text.length;
 }
 
-// Written synchronously, deliberately: a process that dies mid-tick still has
-// its last line on disk, which is the only line that ever matters. These are
-// short and rare — a boot banner, a warning, an error — not a hot path.
+// One entry, appended synchronously, so a process that dies mid-tick still
+// has its last line on disk. These writes are short and rare (a boot banner,
+// a warning, an error), not a hot path.
 export function write(source: LogSource, level: LogLevel, args: unknown[]): void {
   append(formatLine(new Date(), source, level, args));
 }
 
-// Tee the console into the file instead of routing every call site through a
-// logger module. Two reasons: the ~40 existing `console.warn`s in bun/ (and
-// every future one) keep working unchanged, and Electrobun's own output lands
-// in the log too — which is exactly what you want when the complaint is about
-// the shell or the window rather than about Ledge's own code.
+// `startLogging` tees the console into the log file, rather than routing
+// every call site through a logger module. The ~40 existing `console.warn`
+// calls in bun/, and every future one, keep working unchanged. Electrobun's
+// own output lands in the log too, so a bug in the shell or the window is
+// recorded as well as one in Ledge's own code.
 let patched = false;
 
 export function startLogging(basename?: string): void {
@@ -154,10 +158,10 @@ export function startLogging(basename?: string): void {
   }
 }
 
-// Reveal the folder, not the file: the previous session's log is next to it,
-// and after a crash that is the one the user actually needs. `open -R` on the
-// directory selects it in its parent, which is the wrong level, so the folder
-// is opened instead.
+// Opens the log folder rather than revealing one file. The previous session's
+// log sits beside the current one, and after a crash that is the one the user
+// needs. `open -R` on a directory selects it in its parent, one level too
+// high, so plain `open` on the directory is used.
 export function revealLog(): boolean {
   try {
     mkdirSync(LOG_DIR, { recursive: true });

@@ -1,37 +1,32 @@
 // The server as a process that outlives its clients (remote.md §1, §7).
 //
-// Up to phase 3 a server WAS its connection: `ssh host ledge-server serve` ran
-// a fresh one per ssh, so a dropped link killed the shells with it. That makes
-// §7's "sessions outlive connections" false for exactly the case it was
-// written for — a build running on a machine you are not sitting at. So the
-// server moves behind a unix socket in the app home, `serve` becomes a pump
-// between stdio and that socket, and a connection is a thing the server has
-// rather than a thing it is.
+// Up to phase 3 (remote.md §14) a server was its connection: `ssh host
+// ledge-server serve` ran a fresh one per ssh, so a dropped link killed the
+// shells with it. That made §7's "sessions outlive connections" false for the
+// case it was written for, a build running on a machine you are not sitting at.
+// The server now sits behind a unix socket in the app home, `serve` pumps bytes
+// between stdio and that socket, and a connection is something the server has
+// rather than something it is.
 //
-// Several clients at once, and every push is addressed. A Mac and a phone
-// pointed at one machine is the ordinary shape of this rather than an exotic
-// one, and this daemon used to serve whichever dialled last and hang up on the
-// other, which cost a session to gain a session. What actually needed deciding
-// was far smaller: `attached` and the scrollback ring are per SESSION and not
-// per client (bun/server.ts), so the one thing two clients cannot share is a
-// drawer's keyboard. Notes, search, tags, the registry and the vault never
-// needed a rule at all.
+// The daemon serves several clients at once. Each has one entry in the map
+// below, and every push names the client it is for (`Audience` in
+// bun/server.ts). It used to serve whichever client dialled last and hang up on
+// the other, so one device connecting cost another device its session. What
+// needed a rule was smaller: a session's `owner` and its scrollback ring are
+// per session and not per client (bun/server.ts), so two clients cannot share
+// a drawer's keyboard. Notes, search, tags, the registry and the vault need
+// none.
 //
-// So the connections live in a map keyed by client id, and every push names who
-// it is for (`Audience` in bun/server.ts). What is left of displacement is the
-// job it was always doing underneath: a connection is replaced by a later one
-// FROM THE SAME CLIENT, which is how a reconnect takes over from a half-open
-// wire nobody has noticed is dead. The reason still travels in the `bye`, and a
-// client told it stops instead of re-dialling (shared/transport.ts) — the same
-// rule as before, over the one case that cannot cost anybody else their
-// session.
+// Displacement replaces a connection only with a later one from the same
+// client, which is how a reconnect takes over from a half-open wire. The reason
+// travels in the `bye`, and a client told it stops instead of re-dialling
+// (shared/transport.ts).
 //
-// What the socket buys, precisely: a run keeps going when the wire drops, and
-// the op log (bun/opLog.ts) survives to make the client's replay of what was
-// in flight safe. What a client can additionally ASK for is that its idle
-// shells keep going too, which is the one case the rules above get wrong on
-// their own — a phone suspended by iOS looks exactly like a client that is
-// never coming back (HOLD_MAX_MS).
+// The socket keeps a run going when the wire drops, and keeps the op log
+// (bun/opLog.ts) so the client's replay of what was in flight is safe. A client
+// can also ask for its idle shells to be kept (HOLD_MAX_MS). That ask is the
+// one case the rules above get wrong on their own: a phone suspended by iOS
+// looks the same as a client that is never coming back.
 import { chmodSync, mkdirSync, openSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createServer, type NativeDeps } from "./server";
@@ -43,16 +38,16 @@ import { LOG_DIR } from "./log";
 import { APP_HOME } from "./workspaces";
 import { BUILD_VERSION } from "../shared/version";
 
-/** In the app home, so LEDGE_NOTES_ROOT moves it too and a scratch probe gets
- * its own daemon rather than talking to the real one. Dotted like every other
- * app-owned entry there. */
+/** The unix socket the daemon listens on. It lives in the app home, so
+ * LEDGE_NOTES_ROOT moves it too and a scratch probe gets its own daemon rather
+ * than talking to the real one. Dotted like every other app-owned entry
+ * there. */
 export const SOCKET_PATH = join(APP_HOME, ".server.sock");
 
-/** Beside it, because a process nobody started by hand is a process nobody
- * can find by hand. `kill $(cat ~/.ledge/.server.pid)` is the answer to "how
- * do I stop the thing my ssh session left running", and it is what the live
- * probe uses. Removed on a clean exit; a stale one is harmless, since the
- * socket is what anything actually connects to. */
+/** The daemon's pid, beside the socket, so a process nobody started by hand can
+ * still be stopped by hand: `kill $(cat ~/.ledge/.server.pid)`. The live probe
+ * reads it too (scripts/probe-ssh.ts). Removed on a clean exit. A stale file is
+ * harmless: nothing reaches the daemon through it. */
 export const PID_PATH = join(APP_HOME, ".server.pid");
 
 /** The daemon's log basename, shared by the process's own console tee and by
@@ -65,24 +60,15 @@ export const DAEMON_LOG = "ledge-server";
 const HEADLESS: NativeDeps = {};
 
 /**
- * How long an idle daemon waits before exiting.
+ * How long an idle daemon waits before exiting (remote.md §1, §7).
  *
- * It exits at all because the alternative is a process per machine forever,
- * started by an ssh nobody remembers making. It waits because a client that
- * quits and comes back — a connection switch, an app restart, a reconnect —
- * should find the same server rather than pay for a fresh boot.
- *
- * `running()` overrides both: a daemon with a build in flight stays, which is
- * the entire point of the socket. A client that declared a session hold
- * overrides the LENGTH instead (`HOLD_MAX_MS`), because what it is coming back
- * to is a shell that is merely idle — which `running()` is right not to count
- * and wrong to be asked about.
- *
- * The reason is entirely about the daemon nobody asked for, so it applies only
- * to that one. A daemon somebody STARTED — a systemd unit, the container's PID
- * 1 (`Dockerfile`) — stays until it is stopped, which `serve.ts` asks for with
- * `idleMs: 0`. A supervisor restarting a process that correctly exited, every
- * minute, forever, is not a design anyone would choose on purpose.
+ * The wait is there so a client that quits and comes back (a connection
+ * switch, an app restart, a reconnect) finds the same server rather than
+ * paying for a fresh boot. `running()` keeps a daemon that has a build in
+ * flight. A session hold lengthens the wait instead (`HOLD_MAX_MS`), covering
+ * shells that are merely idle, which `running()` does not count. Only an
+ * autostarted daemon exits at all: `serve.ts` passes `idleMs: 0` for one a
+ * person or a unit file started (remote.md §11).
  */
 export const IDLE_EXIT_MS = 60_000;
 /** `idleMs` for a daemon that should stay until something stops it. */
@@ -90,20 +76,16 @@ export const IDLE_EXIT_NEVER = 0;
 
 /**
  * The longest a client can ask this daemon to keep its sessions after going
- * away (wire.ts `Hello.hold`).
+ * away (wire.ts `Hello.hold`, remote.md §7).
  *
- * The ask exists because a phone is suspended shortly after it leaves the
- * foreground and is given no moment to say anything on the way out (ios.md §5),
- * so it says it at connect time instead. This is the other half: the client
- * names what it wants and the server names what it will do, and the term is the
- * server's because the process being kept alive is the server's.
- *
- * Ten minutes is a ceiling, not the ordinary grant. It bites only a client
- * asking for something no person waits through; the phone asks for five
- * (mainview/ios.tsx) and gets it whole. Past ten minutes the shell still has
- * its cwd and its exported variables and nobody has the thread of what they
- * were for, and the cost of guessing high is a process on someone's Mac for a
- * phone that is in a pocket.
+ * A client asks at connect time because iOS suspends a phone shortly after it
+ * leaves the foreground, giving it no moment to say anything on the way out
+ * (ios.md §5). The client names what it wants and the server names what it
+ * will grant, since the process being kept alive is the server's. Ten minutes
+ * constrains no real client: every client asks for five (`SESSION_HOLD_MS` in
+ * shared/transport.ts) and gets it whole. Past ten minutes the shell still has
+ * its cwd and its exported variables, but nobody remembers what they were for,
+ * and a process is running for a phone that is in a pocket.
  */
 export const HOLD_MAX_MS = 10 * 60_000;
 
@@ -133,18 +115,13 @@ export async function startDaemon(opts: DaemonOpts = {}): Promise<Daemon> {
   mkdirSync(APP_HOME, { recursive: true });
   await clearStaleSocket(socketPath);
 
-  // Every client being served, keyed by the id from its hello. Keyed rather
-  // than a plain set because identity is what both routing questions turn on:
-  // which connection a push is addressed to, and which one a fresh connection
-  // replaces.
-  //
-  // Nobody connected is the ORDINARY case here, not an edge: the watcher fires
-  // whenever a file moves, a run keeps producing output, and both of those go
-  // on happily while every client is away. A push with nowhere to go is
-  // dropped, and the state it described is re-read at the next connection's
-  // boot. One exception, and it is the one push that describes no state: a
-  // run's output is a sequence with nothing to re-read it from, so bun/server.ts
-  // holds that before it ever reaches this map.
+  // Every client being served, keyed by the id from its hello. A map rather
+  // than a plain set because both routing questions turn on identity: which
+  // connection a push is addressed to, and which one a fresh connection
+  // replaces. An empty map is the ordinary case here, and a push with nowhere
+  // to go is dropped (bun/audience.ts). Run output is the exception: it
+  // describes no state for the next connection's boot to re-read, so
+  // bun/server.ts holds it before it reaches this map.
   const clients = new Map<string, ServerConnection>();
 
   // The routing itself is bun/audience.ts, shared with the app's own shell:
@@ -155,14 +132,13 @@ export async function startDaemon(opts: DaemonOpts = {}): Promise<Daemon> {
   /**
    * Tell every client who else is here (rpc-schema `presence`).
    *
-   * The daemon's rather than the server's, because presence is a fact about
-   * CONNECTIONS and this is the only thing that has more than one of them: a
-   * server in the app's own process has exactly one client and nothing to say.
-   *
-   * A different list per client, since each is told about the others and never
-   * about itself. Cheap enough to build that way: this runs when somebody
-   * arrives or leaves, which is a human-scale event, over a map with two or
-   * three entries in it.
+   * It lives in the daemon rather than the server because presence is a fact
+   * about connections, and only the code holding the connections knows them.
+   * bun/index.ts does the same for the windows on this Mac
+   * (`announceLocalPresence`). Each client gets a different list, since it is
+   * told about the others and never about itself. Building one list per client
+   * is cheap: this runs when somebody arrives or leaves, over a map with two
+   * or three entries.
    */
   function announcePresence(): void {
     const everyone = [...clients].map(([client, conn]) => ({ client, label: conn.label() }));
@@ -171,12 +147,12 @@ export async function startDaemon(opts: DaemonOpts = {}): Promise<Daemon> {
     }
   }
 
-  // Created once and handed to every connection: the window that makes a
+  // Created once and handed to every connection. The window that makes a
   // replayed write apply once has to span the reconnect it exists for.
   const ops = createOpLog();
-  // And named once, so a client can tell "the wire came back" from "the server
-  // came back". Replaying into a restarted daemon would meet an empty op log
-  // and apply the write a second time (wire.ts Hello.instance).
+  // A fresh id per daemon, so a client can tell "the wire came back" from "the
+  // server came back". Replaying into a restarted daemon would meet an empty op
+  // log and apply the write a second time (wire.ts `Hello.instance`).
   const instance = crypto.randomUUID();
 
   const server = await createServer({ push, native: HEADLESS });
@@ -222,10 +198,10 @@ export async function startDaemon(opts: DaemonOpts = {}): Promise<Daemon> {
     },
   });
 
-  // The socket is the app home's, and the app home is one user's. 0600 rather
-  // than the umask's guess: anything that can open this socket can read every
-  // note on the machine and run commands as this user, which is precisely the
-  // authority ssh spent §4 restricting.
+  // 0600 rather than whatever the umask gives. The socket is in the app home,
+  // which is one user's. Anything that can open this socket can read every note
+  // on the machine and run commands as this user. That is the authority a
+  // restricted key narrows (remote.md §4a).
   try {
     chmodSync(socketPath, 0o600);
   } catch (err) {
@@ -246,56 +222,54 @@ export async function startDaemon(opts: DaemonOpts = {}): Promise<Daemon> {
       clearTimeout(idleTimer);
       idleTimer = null;
     }
-    // On the hello and not on the socket. A connection that has not said who
-    // it is is not a client yet, and the difference is not hypothetical:
-    // clearStaleSocket below decides whether a daemon is behind a socket file
-    // by connecting to it and hanging up, and on the accept that probe would
-    // be counted as somebody using this server.
+    // The daemon registers a client on its hello, not on the accept. A
+    // connection that has not said who it is is not a client yet, and the
+    // difference is not hypothetical: clearStaleSocket below tests for a live
+    // daemon by connecting and hanging up, and registering at accept would
+    // count that probe as somebody using this server.
     const greet = (): void => {
       const id = conn.client();
       const previous = clients.get(id);
       clients.set(id, conn);
-      // Bound to the id the handshake carried, which is why this cannot happen
-      // at accept time: until the hello lands there is nobody to answer as, and
+      // Bound to the id the handshake carried, which is why it cannot happen at
+      // accept time: until the hello lands there is nobody to answer as, and
       // four of these handlers would answer for the wrong client
-      // (bun/server.ts forClient).
+      // (bun/server.ts `forClient`).
       conn.serve(server.forClient(id));
-      // AFTER the new one is registered, so the pushes a teardown emits go to
-      // the connection that is still here rather than to the one being hung up
-      // on.
+      // The daemon closes the previous connection after registering the new
+      // one, so the pushes a teardown emits go to the connection that is still
+      // here rather than to the one being hung up on.
       //
-      // The SAME client only. Two devices are two clients and both stay; one
-      // device dialling twice is a reconnect, and what it is reconnecting past
-      // is a wire nobody has noticed is dead — taking that over is the point.
-      // The reason travels: a client that knows it was replaced stops rather
-      // than re-dialling, and two that re-dialled would replace each other for
-      // as long as both were running (shared/transport.ts).
+      // The daemon displaces the same client only. Two devices are two clients
+      // and both stay. One device dialling twice is a reconnect, taking over
+      // from a wire nobody has noticed is dead. The reason travels with the
+      // close: a client that knows it was replaced stops instead of re-dialling,
+      // and two that re-dialled would replace each other for as long as both
+      // ran (shared/transport.ts).
       previous?.close("this client opened another connection to this server");
-      // After the replacement, so a reconnect is one announcement of the set as
-      // it now stands rather than two with a dead connection in the middle. The
-      // arriving client is told here too — the same push carries the list it
-      // would otherwise have to ask for, which is the round trip remote.md §12
-      // is counting.
+      // After the replacement, so a reconnect makes one announcement of the set
+      // as it now stands rather than two with a dead connection in the middle.
+      // The arriving client is told here too: the same push carries the list it
+      // would otherwise have to ask for, which saves a round trip (remote.md
+      // §12).
       announcePresence();
     };
     const conn = serverConnection(io, { build, ops, instance, greeted: greet, holdMax });
     void conn.closed.then(() => {
-      // Only while it is still the registered one: a connection replaced by its
-      // own client's next one must not delete the replacement on its way out.
-      // The announcement is inside the same check for a smaller reason — a
-      // replaced connection's departure changes nothing, since its client is
-      // still here under the new one, and announcing anyway would push an
-      // identical list to every client on every reconnect.
+      // Only while this is still the registered connection. A connection its
+      // own client has already replaced must not delete the replacement on its
+      // way out. The announcement sits inside the same check because the client
+      // is still here under the new connection, so the list has not changed and
+      // announcing would repeat it to everybody on every reconnect.
       if (clients.get(conn.client()) === conn) {
         clients.delete(conn.client());
         announcePresence();
       }
-      // Recorded on the way out, whether or not anyone else is left: a hold
-      // runs from the moment THAT connection ended, and with several clients
-      // the last one to leave is not necessarily the one that asked. A phone
-      // backgrounding while a Mac stays connected is the ordinary case of
-      // exactly that, and its five minutes must not become the Mac's sixty
-      // seconds because the Mac happened to quit second.
+      // Recorded on the way out whether or not anyone else is left, because a
+      // hold runs from the moment that connection ended and the last client to
+      // leave is not necessarily the one that asked. A phone backgrounding
+      // while a Mac stays connected is the ordinary case: its five minutes must
+      // not become the Mac's sixty seconds because the Mac quit second.
       const hold = conn.hold();
       if (hold > 0) heldUntil = Math.max(heldUntil, Date.now() + hold);
       // A silent socket closing leaves an unattended daemon exactly as the last
@@ -306,17 +280,18 @@ export async function startDaemon(opts: DaemonOpts = {}): Promise<Daemon> {
 
   function armIdleExit(): void {
     if (stopped || idleTimer || idleMs <= 0) return;
-    // A hold applies only where there is something to hold: a client that asked
-    // for one and opened no shell has nothing to come back TO, and keeping the
-    // process for it is the "started by an ssh nobody remembers making" this
-    // timer exists to end.
+    // A hold applies only where there is something to hold. A client that asked
+    // for one and opened no shell has nothing to come back to, and a process
+    // kept for it is the daemon nobody asked for that this timer exists to end
+    // (`IDLE_EXIT_MS`, remote.md §7).
     const held = server.sessionsOpen() ? heldUntil - Date.now() : 0;
     // The longer of the two, never the shorter: a hold is a deadline a client
     // asked to be given, and one that lands inside the ordinary window is
     // already satisfied by it.
     const wait = Math.max(idleMs, held);
-    // Seconds once there are enough of them to round without lying. Every hold
-    // in production is minutes; the ones that are not are a test's.
+    // The wait logs as seconds once it is long enough to round without
+    // misleading. Every hold in production is minutes; the shorter ones come
+    // from tests.
     if (wait !== idleMs) {
       console.error(`[daemon] holding sessions for ${wait >= 10_000 ? `${Math.round(wait / 1000)}s` : `${wait}ms`}`);
     }
@@ -336,12 +311,12 @@ export async function startDaemon(opts: DaemonOpts = {}): Promise<Daemon> {
     if (stopped) return;
     stopped = true;
     if (idleTimer) clearTimeout(idleTimer);
-    // Said as a stop rather than as the last word (wire.ts `bye`): a daemon
-    // exits for reasons that are over in seconds — an idle timeout, a
-    // `systemctl restart`, the SIGTERM a person sends by hand — and a client
-    // that took this for a refusal sat there disconnected with a Reconnect
-    // button that had nothing left to dial. Displacement below is the goodbye
-    // that IS final, and it is the only one.
+    // The close says `back`, so the client treats this as a stop rather than a
+    // refusal (wire.ts `bye`). Most daemon exits are temporary: an idle
+    // timeout, a service restart, a SIGTERM sent by hand. Said as final, this
+    // would end the client's reconnect ladder and leave nothing dialling until
+    // somebody pressed Reconnect (shared/transport.ts). The displacing close in
+    // `accept` above is the one that is final.
     for (const conn of clients.values()) conn.close("this server is shutting down", true);
     clients.clear();
     listener.stop(true);
@@ -368,12 +343,10 @@ export async function startDaemon(opts: DaemonOpts = {}): Promise<Daemon> {
  * A unix socket outlives the process that made it, so a daemon that was killed
  * leaves a path `listen` then refuses as taken. Connecting is the only way to
  * tell a stale file from a live one: the filesystem entry looks identical
- * either way.
- *
- * A file with something LISTENING is left alone, and `listen` then throws —
- * which is the outcome to want, because two daemons on one app home would be
- * two servers owning one set of notes, one watcher pair per root, and two
- * writers racing every atomic rename.
+ * either way. A file with something listening behind it is left alone, and
+ * `Bun.listen` in `startDaemon` then throws, which is what should happen: two
+ * daemons on one app home would be two servers owning one set of notes, one
+ * watcher pair per root, and two writers racing every atomic rename.
  */
 async function clearStaleSocket(path: string): Promise<void> {
   const live = await tryConnect(path);
@@ -393,10 +366,10 @@ async function clearStaleSocket(path: string): Promise<void> {
 /**
  * Connect to this machine's daemon, starting one if there is none.
  *
- * The retry loop is the race: two `serve` processes can find no socket at the
- * same moment and both spawn a daemon. One of them wins the listen, the other
- * throws and exits, and both connect to the winner — so the loop only has to
- * be patient, not clever.
+ * The retry loop covers a race: two `serve` processes can find no socket at the
+ * same moment and both spawn a daemon. One of them wins the listen and the
+ * other throws and exits. Both then connect to the winner, so the loop only has
+ * to wait and try again.
  */
 export async function connectToDaemon(
   opts: { socketPath?: string; spawn?: () => void; timeoutMs?: number } = {},
@@ -456,16 +429,15 @@ async function tryConnect(socketPath: string): Promise<Fed | null> {
 /**
  * Start a daemon that outlives this process.
  *
- * Detached, and NOT sharing this process's stdio: over ssh, stdout IS the
+ * Detached, and not sharing this process's stdio: over ssh stdout is the
  * protocol, and one stray byte desynchronizes a length-prefixed stream with no
  * way back (bun/serve.ts). Its stderr goes to the file its own console tee
- * writes, so a crash Bun reports before any of our code runs is not lost to
- * /dev/null — the two writers are both O_APPEND on the same file, which is the
- * one interleaving guarantee POSIX actually gives.
+ * writes, so a crash Bun reports before any app code runs is not lost. Both
+ * writers open that file O_APPEND, the one interleaving guarantee POSIX gives.
  *
  * `process.execPath` is the compiled binary in a shipped build and `bun` in a
- * checkout, which is why the script path goes back on the command line only in
- * the second case: `bun serve.ts daemon` there, `ledge-server daemon` here.
+ * checkout, so the script path goes back on the command line only in the second
+ * case: `bun serve.ts daemon` there, `ledge-server daemon` here.
  */
 function spawnDaemon(): void {
   // --autostart is what makes the idle timeout apply: this daemon exists

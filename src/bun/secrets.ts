@@ -2,33 +2,23 @@
 // (remote.md §4).
 //
 // Everything here goes through `/usr/bin/security` rather than through
-// Security.framework, and that is the design rather than the expedient. A
-// keychain item's ACL trusts the program that CREATED it, so an item written by
-// `security` is readable by `security` and Ledge's own code signature never
-// enters the ACL at all. Re-signing the app therefore cannot lock it out of its
-// own secrets, which is the failure locking.md §3 warns about for items created
-// with `SecItemAdd` inside the app. Measured in a real bundle: every read is
-// silent, with no `SecurityAgent` prompt, and a relaunch reads back what an
-// earlier launch wrote.
+// Security.framework. The item's ACL then names that binary and not Ledge.
+// Re-signing the app therefore cannot lock it out of its own secrets, the
+// failure locking.md §3 warns about for items created with `SecItemAdd`. The
+// cost is that any process running as this user reads the item with that one
+// command, the same reach the mode 600 key file `keyPath` already names.
 //
-// The other half of that fact is the cost, and remote.md §4 states it: anything
-// running as this user can read the item with the same one command. That is the
-// mode 600 key file `keyPath` already names, exactly, rather than something
-// weaker or stronger.
-//
-// **The plaintext never leaves through this process.** ssh is pointed at the
-// helper script below with `SSH_ASKPASS`, the helper calls `security` itself,
-// and its stdout goes straight to ssh. Nothing in Bun reads a password back
-// except `storePassword`, which reads the one it just wrote to check that it
-// arrived.
+// The plaintext does not pass through this process on the way to ssh. The
+// helper script below reads the keychain itself under `SSH_ASKPASS`, and its
+// stdout goes straight to ssh. `storePassword` and `swapPassword` are the two
+// calls here that read a password back.
 import { chmod, rename, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { CLIENT_HOME, ensureClientHome } from "./clientHome";
 
 // Fixed, not PATH-resolved, for the reason connections.ts fixes ssh's tools:
-// these are spawned without a shell, and every macOS ships them here. xxd is
-// the hex decoder the helper needs and has shipped with macOS as long as vim
-// has.
+// these are spawned without a shell. `security` is part of macOS, and xxd, the
+// hex decoder the helper runs, has shipped with macOS as long as vim has.
 export const SECURITY_PATH = "/usr/bin/security";
 export const XXD_PATH = "/usr/bin/xxd";
 
@@ -38,12 +28,12 @@ export const XXD_PATH = "/usr/bin/xxd";
 export const KEYCHAIN_SERVICE = "sh.ledge.app.server";
 
 /** The helper ssh runs when it wants a password, written into the client home
- * at every launch (`ensureAskpass`). */
+ * before a password connection is dialled (`ensureAskpass`). */
 export const ASKPASS_PATH = join(CLIENT_HOME, "askpass.sh");
 
-/** How the helper is told WHICH connection is being dialled. A connection id
- * and not a secret, so it costs nothing that it is visible in the environment
- * of the ssh process it is passed to. */
+/** Tells the helper which connection is being dialled. The value is a
+ * connection id and not a secret, so it is safe in the environment of the ssh
+ * process it is passed to. */
 export const ASKPASS_ACCOUNT_ENV = "LEDGE_ASKPASS_ACCOUNT";
 
 // --- pure core (unit-tested in secrets.test.ts) ------------------------------
@@ -51,13 +41,11 @@ export const ASKPASS_ACCOUNT_ENV = "LEDGE_ASKPASS_ACCOUNT";
 /**
  * A password as the hex of its UTF-8 bytes, which is the form that is stored.
  *
- * Not obfuscation: it is what makes ONE decoding rule correct for every
- * password. `security find-generic-password -w` prints the value as text when
- * the bytes are printable ASCII and as hex when they are not, with nothing in
- * the output saying which happened — so a password containing "ä" comes back as
- * `70c3a4` and a password that IS "70c3a4" comes back the same. Storing hex
- * makes the stored value printable ASCII always, so the read is always hex,
- * always decoded, and never guessed at.
+ * Not obfuscation: hex makes one decoding rule right for every password.
+ * `security find-generic-password -w` prints a value as text when its bytes
+ * are printable ASCII and as hex when they are not, with nothing in the output
+ * saying which happened, so the password "ä" and the password "c3a4" both come
+ * back as `c3a4`. Storing hex keeps the read always hex, and always decoded.
  */
 export function toHex(text: string): string {
   return Array.from(new TextEncoder().encode(text))
@@ -65,8 +53,9 @@ export function toHex(text: string): string {
     .join("");
 }
 
-/** The inverse, for the test that holds the round trip. The helper does this
- * with `xxd -r -p` rather than with this. */
+/** The inverse of `toHex`. `readPassword` decodes with it, and the round-trip
+ * test in secrets.test.ts holds the pair. The helper script decodes with
+ * `xxd -r -p` instead. */
 export function fromHex(hex: string): string {
   const bytes = new Uint8Array(hex.length >> 1);
   for (let i = 0; i < bytes.length; i++) bytes[i] = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16);
@@ -76,17 +65,13 @@ export function fromHex(hex: string): string {
 /**
  * The `SSH_ASKPASS` helper, as text.
  *
- * ssh runs this with the prompt as its argument and reads the first line of its
- * stdout as the password. The prompt is ignored: there is exactly one thing
- * this connection could be being asked for, and a helper that parsed English
- * would be a helper that answered the wrong question after an OpenSSH release.
- *
- * It reads the keychain itself, which is the point. A password handed to this
- * script would have to exist in Bun's memory and on a pipe first; this way the
- * secret's whole path is keychain to stdout to ssh.
- *
- * A missing item exits non-zero and prints nothing, which ssh reports as a
- * failed authentication rather than as an empty password it then sends.
+ * ssh runs the script with the prompt as its argument and reads the first line
+ * of its stdout as the password. The script ignores the prompt: a password is
+ * the only thing this connection is asked for, and parsing the English would
+ * break at an OpenSSH wording change. The script reads the keychain itself, so
+ * the secret never sits in Bun's memory or on a pipe (remote.md §4). A missing
+ * item exits non-zero and prints nothing, which ssh reports as a failed
+ * authentication rather than sending an empty password.
  */
 export function askpassScript(): string {
   return `#!/bin/sh
@@ -100,28 +85,25 @@ printf '%s' "\$hex" | ${XXD_PATH} -r -p
 `;
 }
 
-// What Keychain Access shows for these items. The label is the row, the comment
-// is the answer to "why is this one gibberish" for anyone who opens it.
+// What Keychain Access shows for these items. The label names the row, and the
+// comment tells anyone who opens it why the value is hex.
 const LABEL = "Ledge server password";
 const COMMENT = "Stored by Ledge for one server connection, as the hex of the password's UTF-8 bytes.";
 
 /**
- * The whole `add-generic-password` command, as the one line `security -i` reads
- * off its stdin.
+ * The whole `add-generic-password` command, as the one line `security -i`
+ * reads off its stdin.
  *
- * Interactive mode, and the tty is the entire reason. `security
- * add-generic-password -w` with no value does NOT read its stdin when the
- * process has a controlling terminal: it opens `/dev/tty`, prints `password
- * data for new item:` there and waits, so the value written to its pipe is
- * never read and the write never returns. The prompt lands in whatever terminal
- * the app was launched from, which is the only visible symptom — the dialog
- * upstream just stops. A `.app` launched from Finder has no controlling
- * terminal, `security` falls back to the pipe, and the prompting form works
- * perfectly, which is why it survived every probe: none of them ran under a tty.
- *
- * Interactive mode takes the value inline instead, so there is no prompt to
- * route anywhere, and the secret is still not in any argv — `ps` shows
- * `security -i` and nothing more.
+ * Interactive mode is used because the prompting form of `-w` hangs whenever
+ * the process has a controlling terminal (remote.md §4). `security` prompts on
+ * `/dev/tty` and never reads the pipe, so the write never returns. The dialog
+ * upstream stops and the prompt lands in whatever terminal launched the app,
+ * which is the only visible symptom. Only a process with no controlling
+ * terminal falls back to stdin: that is every `.app` launched from Finder, so
+ * the prompting form worked in the shipped app and hung under `bun run start`.
+ * It also passed every probe, since a probe driven over ssh has no tty either.
+ * The inline value leaves no prompt to route and no secret in any argv: `ps`
+ * shows `security -i` and nothing more.
  */
 export function storeCommand(id: string, hex: string): string {
   // -U so an existing item is updated rather than refused.
@@ -132,12 +114,11 @@ export function storeCommand(id: string, hex: string): string {
  * One value as one token of that line.
  *
  * `security`'s interactive parser takes double quotes and backslash escapes,
- * measured rather than assumed. Nothing that reaches here needs the escaping
- * today — the service and the label are ours, an id is a UUID and the value is
- * hex — which is why it belongs here rather than in a caller that would have to
- * keep remembering it. A newline is the one thing it does not handle, for the
- * same reason: none of those four can contain one, the command is a LINE, and
- * `security` offers no escape that would keep it one.
+ * measured rather than assumed. Nothing passed in today needs the escaping.
+ * The service and the label are constants here, an id is a UUID, and the value
+ * is hex. The quoting lives here anyway rather than in each caller. A newline
+ * is not handled: none of those four values can contain one, the command is a
+ * single line, and `security` has no escape that would keep it one.
  */
 function quoted(value: string): string {
   return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
@@ -148,17 +129,16 @@ function quoted(value: string): string {
 /**
  * Store one connection's password, replacing whatever was there.
  *
- * Fed on stdin rather than passed in the argv: `security`'s own usage text
- * calls the argument form insecure, and it is right that an argv is the wrong
- * place for a secret even when the kernel keeps other users out of it (the same
- * rule §10 applies to profiles). What goes down the pipe is the entire command
- * rather than the value alone, for the reason `storeCommand` gives.
+ * The command goes in on stdin rather than in the argv. `security`'s own usage
+ * text calls the argument form insecure, and an argv is the wrong place for a
+ * secret even when the kernel keeps other users out of it (the rule remote.md
+ * §10 applies to profiles). The whole command goes down the pipe rather than
+ * the value alone, for the reason `storeCommand` gives.
  *
- * Read back before this returns true, and that read is load-bearing: `security`
- * exits 0 for failures it merely prints — a keychain it could not open is one —
- * so its exit code is not evidence on its own, and a password that was never
- * written would reach the user as a server that rejects a credential they can
- * see is right.
+ * The write is read back before this reports success. `security` exits 0 for
+ * failures it merely prints, and a keychain it could not open is one. Its exit
+ * code is not evidence on its own, and a password that was never written would
+ * reach the user as a server rejecting a credential they can see is right.
  */
 export async function storePassword(id: string, password: string): Promise<{ ok: boolean; error: string }> {
   const hex = toHex(password);
@@ -179,9 +159,9 @@ export async function storePassword(id: string, password: string): Promise<{ ok:
   return { ok: true, error: "" };
 }
 
-/** Whether a password is stored for this connection, WITHOUT reading it. No
- * `-w`, so `security` prints the item's attributes and never its data: asking
- * "is there one" must not be a way to get one. */
+/** Whether a password is stored for this connection, without reading it. No
+ * `-w`, so `security` prints the item's attributes and never its data. Asking
+ * whether one exists must not be a way to obtain one. */
 export async function hasPassword(id: string): Promise<boolean> {
   try {
     const p = Bun.spawn([SECURITY_PATH, "find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", id], {
@@ -217,16 +197,17 @@ export async function forgetPassword(id: string): Promise<void> {
  * Replace what is stored for a connection, and hand back the way to put the
  * old value back.
  *
- * `next` is a password to store or null to leave nothing stored. The caller
- * dials between the two — the dial is what proves a password works, and that
- * means the new one has to be in the keychain before ssh runs — so a dial that
- * fails needs the previous state back exactly.
+ * `next` is a password to store, or null to leave nothing stored. The caller
+ * dials between the two. The dial is what proves a password works, so the new
+ * one has to be in the keychain before ssh runs. A dial that fails needs the
+ * previous state back exactly.
  *
- * This is the only place in the app that reads a stored password into memory,
- * and `restore` is the whole reason: without the old value there is no way to
- * undo, and an edit that mistyped a password would destroy the working one on
- * its way to reporting the failure. It is the user's own secret, in the user's
- * own process, for as long as one ssh takes to fail.
+ * This is the only place in the app that reads a stored password into memory
+ * for anything but checking a write, and `restore` is the reason (remote.md
+ * §4). Without the old value there is no undo, and an edit that mistyped a
+ * password would destroy the working one while reporting the failure. The
+ * plaintext is the user's own secret, in the user's own process, held for as
+ * long as one ssh takes to fail.
  */
 export async function swapPassword(
   id: string,
@@ -242,9 +223,9 @@ export async function swapPassword(
     return { error: "", restore };
   }
   const stored = await storePassword(id, next);
-  // Nothing was replaced when the write failed, so there is nothing to undo,
-  // and handing back a restore that rewrites the old value would be a second
-  // keychain write on a keychain that just refused one.
+  // Nothing was replaced when the write failed, so there is nothing to undo. A
+  // restore that rewrote the old value would be a second write to a keychain
+  // that just refused one.
   if (!stored.ok) return { error: stored.error, restore: async () => {} };
   return { error: "", restore };
 }
@@ -252,11 +233,11 @@ export async function swapPassword(
 /**
  * Write the helper into the client home and return its path.
  *
- * Rewritten at every launch rather than written once, so a script from an older
- * version is replaced rather than trusted. 0700 because it is executable and
- * nobody but this user has any business running it; via a temp file and a
- * rename, like every other write in the app home, so a half-written script is
- * never the one ssh finds.
+ * The caller runs this before every password dial (index.ts), so a script left
+ * by an older version is replaced rather than trusted. Mode 0700 keeps it
+ * executable by this user alone. The write goes through a temp file and a
+ * rename, like every other write in the app home, so ssh never finds a
+ * half-written script.
  */
 export async function ensureAskpass(): Promise<string> {
   await ensureClientHome();
@@ -276,7 +257,8 @@ export async function ensureAskpass(): Promise<string> {
 
 const KEYCHAIN_REFUSED = "The keychain would not store that password.";
 
-/** The one read in this file, and it exists only to check a write. */
+/** The only read of a stored password here. `storePassword` checks its own
+ * write with it, and `swapPassword` takes the old value to restore. */
 async function readPassword(id: string): Promise<string | null> {
   try {
     const p = Bun.spawn([SECURITY_PATH, "find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", id, "-w"], {

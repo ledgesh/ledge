@@ -31,9 +31,9 @@ describe("parseFrame", () => {
     expect(parseFrame("")).toBeNull();
   });
 
-  // A truncated write and a hand-edited file both land here. The point is that
-  // no partial frame escapes: a missing y with a present width would restore a
-  // window with a NaN coordinate, which macOS accepts and then hides.
+  // A truncated write and a hand-edited file both land here. No partial frame
+  // escapes: a missing y with a present width would restore a window with a
+  // NaN coordinate, which macOS accepts and then hides.
   test("anything short of four finite numbers is null", () => {
     expect(parseFrame("{")).toBeNull();
     expect(parseFrame("[1,2,3,4]")).toBeNull();
@@ -49,10 +49,10 @@ describe("parseFrame", () => {
   });
 });
 
-// The window list is what makes a launch reopen the windows that were open,
-// each on the machine it was pointed at (remote.md §8a). Every failure below
-// costs geometry or a connection and none of them may throw: this is read
-// before any window exists.
+// The window list is read at boot so a launch reopens the windows that were
+// open, each on the connection it was pointed at (remote.md §8a). Each failure
+// below costs geometry or a connection. None of them may throw: readWindows
+// runs before any window exists (index.ts).
 describe("parseWindows", () => {
   const FRAME: Rect = { x: 10, y: 20, width: 900, height: 700 };
 
@@ -84,8 +84,9 @@ describe("parseWindows", () => {
     expect(parseWindows(JSON.stringify(FRAME), "vps-1")).toEqual([{ frame: FRAME, connection: "vps-1" }]);
   });
 
-  // Same rule as everywhere else in machine-written state: a bad entry costs
-  // exactly itself, and the windows either side of it still open.
+  // One bad entry is skipped and the windows either side of it still open.
+  // connections.json and the workspace registry drop unusable entries the same
+  // way (connections.ts, workspaces.ts).
   test("an unusable entry is dropped and its neighbours survive", () => {
     const text = JSON.stringify({
       version: 2,
@@ -115,8 +116,9 @@ describe("fitFrame", () => {
     expect(fitFrame(saved, [LAPTOP, EXTERNAL])).toEqual(saved);
   });
 
-  // The failure this whole module exists to prevent: unplug the external
-  // monitor, relaunch, and the window opens somewhere no pointer can reach.
+  // An unplugged external monitor leaves the saved frame on no attached
+  // display. Without fitFrame the window would open where no pointer can
+  // reach it.
   test("a frame stranded by an unplugged display is re-centered, keeping its size", () => {
     const saved: Rect = { x: 2000, y: 300, width: 1400, height: 900 };
     const fit = fitFrame(saved, [LAPTOP]);
@@ -125,7 +127,10 @@ describe("fitFrame", () => {
     expect(fit.y).toBe(Math.round((LAPTOP.height - 900) / 2));
   });
 
-  // Size is a choice the user made; position after a hardware change is not.
+  // The size the user chose is kept up to the size of the screen: fitFrame
+  // clamps width and height to the display the frame best matches. Position
+  // after a hardware change is not a choice the user made, so a frame with no
+  // grabbable strip on any screen is re-centered instead.
   test("a window too big for the screen it lands on is shrunk to fit it", () => {
     const fit = fitFrame({ x: 2000, y: 100, width: 2400, height: 1300 }, [LAPTOP]);
     expect(fit.width).toBe(LAPTOP.width);
@@ -138,8 +143,9 @@ describe("fitFrame", () => {
     expect(fit.height).toBe(MIN_HEIGHT);
   });
 
-  // Dragged mostly off the bottom-right, the way a window ends up when someone
-  // shoves it aside: a grabbable strip is still on screen, so it is honored.
+  // This frame, dragged mostly off the bottom-right, still leaves a strip on
+  // screen big enough to grab and drag back, so fitFrame honors it. GRAB_WIDTH
+  // and GRAB_HEIGHT set the strip's size.
   test("a mostly-offscreen window is kept if enough of it is grabbable", () => {
     const saved: Rect = { x: LAPTOP.width - 400, y: LAPTOP.height - 200, width: 900, height: 700 };
     expect(fitFrame(saved, [LAPTOP])).toEqual(saved);
@@ -151,8 +157,9 @@ describe("fitFrame", () => {
     expect(fit.x).not.toBe(saved.x);
   });
 
-  // The native call returning nothing must not become "move the user's window
-  // to the middle of a screen we know nothing about".
+  // An empty work-area list means the native call failed. The saved frame is
+  // the only evidence left, so fitFrame returns it unchanged rather than
+  // centering the window on a guess.
   test("with no display information the saved frame is honored as-is", () => {
     const saved: Rect = { x: 9000, y: 9000, width: 900, height: 700 };
     expect(fitFrame(saved, [])).toEqual(saved);
@@ -181,8 +188,9 @@ describe("fitFrame", () => {
   });
 });
 
-// The frame arrives from the OS as doubles; a half-pixel in the file is noise
-// that also defeats the identical-text check that suppresses redundant writes.
+// The frame arrives from the OS as doubles. Rounding keeps half-pixels out of
+// the file, and the `text === lastWritten` check in writeWindows can still
+// skip a redundant write.
 test("roundFrame keeps the file in whole pixels", () => {
   expect(roundFrame({ x: 200.4, y: 119.6, width: 940.2, height: 700.5 })).toEqual({
     x: 200,

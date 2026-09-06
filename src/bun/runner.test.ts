@@ -50,9 +50,9 @@ describe("runnerFor", () => {
   });
 
   // The bug this "" convention exists for: a server passed its own
-  // process.execPath, which is `ledge-server` rather than a bun, so a ```ts
-  // fence ran `ledge-server run /tmp/ledge-run-x.ts` and got the server's
-  // usage text and exit 2 back — a verb it does not have.
+  // process.execPath, which is `ledge-server` rather than a bun. A ```ts
+  // fence then ran `ledge-server run /tmp/ledge-run-x.ts`. The binary has no
+  // `run` verb, so the block got the server's usage text and exit 2 back.
   test("no bundled bun means the PATH's bun, the same answer a remote run gets", () => {
     const spec = runnerFor("b13", "ts", "1", INTERP, "");
     expect(spec.command).toBe("bun run /tmp/ledge-run-b13.ts");
@@ -76,12 +76,12 @@ describe("runnerFor", () => {
   });
 
   test("redis fences feed their commands to redis-cli, targeted by the note's env", () => {
-    // Same trailing-`<` composition as prompt, and the value keeps its
-    // "$REDIS_URL" UNEXPANDED: the note's own shell expands it at run time,
-    // so one global entry points at whatever host the note's frontmatter env
+    // The interpreter value ends with `<`, the same composition as prompt.
+    // It leaves "$REDIS_URL" for the note's own shell to expand at run time.
+    // One global entry points at whatever host the note's frontmatter env
     // names, and falls back to a local server when it names none. The
-    // fallback lives inside the quotes because `redis-cli -u ""` is an error,
-    // not a default.
+    // fallback sits inside the quotes: `redis-cli -u ""` is an error, not a
+    // default.
     const spec = runnerFor("b12", "redis", "GET session:42", INTERP, BUN);
     expect(spec.kind).toBe("interpreter");
     expect(spec.path).toBe("/tmp/ledge-run-b12.redis");
@@ -91,17 +91,20 @@ describe("runnerFor", () => {
   });
 
   test("prompt fences feed the block body to the agent CLI on stdin, ledge tools pre-allowed", () => {
-    // The interpreter value ends with `<`: verbatim insertion makes it a
-    // redirect, because `claude -p /tmp/file` would read the PATH as the
-    // prompt. No shim script — the shell is the shim. The allow flag is
-    // load-bearing too: print mode cannot ask permission, so without it a
-    // write-intent block ends with "I wasn't allowed to write".
+    // The interpreter value ends with `<`, and runner.ts splices it into the
+    // command line unquoted, so the shell reads a redirect and feeds the file
+    // in on stdin. No shim script is needed. Without the `<`,
+    // `claude -p /tmp/file` would read the path as the prompt.
+    // `--allowedTools mcp__ledge` pre-authorizes the Ledge MCP server's
+    // tools, because print mode cannot ask permission: a write-intent block
+    // would run to completion and then report it was not allowed to write.
     const spec = runnerFor("b11", "prompt", "Summarize this note as a haiku", INTERP, BUN);
     expect(spec.kind).toBe("interpreter");
     expect(spec.path).toBe("/tmp/ledge-run-b11.prompt");
     expect(spec.contents).toBe("Summarize this note as a haiku");
-    // The env prefix marks the session one-shot; the MCP server's initialize
-    // instructions read it and tell the agent not to ask follow-ups.
+    // LEDGE_PROMPT_BLOCK=1 marks the session one-shot. The MCP server's
+    // initialize instructions read it and tell the agent not to ask
+    // follow-up questions (bun/mcp.ts).
     expect(spec.command).toBe("LEDGE_PROMPT_BLOCK=1 claude --allowedTools mcp__ledge -p < /tmp/ledge-run-b11.prompt");
   });
 
@@ -120,8 +123,9 @@ describe("bundledBun", () => {
 
   test("a compiled binary is not a bun, whatever it was built with", () => {
     // `ledge-server` is bun with the server compiled into it, and its argv is
-    // the server's own: it answers `run` with a usage message, not TypeScript.
-    // Same binary in the image and on a VPS, same answer.
+    // the server's own. serve.ts does not recognise `run` as a verb, so the
+    // block gets a usage message, not a TypeScript run. The Docker image and
+    // a VPS run the same binary.
     expect(bundledBun("/usr/local/bin/ledge-server")).toBe("");
   });
 
@@ -145,8 +149,9 @@ describe("runnerFor (remote)", () => {
   });
 
   test("any body is inert on the command line, because base64 has no metacharacters", () => {
-    // The whole reason for the in-band base64: this body would otherwise need
-    // quoting for quotes, $(), newlines, and the markers' own printf.
+    // The in-band base64 exists for a body like this one. Without it, the
+    // body would need quoting for quotes, $(), newlines, and the markers' own
+    // printf.
     const code = "echo \"$(rm -rf ~)\"; echo 'don'\\''t'\n\x1b]133;D\x07";
     const spec = runnerFor("r2", null, code, INTERP, BUN, true);
     const arg = spec.command.match(/printf '%s' '([^']*)'/)?.[1];
@@ -163,7 +168,7 @@ describe("runnerFor (remote)", () => {
   });
 
   test("remote typescript means the remote's bun, never the bundled path", () => {
-    // The bundle's absolute path is meaningless on another machine; a host
+    // The bundle's absolute path is meaningless on another machine. A host
     // without bun fails with its shell's own "command not found".
     const spec = runnerFor("r4", "ts", "1", INTERP, BUN, true);
     expect(spec.command).toContain("bun run /tmp/ledge-run-r4.ts");
@@ -232,7 +237,7 @@ describe("interpretersFor", () => {
   });
 
   test("glob is whole-string: a pattern is not a substring search", () => {
-    // "prod" must not match "preprod-1" — partial matches would silently
+    // "prod" must not match "preprod-1". A partial match would silently
     // retarget interpreters on hosts the entry never named.
     const b = blocks({ prod: { python: "/opt/py" } });
     expect(interpretersFor("preprod-1", b)["python"]).toBe("python3");

@@ -1,13 +1,12 @@
-// The note store against a real filesystem — the layer notes.test.ts leaves
-// out. These exercise the rename choreography (retitle's self-rename, trash
-// round-trips, restore-into-a-taken-name), the unlink paths, and — since the
-// per-workspace split — the multi-root guards: which of two registered roots
-// a path belongs to is now part of every operation's safety story.
+// The note store against a real filesystem, the layer notes.test.ts leaves
+// out: the renames (retitle's self-rename, trash round-trips, restore into a
+// taken name), the unlink paths, and the multi-root guards. Since the
+// per-workspace split, every operation asks which registered root a path
+// belongs to.
 //
 // The app home is a per-run temp dir, set by src/test-preload.ts before any
-// module loaded (see bunfig.toml). The guard below re-checks that: these tests
-// wipe the app home in beforeEach, and wiping the wrong folder is the one
-// mistake this file must be incapable of.
+// module loads (see bunfig.toml). The guard below re-checks that, because
+// beforeEach wipes the app home and must never wipe the wrong folder.
 import { beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readdir, readFile as readRaw, rm, stat, utimes, writeFile, writeFile as writeRaw } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -51,14 +50,16 @@ if (!resolve(APP_HOME).startsWith(resolve(tmpdir()) + sep)) {
 let ROOT = ""; // the default workspace root every test gets
 let TRASH = ""; // its trash
 
-// readNote returns {text, mtimeMs}; most assertions here only care about the
-// bytes. null stays null so the gone-note cases read the same.
+// Returns just a note's text. readNote returns {text, mtimeMs} and most
+// assertions here only care about the text. null stays null, so the cases for
+// a note that is gone read the same.
 async function textAt(path: string): Promise<string | null> {
   return (await readNote(path))?.text ?? null;
 }
 
-// A second root, for the cross-workspace cases. Managed for convenience; the
-// guards make no managed/external distinction beyond mkdir self-healing.
+// Creates a second root for the cross-workspace cases. It is managed for
+// convenience. The guards treat managed and external roots alike, apart from
+// the mkdir that self-heals a missing managed root (notes.ts rootReady).
 async function secondRoot(): Promise<string> {
   return createManaged("Other");
 }
@@ -88,8 +89,9 @@ describe("createNote / writeNote / readNote", () => {
   });
 
   test("the same heading in two workspaces is two plain names — reservations are per folder", async () => {
-    // A shared reservation set would enumerate one of these to plan-2.md for
-    // no reason: the two files can never collide.
+    // Name reservations are kept per directory. One set shared across
+    // workspaces would enumerate one of these to plan-2.md, though the two
+    // files sit in different directories and cannot collide.
     const other = await secondRoot();
     const [a, b] = await Promise.all([createNote(ROOT, "# Plan\n"), createNote(other, "# Plan\n")]);
     expect(a.path).toBe(join(ROOT, "plan.md"));
@@ -121,8 +123,8 @@ describe("createNote / writeNote / readNote", () => {
   });
 
   test("the app home's own files are unreachable: they are outside every root", async () => {
-    // The escalation this blocks: settings.jsonc names the shell executable, so
-    // a noteWrite that reached it would be command execution at next launch.
+    // settings.jsonc names the shell executable, so a noteWrite that reached
+    // it would run a command of the writer's choosing at the next launch.
     const path = join(APP_HOME, "settings.jsonc");
     await expect(writeNote(path, '{"shell":{"path":"/tmp/evil"}}')).rejects.toThrow(/outside every workspace root/);
     await expect(readNote(path)).rejects.toThrow(/outside every workspace root/);
@@ -137,8 +139,9 @@ describe("createNote / writeNote / readNote", () => {
   });
 
   test("a missing external root refuses writes rather than growing a shadow folder", async () => {
-    // The unmounted-volume case: mkdir-ing the path would catch autosaves in a
-    // folder on the boot disk that the remounted volume then hides.
+    // A missing external root is what an unmounted volume looks like.
+    // Recreating the path with mkdir would catch autosaves in a folder on the
+    // boot disk. The volume hides that folder again when it remounts.
     const dir = await mkdtemp(join(tmpdir(), "ledge-ext-"));
     await attachExternal(dir);
     const note = await createNote(dir, "# On the volume\n");
@@ -150,9 +153,9 @@ describe("createNote / writeNote / readNote", () => {
 });
 
 describe("writeNote's external-edit guard", () => {
-  // An "agent edit": bytes replaced behind the app's back, with an mtime the
-  // caller has never seen. utimes pins it, because two writes can land inside
-  // one mtime granule and would make the test flaky about what it proves.
+  // Writes an "agent edit": bytes replaced behind the app's back, with an
+  // mtime the caller has never seen. utimes pins that mtime, because two
+  // writes can land inside one mtime granule and make the test flaky.
   async function externalEdit(path: string, text: string, at = 12_345_000): Promise<void> {
     await writeFile(path, text, "utf8");
     await utimes(path, new Date(at), new Date(at));
@@ -165,7 +168,7 @@ describe("writeNote's external-edit guard", () => {
     expect(first.divergedTo).toBeNull();
     expect(second.divergedTo).toBeNull();
     expect(await textAt(note.path)).toBe("# Plain\n\ntwo");
-    expect(second.mtimeMs).toBe((await stat(note.path)).mtimeMs); // the reported version IS the file's
+    expect(second.mtimeMs).toBe((await stat(note.path)).mtimeMs); // the reported version matches the file's
   });
 
   test("an external edit under a dirty buffer is moved to the trash, and the save wins the live path", async () => {
@@ -357,8 +360,9 @@ describe("backlinksTo", () => {
 
   test("the scan is workspace-scoped, like the links themselves", async () => {
     const target = await createNote(ROOT, "# Target\n\nbody\n");
-    // The other workspace's [[Target]] resolves within ITS root (where no
-    // Target exists — dangling), never across into this one.
+    // The other workspace's [[Target]] resolves within that workspace's own
+    // root, where no Target exists, so it dangles. It never reaches into this
+    // root.
     await createNote(await secondRoot(), "# Far\n\nsee [[Target]]\n");
     expect((await backlinksTo(target.path)).backlinks).toEqual([]);
   });
@@ -532,7 +536,7 @@ describe("trash round-trip", () => {
 
 describe("stashNote", () => {
   beforeEach(async () => {
-    resetVaultForTests(); // module state outlives the wiped app home
+    resetVaultForTests(); // wiping the app home does not clear the module's key
     await createVault("test passphrase");
   });
 
@@ -559,8 +563,8 @@ describe("stashNote", () => {
     expect(await readRaw(second, "utf8")).toContain("second try");
   });
 
-  // The reason a stash goes to the trash rather than anywhere else: restoring
-  // one puts both versions on screen so the merge can be made by hand.
+  // A stash goes to the trash because restoring one lands it beside the live
+  // note. Both versions are then on screen, and the merge is made by hand.
   test("restoring a stash lands beside the live note, never over it", async () => {
     const note = await createNote(ROOT, "# Plan\n\nwhat the server says\n");
     const dest = await stashNote(note.path, `# Plan\n\n${STRANDED}\n`);
@@ -580,8 +584,7 @@ describe("stashNote", () => {
     expect(raw).not.toContain(STRANDED);
     expect(raw).toContain("locked: v1.");
     expect(raw).toContain("# Secrets\n"); // the title stays plaintext, as everywhere
-    // And it opens again with the vault, which is what makes it recoverable
-    // rather than merely unreadable.
+    // The vault opens it again, so a sealed stash is still recoverable.
     const restored = await restoreNote(dest);
     expect((await readNote(restored.path))?.text).toContain(STRANDED);
   });
@@ -602,21 +605,20 @@ describe("folders", () => {
     const nested = await createNote(ROOT, "# Nested\n", "projects/api");
     expect(relative(ROOT, top.path)).toBe("top.md");
     expect(relative(ROOT, nested.path)).toBe(join("projects", "api", "nested.md"));
-    // Placement is not identity: both are ordinary notes to every reader.
+    // A folder is placement only: listNotes returns both notes the same way.
     expect((await listNotes(ROOT)).map((n) => n.title).sort()).toEqual(["Nested", "Top"]);
   });
 
   test("a note's meta says which folder it is in, and says nothing at the top level", async () => {
-    // Every flat list of notes — quick-open, search, backlinks, the agents'
-    // listings — needs this to tell two same-titled notes apart. Derived from
-    // the path, so it cannot go stale; absent at the top level, which is where
-    // most notes are.
+    // The flat listings (quick-open, search, backlinks, the agents' lists) use
+    // the folder to tell two same-titled notes apart. metaAt derives it from
+    // the path rather than storing it, and omits it at the top level.
     const top = await createNote(ROOT, "# Top\n");
     const nested = await createNote(ROOT, "# Nested\n", "projects/api");
     expect(top.folder).toBeUndefined();
     expect(nested.folder).toBe("projects/api");
-    // And it survives the round trip through the listing, which is the copy
-    // the view actually holds.
+    // listNotes carries the folder too, and that listing is the copy the view
+    // holds.
     const listed = await listNotes(ROOT);
     expect(listed.find((n) => n.title === "Nested")?.folder).toBe("projects/api");
     expect(listed.find((n) => n.title === "Top")?.folder).toBeUndefined();
@@ -632,13 +634,11 @@ describe("folders", () => {
   });
 
   test("a folder scope narrows the scan before the hit cap can be spent", async () => {
-    // The load-bearing half of folder-scoped search, and the one a refactor
-    // could undo without any other test noticing: collectHits STOPS at
-    // MAX_HITS, so a scope has to narrow the note list before the scan reads a
-    // byte. Filter the hits afterwards instead and the notes the caller
-    // explicitly excluded eat the whole budget, leaving the folder's own
-    // matches unread — a search that answers "nothing here" about a folder
-    // that is full of the word.
+    // collectHits stops at MAX_HITS, so searchNotes narrows the note list by
+    // folder before the scan reads a byte. Filtering the hits afterwards would
+    // let the excluded notes spend the whole budget. The folder's own matches
+    // would go unread, and the search would report nothing about a folder full
+    // of the word. No other test covers this narrowing.
     const wanted = await createNote(ROOT, "# Wanted\n\nneedle\n", "projects");
     // MAX_HITS / MAX_HITS_PER_NOTE noisy notes, each newer than the one above,
     // is exactly enough to fill the budget on its own.
@@ -655,7 +655,7 @@ describe("folders", () => {
   test("folderPathOf refuses every way of naming somewhere else", () => {
     for (const folder of [
       "/etc",
-      " /etc", // leading whitespace must not smuggle an absolute path through
+      " /etc", // leading whitespace must not let an absolute path through
       "/",
       "..",
       "../escape",
@@ -677,7 +677,7 @@ describe("folders", () => {
     expect(folderPathOf(ROOT, "")).toBe(ROOT);
     expect(folderPathOf(ROOT, "projects")).toBe(join(ROOT, "projects"));
     expect(folderPathOf(ROOT, "projects/api")).toBe(join(ROOT, "projects", "api"));
-    expect(folderPathOf(ROOT, "projects/")).toBe(join(ROOT, "projects")); // a trailing slash is spelling
+    expect(folderPathOf(ROOT, "projects/")).toBe(join(ROOT, "projects")); // the trailing slash is dropped
     expect(folderPathOf(ROOT, " projects ")).toBe(join(ROOT, "projects"));
   });
 
@@ -689,8 +689,8 @@ describe("folders", () => {
 
   test("an ignored folder is refused, naming why — a note there would never be listed", async () => {
     await expect(ensureFolder(ROOT, "node_modules")).rejects.toThrow(/ignored/);
-    // The PARENT decides: listNotes prunes the directory whole and never sees
-    // the child, so a leaf-only check would wave this through.
+    // Every ancestor is checked, not just the leaf: listNotes prunes an ignored
+    // directory whole and never sees the child.
     await expect(ensureFolder(ROOT, "node_modules/mine")).rejects.toThrow(/ignored/);
     await writeFile(join(ROOT, ".ledgeignore"), "drafts/\n");
     await expect(ensureFolder(ROOT, "drafts")).rejects.toThrow(/ignored/);
@@ -703,7 +703,7 @@ describe("folders", () => {
     expect(relative(ROOT, moved.path)).toBe(join("projects", "shipping.md"));
     expect(moved.title).toBe("Shipping");
     await expect(stat(note.path)).rejects.toThrow(); // moved, not copied
-    // And back out again: "" is the root, the same spelling createNote takes.
+    // Back out again. The root is spelled "", as it is for createNote.
     expect(relative(ROOT, (await moveNote(moved.path, "")).path)).toBe("shipping.md");
   });
 
@@ -723,7 +723,8 @@ describe("folders", () => {
   test("a folder's deletes and restores round-trip through the mirrored trash", async () => {
     const note = await createNote(ROOT, "# Runbook\n", "projects/api");
     const trashed = (await deleteNote(note.path))!;
-    // The trash mirrors the workspace, so the path IS the record of where it came from.
+    // The trash mirrors the workspace's folders, so the path records where the
+    // note came from.
     expect(relative(TRASH, trashed)).toBe(join("projects", "api", "runbook.md"));
     expect((await listTrash(ROOT)).map((t) => t.title)).toEqual(["Runbook"]);
     const back = await restoreNote(trashed);
@@ -738,7 +739,7 @@ describe("folders", () => {
   });
 
   test("same-named notes in different folders survive a delete of both", async () => {
-    // The case the flat trash could not hold: two readme.md, one bin, one name.
+    // A flat trash could not hold this: two readme.md files, one bin, one name.
     const a = await createNote(ROOT, "# Readme\n", "a");
     const b = await createNote(ROOT, "# Readme\n", "b");
     const ta = (await deleteNote(a.path))!;
@@ -757,9 +758,9 @@ describe("folders", () => {
   });
 
   test("concurrent moves into one folder do not collide", async () => {
-    // The reservation's whole job: the readdir is an await, so without it both
-    // moves read the same snapshot and rename onto the same name — and
-    // rename(2) clobbers silently.
+    // moveNote reserves the name it allocates. The readdir before it is an
+    // await, so without the reservation both moves read the same snapshot and
+    // rename onto the same name, and rename(2) clobbers silently.
     const a = await createNote(ROOT, "# Notes\n", "a");
     const b = await createNote(ROOT, "# Notes\n", "b");
     const moved = await Promise.all([moveNote(a.path, "dest"), moveNote(b.path, "dest")]);
@@ -791,8 +792,11 @@ describe("renameFolder", () => {
   });
 
   test("a sibling whose name starts the same is not swept up", async () => {
-    // folderContains' trap, on the rename side: `a` must not take `ab` with it.
-    // A prefix comparison without the separator would rename both.
+    // Renaming `a` must not report `ab` as moved. renameFolder does one
+    // rename(2) of the folder and takes the notes it reports from
+    // folderContains (shared/folders.ts), which compares against `a/`. A
+    // prefix test without the separator would list the sibling's note as
+    // moved, at a path the rename never touched.
     const inside = await createNote(ROOT, "# In\n", "a");
     const sibling = await createNote(ROOT, "# Beside\n", "ab");
     const { moved } = await renameFolder(ROOT, "a", "c");
@@ -801,10 +805,9 @@ describe("renameFolder", () => {
   });
 
   test("the meta comes back with the old title, tags and mtime, only the path new", async () => {
-    // rename(2) moves a directory entry and touches no file inside it, which
-    // is what lets this answer from the listing it already had instead of
-    // re-reading every note. If that ever stops being true this is the test
-    // that says so.
+    // rename(2) moves a directory entry and touches no file inside it, so
+    // renameFolder builds its result from the listing it already took instead
+    // of re-reading every note. This test fails if that stops holding.
     const note = await createNote(ROOT, "# Plan\n\n#roadmap\n", "old");
     const before = (await listNotes(ROOT))[0]!;
     const { moved } = await renameFolder(ROOT, "old", "new");
@@ -812,16 +815,16 @@ describe("renameFolder", () => {
     expect(after.title).toBe(before.title);
     expect(after.mtimeMs).toBe(before.mtimeMs);
     expect(after.path).toBe(join(ROOT, "new", "plan.md"));
-    // And the file itself is byte-identical: nothing read it, nothing rewrote it.
+    // The file is byte-identical: nothing read it and nothing rewrote it.
     expect(await readRaw(after.path, "utf8")).toBe("# Plan\n\n#roadmap\n");
     expect(note.path).toBe(join(ROOT, "old", "plan.md"));
   });
 
   test("a locked note travels with the vault shut, where moving one is refused", async () => {
-    // The whole reason a rename is one call and not N moves. moveNote has to
-    // read a locked body to rebase its image references and refuses when it
-    // cannot; a rename changes no note's DEPTH, so those references are still
-    // right and nothing needs to see inside.
+    // A rename is one call rather than N moves. moveNote reads a locked body to
+    // rebase its image references, and refuses when the vault is shut. A rename
+    // changes no note's depth, so those references still resolve and nothing
+    // reads inside.
     resetVaultForTests();
     await createVault("test passphrase");
     const note = await createNote(ROOT, "# Secrets\n\nplutonium\n", "old");
@@ -849,16 +852,17 @@ describe("renameFolder", () => {
     await createNote(ROOT, "# A\n", "old");
     await createNote(ROOT, "# B\n", "new");
     await expect(renameFolder(ROOT, "old", "new")).rejects.toThrow(/already a folder called/);
-    // Including one holding no notes, which the browser does not draw: rename(2)
-    // would swallow an empty directory without a word.
+    // An empty folder too. The browser does not draw one, but rename(2) onto
+    // an empty directory succeeds and swallows it.
     await mkdir(join(ROOT, "empty"));
     await expect(renameFolder(ROOT, "old", "empty")).rejects.toThrow(/already a folder called/);
   });
 
   test("changing only the case of a name is a rename, not a collision", async () => {
-    // On APFS `old` and `Old` are one directory, so the existence check has to
-    // ask whether the destination is the SOURCE — and fixing the case of a
-    // name is half of what renaming is for.
+    // On APFS `old` and `Old` are the same directory, so the destination
+    // already exists. renameFolder asks sameEntry whether that destination is
+    // the source, and renames rather than refusing when it is. Without that
+    // exception, fixing the case of a name would be refused as a collision.
     await createNote(ROOT, "# A\n", "old");
     const { folder } = await renameFolder(ROOT, "old", "Old");
     expect(folder).toBe("Old");
@@ -886,9 +890,10 @@ describe("renameFolder", () => {
   });
 
   test("the trash mirror follows, so an Undo lands where the folder now is", async () => {
-    // The trash mirrors the workspace's folders. Without this, deleting a note
-    // out of `old`, renaming the folder and pressing Undo would restore it into
-    // a resurrected `old` sitting beside the `new` it came from.
+    // The trash mirrors the workspace's folders (architecture.md §3), so it
+    // follows the rename. Without this, deleting a note out of `old`, renaming
+    // the folder and pressing Undo would restore the note into a recreated
+    // `old` beside the `new` it came from.
     const gone = await createNote(ROOT, "# Gone\n", "old");
     const stays = await createNote(ROOT, "# Stays\n", "old");
     const trashed = (await deleteNote(gone.path))!;
@@ -916,16 +921,18 @@ describe("deleteFolder", () => {
     expect(trashed.map((t) => t.from).sort()).toEqual([deep.path, top.path].sort());
     expect((await listNotes(ROOT)).map((n) => n.folder ?? "")).toEqual(["admin"]);
     expect((await listNotes(ROOT))[0]?.path).toBe(outside.path); // untouched
-    // The directory too, and the subdirectory under it: an emptied folder is
-    // invisible either way, but one left on disk would refuse a later rename
-    // onto its name.
+    // deleteFolder removes the directory and the subdirectory under it.
+    // listNotes hides an emptied folder either way, but one left on disk would
+    // make a later rename onto its name fail.
     await expect(stat(join(ROOT, "projects"))).rejects.toThrow();
   });
 
   test("each note lands in its own mirrored folder, so a restore rebuilds the folder around it", async () => {
-    // What makes this reversible, and why it is N deletes rather than one
-    // directory move: the trash mirrors the workspace's folders, so every note
-    // keeps its own origin and the Trash section lists it as itself.
+    // deleteFolder renames each note into the trash rather than renaming the
+    // directory. The trash mirrors the workspace's folders (architecture.md
+    // §3), so each trashed note keeps its own origin and gets its own Trash
+    // row. Undoing the folder delete is then N restores rather than a second
+    // mechanism.
     await createNote(ROOT, "# Plan\n", "projects");
     await createNote(ROOT, "# Api\n", "projects/api");
     const { trashed } = await deleteFolder(ROOT, "projects");
@@ -938,7 +945,8 @@ describe("deleteFolder", () => {
   });
 
   test("a sibling whose name starts the same is not swept up", async () => {
-    // folderContains' trap on the delete side: `a` must not take `ab` with it.
+    // The prefix test in folderContains (shared/folders.ts), on the delete
+    // side: `a` must not take its sibling `ab` with it.
     await createNote(ROOT, "# In\n", "a");
     const sibling = await createNote(ROOT, "# Beside\n", "ab");
     const { trashed } = await deleteFolder(ROOT, "a");
@@ -947,11 +955,11 @@ describe("deleteFolder", () => {
   });
 
   test("a file the note list never showed is left alone, and keeps its folder", async () => {
-    // The reason this is N deletes rather than one rename of the directory
-    // into the trash. Anything that is not a note would land somewhere the
-    // Trash section cannot list (it shows .md only), so it would be buried
-    // rather than deleted. rmdir refusing a folder that still has something in
-    // it is the guard, not a failure.
+    // deleteFolder deletes the notes one by one rather than renaming the
+    // directory into the trash. The Trash section lists .md files only, so a
+    // non-note moved there would be unreachable from the app. The directory
+    // then stays: rmdir refuses a directory with anything left in it, and that
+    // refusal is the guard.
     await createNote(ROOT, "# Plan\n", "projects");
     await writeRaw(join(ROOT, "projects", "diagram.png"), "PNG", "utf8");
     const { trashed } = await deleteFolder(ROOT, "projects");
@@ -961,9 +969,9 @@ describe("deleteFolder", () => {
   });
 
   test("an ignored subtree keeps its notes and its folder", async () => {
-    // The same rule with the frightening witness: these are real notes, and
-    // .ledgeignore is why the walk never saw them. A directory move would have
-    // taken them somewhere nothing lists.
+    // The same rule, with real notes this time. .ledgeignore is why the
+    // listNotes walk never saw them. A directory move would have taken them
+    // into the trash, where nothing lists them.
     await writeRaw(join(ROOT, ".ledgeignore"), "projects/drafts\n");
     await mkdir(join(ROOT, "projects", "drafts"), { recursive: true });
     await writeRaw(join(ROOT, "projects", "drafts", "wip.md"), "# Wip\n", "utf8");
@@ -974,8 +982,8 @@ describe("deleteFolder", () => {
   });
 
   test("a locked note goes with the vault shut, like a folder rename", async () => {
-    // Deleting reads no body either: it moves the file and the sealed bytes
-    // travel intact, so a locked note is still locked in the trash.
+    // Deleting reads no body either. It renames the file, so the sealed bytes
+    // are unchanged and the note is still locked in the trash.
     resetVaultForTests();
     await createVault("test passphrase");
     const note = await createNote(ROOT, "# Secrets\n\nplutonium\n", "old");
@@ -1017,9 +1025,9 @@ describe("the unlink paths", () => {
   });
 
   test("refuses anything that is not a .md visibly inside a registered root's trash", async () => {
-    // The guard is the whole safety story for permanent delete: it unlinks, so
-    // "which paths does it accept" is the only thing standing between a Trash
-    // row and an arbitrary file the view named.
+    // assertTrashed is the only check on a permanent delete. deleteTrashed
+    // unlinks, so which paths that guard accepts is what separates a Trash row
+    // from an arbitrary file the view named.
     for (const path of [
       "/etc/passwd",
       join(ROOT, "live-note.md"), // a live note, not a trashed one
@@ -1034,10 +1042,9 @@ describe("the unlink paths", () => {
   });
 
   test("accepts a .md nested in the trash, because that is where a folder's deletes land", async () => {
-    // The counterpart to the refusals above, and the reason the guard widened
-    // from "directly inside" (testing.md §3): the trash mirrors the workspace's
-    // folders, so refusing depth would refuse to empty exactly the notes the
-    // mirroring exists for.
+    // Why assertTrashed accepts a nested path rather than "directly inside"
+    // (testing.md §3): the trash mirrors the workspace's folders, so refusing
+    // depth would refuse to empty the notes the mirroring is for.
     const note = await createNote(ROOT, "# Nested\n", "projects/api");
     const trashed = (await deleteNote(note.path))!;
     expect(relative(TRASH, trashed)).toBe(join("projects", "api", "nested.md"));
@@ -1047,7 +1054,7 @@ describe("the unlink paths", () => {
   test("emptyTrash removes exactly what listTrash showed, and nothing it did not", async () => {
     await deleteNote((await createNote(ROOT, "# A\n")).path);
     await deleteNote((await createNote(ROOT, "# B\n")).path);
-    // Things that arrived in the trash folder by some route other than a
+    // Two things that reached the trash folder by some route other than a
     // delete: a stray non-md file and a subdirectory. Both must survive.
     await writeFile(join(TRASH, "not-a-note.txt"), "keep me");
     await mkdir(join(TRASH, "subdir"), { recursive: true });
@@ -1065,25 +1072,24 @@ describe("the unlink paths", () => {
 
   test("purgeTrash evicts by age and keeps the young", async () => {
     await deleteNote((await createNote(ROOT, "# Fresh\n")).path);
-    expect(await purgeTrash(ROOT, 60_000)).toBe(0); // a minute old it is not
+    expect(await purgeTrash(ROOT, 60_000)).toBe(0); // not a minute old
     expect((await listTrash(ROOT)).length).toBe(1);
-    // A negative TTL puts the cutoff in the future, so "older than the cutoff"
-    // is true of a file trashed just now — age without waiting (ctime cannot
-    // be backdated; that immutability is why listTrash trusts it).
+    // A negative TTL puts the cutoff in the future, so a file trashed just now
+    // counts as older than it. That ages a note without waiting. ctime cannot
+    // be set, and listTrash reads it as the deleted-at time.
     expect(await purgeTrash(ROOT, -60_000)).toBe(1);
     expect(await listTrash(ROOT)).toEqual([]);
   });
 });
 
 // --- note locking (locking.md) -----------------------------------------
-// The honesty tests: after a lock, the plaintext must be GONE from disk — in
-// the note, in every save that follows, and in the divergence guard's trash
-// copies — while titles, tags-in-head, and the agent-facing skips behave
-// exactly as §4/§6 promise. The vault module's own crypto is vault.test.ts's;
-// here it is the seams.
+// These tests check that a lock leaves no plaintext on disk: not in the note,
+// not in a later save, not in the divergence guard's trash copies. Titles,
+// frontmatter tags and the agent-facing skips behave as locking.md §4 and §6
+// describe. vault.test.ts covers the crypto; this covers the seams.
 describe("note locking", () => {
   beforeEach(async () => {
-    resetVaultForTests(); // module state outlives the wiped app home
+    resetVaultForTests(); // wiping the app home does not clear the module's key
     await createVault("test passphrase");
   });
 
@@ -1095,7 +1101,7 @@ describe("note locking", () => {
     const raw = await readRaw(note.path, "utf8");
     expect(raw).not.toContain(NEEDLE);
     expect(raw).toContain("locked: v1.");
-    expect(raw).toContain("# Secrets\n"); // the title stays plaintext, deliberately
+    expect(raw).toContain("# Secrets\n"); // the title stays plaintext (locking.md §6)
     expect(await isNoteLocked(note.path)).toBe(true);
     const file = await readNote(note.path);
     expect(file?.locked).toBe(true);
@@ -1157,13 +1163,11 @@ describe("note locking", () => {
     const note = await createNote(ROOT, `# Secrets\n\noriginal\n`);
     await lockNote(note.path);
     const base = (await readNote(note.path))!.mtimeMs;
-    // A foreign writer scribbles on the file (mtime moves on). The wait goes
-    // BEFORE that write and not after it: what has to differ is the file's
-    // timestamp from `base`, and a pause taken once the scribble has landed
-    // separates nothing. On a filesystem whose timestamps are a whole
-    // millisecond apart, the lock, the read and the scribble otherwise all
-    // fall inside one, the guard correctly sees no divergence, and the test
-    // fails for a reason that has nothing to do with locking.
+    // The sleep goes before the foreign write, not after it. The guard
+    // compares the file's mtime against `base`, so that write needs a later
+    // timestamp than the read `base` came from. On a filesystem with
+    // whole-millisecond timestamps, the lock, the read and the write would
+    // otherwise land in one millisecond and the guard would see no divergence.
     await new Promise((r) => setTimeout(r, 5)); // mtime granularity
     const cipher = await readRaw(note.path, "utf8");
     await writeRaw(note.path, cipher + "external-scribble\n");
@@ -1190,8 +1194,10 @@ describe("note locking", () => {
     expect(back.backlinks).toEqual([]);
     expect(back.lockedSkipped).toBe(1);
 
-    // Frontmatter tags live in the plaintext head and stay visible; the body
-    // #hidden does not. Both facts, one note.
+    // One note carries both: a frontmatter tag and an inline #hidden.
+    // Frontmatter tags live in the plaintext head, so they stay visible
+    // (locking.md §6). The inline tag is inside the sealed body, so the scans
+    // do not see it.
     const tags = await tagsIn(ROOT);
     expect(tags.tags).toEqual([{ tag: "work", count: 1 }]);
     expect(tags.lockedSkipped).toBe(1);
@@ -1221,8 +1227,8 @@ describe("note locking", () => {
   });
 });
 
-// Passphrase change: headers and asset wraps rewrite, bodies never — and the
-// old passphrase stops opening anything.
+// Passphrase change: the headers and asset wraps are rewritten, the bodies are
+// not, and the old passphrase stops opening anything.
 import { changeVaultPassphrase } from "./notes";
 import { loadVault, resetVaultForTests as resetVault2, unlockVault as unlockV, VAULT_PATH as VP } from "./vault";
 import { rm as rmF } from "node:fs/promises";
@@ -1238,9 +1244,9 @@ describe("changeVaultPassphrase", () => {
     await lockNote(b.path);
     const rewrapped = await changeVaultPassphrase("new pass", [ROOT]);
     expect(rewrapped).toBe(2);
-    // Bodies still open in this session (data keys unchanged)…
+    // The bodies still open in this session: the data keys are unchanged.
     expect((await readNote(a.path))?.text).toContain("first secret body");
-    // …and across a cold start only the NEW passphrase derives the key.
+    // Across a cold start, only the new passphrase derives the key.
     resetVault2();
     await loadVault();
     expect(await unlockV("old pass")).toBe(false);

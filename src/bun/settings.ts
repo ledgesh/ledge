@@ -1,21 +1,16 @@
-// The SERVER end of settings: settings.jsonc lives in the app home (~/.ledge),
-// beside the workspace registry and the managed workspace folders, and this
-// module is the only thing that reads or writes it. Its sections are the ones
-// that describe this machine — the shell to spawn, how long the trash keeps
+// The server's half of settings: settings.jsonc in the app home (~/.ledge),
+// beside the workspace registry and the managed workspace folders. Its
+// sections describe this machine: the shell to spawn, how long the trash keeps
 // things, what a code fence runs, where daily notes go. Font sizes and the
-// theme are the client's and live in bun/clientSettings.ts (remote.md §5).
+// theme are the client's, in bun/clientSettings.ts (remote.md §5).
 //
-// Settings stay GLOBAL in the per-workspace world: a shell path and an
-// interpreter map are facts about a machine, not about a folder. Read once at
-// launch; changes apply at the next launch, never live — restart-applies is
-// the policy (architecture.md, "Settings"), not a limitation to fix.
-//
-// The file is JSONC — comments are its documentation (SETTINGS_TEMPLATE) and
-// the ⌘, editor in Ledge is its UI (settingsRead/settingsWrite carry the raw
-// text; components/SettingsEditor.tsx). Installs that predate the format keep
-// their settings.json: it is renamed to settings.jsonc on first load (JSON is
-// valid JSONC, so the bytes are already right), rename-not-copy so there is
-// only ever one file being the user's file.
+// This module is the only thing that writes the file. bun/clientSettings.ts
+// also reads it, to seed its own file from an older install's client sections.
+// Settings are global rather than per-workspace: a shell path or an interpreter
+// map is a fact about a machine, not about a folder. The app reads the file at
+// launch, so an edit applies at the next launch, never live; restart-applies is
+// the policy, not a limitation to fix (architecture.md §6). The MCP server is a
+// separate process and reads per tool call (bun/mcpTools.ts).
 import { join } from "node:path";
 import { readFile, rename, writeFile } from "node:fs/promises";
 import { DEFAULT_SETTINGS, parseSettings, settingsTemplate, type Settings } from "../shared/settings";
@@ -27,12 +22,11 @@ export const SETTINGS_PATH = join(APP_HOME, "settings.jsonc");
 // The pre-JSONC spelling, kept only for the one-time migration rename.
 export const LEGACY_SETTINGS_PATH = join(APP_HOME, "settings.json");
 
-// Read and validate settings.jsonc. Three shapes of trouble, three answers:
-// no file → write the commented template (the file is the settings UI, so it
-// should document every knob); unparseable JSONC → warn and run on defaults,
-// leaving the file byte-for-byte alone (it is the user's file mid-edit, and
-// rewriting it would destroy their work to fix a comma); bad values → each
-// falls back alone, reported by parseSettings.
+// Read and validate settings.jsonc, warning about the shell it names.
+// No file: write the commented template. The file is the settings UI, so it
+// should document every knob. Unparseable JSONC: warn, run on defaults, and
+// leave the bytes alone. They may be a file the user is mid-edit on. A bad
+// value: it falls back on its own, reported by parseSettings.
 export async function loadSettings(): Promise<Settings> {
   const settings = await readSettings();
   warnAboutShell(settings.shell.path);
@@ -57,15 +51,16 @@ async function readSettings(): Promise<Settings> {
   return namesShellPath(json) ? settings : withDefaultShell(settings);
 }
 
-// The shell this machine gets when the file does not name one: its own login
-// shell where Ledge supports it (bun/spawnParams.ts). DEFAULT_SETTINGS carries
-// a macOS literal because shared/ cannot look at a filesystem to know better,
-// and on a Linux server that literal names nothing — which used to spawn a pty
-// whose child died at execve, reporting no output, no error and no exit code.
-//
-// The literal survives only as the last resort, for a machine with no supported
-// shell at all. Seeding SOMETHING keeps the file honest about what was tried,
-// and the spawn refuses with a sentence rather than forking into that silence.
+// The shell to seed when the file does not name one: this account's login
+// shell if Ledge supports it, otherwise the first supported shell installed
+// (bun/spawnParams.ts). DEFAULT_SETTINGS.shell.path is the last resort, for a
+// machine with no supported shell at all. It can only be a macOS literal,
+// which names nothing on Linux, because shared/ may not reach for anything
+// only Bun has (shared/portable.test.ts; architecture.md §6, "A default that
+// cannot be a constant"). Seeding it still writes a concrete path into
+// settings.jsonc, and bun/server.ts refuses the spawn with a message rather
+// than forking a pty whose child dies at execve, leaving the block with no
+// output, no error and no exit code.
 export function seededShellPath(): string {
   return defaultShellPath() ?? DEFAULT_SETTINGS.shell.path;
 }
@@ -74,18 +69,21 @@ function withDefaultShell(settings: Settings): Settings {
   return { ...settings, shell: { ...settings.shell, path: seededShellPath() } };
 }
 
-// Whether the file named a shell itself. One the user wrote stays theirs even
-// when this machine cannot run it: it earns the warning below, never a silent
-// substitution, because the file IS the settings UI and a value it shows that
-// is not the value that spawned would be the worse bug of the two.
+// Whether the file names a shell itself. A shell the user wrote is never
+// substituted, even when this machine cannot run it: warnAboutShell below
+// warns about it instead. Substituting silently is the worse of the two
+// failures, since the file is the settings UI and would then show one shell
+// while the pty spawned another.
 function namesShellPath(json: unknown): boolean {
   const shell = (json as { shell?: { path?: unknown } } | null | undefined)?.shell;
   return typeof shell?.path === "string" && shell.path.length > 0;
 }
 
-// Said once at launch, which on a server is the first thing in
-// logs/ledge-server.log. The alternative is finding out at the first Run, and
-// both of these fail in the shape that reads as nothing happening at all.
+// Warn about the configured shell once at launch, which on a server is the
+// first thing in logs/ledge-server.log. Without the warning the user meets the
+// problem at the first Run instead: a shell that cannot spawn refuses the
+// block (bun/server.ts), and an unsupported one runs it without reporting its
+// output or its exit code.
 function warnAboutShell(path: string): void {
   const refusal = shellRefusal(path, isExecutableFile);
   if (refusal) {
@@ -96,8 +94,8 @@ function warnAboutShell(path: string): void {
   if (caveat) console.warn(`[settings] ${caveat}`);
 }
 
-// The file's text, migrating a legacy settings.json into place if that is
-// what exists; null when there is nothing to read.
+// The file's text, migrating a legacy settings.json into place when that is
+// what exists. Null when there is nothing to read.
 async function readSettingsText(): Promise<string | null> {
   let jsoncMissing = false;
   try {
@@ -105,10 +103,10 @@ async function readSettingsText(): Promise<string | null> {
   } catch (err) {
     jsoncMissing = (err as NodeJS.ErrnoException).code === "ENOENT";
   }
-  // Migrate only into a confirmed absence: rename clobbers its target, and
-  // "did not read" is not "does not exist" (permissions, say) — an existing
-  // settings.jsonc we merely could not read must not be overwritten by the
-  // legacy file. JSON is valid JSONC, so the migrated bytes are already right.
+  // Migrate only into a confirmed absence. rename clobbers its target, and a
+  // failed read is not proof of absence (permissions, say), so a settings.jsonc
+  // that exists but could not be read must not be overwritten by the legacy
+  // file. JSON is valid JSONC, so the migrated bytes are already right.
   if (!jsoncMissing) return null;
   try {
     await rename(LEGACY_SETTINGS_PATH, SETTINGS_PATH);
@@ -124,17 +122,18 @@ async function readSettingsText(): Promise<string | null> {
 }
 
 // "wx": exclusive create. The reads above can fail for reasons other than
-// absence (permissions, say), and clobbering an existing file we merely could
-// not read would be data loss — if it exists, whatever the reason we couldn't
-// read it, leave it be.
+// absence (permissions, say), and overwriting a file that exists but could not
+// be read would lose data. If the file exists, whatever the reason the read
+// failed, it stays as it is.
 async function seedDefaultFile(): Promise<void> {
   await ensureAppHome();
   await writeFile(SETTINGS_PATH, settingsTemplate(seededShellPath()), { encoding: "utf8", flag: "wx" }).catch(() => {});
 }
 
-// The settings editor's load half (settingsRead): the raw text, with first
-// launch (or first ⌘,) seeding the commented template so what opens is a file
-// that documents every knob rather than an empty pane.
+// The settings editor's load half (settingsRead): the raw text. On a first
+// launch, or the first time ⌘, opens the file, this seeds the commented
+// template, so the editor opens on a file that documents every knob rather
+// than on an empty pane.
 export async function readSettingsFile(): Promise<string> {
   const raw = await readSettingsText();
   if (raw !== null) return raw;
@@ -143,48 +142,44 @@ export async function readSettingsFile(): Promise<string> {
     return await readFile(SETTINGS_PATH, "utf8");
   } catch {
     // Unreadable even after seeding (permissions): the editor still opens on
-    // the template — a save may fail, but viewing the knobs always works.
+    // the template. A save may fail, but viewing the knobs still works.
     return settingsTemplate(seededShellPath());
   }
 }
 
 // What an agent may learn about settings (the MCP `settings` tool): the file's
-// raw text, its path, and the problems launch would report. Comments included
-// on purpose — SETTINGS_TEMPLATE's comments ARE the knob documentation, so on
-// an unmodified install this one read returns both what the user configured
-// and what every knob means. Same seeding and legacy-migration path as the ⌘,
-// editor, deliberately: one definition of "the settings file's text", and a
-// first read that materializes the documented template is exactly what the
-// next launch would have written anyway.
+// raw text, its path, and the problems launch would report. The text keeps its
+// comments, which are the knob documentation (settingsTemplate), so on an
+// unmodified install one read returns both what the user configured and what
+// every knob means. It reads through readSettingsFile, like the ⌘, editor, so
+// a first read seeds the template the next launch would have written anyway.
 //
-// Read-only, and there is no writing sibling. The prompt-fence default
-// pre-authorizes this server's whole tool namespace (`--allowedTools
-// mcp__ledge`, shared/settings.ts), and settings name the shell every future
-// block spawns and the interpreter every fence runs — an unreviewed write
-// here would change what the user's NEXT run executes. Agents advise; the
-// user edits with ⌘,, or an agent's own file tools do it where the diff is
-// visible. (The file is the user's own config, readable by any shell the
-// agent already has, but a value can still carry a connection string someone
-// inlined instead of using a profile: it is their config, not a secret store.)
+// Read-only, with no writing sibling, and it should not grow one
+// (architecture.md §1): the prompt-fence default pre-authorizes this server's
+// whole tool namespace, and settings name the shell and the interpreter the
+// user's next run uses. Reading is allowed because the file is the user's
+// config rather than a secret store, and any shell the agent already has can
+// read it. A value can still hold a connection string someone inlined instead
+// of using a profile.
 export async function inspectSettings(): Promise<{ path: string; text: string; problems: string[] }> {
   const text = await readSettingsFile();
   let json: unknown;
   try {
     json = JSON.parse(stripJsonc(text));
   } catch (err) {
-    // The launch-time answer, reported rather than repaired: the whole file
-    // is skipped for the run and the bytes stay the user's.
+    // The launch-time answer, reported rather than repaired: an unparseable
+    // file means launch runs entirely on defaults, and the bytes stay as the
+    // user left them.
     return { path: SETTINGS_PATH, text, problems: [`not valid JSONC (${err}); Ledge would run entirely on defaults`] };
   }
   return { path: SETTINGS_PATH, text, problems: parseSettings(json, "server").problems };
 }
 
 // The save half (settingsWrite): the dialog sends the full new text, written
-// atomically like a note save (temp in the same dir, then rename) so a crash
-// mid-save leaves the old file or the new one, never a truncated half. The
-// text is NOT gated on parsing: it is the user's file, and saving a mid-edit
-// state they intend to come back to must not be refused — launch-time
-// validation already degrades gently (and the dialog shows problems live).
+// atomically like a note save (temp file beside it, then rename), so a crash
+// mid-save leaves the old file or the new one, never a truncated half. Parsing
+// does not gate the write: the file is the user's, and a mid-edit save is never
+// refused. The dialog shows problems live, and launch falls back per field.
 export async function writeSettingsFile(text: string): Promise<void> {
   await ensureAppHome();
   const tmp = SETTINGS_PATH + ".tmp";

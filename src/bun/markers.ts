@@ -1,10 +1,12 @@
 // Slices the PTY byte stream into per-block output using OSC 133 semantic
-// markers. A faithful TypeScript port of Sources/SessionKit/MarkerProtocol.swift.
+// markers. A faithful TypeScript port of
+// Sources/SessionKit/MarkerProtocol.swift.
 //
-// Everything in a note flows through one shell on one PTY, so the byte stream is
-// a single mixed torrent: prompts, the shell's echo of what we typed, and the
-// actual output of each block. We wrap every submitted command in OSC 133 begin
-// (C) and end (D) markers and keep only the bytes between a C and its matching D.
+// Everything in a note flows through one shell on one PTY, so the byte stream
+// mixes three things: prompts, the shell's echo of the submitted line, and the
+// output of each block. `markerCommand` marks the start of each submitted
+// command with an OSC 133 C, and the hook `markerInit` installs marks its end
+// with a D. `MarkerParser` keeps only the bytes between a C and its matching D.
 
 const ESC = 0x1b;
 const BEL = 0x07;
@@ -15,76 +17,62 @@ export type MarkerEvent =
   | { type: "began"; blockId: string }
   | { type: "output"; blockId: string; data: Uint8Array }
   | { type: "ended"; blockId: string; exitCode: number }
-  // The init line's acknowledgement: this shell can now end a block. Carries
-  // no id because it is about the SHELL and not about any run — see
-  // markerInit's last statement for what it costs to go without it.
+  // The init line's acknowledgement: this shell can now end a block. It
+  // carries no id because it is about the shell, not about a run. See
+  // markerInit for what a shell that never sends it costs.
   | { type: "ready" };
 
 /**
- * Install the end-marker hook. Sent on the front of a block's own line, by
- * whichever block is the first to run on a shell that has not acknowledged it
- * (bun/inlinePool.ts run) — not on its own at spawn, which is how it used to
- * go out and how it came to be lost.
+ * Install the end-marker hook. `inlinePool.ts` prepends this line to a block's
+ * own line, and does so for every block until the shell acknowledges the hook.
+ * It used to be written on its own at spawn, which made it the likeliest thing
+ * in the system to be lost, silently and completely (architecture.md §6a, the
+ * end-marker hook bullet, has the pty write window and the damage).
  *
- * The end marker cannot be the next command on the block's line. Ctrl-C aborts the
- * whole line, so the printf reporting the exit code never runs and the block reads
- * as still Running forever - which is precisely what you get for interrupting it.
- * zsh's `always` block does not survive the interrupt either.
+ * The end marker cannot be the next command on the block's line. Ctrl-C aborts
+ * the whole line, so the printf reporting the exit code never runs and the
+ * block reads as Running forever. zsh's `always` block does not survive the
+ * interrupt either.
  *
- * precmd runs before every prompt, and the shell prints a prompt however the line
- * ended: finished, failed, or interrupted. So the end marker is reported from
- * there, with $? carrying the real status (130 for a SIGINT).
+ * precmd runs before every prompt, and the shell prints a prompt however the
+ * line ended: finished, failed, or interrupted. So the end marker is reported
+ * from there, with $? carrying the real status (130 for a SIGINT).
  *
  * `local rc=$?` must be the first thing in the function or the status is lost.
  * `__ledge_id` is cleared after reporting, so the hook stays silent for prompts
  * that follow anything other than a block.
  *
- * The line is written blind into whatever shell the pool spawned, and since
- * remote hosts came along that is not always zsh: a remote inline shell is
- * `bash -l` (bash is the one shell ~every server has; see bun/remoteSpawn.ts).
- * So the function body is POSIX (`[ ]`, explicit `;` before `}`) and only the
- * hook registration branches: zsh's precmd_functions, else bash's
- * PROMPT_COMMAND (prepended — both run before every prompt). Anything else
- * (fish, ash) never receives this line, because the pool only ever spawns
- * zsh (local, settings.shell) or bash (remote).
+ * The line is written blind into whatever shell the pool spawned, and that is
+ * not always zsh. A remote inline shell is `bash -l`, bash being the one shell
+ * ~every server has (bun/remoteSpawn.ts). So the function body is POSIX (`[ ]`,
+ * explicit `;` before `}`). Only the hook registration branches: zsh registers
+ * through precmd_functions, bash through PROMPT_COMMAND (prepended), and both
+ * run before every prompt. A configured shell that is neither, such as fish,
+ * still spawns and still gets this line. It registers nothing and never ends a
+ * block, which `shellCaveat` (bun/spawnParams.ts) warns about.
  *
- * PROMPT_SP goes with it, on the zsh side. That option makes zsh emit its
- * PROMPT_EOL_MARK (a reverse-video `%`) padded with spaces and a carriage
- * return before every prompt, so a human can see when output ended mid-line.
- * Two reasons it has no business here: nobody ever sees this shell's prompt
- * (the pool keeps only the bytes between the C and D markers, and the mark is
- * emitted BEFORE precmd, so it lands inside that window), and the erase half
- * of the trick is sized to the pty's winsize — when that disagrees with the
- * grid the panel actually renders, the padding wraps, the carriage return
- * lands on the wrong row, and the `%` survives as a stray line under every
- * block's output. The drawer's shell is a different shell and keeps the
- * option: there the prompt IS the point.
+ * `unsetopt PROMPT_SP` goes with it, on the zsh side. PROMPT_SP prints zsh's
+ * PROMPT_EOL_MARK (a reverse-video `%`) before every prompt, padded with spaces
+ * and a carriage return that erase it again, so a person can see when output
+ * ended mid-line. The mark is emitted ahead of precmd, so it lands inside the
+ * C..D window the pool keeps. The padding is sized to the pty's winsize: when
+ * that disagrees with the grid the panel renders, the padding wraps, the
+ * carriage return lands on the wrong row, and the `%` is left as a stray line
+ * under every block's output. The terminal drawer spawns its own shell, which
+ * never gets this line and keeps the option, because the user reads that
+ * shell's prompt.
  *
- * It opens with a bare newline and closes with an acknowledgement, and both
- * are about the same hazard: this line can be damaged in transit with nothing
- * to show for it. A pty's master takes bytes before the child has finished
- * claiming the slave as its controlling terminal, and the line discipline
- * coming up discards whatever is still queued. `pty.ts` now holds input until
- * the child has spoken, which closes that window where the child IS the shell;
- * a remote shell is one ssh writes for, and ssh can write a line of its own
- * before the shell on the far side exists, so over a wire the window is
- * narrowed rather than shut.
+ * The leading newline covers the cheapest damage, a lost first byte. What is
+ * left of the line is an empty command, and the definition starts on the next
+ * one. Without it, one byte short produces no error at all: `_ledge_precmd()
+ * {…}` next to a `precmd_functions+=(__ledge_precmd)` naming a function that
+ * does not exist. Found on a Linux server (scripts/probe-ssh.ts), where it was
+ * every inline run.
  *
- * The leading newline covers the cheapest version of the damage, a lost first
- * byte: whatever is left of it is an empty command line, and the definition
- * starts on the next one. Without it, one byte short produces no error at all
- * — `_ledge_precmd() {…}` next to a `precmd_functions+=(__ledge_precmd)`
- * naming a function that does not exist. Found on a Linux server
- * (scripts/probe-ssh.ts), where it was every inline run.
- *
- * The `R` at the end covers every larger version, because there is no shape of
- * damage this line can suffer that leaves its last statement running. What a
- * shell that never sends it costs is specific and total: the C marker rides on
- * the block's own line and still arrives, so the block begins, its output is
- * sliced correctly, and NOTHING can ever close it — the panel sits on Running
- * for good, the prompt that follows the block is rendered as part of it, and
- * the block's run button stays dead. `inlinePool.ts` reads the ack and puts
- * the hook back before the next block rather than trusting one write.
+ * The `R` printf is last, so a shell that prints it ran everything before it.
+ * A shell that never sends it can never end a block, and architecture.md §6a
+ * has what that leaves in the panel. `inlinePool.ts` reads the ack and re-sends
+ * the hook before the next block rather than trusting one write.
  */
 export function markerInit(nonce: string): string {
   return (
@@ -117,9 +105,11 @@ export class MarkerParser {
   private openBlock: string | null = null;
 
   /**
-   * The block whose start marker we have seen but whose end marker we have not, if
-   * any. Only the shell can normally close a block; this is for when the shell is
-   * gone and someone else has to say so.
+   * The block whose start marker has arrived and whose end marker has not, or
+   * null. The shell normally closes a block. This names the block for a caller
+   * that has to account for it instead: `inlinePool.ts` ends a block whose
+   * shell exited or whose session restarted, interrupts an orphaned run, and
+   * answers whether any block is mid-run.
    */
   get openBlockId(): string | null {
     return this.openBlock;
@@ -127,7 +117,7 @@ export class MarkerParser {
 
   constructor(private readonly nonce: string) {}
 
-  /** Feed bytes from the PTY. Returns whatever became unambiguous. */
+  /** Feed bytes from the PTY. Returns the events they produce. */
   feed(data: Uint8Array): MarkerEvent[] {
     this.buffer = concat(this.buffer, data);
     const events: MarkerEvent[] = [];
@@ -135,8 +125,8 @@ export class MarkerParser {
     while (this.buffer.length > 0) {
       const start = this.firstOSC(this.buffer);
       if (start === -1) {
-        // No marker ahead. Everything we hold is output or noise, except a
-        // possible partial escape at the very end (keep it for the next read).
+        // No marker ahead. The whole buffer is output or noise, except a
+        // partial escape sequence at the end, kept for the next read.
         const safe = this.buffer.length - this.partialOSCSuffixLength(this.buffer);
         if (safe > 0) {
           this.emit(this.buffer.subarray(0, safe), events);
@@ -164,7 +154,9 @@ export class MarkerParser {
       } else if (marker.kind === "ready") {
         events.push({ type: "ready" });
       }
-      // unknown: some other OSC 133 sequence, not ours, not output.
+      // unknown: a stray ESC, or an OSC 133 sequence this parser does not
+      // accept (another program's, or one that fails the nonce or field
+      // checks). Consumed either way, never emitted as output.
     }
 
     return events;
@@ -181,7 +173,7 @@ export class MarkerParser {
     return indexOfSeq(data, OSC_PREFIX);
   }
 
-  /** Trailing bytes that might be the start of a marker we haven't fully got. */
+  /** How many trailing bytes could be the start of a marker still arriving. */
   private partialOSCSuffixLength(data: Uint8Array): number {
     const maxPartial = Math.min(OSC_PREFIX.length - 1, data.length);
     for (let len = maxPartial; len >= 1; len--) {
@@ -200,10 +192,10 @@ export class MarkerParser {
   /** Parse a marker at the head of `data`. Returns null if incomplete. */
   private parseMarker(data: Uint8Array): [Parsed, number] | null {
     if (!startsWith(data, OSC_PREFIX)) {
-      // Buffer begins with ESC but not yet the whole prefix. If it's a leading
-      // slice of our prefix, the rest is in flight: wait.
+      // The buffer begins with ESC but not with the whole prefix. A leading
+      // slice of the prefix means the rest is still arriving: wait for it.
       if (data.length < OSC_PREFIX.length && startsWith(OSC_PREFIX, data)) return null;
-      // A real ESC that is not our OSC 133. Skip one byte, treat as noise.
+      // A real ESC that is not this OSC 133 prefix. Skip one byte as noise.
       return [{ kind: "unknown" }, 1];
     }
 
@@ -238,7 +230,7 @@ export class MarkerParser {
       if (id !== null) return [{ kind: "began", id }, consumed];
     }
     // No block id and no status: the whole payload is the nonce, so a shell
-    // that is not ours cannot claim to have installed our hook.
+    // that does not know the nonce cannot claim to have installed the hook.
     if (kind === "R" && fields.length >= 2 && fields[1] === `ledge=${this.nonce}`) {
       return [{ kind: "ready" }, consumed];
     }
@@ -250,7 +242,7 @@ export class MarkerParser {
     return [{ kind: "unknown" }, consumed];
   }
 
-  /** Pull the block id out of `ledge=<nonce>:<block>`, only if the nonce is ours. */
+  /** Pull the block id out of `ledge=<nonce>:<block>`, if the nonce matches. */
   private blockId(tag: string): string | null {
     if (!tag.startsWith("ledge=")) return null;
     const payload = tag.slice("ledge=".length);

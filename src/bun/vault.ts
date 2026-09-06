@@ -1,19 +1,21 @@
-// The vault: key lifecycle and envelope crypto for locked notes
-// (locking.md). One app-wide passphrase; scrypt derives the master key;
-// each locked note carries a random data key wrapped by it. Everything is
-// node:crypto (AES-256-GCM throughout) — the dependency policy's zero-new-
-// packages answer — and the master key lives only in this process's memory,
-// from unlock to relock. This module owns keys and byte shapes only: WHAT is
-// locked, and where the seams sit, is notes.ts/assets.ts business (vault must
-// not import notes — the dependency arrow points one way, like workspaces').
+// Key lifecycle and envelope crypto for locked notes (locking.md §2, §3).
+// One app-wide passphrase: scrypt derives the master key, and each locked
+// note carries a random data key wrapped by it. All the crypto is node:crypto
+// AES-256-GCM, so no new package (architecture.md §8). The master key lives
+// only in this process's memory, from unlock to relock. This module owns keys
+// and byte shapes. notes.ts and assets.ts decide which notes are locked and
+// where the seams sit. vault.ts must not import notes.ts, the way notes.ts
+// imports workspaces.ts and not the reverse.
 import { join } from "node:path";
 import { readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { APP_HOME, ensureAppHome } from "./workspaces";
 
-// scrypt cost: interactive-unlock territory (~100ms on current hardware),
-// chosen once and recorded in the vault file so a future cost bump can read
-// old vaults. maxmem must clear 128*N*r bytes or node:crypto refuses.
+// scrypt cost, tuned for an interactive unlock (about 100ms on current
+// hardware). saveVaultFile records these parameters in the vault file, but
+// nothing reads them back: deriveKey always uses this constant, so raising
+// the cost would stop old vaults from opening. maxmem must clear 128*N*r
+// bytes or node:crypto refuses.
 const KDF = { N: 1 << 17, r: 8, p: 1 } as const;
 const SCRYPT_MAXMEM = 512 * 1024 * 1024;
 
@@ -22,40 +24,42 @@ const NONCE_LEN = 12; // GCM standard
 const TAG_LEN = 16;
 const SALT_LEN = 16;
 
-// What .vault.json's check value encrypts. Decrypting it successfully IS the
-// passphrase check: wrong passphrase -> wrong key -> GCM auth failure, and no
-// note was touched to find out.
+// What .vault.json's check value encrypts. Decrypting it is the passphrase
+// check. A wrong passphrase derives a wrong key, and GCM authentication then
+// fails. No note is touched to find out.
 const CHECK_PLAINTEXT = Buffer.from("ledge-vault-check-v1", "utf8");
 
 export const VAULT_PATH = join(APP_HOME, ".vault.json");
 
-// 15 minutes with no note RPC traffic relocks. Activity on the wire is the
-// idle proxy (notes.ts touches on every read/write): autosave debounce means
-// a dirty buffer cannot be older than seconds, so an idle window this long
-// proves there is nothing unflushed to lose. No settings knob until the
-// default demonstrably fails someone (architecture.md §6).
+// Relock after 15 minutes with no note RPC traffic. Wire activity stands in
+// for user activity: notes.ts calls touchVault on every read and write. The
+// autosave debounce is seconds, so nothing dirty is left unflushed by the
+// time this window elapses. No settings knob until the default demonstrably
+// fails someone (architecture.md §6).
 const IDLE_RELOCK_MS = 15 * 60 * 1000;
 const IDLE_SWEEP_MS = 60 * 1000;
 
 export type VaultState = "none" | "locked" | "unlocked";
 
-// The whole in-memory vault: the derived master key while unlocked, and the
-// salt every header must be minted from. Never written anywhere; dies with
-// the process or the relock.
+// The in-memory vault: the derived master key while unlocked, and the salt
+// that every new header copies in. The master key is never written anywhere,
+// and lockVault drops it. The salt survives a relock, and the vault file
+// holds a copy of it.
 let masterKey: Buffer | null = null;
 let vaultSalt: Buffer | null = null;
 let lastActivity = 0;
 let idleTimer: ReturnType<typeof setInterval> | null = null;
 let onAutoLock: (() => void) | null = null;
 
-/** Register what auto-relock should do beyond dropping keys (index.ts pushes
- * vaultChanged). One callback, replaced not stacked. */
+/** Register what auto-relock does beyond dropping the master key (server.ts
+ * passes a callback that pushes vaultChanged). One callback, replaced rather
+ * than stacked. */
 export function configureVault(handlers: { onAutoLock: () => void }): void {
   onAutoLock = handlers.onAutoLock;
 }
 
-/** Note-RPC activity: resets the idle-relock clock (called from the notes.ts
- * read/write funnel — the one place every content path already passes). */
+/** Reset the idle-relock clock. notes.ts calls this from readNote, writeNote
+ * and stashNote, the funnel every note content path already passes. */
 export function touchVault(): void {
   lastActivity = Date.now();
 }
@@ -66,11 +70,11 @@ export function vaultState(): VaultState {
 }
 
 // --- the vault file ---------------------------------------------------------
-// Machine-written AND Bun-shaped, like .workspaces.json: the view never sees
-// its bytes. A CONVENIENCE artifact, not a precious one — every locked note
-// carries its own salt, so this file only buys a passphrase check that
-// touches no note. Corrupt: renamed aside for forensics (workspaces' move)
-// and rebuilt from the next successful unlock.
+// Machine-written and Bun-shaped, like .workspaces.json: the view never sees
+// its bytes (locking.md §3). Losing it costs a re-derive, never a note, since
+// every locked note carries its own salt. All it adds is a passphrase check
+// that touches no note. A corrupt file is renamed aside for forensics (as
+// workspaces.ts does) and rebuilt from the next successful unlock.
 
 interface VaultFile {
   version: 1;
@@ -102,9 +106,11 @@ async function saveVaultFile(salt: Buffer, key: Buffer): Promise<void> {
   }
 }
 
-/** Load the vault file (boot, and before any unlock). Missing file: state
- * stays "none" — first lock creates it, or an unlock probing a locked note's
- * own header rebuilds it. Corrupt: aside-and-continue, never a crash. */
+/** Load the vault file. server.ts calls it once at boot, and unlockVault
+ * re-reads VAULT_PATH itself. A missing file leaves the state "none":
+ * createVault writes one, or a successful unlock probing a locked note's own
+ * header rebuilds it. A corrupt file is moved aside and the run continues.
+ * Neither case throws. */
 export async function loadVault(): Promise<void> {
   let raw: string | null = null;
   try {
@@ -148,8 +154,8 @@ function gcmSeal(key: Buffer, nonce: Buffer, plain: Buffer): Buffer {
   return Buffer.concat([cipher.update(plain), cipher.final(), cipher.getAuthTag()]);
 }
 
-// Throws on a bad tag — which is the tamper signal every caller turns into
-// "damaged — restore from backup/sync", never into silently-wrong plaintext.
+// Throws on a bad tag. Callers turn that into "damaged, restore from backup
+// or sync" (locking.md §2), never into silently wrong plaintext.
 function gcmOpen(key: Buffer, nonce: Buffer, ctAndTag: Buffer): Buffer {
   if (ctAndTag.length < TAG_LEN) throw new Error("ciphertext too short");
   const decipher = createDecipheriv("aes-256-gcm", key, nonce);
@@ -159,8 +165,9 @@ function gcmOpen(key: Buffer, nonce: Buffer, ctAndTag: Buffer): Buffer {
 
 // --- lifecycle --------------------------------------------------------------
 
-/** First lock ever: choose the passphrase, mint the vault. Refused when one
- * already exists — that flow is unlockVault. */
+/** Create the vault from the first lock's passphrase: a fresh salt, the
+ * derived master key, and the vault file. Throws when a vault already
+ * exists, which is unlockVault's case. */
 export async function createVault(passphrase: string): Promise<void> {
   if (vaultSalt !== null) throw new Error("a vault already exists");
   if (passphrase.length === 0) throw new Error("empty passphrase");
@@ -173,12 +180,11 @@ export async function createVault(passphrase: string): Promise<void> {
 }
 
 /**
- * Unlock. Ordinarily the vault file's check value answers; with NO vault file
- * but locked notes on disk (synced from another machine, or the file lost),
- * `probeHeader` — any locked note's own `locked:` value — stands in: its salt
- * derives the key and unwrapping its data key is the check, after which the
- * vault file is rebuilt so the next unlock is ordinary. Returns false for a
- * wrong passphrase; never throws for one.
+ * Unlock the vault. With a vault file, its check value decides. Without one,
+ * but with locked notes on disk (synced from elsewhere, or the file lost),
+ * pass `probeHeader`: any locked note's `locked:` value, whose salt derives
+ * the key. Unwrapping that header's data key is then the check, and a success
+ * rebuilds the vault file. A wrong passphrase returns false, never throws.
  */
 export async function unlockVault(passphrase: string, probeHeader?: string): Promise<boolean> {
   if (masterKey) return true;
@@ -212,8 +218,9 @@ export async function unlockVault(passphrase: string, probeHeader?: string): Pro
 }
 
 /** Drop the master key. Callers push vaultChanged and evict view-side
- * plaintext; by the time this runs, dirty locked buffers must already be
- * flushed (the ⌘L command flushes first; idle relock proves it by silence). */
+ * plaintext. Dirty locked buffers must already be flushed: the ⌘L command
+ * (vault.lock) flushes before calling this, and idle relock fires only after
+ * minutes of no note traffic. */
 export function lockVault(): void {
   masterKey = null;
   stopIdle();
@@ -229,8 +236,8 @@ function startIdle(): void {
     lockVault();
     onAutoLock?.();
   }, IDLE_SWEEP_MS);
-  // Housekeeping must not hold the process open (tests would hang on it; the
-  // app's own drain loop already keeps the main process alive).
+  // The sweep must not hold the process open: tests would hang on it, and
+  // the app's own drain loop already keeps the main process alive.
   (idleTimer as unknown as { unref?: () => void }).unref?.();
 }
 
@@ -247,10 +254,9 @@ function requireKey(): Buffer {
 // --- the note envelope ------------------------------------------------------
 // On disk (locking.md §2):
 //   locked: v1.<b64 salt>.<b64 wrap-nonce>.<b64 wrapped-key+tag>
-// in the frontmatter, and the body as base64 of (body-nonce ‖ ct ‖ tag),
-// 76-col wrapped. The salt is COPIED into every header so a locked note is
-// self-contained: it decrypts with the passphrase alone on any machine,
-// vault file or not.
+// in the frontmatter, with the body as base64 of (body-nonce ‖ ct ‖ tag)
+// wrapped at 76 columns. Every header copies the salt in, so a locked note
+// decrypts with the passphrase alone on any machine, vault file or not.
 
 export interface LockedHeader {
   salt: Buffer;
@@ -260,8 +266,8 @@ export interface LockedHeader {
 
 const HEADER_RE = /^v1\.([A-Za-z0-9+/=]+)\.([A-Za-z0-9+/=]+)\.([A-Za-z0-9+/=]+)$/;
 
-/** Parse a `locked:` frontmatter value, or throw — a malformed header on a
- * note the disk says is locked reads as damage, not as unlocked. */
+/** Parse a `locked:` frontmatter value. Throws on a malformed one: a note
+ * the disk says is locked reads as damaged, never as unlocked. */
 export function parseLockedHeader(value: string): LockedHeader {
   const m = HEADER_RE.exec(value.trim());
   if (m) {
@@ -280,8 +286,11 @@ function unwrapDataKey(header: LockedHeader): Buffer {
   try {
     return gcmOpen(key, header.wrapNonce, header.wrappedKey);
   } catch {
-    // The master key is checked at unlock, so a failed unwrap here is a note
-    // from a DIFFERENT passphrase era (or a tampered header), not a typo.
+    // The master key was checked at unlock, so this is not a mistyped
+    // passphrase. The header was wrapped under some other key: an older or a
+    // newer passphrase (changeVaultPassphrase in notes.ts commits only after
+    // its sweep, so a crash leaves headers already rewrapped), a note synced
+    // in from a different vault, or a tampered header.
     throw new Error("this note's key does not open with the current passphrase (damaged, or locked under an old passphrase)");
   }
 }
@@ -306,8 +315,9 @@ export function sealBody(headerValue: string, body: string): string {
   return b64.replace(/(.{76})/g, "$1\n").replace(/\n$/, "");
 }
 
-/** Decrypt a note body. Throws when the vault is locked, and — distinctly —
- * when the ciphertext fails authentication (external tamper = damage). */
+/** Decrypt a note body. Throws when the vault is locked, and throws a
+ * distinct error when the ciphertext fails authentication (an edit from
+ * outside Ledge counts as damage). */
 export function openBody(headerValue: string, armored: string): string {
   const dataKey = unwrapDataKey(parseLockedHeader(headerValue));
   const raw = Buffer.from(armored.replace(/\s+/g, ""), "base64");
@@ -322,9 +332,9 @@ export function openBody(headerValue: string, armored: string): string {
   return plain.toString("utf8");
 }
 
-/** Re-wrap an existing header's data key under the current master key (the
- * passphrase-change move: headers rewrite, bodies never do). The body stays
- * decryptable because the DATA key is unchanged. */
+/** Re-wrap a header's data key from `oldKey` to `newKey`, stamping in
+ * `newSalt`. This is the passphrase change: headers are rewritten, bodies
+ * are not. The body still decrypts because the data key is unchanged. */
 export function rewrapHeader(headerValue: string, oldKey: Buffer, newKey: Buffer, newSalt: Buffer): string {
   const header = parseLockedHeader(headerValue);
   const dataKey = (() => {
@@ -340,9 +350,10 @@ export function rewrapHeader(headerValue: string, oldKey: Buffer, newKey: Buffer
 }
 
 /**
- * Change the vault passphrase: derive the new master key under a fresh salt,
- * persist the new vault file, and hand the caller both keys so it can rewrap
- * every locked note's header (notes.ts owns finding them). Unlocked only.
+ * Start a passphrase change: derive the new master key under a fresh salt
+ * and return it with the old key, so the caller can rewrap every locked
+ * note's header and every sealed asset (notes.ts owns finding them). The
+ * vault file is not written until commitPassphraseChange. Unlocked only.
  */
 export async function beginPassphraseChange(newPassphrase: string): Promise<{ oldKey: Buffer; newKey: Buffer; newSalt: Buffer }> {
   const oldKey = requireKey();
@@ -352,8 +363,9 @@ export async function beginPassphraseChange(newPassphrase: string): Promise<{ ol
   return { oldKey, newKey, newSalt };
 }
 
-/** Commit a passphrase change after every header rewrapped: the new key
- * becomes the vault. (Called by notes.ts's rewrap sweep, not the RPC layer.) */
+/** Finish a passphrase change once every header is rewrapped: write the new
+ * vault file and make the new key the master key. notes.ts's rewrap sweep
+ * calls this, not the RPC layer. */
 export async function commitPassphraseChange(newKey: Buffer, newSalt: Buffer): Promise<void> {
   await saveVaultFile(newSalt, newKey);
   vaultSalt = newSalt;
@@ -362,11 +374,11 @@ export async function commitPassphraseChange(newKey: Buffer, newSalt: Buffer): P
 
 // --- the head/body split ----------------------------------------------------
 // The plaintext head is the frontmatter block plus the first-content-line H1,
-// EXACTLY as slug.ts derives the title (frontmatterEnd, then blank lines are
-// skipped only after a block): what stays readable is precisely what labels
-// the note. Everything after — blank lines included — is body, and the split
-// must round-trip byte-for-byte (head + body === text), because writeNote
-// re-splits on every save.
+// derived the way slug.ts derives a title (frontmatterEnd, then blank lines
+// skipped only after a block). Those bytes are where metaAt finds a note's
+// title and locked flag (locking.md §2). Everything after is body, blank
+// lines included. The split must round-trip byte for byte (head + body ===
+// text), because writeNote re-splits on every save.
 
 import { frontmatterEnd } from "../shared/frontmatter";
 
@@ -374,7 +386,7 @@ export function splitHead(text: string): { head: string; body: string } {
   const fmEnd = frontmatterEnd(text);
   let pos = fmEnd;
   // Blank lines between the block and the H1 stay in the head, matching
-  // headingOf's skip — but only after a frontmatter block, exactly as there.
+  // headingOf's skip. Only after a frontmatter block, as there.
   if (fmEnd > 0) {
     const m = /^(?:[ \t]*\r?\n)+/.exec(text.slice(pos));
     if (m) pos += m[0].length;
@@ -388,15 +400,11 @@ export function splitHead(text: string): { head: string; body: string } {
 }
 
 // --- the asset envelope ------------------------------------------------------
-// Sealed images (locking.md §5): magic ‖ salt ‖ wrap-nonce ‖ wrapped
-// data key ‖ body nonce ‖ GCM(bytes). Wrapped by the MASTER key, not a
-// note's — assets live in a per-root shared pool and may be referenced from
-// several notes. Sealed IN PLACE under the asset's own name, detected by the
-// magic bytes: the name never changes, so note references stay valid, the
-// never-unlink rule holds (the transition is writeAsset's temp+rename, no
-// second file), and an external tool still fails loudly — the bytes are not
-// a PNG and no longer pretend to be. The salt rides along for the same
-// self-containment reason as note headers.
+// Sealed images (locking.md §5): magic ‖ salt ‖ wrap-nonce ‖ wrapped data key
+// ‖ body nonce ‖ GCM(bytes). The master key does the wrapping, not a note's
+// key, since several notes may reference one asset. Sealing happens in place
+// under the asset's own name, marked by the magic bytes, so note references
+// stay valid. The salt rides along, the way a note header carries one.
 
 const ASSET_MAGIC = Buffer.from("LEDGESEAL1", "ascii");
 
@@ -417,8 +425,9 @@ export function sealAssetBytes(bytes: Uint8Array): Buffer {
   return Buffer.concat([ASSET_MAGIC, vaultSalt, wrapNonce, wrapped, bodyNonce, sealed]);
 }
 
-/** Open a sealed asset. Throws when the vault is locked, and — distinctly —
- * when the bytes fail authentication (tamper = damage). */
+/** Open a sealed asset. Throws when the vault is locked, and throws a
+ * distinct error when the bytes fail authentication (an edit from outside
+ * Ledge counts as damage). */
 export function openAssetBytes(sealed: Uint8Array): Buffer {
   const key = requireKey();
   const buf = Buffer.from(sealed.buffer, sealed.byteOffset, sealed.byteLength);
@@ -455,18 +464,21 @@ export function rewrapAssetBytes(sealed: Uint8Array, oldKey: Buffer, newKey: Buf
 }
 
 // --- locked: line surgery ---------------------------------------------------
-// The header line is Bun-OWNED text (locking.md §2): a save can neither
-// mint nor drop it, so writeNote re-stamps the disk's value into whatever the
-// buffer says, and only the Remove Lock command strips it. Byte-preserving
-// around the one line it owns: every other frontmatter line is the user's.
+// The header line is Bun-owned text (locking.md §2). A save can neither mint
+// nor drop it: writeNote re-stamps the disk's value into whatever the buffer
+// says, and only the Remove Lock command strips it. The surgery preserves
+// bytes around the one line it owns, since every other frontmatter line is
+// the user's.
 
-// A top-level `locked:` line — never an indented one, which would be an env
-// var named "locked" under `env:`.
+// A top-level `locked:` line, never an indented one. An indented one would
+// be an env var named "locked" under `env:`.
 const LOCKED_LINE = /^locked\s*:/;
 
-// The block's lines, split so surgery can address them: `open`/`close` are
-// the fence indices into `lines`; content is the exclusive range between.
-// Returns null when the text has no block (frontmatterEnd's definition).
+// The frontmatter block's lines, split so the surgery can address them.
+// `close` is the closing fence's index into `lines` (the opening fence is
+// index 0), and the content is the lines between them, both fences excluded.
+// `end` is frontmatterEnd's offset. Returns null when the text has no block
+// (frontmatterEnd's definition).
 function blockLines(text: string): { end: number; lines: string[]; close: number } | null {
   const end = frontmatterEnd(text);
   if (end === 0) return null;
@@ -493,12 +505,12 @@ export function stampLockedLine(text: string, headerValue: string): string {
   return [b.lines[0]!, ...stamped, ...b.lines.slice(b.close)].join("\n") + text.slice(b.end);
 }
 
-/** Remove every top-level `locked:` line; a block EMPTIED by that removal goes
- * entirely (Remove Lock should leave no husk — but a block with comments or
- * other keys is the user's, and stays). A block this found nothing to remove
- * from is returned untouched, blank or not: the frontmatter editor opens a
- * note's first block as `---\n\n---\n` and the autosave that lands before the
- * user types a key must not delete what they just opened. */
+/** Remove every top-level `locked:` line. The whole block goes when every
+ * line left in it is blank, so Remove Lock leaves no husk. A block still
+ * holding comments or other keys is the user's, and it stays. A block with no
+ * `locked:` line comes back untouched, blank or not: the frontmatter editor
+ * opens an empty `---\n\n---\n` block, and the autosave that lands before the
+ * user has typed anything must not delete it. */
 export function stripLockedLine(text: string): string {
   const b = blockLines(text);
   if (b === null) return text;
@@ -511,8 +523,9 @@ export function stripLockedLine(text: string): string {
 
 // --- test seams -------------------------------------------------------------
 
-/** Reset every module-level piece (tests only: module state outlives test
- * files, and a vault unlocked in one must not leak into the next). */
+/** Clear the master key and the salt, stop the idle timer, and forget the
+ * auto-lock callback. Tests only: module state outlives a test file, so a
+ * vault unlocked in one must not leak into the next. */
 export function resetVaultForTests(): void {
   masterKey = null;
   vaultSalt = null;

@@ -1,6 +1,9 @@
-// daily.ts against a real filesystem: the create-or-open idempotency that IS
-// the feature's promise, template instantiation with frontmatter carried, and
-// the degradation paths. Same scratch-app-home discipline as notes.fs.test.ts.
+// daily.ts against a real filesystem: the create-or-open idempotency the
+// feature is for, template instantiation that carries the frontmatter
+// through, and the degradation paths. Same scratch-app-home discipline as
+// notes.fs.test.ts: the app home is a per-run temp dir set by
+// src/test-preload.ts (see bunfig.toml) and beforeEach wipes it, so the
+// guard below refuses to run when it is not under the temp dir.
 import { beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, rm, utimes } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -15,8 +18,9 @@ if (!resolve(APP_HOME).startsWith(resolve(tmpdir()) + sep)) {
 
 let ROOT = "";
 
-// The fixed "today" every test uses: 2026-07-18, late evening — local, so the
-// titles asserted below cannot depend on the machine's timezone.
+// The fixed "today" every test uses: 2026-07-18, late evening. The date is
+// local, so the titles asserted below do not depend on the machine's
+// timezone.
 const NOW = new Date(2026, 6, 18, 23, 30);
 
 beforeEach(async () => {
@@ -47,9 +51,10 @@ describe("openDaily", () => {
     const filed = await openDaily(ROOT, "journal", NOW);
     expect(filed.meta.path).toBe(join(ROOT, "journal", "2026-07-18.md"));
     expect(filed.meta.folder).toBe("journal");
-    // The folder decides only where a note is CREATED: today's is found by
-    // title wherever it sits, so the same day asked for elsewhere is the one
-    // already filed, while tomorrow follows the new answer.
+    // The folder decides only where a new note is created. Today's note is
+    // found by title wherever it sits, so asking for the same day with a
+    // different folder returns the one already filed. Tomorrow's note follows
+    // the new folder.
     expect((await openDaily(ROOT, "elsewhere", NOW)).meta.path).toBe(filed.meta.path);
     const tomorrow = await openDaily(ROOT, "elsewhere", new Date(2026, 6, 19, 8, 0));
     expect(tomorrow.meta.path).toBe(join(ROOT, "elsewhere", "2026-07-19.md"));
@@ -82,8 +87,10 @@ describe("openDaily", () => {
   });
 
   test("finds an existing daily note case-insensitively by title, wherever it sits", async () => {
-    // A hand-made note in a subfolder still counts as today's: resolution is
-    // by title over the listing, not by a fixed path.
+    // A hand-made note titled with today's date counts as today's note,
+    // wherever it sits. Resolution is by title over the listing, not by a
+    // fixed path: the `journal/` folder below stays empty, and createNote
+    // puts the note at the root.
     await mkdir(join(ROOT, "journal"), { recursive: true });
     const made = await createNote(ROOT, "# 2026-07-18\n\nalready here\n");
     const { meta, created } = await openDaily(ROOT, null, NOW);
@@ -121,9 +128,10 @@ describe("findTemplate / createFromTemplate", () => {
   test("findDailyTemplate is strictly per-workspace: no borrowing, several claimants resolve newest-first", async () => {
     const other = await createManaged("Other");
     await createNote(other, "---\ntemplate: daily\n---\n# Theirs\n\ntheirs\n");
-    // Another workspace's claimant is NOT borrowed — a workspace without its
-    // own daily template gets the bare dated note, never a template it cannot
-    // see from where it sits.
+    // Another workspace's claimant is not borrowed: a daily note appears
+    // without being asked for, so a borrowed template would surprise
+    // (findDailyTemplate in daily.ts). A workspace without its own daily
+    // template gets the bare dated note.
     expect(await findDailyTemplate(ROOT)).toBeNull();
     expect((await readNote((await openDaily(ROOT, null, NOW)).meta.path))?.text).toBe("# 2026-07-18\n");
     await createNote(ROOT, "---\ntemplate: daily\n---\n# Ours Old\n\nours old\n");
@@ -143,8 +151,8 @@ describe("findTemplate / createFromTemplate", () => {
   test("the template: true marker never reaches an instance", async () => {
     await createNote(ROOT, "---\ntags: work\ntemplate: true\n---\n# Meeting\n\nagenda\n");
     const note = await createFromTemplate(ROOT, "Meeting", "Standup", null, NOW);
-    // The rest of the frontmatter carries; the marker is stripped, so the
-    // instance does not show up in the template picker itself.
+    // The rest of the frontmatter carries. The marker is stripped, so the
+    // instance does not show up in the template picker.
     expect((await readNote(note.path))?.text).toBe("---\ntags: work\n---\n# Standup\n\nagenda\n");
   });
 });
@@ -154,8 +162,8 @@ describe("createFromTemplatePath", () => {
     const other = await createManaged("Other");
     await createNote(ROOT, "---\ntemplate: true\n---\n# Meeting\n\nours\n");
     const theirs = await createNote(other, "---\ntemplate: true\n---\n# Meeting\n\ntheirs\n");
-    // The picker chose the OTHER workspace's Meeting; title resolution would
-    // have preferred ROOT's own — the path must win.
+    // The picker chose the other workspace's Meeting. Title resolution would
+    // have preferred ROOT's own, so the path has to win.
     const note = await createFromTemplatePath(ROOT, theirs.path, "Standup", NOW);
     expect(note.path).toBe(join(ROOT, "standup.md"));
     expect((await readNote(note.path))?.text).toBe("# Standup\n\ntheirs\n");

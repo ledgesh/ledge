@@ -1,8 +1,8 @@
-// The client id against a real filesystem. It is the key the server files this
-// client's layout under (remote.md §5), so the properties that matter are that
-// it survives a relaunch and that nothing on the read path can turn it into a
-// different id — a re-mint would silently orphan a saved arrangement rather
-// than fail.
+// The client ids against a real filesystem: the machine id, the id per
+// connection, and parseClientMap. The server files this client's layout under
+// the id this client sends (remote.md §5). A relaunch must report the same
+// ids, and a read must never replace a well-formed one. A re-mint does not
+// fail: it silently orphans the saved arrangement.
 //
 // Same preload-scratch-home arrangement and same guard as layout.fs.test.ts.
 import { beforeEach, describe, expect, test } from "bun:test";
@@ -28,10 +28,11 @@ if (!resolve(APP_HOME).startsWith(resolve(tmpdir()) + sep)) {
   throw new Error(`refusing to run filesystem tests against ${APP_HOME} — is the preload configured?`);
 }
 
-// clientId caches for the life of the process, which is exactly what a client
-// wants and exactly what a test suite cannot have: every case here reaches
-// past the cache by reading and writing the file itself, and calls clientId()
-// at most once per process. That one call is the first test below.
+// clientId caches for the life of the process, so it can be called
+// meaningfully only once here: the first test below, which mints an id. The
+// second then checks that the cache answers that same id. A case added later
+// must not call it again. To see the file, a case reads and writes
+// CLIENT_ID_PATH itself or asks a fresh process what a launch sees.
 describe("the client id", () => {
   beforeEach(async () => {
     await rm(APP_HOME, { recursive: true, force: true });
@@ -48,9 +49,9 @@ describe("the client id", () => {
     expect(await clientId()).toBe(await clientId());
   });
 
-  // The one property the server's layout map depends on: the id a launch
-  // reports is the id the launch before it did. In-process the answer is
-  // cached, so this asks two real processes.
+  // The id a launch reports is the id the launch before it reported. The
+  // server's layout map depends on that. In-process the answer is cached, so
+  // this asks two real processes.
   test("a relaunch reports the id the first launch minted", async () => {
     const first = await mintInFreshProcess();
     expect(isClientId(first)).toBe(true);
@@ -69,30 +70,27 @@ describe("the client id", () => {
     },
   );
 
-  // Not a hypothetical: the file is one line of text in a folder people back up
-  // and sync. What matters is not just that garbage is rejected but that it is
-  // REPLACED — leaving it in place would mint a fresh id at every launch and
-  // orphan the saved layout every time. Through a fresh process because the
-  // read happens once per process and is cached after.
+  // A garbage id file has to be replaced, not just rejected. Leaving it in
+  // place would mint a fresh id at every launch and orphan the saved layout
+  // each time. The file is one line of text in a folder people back up and
+  // sync, so half-written content is realistic. Run through a fresh process
+  // because the read happens once per process and is cached after.
   test("a garbage id file is replaced with a real one, once", async () => {
     await ensureClientHome();
     await writeFile(CLIENT_ID_PATH, "half a wri", "utf8");
     const first = await mintInFreshProcess();
     expect(isClientId(first)).toBe(true);
     expect((await readFile(CLIENT_ID_PATH, "utf8")).trim()).toBe(first);
-    // The launch after that reads the file rather than minting again, which is
-    // the whole point of writing it.
+    // The launch after that reads the replacement rather than minting again.
     expect(await mintInFreshProcess()).toBe(first);
   });
 });
 
-// The other half, once a window is a client and identity follows the CONNECTION
-// (remote.md §8a). What matters here is the same property one step along: the
-// arrangement a server has on file comes back whenever that server is selected
-// again, which is only true if the id this client sends it is stable.
-//
-// These run in-process; the map is cached but mutable through this module, so
-// unlike the id above there is nothing to reach past.
+// The per-connection ids, now that a window is a client and identity follows
+// the connection (remote.md §8a). Selecting a server again brings back the
+// arrangement it has on file. That holds only while the id this client sends
+// it stays the same. These run in-process: the map cache is mutable through
+// this module, so unlike the id above there is nothing to reach past.
 describe("the id per connection", () => {
   beforeEach(async () => {
     await rm(APP_HOME, { recursive: true, force: true });
@@ -114,15 +112,15 @@ describe("the id per connection", () => {
     expect(JSON.parse(await readFile(CLIENT_MAP_PATH, "utf8"))["vps-1"]).toBe(first);
   });
 
-  // A layout is three panes of THAT machine's notes and means nothing in front
-  // of another machine's, which is the whole reason these are not one id.
+  // A layout is three panes of one machine's notes and means nothing in front
+  // of another machine's. That is why each connection gets its own id.
   test("two connections are two clients", async () => {
     expect(await clientIdFor("vps-1")).not.toBe(await clientIdFor("laptop-1"));
     expect(await clientIdFor("vps-1")).not.toBe(await clientIdFor(LOCAL_ID));
   });
 
-  // What bounds the file: one entry per connection, dropped with the connection
-  // (connectionStore.ts remove).
+  // One entry per connection is all the file ever holds. connectionStore.ts
+  // remove drops the entry along with the connection.
   test("forgetting a connection drops its id, and the next one is fresh", async () => {
     const first = await clientIdFor("vps-1");
     await forgetClientId("vps-1");
@@ -134,8 +132,8 @@ describe("the id per connection", () => {
     await forgetClientId("never-connected");
   });
 
-  // The second window on a server is a client that server has never met, for as
-  // long as it is open, and it is never written down.
+  // The second window on a server is a client that server has never met, for
+  // as long as that window is open. Its id is never written down.
   test("an ephemeral id is a real id and is not stored", async () => {
     const one = ephemeralClientId();
     expect(isClientId(one)).toBe(true);
@@ -144,9 +142,9 @@ describe("the id per connection", () => {
     expect(Object.values(JSON.parse(await readFile(CLIENT_MAP_PATH, "utf8")))).not.toContain(one);
   });
 
-  // The property the whole file exists for, asked of two real processes: the id
-  // a launch sends a server is the id the launch before it sent that server,
-  // and it is that server's rather than the machine's.
+  // The id a launch sends a server is the id the launch before it sent that
+  // server, and it is that server's id rather than the machine's. Asked of two
+  // real processes, because the map is cached within each one.
   test("a relaunch reports the ids the launch before it minted, one per connection", async () => {
     const first = await mapInFreshProcess();
     expect(isClientId(first["vps-1"]!)).toBe(true);
@@ -162,9 +160,10 @@ describe("parseClientMap", () => {
     expect(parseClientMap({ "vps-1": id })).toEqual({ "vps-1": id });
   });
 
-  // Machine-written state (architecture.md §6): anything that does not parse
-  // costs exactly itself, and total failure costs saved arrangements rather
-  // than the launch.
+  // Machine-written state (architecture.md §6). A bad entry costs only itself,
+  // and a value that is not an object at all yields no ids. The rows below are
+  // both kinds. A file whose JSON does not parse is caught in clientMap
+  // instead, and costs the same: saved arrangements, never the launch.
   test.each([
     [null, "null"],
     ["nope", "a string"],
@@ -176,16 +175,17 @@ describe("parseClientMap", () => {
     expect(parseClientMap(raw)).toEqual({});
   });
 
-  // The local server's id lives in its own file; an entry wearing that key
+  // The local server's id lives in its own file, so an entry under that key
   // could only shadow it.
   test("an entry claiming the local id is dropped", () => {
     expect(parseClientMap({ [LOCAL_ID]: "3f2504e0-4f89-41d3-9a0c-0305e82c3301" })).toEqual({});
   });
 });
 
-// A whole `bun -e` per call, because "what does a launch see?" is the question
-// and a launch is a process. LEDGE_NOTES_ROOT is inherited from the preload's
-// scratch home, so this reads and writes the same files the test does.
+// Each call spawns a whole `bun -e`, because the question is what a launch
+// sees and a launch is a process. The child gets LEDGE_NOTES_ROOT set to
+// APP_HOME, the preload's scratch home, so it reads and writes the same files
+// the test does.
 async function mintInFreshProcess(): Promise<string> {
   const p = Bun.spawn(
     [process.execPath, "-e", `import { clientId } from "${resolve(import.meta.dir, "clientHome.ts")}"; console.log(await clientId())`],
@@ -196,8 +196,8 @@ async function mintInFreshProcess(): Promise<string> {
   return out.trim();
 }
 
-// The same question about the per-connection map: two launches, two ids asked
-// for, one answer.
+// The same question about the per-connection map. Each call asks one fresh
+// process for three ids: two connections and the local server.
 async function mapInFreshProcess(): Promise<Record<string, string>> {
   const src = resolve(import.meta.dir, "clientHome.ts");
   const p = Bun.spawn(

@@ -1,18 +1,17 @@
-// The two ends of a connection, run against each other over a pipe made of
-// promises. What this covers that wire.test.ts cannot is the conversation:
-// who speaks first, what happens to a request whose server has not finished
+// The two ends of a connection, run against each other over an in-memory
+// pipe. What this covers that wire.test.ts cannot is the conversation: who
+// speaks first, what happens to a request whose server has not finished
 // booting, and how a server answers a client that is not following the rules.
 //
-// The client's half lives in shared/transport.ts now, so the tests that need
-// only a client — the handshakes it refuses, and fedDuplex — are in
-// shared/transport.test.ts, which imports nothing from this directory. What
-// stays here is everything with a server in it, because that is what a server
-// is: the handler map, the coalescer, and the op log a replay is deduped
-// against.
+// A server is a handler map, a coalescer, and an op log a replay is deduped
+// against, so every test here has one. The client's half lives in
+// shared/transport.ts, so the tests that need only a client (the handshakes it
+// refuses, and fedDuplex) are in shared/transport.test.ts, which imports
+// nothing from this directory.
 //
 // No processes here either. spawnDuplex and stdioDuplex are three lines of Bun
-// API each and are exercised for real in serve.fs.test.ts, which is the only
-// place a pipe can actually break.
+// API each, and serve.fs.test.ts drives them against a real child process. That
+// is the only place a pipe can actually break.
 import { describe, expect, test } from "bun:test";
 import {
   CONTROL_FRAME,
@@ -38,9 +37,9 @@ interface Endpoint extends Duplex {
   hangup(): void;
 }
 
-// Buffers until someone is listening, exactly as the real duplexes do: a
-// server writes its hello the moment it is built, which is before the far end
-// of a test's pipe exists.
+// Buffers until someone is listening, as the real duplexes do. A server
+// writes its hello the moment it is built, before the far end of a test's pipe
+// exists.
 function endpoint(): Endpoint {
   let onData: ((chunk: Uint8Array) => void) | undefined;
   let onClose: (() => void) | undefined;
@@ -80,8 +79,8 @@ function endpoint(): Endpoint {
 function pipePair(): { a: Endpoint; b: Endpoint } {
   const a = endpoint();
   const b = endpoint();
-  // Asynchronous delivery on purpose: a real pipe never calls back into the
-  // writer's own stack, and a synchronous one would hide re-entrancy bugs.
+  // Delivery is asynchronous, as a real pipe's is: it never calls back into
+  // the writer's own stack. Synchronous delivery would hide re-entrancy bugs.
   a.write = (bytes) => queueMicrotask(() => b.deliver(bytes));
   b.write = (bytes) => queueMicrotask(() => a.deliver(bytes));
   a.close = () => {
@@ -98,8 +97,9 @@ function pipePair(): { a: Endpoint; b: Endpoint } {
 /** Let every queued microtask and the promises behind them run out. */
 const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
 
-/** A timer cranked by hand, for the heartbeat at both ends: forty seconds of
- * silence costs a function call, and no test below waits for a clock. */
+/** A repeating timer a test drives by hand, standing in for the one the
+ * heartbeat runs at either end. Forty seconds of silence costs one function
+ * call, so no test below waits on a clock. */
 function ticker() {
   const ticks = new Set<() => void>();
   return {
@@ -114,8 +114,9 @@ function ticker() {
   };
 }
 
-/** Refusals are logged server-side, and a test that provokes six of them
- * should not bury its own output in them. */
+/** Silences console.error while `fn` runs. Some refusals are logged
+ * server-side (bun/transport.ts), and a test that provokes several of them
+ * would bury its own output. */
 async function quiet<T>(fn: () => Promise<T>): Promise<T> {
   const was = console.error;
   console.error = () => {};
@@ -128,10 +129,11 @@ async function quiet<T>(fn: () => Promise<T>): Promise<T> {
 
 // --- stubs --------------------------------------------------------------------
 
-// The dispatcher looks a method up by name in whatever map it is handed, so a
-// full 59-handler map would prove nothing this one does not. The cast is
-// deliberate: RequestHandlers is exhaustive by design (server.ts), and
-// stubbing all of it here would be a maintenance tax with no test inside it.
+// Two handlers rather than the full 59-handler map. The dispatcher looks a
+// method up by name in whatever map it is handed (bun/transport.ts dispatch),
+// so the rest would prove nothing. The cast is here because RequestHandlers
+// covers every method in the schema (wire.ts), and stubbing all 59 would be
+// maintenance for no test.
 function handlers(over: Record<string, (p: never) => unknown> = {}): RequestHandlers {
   return {
     vaultState: () => ({ state: "locked" }),
@@ -201,9 +203,9 @@ describe("a client and a server over one connection", () => {
   });
 
   // Identity comes from the connection, not from each call (remote.md §5), so
-  // the server can key a saved layout by who is asking without the view ever
-  // holding an id. Read after the handshake, which is the only time any
-  // handler runs.
+  // the server can key a saved layout by who is asking and the view never
+  // holds an id. No request is dispatched before the handshake, so a handler
+  // reading `client()` always has the answer (bun/transport.ts).
   test("the server learns which client connected", async () => {
     const pipe = pipePair();
     const server = serverConnection(pipe.a, { build: "0.1.0" });
@@ -224,9 +226,9 @@ describe("a client and a server over one connection", () => {
   });
 
   // The session hold rides the handshake for the reason the id does, and one
-  // more: a client the operating system suspends is given no moment to say
-  // anything on the way out (ios.md §5), so what should happen when this
-  // connection ends is stated before it has ended by any means.
+  // more: iOS suspends an app with no moment to say anything on the way out
+  // (ios.md §5). So both ends settle what happens when this connection ends
+  // before it has ended by any means.
   test("the two ends state the ask and the ceiling in one crossing exchange", async () => {
     const pipe = pipePair();
     const server = serverConnection(pipe.a, { build: "0.1.0", holdMax: 600_000 });
@@ -237,8 +239,9 @@ describe("a client and a server over one connection", () => {
       client: "phone-1",
       hold: 300_000,
     });
-    // Each end knows the granted number from its own side of the pair; nothing
-    // travels back to tell either (wire.ts `sessionHold`).
+    // The two hellos cross rather than answer each other, so no grant travels
+    // back (wire.ts `sessionHold`). The client reads the server's ceiling off
+    // its hello, and the server applies that ceiling to the client's ask.
     expect((await client.ready).hold).toBe(600_000);
     expect(server.hold()).toBe(300_000);
   });
@@ -252,17 +255,18 @@ describe("a client and a server over one connection", () => {
     expect(server.hold()).toBe(600_000);
   });
 
-  // The desktop's case: it is not suspended out from under its connection and
-  // does not ask, so nothing is held for it.
+  // The desktop's case: it is not suspended out from under its connection, so
+  // it does not ask. A client whose hello carries no `hold` has nothing held
+  // for it (wire.ts `Hello.hold`).
   test("a client that asks for nothing is held for nothing", async () => {
     const { server, client } = connect();
     await client.ready;
     expect(server.hold()).toBe(0);
   });
 
-  // And the stale-socket probe's case (daemon.ts clearStaleSocket): a socket
-  // that opened and said nothing is not a client, so there is no ask to grant
-  // even from a server willing to grant one.
+  // And the stale-socket probe's case (bun/daemon.ts clearStaleSocket). A
+  // socket that opened and said nothing is not a client, so a server willing
+  // to grant a hold has no ask to grant.
   test("a socket that never says who it is asks for nothing", () => {
     const pipe = pipePair();
     const server = serverConnection(pipe.a, { build: "0.1.0", holdMax: 600_000 });
@@ -270,9 +274,9 @@ describe("a client and a server over one connection", () => {
     expect(server.hold()).toBe(0);
   });
 
-  // The whole reason a guard stays server-side (remote.md §2): it refuses over
-  // the wire exactly as it refuses in-process, and its own words are what the
-  // caller sees.
+  // A guard stays server-side (remote.md §2). It refuses over the wire as it
+  // refuses in-process, and the caller sees the guard's own words: the server
+  // sends the error's message and no stack (bun/transport.ts dispatch).
   test("a handler that throws rejects the caller with its refusal", async () => {
     const { client } = connect();
     await expect(client.requests.noteRead({ path: "../../.ssh/id_rsa" })).rejects.toThrow(
@@ -372,8 +376,8 @@ describe("a server facing a misbehaving client", () => {
     });
   });
 
-  // The heartbeat has a direction (wire.ts): a client asks and a server
-  // answers, so a client that answers is a client out of sync.
+  // The heartbeat has a direction: a client pings and a server pongs
+  // (wire.ts). A client that sends a pong is out of sync.
   test("a client that answers a probe nobody sent is refused", async () => {
     await quiet(async () => {
       const { client } = listen();
@@ -395,8 +399,9 @@ describe("a server facing a misbehaving client", () => {
     expect(client.isClosed()).toBe(false);
   });
 
-  // The handler map is an object literal, so everything reachable through its
-  // prototype is the client trying its luck rather than a method.
+  // The handler map is an object literal, so a name reached through its
+  // prototype is not a method. bun/transport.ts dispatch looks methods up with
+  // Object.hasOwn for this reason.
   test.each(["constructor", "toString", "__proto__", "hasOwnProperty"])(
     "%s is not a method",
     async (method) => {
@@ -418,10 +423,10 @@ describe("a server facing a misbehaving client", () => {
     });
   });
 
-  // A binary frame is claimed by the control frame right behind it (wire.ts).
-  // These are the three ways a peer can break that rule, and all three are
-  // fatal for the same reason a bad length is: there is no resynchronizing a
-  // stream whose framing is in doubt.
+  // A binary frame is claimed by the control frame right behind it (wire.ts
+  // BinaryHolder). This test and the next two are the three ways a peer can
+  // break that rule. All three end the connection, as a bad frame length does:
+  // a stream whose framing is in doubt cannot be resynchronized.
   test("bytes that no control frame claims end the connection", async () => {
     await quiet(async () => {
       const { client } = listen();
@@ -467,8 +472,9 @@ describe("a server facing a misbehaving client", () => {
     });
   });
 
-  // A server sends its hello before createServer has finished loading the
-  // vault and syncing the docs, so a brisk client can genuinely get here.
+  // A server sends its hello as soon as it is built, before createServer has
+  // loaded the workspaces, synced the docs and loaded the vault
+  // (bun/server.ts). A fast client can send a request before serve() arrives.
   test("a request that beats the handlers waits for them instead of failing", async () => {
     const { server, client } = listen(null);
     client.send(hello("client", "0.1.0"));
@@ -484,9 +490,9 @@ describe("a server facing a misbehaving client", () => {
 
 describe("a socket that will not take it all at once", () => {
   /**
-   * A socket with a send buffer, like the real one: it takes what fits and says
-   * so, and only a drain makes room. `taken` is everything the peer would
-   * actually receive.
+   * A socket with a send buffer, like the real one. `write` takes what fits
+   * and returns how much it took, and only `empty` makes room again. `taken`
+   * is everything the peer would actually receive.
    */
   function fakeSocket(buffer: number) {
     const taken: number[] = [];
@@ -501,7 +507,7 @@ describe("a socket that will not take it all at once", () => {
           return wrote;
         },
       },
-      /** The peer read: room again, which is when Bun calls `drain`. */
+      /** The peer read, so there is room again. Bun calls `drain` here. */
       empty() {
         room = buffer;
       },
@@ -515,10 +521,9 @@ describe("a socket that will not take it all at once", () => {
     const out = socketWriter(peer.socket);
 
     out.write(counting(20));
-    // Eight bytes fit. The other twelve are this end's to remember: discarding
-    // what `write` did not take is the truncation this whole seam exists to
-    // stop, and it is silent — the reader is left waiting on a frame length
-    // whose bytes never come.
+    // Eight bytes fit, and socketWriter holds the other twelve. Discarding
+    // what `write` did not take truncates the stream with no error anywhere:
+    // the reader waits on a frame length whose bytes never come.
     expect(peer.taken.length).toBe(8);
 
     peer.empty();
@@ -559,8 +564,8 @@ describe("a socket that will not take it all at once", () => {
     });
     out.write(counting(100));
     out.drain();
-    // Once per attempt and no more: a loop that treated -1 as "try again"
-    // would burn a core against a dead peer.
+    // One write per attempt and no more. A loop that treated -1 as "try again"
+    // would spin against a dead peer.
     expect(calls).toBe(2);
   });
 
@@ -576,9 +581,9 @@ describe("a socket that will not take it all at once", () => {
   });
 
   test("a response larger than the buffer arrives whole", () => {
-    // The shape of the bug this seam was written for: 291KB of note text
-    // through a send buffer of 8KB, which is what macOS gives a unix socket.
-    // Before this, the reader got the first 8KB and then nothing, forever.
+    // The bug this seam was written for: 291KB of note text through the 8KB
+    // send buffer macOS gives a unix socket. Without socketWriter the reader
+    // got the first 8KB and then nothing.
     const peer = fakeSocket(8 * 1024);
     const out = socketWriter(peer.socket);
     const note = counting(291 * 1024);
@@ -595,10 +600,10 @@ describe("a socket that will not take it all at once", () => {
 // --- what phase 4 added -------------------------------------------------------
 
 describe("bytes ride binary frames rather than base64 (remote.md §3)", () => {
-  // The saving is on the WIRE only: the schema still says base64 and the view
-  // still receives it, because Electrobun's bridge is JSON either way. So the
-  // assertion is in two halves — the payload arrives intact, and the bytes did
-  // not travel inflated.
+  // The saving is on the wire only. The schema still says base64 and the view
+  // still receives base64, because Electrobun's bridge is JSON either way
+  // (wire.ts BINARY_FIELDS). So these tests assert two things: the payload
+  // arrives intact, and the bytes did not travel inflated.
   test("a pasted image's bytes cross as bytes and arrive as the same base64", async () => {
     const pipe = pipePair();
     const seen: unknown[] = [];
@@ -612,8 +617,8 @@ describe("bytes ride binary frames rather than base64 (remote.md §3)", () => {
       }),
     );
     const client = clientConnection(pipe.b, { push: recordingPush().push, build: "0.1.0" });
-    // A PNG header plus a byte that is not valid UTF-8 on its own, which is
-    // the whole reason these payloads are base64 in the schema.
+    // A PNG header plus a byte that is not valid UTF-8 on its own. Payloads
+    // like this are why the schema carries them as base64.
     const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0xff, 0xfe, 0x00, 0x01]);
     const dataB64 = Buffer.from(bytes).toString("base64");
     expect(await client.requests.assetWrite({ root: "/w", notePath: null, dataB64 })).toEqual({
@@ -629,8 +634,8 @@ describe("bytes ride binary frames rather than base64 (remote.md §3)", () => {
     const { push, seen } = recordingPush();
     const client = clientConnection(pipe.b, { push, build: "0.1.0" });
     await client.ready;
-    // Bytes that are not valid UTF-8: a payload that survived the trip as
-    // bytes rather than as text is the assertion.
+    // Bytes that are not valid UTF-8, so a trip that handled them as text
+    // would mangle them. The assertion is that the payload arrives unchanged.
     const bytes = new Uint8Array(3000).fill(0xab);
     server.push.terminalOutput({ sessionId: "s1", dataB64: Buffer.from(bytes).toString("base64") });
     await settle();
@@ -661,9 +666,9 @@ describe("bytes ride binary frames rather than base64 (remote.md §3)", () => {
 });
 
 describe("terminal output is coalesced (remote.md §3)", () => {
-  // Reassembles what the wire took apart: terminal output leaves as a binary
-  // frame followed by a control frame with the field blanked, so a tap that
-  // only read control frames would see every payload as empty.
+  // Reassembles what the wire took apart. Terminal output leaves as a binary
+  // frame followed by a control frame with dataB64 blanked, so a tap that read
+  // only control frames would see every payload as empty.
   function tap(pipe: { a: Endpoint; b: Endpoint }) {
     const decoder = new FrameDecoder();
     const control: WireMessage[] = [];
@@ -687,9 +692,9 @@ describe("terminal output is coalesced (remote.md §3)", () => {
 
   const outputs = (msgs: WireMessage[]) => msgs.filter((m) => m.t === "push" && m.m === "terminalOutput");
 
-  // Nagle's shape, not a fixed delay: an echoed keystroke must not wait, so
-  // the first chunk after a quiet moment goes out at once and only a shell
-  // that is producing CONTINUOUSLY is batched.
+  // Nagle's shape rather than a fixed delay. The first chunk after a quiet
+  // moment goes out at once, so an echoed keystroke is never delayed. Only a
+  // shell producing continuously is batched onto the interval.
   test("the first chunk after a quiet moment is not held", async () => {
     const pipe = pipePair();
     const server = serverConnection(pipe.a, { build: "0.1.0", coalesce: { ms: 40 } });
@@ -734,9 +739,10 @@ describe("terminal output is coalesced (remote.md §3)", () => {
     expect(byId.get("b")).toBe("2");
   });
 
-  // The ordering rule, and the reason it is not optional: terminalAttach's
-  // answer IS the scrollback up to that instant. Output held back from before
-  // it would be painted on top of a snapshot that already contains it.
+  // Every message other than a terminalOutput push flushes the coalescer first
+  // (bun/transport.ts send). terminalAttach's answer is the scrollback up to
+  // that instant, so output held from before it would be painted on top of a
+  // snapshot that already contains it.
   test("held output is flushed before anything else is sent", async () => {
     const pipe = pipePair();
     const server = serverConnection(pipe.a, { build: "0.1.0", coalesce: { ms: 200 } });
@@ -753,8 +759,8 @@ describe("terminal output is coalesced (remote.md §3)", () => {
 });
 
 describe("a replayed request applies once (remote.md §7)", () => {
-  // The op log belongs to the SERVER and is handed to each connection, because
-  // the whole point is that it survives the connection that filled it.
+  // The op log belongs to the server and is handed to each connection, so it
+  // survives the connection that filled it.
   function twoConnections(handlerMap: RequestHandlers) {
     const ops = createOpLog();
     const open = () => {
@@ -788,9 +794,9 @@ describe("a replayed request applies once (remote.md §7)", () => {
     expect(reads).toBe(2);
   });
 
-  // Different clients count from 1 independently, so the window has to be
-  // scoped by who is asking or two apps on one machine would answer each
-  // other's writes.
+  // The op log keys on the client as well as the op id (bun/transport.ts
+  // dispatch), so a recorded outcome only ever answers the client that made
+  // it. The two clients here send the same op id to make that key do the work.
   test("two clients' op ids do not collide", async () => {
     let writes = 0;
     const ops = createOpLog();
@@ -822,10 +828,10 @@ describe("a server and the clients that probe it", () => {
     return { server, client };
   }
 
-  // Answered by the transport rather than dispatched into the handler map,
-  // which is the whole reason it is a frame and not a request: the map arrives
-  // once the vault has loaded, and a probe queued behind a slow boot would
-  // report a dead server that is merely starting.
+  // A ping is a frame the transport answers, not a request dispatched into the
+  // handler map. The map arrives only once the vault has loaded, so a probe
+  // queued behind a slow boot would report a dead server that is merely
+  // starting.
   test("a probe is answered before the server has a single handler", async () => {
     const { client } = listen({ serve: false });
     client.send({ t: "ping" });
@@ -845,9 +851,9 @@ describe("a server and the clients that probe it", () => {
     expect(client.heard.filter((m) => m.t === "pong").length).toBe(5);
   });
 
-  // The ghost this exists for: a wire that black-holes leaves the daemon a
-  // connection nobody will ever close, its sessions open and its idle exit
-  // never armed.
+  // The watchdog exists for a wire that black-holes. Without it the daemon
+  // keeps a connection nobody will ever close, with its sessions open and its
+  // idle exit never armed (bun/daemon.ts arms it only at zero clients).
   test("a client that says nothing is collected, and told nothing", async () => {
     await quiet(async () => {
       const beats = ticker();
@@ -858,15 +864,14 @@ describe("a server and the clients that probe it", () => {
       beats.beat();
       await settle();
       expect(client.isClosed()).toBe(true);
-      // No `bye`, and that is deliberate: a farewell is a decision the client
-      // is meant to read and stop re-dialling over (shared/transport.ts), and
-      // this one is not reading anything.
+      // No `bye`. A farewell tells the client to stop re-dialling
+      // (shared/transport.ts), and this client is not reading anything.
       expect(client.heard.some((m) => m.t === "bye")).toBe(false);
     });
   });
 
-  // A socket that connects and never identifies itself used to sit there for
-  // as long as the process did.
+  // The same watchdog collects a socket that connects and never greets
+  // (bun/transport.ts), which would otherwise sit there as long as the process.
   test("a socket that never greets is collected too", async () => {
     await quiet(async () => {
       const beats = ticker();
@@ -879,17 +884,18 @@ describe("a server and the clients that probe it", () => {
     });
   });
 
-  // Both ways a connection ends, because they are different code paths and the
-  // second is the ordinary one: a client hanging up is not this server
-  // deciding to. A watchdog left behind by either is a timer per dropped
-  // connection, forever, on the process meant to outlive them all.
+  // This test and the next cover the two ways a connection ends, which are
+  // different code paths. The second is the ordinary one: a client hanging up
+  // is not this server deciding to. A watchdog left running by either leaves
+  // the daemon one timer per dropped connection, on a process meant to outlive
+  // them all.
   test("the watchdog stops when the server closes the connection", () => {
     const beats = ticker();
-    // Over a duplex whose close() does not call back, because a pipe's does:
-    // closing one end of a pipe hangs up the other, which would clear this by
-    // the path the test below is about and prove nothing about this one.
-    // Duplex promises no such courtesy — fedDuplex gives none
-    // (shared/transport.ts), and that is what the iOS shell hands over.
+    // A bare duplex, because closing one end of a pipe hangs up the other:
+    // that would clear the watchdog by the path the next test covers and prove
+    // nothing about this one. Duplex does not require close() to call back,
+    // and fedDuplex does not (shared/transport.ts). The daemon wraps every
+    // socket it accepts in a fedDuplex (bun/daemon.ts).
     const bare: Duplex = { write: () => {}, close: () => {} };
     const server = serverConnection(bare, { build: "0.1.0", silentMs: 40_000, repeat: beats.repeat });
     expect(beats.running()).toBe(1);
@@ -909,8 +915,8 @@ describe("a server and the clients that probe it", () => {
 });
 
 describe("a client that reconnects", () => {
-  /** A server behind a dial() that can be cut and rebuilt, which is what a
-   * dropped ssh looks like from this side. */
+  /** A server behind a dial() that can be cut and rebuilt. That is what a
+   * dropped ssh looks like from the client's side. */
   function reconnectable(handlerMap: RequestHandlers, opts: { instance?: () => string; holdMax?: number } = {}) {
     const ops = createOpLog();
     let current: { server: ServerConnection; pipe: ReturnType<typeof pipePair>; blackHole: () => void } | null = null;
@@ -919,9 +925,9 @@ describe("a client that reconnects", () => {
       dials += 1;
       const pipe = pipePair();
       // A wire that can stop carrying bytes without closing: no FIN, no RST,
-      // no exit, nothing for either end to notice. `cut` below is a wire that
-      // ENDED, which every test but one here is about; this is the one that
-      // only the heartbeat can end.
+      // no exit, nothing for either end to notice. `cut` below ends the wire
+      // instead, and that is what every test here but one uses. Only the
+      // heartbeat can end a black-holed wire.
       let carrying = true;
       const onwards = { a: pipe.a.write, b: pipe.b.write };
       pipe.a.write = (bytes) => {
@@ -950,11 +956,12 @@ describe("a client that reconnects", () => {
     };
   }
 
-  // A ladder with no waiting in it, and no beat after it. `retryEveryMs: 0` is
-  // the heartbeat's `everyMs: 0` one layer up: the tests below that are about
-  // giving up need the moment the ladder ends to be an ENDING, and a fixture
-  // whose sleep resolves instantly would otherwise dial in a tight loop. The
-  // beat has its own tests, with a sleep it can be watched through.
+  // A ladder with no waiting in it, and no retry beat after it. `retryEveryMs:
+  // 0` is the heartbeat's `everyMs: 0` one layer up: the off switch for a test
+  // that is not about it. Without it a sleep that resolves instantly would dial
+  // in a tight loop, and the tests below about giving up need the ladder's end
+  // to be an end. The beat has its own tests further down, with a sleep they
+  // can control.
   const instant = { delaysMs: [0, 0, 0], sleep: () => Promise.resolve(), retryEveryMs: 0 };
 
   test("a request in flight when the wire drops is finished by the next connection", async () => {
@@ -978,18 +985,18 @@ describe("a client that reconnects", () => {
     await settle();
     wire.cut();
     release();
-    // The first connection ran it; the replay is answered from the record, so
+    // The first connection ran it. The replay is answered from the record, so
     // the caller gets an answer and the file was written once.
     expect(await pending).toEqual({ mtimeMs: 1, divergedTo: null });
     expect(writes).toBe(1);
     expect(wire.dials()).toBe(2);
   });
 
-  // The ask is a property of the CLIENT, not of one connection. A reconnect
-  // that dropped it would hold nothing for the app switch after this one, which
-  // is exactly when a phone needs it (ios.md §5) — and the ladder's ordinary
-  // job is a wire that flapped, so the next connection is usually the one that
-  // will be suspended.
+  // The session hold belongs to the client, not to one connection, so every
+  // dial re-states it (shared/transport.ts). A reconnect that dropped it would
+  // hold nothing for the next app switch, which is when a phone needs it
+  // (ios.md §5). The ladder's ordinary job is a wire that flapped, so the next
+  // connection is usually the one that gets suspended.
   test("every dial re-states the session hold", async () => {
     const wire = reconnectable(handlers(), { holdMax: 600_000 });
     const client = await reconnectingClient({
@@ -1006,11 +1013,10 @@ describe("a client that reconnects", () => {
     expect(wire.hold()).toBe(300_000);
   });
 
-  // The failure everything else in this file is unable to produce, and the one
-  // the heartbeat was written for. Every other test here drops a wire by
-  // CLOSING it, which tells this end immediately. A network that goes away
-  // does neither: no FIN, no RST, no exit, and until the probes went unanswered
-  // there was nothing to notice.
+  // The failure the heartbeat was written for, and the only test here that
+  // produces it. Every other test drops a wire by closing it, which tells this
+  // end at once. A network that goes away sends nothing: no FIN, no RST, no
+  // exit. Unanswered probes are the only sign of it.
   test("a wire that stops carrying bytes is noticed, and the ladder climbs back", async () => {
     const beats = ticker();
     const states: string[] = [];
@@ -1025,8 +1031,8 @@ describe("a client that reconnects", () => {
     });
     wire.blackHole();
 
-    // Four beats: one that heard the hello, then three probes into the dark.
-    // Nothing has been decided, and nothing has been said to anybody.
+    // Four beats: the first still counts the hello as traffic, then three
+    // probes go unanswered. Nothing is decided yet and no state is announced.
     beats.beat(4);
     expect(states).toEqual([]);
     expect(wire.dials()).toBe(1);
@@ -1035,7 +1041,8 @@ describe("a client that reconnects", () => {
     expect(await client.requests.vaultState({})).toEqual({ state: "locked" });
     expect(wire.dials()).toBe(2);
     expect(states).toEqual(["reconnecting", "live"]);
-    // The dead connection's timer went with it, and the new one has its own.
+    // The dead connection's timer stopped with it, and the new connection runs
+    // one of its own.
     expect(beats.running()).toBe(1);
   });
 
@@ -1062,9 +1069,9 @@ describe("a client that reconnects", () => {
     expect(states).toEqual(["reconnecting", "live"]);
   });
 
-  // A handler saying no is an ANSWER, and answers are final. Only a transport
-  // failure is worth replaying, or every refusal would be retried against a
-  // server that already refused it.
+  // A handler saying no is an answer, so it is final. Only a transport failure
+  // is replayed (shared/transport.ts ConnectionLost). Otherwise every refusal
+  // would be retried against a server that already refused it.
   test("a refusal is reported, not replayed", async () => {
     const wire = reconnectable(handlers());
     const client = await reconnectingClient({ dial: wire.dial, push: recordingPush().push, build: "0.1.0", ...instant });
@@ -1091,16 +1098,11 @@ describe("a client that reconnects", () => {
     await expect(pending).rejects.toThrow("the server restarted");
   });
 
-  // And then talks to it. Refusing was the old answer, and it made the ordinary
-  // overnight case unrecoverable without a human: the daemon idles out a minute
-  // after its last client leaves, so a laptop that slept ALWAYS wakes to a
-  // different process than the one it left.
-  //
-  // The pair of announcements is the load-bearing part. `lost` is what suspends
-  // saving above and `live` is what settles the buffers against a server that
-  // has moved on (notes/store.ts, workspace/editorPool.ts), so a restart that
-  // reported only `live` would let a stale buffer win exactly the argument this
-  // whole phase is about.
+  // The client reconnects to a restarted server rather than refusing it. The
+  // daemon idles out a minute after its last client leaves (bun/daemon.ts), so
+  // a laptop that slept wakes to a different process than the one it left, and
+  // refusing meant somebody had to fix that overnight case by hand. Both
+  // announcements matter: remote.md §7 says what `lost` and `live` settle.
   test("and then talks to it, saying plainly that everything it was holding is gone", async () => {
     let n = 0;
     const wire = reconnectable(handlers(), { instance: () => `run-${++n}` });
@@ -1121,8 +1123,9 @@ describe("a client that reconnects", () => {
     ]);
   });
 
-  // The op line, drawn where the op log draws it: a write cannot be replayed
-  // into an empty record, and a read is a question about right now.
+  // Only a request carrying an op is failed across a restart (wire.ts
+  // needsOp). A write replayed into an empty record could apply twice. A read
+  // asks about right now, so any server can answer it.
   test("a read in flight across a restart is carried; a write is not", async () => {
     let n = 0;
     let slow!: () => void;
@@ -1147,9 +1150,9 @@ describe("a client that reconnects", () => {
     expect(await read).toEqual({ state: "locked" });
   });
 
-  // With no beat under it (`retryEveryMs: 0`), which is the shape a one-shot
-  // wants: a client with somewhere else to be should not be kept alive by its
-  // own hope. The app's shape is the test below this one.
+  // With no retry beat under it (`retryEveryMs: 0`), the shape a one-shot
+  // wants: a client with somewhere else to be stops instead of dialling
+  // forever. The app's shape, which keeps dialling, is tested further down.
   test("a ladder that runs out gives up, says the last reason, and stops pretending", async () => {
     let alive = true;
     let cut!: () => void;
@@ -1174,31 +1177,30 @@ describe("a client that reconnects", () => {
     await settle();
     alive = false;
     cut();
-    // What was in flight is failed with the reason, rather than waiting on a
-    // wire that is not coming back.
+    // The request in flight fails with the dial's reason instead of waiting
+    // on a wire that is not coming back.
     await expect(pending).rejects.toThrow("host is down");
     expect(states.at(-1)).toContain("lost:");
-    // And nothing new is accepted: an app that keeps taking requests for a
+    // New requests are refused too. An app that keeps taking requests for a
     // server it cannot reach looks like it is working.
     await expect(client.requests.vaultState({})).rejects.toThrow("There is no connection to the server.");
   });
 
   // --- and the ladder that does not end -----------------------------------
   //
-  // Every test above turns the beat off, because they are about the ladder.
-  // These are about what happens after it, which is the difference between an
-  // outage that costs a pause and one that costs the session: a closed lid, a
-  // flight, a hotel with a captive portal are all longer than thirty seconds,
-  // and all of them used to be permanent.
+  // Every test above sets `retryEveryMs: 0`, because they are about the
+  // ladder. These are about the beat that runs after it. An outage longer than
+  // the ladder used to be permanent: a closed lid, a flight, a hotel with a
+  // captive portal.
 
-  /** A sleep held open, so a beat can be watched rather than waited for. Every
-   * `sleep` in the client comes through here — the ladder's rungs and the beat
-   * alike — so a test says exactly how many waits it is releasing. */
+  /** A sleep that stays open until a test releases it. Every `sleep` in the
+   * client comes through here, the ladder's rungs and the beat alike, so a
+   * test controls exactly how many waits it is releasing. */
   function pacer() {
     let waiting: Array<() => void> = [];
     return {
       sleep: () => new Promise<void>((resolve) => waiting.push(resolve)),
-      /** Let every current wait finish, and let what it starts settle. */
+      /** Resolves every wait outstanding now, then settles what they start. */
       async release(): Promise<void> {
         for (const resolve of waiting.splice(0)) resolve();
         await settle();
@@ -1207,8 +1209,8 @@ describe("a client that reconnects", () => {
     };
   }
 
-  /** A server that can be taken away and put back, which is a network rather
-   * than a peer: `dial` throws while it is down, exactly as ssh does. */
+  /** A server that can be taken away and put back, standing in for a network
+   * rather than a peer. While it is down `dial` throws, the way ssh does. */
   function flaky() {
     let up = true;
     let dials = 0;
@@ -1262,10 +1264,10 @@ describe("a client that reconnects", () => {
     client.close();
   });
 
-  // The half that must NOT change with it. A beating client is still lost, and
-  // lost still means an answer now rather than a wait: a request that hung on
-  // the next half-minute would be the disconnected app that looks like a working
-  // one, which is the whole thing this is for.
+  // The beat does not change what `lost` means. A request made while the beat
+  // is running fails at once instead of waiting for the next dial. Waiting on
+  // a wire that is dialled every half minute would make a disconnected app
+  // look like a working one.
   test("a client that is still trying is still lost, and says so at once", async () => {
     const net = flaky();
     const beats = pacer();
@@ -1284,9 +1286,9 @@ describe("a client that reconnects", () => {
     client.close();
   });
 
-  // What a woken laptop, a network coming back and a pressed button all reach.
-  // Worth its own path because the beat is half a minute wide: a lid that opens
-  // onto a working network should not spend any of it.
+  // `recheck` is what a woken laptop, a network coming back and a pressed
+  // Reconnect button all call. The beat is half a minute wide, so a lid that
+  // opens onto a working network would otherwise wait through it.
   test("a recheck brings the next beat forward instead of waiting for it", async () => {
     const net = flaky();
     const beats = pacer();
@@ -1311,9 +1313,9 @@ describe("a client that reconnects", () => {
     client.close();
   });
 
-  // A client that has been closed is finished, and a beat that outlived it
-  // would dial a server the app has already let go of — on a switch, that is
-  // an ssh child spawned against the machine you just left.
+  // A beat that outlived `close` would dial a server the app has already let
+  // go of. On a connection switch that is an ssh child spawned against the
+  // machine the app just left.
   test("closing stops the beat", async () => {
     const net = flaky();
     const beats = pacer();
@@ -1336,10 +1338,10 @@ describe("a client that reconnects", () => {
     expect(net.dials()).toBe(spent);
   });
 
-  // The same rule one step later, and the beat is what makes it ordinary: a
-  // lost client sits in a dial for half a minute at a time, so a switch lands
-  // in the middle of one routinely. Adopting what comes back would put a live
-  // wire on a closed client, pointed at the machine the app just left.
+  // The same rule one dial later. A lost client waits half a minute between
+  // dials, so a connection switch usually closes it mid-wait. Adopting the
+  // connection that lands would put a live wire on a closed client, pointed at
+  // the machine the app just left.
   test("a dial that lands after the client was closed is thrown away", async () => {
     const net = flaky();
     const beats = pacer();
@@ -1355,21 +1357,19 @@ describe("a client that reconnects", () => {
     await settle();
     await beats.release();
 
-    // The server is back, and the beat is released in the same breath as the
-    // close: the dial succeeds, and finds a client that has finished.
+    // The server is back and the beat is released just after the close, so
+    // the dial succeeds and finds a client that has already finished.
     net.up();
     client.close();
     await beats.release();
     await expect(client.requests.vaultState({})).rejects.toThrow("There is no connection to the server.");
   });
 
-  // A wire cannot say anything, so a reason means the server DECIDED. The
-  // ladder is for the other case, and running it against a decision is an
-  // argument with a server that has already answered: the daemon serves one
-  // client and gives the session to whoever dialled last, so two clients that
-  // both re-dialled "another client connected" would displace each other for
-  // as long as both were running, several times a second, at an ssh handshake
-  // and a server process per turn.
+  // A broken wire carries no reason, so a `bye` with one means the server
+  // chose to hang up, and the ladder answers the broken wire only. The daemon
+  // replaces a connection with a later one from the same client
+  // (bun/daemon.ts). If the displaced connection re-dialled, the two would
+  // replace each other for as long as both ran, at an ssh handshake per turn.
   test("a server that says goodbye is not dialled again", async () => {
     const wire = reconnectable(handlers());
     const states: string[] = [];
@@ -1383,17 +1383,17 @@ describe("a client that reconnects", () => {
     wire.bye("another client connected to this server");
     await settle();
     expect(wire.dials()).toBe(1);
-    // In the server's own words, because "the connection dropped" would send
-    // the user looking at their network for something that is not there.
+    // The server's own words. "The connection dropped" would send the user
+    // looking at their network for a fault that is not there.
     expect(states).toEqual(["lost:Disconnected: another client connected to this server."]);
     await expect(client.requests.vaultState({})).rejects.toThrow("There is no connection to the server.");
   });
 
-  // The whole point of the split. A ladder that ran out is a wire nobody could
-  // ask, and it keeps asking; a `bye` is an answer, and no amount of beating
-  // improves on it. Displacement is what bites: the daemon serves one client and
-  // gives the session to whoever dialled last, so two beating clients would kick
-  // each other off twice a minute forever, at an ssh handshake apiece.
+  // The beat does not resume after a final `bye` either. A spent ladder means
+  // nobody answered, so dialling again is worth trying; a `bye` is an answer.
+  // A displaced connection that kept beating would take the client back from
+  // the connection that replaced it, twice a minute forever, at an ssh
+  // handshake apiece.
   test("and a beat does not talk it round", async () => {
     const wire = reconnectable(handlers());
     const beats = pacer();
@@ -1414,12 +1414,12 @@ describe("a client that reconnects", () => {
     client.close();
   });
 
-  // The exception, and the one the shipped daemon actually sends: a server that
-  // says it is COMING BACK has decided about this connection and not about this
-  // client (wire.ts `bye`). Every graceful stop is this — an idle exit, a
-  // `systemctl restart`, the SIGTERM behind a `pkill` — and reading it as final
-  // left the window disconnected with a Reconnect that had nothing to dial,
-  // recoverable only by opening another one.
+  // The exception, and the one the daemon sends (bun/daemon.ts stop). A server
+  // saying it is coming back has decided about this connection, not about this
+  // client (wire.ts `bye`). Every graceful stop is this: an idle exit, a
+  // `systemctl restart`, the SIGTERM behind a `pkill`. Reading it as final left
+  // the window disconnected with a Reconnect that had nothing to dial, until
+  // someone opened another window.
   test("but a server that says it is coming back is dialled again", async () => {
     const wire = reconnectable(handlers());
     const states: string[] = [];
@@ -1433,19 +1433,18 @@ describe("a client that reconnects", () => {
     wire.bye("this server is shutting down", true);
     await settle();
     expect(wire.dials()).toBe(2);
-    // In the server's own words on the way down, too: "the connection dropped"
-    // about a server that said it was stopping sends the user to look at their
-    // network for something that is not there.
+    // The server's own words on the way down, too. Saying "the connection
+    // dropped" about a server that announced it was stopping sends the user
+    // looking at their network for a fault that is not there.
     expect(states).toEqual(["reconnecting:This server is shutting down. Reconnecting…", "live:"]);
     expect(await client.requests.vaultState({})).toBeDefined();
     client.close();
   });
 
-  // The button, in the one state where it used to be a button that did nothing
-  // (interactions.md §4-1). A client told the goodbye was final dials for
-  // nobody — but a person pressing Reconnect is not the client guessing, it is
-  // the one fact the client cannot have, which is that somebody can see the
-  // machine is back.
+  // The Reconnect button, in the one state where it used to do nothing
+  // (interactions.md §4-1). A client told the goodbye was final never dials
+  // again on its own. The press supplies the one fact the client cannot have:
+  // a person can see the machine is back.
   test("and a press dials even a client that was told the goodbye was final", async () => {
     const wire = reconnectable(handlers());
     const states: string[] = [];
@@ -1467,8 +1466,8 @@ describe("a client that reconnects", () => {
     client.close();
   });
 
-  // And it is one dial per press rather than a second ssh child racing the
-  // first: everywhere else the wire is already dialling, a press is nothing.
+  // One dial per press, not a second ssh child racing the first. A press does
+  // nothing while the client is already dialling.
   test("a press while something is already dialling is the no-op it should be", async () => {
     const wire = reconnectable(handlers());
     const beats = pacer();
@@ -1492,19 +1491,19 @@ describe("a client that reconnects", () => {
     client.close();
   });
 
-  // The general shape of the same failure, for every cause that does NOT come
-  // with a bye: a server that crashes as it boots, an ssh killed with its
-  // session, a forced command that exits. The ladder ends, but it used to start
-  // over on every success, so a connection that died the moment it was made had
-  // an unbounded budget one rung at a time.
+  // The same failure with no `bye` behind it: a server that crashes as it
+  // boots, an ssh killed with its session, a forced command that exits. The
+  // ladder used to start over on every success, so a connection that died the
+  // moment it was made had an unbounded budget one rung at a time
+  // (shared/transport.ts STEADY_MS).
   test("a connection that dies as soon as it is made does not buy a fresh ladder", async () => {
     let dials = 0;
     const dial = (): Duplex => {
       dials += 1;
       const pipe = pipePair();
-      // Cut on the handshake and not before it: a dial that never completed is
-      // an ordinary failure, and what has to be caught here is the one that
-      // LOOKS like a recovery.
+      // Cut on the handshake rather than before it. A dial that never
+      // completed is an ordinary failure; this one connects first, so it
+      // counts as a recovery before it dies.
       const server = serverConnection(pipe.a, {
         build: "0.1.0",
         instance: "one-server",
@@ -1519,23 +1518,25 @@ describe("a client that reconnects", () => {
       push: recordingPush().push,
       build: "0.1.0",
       onState: (s, d) => states.push(`${s}:${d}`),
-      // A clock that does not move: every connection is instantaneous, which
-      // is the property being tested rather than a fixture's convenience.
+      // A clock that does not move, so every connection lasts zero ms and none
+      // of them reaches STEADY_MS. That is the case under test, not a
+      // fixture's convenience.
       now: () => 0,
       ...instant,
     });
     await settle();
-    // One boot dial plus the ladder's three rungs, and then it stops. The
-    // states alternate live/reconnecting the whole way, which is precisely what
-    // a user watching the indicator sees, and precisely why the count matters.
+    // One boot dial plus the ladder's three rungs, and then it stops. Each
+    // rung connects and drops, so the indicator alternates live and
+    // reconnecting the whole way. The dial count is what says the ladder was
+    // bounded.
     expect(dials).toBe(1 + instant.delaysMs.length);
     expect(states.at(-1)).toContain("lost:");
     await expect(client.requests.vaultState({})).rejects.toThrow("There is no connection to the server.");
   });
 
-  // The other half of the rule, and the one that would bite a real user: a
-  // connection that HELD earns the whole ladder back, so an ordinary drop on a
-  // long session is never mistaken for a flap.
+  // The other half of the rule. A connection that lasted STEADY_MS earns the
+  // whole ladder back, so an ordinary drop on a long session is not treated as
+  // a flap.
   test("a connection that held gets the whole ladder again", async () => {
     const wire = reconnectable(handlers());
     let clock = 0;
@@ -1546,7 +1547,7 @@ describe("a client that reconnects", () => {
       now: () => clock,
       ...instant,
     });
-    // Four drops, each after a connection that stood up for a minute. A ladder
+    // Four drops, each after a connection that held for a minute. A ladder
     // that only ever advanced would have run out on the fourth.
     for (let i = 0; i < 4; i++) {
       clock += 60_000;

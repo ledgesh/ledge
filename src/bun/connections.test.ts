@@ -1,13 +1,11 @@
-// The connection record and the ssh argv it becomes (remote.md §8, §4).
-//
-// Everything here is pure. The ssh hop itself is a native seam and belongs to
-// the live probe (testing.md §6), but WHICH command gets run is the security
-// posture of the whole transport, and that is a string comparison: an option
-// dropped in a refactor would turn a pinned connection into one that trusts
-// whoever answers, and nothing else in the system would notice.
-//
-// This machine's half only. What a destination and a pin ARE is both clients'
-// and is tested in shared/connections.test.ts.
+// The connection record and the ssh argv it becomes (remote.md §8, §4). This
+// machine's half only: a destination and a pin belong to both clients, and
+// shared/connections.test.ts covers them. Everything here is pure. The ssh hop
+// itself is a native seam left to the live probe (testing.md §6), but the
+// command that hop runs is the security posture of the whole transport, and
+// that is a string comparison: an option dropped in a refactor would leave a
+// pinned connection trusting whoever answers, and nothing else in the system
+// would notice.
 import { describe, expect, test } from "bun:test";
 import {
   explainDial,
@@ -50,24 +48,25 @@ describe("the ssh command", () => {
   });
 
   // A connection that names no port passes none, so ssh's own configuration
-  // decides — which is what keeps a `~/.ssh/config` alias's `Port` working. A
+  // decides. That is what keeps a `~/.ssh/config` alias's `Port` working. A
   // form defaulting to 22 and always sending it would override that silently.
   test("a port is passed only when the connection names one", () => {
     expect(argv).not.toContain("-p");
     const { argv: moved } = dial({ ...CONN, port: 2222 });
     expect(moved.join(" ")).toContain("-p 2222");
-    // Still ahead of the destination, which is where ssh takes its options.
+    // Still ahead of the destination, where ssh takes its options.
     expect(moved.indexOf("-p")).toBeLessThan(moved.indexOf("dev@laptop"));
   });
 
-  // This ssh has no terminal: its stdout IS the protocol. A prompt would hang
-  // the connection or write a question mark into a frame header.
+  // This ssh has no terminal, and its stdout carries the protocol. A prompt
+  // would hang the connection or write a question mark into a frame header.
   test("never prompts", () => {
     expect(argv).toContain("BatchMode=yes");
   });
 
-  // The blind accept remote.md §4 rules out. An unknown host is refused, a
-  // changed one is refused, and neither is remembered.
+  // StrictHostKeyChecking=yes rules out the blind accept remote.md §4 forbids.
+  // An unknown host is refused, a changed one is refused, and neither is
+  // remembered.
   test("refuses an unknown or changed host key", () => {
     expect(argv).toContain("StrictHostKeyChecking=yes");
   });
@@ -81,25 +80,26 @@ describe("the ssh command", () => {
     expect(argv).toContain("GlobalKnownHostsFile=/dev/null");
   });
 
-  // Both default to off, and off means a wire that stops carrying bytes without
-  // closing is never noticed: no FIN, no RST, and macOS does not probe an idle
-  // socket for two hours. Everything in shared/transport.ts hangs off the
-  // connection ending, so without these the reconnect ladder cannot run at all.
-  // A number here is a claim about how long that takes, so assert the numbers.
+  // Both options default to off. A wire that stops carrying bytes without
+  // closing sends no FIN and no RST. macOS does not probe an idle socket for
+  // two hours. Everything in shared/transport.ts hangs off the connection
+  // ending, and these options are one of the two ways a silent wire gets
+  // there; the protocol heartbeat in transport.ts is the other. The numbers
+  // set how long ssh takes to notice, so assert them.
   test("notices a wire that went silent without closing", () => {
     expect(argv).toContain("ServerAliveInterval=5");
     expect(argv).toContain("ServerAliveCountMax=3");
   });
 
-  // Dialling into that same hole hangs on the SYN or on the banner, and a rung
-  // of the ladder that never returns leaves a ladder with one rung.
+  // Dialling into that same hole hangs on the SYN or on the banner. A rung of
+  // the reconnect ladder that never returns stops the ladder there.
   test("gives up on a dial that goes unanswered", () => {
     expect(argv).toContain("ConnectTimeout=10");
   });
 
-  // Without -t there is no remote pty, and so no newline translation. A pty in
-  // this path would corrupt a length-prefixed protocol rather than break it
-  // visibly, which is the worst way for it to go wrong.
+  // Without -t there is no remote pty, and so no newline translation. A pty
+  // here would corrupt a length-prefixed protocol quietly rather than fail
+  // visibly.
   test("allocates no terminal", () => {
     expect(argv).not.toContain("-t");
   });
@@ -118,24 +118,27 @@ describe("the ssh command", () => {
   });
 
   // Spawned with no shell, so the destination is one argv element with no
-  // quoting of its own. What keeps that safe is the edge (validateConnection
-  // below), which is the same predicate a note's `host:` frontmatter gets.
+  // quoting of its own. The isHostName predicate guards both edges: a stored
+  // record whose destination fails it is dropped by parseConnection in
+  // connections.ts, and a form is refused by validateConnection in
+  // shared/connections.ts. A note's `host:` frontmatter gets the same one.
   test("the destination appears exactly once, and after every option", () => {
     expect(argv.filter((a) => a === "dev@laptop")).toHaveLength(1);
     expect(argv.indexOf("dev@laptop")).toBe(argv.lastIndexOf("-o") + 2);
   });
 
-  // Nothing about the key door needs one, and an environment set here would be
-  // an environment ssh passes to every child it forks.
+  // A key connection needs no environment, and anything set here would be
+  // passed on to every child ssh forks.
   test("a key connection asks for no environment", () => {
     expect(dial(CONN).env).toEqual({});
   });
 });
 
-// The other door (remote.md §4). Every claim here was measured against a real
-// password-only sshd before it was written down, and the one that reversed this
-// section is the first: BatchMode=yes suppresses SSH_ASKPASS entirely, force
-// included, so the helper is never spawned and no password is ever offered.
+// The password door (remote.md §4). Every claim here was measured against a
+// real password-only sshd before it was written down. The measurement that
+// reversed the section is the first test: BatchMode=yes suppresses SSH_ASKPASS
+// entirely, force included, so the helper is never spawned and no password is
+// ever offered.
 describe("the ssh command for a password connection", () => {
   const PASS: Connection = { ...CONN, auth: "password" };
   const { argv, env } = dial(PASS);
@@ -145,16 +148,15 @@ describe("the ssh command for a password connection", () => {
     expect(argv).not.toContain("BatchMode=yes");
   });
 
-  // What BatchMode was buying, bought by narrower options. Without this one an
-  // askpass that answers wrongly is retried up to the server's MaxAuthTries,
-  // which is the unbounded prompting a batch mode exists to prevent.
+  // Narrower options cover what BatchMode was covering. Without this one, an
+  // askpass that answers wrongly is retried up to the server's MaxAuthTries.
+  // That is the unbounded prompting a batch mode exists to prevent.
   test("asks once and gives up", () => {
     expect(argv).toContain("NumberOfPasswordPrompts=1");
   });
 
-  // The other half is unchanged, and has to be: it is what makes turning
-  // BatchMode off affordable, since a host key question is refused outright
-  // rather than asked.
+  // The host-key options are unchanged, and turning BatchMode off depends on
+  // that: a host-key question is refused outright rather than asked.
   test("still refuses an unknown or changed host key", () => {
     expect(argv).toContain("StrictHostKeyChecking=yes");
     expect(argv).toContain(`UserKnownHostsFile=${KNOWN} ${USER}`);
@@ -171,25 +173,25 @@ describe("the ssh command for a password connection", () => {
     expect(dial({ ...PASS, keyPath: "/home/dev/.ssh/ledge" }).argv).not.toContain("/home/dev/.ssh/ledge");
   });
 
-  // Both, because a great many sshd configurations answer with
-  // keyboard-interactive where this one would say password, and askpass serves
-  // both.
+  // Both methods are named because many sshd configurations answer with
+  // keyboard-interactive where this one would say password. The askpass helper
+  // serves both.
   test("names both of the methods a password can arrive by", () => {
     expect(argv).toContain("PreferredAuthentications=password,keyboard-interactive");
   });
 
-  // force rather than a bare SSH_ASKPASS, which OpenSSH ignores when there is
-  // no DISPLAY set — and there never is one here.
+  // `force` rather than a bare SSH_ASKPASS: OpenSSH ignores askpass when no
+  // DISPLAY is set, and nothing sets one here.
   test("points ssh at the helper and names which connection it is for", () => {
     expect(env["SSH_ASKPASS"]).toBe(ASKPASS);
     expect(env["SSH_ASKPASS_REQUIRE"]).toBe("force");
     expect(env[ASKPASS_ACCOUNT_ENV]).toBe(PASS.id);
   });
 
-  // The helper reads the password out of the keychain, so nothing here has one
-  // to leak. Pinned as an exact set rather than as three lookups: a fourth
-  // variable added here is inherited by every process ssh forks, and this is
-  // what makes adding one a decision instead of an accident.
+  // The helper reads the password out of the keychain, so no variable here
+  // carries one. The set is asserted exactly, not by three lookups. A fourth
+  // variable would be inherited by every process ssh forks, so adding one
+  // means changing this test too.
   test("passes exactly three variables, and no secret among them", () => {
     expect(Object.keys(env).sort()).toEqual(["SSH_ASKPASS", "SSH_ASKPASS_REQUIRE", ASKPASS_ACCOUNT_ENV].sort());
   });
@@ -208,9 +210,9 @@ describe("the stored list", () => {
     expect(selected).toBe(LOCAL_ID);
   });
 
-  // A record written before the field existed, and one whose port is nonsense,
-  // are the same thing to a reader: a connection that opens wherever ssh
-  // decides, which is where it opened before.
+  // A record written before the port field existed and one whose port is
+  // unusable read the same way. The connection opens wherever ssh decides,
+  // which is where it opened before.
   test("a missing or unusable port costs itself and not the record", () => {
     const read = (port: unknown) => parseConnections({ connections: [{ ...CONN, port }] }).connections[0]!;
     expect(parseConnections({ connections: [{ ...CONN, port: undefined }] }).connections[0]!.port).toBe(PORT_UNSET);
@@ -233,7 +235,7 @@ describe("the stored list", () => {
     expect(connections).toEqual([CONN]);
   });
 
-  // The local id names the server in this process. A stored entry wearing it
+  // The local id names the server in this process. A stored entry claiming it
   // could shadow the one connection that must always be reachable.
   test("a stored entry cannot claim the local id", () => {
     const { connections } = parseConnections({ connections: [{ ...CONN, id: LOCAL_ID }] });
@@ -245,8 +247,9 @@ describe("the stored list", () => {
     expect(connections).toEqual([CONN]);
   });
 
+  // The fallback is the local server, not some other stored connection.
   // Booting into the wrong machine is the failure remote.md §8 spends a
-  // paragraph on, so a dangling selection goes home rather than to a neighbour.
+  // paragraph on.
   test("a selection naming nothing falls back to the local server", () => {
     expect(parseConnections({ selected: "gone", connections: [CONN] }).selected).toBe(LOCAL_ID);
   });
@@ -265,9 +268,9 @@ describe("the pins file", () => {
     );
   });
 
-  // It is a projection of the records, never an input: a connection with no
-  // pin of its own (the user's ssh already trusted the host) contributes no
-  // line, and an empty file is a valid one.
+  // The file is a projection of the records, never an input. A connection with
+  // no pin of its own (the user's ssh already trusted the host) contributes no
+  // line, and an empty file is valid.
   test("connections with no pin contribute nothing", () => {
     expect(knownHostsText([{ ...CONN, hostKey: "" }])).toBe("");
     expect(knownHostsText([])).toBe("");
@@ -275,7 +278,7 @@ describe("the pins file", () => {
 });
 
 describe("reading what a host answered", () => {
-  // Real ssh-keyscan output: a banner comment per key, then the keys.
+  // Real ssh-keyscan output: a banner comment before each key.
   const SCAN = [
     "# laptop:22 SSH-2.0-OpenSSH_9.6",
     "laptop ssh-rsa AAAAB3NzaC1yc2E",
@@ -286,8 +289,8 @@ describe("reading what a host answered", () => {
   ].join("\n");
 
   // Pinning a key ssh will not negotiate refuses every connection with a
-  // message about a CHANGED host key, which is the most alarming possible
-  // wording for "we picked the wrong one".
+  // message about a changed host key. That is the most alarming wording ssh
+  // has, for what is only a wrong choice of key here.
   test("prefers the key type ssh itself prefers", () => {
     expect(pickHostKey(SCAN)).toBe("laptop ssh-ed25519 AAAAC3NzaC1lZDI1");
   });
@@ -320,11 +323,11 @@ describe("reading what a host answered", () => {
   });
 });
 
-// Every string below was taken from a real ssh, against a real sshd in Docker,
-// by pointing the client at a machine that had each fault in turn. The point of
-// the function is that the transport cannot tell these apart — all four reach
-// it as "the connection to the server closed" — so a paraphrase would be
-// testing the paraphrase.
+// Every string below came from a real ssh, against a real sshd in Docker, with
+// the client pointed at a machine carrying each fault in turn. The function
+// exists because the transport cannot tell these apart: all four reach it as
+// "the connection to the server closed". Paraphrased strings would test the
+// paraphrase.
 describe("why the dial failed", () => {
   test("the shell's word for a server that was never installed becomes the sentence that says so", () => {
     const said = explainDial("bash: line 1: ledge-server: command not found\n");
@@ -367,9 +370,9 @@ describe("why the dial failed", () => {
     expect(explainDial("Pseudo-terminal will not be allocated because stdin is not a terminal.\n")).toBeNull();
   });
 
-  // The far end saying it is UP, reported as the reason it could not be
-  // reached. It is the last line on stderr whenever the dial worked and the
-  // protocol then refused, which is every version mismatch.
+  // The banner says the server came up, so a failure message quoting it
+  // contradicts itself. It is the last line on stderr whenever the dial
+  // worked and the protocol then refused. A version mismatch does that.
   test("the server's own startup banner is not a diagnosis either", () => {
     expect(explainDial("[serve] ledge-server 0.1.0 attached to /home/linuxuser/.ledge/.server.sock\n")).toBeNull();
     expect(
@@ -382,8 +385,8 @@ describe("why the dial failed", () => {
     ).toBeNull();
   });
 
-  // Dropping the banner must not drop what came after it: a server that
-  // attached and then died says both, and the second one is the answer.
+  // Dropping the banner must not drop what came after it. A server that
+  // attached and then exited prints both lines, and the second is the answer.
   test("a fault after the banner is still the fault", () => {
     const said = ["[serve] ledge-server 0.1.0 attached to /home/linuxuser/.ledge/.server.sock", "Killed"].join("\n");
     expect(explainDial(said)).toBe("Killed");

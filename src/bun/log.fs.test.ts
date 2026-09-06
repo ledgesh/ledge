@@ -1,6 +1,6 @@
-// The log against a real filesystem: rotation, the size cap, and the promise
-// that a log write can never be the thing that fails. Same preload-scratch-home
-// arrangement and same guard as layout.fs.test.ts.
+// The log against a real filesystem: rotation, the size cap, and that a log
+// write never throws. Runs against the same scratch app home as
+// layout.fs.test.ts, behind the same guard.
 import { beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -31,8 +31,9 @@ describe("the session log", () => {
     expect(await read(LOG_PATH)).toBe("first\nsecond\n");
   });
 
-  // The point of the whole design: the session that crashed has to survive the
-  // relaunch that follows it, because relaunching is what everyone does first.
+  // startLogging rotates at launch (log.ts), so the log of the session that
+  // crashed survives the relaunch. Relaunching is the first thing anyone does
+  // after a crash. append rotates as well, at the size cap below.
   test("rotation moves the finished session aside, under a name that says so", async () => {
     append("the session that crashed\n");
     rotate();
@@ -56,9 +57,8 @@ describe("the session log", () => {
     expect(await read(LOG_PATH)).toBe("current\n");
   });
 
-  // A diagnostic that fills a disk is worse than the bug it was recording.
-  // Rotating rather than truncating keeps the recent end, which is the half a
-  // crash is in.
+  // The cap keeps the log from filling a disk. Rotating rather than
+  // truncating keeps the recent end of the log. A crash shows up at that end.
   test("a runaway log rotates itself and keeps writing", async () => {
     append("x".repeat(MAX_LOG_BYTES + 1));
     append("after the cap\n");
@@ -66,8 +66,9 @@ describe("the session log", () => {
     expect((await read(PREV_LOG_PATH))?.length).toBeGreaterThan(MAX_LOG_BYTES);
   });
 
-  // Logging must never be the second failure. A directory sitting where the
-  // file belongs is the cheapest way to make every write fail.
+  // write swallows its errors, so a logging call cannot add a failure of its
+  // own on top of the bug it was recording. Putting a directory where the log
+  // file belongs makes every write to it fail.
   test("a log that cannot be written is swallowed, not thrown", async () => {
     await rm(LOG_PATH, { force: true });
     await mkdir(LOG_PATH, { recursive: true });

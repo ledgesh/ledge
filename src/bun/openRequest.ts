@@ -1,17 +1,17 @@
-// The CLI → app channel: how `ledge <title>` tells a RUNNING (or about to
-// run) app which note to show. A request file in the app home, not a socket:
-// "external actors reach the app through the filesystem" is already how
-// agents' edits arrive (the watcher), it needs no always-listening ingress,
-// and the app home is where machine-written coordination files live. The CLI
-// resolves the title itself (same store, same rules) and writes the PATH;
-// the app consumes the file — read, delete, validate — and reveals the note.
+// The CLI-to-app channel: `ledge <title>` tells a running (or about to run)
+// app which note to show. The CLI resolves the title itself (same store, same
+// rules) and writes the path into a request file in the app home. The app
+// reads the file, deletes it, validates it, and reveals the note. Requests
+// travel through a file rather than a socket because external actors reach
+// the app through the filesystem, as agents' edits do through the watcher
+// (architecture.md §1).
 //
-// Trust: the file sits in user-writable ground, so its payload is treated
-// exactly like a view-supplied path (architecture.md §2) — it must resolve
-// inside a registered root and name a .md, and all it can cause is an editor
-// tab opening. The unlink here is not a note unlink (the §3 list is about
-// notes): this is Bun consuming its own coordination file, the writeNote
-// temp-file stance.
+// Trust: anyone who can write the app home can write this file, so its
+// payload is treated like a view-supplied path (architecture.md §2). It must
+// resolve inside a registered root and name a .md. The worst it can cause is
+// an editor tab opening. The unlink here is not a note unlink (the §3 list
+// covers notes): Bun removes a coordination file it wrote itself, as
+// writeNote does with its temp file after a failed save.
 import { join, resolve } from "node:path";
 import { readFile, rename, unlink, writeFile } from "node:fs/promises";
 import type { ExternalOpenInfo } from "../shared/rpc-schema";
@@ -21,15 +21,16 @@ import { APP_HOME, ensureAppHome, rootContaining } from "./workspaces";
 
 export const OPEN_REQUEST_PATH = join(APP_HOME, ".open-request.json");
 
-// A request is "open this NOW", not a standing instruction: one written while
-// the app was closed must cover the launch it triggered — seconds — and no
-// more. Without the cutoff, an app launched Tuesday would replay a wish
-// forgotten on Monday.
+// How long a request stays valid. A request means "open this now", not a
+// standing instruction. One written while the app was closed only has to
+// cover the launch it triggered. That takes seconds. Without the cutoff, an
+// app launched days later would open a note the user asked for long ago.
 export const OPEN_REQUEST_MAX_AGE_MS = 60_000;
 
 
-// The CLI's half. Temp-plus-rename like every machine write: the app's
-// watcher must never read half a request.
+// The CLI's half of the channel. Writes the request file with a temp file
+// plus rename, like every machine write, so the app's watcher never reads
+// half a request.
 export async function writeOpenRequest(path: string): Promise<void> {
   await ensureAppHome();
   const tmp = `${OPEN_REQUEST_PATH}.tmp-${process.pid}`;
@@ -42,11 +43,12 @@ export async function writeOpenRequest(path: string): Promise<void> {
   }
 }
 
-// The app's half: consume whatever request is pending. Always removes the
-// file first — a request that fails validation is spent, not retried; every
-// failure costs exactly the request. Returns null when there is nothing
-// valid to open (no file, someone else took it, stale, or a path the guards
-// refuse).
+// The app's half of the channel. Consumes whatever request is pending,
+// removing the file before validating anything. A bad request is therefore
+// spent rather than retried, and costs that one request and nothing more.
+// Returns null when there is nothing valid to open: no file exists, a racing
+// consumer took it, the request is older than OPEN_REQUEST_MAX_AGE_MS, or
+// the path guards refuse it.
 export async function takeOpenRequest(now: number = Date.now()): Promise<ExternalOpenInfo | null> {
   let raw: string;
   try {

@@ -3,16 +3,17 @@ import { join } from "node:path";
 import { APP_HOME, isInside, kindOf, uniqueName } from "./workspaces";
 
 // uniqueName and isInside moved here from notes.ts with the per-workspace
-// split (they guard workspace folders now too); their tests moved with them.
+// split, and these tests moved with them. They guard workspace folders now,
+// not just notes.
 
 describe("uniqueName", () => {
   test("takes the bare name when nothing is taken", () => {
     expect(uniqueName("untitled", new Set())).toBe("untitled.md");
   });
 
-  // APFS is case-insensitive by default, so "Foo.md" and "foo.md" are ONE file on
-  // macOS: a case-sensitive check would hand back a name whose rename silently
-  // clobbers the other note.
+  // On macOS, APFS is case-insensitive by default: an existing "Foo.md" and a
+  // wanted "foo.md" are one file. A case-sensitive check would hand back a
+  // name whose rename silently clobbers the existing note.
   test("comparison is case-insensitive, so a name cannot collide by case alone", () => {
     expect(uniqueName("untitled", new Set(["UNTITLED.md"]))).toBe("untitled-2.md");
     expect(uniqueName("notes", new Set(["Notes.md", "notes-2.MD"]))).toBe("notes-3.md");
@@ -75,9 +76,10 @@ describe("isInside", () => {
 });
 
 describe("kindOf", () => {
-  // kind is a fact about location, never a stored field: managed means "a
-  // direct child of APP_HOME", full stop. That equivalence is what lets the
-  // registry file carry bare paths.
+  // kind is derived from location, never stored, so the registry file can
+  // store bare paths. A direct child of APP_HOME is "managed". Anything else
+  // is "external". The docs folder is the exception: it sits directly under
+  // APP_HOME, and kindOf returns "docs" for it.
   test("a direct child of the app home is managed", () => {
     expect(kindOf(join(APP_HOME, "scratch"))).toBe("managed");
   });

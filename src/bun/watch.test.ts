@@ -1,5 +1,6 @@
-// The watcher's event filter — the pure half of bun/watch.ts. What may wake
-// the view is a policy, and these are its statements.
+// Tests for relevantChange, the event filter that is the pure half of
+// bun/watch.ts. The filter decides which filesystem events should refresh
+// the view.
 import { describe, expect, test } from "bun:test";
 import { relevantChange } from "./watch";
 
@@ -15,9 +16,11 @@ describe("relevantChange", () => {
   });
 
   test("a temp-plus-rename save counts UNDER ITS TEMP NAME — the platform reports it no other way", () => {
-    // The one event a coalesced atomic save fires is named for the dotted temp
-    // file; the note's name is embedded in it. Filtering this out blinds the
-    // watcher to Ledge's own saves and to atomic-writing agents.
+    // A temp-plus-rename save coalesces into one event. That event is named
+    // for the dotted temp file, and the note's name is embedded in the temp
+    // name. So the filter accepts a ".md" followed by a dot, not only one at
+    // the end of the name. Requiring a trailing ".md" would blind the watcher
+    // to Ledge's own saves and to atomic-writing agents.
     expect(relevantChange(".plan.md.tmp-123-1")).toBe(true);
     expect(relevantChange("sub/.plan.md.tmp-123-1")).toBe(true);
   });

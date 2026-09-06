@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { htmlFromScriptOutput } from "./clipboard";
 
-// Hex for `new TextEncoder().encode(text)`, the shape osascript prints.
+// Builds the raw-data literal osascript prints, `«data HTML…»`: the `prefix`
+// bytes then the UTF-8 bytes of `text`, all in hex.
 function literal(text: string, prefix: number[] = []): string {
   const bytes = [...prefix, ...new TextEncoder().encode(text)];
   return `«data HTML${bytes.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join("")}»\n`;

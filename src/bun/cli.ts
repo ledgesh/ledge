@@ -1,36 +1,31 @@
-// The Ledge CLI: notes from a shell prompt. `ledge` is an entry point beside
-// the app and the MCP server (architecture.md §1), built the same way the MCP
-// server is: a separate process that reuses the bun-side store — and it goes
-// one step further, dispatching through the SAME McpTool handlers agents
-// call. That reuse is the point, not a shortcut: title resolution, workspace
-// deixis, H1-slug naming, and the divergence guard have one definition, so
-// `ledge append` and an agent's append_note cannot drift apart, and the
-// running app perceives a CLI write exactly as it perceives an agent's — an
-// ordinary external edit, through its watcher.
+// The Ledge CLI: notes from a shell prompt. Like the MCP server, `ledge` is a
+// separate process that reuses the bun-side store, and it dispatches through
+// the same McpTool handlers agents call (architecture.md §1). Title
+// resolution, workspace deixis, H1-slug naming and the divergence guard
+// therefore have one definition, so `ledge append` and an agent's append_note
+// cannot drift apart. The running app sees a CLI write as an ordinary
+// external edit, through its watcher.
 //
-// Deixis: inside a note's terminal the environment already names "here"
-// ($LEDGE_NOTE / $LEDGE_WORKSPACE, architecture.md §2) and the handlers honor
-// it. The CLI adds the one shell-native fact the server never had: the
-// working directory. A cwd inside a registered root IS "here" — `ledge new`
-// in a project workspace creates there, ls/search scope there — expressed by
-// setting $LEDGE_WORKSPACE for the handler call rather than by a parallel
-// resolution rule, so cwd rides the existing precedence (an explicit
-// --workspace still outranks it, exactly as it outranks the env).
+// Deixis: inside a note's terminal, $LEDGE_NOTE and $LEDGE_WORKSPACE name
+// "here" (architecture.md §2) and the handlers honor them. The CLI adds the
+// working directory to that chain. A cwd inside a registered root is "here",
+// so `ledge new` in a project workspace creates there and ls and search scope
+// there. The CLI expresses that by setting $LEDGE_WORKSPACE around the
+// handler call, not by a parallel resolution rule. An explicit --workspace
+// outranks it, in the same way it outranks the env.
 //
-// Once notes can sit in FOLDERS, that fact goes one level deeper: a cwd below
-// the root names a folder as well as a workspace (cwdFolder), and ls, search,
-// tags and new honor it, because a shell command acting on the directory you
-// are standing in is the oldest contract there is. It rides as an argument
-// rather than an env var — there is no $LEDGE_FOLDER and should not be, since
-// a note's terminal spawns in $HOME or the note's own `cwd:`, neither of which
-// says anything about where the note is filed. Naming a workspace (-w) or
-// going wide (--all) means the whole of it; --folder outranks everything.
+// A cwd below the root names a folder as well (cwdFolder), which ls, search,
+// tags and new honor. The folder rides as an argument: there is no
+// $LEDGE_FOLDER and should not be, because a note's terminal spawns in $HOME
+// or the note's own `cwd:`, and neither says where the note is filed. Naming
+// a workspace (-w) or going wide (--all) means the whole of it; --folder
+// outranks everything.
 //
-// Output discipline: results go to stdout (raw text for `cat`, one row per
-// line for lists, the handler's JSON under --json), everything conversational
-// — errors, confirmations, truncation notes — to stderr, so a pipe never has
-// to strip chatter. Exit codes are conventional: 0 ok, 1 failure (including
-// a search with no hits, grep's contract), 2 usage.
+// Results go to stdout (raw text for `cat`, one row per line for lists, the
+// handler's JSON under --json) and everything conversational to stderr, so a
+// pipe never has to strip chatter. Exit codes: 0 ok, 1 failure (including a
+// search with no hits, grep's contract), 2 usage. interactions.md §9 governs
+// the verb table.
 import { homedir } from "node:os";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { serve } from "./mcp";
@@ -41,7 +36,7 @@ import { loadWorkspaces, rootContaining, roots, workspaceMatches } from "./works
 
 export { tildify }; // display formatting; defined in cliShim.ts so the app's install handler shares it
 
-/** The app's bundle identifier — how `open -b` finds it without a path. */
+/** The app's bundle identifier: how `open -b` finds it without a path. */
 export const BUNDLE_ID = "sh.ledge.app";
 
 // This module's own location: what an installed shim execs. Resolves to
@@ -67,9 +62,9 @@ export interface ParsedCli {
   flags: CliFlags;
 }
 
-// Hand-rolled argv parsing (§8: a flag loop is less code than a library's
-// config). Flags may sit anywhere; `--` ends flag parsing so a title that
-// starts with a dash stays reachable.
+// Hand-rolled argv parsing (architecture.md §8: a flag loop is less code than
+// a library's config). Flags may sit anywhere. `--` ends flag parsing, so a
+// title that starts with a dash stays reachable.
 export function parseCliArgs(argv: readonly string[]): ParsedCli | { error: string } {
   const flags: CliFlags = { json: false, all: false, help: false };
   const positionals: string[] = [];
@@ -112,16 +107,15 @@ export function parseCliArgs(argv: readonly string[]): ParsedCli | { error: stri
 }
 
 /**
- * The folder the caller is standing in, relative to their workspace root — the
- * cwd deixis one level deeper than the workspace. `cd ~/notes/projects` and
- * `ls`, `search` and `tags` narrow to `projects`, `new` creates there: the
- * shell contract, where a command acts on the directory you are in.
+ * The folder the caller is standing in, relative to their workspace root: the
+ * cwd deixis one level deeper than the workspace. After `cd ~/notes/projects`,
+ * `ls`, `search` and `tags` narrow to `projects` and `new` creates there.
  *
- * "" for a cwd that is the root itself, outside every root, or below a
- * dot-directory. That last case is Ledge's own storage (.ledge-trash,
- * .ledge-assets) and a project's .git: none of them is a place a note may go
- * (folderPathOf refuses them), so standing in one means the workspace, not an
- * error about a folder the caller never typed.
+ * Returns "" for a cwd that is the root itself, outside every root, or below
+ * a dot-directory. The dot-directories are Ledge's own storage (.ledge-trash,
+ * .ledge-assets) and a project's .git. No note may go in one (folderPathOf
+ * refuses them), so standing in one means the workspace rather than an error
+ * about a folder the caller never typed.
  */
 export function cwdFolder(cwd: string, root: string | null): string {
   if (root === null) return "";
@@ -131,9 +125,10 @@ export function cwdFolder(cwd: string, root: string | null): string {
   return parts.some((part) => part.startsWith(".")) ? "" : parts.join("/");
 }
 
-// A search hit's path the way a shell user reads one: relative when the hit
-// is under the cwd (the grep experience inside a workspace), ~-shortened
-// otherwise. Never "..", which reads as a riddle in a result list.
+// A search hit's path as a shell user reads one: relative when the hit is
+// under the cwd (what grep prints inside a workspace), ~-shortened otherwise.
+// Never a path starting with "..": the ~-shortened path it falls back to is
+// easier to read in a result list.
 export function hitPath(p: string, cwd: string, home: string = homedir()): string {
   const rel = relative(cwd, p);
   return rel === "" || rel.startsWith("..") ? tildify(p, home) : rel;
@@ -148,23 +143,22 @@ export function formatNoteList(
     title: n.title,
     date: n.modified.slice(0, 10),
     path: tildify(n.path, home),
-    // The `template:` frontmatter marker, surfaced where the notes are
-    // listed — the same discoverability move as the app's ⌥⌘N picker. A
-    // trailing tag, not a column: most rows have nothing to say. `(locked)`
-    // rides the same slot (the markers are mutually exclusive): the shell
-    // must say up front which rows `cat`/`search` will not serve.
+    // The `template:` frontmatter marker is shown where the notes are listed.
+    // It is the same marker that fills the app's ⌥⌘N picker (interactions.md
+    // §9). A trailing tag rather than a column, since most rows have nothing
+    // to say. `(locked)` uses the same slot, so a row carries one marker: the
+    // shell says up front which rows `cat` and `search` will not serve.
     tag: n.template === "daily" ? "  (daily template)" : n.template ? "  (template)" : n.locked ? "  (locked)" : "",
   }));
   const width = rows.reduce((w, r) => Math.max(w, r.title.length), 0);
   return rows.map((r) => `${r.title.padEnd(width)}  ${r.date}  ${r.path}${r.tag}`);
 }
 
-// What a --workspace argument may say: a root path (~ expands), or — for
-// `ledge -w notes` convenience — the folder name of exactly one registered
-// root. Names are shorthand, not identity: two roots sharing a basename make
-// the name ambiguous, and the error lists the paths that would disambiguate.
-// The match itself is workspaceMatches (shared with the daily.workspace
-// setting); only the refusals are the CLI's own.
+// What a --workspace argument may say: a root path (~ expands), or the folder
+// name of exactly one registered root (so `ledge -w notes` works). A name is
+// shorthand, not identity: two roots sharing a basename make it ambiguous, and
+// the error lists the paths that disambiguate. workspaceMatches does the
+// matching (shared with daily.workspace); only the refusals are the CLI's own.
 export function resolveWorkspaceArg(value: string, registered: readonly string[], home: string = homedir()): string {
   const matches = workspaceMatches(value, registered, home);
   if (matches.length === 1) return matches[0]!;
@@ -220,24 +214,24 @@ export interface CliIo {
   openApp(): Promise<boolean>;
 }
 
-// Dispatch into a tool by name — the exact seam mcpTools.fs.test.ts uses. A
+// Dispatch into a tool by name, the same seam mcpTools.fs.test.ts uses. A
 // missing name is a programmer error (the verb table drifted from the tool
-// list), so it throws plainly rather than pretending to be user input.
+// list), so it throws plainly rather than reporting a user mistake.
 async function tool(name: string, args: Record<string, unknown>): Promise<any> {
   const t = ledgeTools.find((x) => x.name === name);
   if (!t) throw new Error(`no such tool: ${name}`);
   return t.handler(args);
 }
 
-// cat/append name a note by one argument. A ".md" suffix says path (resolved
-// against the caller's cwd, the shell contract); anything else is a title —
-// the preferred, rename-proof address, so the ambiguity tilts its way.
+// cat and append name a note by one argument. A ".md" suffix means a path,
+// resolved against the caller's cwd. Anything else is a title, the preferred
+// rename-proof address, so an ambiguous argument is read as a title.
 //
-// `folder` narrows which note a title resolves to, and it is the EXPLICIT -f
-// only, never the cwd's folder. Narrowing a survey by where you stand is the
-// shell contract; narrowing an ADDRESS by it is not — `cd projects` would
-// otherwise stop `ledge cat` reaching a note one level up, which is a way to
-// lose an address, not a way to disambiguate one.
+// The `folder` argument narrows which note a title resolves to, and it is the
+// explicit -f only, never the cwd's folder. Scoping a listing by where the
+// caller stands is the shell contract. Scoping an address by it is not:
+// `cd projects` would then stop `ledge cat` from reaching a note one level up,
+// which loses an address rather than disambiguating one.
 function targetArgs(
   arg: string | null,
   cwd: string,
@@ -256,9 +250,9 @@ async function openApp(io: CliIo): Promise<number> {
   return 1;
 }
 
-// The handlers' error guidance speaks MCP ("try list_notes"); a shell user
-// gets the same advice in their own dialect. Substring replacement, not a
-// reworded catalog: the messages themselves stay single-sourced in mcpTools.
+// The handlers' error guidance names MCP tools ("try list_notes"), so this
+// rewrites those names as CLI verbs. Substring replacement, not a second
+// catalog: the messages stay single-sourced in mcpTools.ts.
 function humanize(msg: string): string {
   return msg
     .replace(/\blist_notes\b/g, "`ledge ls`")
@@ -318,14 +312,14 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     await loadWorkspaces();
     const here = rootContaining(io.cwd());
     const scope = flags.workspace !== undefined ? resolveWorkspaceArg(flags.workspace, roots()) : null;
-    // --folder wins; naming a workspace or going wide means the whole of it;
-    // otherwise the directory the caller is standing in. "" is no folder.
+    // --folder wins. Naming a workspace or going wide means the whole of it.
+    // Otherwise it is the directory the caller stands in. "" is no folder.
     const folder = flags.folder ?? (scope !== null || flags.all ? "" : cwdFolder(io.cwd(), here));
     const inFolder = (args: Record<string, unknown>): Record<string, unknown> =>
       folder === "" ? args : { ...args, folder };
     // The cwd deixis: fold "here" into the env chain the handlers already
-    // honor. Restored on the way out — runCli must leave the process as it
-    // found it, or in-process tests would leak one verb's cwd into the next.
+    // honor. The finally below restores it. runCli must leave the process as
+    // it found it, or in-process tests leak one verb's cwd into the next.
     const savedWs = process.env["LEDGE_WORKSPACE"];
     if (here !== null) process.env["LEDGE_WORKSPACE"] = here;
     try {
@@ -408,8 +402,9 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
           const title = positionals.join(" ");
           const body = (await io.stdin())?.replace(/\s+$/u, "") ?? "";
           if (flags.template !== undefined) {
-            // The template IS the body; a piped one would be a second body
-            // with no principled merge order, so it is refused, not folded.
+            // The template supplies the body, so a piped body would be a
+            // second body with no obvious merge order. This branch refuses it
+            // rather than folding the two together.
             if (body !== "") {
               io.err("ledge: --template is the note's body — don't pipe one too");
               return 2;
@@ -436,13 +431,11 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
           return 0;
         }
         case "today": {
-          // Create-or-open today's note, then land in the app on it — the
-          // whole point is one motion from anywhere. Path to stdout first
-          // (the `new` contract: scriptable), the open ride-along after.
-          // `--folder` only, deliberately NOT the cwd's: today's note is
-          // identified by its date, and where it lives should be the same
-          // every day rather than wherever the caller happened to be standing
-          // the first time they ran this today.
+          // Create or open today's note, then land the app on it. The path
+          // goes to stdout first, like `new`, so the verb stays scriptable.
+          // The folder comes from -f only, never from the cwd: today's note
+          // is identified by its date, so where it lives stays the same every
+          // day instead of moving with wherever the caller runs it from.
           const args: Record<string, unknown> = scope !== null ? { workspace: scope } : {};
           if (flags.folder !== undefined) args["folder"] = flags.folder;
           const n = await tool("daily_note", args);
@@ -476,19 +469,19 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
           else for (const w of list) io.out(`${tildify(w.root)}  ${w.kind}${w.available ? "" : "  (unavailable)"}`);
           return 0;
         }
-        // `ledge <title>` — anything that is not a verb is a note to open in
-        // the app. The CLI resolves the title HERE (same store, same deixis
-        // as cat), writes the request file, and launches/activates the app,
-        // which consumes the request (bun/openRequest.ts). `open` spelled out
-        // is the escape hatch for a note titled like a verb.
+        // `ledge <title>`: anything that is not a verb is a note to open in
+        // the app. The CLI resolves the title in this process (same store,
+        // same deixis as cat), writes the request file, then launches or
+        // activates the app, which consumes it (bun/openRequest.ts). `open`
+        // spelled out is the escape hatch for a note titled like a verb.
         case "open":
         default: {
           const words = verb === "open" ? positionals : [verb, ...positionals];
           const arg = words.join(" ");
           if (arg === "") return openApp(io); // bare `ledge open`
-          // resolveNoteForOpen, not read_note: opening the app AT a note is
-          // navigation, so a LOCKED title still works — the app lands on its
-          // own unlock flow, and no body ever crosses this seam.
+          // resolveNoteForOpen, not read_note: opening the app at a note is
+          // navigation, so a locked title still resolves. The app lands on
+          // its own unlock flow, and no note body crosses this seam.
           const n = await resolveNoteForOpen(targetArgs(arg, io.cwd(), scope, flags.folder));
           await writeOpenRequest(n.path);
           return openApp(io);

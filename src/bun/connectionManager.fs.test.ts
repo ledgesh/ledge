@@ -1,12 +1,12 @@
-// Which server is being served, and what happens when that changes
-// (remote.md §8). The manager is driven with a fake `attach`, so these run
-// with no window, no socket, and no ssh binary — what is under test is the
-// choreography, which is where the failures that matter live: a session torn
-// down for a connection that was never going to open, a boot that refuses to
-// draw because a laptop is asleep, a removed connection whose pin outlives it.
+// Which server is served, and what happens when that changes (remote.md §8).
+// A fake `attach` drives the manager, so these run with no window, no socket
+// and no ssh binary. What they check is the choreography: a session torn down
+// for a connection that never opened, a boot that will not draw because a
+// laptop is asleep, a removed connection whose pin outlives it.
 //
-// Filesystem-backed because the list is a file and the pins are a projection
-// of it. Same preload-scratch-home arrangement and guard as layout.fs.test.ts.
+// Filesystem-backed because the list is a file and saveConnections writes the
+// pins from it. Same preload-scratch-home arrangement and guard as
+// layout.fs.test.ts.
 import { beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -33,8 +33,8 @@ const LAPTOP: Connection = {
   lastReached: 0,
 };
 
-// A fake connection: `vaultState` answers with the id it was attached for, so
-// a request proves WHICH server the router reached rather than merely that it
+// A fake connection. Its `vaultState` answers with the id it was attached for,
+// so a request proves which server the router reached, not just that it
 // reached one. `unreachable` is the set of ids that refuse to open.
 function fakeAttach(unreachable = new Set<string>()) {
   const log: string[] = [];
@@ -84,16 +84,17 @@ describe("boot", () => {
     expect(await served(m)).toBe(LAPTOP.id);
   });
 
-  // An app that does not open teaches nothing. One that opens on this machine
-  // and says why can be fixed from inside itself.
+  // A boot that cannot reach its server opens on the local one. Refusing to
+  // open at all would leave nothing to fix the connection with (remote.md §8).
+  // The recorded reason is what the user acts on.
   test("a connection that will not open falls back to the local server, with the reason", async () => {
     await saveConnections([LAPTOP], LAPTOP.id);
     const m = await createConnectionManager({ attach: fakeAttach(new Set([LAPTOP.id])).attach });
     expect(await served(m)).toBe(LOCAL_ID);
     const status = await m.requests.connectionList({});
     expect(status.active).toBe(LOCAL_ID);
-    // What the user asked for is still what they asked for: the indicator has
-    // to be able to say "wanted Laptop, on This Mac, because host is down".
+    // `wanted` keeps the connection that was chosen, so the indicator can say
+    // "wanted Laptop, on This Mac, because host is down".
     expect(status.wanted).toBe(LAPTOP.id);
     expect(status.error).toContain("host is down");
   });
@@ -119,12 +120,13 @@ describe("switching", () => {
     expect(await m.requests.connectionSelect({ id: LAPTOP.id })).toEqual({ ok: true, error: "" });
     expect(await served(m)).toBe(LAPTOP.id);
     expect(fake.open.has(LOCAL_ID)).toBe(false);
-    // Opened before torn down: the session in front of the user is the last
-    // thing given up, never the first.
+    // The new connection is opened before the old one is shut down, so a
+    // destination that does not answer costs the running session nothing.
     expect(fake.log).toEqual([`attach:${LOCAL_ID}`, `attach:${LAPTOP.id}`, `shutdown:${LOCAL_ID}`]);
   });
 
-  // Losing a working session to a typo would be the worse failure by far.
+  // The attach that throws leaves the running session in place, so a typo in
+  // the destination costs nothing.
   test("a connection that will not open costs nothing", async () => {
     await saveConnections([LAPTOP], LOCAL_ID);
     const fake = fakeAttach(new Set([LAPTOP.id]));
@@ -133,15 +135,15 @@ describe("switching", () => {
     expect(res.ok).toBe(false);
     expect(res.error).toContain("Laptop");
     expect(res.error).toContain("host is down");
-    // Still here, still serving.
+    // The local server is still attached and still serving.
     expect(await served(m)).toBe(LOCAL_ID);
     expect(fake.open.has(LOCAL_ID)).toBe(true);
   });
 
-  // Where the next launch reads a window's server from is the window list, not
-  // this file (remote.md §8a): two windows writing one `selected` key would
-  // mean the last one to switch decided where the next launch opened. So a
-  // switch REPORTS, and the shell records.
+  // The next launch reads a window's server from the window list, not from
+  // connections.json (remote.md §8a). Two windows writing one `selected` key
+  // would let the last one to switch decide where the next launch opened. So a
+  // switch reports through `onSelect`, and the shell records it.
   test("a switch reports the new connection for the window list", async () => {
     await saveConnections([LAPTOP], LOCAL_ID);
     const chosen: string[] = [];
@@ -166,8 +168,8 @@ describe("switching", () => {
     expect(chosen).toEqual([]);
   });
 
-  // The other half: a window opens where it is told, which is what the shell
-  // reads back out of the window list.
+  // Where `onSelect` writes, `want` reads. A window opens on the connection
+  // `want` names, and bun/index.ts takes that id from the window list (§8a).
   test("a window opens on the connection it is asked for", async () => {
     await saveConnections([LAPTOP], LOCAL_ID);
     const m = await createConnectionManager({ attach: fakeAttach().attach, want: LAPTOP.id });
@@ -189,10 +191,10 @@ describe("switching", () => {
     expect(await served(m)).toBe(LOCAL_ID);
   });
 
-  // The no-op above is right for a connection that is working and wrong for
-  // one that is dead, and a transport that gave up stays given up on purpose
-  // (shared/transport.ts). Choosing the same server again is the recovery the
-  // chrome offers, and it is the only one there is, so it has to attach.
+  // The no-op above is right for a connection that is working and wrong for one
+  // whose wire gave up (shared/transport.ts). Choosing the same server again is
+  // the recovery the chrome offers, and it is the only one there is, so a
+  // select after `lost` has to attach afresh.
   test("selecting the one being served DOES reconnect once its wire has given up", async () => {
     await saveConnections([LAPTOP], LAPTOP.id);
     const fake = fakeAttach();
@@ -202,11 +204,12 @@ describe("switching", () => {
     expect(fake.log).toEqual([`attach:${LAPTOP.id}`, `attach:${LAPTOP.id}`, `shutdown:${LAPTOP.id}`]);
   });
 
-  // The other half of the same record, and it is needed because a wire that gave
-  // up no longer stays given up: the ladder ends in a beat that keeps dialling
-  // (shared/transport.ts). A recovery that left `lost` standing would make
-  // choosing the same connection tear down a session that was working again and
-  // rebuild the identical one, which on the view's side is a page reload.
+  // `restored` is the other half of the record `lost` writes. A wire can come
+  // back on its own: the ladder ends in a beat that keeps dialling
+  // (shared/transport.ts RETRY_EVERY_MS).
+  // Leaving `lost` standing after a recovery would make choosing the same
+  // connection tear down a working session and rebuild the identical one,
+  // reloading the page.
   test("a wire that came back on its own makes selecting it a no-op again", async () => {
     await saveConnections([LAPTOP], LAPTOP.id);
     const fake = fakeAttach();
@@ -217,8 +220,8 @@ describe("switching", () => {
     expect(fake.log).toEqual([`attach:${LAPTOP.id}`]);
   });
 
-  // By id from this side too: a dead connection's late recovery must not clear
-  // the reason a DIFFERENT one is being reported.
+  // `restored` is checked by id too: a dead connection recovering late must not
+  // clear the reason recorded for a different one.
   test("and a recovery reported by a connection nobody is on clears nothing", async () => {
     await saveConnections([LAPTOP], LAPTOP.id);
     const fake = fakeAttach();
@@ -229,8 +232,8 @@ describe("switching", () => {
     expect(fake.log).toEqual([`attach:${LAPTOP.id}`, `attach:${LAPTOP.id}`, `shutdown:${LAPTOP.id}`]);
   });
 
-  // Not a question for the server — there may be no server to ask — but for
-  // this window's own wire, which is holding a beat it can be told to cut short.
+  // Reconnect is not a question for the server (there may be no server to ask).
+  // It tells this window's own wire to cut its wait short and try now.
   test("reconnecting asks the wire being served, and nothing else", async () => {
     await saveConnections([LAPTOP], LAPTOP.id);
     const fake = fakeAttach();
@@ -239,9 +242,9 @@ describe("switching", () => {
     expect(fake.log).toEqual([`attach:${LAPTOP.id}`, `recheck:${LAPTOP.id}`]);
   });
 
-  // A connection reports its own end, and the one being torn down on the way
-  // to another can report it after the switch has already landed. Marking the
-  // connection now in front of the user dead would be worse than silence.
+  // A connection reports its own end, and the one torn down on the way to
+  // another can report it after the switch has landed. `lost` checks the id, so
+  // the report does not mark the connection now being served dead.
   test("a connection that dies after being switched away from marks nothing", async () => {
     await saveConnections([LAPTOP], LOCAL_ID);
     const fake = fakeAttach();
@@ -253,9 +256,9 @@ describe("switching", () => {
   });
 });
 
-// What the shell puts in the title bar (remote.md §8a). Every window said
-// "Ledge" before this, which told a person with three of them open nothing at
-// all: the one thing a second window is for is being on a second machine.
+// What the shell puts in the title bar (remote.md §8a). A window is titled by
+// the connection it is on. A person with three windows open can tell which
+// machine each one is on rather than reading "Ledge" three times.
 describe("naming the window", () => {
   const named = async (deps: Parameters<typeof createConnectionManager>[0]) => {
     const names: string[] = [];
@@ -263,16 +266,18 @@ describe("naming the window", () => {
     return { m, names };
   };
 
-  // Reported before the manager returns, because the shell builds the window
-  // after that and a window is titled at birth.
+  // The name is reported before the manager returns, because the shell builds
+  // the window after that and hands the title to the constructor
+  // (bun/index.ts). A name reported later could only retitle a window that had
+  // already opened.
   test("a window is named as it boots", async () => {
     await saveConnections([LAPTOP], LAPTOP.id);
     const { names } = await named({ attach: fakeAttach().attach });
     expect(names).toEqual(["Laptop"]);
   });
 
-  // The title says where the window IS, not where it was asked to go: the
-  // indicator is what explains the difference.
+  // The title names the connection the window landed on, not the one it was
+  // asked for. The indicator is what explains the difference.
   test("a window that fell back is named for the machine it landed on", async () => {
     await saveConnections([LAPTOP], LAPTOP.id);
     const { names } = await named({ attach: fakeAttach(new Set([LAPTOP.id])).attach });
@@ -295,8 +300,8 @@ describe("naming the window", () => {
     expect(names).toEqual(["This Mac"]);
   });
 
-  // The one case `onSelect` cannot carry: the window went nowhere, and the
-  // string on it is the one that changed.
+  // A rename is the one change `onSelect` cannot report. The window moved
+  // nowhere, so only the name changed, and `onName` is what carries it.
   test("renaming the connection being served renames the window", async () => {
     await saveConnections([LAPTOP], LAPTOP.id);
     const { m, names } = await named({ attach: fakeAttach().attach });
@@ -313,8 +318,8 @@ describe("naming the window", () => {
     expect(names).toEqual(["Laptop", "Studio"]);
   });
 
-  // A window on this Mac while another connection is edited keeps its title:
-  // the edit is about a machine it is not looking at.
+  // A window on the local server keeps its title when another connection is
+  // edited. The edit is about a machine that window is not on.
   test("renaming a connection this window is not on renames nothing", async () => {
     await saveConnections([LAPTOP], LOCAL_ID);
     const { m, names } = await named({ attach: fakeAttach().attach });
@@ -379,7 +384,7 @@ describe("adding and removing", () => {
     expect((await m.requests.connectionList({})).connections.map((c) => c.id)).toEqual([LOCAL_ID]);
   });
 
-  // Both refusals are about leaving the app somewhere it can work from.
+  // Both refusals below leave the window on a connection it can work from.
   test("the local server cannot be removed", async () => {
     const m = await createConnectionManager({ attach: fakeAttach().attach });
     const res = await m.requests.connectionRemove({ id: LOCAL_ID });
@@ -405,8 +410,9 @@ describe("editing", () => {
   port: PORT_UNSET,
   keyPath: "",
   auth: "key" as const,
-  // Null is the form saying it did not ask for one, which is every case here
-  // that is not about the password door.
+  // A null password means the form did not ask for one, which is what a rename
+  // sends. Every edit below spreads these fields; the password door tests
+  // build their own.
   password: null,
   hostKey: null,
 };
@@ -420,8 +426,8 @@ describe("editing", () => {
     expect(await readFile(KNOWN_HOSTS_PATH, "utf8")).toBe(`${LAPTOP.hostKey}\n`);
   });
 
-  // The account is not what a host key belongs to: keyscan asked the HOST, and
-  // `dev@laptop` to `ledge@laptop` is the same machine and the same key.
+  // A host key belongs to the host, not to the account: ssh-keyscan asked the
+  // host. `dev@laptop` to `ledge@laptop` is the same machine and the same key.
   test("changing only the account keeps the pin", async () => {
     await saveConnections([LAPTOP], LOCAL_ID);
     const m = await createConnectionManager({ attach: fakeAttach().attach });
@@ -432,9 +438,10 @@ describe("editing", () => {
     });
   });
 
-  // A pin is a claim about one machine. Carried across, it would refuse every
-  // later connection with a message about a CHANGED host key — the most
-  // alarming possible wording for "you typed a new address".
+  // A pin is a claim about one machine. If it were carried to a new address,
+  // ssh would refuse every later connection with a warning about a changed
+  // host key. That message blames a key change when the user only typed a new
+  // address.
   test("an address that moved to another host has to be pinned again", async () => {
     await saveConnections([LAPTOP], LOCAL_ID);
     const m = await createConnectionManager({ attach: fakeAttach().attach });
@@ -471,14 +478,14 @@ describe("editing", () => {
       .toContain("ssh destination");
     expect((await m.requests.connectionUpdate({ ...edit, name: "  " })).error).toContain("name");
     expect((await m.requests.connectionUpdate({ ...edit, id: "gone" })).error).toContain("no such connection");
-    // The server in this process is not a record, so there is nothing about it
-    // to change.
+    // The local server is synthesized rather than stored, so an edit has no
+    // record to change. connectionStore.ts refuses it by id.
     expect((await m.requests.connectionUpdate({ ...edit, id: LOCAL_ID })).error).toContain("not a connection you can edit");
   });
 
-  // The wire in front of the user was built from the old address, so a row
-  // saying one machine over a session talking to another is the lie the
-  // indicator exists to prevent.
+  // The wire in front of the user was built from the old address. Leaving it
+  // open would put a row naming one machine over a session talking to another,
+  // so connectionUpdate re-opens the connection being served.
   test("re-addressing the connection being served re-opens it", async () => {
     await saveConnections([LAPTOP], LAPTOP.id);
     const fake = fakeAttach();
@@ -487,17 +494,18 @@ describe("editing", () => {
     expect(
       await m.requests.connectionUpdate({ ...edit, destination: "dev@studio", hostKey: "studio ssh-ed25519 AAAAnew" }),
     ).toEqual({ ok: true, error: "" });
-    // The new one BEFORE the old one goes, which is the order that makes the
-    // refusal below free.
+    // The new one is opened before the old one is shut down. That order is what
+    // makes the failed edit in the next test cost nothing.
     expect(fake.log).toEqual([`attach:${LAPTOP.id}`, `shutdown:${LAPTOP.id}`]);
   });
 
-  // The same promise switching makes: the session in front of the user survives
-  // an address that does not answer, and the reason arrives as a sentence.
+  // An edit makes the same promise a switch does. The session in front of the
+  // user survives an address that does not answer, and the reason comes back
+  // as an error string.
   test("an address that will not open costs nothing", async () => {
     await saveConnections([LAPTOP], LAPTOP.id);
-    // By destination rather than by id, because an edit keeps the id: what is
-    // unreachable here is the new ADDRESS.
+    // This fake logs by destination rather than by id, because an edit keeps
+    // the id. What is unreachable here is the new address.
     const log: string[] = [];
     const attach = async (conn: Connection): Promise<Attached> => {
       log.push(`attach:${conn.destination}`);
@@ -520,16 +528,16 @@ describe("editing", () => {
     expect(res.ok).toBe(false);
     expect(res.error).toContain("host is down");
     expect(log).toEqual(["attach:dev@studio"]);
-    // Untouched: still the session the user was in, and the record still says
-    // where that session actually is.
+    // Nothing moved: the same session is still served, and the stored record
+    // still names the address that session is on.
     expect(await served(m)).toBe(LAPTOP.destination);
     expect((await m.requests.connectionList({})).connections[1]!.destination).toBe(LAPTOP.destination);
     expect(await readFile(KNOWN_HOSTS_PATH, "utf8")).toBe(`${LAPTOP.hostKey}\n`);
   });
 
-  // A rename of the connection being served changes nothing about how it is
-  // made, so tearing the session down for it would cost every open tab for a
-  // string.
+  // A rename changes nothing about how the connection is made, so
+  // connectionUpdate leaves the wire alone. Tearing the session down would
+  // cost every open tab for the sake of a string.
   test("renaming the connection being served does not re-open it", async () => {
     await saveConnections([LAPTOP], LAPTOP.id);
     const fake = fakeAttach();
@@ -541,9 +549,9 @@ describe("editing", () => {
   });
 });
 
-// Two windows, one list (remote.md §8a). What each of these proves is that the
-// split lands where the design puts it: the records are the app's and the
-// pointer is the window's.
+// Two windows, one list (remote.md §8a). These tests check where the split
+// falls: the records belong to the app, and the pointer at one of them belongs
+// to the window.
 describe("two windows over one store", () => {
   // Two managers over one store, each on its own connection.
   async function pair(unreachable = new Set<string>()) {
@@ -563,8 +571,8 @@ describe("two windows over one store", () => {
     expect(await served(second)).toBe(LAPTOP.id);
   });
 
-  // A machine you have paired with is a fact about this Mac, not about one of
-  // its windows.
+  // A paired machine is a fact about this Mac rather than about one of its
+  // windows, so both managers read one list.
   test("a connection added in one window is listed in the other", async () => {
     const { first, second } = await pair();
     const { id } = await first.requests.connectionAdd({
@@ -579,7 +587,8 @@ describe("two windows over one store", () => {
     expect((await second.requests.connectionList({})).connections.map((c) => c.id)).toContain(id);
   });
 
-  // Both refusals are about leaving every window somewhere it can work from.
+  // This refusal and the re-address one below both leave every window on a
+  // connection it can work from.
   test("a connection another window is on cannot be removed", async () => {
     await saveConnections([LAPTOP], LOCAL_ID);
     const { first, second } = await pair();
@@ -589,9 +598,9 @@ describe("two windows over one store", () => {
     expect(await served(second)).toBe(LAPTOP.id);
   });
 
-  // The window that edits can re-open its own wire; the other window's cannot
-  // be re-opened from here, and leaving it on the old machine while the row
-  // names the new one is the lie the indicator exists to prevent.
+  // The editing window can re-open its own wire. Another window's cannot be
+  // re-opened from here. Leaving that window on the old machine while the row
+  // names the new one would make the row wrong, so the edit is refused.
   test("re-addressing a connection another window is on waits for that window", async () => {
     await saveConnections([LAPTOP], LOCAL_ID);
     const { first, second } = await pair();
@@ -611,8 +620,8 @@ describe("two windows over one store", () => {
   });
 
   // A rename changes nothing about how a connection is made, so it is never
-  // refused — tearing a second window's session down for a string would be the
-  // cure being worse.
+  // refused. Tearing a second window's session down for a string would cost
+  // more than the rename is worth.
   test("renaming a connection another window is on is allowed", async () => {
     await saveConnections([LAPTOP], LOCAL_ID);
     const { first, second } = await pair();
@@ -642,25 +651,22 @@ describe("two windows over one store", () => {
   });
 });
 
-// The list in bun/clientSeams.ts is what the SERVER refuses; this is what the
-// manager answers. A name in one and not the other is a method refused by
-// everybody or served by nobody.
+// bun/clientSeams.test.ts checks the list bun/server.ts refuses; this checks
+// what the manager answers. A name in one and not the other is a method
+// refused by everybody or served by nobody.
 test("the listed connection methods are the ones implemented", async () => {
   const m = await createConnectionManager({ attach: fakeAttach().attach });
   for (const name of CONNECTION_METHODS) expect(typeof m.requests[name]).toBe("function");
-  // And they are served by the manager rather than forwarded: the fake server
+  // The manager serves them rather than forwarding them. The fake connection
   // above implements only vaultState, so a forwarded call would throw.
   expect((await m.requests.connectionList({})).active).toBe(LOCAL_ID);
 });
 
-// The password door (remote.md §4). What is proved here is the ORDER, which is
-// where the interesting failures live: the credential has to be in the keychain
-// before the dial, because the dial is what proves it, and a dial that then
-// fails has to leave the connection exactly as it was.
-//
-// The keychain itself is a native seam and belongs to the live probe (testing.md
-// §6). This one records instead, so a suite that runs hundreds of times a day
-// never writes to the login keychain.
+// A recording stand-in for the keychain, used by the password door tests below
+// (remote.md §4). What they check is the order: the credential is stored before
+// the dial, because the dial is what proves it, and a dial that fails puts the
+// old credential back. The real keychain is a native seam left to the live
+// probe (testing.md §6), so this suite never writes to the login keychain.
 function fakeSecrets(refuse = false) {
   const items = new Map<string, string>();
   const log: string[] = [];
@@ -713,8 +719,8 @@ describe("the password door", () => {
   });
 
   // The record says which door; the keychain holds the secret. Nothing in
-  // connections.json is a credential, which is the claim that makes the file
-  // safe to read, back up and hand-edit.
+  // connections.json is a credential, so the file is safe to read, back up and
+  // hand-edit.
   test("stores the password in the keychain and not in the file", async () => {
     const { items, secrets } = fakeSecrets();
     const store = await createConnectionStore({ secrets });
@@ -736,7 +742,7 @@ describe("the password door", () => {
   });
 
   // A password askpass cannot deliver is refused where the user can see it,
-  // rather than stored and turned into a server that refuses to talk to them.
+  // rather than stored and left to make a connection that cannot authenticate.
   test("refuses a password ssh could not deliver, and stores nothing", async () => {
     const { items, secrets } = fakeSecrets();
     const store = await createConnectionStore({ secrets });
@@ -749,8 +755,8 @@ describe("the password door", () => {
     expect(store.all()).toHaveLength(1);
   });
 
-  // A keychain that will not take the password leaves no record behind either:
-  // the alternative is a connection naming a door with nothing behind it.
+  // A keychain that will not take the password leaves no record behind either.
+  // The alternative is a connection naming a password door with no password.
   test("a keychain that refuses costs the whole connection", async () => {
     const { secrets } = fakeSecrets(true);
     const store = await createConnectionStore({ secrets });
@@ -780,8 +786,10 @@ describe("the password door", () => {
     expect(log).toEqual([]);
   });
 
-  // A rename is not a re-credential. Asking for the password again to change a
-  // name would teach the user to type it into dialogs for no reason.
+  // A rename is not a re-credential: the form sends a null password, so nothing
+  // asks the keychain and the stored password stays. Asking for the password
+  // again to change a name would teach the user to type it into dialogs for no
+  // reason.
   test("a rename keeps the stored password and asks the keychain nothing", async () => {
     const { items, log, secrets } = fakeSecrets();
     const store = await createConnectionStore({ secrets });
@@ -802,8 +810,8 @@ describe("the password door", () => {
   });
 
   // Null means "keep the stored one", which is only an answer when there is one
-  // to keep. A connection moved onto this door with nothing behind it would
-  // dial, find no secret, and be refused for a reason that is on this Mac.
+  // to keep. A connection moved onto this door with nothing stored would dial,
+  // find no secret, and be refused for a reason that is on this Mac.
   test("moving onto the door with nothing stored is refused", async () => {
     const { secrets } = fakeSecrets();
     const store = await createConnectionStore({ secrets });
@@ -821,17 +829,17 @@ describe("the password door", () => {
     expect(items.size).toBe(0);
   });
 
-  // The one that decides whether an edit is safe to try. The new password has
-  // to be in the keychain for the dial to be a dial of the NEW one, and a dial
-  // that fails has to put the old one back: otherwise mistyping a password
-  // destroys the working one on the way to reporting the failure.
+  // The order that makes an edit safe to try. The new password has to be in the
+  // keychain for the dial to test the new one, and a dial that fails has to put
+  // the old one back. Otherwise mistyping a password destroys the working one
+  // on the way to reporting the failure.
   test("a new password is in place before the dial, and back out after a failed one", async () => {
     const { items, log, secrets } = fakeSecrets();
     const store = await createConnectionStore({ secrets });
     const { id } = await store.add(PASSWORD_ADD);
-    // Reachable at boot and not afterwards, which is what an edit that
-    // mistypes the password looks like from here: the connection worked, and
-    // the dial made with the new credential is the one that fails.
+    // Reachable at boot and not afterwards. That is what a mistyped password
+    // looks like from here: the connection worked, and the dial made with the
+    // new credential is the one that fails.
     let refuse = false;
     const attach = async (): Promise<Attached> => {
       if (refuse) throw new Error("host is down");
@@ -853,8 +861,8 @@ describe("the password door", () => {
     });
     expect(res.ok).toBe(false);
     expect(res.error).toContain("Could not reach");
-    // Swapped in first, then put back — and in that order, which is the whole
-    // claim. The keychain ends where it started.
+    // Swapped in first, then put back, in that order. The keychain ends where
+    // it started.
     expect(log).toEqual([`swap ${id}`, `restore ${id}`]);
     expect(items.get(id)).toBe("hunter2");
   });

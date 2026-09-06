@@ -1,13 +1,15 @@
 // The layout file against a real filesystem: the write choreography, the JSON
-// gate, and the keying by client (remote.md §5). The shape of the content is
-// the view's business (workspace/persist.test.ts); these prove the bytes land
-// atomically in the right dotted file, that each client gets its own
-// arrangement back, and that garbage is refused rather than written into the
-// app home.
+// gate, and the keying by client (remote.md §5). These tests check that the
+// bytes land atomically in the right dotted file, that each client reads back
+// its own arrangement, and that non-JSON is refused rather than written into
+// the app home. The shape of the content belongs to the view, which owns it in
+// workspace/persist.ts and tests it in workspace/persist.test.ts, so nothing
+// here asserts on it.
 //
-// Same preload-scratch-home arrangement as notes.fs.test.ts, same guard: these
-// tests wipe the app home in beforeEach, and wiping the wrong folder is the
-// one mistake this file must be incapable of.
+// The app home is a per-run temp dir, set by src/test-preload.ts before any
+// module loads, the same arrangement notes.fs.test.ts uses. The guard below
+// re-checks that, because beforeEach wipes the app home and must never wipe
+// the wrong folder.
 import { beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -69,17 +71,19 @@ describe("readLayout / writeLayout", () => {
   });
 
   test("no noteWrite can clobber the layout file: the app home is outside every root", async () => {
-    // Belt and braces on the §3 invariant this file leans on. The refusal
-    // reason changed with the per-workspace split (the path used to fail the
-    // .md check; now it fails root membership first), but the invariant is
-    // the same: this write cannot happen.
+    // This test re-checks the trust-boundary invariant the file leans on
+    // (architecture.md §2): the app home is outside every workspace root, and
+    // assertNote refuses a path outside one. The refusal reason changed with
+    // the per-workspace split: the path used to fail the .md check, and now it
+    // fails root membership first. Either way the write cannot happen.
     await expect(writeNote(LAYOUT_PATH, "clobber")).rejects.toThrow(/outside every workspace root/);
   });
 });
 
-// The point of the keying: one server, two screens, two arrangements. The
-// failure it prevents is a phone opening a desktop's three-pane split — and,
-// just as bad, the desktop losing its own the moment the phone saves.
+// One server can be looked at from two screens, and keying by client gives
+// each screen its own arrangement. It keeps a phone from opening a desktop's
+// three-pane split, and keeps the desktop's own arrangement from being
+// overwritten when the phone saves.
 describe("two clients of one server", () => {
   test("each gets its own arrangement back", async () => {
     await writeLayout(MAC, JSON.stringify({ version: 2, panes: 3 }));
@@ -100,9 +104,11 @@ describe("two clients of one server", () => {
     expect(await readLayout(MAC)).toBe(JSON.stringify({ version: 2, panes: 3 }));
   });
 
-  // The id becomes a key in a file this module writes, so it is validated
-  // rather than trusted (architecture.md §2). Anything unusable shares one
-  // bucket: still a working restore, never a key of the caller's choosing.
+  // The id becomes a key in the layout file, so layout.ts validates it rather
+  // than trusting it (architecture.md §2). Anything that is not a plain id
+  // shares the anonymous bucket "_". A client with no usable id still finds
+  // its tabs where it left them, and the cost is that two such clients share
+  // one arrangement.
   test.each([["", "no id at all"], ["../../etc/passwd", "a path"], ["a b", "a space"]])(
     "%p (%s) shares the anonymous bucket rather than becoming a key",
     async (id) => {
@@ -114,9 +120,9 @@ describe("two clients of one server", () => {
   );
 });
 
-// An install that predates the keying has one arrangement saved and one client
-// asking for it. Losing it would be a visible regression on upgrade — every
-// tab and split gone — for a change nobody asked for.
+// An install that predates the keying has one arrangement saved and one
+// client asking for it. Adopting it keeps the upgrade from losing every tab
+// and split.
 describe("a layout saved before it was keyed by client", () => {
   const OLD = JSON.stringify({ version: 2, workspaces: [{ name: "Notes" }] });
 
@@ -131,8 +137,8 @@ describe("a layout saved before it was keyed by client", () => {
     await writeLayout(MAC, JSON.stringify({ version: 2, panes: 3 }));
     const file = JSON.parse(await readFile(LAYOUT_PATH, "utf8")) as Record<string, unknown>;
     expect(Object.keys(file)).toEqual([MAC]);
-    // And the second client to arrive gets a fresh boot rather than a second
-    // helping of the first one's tabs.
+    // The second client to arrive boots fresh rather than adopting the first
+    // client's tabs.
     expect(await readLayout(PHONE)).toBeNull();
   });
 });

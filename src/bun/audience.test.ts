@@ -1,16 +1,14 @@
-// Push routing, which is the one thing the daemon and the app's own shell do
+// Tests for push routing, the one thing the daemon and the app's own shell do
 // identically once a server has more than one client (remote.md §7, §8a).
-//
-// The failures worth catching are all about WHEN the set is read: a server
-// outlives every connection and every window it was built with, so an audience
-// that captured its clients would push at whoever was there when createServer
-// ran.
+// Every test here is about when the client set is read. A server outlives
+// every connection and window it was built with, so an audience that captured
+// its clients would push at whoever was there when createServer ran.
 import { describe, expect, test } from "bun:test";
 import { audienceOf, fanout } from "./audience";
 import type { ServerPush } from "../shared/wire";
 
-// A push object that records what it was asked to send, so "who got it" is a
-// list rather than a mock framework.
+// A push object that records what it was asked to send. That makes "who got
+// it" a list of strings to compare, so these tests need no mock framework.
 function recorder(name: string, into: string[]): ServerPush {
   return new Proxy({} as ServerPush, {
     get: (_t, method: string) => () => into.push(`${name}:${method}`),
@@ -26,14 +24,15 @@ describe("fanout", () => {
     expect(sent).toEqual(["a:notesChanged", "b:notesChanged"]);
   });
 
-  // Nobody attached is the ORDINARY case, not an edge: the watcher fires
-  // whenever a file moves and a run keeps producing output, both of them
-  // happily while every window is closed.
+  // Nobody attached is the ordinary case, not an edge. With every window
+  // closed, the watcher still fires whenever a file moves, and a run still
+  // produces output.
   test("a push with nobody there is dropped, not an error", () => {
     fanout(() => []).vaultChanged({ state: "locked" });
   });
 
-  // The whole reason this is a picker and not a list.
+  // fanout takes a picker rather than a list of push objects so the set is
+  // read at push time.
   test("the set is read at push time, not at build time", () => {
     const sent: string[] = [];
     let here: ServerPush[] = [];
@@ -62,9 +61,9 @@ describe("audienceOf", () => {
     expect(sent).toEqual(["phone:terminalExit"]);
   });
 
-  // A drawer's bytes addressed at a window that closed have nowhere to go, and
-  // that is not a failure — the state they described is re-read at the next
-  // window's boot.
+  // A drawer's bytes addressed at a window that closed have nowhere to go.
+  // That is not a failure: the next window boots and re-reads the state those
+  // bytes described.
   test("a push addressed to a client that is not here is dropped", () => {
     const sent: string[] = [];
     const clients = new Map([["mac", recorder("mac", sent)]]);
@@ -74,9 +73,10 @@ describe("audienceOf", () => {
     expect(sent).toEqual([]);
   });
 
-  // `to` memoizes one object per client id, and that object has to keep working
-  // across a client leaving and coming back under the same id — which is what a
-  // reconnect is, and what re-selecting a connection whose wire gave up is.
+  // `to` memoizes one object per client id. That object has to keep working
+  // across a client leaving and coming back under the same id. A reconnect
+  // leaves and comes back that way, and so does re-selecting a connection
+  // whose wire gave up.
   test("an address outlives the client it names leaving and returning", () => {
     const sent: string[] = [];
     const clients = new Map<string, ServerPush>();
@@ -99,11 +99,12 @@ describe("audienceOf", () => {
     expect(push.to("mac")).not.toBe(push.to("phone"));
   });
 
-  // The one question a caller asks before pushing rather than after, and it
-  // exists for run output alone: dropping a state is fine because the next
-  // connection re-reads it, and dropping a sequence loses it (server.ts
-  // sendRunEvent). Read live, not memoized like `to`, since the whole point is
-  // that the answer changes when a client leaves.
+  // `has` is the one question a caller asks before pushing rather than after,
+  // and only run output needs it (server.ts sendRunEvent is the one caller).
+  // A dropped state push is fine: the next connection re-reads that state. A
+  // dropped run event is lost, so sendRunEvent holds the event for that
+  // client instead. `has` reads the answer live rather than memoizing it like
+  // `to` does, because the answer changes when a client leaves.
   test("has says whether that client is here, now", () => {
     const clients = new Map<string, ServerPush>();
     const push = audienceOf(clients, (held) => held);

@@ -1,10 +1,11 @@
-// The asset guard and the save/read choreography. assetPathOf is the whole
-// safety story for assetRead — the one RPC that takes a view-supplied
-// relative path — so its refusals get named tests the way assertTrashed's do
+// The asset guard, plus the save and read paths around it. assetPathOf is the
+// only guard on assetRead, the one RPC that takes a view-supplied relative
+// path. Each of its refusals gets a named test, the way assertTrashed's do
 // (testing.md §3). Since the per-workspace split the reference resolves
-// against a caller-named root, so "which root" is part of the guard too.
-// The filesystem half runs against the scratch app home the preload set
-// (see notes.fs.test.ts for why the guard re-checks it).
+// against a caller-named root. That makes "which root" part of the guard too.
+// These tests run against the scratch app home src/test-preload.ts sets. The
+// guard below re-checks that, because beforeEach wipes the app home and must
+// never wipe the wrong folder (notes.fs.test.ts guards it for that reason).
 import { beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -37,8 +38,8 @@ beforeEach(async () => {
   await mkdir(ASSETS, { recursive: true });
 });
 
-// Not a real image; readAsset serves bytes by extension, which is the point —
-// the guard is about which files may be read, not what is in them.
+// Not a real image. readAsset reads the mime off the extension. The guard
+// decides which files may be read, not what is in them.
 const BYTES = new Uint8Array([1, 2, 3, 4]);
 
 describe("assetPathOf", () => {
@@ -47,8 +48,10 @@ describe("assetPathOf", () => {
   });
 
   test("an image sitting outside .ledge-assets/ but inside the root is allowed", () => {
-    // Hand-managed images are the user's business; the root is the boundary.
-    // An attached project's own visible assets/ folder is just such a folder.
+    // Where the user files an image is their business, so an image outside
+    // .ledge-assets/ is served too. The root bounds it, and the dot-entry and
+    // extension rules below still apply. An attached project's own visible
+    // assets/ folder is one such place.
     expect(assetPathOf(ROOT, "pics/x.jpeg")).toBe(join(ROOT, "pics", "x.jpeg"));
     expect(assetPathOf(ROOT, "assets/x.png")).toBe(join(ROOT, "assets", "x.png"));
   });
@@ -70,9 +73,10 @@ describe("assetPathOf", () => {
   test("a dot-entry anywhere in the path is rejected — invisible stays unservable", () => {
     expect(() => assetPathOf(ROOT, ".ledge-trash/x.png")).toThrow();
     expect(() => assetPathOf(ROOT, ".git/logo.png")).toThrow();
-    // The app's own assets dir is the ONE exception, and only as the first
-    // segment: in-flight .asset.tmp files (and anything else dotted) inside
-    // it stay unservable, and it earns no pass deeper in the path.
+    // The app's own assets dir is the single exception, and only as the first
+    // segment. A dotted name inside it stays unservable (the in-flight
+    // .asset.tmp files among them), and the dir earns no exception deeper in
+    // the path.
     expect(() => assetPathOf(ROOT, ".ledge-assets/.hidden.png")).toThrow();
     expect(() => assetPathOf(ROOT, "sub/.ledge-assets/x.png")).toThrow();
   });
@@ -85,9 +89,10 @@ describe("assetPathOf", () => {
 
   test("a URL is not an asset reference, however image-shaped it looks", () => {
     // `resolve` turns these into in-root paths that pass every other check
-    // (`<root>/https:/example.com/x.png`), and the view draws them as remote
-    // images and never asks for bytes. The two ends have to agree, and it
-    // stopped being cosmetic when moveNote began rewriting what this accepts.
+    // (`<root>/https:/example.com/x.png`). The view draws them as remote
+    // images and never asks for bytes, so both ends have to agree on what is
+    // an asset. moveNote rewrites every reference this function accepts, so
+    // accepting a URL here would rewrite the URL.
     expect(() => assetPathOf(ROOT, "https://example.com/x.png")).toThrow(/not an asset reference/);
     expect(() => assetPathOf(ROOT, "file:///etc/x.png")).toThrow(/not an asset reference/);
     expect(() => assetPathOf(ROOT, "www.example.com/x.png")).toThrow(/not an asset reference/);
@@ -108,9 +113,9 @@ describe("imageMimeOf", () => {
 });
 
 
-// A reference resolves against the NOTE that carries it, not the root, so a
-// note in a subfolder reaches the shared pool with `../`. The escape rules do
-// not loosen: what matters is where the RESOLVED path lands.
+// A reference resolves against the note that carries it, not against the
+// root, so a note in a subfolder reaches the shared pool with `../`. The
+// escape rules do not loosen: every check runs on the resolved path.
 describe("assetPathOf against the note that carries the reference", () => {
   test("a subfolder note reaches the root's shared assets with ../", () => {
     const from = join(ROOT, "trips", "japan.md");
@@ -158,8 +163,8 @@ describe("assetRefFor", () => {
   });
 });
 
-// Narrow readAsset's union for the plain-bytes cases these tests assert on
-// (the sealed face has its own describe below).
+// Narrow readAsset's union to the plain-bytes case these tests assert on.
+// Sealed reads have their own describe below.
 function asBytes(got: Awaited<ReturnType<typeof readAsset>>): { dataB64: string; mime: string } {
   if (got === null || "sealed" in got) throw new Error("expected plain bytes");
   return got;
@@ -175,8 +180,8 @@ describe("readAsset", () => {
   });
 
   test("the same reference in another workspace is that workspace's file, not this one's", async () => {
-    // The whole reason assetRead carries a root: `.ledge-assets/x.png` is meaningful
-    // only relative to the note that references it.
+    // assetRead carries a root because `.ledge-assets/x.png` names a
+    // different file in each workspace.
     const other = await createManaged("Other");
     await mkdir(assetsDirOf(other), { recursive: true });
     await writeFile(join(ASSETS, "x.png"), BYTES);
@@ -211,15 +216,16 @@ describe("savePastedImage", () => {
   });
 
   test("a paste from a note in a folder lands in the ROOT's pool and reads back from there", async () => {
-    // One pool per workspace, whatever folder the note is in: it is what lets
-    // two notes share an image and what the lock sweep already assumes.
+    // One pool per workspace root, whatever folder the note sits in. That is
+    // what lets two notes share an image, and what the lock sweep assumes
+    // (locking.md §5).
     const from = join(ROOT, "trips", "japan.md");
     const src = await savePastedImage(ROOT, BYTES, ".png", false, from);
     expect(src).toMatch(/^\.\.\/\.ledge-assets\/pasted-\d{4}-\d{2}-\d{2}\.png$/);
     expect(await readdir(ASSETS)).toHaveLength(1);
     const got = await readAsset(ROOT, src, from);
     expect(new Uint8Array(Buffer.from(asBytes(got).dataB64, "base64"))).toEqual(BYTES);
-    // And the same file, said the root's way, is the same bytes.
+    // The same file, named from the root instead, reads back the same bytes.
     const flat = src.replace("../", "");
     expect(new Uint8Array(Buffer.from(asBytes(await readAsset(ROOT, flat)).dataB64, "base64"))).toEqual(BYTES);
   });
@@ -231,11 +237,11 @@ describe("savePastedImage", () => {
   });
 });
 
-// The name has to follow the bytes: imageMimeOf reads it back off the
-// extension, so a JPEG called .png is an image the browser has to sniff its way
-// into. It stopped being academic when the photo picker arrived (ios.md §11) —
-// a phone's pictures are photographs, and forcing them through PNG was a
-// tenfold size increase measured on the first one ever inserted.
+// The extension has to follow the bytes. imageMimeOf reads the mime back off
+// the extension, so a JPEG named .png is an image the browser has to sniff.
+// This became load-bearing with the photo picker (ios.md §11). A phone's
+// pictures are photographs, and forcing them through PNG was a tenfold size
+// increase, measured on the first one ever inserted.
 describe("the extension a paste is written under", () => {
   const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]);
   const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
@@ -264,8 +270,8 @@ import { createNote, lockNote, moveNote, readNote, removeLockNote } from "./note
 import { createVault, isSealedAsset, lockVault, resetVaultForTests, unlockVault } from "./vault";
 import { readFile as readRawFile, stat } from "node:fs/promises";
 
-// A reference is relative to the note, so moving the note changes what every
-// one of them names. The move rewrites them; without that, filing a note with
+// A reference is relative to the note, so moving the note changes what each
+// one names. moveNote rewrites them. Without that, filing a note with
 // pictures into a folder breaks every picture in it.
 describe("moving a note rebases its image references", () => {
   const textOf = async (path: string) => (await readNote(path))!.text;
@@ -332,8 +338,9 @@ describe("sealed images", () => {
     expect(onDisk.includes(Buffer.from(BYTES))).toBe(false); // no plaintext run survives
     const got = await readAsset(ROOT, src);
     expect(new Uint8Array(Buffer.from(asBytes(got).dataB64, "base64"))).toEqual(BYTES);
-    // Vault locked: the read says sealed — the widget's locked face, not
-    // broken, and never the bytes.
+    // With the vault locked readAsset returns { sealed: true }, never the
+    // bytes. The widget shows the locked placeholder rather than a broken
+    // image.
     lockVault();
     expect(await readAsset(ROOT, src)).toEqual({ sealed: true });
   });
@@ -351,9 +358,9 @@ describe("sealed images", () => {
   });
 
   test("an image an unlocked note still shows is sealed AND surfaced, never refused", async () => {
-    // A refusal would deadlock locking two notes that share an image (each
-    // blocks on the other); sealing extends the lock's visibility rule to
-    // the shared image, and sealedShared is what the UI says out loud.
+    // Refusing would deadlock locking two notes that share an image: each
+    // would block on the other. Sealing extends the lock's visibility rule to
+    // the shared image, and sealedShared is what the UI reports.
     await mkdir(ASSETS, { recursive: true });
     await writeFile(join(ASSETS, "shared.png"), BYTES);
     await createNote(ROOT, "# Also Shows It\n\n![x](.ledge-assets/shared.png)\n");
@@ -361,22 +368,21 @@ describe("sealed images", () => {
     const res = await lockNote(note.path);
     expect(res.sealedShared).toEqual(['.ledge-assets/shared.png (also shown by "Also Shows It")']);
     expect(isSealedAsset(await readRawFile(join(ASSETS, "shared.png")))).toBe(true);
-    // The sharing (still unlocked) note's read serves it sealed while the
-    // vault is locked — the same face everywhere, which is the point.
+    // The sharing note stays unlocked, but readAsset returns { sealed: true }
+    // for it while the vault is locked. The image reads the same way from
+    // every note.
     lockVault();
     expect(await readAsset(ROOT, ".ledge-assets/shared.png")).toEqual({ sealed: true });
   });
 
-  // Two notes in different folders write the same image two different ways:
-  // `.ledge-assets/x.png` from the root, `../.ledge-assets/x.png` one folder
-  // down. Both sweeps therefore compare RESOLVED PATHS, never reference
-  // strings.
-  //
-  // The direction matters, so both tests below run it: a DEEPER note's
-  // reference contains a shallower one as a substring, so the old
-  // `other.text.includes(ref)` still stumbled onto the right answer when the
-  // note being swept was the shallow one. Sweep the deep note and it finds
-  // nothing, and §5 breaks in both directions at once.
+  // Two notes in different folders write one image two ways:
+  // `.ledge-assets/x.png` from the root, `../.ledge-assets/x.png` a folder
+  // down. Both sweeps compare resolved paths, never reference strings. The old
+  // `other.text.includes(ref)` (lockNote and removeLockNote in notes.ts) found
+  // the sharer when the note being swept was the shallow one, and missed it
+  // when the swept note was the deep one, so both directions get a test
+  // (testing.md §3). A miss seals a shared image without reporting it, and
+  // leaves one unsealed that a locked note still shows (locking.md §5).
   test("a sharing note at the ROOT is found when the locking note is in a folder", async () => {
     await writeFile(join(ASSETS, "team.png"), BYTES);
     await createNote(ROOT, "# Roster\n\n![x](.ledge-assets/team.png)\n");
@@ -392,9 +398,9 @@ describe("sealed images", () => {
     await lockNote(flat.path);
     await lockNote(deep.path);
     await removeLockNote(deep.path);
-    // `flat` is still locked and still shows it, so sealed it stays. This is
-    // the leak the resolved-path comparison exists to stop: unseal here and a
-    // locked note's image is readable with the vault shut.
+    // `flat` is still locked and still shows the image, so it stays sealed.
+    // Unsealing here is the leak the resolved-path comparison stops: it would
+    // leave a locked note's image readable with the vault shut.
     expect(isSealedAsset(await readRawFile(join(ASSETS, "plan.png")))).toBe(true);
     await removeLockNote(flat.path);
     expect(isSealedAsset(await readRawFile(join(ASSETS, "plan.png")))).toBe(false);
@@ -408,8 +414,8 @@ describe("sealed images", () => {
     expect((await readNote(moved.path))!.text).toContain("![x](../.ledge-assets/secret.png)");
     expect((await readNote(moved.path))!.locked).toBe(true);
 
-    // Shut, the body is unreadable, so the rewrite cannot happen. Moving
-    // anyway would land the note with its picture pointing at nothing.
+    // With the vault shut the body is unreadable, so the rewrite cannot run.
+    // Moving anyway would land the note with its picture pointing at nothing.
     lockVault();
     expect(moveNote(moved.path, "elsewhere")).rejects.toThrow(/unlock first/);
     expect(await unlockVault("asset-pass")).toBe(true);
@@ -423,9 +429,10 @@ describe("sealed images", () => {
     const a = await createNote(ROOT, "# First\n\n![x](.ledge-assets/both.png)\n");
     const b = await createNote(ROOT, "# Second\n\n![x](.ledge-assets/both.png)\n");
     await lockNote(a.path);
-    await lockNote(b.path); // no conflict: locked claims agree
+    await lockNote(b.path); // no conflict: the sweep skips an already-locked sharer
     await removeLockNote(a.path);
-    // Second still claims it: sealed it stays.
+    // The second note is still locked and still shows the image, so its claim
+    // keeps the image sealed through this Remove Lock.
     expect(isSealedAsset(await readRawFile(join(ASSETS, "both.png")))).toBe(true);
     await removeLockNote(b.path);
     expect(isSealedAsset(await readRawFile(join(ASSETS, "both.png")))).toBe(false);

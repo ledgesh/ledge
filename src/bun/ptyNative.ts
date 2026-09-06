@@ -1,19 +1,19 @@
-// The two C trampolines the PTY cannot do from bun:ffi alone, and the one
-// declaration of their signatures. Kept apart from pty.ts because there are
-// two consumers and they must not drift: `scripts/build-native.ts` compiles
-// this source into the dylib the app bundle ships, and pty.ts loads that dylib
-// (falling back to compiling the same text in-process with bun:ffi's TinyCC).
-// A symbol named here but absent from the C is a dlopen failure at first
-// spawn, which is why the pair lives in one file with an invariant test.
+// The C trampolines the PTY cannot reach from bun:ffi alone, and the one
+// declaration of their signatures (architecture.md §8). Two consumers read
+// this file and must not drift: `scripts/build-native.ts` compiles the C into
+// the dylib the app bundle ships, and pty.ts dlopens that dylib, or compiles
+// the same text in-process with bun:ffi's TinyCC. A symbol named here but
+// absent from the C is a dlopen failure at first spawn, so ptyNative.test.ts
+// compares the two.
 //
-// Why a build-time dylib at all: TinyCC needs the SYSTEM HEADERS this source
-// includes, and macOS keeps those in the SDK — a Mac without Xcode or the
-// Command Line Tools has no /usr/include, so the in-process compile fails with
-// "include file 'sys/ioctl.h' not found". That machine is a plausible first
-// launch (Ledge is downloaded, not built), and the failure is quiet and awful:
-// Ctrl-C stops working in every terminal and resize becomes a no-op. Compiling
-// on OUR machine, where the SDK is a build requirement anyway, moves the
-// dependency off the user's.
+// The dylib is built ahead of time because TinyCC needs the system headers
+// this source includes, and a machine that downloads Ledge rather than
+// building it has none (architecture.md §8). The in-process compile fails
+// there with "include file 'sys/ioctl.h' not found", and nothing but a console
+// warning reports it. The two accounts of what that costs disagree:
+// architecture.md §8 says Ctrl-C stops working in every terminal and resize
+// becomes a no-op, while pty.ts's loadNative measured Ctrl-C still working and
+// only resize and non-blocking writes lost.
 import type { FFIFunction } from "bun:ffi";
 
 /** The trampolines' filename on `platform`. Mach-O and ELF disagree about the
@@ -30,18 +30,20 @@ export const NATIVE_LIB = nativeLibName(process.platform);
  * The subdirectory one target's prebuilt trampolines sit in inside a published
  * package (`lib/native/<this>/<NATIVE_LIB>`).
  *
- * A published package carries every target at once, because npm installs one
- * tarball on whatever machine runs the install and the file is 33KB — the
- * per-platform optional dependency that a bigger binary would earn here would
- * be four more packages to publish in lockstep for no saving anyone can
- * measure. So the loader has to pick, and the name is what it picks by.
+ * A published package carries every target at once (npmPackage.ts,
+ * NATIVE_TARGETS), because npm installs one tarball on whatever machine runs
+ * the install. Each library is 33KB. A bigger one would earn per-platform
+ * optional dependencies; at this size they are four more packages to publish
+ * in lockstep for no measurable saving. So the loader has to pick a target,
+ * and this name is what it picks by.
  *
- * Both consumers are here for ptyNative.ts's reason: `scripts/build-npm.ts`
- * writes these directories and `pty.ts` reads them, on different machines
- * months apart, and a disagreement between them is not a crash. It is a server
- * that falls through to the in-process compile, fails that too for want of
- * headers, and runs shells with no controlling terminal — which reaches the
- * user as Ctrl-C quietly doing nothing.
+ * Two consumers, on different machines months apart: nativePath
+ * (npmPackage.ts) puts this segment in the file path `scripts/build-npm.ts`
+ * writes, and libCandidates (pty.ts) looks for the library under the same
+ * name. A disagreement between them is not a crash. The server falls through
+ * to the in-process compile, fails that too because the headers are missing,
+ * and runs shells without the trampolines: resize is a no-op, and a write to a
+ * shell that is not reading can stall (pty.ts, loadNative).
  */
 export function nativeDir(platform: string, arch: string): string {
   return `${platform}-${arch}`;
@@ -50,17 +52,17 @@ export function nativeDir(platform: string, arch: string): string {
 /** This machine's entry in that layout. */
 export const NATIVE_DIR = nativeDir(process.platform, process.arch);
 
-// What differs between the two libcs, in one place because the alternative is
-// a `process.platform` per call site in pty.ts.
+// What differs between the two libcs, in one place. The alternative is a
+// `process.platform` test at every call site in pty.ts.
 //
-// Only three things do, and only the third is a value rather than a name.
-// openpty, ttyname, poll, killpg, tcgetpgrp and the whole posix_spawn family
-// are POSIX and identical; O_RDWR, POLLIN and struct pollfd's layout agree
-// (0x2, 0x1, 8 bytes) on both; and TIOCSWINSZ does NOT agree (0x80087467 vs
-// 0x5414) but never reaches TypeScript, because ioctl goes through the
-// trampoline and the compiler substitutes the right one. That is a second
-// reason for the trampoline beyond the variadic one, and it is the reason a
-// ported constant table stays this short.
+// These three fields are the whole difference, and only POSIX_SPAWN_SETSID is
+// a value rather than a name. The rest of what pty.ts calls is POSIX and
+// identical: openpty, ttyname, poll, killpg, tcgetpgrp, the whole posix_spawn
+// family, and O_RDWR, POLLIN and struct pollfd's layout (0x2, 0x1, 8 bytes on
+// both). TIOCSWINSZ does differ (0x80087467 vs 0x5414), but ioctl goes through
+// the trampoline and the C compiler substitutes the right value there, so
+// TIOCSWINSZ needs no entry here. That is a second reason for the trampoline
+// beyond the variadic one.
 //
 // The floor is glibc 2.29 (Debian 11, Ubuntu 20.04, RHEL 9), set by
 // posix_spawn_file_actions_addchdir_np. musl is out of scope: it has no
@@ -70,13 +72,13 @@ export const PLATFORM = process.platform === "darwin"
   ? {
     libc: ["libSystem.B.dylib"],
     // openpty is libutil's on glibc, and libutil was folded into libc.so.6 in
-    // 2.34 (2021) — so a modern Debian finds it in the first candidate and
-    // Ubuntu 20.04 finds it in the second. dlopen resolves eagerly, so this is
-    // a separate handle rather than a bigger table: one missing name would
-    // otherwise take every symbol down with it.
+    // 2.34 (2021). A modern Debian finds it in the first candidate, Ubuntu
+    // 20.04 in the second. openpty gets its own dlopen handle rather than a
+    // place in a bigger table, because dlopen resolves eagerly: one missing
+    // name would take every symbol down with it.
     ptyLib: ["libSystem.B.dylib"],
-    // BSD's flag. glibc's has a different value and would silently set some
-    // other attribute, which is the failure mode a shared constant invites.
+    // BSD's flag. glibc's has a different value, so one shared constant would
+    // silently set some other attribute on the wrong platform.
     POSIX_SPAWN_SETSID: 0x0400,
   }
   : {
@@ -85,41 +87,39 @@ export const PLATFORM = process.platform === "darwin"
     POSIX_SPAWN_SETSID: 0x0080,
   };
 
-// Spawning the shell so that Ctrl-C works.
+// ledge_spawn_tty runs login_tty (setsid, TIOCSCTTY, dup onto 0/1/2) in the
+// child, between fork and exec. That gives the shell a controlling terminal,
+// which is what makes ^C reach it: a tty turns ^C into SIGINT only for its
+// foreground process group, and it has such a group only once some process has
+// claimed it. On macOS the claim needs an explicit ioctl(TIOCSCTTY), since the
+// "first tty a session leader opens becomes its ctty" rule is System V and
+// Linux, not BSD. posix_spawn has no file action for an ioctl, so
+// POSIX_SPAWN_SETSID alone produced a session leader with no controlling
+// terminal: `stty` reported isig on and ^C did nothing.
 //
-// A tty only turns ^C into SIGINT for its foreground process group, and it only
-// has one if some process has claimed it as its CONTROLLING terminal. On macOS
-// that claim is an explicit ioctl(TIOCSCTTY) - the "first tty a session leader
-// opens becomes its ctty" rule is System V/Linux, not BSD - and posix_spawn has no
-// file action for an ioctl. So POSIX_SPAWN_SETSID gave us a session leader with no
-// controlling terminal: `stty` reported isig on, and ^C still did nothing, because
-// the line discipline had nobody to signal.
+// The fork is safe here even though pty.ts's header warns about fork() under
+// Bun. That warning is about forking into JS, and this child touches nothing
+// but syscalls before execve replaces the image.
 //
-// login_tty() is exactly that missing step (setsid + TIOCSCTTY + dup onto 0/1/2),
-// but it has to run in the child, between fork and exec. Hence this trampoline.
-// pty.ts's header warning about fork() under Bun holds for forking into JS; here
-// the child touches nothing but syscalls before execve replaces the image, which
-// is the same contract posix_spawn keeps inside libc.
+// ledge_set_winsize is a fixed-arity ioctl(fd, TIOCSWINSZ, &winsize), which is
+// how a live pty is resized. It is C because ioctl is variadic and bun:ffi
+// mis-marshals variadic calls on arm64 (pty.ts's header). The ioctl also
+// raises SIGWINCH on the child, so zsh and any running program re-read the new
+// size.
 //
-// Resizing a live pty means ioctl(fd, TIOCSWINSZ, &winsize), but ioctl is
-// variadic and bun:ffi mis-marshals variadic calls on arm64 (pty.ts's header),
-// so ledge_set_winsize is a fixed-arity wrapper around it. ioctl(TIOCSWINSZ)
-// also raises SIGWINCH on the child, so zsh and any running program re-read the
-// new size.
+// ledge_set_nonblock wraps fcntl for the same variadic reason, and pty.ts's
+// write path is why it exists: a blocking write to a pty master can wait
+// forever. A tty in canonical mode holds input a line at a time, so a line
+// longer than its buffer can never be completed and never be read, and the
+// writer sleeps in the kernel with the whole main process behind it. Every
+// shell switches to raw mode, where no such limit exists, but a spawn writes
+// before the child has done that, and a remote block's body arrives as one
+// long line. O_NONBLOCK turns that wait into EAGAIN, which pty.ts can queue
+// and retry.
 //
-// ledge_set_nonblock is there for the same variadic reason, and pty.ts's write
-// path is why: a blocking write to a pty master can wait forever. A tty in
-// canonical mode holds input a line at a time, so a line longer than its buffer
-// can never be completed and never be read, and the writer sleeps in the kernel
-// with the whole main process behind it. Every shell switches to raw mode where
-// no such limit exists, but a spawn writes before the child has done that, and
-// a remote block's body rides in on one long line. O_NONBLOCK turns that wait
-// into EAGAIN, which pty.ts can queue and retry.
-//
-// The includes are the port: login_tty is declared in <util.h> on BSD and in
-// <utmp.h> on glibc, whose <pty.h> holds openpty and forkpty instead. Same
-// three functions, same libc-level contract, two spellings of where to find
-// them — so the source stays one source and the preprocessor picks.
+// The one `#if` in the includes is login_tty's two homes: <util.h> on BSD, and
+// <utmp.h> on glibc, whose <pty.h> holds openpty and forkpty instead
+// (architecture.md §8).
 export const NATIVE_C = `#include <fcntl.h>
 #include <sys/ioctl.h>
 #include <termios.h>
@@ -172,7 +172,7 @@ export const NATIVE_SYMBOLS = {
 } satisfies Record<string, FFIFunction>;
 
 /** The function names the C source defines, in source order. The invariant
- * test compares this against NATIVE_SYMBOLS' keys; nothing else parses C. */
+ * test compares them against NATIVE_SYMBOLS' keys. Nothing else parses C. */
 export function definedSymbols(source: string): string[] {
   return [...source.matchAll(/^\w[\w *]*?\b(\w+)\s*\(/gm)].map((m) => m[1]);
 }

@@ -1,17 +1,16 @@
-// The seams the client keeps (remote.md §10). Two of the five reach the real
-// pasteboard, so what is tested here is everything around them: the list both
-// ends read, the gate that decides whether a paste pays for an osascript
-// spawn, and the guard on link opening. Nothing in this file writes the
-// clipboard or opens a browser — a test suite that clobbered the user's
-// pasteboard would be worse than the bug it was looking for.
+// Tests for the seams the client serves itself (remote.md §10). No test reads
+// or writes the real pasteboard, and none opens a browser: every assetPaste
+// call injects a readImage, and linkOpen is only given urls it refuses. What
+// the tests cover is the list both ends read, the gate that decides whether a
+// paste pays for an osascript spawn, and the guard on link opening.
 import { describe, expect, test } from "bun:test";
 import { clientSeams, wantsHtml } from "./clientSeams";
 import { CLIENT_METHODS, CONNECTION_METHODS, NATIVE_METHODS } from "../shared/wire";
 
 describe("the client's methods", () => {
-  // NATIVE_METHODS is what clientSeams implements; CLIENT_METHODS is what the
-  // server refuses, which is that plus the connection list
-  // (bun/connectionManager.ts implements those). A name in one and not the
+  // NATIVE_METHODS is what clientSeams implements. CLIENT_METHODS is what the
+  // server refuses: that list plus the connection list. The connection list is
+  // implemented by bun/connectionManager.ts. A name in one list and not the
   // other is a method served by nobody or refused by everybody.
   test("the native list and its implementations name the same six", () => {
     expect(Object.keys(clientSeams({})).sort()).toEqual([...NATIVE_METHODS].sort());
@@ -31,15 +30,17 @@ describe("the rich-paste gate", () => {
     expect(wantsHtml(["public.utf8-plain-text", "html"])).toBe(true);
   });
 
-  // The common case, and the one the gate exists for: a copy made inside Ledge
-  // (pbcopy writes text alone) must not cost an osascript spawn per ⌘V.
+  // The gate exists for the common case: a copy made inside Ledge. Ledge
+  // copies with pbcopy, and pbcopy writes text alone. ⌘V after one must not
+  // cost an osascript spawn.
   test("text alone skips the spawn", () => {
     expect(wantsHtml(["public.utf8-plain-text"])).toBe(false);
   });
 
-  // Both spellings of "we could not tell": the flavor list is an optional
-  // native seam, and being wrong here has to cost latency rather than the
-  // paste itself.
+  // Two answers mean the flavors are unknown: a null list and an empty one.
+  // Null covers an absent native seam and a pasteboard that cannot be read
+  // (clientSeams.ts clipboardFormats). Either way the pasteboard is asked, so
+  // a wrong answer costs latency rather than the paste.
   test.each([
     [null, "no format list at all"],
     [[], "an empty one"],
@@ -50,9 +51,10 @@ describe("the rich-paste gate", () => {
 
 describe("opening a link", () => {
   // `open` treats a non-URL argument as a file path and will launch an .app
-  // bundle, so this guard is the boundary, not a nicety — and the urls arrive
-  // from note text, which is to say from anywhere. A refusal returns rather
-  // than throws: the view has nothing useful to do with the exception.
+  // bundle, so openableUrl (shared/links.ts) is the boundary. It refuses empty
+  // and whitespace-bearing text as well as unlisted schemes. The urls come from
+  // note text, so they can be anything. A refusal returns { ok: false } rather
+  // than throwing: the view has nothing useful to do with the exception.
   test.each([
     ["javascript:alert(1)", "script"],
     ["file:///Applications/Calculator.app", "a local file"],
@@ -64,10 +66,11 @@ describe("opening a link", () => {
 });
 
 describe("the native halves", () => {
-  // Both are optional because a client that is not macOS has neither, and the
-  // one that matters is the menu: a shell with no setMenu must still answer
-  // menuSet, or every menu push the view makes turns into an unhandled
-  // rejection.
+  // setMenu and readImage, the two natives this file injects, are optional
+  // because a client that is not macOS has neither. The menu is the one that
+  // matters here: a shell with no setMenu must still answer menuSet. The view
+  // re-pushes the menu on every state change and fires each push with `void`
+  // (boot.tsx configureMenu), so a rejection would go unhandled.
   test("menuSet answers with no platform to hand the menu to", async () => {
     expect(await clientSeams({}).menuSet({ items: [] })).toEqual({ ok: true });
   });
@@ -80,11 +83,11 @@ describe("the native halves", () => {
   });
 });
 
-// remote.md §10's last move: the pasteboard's image is read on the machine
-// holding the pasteboard, and the file is named on the machine holding the
-// notes. The osascript half cannot run in a test suite (it would read the
-// developer's own clipboard), so what is asserted here is the seam between the
-// two halves — including the case that must NOT trouble the server at all.
+// A pasted image splits across two machines (remote.md §10): the image is read
+// on the machine holding the pasteboard, and the file is named on the machine
+// holding the notes. The osascript read cannot run in a test suite, since it
+// would read the developer's own clipboard. These tests cover the seam between
+// the two ends, including the case that never reaches the server.
 describe("a pasted image is two machines' work", () => {
   test("no image on the pasteboard answers null without asking the server", async () => {
     let asked = 0;
@@ -115,7 +118,8 @@ describe("a pasted image is two machines' work", () => {
     expect(await seams.assetPaste({ root: "/w", notePath: "/w/a.md" })).toEqual({
       src: ".ledge-assets/pasted-2026-08-01.png",
     });
-    // The client sends bytes and handles it was given, and names nothing.
+    // The client sends the bytes plus the root and note path it was given.
+    // The client does not name the file; the server does.
     expect(seen).toEqual([{ root: "/w", notePath: "/w/a.md", dataB64: "iVBORw==" }]);
   });
 

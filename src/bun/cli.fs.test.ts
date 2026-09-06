@@ -1,11 +1,8 @@
-// The CLI verbs against a real filesystem: what `ledge` actually prints and
-// exits with, driven through runCli with the process seams stubbed. The
-// interesting decisions are the shell-shaped ones — cwd scoping ls and
-// anchoring new, the grep exit contract, path-vs-title targeting — plus one
-// spawned-process pass proving the import.meta.main assembly.
-//
-// Same scratch-home discipline as notes.fs.test.ts: the preload pointed
-// APP_HOME at a temp dir before anything imported, and the guard re-checks.
+// The CLI verbs against a real filesystem: what `ledge` prints and exits with,
+// driven through runCli with the process seams stubbed. The cwd scopes `ls`
+// and anchors `new`. `search` follows grep's exit contract. A target is a path
+// or a title. One spawned process covers import.meta.main. This file and
+// notes.fs.test.ts share the preload's scratch APP_HOME, re-checked below.
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -19,8 +16,10 @@ if (!resolve(APP_HOME).startsWith(resolve(tmpdir()) + sep)) {
   throw new Error(`refusing to run filesystem tests against ${APP_HOME} — is the preload configured?`);
 }
 
-// The deixis env is the CLI's input surface, so tests own it completely:
-// cleared before each test, restored for whoever runs after this file.
+// The deixis env is the CLI's input surface (cli.ts, its "Deixis" note), so
+// this file owns it: beforeEach clears LEDGE_WORKSPACE and LEDGE_NOTE, one
+// append test sets LEDGE_NOTE, and afterAll restores what the process had for
+// the test files that run after this one.
 const SAVED_WS = process.env["LEDGE_WORKSPACE"];
 const SAVED_NOTE = process.env["LEDGE_NOTE"];
 afterAll(() => {
@@ -51,10 +50,11 @@ interface Run {
   opens: number;
 }
 
-// Run a verb in-process: stdout/stderr captured per line, cwd and piped
-// stdin injected, the app launch recorded instead of performed. tmpdir() is
-// the standing "outside every workspace" cwd — it CONTAINS the scratch
-// APP_HOME, and rootContaining only looks downward.
+// Runs a verb in-process: stdout and stderr captured per line, cwd and piped
+// stdin injected, the app launch recorded as a success instead of performed.
+// The default cwd of tmpdir() stands for "outside every workspace". tmpdir()
+// sits above the scratch APP_HOME, not inside a registered root, and
+// rootContaining matches only a path at or below a root.
 async function run(argv: string[], opts: { cwd?: string; stdin?: string } = {}): Promise<Run> {
   const out: string[] = [];
   const err: string[] = [];
@@ -290,8 +290,9 @@ describe("tags", () => {
   });
 });
 
-// The cwd deixis one level deeper than the workspace. `-w` and `--all` mean
-// the whole workspace; `-f` outranks everything.
+// The cwd's folder scopes `ls`, `search`, `tags` and `new` to that folder, at
+// any depth below the root (cwdFolder). `-w` and `--all` mean the whole
+// workspace. `-f` outranks all of them, the cwd's folder included.
 describe("folders", () => {
   test("a cwd inside a folder scopes ls to it, and -f names one from anywhere", async () => {
     await run(["new", "Top"], { cwd: ROOT });
@@ -331,8 +332,8 @@ describe("folders", () => {
     await run(["new", "Filed", "-f", "projects"], { cwd: ROOT, stdin: "findme #here" });
     const hits = await run(["search", "findme"], { cwd: join(ROOT, "projects") });
     expect(hits.code).toBe(0);
-    // hitPath renders a hit under the cwd relatively: inside the folder, a
-    // grep-shaped bare filename.
+    // hitPath prints a hit under the cwd as a relative path, grep-shaped:
+    // inside the folder that is a bare filename.
     expect(hits.out).toEqual(["filed.md:3: findme #here"]);
     const tags = await run(["tags", "here"], { cwd: join(ROOT, "projects") });
     expect(tags.out).toEqual(["filed.md:3: findme #here"]);
@@ -357,8 +358,9 @@ describe("folders", () => {
     await run(["new", "Plan", "-f", "projects"], { cwd: ROOT, stdin: "the projects one" });
     const picked = await run(["cat", "Plan", "-f", "projects"], { cwd: ROOT });
     expect(picked.out.join("\n")).toContain("the projects one");
-    // Standing in admin/ must not narrow the ADDRESS: a title still reaches
-    // the whole workspace, or `cd` would be a way to lose notes.
+    // The cwd's folder does not narrow which note a title addresses. Standing
+    // in admin/, `-f projects` still picks the projects note, and a bare title
+    // still reaches the whole workspace.
     const fromAdmin = await run(["cat", "Plan", "-f", "projects"], { cwd: join(ROOT, "admin") });
     expect(fromAdmin.out.join("\n")).toContain("the projects one");
     expect((await run(["cat", "Plan"], { cwd: join(ROOT, "projects") })).code).toBe(0);
@@ -385,13 +387,13 @@ describe("workspaces", () => {
 
 describe("install", () => {
   test("an explicit dir gets the shim, path on stdout, PATH hint on stderr", async () => {
-    const bin = join(APP_HOME, "shim-bin"); // scratch by construction — never a real bin dir
+    const bin = join(APP_HOME, "shim-bin"); // scratch by construction, never a real bin dir
     const r = await run(["install", bin]);
     expect(r.code).toBe(0);
     expect(r.out).toEqual([join(bin, "ledge")]);
     expect(r.err.join("\n")).toContain("not on your PATH");
     const text = await Bun.file(join(bin, "ledge")).text();
-    expect(text).toContain('"$@"'); // the shim, execing this very entry
+    expect(text).toContain('"$@"'); // the shim execs this entry, forwarding the caller's arguments
     expect(text).toContain("cli.ts");
   });
 });
@@ -431,10 +433,11 @@ describe("open (the bare-title form)", () => {
   });
 });
 
-// The spawned seam: the actual `bun src/bun/cli.ts` a shim would exec, with
-// its own hand-crafted home (a separate process — the preload's APP_HOME
-// does not reach it). What only this proves is the assembly: import.meta.main
-// fires, the env the shell set is honored, stdout carries the result alone.
+// The spawned seam: the `bun src/bun/cli.ts` a shim would exec. The spawn env
+// below sets LEDGE_NOTES_ROOT to a temp home, overriding the scratch root the
+// child would otherwise inherit from the preload (workspaces.ts reads APP_HOME
+// from that variable). Only this test covers the assembly: import.meta.main
+// runs, the env the shell set is honored, and stdout carries the result alone.
 describe("spawned process", () => {
   test("cat by title, and mcp answering initialize", async () => {
     const HOME = await mkdtemp(join(tmpdir(), "ledge-cli-proc-"));

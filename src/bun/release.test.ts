@@ -7,64 +7,68 @@ import { manifest } from "./npmPackage";
 
 const ROOT = resolve(import.meta.dir, "..", "..");
 
-// The build config decides what a released app IS, and it is exercised about
-// once per release. These are the parts of it that fail silently: a wrong
-// version reaches users as a wrong About box, and a build that skips signing
-// reaches them as an app that will not open.
+// The build config decides what a released app is, and the release path that
+// consumes it runs about once per release. These tests cover the parts of it
+// that fail silently. A wrong version reaches users as a wrong About box. A
+// build that skips signing reaches them as an app that will not open.
 describe("the release build config", () => {
   const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as {
     version: string;
     scripts: Record<string, string>;
   };
 
-  // Two files carry the version. electrobun.config.ts is the one that becomes
-  // CFBundleVersion and CFBundleShortVersionString; package.json is the one a
-  // reader looks at first. A release where they disagree has no version.
+  // Two files carry the version. electrobun.config.ts is the copy that reaches
+  // the bundle: it becomes CFBundleVersion, and scripts/stamp-version.ts copies
+  // it into CFBundleShortVersionString. package.json is the copy a reader looks
+  // at first. A release where they disagree ships a bundle whose version is not
+  // the one the repo names.
   test("both files name the same version", () => {
     expect(config.app.version).toBe(pkg.version);
   });
 
-  // A third, for the server: it has no Electrobun runtime to ask
-  // (shared/version.ts), and the number it reports is what a client compares
-  // builds against across an ssh connection.
+  // shared/version.ts holds a third copy, for the server. The server has no
+  // Electrobun runtime to ask for a version, and the number it reports in its
+  // handshake is the build a client sees across an ssh connection.
   test("the server reports that version too", () => {
     expect(BUILD_VERSION).toBe(pkg.version);
   });
 
-  // And a fourth, on npm. The handshake refuses a schema mismatch by naming
-  // both builds (remote.md §11), so the number a published `ledge-server`
-  // reports has to be the number it was published under — a package whose
-  // version is its own would make that message name a build nobody can
-  // install. Generated rather than checked in for exactly this reason;
-  // the test is what makes the generator's input the right one.
+  // npm carries a fourth copy. The handshake's refusal names the build the peer
+  // is running (remote.md §11), and a `ledge-server` published under any other
+  // version would put a build nobody can install into that message. The
+  // published package.json is generated from `manifest` by scripts/build-npm.ts
+  // rather than checked in, which is what stops that drift (npmPackage.ts,
+  // releasing.md §2).
   test("a published server is versioned as the app it belongs to", () => {
     expect(manifest(pkg.version).version).toBe(BUILD_VERSION);
   });
 
-  // npm's own grammar, which is stricter than Apple's above: a range or a
-  // leading v is accepted into package.json and rejected at publish.
+  // A range or a leading v is accepted into package.json and then rejected at
+  // publish. npm checks the version where Apple's tools do not: the same string
+  // goes into the plist below without complaint.
   test("the package version is a plain semver", () => {
     expect(manifest(pkg.version).version).toMatch(/^\d+\.\d+\.\d+(-[\w.]+)?$/);
   });
 
   // CFBundleShortVersionString has a defined grammar: one to three
   // dot-separated integers. Apple's tools accept `v0.1.0` or `0.1.0-beta` into
-  // the plist and then sort them wrongly forever.
+  // the plist and then sort them wrongly.
   test("the version is a plain release number", () => {
     expect(config.app.version).toMatch(/^\d+(\.\d+){0,2}$/);
   });
 
   test("the release script builds the stable channel", () => {
     expect(pkg.scripts["release"]).toContain("--env=stable");
-    // The preflight is the only thing standing between a mistyped identity and
-    // a three-minute build that fails at the end of it.
+    // The preflight catches a mistyped signing identity before the build
+    // starts, rather than minutes later when the build fails at signing.
     expect(pkg.scripts["release"]).toContain("release-preflight.ts");
   });
 });
 
-// The escape hatch is a switch that turns signing OFF, so the interesting
-// question is which way it points when nobody touches it. Read from a fresh
-// process because the config decides this at import time.
+// LEDGE_UNSIGNED turns signing off. These tests pin both positions of the
+// switch: on when nobody sets the variable, and off for both codesign and
+// notarize when it is set. Each case reads the config from a fresh process,
+// because electrobun.config.ts decides `signed` at import time.
 describe("signing", () => {
   function macConfigWith(env: Record<string, string | undefined>): { codesign: boolean; notarize: boolean } {
     const p = Bun.spawnSync(
@@ -82,9 +86,9 @@ describe("signing", () => {
   });
 
   test("LEDGE_UNSIGNED=1 turns off both halves, not one", () => {
-    // Signing without notarizing produces an app Gatekeeper still refuses, so
-    // a dry run that dropped only one of them would waste the round trip and
-    // prove nothing.
+    // Gatekeeper refuses an app that is signed but not notarized. A dry run
+    // that turned off only one of the two would spend the notarization round
+    // trip to Apple's servers and prove nothing.
     const mac = macConfigWith({ LEDGE_UNSIGNED: "1" });
     expect(mac.codesign).toBe(false);
     expect(mac.notarize).toBe(false);

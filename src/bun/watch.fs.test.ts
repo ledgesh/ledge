@@ -1,15 +1,16 @@
-// The watcher against a real filesystem: does fs.watch(recursive) on this
-// platform actually deliver the events the feature stands on? A unit test
-// cannot answer that — this is the native seam, probed with real writes.
-// Timings are generous: the point is delivery, not latency.
+// The watcher against a real filesystem. The question these tests ask is
+// whether fs.watch(recursive) on this platform delivers the events the
+// feature stands on. A unit test cannot answer that, so the tests make real
+// writes and wait for real events. Timings are generous: the point is
+// delivery, not latency.
 import { afterEach, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rename, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { closeWatchers, syncWatchers } from "./watch";
 
-// Resolve once onChange fires for the expected root, or fail loudly after 3s —
-// a watcher that stays silent IS the finding.
+// nextChange resolves with the root that the first change callback reports.
+// If no callback arrives within three seconds it rejects, and the test fails.
 function nextChange(register: (cb: (root: string) => void) => void): Promise<string> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("watcher never fired")), 3000);
@@ -20,12 +21,13 @@ function nextChange(register: (cb: (root: string) => void) => void): Promise<str
   });
 }
 
-// The recursive watch registers PREEXISTING subdirectories asynchronously
-// after watch() returns (the probe that established this lives in the module
-// comment's history): a write racing that setup can be missed. The app never
-// notices — roots are watched at boot, and the focus refresh is the belt —
-// but a test writing microseconds after syncWatchers would flake, so give
-// the scan a beat.
+// A recursive watch registers preexisting subdirectories asynchronously,
+// after watch() returns. A write that races that setup can go unseen by the
+// watcher. A probe established this, and the writeup is in the module
+// comment's history. The app never notices, because roots are watched at
+// boot and the window-focus refresh re-reads a root whose events were
+// missed. A test writing microseconds after syncWatchers would flake, so
+// settle sleeps 150 ms: a guess with slack, not a signal from the scan.
 const settle = () => new Promise((r) => setTimeout(r, 150));
 
 afterEach(() => closeWatchers());
@@ -43,8 +45,8 @@ test("a temp-plus-rename save (how agents and Ledge itself write) fires via the 
   await writeFile(join(root, "note.md"), "# Old\n");
   const fired = nextChange((cb) => syncWatchers([root], cb));
   await settle();
-  // The platform coalesces this pair into one event named for the TEMP file —
-  // which is why relevantChange matches ".md" inside a name, not just at its end.
+  // The platform coalesces this pair into one event named for the temp file.
+  // That is why relevantChange matches ".md" inside a name, not just at the end.
   await writeFile(join(root, ".note.md.tmp-1"), "# New\n");
   await rename(join(root, ".note.md.tmp-1"), join(root, "note.md"));
   expect(await fired).toBe(root);

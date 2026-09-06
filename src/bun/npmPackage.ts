@@ -1,32 +1,24 @@
 // What the published `ledge-server` package contains, and what makes one
 // complete. The half of `scripts/build-npm.ts` that `bun test` can reach.
 //
-// The package exists because the alternative was asking a user to clone the
-// repo, compile a binary on a machine of matching architecture, and copy two
-// files that have to stay adjacent (docs/contributor/remote.md §11). Every
-// comparable tool installs its far end in one step, and the reason Ledge could
-// not was never the architecture: it was that `bun build --compile` produces
-// one artifact per target and the trampolines sit BESIDE it as a second file.
-// A package inverts both problems. npm already solves "one artifact per
-// target" by shipping every target in one tarball, and it already solves
-// adjacency by installing a directory rather than two loose files.
-//
-// What it costs, stated where the decision is: bun has to exist on the far
-// machine. The compiled binary needed nothing there, and this needs a runtime.
-// For the audience — a developer's own VPS — that is one curl, and it buys
-// away the architecture matrix, the glibc floor as a user-facing rule, and the
-// adjacency rule whose failure mode is Ctrl-C quietly not working.
+// Before the package, installing the server meant cloning the repo, compiling
+// a binary of matching architecture, and copying two files that have to stay
+// adjacent. The blocker was not portability. `bun build --compile` produces
+// one artifact per target, and the trampolines sit beside it as a second file.
+// npm carries every target in one tarball and installs a directory rather than
+// two loose files. The cost is Bun on the far machine. The compiled binary
+// needed nothing installed there (docs/contributor/remote.md §11).
 import { nativeDir, nativeLibName } from "./ptyNative";
 
 /** The name on npm, and the command it installs. */
 export const PACKAGE_NAME = "ledge-server";
 
 /**
- * The Bun floor. It is the version the suite runs on rather than the oldest
- * one that would work, and it points that way deliberately: too high asks
- * somebody to upgrade Bun, too low lets them find out from a stack trace.
- * Nothing in the server's runtime surface is exotic (dlopen, spawn, sockets),
- * so lowering it is an evidence question rather than a porting one.
+ * The minimum Bun the package declares: the version the suite runs on, not
+ * the oldest one that would work. A higher floor asks a user to upgrade Bun.
+ * A lower one lets them find out from a stack trace. The server's runtime
+ * surface is ordinary (dlopen, spawn, sockets), so lowering the floor means
+ * testing an older Bun rather than changing the server.
  */
 export const BUN_FLOOR = ">=1.3.0";
 
@@ -36,13 +28,13 @@ export interface NativeTarget {
 }
 
 /**
- * Every machine an installed package must be able to serve, all four carried
- * at once (ptyNative.ts, nativeDir).
+ * Every machine an installed package must be able to serve, all four in one
+ * tarball. `nativeDir` (ptyNative.ts) names the directory each target's
+ * library sits in.
  *
- * darwin-x64 is here and the Mac APP is arm64-only, which is not an
- * inconsistency: an old Intel Mac is a plausible always-on box for exactly the
- * user this is for, and the slice costs 33KB inside a tarball that is already
- * being downloaded.
+ * darwin-x64 is here even though the Mac app is arm64-only: an old Intel Mac
+ * is a plausible always-on box for the user this is for, and the slice costs
+ * 33KB inside a tarball that is already being downloaded.
  */
 export const NATIVE_TARGETS: readonly NativeTarget[] = [
   { platform: "darwin", arch: "arm64" },
@@ -59,15 +51,13 @@ export function nativePath(target: NativeTarget): string {
 export type BuildRoute = "universal-dylib" | "docker" | "unavailable";
 
 /**
- * How one target's trampolines get built on `hostPlatform`.
- *
- * The Mach-O slices come from one universal dylib because `cc -arch a -arch b`
- * on a Mac is a flag; the ELF ones come from a container per architecture
- * because ELF has no fat binary and a second architecture on Linux means a
- * cross toolchain (scripts/build-native.ts says the same thing from the other
- * side). What falls out is a rule worth stating plainly rather than
- * discovering: a COMPLETE package can only be assembled on a Mac. A Linux host
- * can build both Linux slices and cannot produce a Mach-O at all.
+ * How one target's trampolines get built on `hostPlatform`. Both Mach-O
+ * slices come from one universal dylib, which on a Mac is one `cc` call with
+ * two `-arch` flags. Each ELF slice comes from its own container, because ELF
+ * has no fat binary and a second architecture on Linux means a cross
+ * toolchain (scripts/build-native.ts and docs/contributor/remote.md §11 say
+ * the same). So only a Mac can assemble a complete package. A Linux host
+ * builds both Linux slices, and cannot produce a Mach-O at all.
  */
 export function routeFor(target: NativeTarget, hostPlatform: string): BuildRoute {
   if (target.platform !== "darwin") return "docker";
@@ -84,9 +74,11 @@ export function dockerPlatform(target: NativeTarget): string {
  * tree actually holds.
  *
  * One function so the build script and the test that reads the built tree
- * agree on what "publishable" means. A package missing a target is not a
- * degraded package: on that machine it is a server whose shells have no
- * controlling terminal.
+ * agree on what "publishable" means. Three targets out of four is not a
+ * degraded package but an unpublishable one: on the missing machine the
+ * server runs its shells without the trampolines, so terminal resize is a
+ * no-op and a write to a shell that is not reading can stall (pty.ts,
+ * loadNative).
  */
 export function missingTargets(present: readonly string[]): NativeTarget[] {
   const have = new Set(present);
@@ -103,12 +95,13 @@ export const ELF_MACHINE: Readonly<Record<string, number>> = { x64: 0x3e, arm64:
  * The architecture an ELF header declares, or null when the bytes are not an
  * ELF at all.
  *
- * Worth doing rather than trusting the build: `docker build --platform` is a
- * request, and a daemon without the emulator for that platform can answer it
- * with the host's architecture instead. What ships then is a package whose
- * linux-arm64 slice is x86-64, which fails on the user's machine as a dlopen
- * error and falls through to the no-terminal path — the exact quiet failure
- * shipping prebuilt trampolines exists to prevent.
+ * scripts/build-npm.ts reads this back out of each container's output rather
+ * than trusting the build: `docker build --platform` is a request, and a
+ * daemon without the emulator for that platform can answer it with the host's
+ * architecture instead. A package whose linux-arm64 slice is x86-64 fails
+ * quietly on the user's machine, as a dlopen error that leaves the server
+ * running shells whose resize does nothing (pty.ts, loadNative). Docker warns
+ * when it substitutes an architecture, in a line nobody reads.
  */
 export function elfMachine(header: Uint8Array): number | null {
   if (header.length < 20) return null;
@@ -140,11 +133,11 @@ export interface Manifest {
  * The published package.json, generated rather than checked in so its version
  * cannot drift from the app's (release.test.ts holds that).
  *
- * `os` and `cpu` are the two fields npm ENFORCES: an install on Windows fails
+ * `os` and `cpu` are the two fields npm enforces: an install on Windows fails
  * with EBADPLATFORM instead of succeeding into a server that cannot open a
- * pty. `private` is deliberately absent — the root package.json carries it,
- * this one must not, and a copied field would be a publish that silently
- * refuses.
+ * pty. `private` is absent. The root package.json carries it, this one must
+ * not, and npm refuses to publish a private package. That refusal lands at
+ * the end of a release rather than the start of one (npmPackage.test.ts).
  */
 export function manifest(version: string): Manifest {
   return {

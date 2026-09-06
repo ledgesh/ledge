@@ -1,34 +1,37 @@
 // What the note walk skips beyond dot-entries (bun/notes.ts listNotes): the
-// well-known vendor/build directories, and whatever the workspace's own
+// well-known vendor and build directories, plus whatever the workspace's own
 // `.ledgeignore` says. An attached project folder should contribute its
 // handful of real notes, not every README and CHANGELOG under node_modules.
 //
-// This is VISIBILITY, not a guard: an ignored note is merely absent from the
-// browser and search. The path guards stay registry-based (workspaces.ts), so
-// a note that was open when it became ignored still saves — losing edits to a
-// config file would be worse than listing one note too many.
+// An ignore rule hides a note. It does not protect it: the path guards stay
+// registry-based (workspaces.ts), so a note that was open when it became
+// ignored still saves, because losing edits to a config file would be worse
+// than listing one note too many. Writing is the exception: ensureFolder and
+// renameFolder (bun/notes.ts) refuse an ignored name, since a note there
+// would never appear in the list.
 //
-// The grammar is a deliberately small gitignore subset, hand-rolled per
-// architecture.md §8, one line per pattern, degrading per line:
+// The grammar is a small gitignore subset, hand-rolled per architecture.md
+// §8. An unusable line is skipped and the rest of the file still applies.
+// One line per pattern:
 //
 //   #  comment; blank lines skipped
-//   name          matches a file or directory NAME at any depth (drafts)
+//   name          matches a file or directory name at any depth (drafts)
 //   name/         directory-only (the trailing slash)
 //   a/b           contains a slash: anchored to the workspace root
 //   *.wip.md      * and ? glob within a path segment (never across /)
 //   !pattern      re-include: last matching line wins (gitignore's rule)
 //
 // The defaults are listed first, so a `.ledgeignore` line like `!build` can
-// win a workspace's real build/ folder back. No `**` (a name pattern already
-// matches at any depth), and re-including inside an ignored directory cannot
-// work — the walk prunes the directory before ever seeing its children.
+// win a workspace's real build/ folder back. There is no `**`, since a name
+// pattern already matches at any depth. Re-including inside an ignored
+// directory does not work: the walk prunes it before reading its children.
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 // Directory names skipped by default, at any depth. Exact names only, and
-// directories only: a note slugged build.md is not a build system. Kept to
-// the near-universal conventions — anything more opinionated belongs in the
-// workspace's own .ledgeignore.
+// directories only, so a file called build.md is not mistaken for the build
+// directory. The list sticks to the near-universal conventions: anything
+// more opinionated belongs in the workspace's own .ledgeignore.
 export const DEFAULT_IGNORED_DIRS = [
   "node_modules",
   "bower_components",
@@ -47,7 +50,9 @@ export const LEDGEIGNORE = ".ledgeignore";
 
 interface Pattern {
   re: RegExp;
-  // Matches against the full root-relative path (held a "/") vs the entry name.
+  // True when a slash survives stripping `!` and any trailing slash, so
+  // `drafts/` is not anchored. Anchored patterns match against the full
+  // root-relative path, the rest against the entry name.
   anchored: boolean;
   dirOnly: boolean;
   negated: boolean;
@@ -60,8 +65,8 @@ export interface IgnoreMatcher {
   problems: string[];
 }
 
-// One glob segment to regex source: * and ? stay within a segment, everything
-// else is literal. Split on the globs first so the rest can be escaped whole.
+// One glob pattern to regex source: * and ? match within a path segment,
+// the rest is literal. Split on the globs first so it can be escaped whole.
 function globToRe(pattern: string): string {
   return pattern
     .split(/([*?])/)
@@ -75,10 +80,10 @@ function compile(line: string): Pattern | null {
   if (negated) p = p.slice(1);
   const dirOnly = p.endsWith("/");
   if (dirOnly) p = p.slice(0, -1);
-  // A leading slash is an explicit anchor (gitignore spelling); any interior
-  // slash anchors too, since a relative path only means something from the
-  // root. Decide BEFORE stripping the leading slash, or "/scratch" would
-  // degrade to a match-anywhere name pattern.
+  // A leading slash is an explicit anchor, gitignore's spelling. An interior
+  // slash anchors too. A path with a slash in it only means something from
+  // the root. The check runs before the leading slash is stripped: after the
+  // strip, "/scratch" is just "scratch" and matches at any depth.
   let anchored = p.includes("/");
   if (p.startsWith("/")) p = p.slice(1);
   if (p === "") return null;
@@ -117,10 +122,10 @@ export function parseIgnore(text: string): IgnoreMatcher {
 }
 
 /**
- * The matcher for one workspace root, read fresh per walk: the file is one
- * small read against a directory scan, and editing it takes effect on the
- * next refresh with no reload story. Missing file (almost every workspace)
- * means defaults only; an unreadable line costs itself and is logged.
+ * The matcher for one workspace root, read fresh on every walk. The read is
+ * small next to the directory scan it guards. An edit takes effect at the
+ * next refresh, with nothing to reload. A missing file (almost every
+ * workspace) means the defaults only. An unusable line is skipped and logged.
  */
 export async function loadIgnore(root: string): Promise<IgnoreMatcher> {
   const text = await readFile(join(root, LEDGEIGNORE), "utf8").catch(() => "");

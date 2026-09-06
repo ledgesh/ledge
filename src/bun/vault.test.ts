@@ -1,9 +1,9 @@
-// The vault's crypto and text surgery, against the scratch app home (the
-// preload's LEDGE_NOTES_ROOT — .vault.json lands there). The envelope round
-// trips are the honesty tests for locking.md §2: what seals must open,
-// what is tampered with must refuse, and a locked note must stay openable
-// with the passphrase ALONE (no vault file — the self-containment property
-// syncing depends on).
+// The vault's crypto and its two text surgeries (the head/body split and the
+// `locked:` frontmatter line), against the scratch app home where .vault.json
+// lands (the preload's LEDGE_NOTES_ROOT). The envelope round trips cover
+// locking.md §2: what seals must open, what is tampered with must refuse, and
+// a locked note must open with the passphrase and its own header on a machine
+// that has no vault file. Syncing depends on that last property.
 import { beforeEach, describe, expect, test } from "bun:test";
 import { rm } from "node:fs/promises";
 import { resolve, sep } from "node:path";
@@ -44,8 +44,9 @@ describe("splitHead", () => {
     ["# Title\n\nbody\n", "# Title\n", "\nbody\n"],
     ["# Title", "# Title", ""],
     ["plain prose\nmore\n", "", "plain prose\nmore\n"],
-    // A block but no H1 after it: the head is the block alone, the blank
-    // run is body (matching headingOf, which only skips blanks to FIND an H1).
+    // A block with no H1 after it: the head is the block alone and the blank
+    // run is body, matching headingOf. headingOf skips those blanks to look
+    // for an H1, and no H1 follows them here.
     ["---\ncwd: /x\n---\n\nprose\n", "---\ncwd: /x\n---\n", "\nprose\n"],
     ["", "", ""],
   ];
@@ -76,8 +77,8 @@ describe("locked: line surgery", () => {
     expect(stripLockedLine("# T\n\nbody\n")).toBe("# T\n\nbody\n");
   });
   test("strip leaves a block it removed nothing from, even an empty one", () => {
-    // What the frontmatter editor inserts on a note with no block: an
-    // autosave landing before the user types must not delete it.
+    // The first shape is what frontmatterEdit.ts inserts on a note with no
+    // block. An autosave landing before the user types must not delete it.
     expect(stripLockedLine("---\n\n---\n# T\n")).toBe("---\n\n---\n# T\n");
     expect(stripLockedLine("---\n---\n# T\n")).toBe("---\n---\n# T\n");
     expect(stripLockedLine("---\ncwd: /x\n---\n# T\n")).toBe("---\ncwd: /x\n---\n# T\n");
@@ -89,10 +90,10 @@ describe("vault lifecycle and the envelope", () => {
     await createVault("correct horse");
     expect(vaultState()).toBe("unlocked");
     const header = mintLockedHeader();
-    parseLockedHeader(header); // shape sanity: throws if malformed
+    parseLockedHeader(header); // throws if the header is malformed
     const body = "line one\n\nline two with #tag and [[Link]]\n";
     const armored = sealBody(header, body);
-    expect(armored).not.toContain("line one"); // ciphertext, not dressing
+    expect(armored).not.toContain("line one"); // ciphertext under the base64 armor
     expect(openBody(header, armored)).toBe(body);
     expect(openBody(header, sealBody(header, ""))).toBe(""); // empty body seals too
 
@@ -129,8 +130,8 @@ describe("vault lifecycle and the envelope", () => {
     expect(await unlockVault("wrong", header)).toBe(false);
     expect(await unlockVault("travelling pw", header)).toBe(true);
     expect(openBody(header, armored)).toBe("synced body\n");
-    // The vault file was rebuilt from the header's own salt: the NEXT unlock
-    // is ordinary (no probe needed).
+    // The probe unlock rebuilt the vault file from the header's salt, so the
+    // next unlock is ordinary and needs no probe header.
     resetVaultForTests();
     await loadVault();
     expect(vaultState()).toBe("locked");
@@ -142,6 +143,6 @@ describe("vault lifecycle and the envelope", () => {
     resetVaultForTests();
     await Bun.write(VAULT_PATH, "{not json");
     await loadVault();
-    expect(vaultState()).toBe("none"); // aside, not fatal; a probe unlock rebuilds
+    expect(vaultState()).toBe("none"); // moved aside, not fatal: a probe unlock rebuilds it
   });
 });

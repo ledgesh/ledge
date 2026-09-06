@@ -1,10 +1,9 @@
-// The client's settings file, and the one-time split (remote.md §5). The
-// validator is proved in shared/settings.test.ts; what only a filesystem can
-// prove is the migration — that an install from before the boundary existed
-// keeps its font size, and that carrying it across does not touch the file it
-// came from.
-//
-// Same preload-scratch-home arrangement and same guard as settings.fs.test.ts.
+// Filesystem tests for the client's settings file and the one-time split
+// (remote.md §5). shared/settings.test.ts covers the validator. An install that
+// predates the split keeps its font size. Carrying those values across leaves
+// the file they came from untouched. The app home is a scratch temp dir set by
+// src/test-preload.ts, and the guard below re-checks it, the same way
+// settings.fs.test.ts does.
 import { beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -41,9 +40,10 @@ describe("a fresh install", () => {
   });
 });
 
-// The upgrade path. A settings.jsonc written before the split has all seven
-// sections; the client's three are lifted out of it once, so nobody's type
-// silently resets to 14px because the architecture moved.
+// The upgrade path. A settings.jsonc written before the split holds all seven
+// sections. The client's three (editor, terminal, appearance) are lifted out
+// of it once, so values already set there are kept rather than reset to the
+// defaults.
 describe("the split", () => {
   test("carries the client's values out of an older settings.jsonc", async () => {
     await writeFile(
@@ -68,8 +68,8 @@ describe("the split", () => {
     expect(await readFile(SETTINGS_PATH, "utf8")).toBe(before);
   });
 
-  // The values move; the shell does not follow them. A client file that
-  // inherited "shell" would be a second, silent answer to which shell runs.
+  // Only the client's sections move. A client file that inherited "shell"
+  // would be a second, silent answer to which shell runs.
   test("takes only the client's sections", async () => {
     await writeFile(SETTINGS_PATH, '{ "shell": { "path": "/bin/bash" }, "editor": { "fontSize": 19 } }');
     await loadClientSettings();
@@ -104,7 +104,9 @@ describe("reading and writing", () => {
     const broken = '{ "editor": { "fontSize": } }';
     await writeClientSettingsFile(broken);
     expect(await loadClientSettings()).toEqual(DEFAULT_SETTINGS);
-    // The file is the user's, mid-edit; fixing it is theirs to do.
+    // The file is the user's and may be mid-edit. Ledge does not repair or
+    // rewrite it. Fixing it is the user's to do (loadClientSettings in
+    // clientSettings.ts).
     expect(await readFile(CLIENT_SETTINGS_PATH, "utf8")).toBe(broken);
   });
 

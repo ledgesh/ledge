@@ -1,19 +1,18 @@
 // The system pasteboard. The webview runs under the views:// scheme, which is
-// not a secure context, so `navigator.clipboard` is unavailable there and
-// copy/paste has to come through this process (rpc-schema, clipboardRead).
+// not a secure context. `navigator.clipboard` is unavailable there, so
+// copy/paste goes through this process (rpc-schema.ts, clipboardRead).
 //
 // Text is `pbcopy`/`pbpaste`. The HTML flavor is not: `pbpaste` reads
 // `public.utf8-plain-text`, `public.rtf` and PostScript and nothing else, and
-// Electrobun's clipboard FFI reads text and images only. So the rich flavor goes
-// through osascript, the same route the pasteboard's image already takes
-// (assets.ts) and for the same reason — AppleScript can name a pasteboard type
-// this process otherwise has no binding for.
+// Electrobun's clipboard FFI reads text and images only. So the HTML flavor
+// takes the same route `readClipboardImage` takes below, osascript.
+// AppleScript can name a pasteboard type this process has no binding for.
 //
-// The hex round trip is what `«class HTML»` costs: AppleScript prints raw data
+// Reading `«class HTML»` costs a hex round trip. AppleScript prints raw data
 // as `«data HTML3C68…»`, so the bytes come back doubled and are parsed here.
-// Text-shaped and small (a pasteboard flavor is a selection, not a file), which
-// is why this one does not bother with the temp file `pasteboardImage` uses to
-// avoid exactly that doubling for megabyte-sized PNGs.
+// HTML is text-shaped and small (a pasteboard flavor is a selection, not a
+// file), so this path pays that cost instead of writing the temp file
+// `readClipboardImage` uses for megabyte-sized PNGs.
 
 import { readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
@@ -28,27 +27,28 @@ const HTML_SCRIPT = [
   "return d",
 ].join("\n");
 
-// AppleScript's raw-data literal. Whitespace inside the run is tolerated and
-// stripped rather than ending it, in case a long payload ever arrives wrapped;
-// the closing guillemet is required, so a run cut short reads as no HTML rather
-// than as a truncated document.
+// AppleScript's raw-data literal. The character class takes whitespace instead
+// of ending the hex run, in case a long payload arrives wrapped, and
+// `htmlFromScriptOutput` strips it before decoding. The closing guillemet is
+// required, so a run cut short reads as no HTML instead of as a truncated
+// document.
 const DATA = /data\s+HTML([0-9A-Fa-f\s]*)»/;
 
 /**
- * The HTML bytes out of an osascript run's stdout, or "" when the pasteboard
- * held no HTML (the script answers "none") and when the literal is malformed —
- * a flavor we cannot decode is a flavor we do not have, and the caller still
- * has the plain text.
+ * The HTML bytes from an osascript run's stdout, or "" when the pasteboard
+ * held no HTML (the script answers "none") and when the literal is malformed.
+ * A flavor this cannot decode counts as no flavor, and the caller still has
+ * the plain text.
  *
- * UTF-8 unless a BOM says otherwise: WebKit and every Cocoa app write
- * `public.html` as UTF-8 (their payload even opens with a `<meta charset>`),
- * while a Windows-authored flavor arriving over a remote desktop can be
- * UTF-16 — decoded as UTF-8 that is text interleaved with NULs, which is
- * worse than not pasting at all.
+ * This decodes the bytes as UTF-8 unless a leading BOM says UTF-16. WebKit and
+ * every Cocoa app write `public.html` as UTF-8, down to the opening
+ * `<meta charset>`. A Windows-authored flavor arriving over a remote desktop
+ * can be UTF-16, and decoding that as UTF-8 gives text interleaved with NULs,
+ * which is worse than pasting nothing.
  */
 export function htmlFromScriptOutput(out: string): string {
   const hex = DATA.exec(out)?.[1]?.replace(/\s+/g, "") ?? "";
-  // An odd nibble count is a literal we did not read the way it was written.
+  // An odd nibble count means the literal was not read the way it was written.
   if (hex.length < 2 || hex.length % 2 !== 0) return "";
   const bytes = new Uint8Array(hex.length >> 1);
   for (let i = 0; i < bytes.length; i += 1) {
@@ -104,35 +104,30 @@ export async function readClipboardHtml(): Promise<string> {
 }
 
 // Read the pasteboard's image as PNG bytes, or null when it holds none.
-// pbpaste is text-only, so this goes through osascript: AppKit promises a PNG
-// rendition of whatever image flavor is on the pasteboard (a screenshot IS
-// PNG; a browser-copied image is TIFF and converts), and «class PNGf» asks
-// for exactly that. The AppleScript writes to a temp file rather than printing
-// hex to stdout — same bytes, none of the doubling and parsing this file's
-// HTML flavor puts up with for being small.
+// pbpaste is text-only, so this goes through osascript. «class PNGf» asks
+// AppKit for a PNG rendition of whatever image flavor is there: a screenshot
+// is already PNG, a browser-copied image is TIFF and converts. The script
+// writes a temp file rather than printing hex, skipping the doubling above.
 //
-// The temp lands in the CLIENT home, not in the workspace's assets folder: on
-// a connection the notes are on another machine, and this is the one seam that
-// has to run on the machine holding the pasteboard (remote.md §10). It is
-// transient plaintext for a paste into a locked note either way, unlinked
-// immediately — the caveat locking.md §5 already documents, now one directory
-// over.
+// The temp goes in the client home, not the workspace's assets folder. Across
+// a connection the notes are on another machine, and this seam has to run on
+// the machine holding the pasteboard (remote.md §10). A paste into a locked
+// note puts plaintext in that temp, and the unlink below is immediate.
+// locking.md §5 documents the caveat without naming a directory, from when
+// the temp sat with the assets.
 let tmpCounter = 0;
 
 /**
  * A file the user picked, as image bytes the server can store, or null when it
- * is not a picture at all.
+ * is not a picture. This is what Insert Image… calls on a Mac. The phone
+ * answers the same verb with a photo picker (ios.md §11). The caller runs the
+ * picker (`pickImage` in index.ts), and this function reads what it chose.
  *
- * The other end of Insert Image… on a Mac (ios.md §11's photo picker is the
- * phone's answer to the same verb). The picker itself is the caller's; this is
- * what happens to what it chose.
- *
- * **PNG and JPEG pass through untouched**, which is the whole point: those are
- * what `assetWrite` stores and what a note can render, and re-encoding a
- * photograph as a lossless PNG multiplies its size by roughly ten for no gain
- * anybody can see. Everything else — a HEIC, a TIFF, a PDF page — goes through
- * `sips`, which ships with macOS, refuses what it cannot decode, and so answers
- * "is this a picture" and "make it one I can store" in the same call.
+ * PNG and JPEG pass through untouched. Those are what `assetWrite` stores and
+ * what a note can render, and re-encoding a photograph as a lossless PNG
+ * multiplies its size by roughly ten. Everything else (a HEIC, a TIFF, a PDF
+ * page) goes through `sips`, which ships with macOS and refuses what it cannot
+ * decode. A nonzero exit from `sips` means the file was not a picture.
  */
 export async function imageFromFile(path: string): Promise<Uint8Array | null> {
   const original = await readFile(path).catch(() => null);
@@ -183,6 +178,9 @@ export async function readClipboardImage(): Promise<Uint8Array | null> {
   } catch {
     return null; // no osascript (non-macOS), or the write failed: no image
   } finally {
-    await unlink(tmp).catch(() => {}); // discard our own temp, like writeNote
+    // Unlink the temp this function wrote. Removing a temp is not one of the
+    // three note unlinks architecture.md §3 lists, and `writeNote` unlinks its
+    // own temp too, on its error path.
+    await unlink(tmp).catch(() => {});
   }
 }

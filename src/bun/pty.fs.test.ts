@@ -1,15 +1,15 @@
-// The PTY against a real shell, because everything interesting about it is a
-// property of the kernel rather than of this code: whether the child got a
-// CONTROLLING terminal, whether the line discipline turns ^C into a signal,
-// whether TIOCSWINSZ reaches the program inside.
+// The PTY against a real shell: whether the child got a controlling terminal,
+// whether the line discipline turns ^C into a signal, whether TIOCSWINSZ
+// reaches the program inside. All of that is a property of the kernel rather
+// than of this code.
 //
 // This is the one test file that is also the Linux port's proof. `pty.ts`
 // reaches libc by name and by flag value, and both differ between libSystem
-// and glibc (`ptyNative.ts`, PLATFORM); the C reaches login_tty through a
-// different header on each. None of that is checkable by reading it, and all
-// of it fails quietly — a terminal that runs commands fine and has no Ctrl-C.
-// So the suite runs in the container too (`Dockerfile`, `docs/contributor/
-// remote.md` §13) and the same assertions answer for both libcs.
+// and glibc (`ptyNative.ts`, PLATFORM). The C reaches login_tty through a
+// different header on each. A mistake there is invisible in the source and
+// fails quietly: a terminal that runs commands fine and has no Ctrl-C. The
+// suite runs in the container too (`Dockerfile`, `docs/contributor/remote.md`
+// §13), so the same assertions answer for both libcs.
 import { describe, expect, test } from "bun:test";
 import { PtyProcess, type PtyOptions } from "./pty";
 
@@ -21,14 +21,15 @@ function shell(opts: Partial<PtyOptions> = {}): PtyProcess {
 }
 
 /**
- * Drain until `want` shows up, returning everything read. A poll rather than a
- * fixed wait: a shell's startup is not a duration anything here gets to
- * assume, and the failure message carries what did arrive, which is the
- * difference between "Ctrl-C is broken" and "the shell never came up".
+ * Drains until `want` shows up, returning everything read. It polls rather
+ * than waiting a fixed time, because a shell's startup has no duration this
+ * code gets to assume. The timeout error quotes the tail of what did arrive,
+ * which separates "Ctrl-C is broken" from "the shell never came up".
  *
- * `normalize` matches against a rewritten copy while still returning the raw
- * text, for the one case where the terminal's own line wrapping sits between
- * what was written and what came back.
+ * `normalize` rewrites the copy that `want` is matched against, and the raw
+ * text is still what gets returned. The long-line test needs it, because the
+ * terminal's own line wrapping sits between what was written and what came
+ * back.
  */
 async function readUntil(
   pty: PtyProcess,
@@ -49,18 +50,18 @@ async function readUntil(
 }
 
 /**
- * How long until the shell will run something again — the portable way to ask
- * whether an interrupt landed.
+ * Returns how long it takes the shell to run something again. That is the
+ * portable way to ask whether an interrupt landed.
  *
- * What the two platforms do AFTER the signal is not common ground: `sh` is
- * bash in posix mode on macOS and dash on Debian, and one carries on to the
- * next command in the list while the other abandons it for a prompt. What is
- * common is that a shell still inside `sleep 30` runs nothing at all.
+ * What happens after the signal differs by platform: `sh` is bash in posix
+ * mode on macOS and dash on Debian, and one carries on to the next command in
+ * the list while the other abandons it for a prompt. On both, a shell still
+ * inside `sleep 30` runs nothing.
  *
- * Asking repeatedly rather than once, because raising SIGINT also FLUSHES the
- * terminal's input queue: a command typed in the same breath as the interrupt
- * is echoed and then discarded, which reads exactly like a shell that is still
- * busy.
+ * It asks repeatedly rather than once. Raising SIGINT also flushes the
+ * terminal's input queue, so a command typed in the same breath as the
+ * interrupt is echoed and then discarded, and that looks like a shell that is
+ * still busy.
  */
 async function idleWithin(pty: PtyProcess, ms: number): Promise<number> {
   const start = Date.now();
@@ -78,7 +79,10 @@ async function idleWithin(pty: PtyProcess, ms: number): Promise<number> {
   throw new Error(`the shell was still busy ${ms}ms after the interrupt\n${last}`);
 }
 
-/** The same question, expecting the answer no. */
+/**
+ * True when the shell runs nothing within `ms`. It asks idleWithin and
+ * reports the opposite answer.
+ */
 async function stillBusy(pty: PtyProcess, ms: number): Promise<boolean> {
   try {
     await idleWithin(pty, ms);
@@ -89,22 +93,23 @@ async function stillBusy(pty: PtyProcess, ms: number): Promise<boolean> {
 }
 
 // The window that eats the first thing written to a shell. A master takes
-// bytes from the moment it exists; the child claims the slave a moment later,
-// and the line discipline coming up discards whatever is still queued. Nothing
-// reports it — no error, no short write — and what is lost is whichever line
-// went first, which for an inline shell is the one that lets it end a block
+// bytes from the moment it exists. The child claims the slave a moment later,
+// and the line discipline coming up discards whatever is still queued, with no
+// error and no short write. What is lost is whichever line went first. For an
+// inline shell that is the line that lets the shell end a block
 // (bun/markers.ts).
 describe("input written before the child has spoken", () => {
   test("waits for it rather than going into a tty nobody has claimed", async () => {
     // A child that stays quiet long enough to ask the question. Without the
-    // gate the tty takes this write at once — an empty input queue has room —
-    // and `pending` would already be false.
+    // gate in pty.ts flush(), the tty would take this write at once (an empty
+    // input queue has room) and `pending` would already be false.
     const pty = shell({ args: ["-c", "sleep 0.4; echo AWAKE; exec cat"] });
     try {
       pty.write("held-until-awake\n");
       expect(pty.pending).toBe(true);
 
-      // It goes out on the tick that hears the child, not the one after.
+      // The queue goes out on the drain tick that reads the child's first
+      // output, not the tick after it.
       const seen = await readUntil(pty, /AWAKE/);
       expect(seen).not.toContain("held-until-awake");
       await readUntil(pty, /held-until-awake/);
@@ -115,9 +120,9 @@ describe("input written before the child has spoken", () => {
   });
 
   test("goes out when the child dies without ever speaking", async () => {
-    // Nothing will read it and nothing needs to, but a queue held for a child
-    // that is gone would be held forever, and `pending` is what the drain loop
-    // reads to decide it may slow down (bun/server.ts).
+    // Nothing will read this write, and nothing needs to. A queue held for a
+    // child that is gone would be held forever, and the drain loop reads
+    // `pending` to decide whether it may slow down (bun/server.ts).
     const pty = shell({ args: ["-c", "exit 0"] });
     try {
       pty.write("nobody is listening\n");
@@ -146,7 +151,7 @@ describe("a shell on a pty", () => {
   });
 
   // The claim that separates a pty from a pipe. login_tty ran, so the child is
-  // a session leader whose session HAS this terminal, and `tty` can name it.
+  // a session leader whose session holds this terminal, and `tty` can name it.
   test("the child holds the terminal as its controlling one", async () => {
     const pty = shell();
     try {
@@ -158,24 +163,25 @@ describe("a shell on a pty", () => {
     }
   });
 
-  // What the trampoline exists for, in the two ways it is delivered. Both
-  // assert on the CLOCK: a shell inside `sleep 30` runs nothing, so the
-  // difference between working and inert is thirty seconds.
+  // An interrupt, in the two ways it is delivered. Both tests assert on the
+  // clock: a shell inside `sleep 30` runs nothing, so the difference between
+  // working and inert is thirty seconds.
   //
-  // `interrupt()` is a signal to the terminal's FOREGROUND PROCESS GROUP,
-  // which the terminal only has because a process claimed it — on BSD an
-  // explicit TIOCSCTTY that posix_spawn has no file action for.
+  // `interrupt()` signals the terminal's foreground process group. The
+  // terminal has that group only because the child claimed the terminal as
+  // its controlling one. On BSD that claim is an explicit TIOCSCTTY, and
+  // posix_spawn has no file action for an ioctl (ptyNative.ts).
   test("interrupt stops the foreground job", async () => {
     const pty = shell();
     try {
       pty.write("echo GO-$((6*7)); sleep 30\n");
-      // The marker has to differ from what the terminal ECHOES back, or the
-      // wait is satisfied by our own keystrokes: hence the arithmetic.
+      // The arithmetic makes the marker differ from what the terminal echoes
+      // back. Without it, the echo of the written line satisfies the wait.
       await readUntil(pty, /GO-42/);
-      // Confirm it is genuinely inside the sleep BEFORE interrupting. An
-      // interrupt that lands in the moment between `echo` and `sleep` stops
-      // the list without ever reaching a signal handler, and the test would
-      // pass without having asked anything.
+      // Confirm the shell is inside the sleep before interrupting. An
+      // interrupt that lands between `echo` and `sleep` stops the list without
+      // reaching a signal handler, and the test would pass without having
+      // tested anything.
       expect(await stillBusy(pty, 1000)).toBe(true);
       pty.interrupt();
       expect(await idleWithin(pty, 8000)).toBeLessThan(8000);
@@ -184,22 +190,23 @@ describe("a shell on a pty", () => {
     }
   }, 30_000);
 
-  // The stricter version: nothing here signals anything. A ^C CHARACTER is
-  // inert unless the line discipline has a foreground process group to raise
-  // SIGINT on, so this is the assertion that fails if the trampoline never
-  // loaded — where the previous one could still pass by killpg'ing the pid it
-  // was handed.
+  // The stricter version: nothing here raises a signal. The ^C character goes
+  // into the terminal, and the line discipline raises SIGINT on the foreground
+  // process group. The test above could pass by killpg'ing the pid it was
+  // handed. Neither test shows whether the native library loaded, because the
+  // fallback spawn acquires a controlling terminal too. Resize below is the
+  // test that does (remote.md §13).
   test("a typed ^C is turned into a signal by the line discipline", async () => {
     const pty = shell({ interruptViaChar: true });
     try {
       pty.write("echo GO-$((6*7)); sleep 30\n");
-      // The marker has to differ from what the terminal ECHOES back, or the
-      // wait is satisfied by our own keystrokes: hence the arithmetic.
+      // The arithmetic makes the marker differ from what the terminal echoes
+      // back. Without it, the echo of the written line satisfies the wait.
       await readUntil(pty, /GO-42/);
-      // Confirm it is genuinely inside the sleep BEFORE interrupting. An
-      // interrupt that lands in the moment between `echo` and `sleep` stops
-      // the list without ever reaching a signal handler, and the test would
-      // pass without having asked anything.
+      // Confirm the shell is inside the sleep before interrupting. An
+      // interrupt that lands between `echo` and `sleep` stops the list without
+      // reaching a signal handler, and the test would pass without having
+      // tested anything.
       expect(await stillBusy(pty, 1000)).toBe(true);
       pty.interrupt();
       expect(await idleWithin(pty, 8000)).toBeLessThan(8000);
@@ -210,7 +217,7 @@ describe("a shell on a pty", () => {
 
   // ioctl(TIOCSWINSZ) through the fixed-arity wrapper. The constant differs
   // between the two kernels (0x80087467 and 0x5414) and never reaches
-  // TypeScript, so this is also the test that the C was compiled against the
+  // TypeScript, so this test also checks that the C was compiled against the
   // headers of the machine it runs on.
   test("resize is visible to the program inside", async () => {
     const pty = shell({ columns: 120, rows: 30 });
@@ -227,23 +234,22 @@ describe("a shell on a pty", () => {
 
   // The write queue, exercised by the case it exists for: the first thing
   // written to a shell, before that shell has read anything or switched the
-  // terminal out of canonical mode. Production does exactly this with the
-  // marker hook. Every byte has to survive being refused, because the tail
-  // this drops is the tail of somebody's command.
+  // terminal out of canonical mode. Production does this with the marker hook
+  // (bun/markers.ts). Every byte has to survive being refused, because a
+  // dropped tail is the tail of somebody's command.
   //
-  // 900 characters, not more, and the ceiling is real rather than timid:
-  // MAX_CANON is 1024 on macOS and a 4096-byte buffer on Linux, and a line
-  // over the limit is one the terminal can never complete and the shell can
-  // never read — the deadlock O_NONBLOCK downgrades to a stall. Which side of
-  // that line a long paste falls on is a property of the kernel, so a test
-  // that crossed it would assert a difference rather than the queue.
+  // The 900 characters stay under a real kernel limit: MAX_CANON is 1024 on
+  // macOS, and Linux uses a 4096-byte buffer. A longer line is one the
+  // terminal can never complete and the shell can never read. O_NONBLOCK turns
+  // that deadlock into a stall. A test that crossed the limit would assert a
+  // difference between the two kernels rather than the queue's behavior.
   test("a long first line, written before the shell reads, survives whole", async () => {
     const pty = shell({ columns: 80 });
     try {
       pty.write(`echo ${"A".repeat(900)}-DONE\n`);
       // The terminal wraps at its width, and macOS marks each wrap with a
       // space and a CR, so the A's arrive in 80-column pieces. Joining them
-      // back up IS the assertion: every byte written came back, in order.
+      // back up is the assertion: every byte written came back, in order.
       const flat = (s: string) => s.replace(/[ \r\n]/g, "");
       const out = await readUntil(pty, /A{900}-DONE/, 6000, flat);
       expect(flat(out)).toContain(`${"A".repeat(900)}-DONE`);
@@ -252,10 +258,10 @@ describe("a shell on a pty", () => {
     }
   }, 20_000);
 
-  // A closed drawer used to leave a zombie apiece: nothing in this process
-  // waits for a pty's child, so its exit status sat in the table forever. One
-  // window's worth is invisible; a server that runs for weeks (remote.md §11)
-  // is where it becomes a pid leak, and a container has a pid limit.
+  // Closing a drawer used to leave a zombie behind. Nothing else in this
+  // process waits for a pty's child, so its exit status sat in the process
+  // table forever. One window's worth goes unnoticed. A server that runs for
+  // weeks leaks pids, and a container has a pid limit (remote.md §11).
   test("a closed shell is collected, not left as a zombie", async () => {
     const pty = shell();
     pty.write("echo READY\n");

@@ -1,42 +1,43 @@
 // Per-root filesystem watching: the push half of external-edit safety.
 //
-// One recursive fs.watch per AVAILABLE workspace root. Events are filtered to
+// One recursive fs.watch per available workspace root. Events are filtered to
 // what could change a note list or an open note (.md entries outside
-// dot-directories), debounced per root, and surfaced as one "this root
-// changed" callback — the view re-reads lists and reloads clean open buffers;
-// nothing here says WHAT changed, because the view's answer to any change is
-// the same cheap re-read either way. Ledge's own saves fire events like
-// anyone else's; the view's mtime comparison makes those a no-op, which is
-// simpler and safer than teaching the watcher whose writes are whose.
+// dot-directories), debounced per root, and reported as one "this root
+// changed" callback. Nothing here says what changed: the view re-reads lists
+// and reloads clean open buffers for any change. Ledge's own saves fire
+// events too, and the mtime comparison in the view's reload makes those a
+// no-op (mainview/workspace/editorPool.ts). Do not suppress them here
+// instead: the watcher would have to work out whose write each event came
+// from.
 //
-// Failure posture matches the registry's (architecture.md §3): a root that
-// cannot be watched (an unmounted external volume) is skipped with a warning,
-// not failed — the window-focus refresh remains the belt for it, and the next
-// syncWatchers call (a workspace change, or the next boot) retries.
+// A root that cannot be watched (an unmounted volume) is skipped with a
+// warning rather than failing the sync, and the window-focus refresh is the
+// belt for it (architecture.md §3). A later syncWatchers retries it.
 import { watch, type FSWatcher } from "node:fs";
 
-// Debounce long enough to swallow a burst (git checkout, an agent rewriting a
-// file as temp+rename) into one refresh, short enough that an edit made in the
-// note's own terminal drawer shows up while you look.
+// The debounce window per root: long enough to swallow a burst (a git
+// checkout, an agent rewriting a file as temp+rename) into one refresh, short
+// enough that an edit made in the note's own terminal drawer shows up while
+// the note is still on screen.
 const DEBOUNCE_MS = 250;
 
-// Does this event name something that could be (or hide) a note?
+// True when an event names something that could be (or hide) a note.
 //
-// The last segment must CONTAIN ".md", not end with it, because of how this
-// platform reports a temp-plus-rename save — the very shape Ledge's own saves
-// and most atomic-writing agents use: the probe shows the burst coalescing
-// into ONE event named for the dotted temp file (".plan.md.tmp-123-1"), with
-// no separate event under the target name. The temp name embeds the note's
-// name, so matching ".md" anywhere in it is what keeps those saves visible;
-// requiring a trailing ".md" made the watcher blind to exactly the writes it
-// exists for (the fs test on the rename choreography is the regression net).
+// The last segment must contain ".md" rather than end with it. A probe showed
+// this platform reporting a temp-plus-rename save (the shape Ledge's own
+// saves and most atomic-writing agents use) as one coalesced event named for
+// the dotted temp file (".plan.md.tmp-123-1"), with no separate event under
+// the target name. The temp name embeds the note's name, so matching ".md"
+// anywhere in it keeps those saves visible. Requiring a trailing ".md" made
+// the watcher blind to them. watch.fs.test.ts covers the rename choreography.
 //
-// Dotted DIRECTORY segments are still dropped: .git churn (constant while an
+// Dotted directory segments are still dropped: .git churn (constant while an
 // agent works in an attached project folder), .ledge-trash's internal moves
 // (a delete already fires under its source name in the root), editor state
-// dirs. The filename can be null (events can coalesce past name attribution);
-// count those, conservatively — a refresh too many is cheap, a missed one is
-// stale UI. Everything else non-.md cannot appear in any list the view shows.
+// directories. The view's lists hold only .md files.
+//
+// A null filename counts as relevant. Events can coalesce past name
+// attribution. An extra refresh is cheap. A missed one leaves the UI stale.
 export function relevantChange(filename: string | null): boolean {
   if (filename === null) return true;
   const segments = filename.split("/");
@@ -52,8 +53,9 @@ interface RootWatch {
 const watchers = new Map<string, RootWatch>();
 
 // Reconcile the watched set against the given roots: close what dropped out,
-// open what is new, leave the rest running. Called at boot and again on every
-// workspace attach/create/detach — the registry is the source of truth and
+// open what is new, leave the rest running. Called at boot and again from
+// every handler that changes the registry (workspace create, attach, detach,
+// move; server.ts refreshWatchers). The registry is the source of truth and
 // this trails it.
 export function syncWatchers(roots: string[], onChange: (root: string) => void): void {
   const want = new Set(roots);
@@ -69,15 +71,17 @@ export function syncWatchers(roots: string[], onChange: (root: string) => void):
     try {
       const watcher = watch(root, { recursive: true }, (_event, filename) => {
         if (!relevantChange(filename)) return;
-        if (entry.timer !== null) return; // trailing-edge debounce: one refresh per burst
+        // Trailing-edge debounce: the first event arms the timer below and
+        // later ones return here. The refresh fires when the window ends.
+        if (entry.timer !== null) return;
         entry.timer = setTimeout(() => {
           entry.timer = null;
           onChange(root);
         }, DEBOUNCE_MS);
       });
       // A root that vanishes mid-session (volume unmounted) surfaces as an
-      // error event; treat it as "stop watching" — the focus refresh takes
-      // over, and a re-sync after remount starts a fresh watcher.
+      // error event. Stop watching it: the focus refresh takes over, and a
+      // re-sync after remount starts a fresh watcher.
       watcher.on("error", (err) => {
         console.warn("[watch] watcher for", root, "failed; falling back to focus refresh:", err);
         const w = watchers.get(root);

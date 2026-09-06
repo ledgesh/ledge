@@ -1,6 +1,6 @@
-// The shim's pure half: the script's shape, the self-recognition marker, and
-// the PATH answer. What installShim does to a real bin dir is
-// cliShim.fs.test.ts's subject.
+// The pure half of cliShim: the script's shape, the self-recognition marker,
+// and the PATH answer. cliShim.fs.test.ts covers what installShim does to a
+// real bin dir.
 import { describe, expect, test } from "bun:test";
 import { dirOnPath, isLedgeShim, shimDirCandidates, shimScript } from "./cliShim";
 

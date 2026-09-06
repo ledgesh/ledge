@@ -1,13 +1,14 @@
-// The registry against a real filesystem: create/attach/detach round trips,
-// load-time healing, and the availability snapshot. The registry is the trust
-// artifact every path guard consults, so the load-time validation cases here
-// are guard tests, not bookkeeping tests: a root that survives loading is a
-// folder the view can write .md files into.
+// The registry against a real filesystem: create, attach and detach round
+// trips, load-time healing, and the availability snapshot. The registry is the
+// trust artifact every path guard consults. The load-time validation cases
+// here are guard tests, not bookkeeping tests: an available user root that
+// survives loading is a folder the view can write .md files into.
 //
 // The app home is a per-run temp dir, set by src/test-preload.ts before any
-// module loaded (see bunfig.toml). The guard below re-checks that: these tests
-// wipe the app home in beforeEach, and wiping the wrong folder is the one
-// mistake this file must be incapable of.
+// module loads (see bunfig.toml). These tests wipe the app home in beforeEach,
+// and wiping the real one would delete the user's managed notes and
+// settings.jsonc. The guard below aborts the file unless the app home is under
+// tmpdir.
 import { beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -34,9 +35,9 @@ if (!resolve(APP_HOME).startsWith(resolve(tmpdir()) + sep)) {
   throw new Error(`refusing to run filesystem tests against ${APP_HOME} — is the preload configured?`);
 }
 
-// The registry as the USER's roots: every load also registers the built-in
-// docs root in memory (its own describe block below pins that), and these
-// filtered views keep the user-root assertions saying what they always said.
+// The user's roots, without the built-in docs root. Every load registers the
+// docs root in memory; the docs root block below pins that. These two helpers
+// keep it out of what the assertions everywhere else see.
 function userRoots(): string[] {
   return roots().filter((r) => r !== resolve(DOCS_ROOT));
 }
@@ -44,8 +45,8 @@ function userList() {
   return listWorkspaceRoots().filter((w) => w.kind !== "docs");
 }
 
-// A scratch dir OUTSIDE the app home, for external-root cases. A sibling of
-// the app home's own temp dir, so the two can never nest.
+// A scratch dir outside the app home, for external-root cases. It is a
+// sibling of the app home's own temp dir, so the two can never nest.
 async function externalDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "ledge-ext-"));
 }
@@ -53,7 +54,7 @@ async function externalDir(): Promise<string> {
 beforeEach(async () => {
   await rm(APP_HOME, { recursive: true, force: true });
   await mkdir(APP_HOME, { recursive: true });
-  await loadWorkspaces(); // no file: resets the registry to empty
+  await loadWorkspaces(); // no registry file: only the docs root is registered
 });
 
 describe("createManaged", () => {
@@ -109,9 +110,11 @@ describe("attachExternal", () => {
   });
 
   test("the app home itself, and anything containing it, is refused", async () => {
-    // settings.jsonc lives in the app home and names the shell executable;
-    // "every .md in ~/.ledge is a note" was exactly the blast radius the
-    // per-workspace split removed. tmpdir() contains the app home here.
+    // settings.jsonc lives in the app home and names the shell executable.
+    // The app home must never be a note root: "every .md in ~/.ledge is a
+    // note" was the blast radius the per-workspace split removed. tmpdir()
+    // contains the app home here, so the second expect covers a root that
+    // contains the app home.
     expect(await attachExternal(APP_HOME)).toHaveProperty("error");
     expect(await attachExternal(tmpdir())).toHaveProperty("error");
   });
@@ -127,9 +130,9 @@ describe("attachExternal", () => {
   });
 
   test("a directory with commas in its name attaches whole", async () => {
-    // The native dialog's FFI return is comma-JOINED and re-split; index.ts
-    // re-joins it back into one path. This guards the registry half: a comma
-    // path is an ordinary path here.
+    // The native dialog's FFI splits its result on commas, and index.ts
+    // pickFolder joins it back into one path. This test covers the registry
+    // half: a path with commas in it is an ordinary path here.
     const dir = await externalDir();
     const weird = join(dir, "notes, drafts, misc");
     await mkdir(weird);
@@ -150,7 +153,7 @@ describe("attachExternal", () => {
     const root = await createManaged("Scratch");
     await writeFile(join(root, "kept.md"), "# Kept\n", "utf8");
     await detachRoot(root);
-    expect(rootContaining(join(root, "kept.md"))).toBeNull(); // truly out
+    expect(rootContaining(join(root, "kept.md"))).toBeNull(); // no longer registered
     expect(await attachExternal(root)).toEqual({ root });
     expect(userList()).toEqual([{ root, kind: "managed", available: true }]);
     expect(await readFile(join(root, "kept.md"), "utf8")).toBe("# Kept\n");
@@ -192,12 +195,12 @@ describe("moveRoot", () => {
     const res = await moveRoot(root, dest);
     expect(res).toEqual({ root: join(resolve(dest), "scratch") });
     const next = (res as { root: string }).root;
-    // Everything travelled; nothing remains under the old name.
+    // Everything moved with the folder, and the old path is gone.
     expect(await readFile(join(next, "kept.md"), "utf8")).toBe("# Kept\n");
     expect(await readFile(join(next, ".ledge-trash", "gone.md"), "utf8")).toBe("# Gone\n");
     expect(await stat(root).catch(() => null)).toBeNull();
-    // The registry followed, kind re-derived from the new location, and it
-    // survived a reload from disk.
+    // The registry line followed, with its kind re-derived from the new
+    // location. The change survives a reload from disk.
     expect(userList()).toEqual([{ root: next, kind: "external", available: true }]);
     await loadWorkspaces();
     expect(userRoots()).toEqual([next]);
@@ -219,7 +222,7 @@ describe("moveRoot", () => {
     await writeFile(join(dest, "scratch", "theirs.md"), "# Theirs\n", "utf8");
     const res = await moveRoot(root, dest);
     expect(res).toEqual({ root: join(resolve(dest), "scratch-2") });
-    // The squatter kept its bytes.
+    // scratch/theirs.md is untouched: the move went to scratch-2 instead.
     expect(await readFile(join(dest, "scratch", "theirs.md"), "utf8")).toBe("# Theirs\n");
   });
 
@@ -278,7 +281,8 @@ describe("loadWorkspaces healing", () => {
     await writeFile(WORKSPACES_PATH, "{ not json", "utf8");
     await loadWorkspaces();
     expect(userRoots()).toEqual([]);
-    // The bytes survive for forensics; no note file was touched.
+    // The bytes are kept for forensics, as .workspaces.json.bad-<timestamp>,
+    // and no note file was touched.
     const aside = (await readdir(APP_HOME)).filter((n) => n.startsWith(".workspaces.json.bad-"));
     expect(aside).toHaveLength(1);
     expect(await readFile(join(APP_HOME, aside[0]), "utf8")).toBe("{ not json");
@@ -339,16 +343,16 @@ describe("ensureDefault", () => {
 });
 
 describe("the docs root", () => {
-  // The built-in documentation folder: registered IN MEMORY at every load so
-  // the read paths serve doc pages through the ordinary guards, but never a
-  // user root — not persisted, not attachable, not movable, not writable.
+  // The built-in documentation folder. Every load registers it in memory so
+  // the read paths serve doc pages through the ordinary guards. It is never a
+  // user root: not persisted, not attachable, not movable, not writable.
   const docs = resolve(DOCS_ROOT);
 
   test("every load registers it, kind docs, self-healed like a managed folder", async () => {
     expect(roots()).toContain(docs);
     expect(listWorkspaceRoots()).toContainEqual({ root: docs, kind: "docs", available: true });
     expect((await stat(docs)).isDirectory()).toBe(true);
-    // And the guards agree it is a root: a page path resolves to it.
+    // The guards agree it is a root: a page path resolves to it.
     expect(rootContaining(join(docs, "getting-started.md"))).toBe(docs);
     expect(assertRegisteredRoot(docs)).toBe(docs);
   });

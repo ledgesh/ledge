@@ -8,8 +8,10 @@ describe("formatArg", () => {
     expect(formatArg("shell exited")).toBe("shell exited");
   });
 
-  // The whole reason this function exists rather than String(): a log written
-  // for a crash nobody watched needs the stack, and String(err) drops it.
+  // formatArg unwraps an Error to its stack. That is why it exists rather
+  // than a plain `String(arg)`: `String(err)` keeps only the name and the
+  // message. Nobody watches this output live (log.ts), so the log file is
+  // the only record of a crash, and the stack is the part worth having.
   test("an Error keeps its stack", () => {
     const err = new Error("boom");
     expect(formatArg(err)).toContain("Error: boom");
@@ -26,8 +28,10 @@ describe("formatArg", () => {
     expect(formatArg({ root: "/ws", ok: false })).toBe('{"root":"/ws","ok":false}');
   });
 
-  // Serializing must never be what takes the log entry down: the arg that
-  // cannot be described is exactly the one being complained about.
+  // JSON.stringify throws on a cycle. formatArg catches that and falls back
+  // to String(arg). The argument it cannot serialize is the one the log call
+  // is reporting on, so throwing here would lose the diagnostic along with
+  // the entry.
   test("a cyclic object degrades instead of throwing", () => {
     const cyclic: Record<string, unknown> = { a: 1 };
     cyclic["self"] = cyclic;
@@ -57,8 +61,9 @@ describe("formatLine", () => {
     );
   });
 
-  // A stack is the payload, and re-wrapping it to keep one entry on one line
-  // would only make it unreadable. Nothing parses this file.
+  // formatLine keeps the newlines inside an argument rather than folding the
+  // entry onto one line. Re-wrapping a stack that way would make it
+  // unreadable. Nothing parses the log file: a person reads it.
   test("a multi-line stack is written through, not flattened", () => {
     const line = formatLine(AT, "bun", "error", ["failed", new Error("boom")]);
     expect(line.split("\n").length).toBeGreaterThan(2);

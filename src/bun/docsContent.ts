@@ -1,24 +1,25 @@
-// The built-in documentation corpus, compiled INTO the binary as text imports
-// rather than shipped as loose files: the bundle then needs no build.copy
-// entry, and dev and packaged runs resolve the pages identically (no
-// import.meta.dir gymnastics against two different bundle layouts). The
-// authored sources live in docs/user/ as ordinary Markdown; adding a page is
-// one import plus one manifest line, and bun/docs.ts syncs the manifest into
+// The built-in documentation corpus, compiled into the binary as text
+// imports rather than shipped as loose files (architecture.md §3b). The
+// bundle then needs no build.copy entry, and a dev run and a packaged run
+// resolve the pages the same way, with no import.meta.dir walk over two
+// bundle layouts.
+
+// The pages live in docs/user/ as ordinary Markdown. Adding one takes one
+// import and one manifest line, and bun/docs.ts syncs the manifest into
 // ~/.ledge/.ledge-docs at every launch.
-//
+
 // Filenames are stated here, not derived from the H1 like a user note's:
-// these files are machine-written artifacts (the sync compares and prunes by
-// exactly these names), and the source file in docs/user/ should keep the
-// same name so grep finds both ends. The numeric prefix IS the reading
-// order: the note browser sorts the docs workspace by path (NoteBrowser.tsx),
-// so the manifest's numbering decides how the manual reads top to bottom —
-// titles stay clean, and renumbering is just a rename the sync absorbs.
-//
+// these files are machine-written, and the sync compares and prunes by
+// exactly these names. Keep the docs/user/ source under the same name so
+// grep finds both ends. The numeric prefix sets the reading order, because
+// the note browser sorts the docs workspace by path (NoteBrowser.tsx).
+// Titles stay unnumbered, and renumbering is a rename the sync absorbs.
+
 // Authoring rules live in docs/contributor/writing.md (style, headings,
-// voice). The two mechanical ones that bite here: one line per paragraph, no
-// hard wrapping (these pages render in the editor, which soft-wraps; an
-// 80-column wrap, the style of the repo docs next door, shows up as broken
-// lines mid-sentence) — and no em dashes in the prose.
+// voice). Two of its mechanics are easy to get wrong here. §10: one line per
+// paragraph, no hard wrapping, because the editor soft-wraps and an
+// 80-column wrap (the style of the docs/contributor/ pages next door) shows
+// as broken lines mid-sentence. §7: no em dashes.
 import gettingStarted from "../../docs/user/01-getting-started.md" with { type: "text" };
 import runningCode from "../../docs/user/02-running-code.md" with { type: "text" };
 import notesAndWorkspaces from "../../docs/user/03-notes-and-workspaces.md" with { type: "text" };
@@ -41,12 +42,11 @@ import tutorialSync from "../../docs/user/19-tutorial-keep-notes-synced.md" with
 import tutorialServer from "../../docs/user/20-tutorial-set-up-a-ledge-server.md" with { type: "text" };
 import tutorialBackup from "../../docs/user/21-tutorial-back-up-your-notes-to-s3.md" with { type: "text" };
 // The one page not authored in docs/user/, and not authored at all: `bun run
-// licenses` generates it (src/bun/licenses.ts) and writes it to the repository
-// root, where GitHub, a packager, and anyone auditing the release all expect
-// to find it. It is a page of the manual regardless of where its source sits,
-// because the licenses it reproduces ask to travel with the app rather than
-// stay behind in a repository. Editing it by hand is pointless: the next
-// regeneration overwrites it, and licenses.test.ts fails in the meantime.
+// licenses` (scripts/licenses.ts) writes it to the repository root, where
+// GitHub, a packager, and a release auditor expect it. It ships as a manual
+// page because the licenses ask to travel with the app (architecture.md §8).
+// Editing it by hand is pointless: the next run overwrites the edit, and
+// licenses.test.ts fails in the meantime.
 import thirdParty from "../../THIRD-PARTY-NOTICES.md" with { type: "text" };
 
 export interface DocPage {

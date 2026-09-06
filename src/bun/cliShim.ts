@@ -1,19 +1,19 @@
-// The `ledge` shim: how the CLI gets onto a PATH. One rule covers every
-// context — the shim execs the exact runtime and entry that WROTE it
-// (process.execPath plus the CLI module's own path), which is the packaged
-// app's Contents/MacOS/bun + Resources/app/bun/cli.js when the app installs
-// it, and the dev machine's bun + src/bun/cli.ts when a checkout does. No
-// bundle discovery and no PATH probing at run time: the shim is a two-line
-// fact, and a moved app is fixed by running the install again — the shim's
-// own comment says so, because that fact is not guessable from "not found".
+// The `ledge` shim: how the CLI gets onto a PATH. It execs the exact runtime
+// and entry that wrote it (process.execPath plus the CLI module's own path)
+// and discovers nothing at run time: no bundle lookup, no PATH probe. The
+// packaged app writes Contents/MacOS/bun and Resources/app/bun/cli.js, a
+// checkout the dev machine's bun and src/bun/cli.ts (architecture.md §1).
+// Re-running the install repoints a moved app. The shim's own text says so,
+// because sh's "not found" error does not.
 //
-// Shared by the CLI's `install` verb and the app's cliInstall RPC, which is
-// why it lives apart from cli.ts: the app must not import the CLI's verb
-// table (and the MCP server behind it) to write two lines of sh.
+// The CLI's `install` verb and the app's cliInstall RPC both call installShim,
+// so it lives apart from cli.ts. The app must not import the CLI's verb table
+// (and the MCP server behind it) to write two lines of sh.
 //
-// Written like every machine-owned file in this repo: temp-plus-rename, and
-// NEVER over a file that is not recognizably ours — a bin dir is shared
-// ground, and rename(2) clobbers silently.
+// installShim saves the shim the way every machine-owned file in this repo is
+// saved: temp file, then rename (architecture.md §3). It refuses to write over
+// a file that is not a Ledge shim. A bin directory is shared ground, and
+// rename(2) clobbers silently.
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { chmod, mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
@@ -31,9 +31,10 @@ export function tildify(p: string, home: string = homedir()): string {
   return r.startsWith(h + "/") ? `~${r.slice(h.length)}` : p;
 }
 
-// Double-quote a path for sh. The escapes cover what double quotes do not:
-// machine-derived paths never need them, but a shim that silently broke on a
-// space or a dollar sign would fail as the USER's shell error, not ours.
+// Double-quote a path for sh. The escapes cover what the double quotes do
+// not: backslash, double quote, dollar and backtick. Machine-derived paths
+// never need them, but a shim that silently broke on a space or a dollar sign
+// would surface later as an error from the user's shell.
 function shQuote(p: string): string {
   return `"${p.replace(/[\\"$`]/g, (c) => `\\${c}`)}"`;
 }
@@ -59,10 +60,10 @@ export function dirOnPath(dir: string, pathVar: string): boolean {
   return pathVar.split(":").some((p) => p !== "" && resolve(p) === d);
 }
 
-// Where a shim goes when the caller names no dir, most-visible first: the
-// Homebrew bins are on a mac user's PATH when they exist at all, and
-// ~/.local/bin is the one we may create ourselves — growing a directory in
-// /usr/local is a package manager's job, not a notes app's.
+// Where a shim goes when the caller names no dir, most-visible first. The
+// Homebrew bins are on a mac user's PATH when they exist at all, so they come
+// before ~/.local/bin. installShim creates ~/.local/bin when it is missing and
+// creates none of the others: /usr/local is not this app's to create.
 export function shimDirCandidates(home: string): string[] {
   return ["/opt/homebrew/bin", "/usr/local/bin", join(home, ".local", "bin")];
 }
@@ -92,13 +93,15 @@ export async function installShim(opts: {
   /** Explicit target directory; null picks from the candidates. */
   dir?: string | null;
   home?: string;
-  /** Candidate dirs for the pick — injectable so tests never probe the real
-   * /opt/homebrew/bin (which would be writable, and written). */
+  /** Candidate dirs to pick from. Tests inject their own so the pick never
+   * probes the real /opt/homebrew/bin, which on a dev machine is writable, so
+   * the test would write into it. */
   candidates?: readonly string[];
 }): Promise<ShimInstall> {
   const home = opts.home ?? homedir();
-  // The entry must exist NOW: a shim pointing at nothing would fail at first
-  // use as sh's error, long after the install claimed success.
+  // installShim stats the entry before it writes anything. A shim whose entry
+  // is missing still execs the runtime, which then reports the missing module
+  // at first use, long after the install reported success.
   const entryOk = await stat(opts.entryPath).then((s) => s.isFile()).catch(() => false);
   if (!entryOk) throw new Error(`the CLI entry is missing at ${opts.entryPath} — rebuild the app`);
 
@@ -110,7 +113,7 @@ export async function installShim(opts: {
         break;
       }
     }
-    dir ??= join(home, ".local", "bin"); // nothing writable: grow the user's own
+    dir ??= join(home, ".local", "bin"); // nothing writable: create ~/.local/bin
   }
   await mkdir(dir, { recursive: true });
 
@@ -126,7 +129,7 @@ export async function installShim(opts: {
     await chmod(tmp, 0o755); // explicit, not writeFile's mode: umask must not decide
     await rename(tmp, target);
   } catch (err) {
-    await unlink(tmp).catch(() => {}); // our own dotted temp, moments old
+    await unlink(tmp).catch(() => {}); // the dotted temp this call just wrote
     throw err;
   }
   return { path: target, onPath: dirOnPath(dir, opts.pathVar) };

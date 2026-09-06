@@ -1,12 +1,11 @@
-// The MCP tools against a real filesystem: what an agent actually gets, and
-// what its writes actually do. The interesting decisions are the ones an
-// agent would trip over — title resolution across workspaces (newest wins),
-// the registry re-read that keeps a long-lived server honest about workspaces
+// The MCP tools against a real filesystem: what an agent reads, and what its
+// writes do. Covered here: title resolution across workspaces (newest wins),
+// the per-call registry re-read that lets a long-lived server see a workspace
 // attached mid-session, the guards holding for paths an agent invents, and
 // the write tier inheriting the store's naming and never-clobber rules.
 //
-// Same scratch-home discipline as notes.fs.test.ts: the preload pointed
-// APP_HOME at a temp dir before anything imported, and the guard re-checks.
+// Same scratch-home discipline as notes.fs.test.ts: the preload sets
+// LEDGE_NOTES_ROOT (APP_HOME's source) to a temp dir, and the guard checks it.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -50,8 +49,9 @@ describe("list_workspaces", () => {
   test("reflects the registry, kinds and availability included — the built-in docs root leads", async () => {
     const out = await call("list_workspaces");
     expect(out).toEqual([
-      // Registered at every load, before the user's roots (bun/workspaces.ts):
-      // readable corpus for agents, flagged by its kind; every write refuses.
+      // loadWorkspaces registers the docs root at every load, ahead of the
+      // user's roots (bun/workspaces.ts). Agents can read those pages, and
+      // `kind` flags them; every write to the root is refused.
       { root: resolve(DOCS_ROOT), kind: "docs", available: true },
       { root: ROOT, kind: "managed", available: true },
       { root: OTHER, kind: "managed", available: true },
@@ -59,8 +59,8 @@ describe("list_workspaces", () => {
   });
 
   test("re-reads the registry per call — a workspace attached mid-session appears without a restart", async () => {
-    // The app (a different process, from this server's point of view) writes
-    // the registry file; only a per-call reload can see it.
+    // The app writes the registry file from another process, so only a
+    // reload on each call sees the new root.
     const extra = await mkdtemp(join(tmpdir(), "ledge-extra-"));
     await writeFile(WORKSPACES_PATH, JSON.stringify({ version: 1, roots: [ROOT, OTHER, extra] }));
     const out = await call("list_workspaces");
@@ -114,7 +114,7 @@ describe("read_note", () => {
     await ageTo(a.path, 1_000_000);
     await ageTo(b.path, 2_000_000);
     expect((await call("read_note", { title: "Plan" })).text).toBe("# Plan\nnew");
-    // ...unless the workspace narrows it.
+    // A workspace argument narrows the resolution to that root's note.
     expect((await call("read_note", { title: "Plan", workspace: ROOT })).text).toBe("# Plan\nold");
   });
 
@@ -137,11 +137,11 @@ describe("read_note", () => {
 
 });
 
-// The no-argument default: "the note I am sitting in". Ledge stamps
-// LEDGE_NOTE into every note shell's spawn; the agent CLI inherits it and so
-// does this server, spawned by the agent. These tests drive the same fallback
-// through the server's own process env — saved and restored around each, so
-// the suite behaves the same however it was launched.
+// With no arguments the tools target the current note. Ledge stamps
+// LEDGE_NOTE into every note shell's spawn (bun/spawnParams.ts). The agent
+// CLI launched there inherits it, and this server, a child of that CLI,
+// inherits it too. These tests set it in the server's own env, saved and
+// restored around each test so the suite runs the same however it started.
 describe("the current-note default (LEDGE_NOTE)", () => {
   const HAD = Object.hasOwn(process.env, "LEDGE_NOTE");
   const OLD = process.env["LEDGE_NOTE"];
@@ -184,10 +184,10 @@ describe("the current-note default (LEDGE_NOTE)", () => {
   });
 });
 
-// The current-workspace tie-break: an ambiguous title resolves the way the
-// current note's own [[wikilinks]] would — within its workspace — before the
-// global newest-first pass gets a say. Same deixis chain as LEDGE_NOTE; the
-// two are stamped together.
+// The current-workspace tie-break. An ambiguous title resolves inside
+// LEDGE_WORKSPACE first, and only then by the global newest-first pass. That
+// is the rule the current note's own [[wikilinks]] follow. Same deixis chain
+// as LEDGE_NOTE: the two are stamped into a note shell's spawn together.
 describe("the current-workspace tie-break (LEDGE_WORKSPACE)", () => {
   const HAD = Object.hasOwn(process.env, "LEDGE_WORKSPACE");
   const OLD = process.env["LEDGE_WORKSPACE"];
@@ -235,10 +235,10 @@ describe("the current-workspace tie-break (LEDGE_WORKSPACE)", () => {
   });
 });
 
-// The write tier. Both tools route through the store, so what these really
-// pin down is that an agent's write inherits the app's rules — H1-slug
-// naming, uniqueName dedup, block-append semantics — rather than getting a
-// laxer parallel path.
+// The write tier. create_note and append_note route through the note store,
+// so these tests check that an agent's write gets the app's own rules: H1-slug
+// naming, uniqueName dedup, block-append semantics. Agents get no looser
+// path of their own.
 describe("create_note", () => {
   const HAD = Object.hasOwn(process.env, "LEDGE_WORKSPACE");
   const OLD = process.env["LEDGE_WORKSPACE"];
@@ -398,9 +398,9 @@ describe("append_note", () => {
   });
 
   test("a heading argument appends inside that section, not at the end", async () => {
-    // The splice itself is shared/wikilinks.test.ts's subject; what this pins
-    // is the tool wiring — heading + the env-default note compose, and the
-    // result still reports the note's identity.
+    // This pins the tool wiring: a heading argument and the env-default note
+    // compose, and the result still reports the note's identity. The splice
+    // itself is shared/wikilinks.test.ts's subject.
     const n = await createNote(ROOT, "# Jokes\n\n## Puns\n\nfirst\n\n## Long Ones\n\nsaga\n");
     process.env["LEDGE_NOTE"] = n.path;
     const out = await call("append_note", { heading: "puns", text: "second" });
@@ -409,9 +409,9 @@ describe("append_note", () => {
   });
 
   test("a note ending with its own prompt block keeps the block last — the append lands above it", async () => {
-    // The "add another joke to this note" note: content, then the runnable
-    // ```prompt fence that produced this very call. Below the block would
-    // interleave results with the button (and each rerun would bury it).
+    // The note holds content, then the runnable ```prompt fence that produced
+    // this call. Appending below the fence would leave results interleaved
+    // with the button, and each rerun would bury it deeper.
     const n = await createNote(ROOT, "# Jokes\n\n> joke one\n\n```prompt\nadd another joke\n```\n");
     process.env["LEDGE_NOTE"] = n.path;
     await call("append_note", { text: "> joke two" });
@@ -433,10 +433,11 @@ describe("append_note", () => {
   });
 });
 
-// The revision tool: exact-match replacement, no fuzz. The decisions worth
-// pinning are the refusals (they teach the agent to self-correct: exactness,
-// ambiguity counts, replace_all as the escape), the literal-replacement
-// hazard ($-patterns), and that an edit reaching the H1 retitles the result.
+// edit_note replaces exact text, with no fuzzy matching. The refusal
+// messages steer the agent: the match is exact, an ambiguous old_text comes
+// back with its occurrence count, and replace_all is the escape. These tests
+// also cover the $-pattern hazard (the replacement must stay literal) and an
+// edit reaching the H1, which retitles the result without renaming the file.
 describe("edit_note", () => {
   const HAD = Object.hasOwn(process.env, "LEDGE_NOTE");
   const OLD = process.env["LEDGE_NOTE"];
@@ -551,8 +552,8 @@ describe("backlinks", () => {
     await createNote(ROOT, "# Folded\n\nalso [[target]]");
     await createNote(ROOT, "# Fenced\n\n```\n[[Target]]\n```");
     await createNote(ROOT, "# Unrelated\n\n[[Someone Else]]");
-    // Wikilinks are workspace-scoped: a note elsewhere naming the same title
-    // is not a backlink of THIS note.
+    // Wikilinks are workspace-scoped: a note in another workspace naming the
+    // same title is not a backlink of this one.
     await createNote(OTHER, "# Elsewhere\n\n[[Target]]");
     const out = await call("backlinks", { title: "Target" });
     expect(out.target.path).toBe(target.path);
@@ -580,8 +581,9 @@ describe("tags", () => {
     await createNote(ROOT, "# One\n\n#work twice #work\n");
     await createNote(ROOT, "---\ntags: work, home\n---\n# Two\n\nbody\n");
     await createNote(OTHER, "# Far\n\n#Work elsewhere\n");
-    // Counts are notes bearing the tag (One's two occurrences count once),
-    // summed across workspaces; identity folds case, first spelling wins.
+    // Each count is how many notes bear the tag, across every workspace.
+    // One's two occurrences of #work count once. Tag identity folds case, and
+    // the first spelling seen is the one reported.
     const out = await call("tags");
     expect(out.tags).toEqual([
       { tag: "home", count: 1 },
@@ -611,10 +613,9 @@ describe("tags", () => {
   });
 });
 
-// Folders reach the agent surface twice, and the two are not the same
-// argument: a listing tool's `folder` SELECTS notes that already exist, a
-// creating tool's PLACES a new one. Only the second builds a path, so only the
-// second can be refused.
+// `folder` means two different things across the tools. On a listing tool it
+// selects among notes that already exist. On a creating tool it places a new
+// note. Only the creating use builds a path, so only it can be refused.
 describe("folders", () => {
   test("a row says which folder its note is in, and says nothing at the top level", async () => {
     await createNote(ROOT, "# Top\n");
@@ -637,9 +638,9 @@ describe("folders", () => {
   });
 
   test("a folder nobody has a note in selects nothing, and that is an answer rather than an error", async () => {
-    // A folder with no notes in it is not a thing Ledge shows anywhere, so a
-    // typo and an empty folder are the same case — and neither is worth an
-    // error an agent would have to recover from.
+    // Ledge shows a folder nowhere unless a note sits in it, so a typo and an
+    // empty folder are the same case. Neither is worth an error the agent
+    // would have to recover from.
     await createNote(ROOT, "# Top\n");
     expect(await call("list_notes", { workspace: ROOT, folder: "nope" })).toEqual([]);
     expect((await call("search_notes", { query: "Top", folder: "nope" })).hits).toEqual([]);
@@ -661,9 +662,10 @@ describe("folders", () => {
   });
 
   test("a folder picks which of two notes sharing a title is meant", async () => {
-    // The ambiguity filing creates, and the argument that answers it: without
-    // one the newest wins (resolveWikiTitle's documented tie-break), which is
-    // deterministic but unsayable.
+    // Filing two notes under one title makes the title ambiguous, and
+    // `folder` is the argument that resolves it. Without one the newest note
+    // wins (resolveWikiTitle's tie-break), which is deterministic but leaves
+    // no way to ask for the other.
     const old = await createNote(ROOT, "# Plan\nthe projects one\n", "projects");
     await ageTo(old.path, 1000);
     await createNote(ROOT, "# Plan\nthe admin one\n", "admin");
@@ -687,8 +689,8 @@ describe("folders", () => {
   });
 
   test("names that are not folders are refused by the store's guard, not reinterpreted", async () => {
-    // folderPathOf is the single opinion on this (bun/notes.ts): the tools add
-    // no second check, so what the app refuses the agents refuse identically.
+    // folderPathOf (bun/notes.ts) decides this for everyone. The tools add no
+    // second check, so they reject the same names the app does.
     expect(call("create_note", { workspace: ROOT, text: "# X\n", folder: "../escape" })).rejects.toThrow("not a folder");
     expect(call("create_note", { workspace: ROOT, text: "# X\n", folder: "/tmp" })).rejects.toThrow("not a folder");
     expect(call("create_note", { workspace: ROOT, text: "# X\n", folder: ".hidden" })).rejects.toThrow("not a folder");
@@ -701,15 +703,17 @@ describe("folders", () => {
     expect(configured.folder).toBe("journal");
     expect(configured.path).toBe(join(ROOT, "journal", `${title}.md`));
 
-    // The knob only decides the day it CREATES: moving it does not move the
-    // notes already filed, because the day's note is found by its title.
+    // The setting only decides where a day's note is created. Changing it
+    // does not move the notes already filed, because the day's note is found
+    // by its title.
     await writeFile(SETTINGS_PATH, JSON.stringify({ daily: { workspace: ROOT, folder: "elsewhere" } }));
     expect((await call("daily_note")).path).toBe(configured.path);
   });
 
   test("a daily.folder that is not a folder name is ignored, so the keystroke still works", async () => {
-    // parseSettings reports it and degrades to "" (shared/settings.ts): the
-    // file is the settings UI, and a typo there must not break ⌘J.
+    // parseSettings reports the bad name and falls back to ""
+    // (shared/settings.ts). The file is the settings UI, so a typo in it must
+    // not break ⌘J.
     await writeFile(SETTINGS_PATH, JSON.stringify({ daily: { workspace: ROOT, folder: "../escape" } }));
     const out = await call("daily_note");
     expect(out.path).toBe(join(ROOT, `${isoDateOf(new Date())}.md`));
@@ -722,25 +726,25 @@ describe("folders", () => {
     expect(first.created).toBe(true);
     expect(first.folder).toBe("journal");
     expect(first.path).toBe(join(ROOT, "journal", `${title}.md`));
-    // Today's note is found by TITLE anywhere in the workspace, so a second
-    // call naming a different folder returns the one that exists rather than
-    // minting a second copy of today.
+    // Today's note is found by title anywhere in the workspace, so a second
+    // call naming a different folder returns the note that exists rather than
+    // creating a second copy of today.
     const second = await call("daily_note", { workspace: ROOT, folder: "elsewhere" });
     expect(second.created).toBe(false);
     expect(second.path).toBe(first.path);
   });
 });
 
-// The one tool that names no note. Its contract is bun/settings.ts's
-// inspectSettings (covered there); what matters here is that the tool exists,
-// takes no arguments, and stays read-only — the tool set is what a prompt
-// fence pre-authorizes, so a writing sibling appearing later should fail a
-// test, not slip in.
+// settings is the one tool that names no note. Its contract is
+// inspectSettings in bun/settings.ts and is covered there. These tests check
+// that the tool exists, takes no arguments, and stays read-only. A prompt
+// fence pre-authorizes the whole tool set, so a settings-writing sibling
+// added later has to fail a test rather than slip in.
 describe("settings", () => {
   test("returns the user's settings text and its path, no arguments needed", async () => {
-    // A server-owned section (remote.md §5): this tool reads the settings of
-    // the machine the agent is running on, which is the server, and a font
-    // size is not that machine's fact.
+    // The settings file this reads belongs to the machine the agent runs on,
+    // which is the server. That is where behavior settings live; appearance
+    // settings such as a font size are the client's (remote.md §5).
     await writeFile(SETTINGS_PATH, '{\n  // theirs\n  "trash": { "ttlDays": 15 }\n}\n');
     const out = await call("settings");
     expect(out.path).toBe(SETTINGS_PATH);
@@ -757,11 +761,10 @@ describe("settings", () => {
 });
 
 // --- locked notes: the agent surface (locking.md §8) --------------------
-// The invariant under test: no tool returns a locked body, EVER — including
-// while the app-side vault is unlocked, which is exactly the state these
-// tests set up (createVault leaves it unlocked; the same process serves the
-// tools here). If these pass with the vault OPEN, the flag — not the vault
-// state — is what refuses, which is the whole point.
+// No tool returns a locked body, even while the app-side vault is unlocked.
+// These tests run in that state: createVault leaves the vault unlocked, and
+// the same process serves the tools. They pass with the vault open, so what
+// refuses is the note's locked flag, not the vault state.
 import { lockNote, removeLockNote } from "./notes";
 import { createVault, resetVaultForTests } from "./vault";
 import { resolveNoteForOpen } from "./mcpTools";
@@ -818,7 +821,8 @@ describe("locked notes refuse agents", () => {
     const n = await resolveNoteForOpen({ title: "Sealed" });
     expect(n.path).toBe(path);
     expect(n).not.toHaveProperty("text");
-    // And the lock still comes off for the app's own flow, not for agents.
+    // The lock still comes off through the app's own flow (removeLockNote),
+    // never through a tool: once it runs, read_note returns the body.
     await removeLockNote(path);
     const after = await call("read_note", { title: "Sealed" });
     expect(after.text).toContain(SECRET);

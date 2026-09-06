@@ -18,9 +18,9 @@ import { NATIVE_DIR, NATIVE_LIB } from "./ptyNative";
 const ROOT = resolve(import.meta.dir, "..", "..");
 
 describe("the published manifest", () => {
-  // The root package.json is private and this one must not be: npm refuses to
-  // publish a private package, and it refuses at the end of a release rather
-  // than the start of one.
+  // The manifest must not carry `private`. The root package.json does, and
+  // npm refuses to publish a private package. The refusal comes at the end of
+  // a release rather than the start of one.
   test("is publishable", () => {
     const m = manifest("1.2.3") as unknown as Record<string, unknown>;
     expect(m["private"]).toBeUndefined();
@@ -32,10 +32,10 @@ describe("the published manifest", () => {
     expect(manifest("0.0.0").bin).toEqual({ [PACKAGE_NAME]: "bin/ledge-server.js" });
   });
 
-  // os and cpu are the two fields npm ENFORCES at install time, so they are
-  // the package's real statement about where it runs. Deriving the assertion
-  // from NATIVE_TARGETS is the point: adding a target without widening these
-  // ships a tarball npm refuses to install on the machine it was added for.
+  // npm enforces os and cpu at install time, so those two fields state where
+  // the package runs. The assertion derives from NATIVE_TARGETS: a target
+  // added without widening these ships a tarball npm refuses to install on
+  // the machine it was added for.
   test("names exactly the platforms and architectures it carries", () => {
     const m = manifest("0.0.0");
     expect(new Set(m.os)).toEqual(new Set(NATIVE_TARGETS.map((t) => t.platform)));
@@ -46,8 +46,9 @@ describe("the published manifest", () => {
     expect(manifest("0.0.0").engines).toEqual({ bun: BUN_FLOOR });
   });
 
-  // The manifest points at it; scripts/build-npm.ts copies it. A rename that
-  // misses one of the two is a published package whose only command is a
+  // The manifest's `bin` field points at bin/ledge-server.js inside the
+  // package, and scripts/build-npm.ts copies this repo file there. A rename
+  // that misses one of the two publishes a package whose only command is a
   // dangling bin link.
   test("the bin it points at is a file in the repo", () => {
     expect(existsSync(join(ROOT, "npm", "bin", "ledge-server.js"))).toBe(true);
@@ -58,21 +59,22 @@ describe("the published manifest", () => {
     const guard = src.indexOf(`typeof Bun === "undefined"`);
     const load = src.indexOf("../lib/serve.js");
     expect(guard).toBeGreaterThan(-1);
-    // Order is the whole point: the bundle statically imports bun:ffi, so an
-    // import reached first fails as an unresolvable specifier and the message
-    // below never prints. `await import` and not `import` for the same reason.
+    // The guard has to come first, and the bin has to reach the bundle
+    // through `await import`. The bundle statically imports bun:ffi, an
+    // unresolvable specifier under any other runtime. A static import runs
+    // before the guard whatever its position, so it would fail there and the
+    // guard's message would never print.
     expect(load).toBeGreaterThan(guard);
     expect(src).toContain("await import(");
   });
 });
 
 describe("the native layout", () => {
-  // THE drift invariant. scripts/build-npm.ts writes these directories and
-  // bun/pty.ts reads them, and a disagreement is not a crash: it is a server
-  // that falls through to the in-process compile, fails that for want of
-  // headers on a machine that installed rather than built, and runs every
-  // shell with no controlling terminal. Ctrl-C stops working and nothing says
-  // why.
+  // The drift invariant: scripts/build-npm.ts writes these directories and
+  // bun/pty.ts reads them. A disagreement is not a crash. The server falls
+  // through to the in-process compile. That compile fails for want of headers
+  // on a machine that installed rather than built. Every shell then runs with
+  // no controlling terminal, Ctrl-C stops working, and nothing says why.
   test("is the one pty.ts computes for this machine", () => {
     const here = NATIVE_TARGETS.find((t) => t.platform === process.platform && t.arch === process.arch);
     expect(here).toBeDefined();
@@ -105,9 +107,9 @@ describe("missingTargets", () => {
     expect(missingTargets(without)).toEqual([{ platform: "linux", arch: "arm64" }]);
   });
 
-  // A path that is nearly right is the shape a refactor produces, and the
-  // check is an exact set membership rather than a substring search so it
-  // fails rather than passing on a neighbour.
+  // missingTargets compares whole paths, not substrings, so a nearly right
+  // path leaves its target uncovered. A refactor produces exactly this shape:
+  // a Mach-O extension inside a linux directory.
   test("a file in the wrong place does not count", () => {
     expect(missingTargets(["lib/native/linux-arm64/libledge_pty.dylib"]).length).toBe(NATIVE_TARGETS.length);
   });
@@ -119,8 +121,10 @@ describe("routeFor", () => {
     expect(routeFor({ platform: "darwin", arch: "x64" }, "darwin")).toBe("universal-dylib");
   });
 
-  // Stated as a test because it is the rule a release runbook has to obey:
-  // assembling a complete package on Linux is not slow, it is impossible.
+  // A complete package can only be assembled on a Mac. No other host can
+  // produce a Mach-O slice at all, so routeFor has no route to offer and
+  // answers "unavailable". A test pins the rule because the release runbook
+  // has to obey it (docs/contributor/releasing.md §6).
   test("and cannot be built anywhere else", () => {
     expect(routeFor({ platform: "darwin", arch: "arm64" }, "linux")).toBe("unavailable");
     expect(routeFor({ platform: "darwin", arch: "arm64" }, "win32")).toBe("unavailable");
@@ -159,8 +163,9 @@ describe("elfMachine", () => {
     expect(elfMachine(header(0xb7))).toBe(ELF_MACHINE["arm64"]);
   });
 
-  // The check exists to catch a docker that answered --platform with the
-  // host's architecture, so telling the two apart is the entire job.
+  // scripts/build-npm.ts calls elfMachine to catch a docker build that
+  // answered --platform with the host's architecture, so the two numbers have
+  // to come out different.
   test("tells x86-64 and AArch64 apart", () => {
     expect(elfMachine(header(0x3e))).not.toBe(elfMachine(header(0xb7)));
   });
@@ -170,7 +175,7 @@ describe("elfMachine", () => {
   });
 
   test("a Mach-O is not an ELF", () => {
-    // The dylib's magic, which is what would land here if a darwin slice were
+    // These bytes are Mach-O magic. They land here when a darwin slice is
     // copied into a linux directory.
     expect(elfMachine(new Uint8Array([0xcf, 0xfa, 0xed, 0xfe, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]))).toBeNull();
   });

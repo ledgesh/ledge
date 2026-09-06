@@ -1,6 +1,8 @@
-// The dedupe window (remote.md §7). Pure and clock-injected, so "two minutes
-// later" costs nothing and the eviction rules are actually asserted rather
-// than assumed.
+// Tests for the dedupe window (opLog.ts, remote.md §7). The module does no
+// I/O, so a test builds a log and calls it directly. createOpLog takes its
+// limit, ttl and clock as options. The tests below run with a limit of 3 and
+// a ttl of 100ms, stepping an injected clock past it, so eviction is asserted
+// rather than assumed.
 import { describe, expect, test } from "bun:test";
 import { createOpLog } from "./opLog";
 
@@ -18,8 +20,9 @@ describe("an op that arrives twice", () => {
     expect(c.runs()).toBe(1);
   });
 
-  // The window is per client AND per op (the server keys it with both), so two
-  // clients counting from 1 do not answer each other's calls.
+  // The server keys the window by client as well as by op: bun/transport.ts
+  // joins the peer's client id and the request's op id. Two clients counting
+  // from 1 do not answer each other's calls.
   test("a different key is a different op", async () => {
     const log = createOpLog();
     const c = counter();
@@ -28,10 +31,10 @@ describe("an op that arrives twice", () => {
     expect(c.runs()).toBe(2);
   });
 
-  // The case a fast reconnect actually produces: the replay lands while the
-  // original is still writing the file. Two writes racing each other is the
-  // failure this whole mechanism exists to prevent, so it must not start a
-  // second one — it has to wait on the first.
+  // The case a fast reconnect produces: the replay arrives while the original
+  // is still writing the file. Two writes racing each other is the failure the
+  // op log prevents, so the replay must not start a second run. It gets the
+  // first call's promise and waits on it.
   test("a replay that arrives mid-flight waits for the original", async () => {
     const log = createOpLog();
     let release!: (v: { ran: number }) => void;
@@ -48,9 +51,9 @@ describe("an op that arrives twice", () => {
     expect(await second).toEqual({ ran: 1 });
   });
 
-  // A refusal is an answer. Replaying a write the vault refused must be
-  // refused again rather than retried into a vault that has since been
-  // unlocked, which would apply what the user was told did not happen.
+  // A failure is recorded the same way a result is. A write the vault refused
+  // is refused again on replay, not retried into a vault that has since been
+  // unlocked. Retrying would apply a change the user was told did not happen.
   test("a failure is recorded too, and replayed as the same failure", async () => {
     const log = createOpLog();
     let runs = 0;
@@ -70,9 +73,9 @@ describe("the window is bounded", () => {
     const c = counter();
     for (const key of ["a", "b", "c", "d"]) await log.run(key, c.exec);
     expect(log.size()).toBe(3);
-    // "a" was evicted, so its replay runs again. That is the honest failure
-    // mode of a bounded window, and the bound is what keeps a recorded
-    // scrollback replay from being held forever.
+    // "a" was evicted, so its replay runs again. The limit is what keeps the
+    // log small: one recorded result, terminalAttach's scrollback replay, is a
+    // quarter megabyte (opLog.ts).
     await log.run("a", c.exec);
     expect(c.runs()).toBe(5);
     // "d" is still remembered.
@@ -89,8 +92,8 @@ describe("the window is bounded", () => {
     await log.run("a", c.exec);
     expect(c.runs()).toBe(1);
     clock += 500;
-    // The eviction sweep runs on the next write, so it takes another op to
-    // clear the stale one — then the replay is a fresh run.
+    // The sweep runs only after a miss records its entry, so it takes another
+    // op to clear the stale one. The replay after that is a fresh run.
     await log.run("b", c.exec);
     await log.run("a", c.exec);
     expect(c.runs()).toBe(3);

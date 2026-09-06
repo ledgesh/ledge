@@ -21,8 +21,9 @@ describe("staleExtractionFiles", () => {
     expect(staleExtractionFiles(entries, LIVE)).toEqual([`${LIVE}.patch`, `from-${LIVE}.tar`]);
   });
 
-  // The whole point of pruning instead of emptying: the updater bsdiffs from
-  // this file, and deleting it turns the next patch into a full download.
+  // The prune keeps the running version's tar instead of emptying the
+  // folder. The updater bsdiffs from that tar, so deleting it turns the next
+  // patch into a full download.
   test("never removes the baseline even when it is the only entry", () => {
     expect(staleExtractionFiles([`${LIVE}.tar`], LIVE)).not.toContain(`${LIVE}.tar`);
   });
@@ -65,7 +66,8 @@ describe("pruneExtractionDir", () => {
     expect(readdirSync(dir).sort()).toEqual(before);
   });
 
-  // The dev-build case: electrobun only makes this folder for a packaged app.
+  // Electrobun creates the self-extraction folder only for a packaged app,
+  // so a dev build has none.
   test("a missing folder is not an error", async () => {
     expect(await pruneExtractionDir(join(tmpdir(), "ledge-no-such-dir-9d3f"), LIVE)).toEqual([]);
   });

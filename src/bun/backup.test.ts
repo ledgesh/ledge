@@ -1,6 +1,7 @@
-// The backup set's rules. Pure: no filesystem, no registry, no server — the
-// input is what a machine's registry says and the output is two lists of
-// paths, which is the whole of what `backup-paths` decides (testing.md §2).
+// The backup set's rules. `backupSet` is pure: no filesystem, no registry, no
+// server, so these tests need none either (testing.md §2). It takes one
+// machine's paths and a secrets flag and returns two lists of paths. That is
+// the whole of what `backup-paths` decides.
 import { expect, test } from "bun:test";
 import { backupSet } from "./backup";
 
@@ -16,8 +17,8 @@ test("the app home is included whole, so new state in it is backed up by default
 });
 
 test("profiles are included even though they live outside the app home", () => {
-  // The bug this module exists for: notes that say `profile: prod` restore
-  // without the values unless this path travels with them.
+  // The bug this module exists for. A backup without this path restores the
+  // notes that say `profile: prod` without the values they spawn with.
   expect(set().include).toContain(PROFILES);
 });
 

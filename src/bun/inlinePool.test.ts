@@ -4,18 +4,17 @@ import { markerCommand, markerInit } from "./markers";
 
 const NONCE = "testnonce";
 
-// Who started a run. Most tests below have only one client and say so once;
-// the pair matters only where two of them share a server (see "runs belong to
-// the client that started them").
+// Who started a run. Most tests below use one client throughout. The pair
+// matters only where two clients share a server (see "runs belong to the
+// client that started them").
 const MAC = "mac";
 const PHONE = "phone";
 
 // The byte stream a real shell would echo back: OSC 133 C when a block starts,
-// D with the exit status when its prompt returns (see markers.ts).
-// The hook's ack rides ahead of the start marker on the same line that carries
-// it (markers.ts, and `run` in inlinePool.ts), so a block beginning on a shell
-// that can end it is always these two, in this order. `unhooked` is the damaged
-// case: a line that lost its hook and kept its block.
+// D with the exit status when its prompt returns (markers.ts). The hook's ack
+// goes out ahead of the start marker in the same write (markers.ts, and `run`
+// in inlinePool.ts), so a block on a shell that can end it always shows those
+// two in order. `unhooked` is the damaged case: the block marker with no ack.
 const ready = `\x1b]133;R;ledge=${NONCE}\x07`;
 const unhooked = (id: string) => `\x1b]133;C;ledge=${NONCE}:${id}\x07`;
 const began = (id: string) => ready + unhooked(id);
@@ -23,16 +22,16 @@ const ended = (id: string, code = 0) => `\x1b]133;D;${code};ledge=${NONCE}:${id}
 
 class FakeShell implements InlineShellIO {
   written = "";
-  // Kept apart from `written` because one of the things being tested is that
-  // the hook and the block go out in ONE write: a tty discards what it has not
-  // read yet, and two writes can be separated where one cannot.
+  // Kept apart from `written` so a test can check that the hook and the block
+  // go out in a single write. A tty discards what it has not read yet, and two
+  // writes can be separated where one cannot.
   writes: string[] = [];
   resizes: Array<[number, number]> = [];
   interrupts = 0;
   closed = false;
   exited = false;
   // What a real pty reports when the tty would not take all of a write
-  // (pty.ts `pending`); set directly here, since a fake has no tty to refuse.
+  // (pty.ts `pending`). Tests set it directly: a fake has no tty to refuse.
   pending = false;
   private queue: Uint8Array[] = [];
 
@@ -97,13 +96,13 @@ describe("restartSession", () => {
 
     pool.run("note", "b", "source /tmp/b.sh", { client: MAC });
     expect(shells.length).toBe(2);
-    // A fresh shell, fully re-primed: the marker hook lives in the dead zsh.
+    // The new shell gets the marker hook again: the hook lived in the dead zsh.
     expect(shells[1].written.startsWith(markerInit(NONCE))).toBe(true);
   });
 
   test("open runs are closed out through emit, overflow included", () => {
-    // The tab is still open and watching (unlike closeSession): a run left
-    // un-ended would sit on "Running" with a dead run button forever.
+    // The tab is still open and watching, unlike closeSession. A run left
+    // un-ended sits on "Running" with a run button that no longer works.
     const { pool, shells, drained } = makePool();
     pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
     shells[0].emit(began("a"));
@@ -132,8 +131,9 @@ describe("restartSession", () => {
   });
 
   test("a resize stashed for a not-yet-started run dies with the restart", () => {
-    // The pre-run resize was measured against panels of the session being torn
-    // down; applying it to a post-restart shell would be a stale grid.
+    // The stashed resize was measured against the panels of the session being
+    // torn down. Applying it to a shell spawned after the restart would set a
+    // stale grid.
     const { pool, shells } = makePool();
     pool.resize("note", "x", 33, 7);
     pool.restartSession("note", () => {});
@@ -152,8 +152,9 @@ describe("shell selection", () => {
   });
 
   test("every spawn is told which session it is for, overflow included", () => {
-    // The spawn uses it to give the shell that note's params (frontmatter cwd/
-    // env); an overflow shell for the same note must be born with the same ones.
+    // The spawn uses the session id to give the shell that note's params (cwd
+    // and env from its frontmatter). An overflow shell for the same note has
+    // to start with the same ones.
     const spawnedFor: string[] = [];
     const pool = new InlinePool((sessionId) => {
       spawnedFor.push(sessionId);
@@ -175,8 +176,8 @@ describe("shell selection", () => {
   });
 
   test("a second run picks the overflow shell even before the first's begin marker echoes back", () => {
-    // The write happens now; the C marker echoes back later. The busy check must
-    // not depend on the echo or two rapid runs would share the shell.
+    // The write happens now and the C marker echoes back later. The busy check
+    // must not depend on the echo, or two rapid runs would share the shell.
     const { pool, shells } = makePool();
     pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
     // No drain between the two runs: shell 0 has echoed nothing yet.
@@ -253,10 +254,11 @@ describe("lifecycle", () => {
     expect(shells[0].written).toContain("source /tmp/c.sh");
   });
 
-  // The two questions the daemon asks, and the gap between them is the whole
-  // of a session hold: a note's shell that finished its last block is not
-  // RUNNING, and it is still the cwd and the exported variables a client that
-  // said it is coming back will come back to (daemon.ts).
+  // running() and sessionsOpen() are the two questions the daemon asks, and
+  // the gap between them is what a session hold covers. A note's shell that
+  // finished its last block is not running. It still holds the cwd and the
+  // exported variables a client that asked for a hold comes back to
+  // (daemon.ts).
   test("a finished run leaves a session open, though nothing is running", () => {
     const { pool, shells, drained } = makePool();
     expect(pool.running()).toBe(false);
@@ -378,8 +380,8 @@ describe("run-addressed plumbing", () => {
 });
 
 describe("per-host persistent shells", () => {
-  // Like makePool, but the fake spawn records which host each shell was born
-  // for, which is the whole behavior under test here.
+  // Like makePool, but the fake spawn records which host each shell was
+  // spawned for. That is what these tests check.
   function makeHostPool() {
     const shells: Array<FakeShell & { host?: string }> = [];
     const pool = new InlinePool((_sessionId, host) => {
@@ -425,7 +427,7 @@ describe("per-host persistent shells", () => {
     pool.run("note", "b", "cmd-b", { client: MAC, host: "web1" });
     expect(shells.length).toBe(2);
     expect(shells[1].host).toBe("web1");
-    // ...and the overflow dies with its run, as ever.
+    // The overflow shell closes when its run ends, as it does anywhere else.
     shells[1].emit(began("b") + ended("b"));
     drained();
     expect(shells[1].closed).toBe(true);
@@ -464,11 +466,11 @@ describe("per-host persistent shells", () => {
 });
 
 // A shell that cannot reach the block has usually said why, and the marker
-// parser drops every one of those bytes: they fall outside a C..D pair. This is
-// how they get to the panel anyway. It matters most for remote runs, where the
-// pty's child is ssh and ssh talks before the shell exists (an unknown host
-// key, a passphrase, "Permission denied"). Before this, the first run against a
-// new host was a block that ran forever with an empty panel.
+// parser drops those bytes: they fall outside a C..D pair. These tests show
+// the two ways they reach the panel anyway (inlinePool.ts): the shell stays
+// silent too long (SILENT_MS), or it dies. Remote runs need it most: ssh
+// talks before the shell exists (host key, passphrase, "Permission denied"),
+// and without it a first run against a new host runs forever, showing nothing.
 describe("a shell that never starts the block", () => {
   test("says nothing extra while it is merely starting up", () => {
     const { pool, shells, drained, clock } = makePool();
@@ -477,8 +479,8 @@ describe("a shell that never starts the block", () => {
     expect(textOf(drained())).toBe("");
     clock.t += 1000; // still well inside the grace period
     shells[0].emit(began("a") + "real output" + ended("a"));
-    // The prologue is dropped once the block begins: what the panel shows is
-    // the block's own output and nothing else.
+    // The held output is dropped once the block begins. The panel shows the
+    // block's own output and nothing else.
     expect(textOf(drained())).toBe("real output");
   });
 
@@ -492,8 +494,8 @@ describe("a shell that never starts the block", () => {
   });
 
   test("keeps streaming after that, so a question can be answered", () => {
-    // The panel takes keystrokes (pool.input), so a prompt surfaced there is
-    // answerable — but only if what follows the answer is shown too.
+    // The panel takes keystrokes (pool.input), so a prompt shown there can be
+    // answered. That only works if what follows the answer is shown too.
     const { pool, shells, drained, clock } = makePool();
     pool.run("note", "a", "cmd", { client: MAC });
     shells[0].emit("Are you sure you want to continue connecting? ");
@@ -512,7 +514,7 @@ describe("a shell that never starts the block", () => {
     shells[0].exited = true;
     const events = drained();
     expect(textOf(events)).toContain("Permission denied");
-    // And the run still closes out, or the panel sits on Running forever.
+    // The run still closes out. Otherwise the panel sits on Running forever.
     expect(events.at(-1)).toEqual({ type: "ended", blockId: "a", exitCode: null });
   });
 
@@ -525,7 +527,7 @@ describe("a shell that never starts the block", () => {
     drained();
     pool.run("note", "b", "cmd-b", { client: MAC });
     clock.t += 5000;
-    // The noise belonged to no run and was never held; block b's silence has
+    // The noise belonged to no run, so nothing held it. Block b's silence has
     // nothing to hand over.
     expect(textOf(drained())).toBe("");
   });
@@ -541,13 +543,13 @@ describe("the shell's echo of what we typed", () => {
     shells[0].emit(echo + "Permission denied (publickey).\r\n");
     drained();
     clock.t += 5000;
-    // What surfaces is the shell's own message, not the marker hook.
+    // The panel gets the shell's own message, not the marker hook.
     expect(textOf(drained())).toBe("Permission denied (publickey).\r\n");
   });
 
   test("a partial or mangled echo is shown rather than guessed at", () => {
-    // Half a match means the rest is still arriving or came back wrapped;
-    // stripping there would eat the first line of the real message.
+    // Half a match means the rest is still arriving or came back wrapped.
+    // Stripping there would eat the first line of the real message.
     const { pool, shells, drained, clock } = makePool();
     pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
     shells[0].emit(markerInit(NONCE).slice(0, 40) + "\r\nsomething went wrong\r\n");
@@ -611,9 +613,9 @@ describe("claiming what a client can still show", () => {
 
     expect(pool.claim(MAC, []).orphaned).toEqual(["a"]);
     expect(shells[0].interrupts).toBe(1);
-    // The interrupt, not a teardown: the shell keeps the cwd and the exports
-    // the last block left it, which is the whole of what a session hold buys
-    // the client that comes back (daemon.ts).
+    // An interrupt, not a teardown. The shell keeps the cwd and the exports
+    // the last block left it. That state is what a session hold keeps for a
+    // client that comes back (daemon.ts).
     expect(shells[0].closed).toBe(false);
     shells[0].emit(ended("a", 130));
     expect(drained()).toEqual([{ type: "ended", blockId: "a", exitCode: 130 }]);
@@ -632,9 +634,9 @@ describe("claiming what a client can still show", () => {
   });
 
   test("a claim for a run that already ended is simply not confirmed", () => {
-    // The other direction: the client still shows a panel because the ended
-    // event was pushed at a wire that was down. Nothing here to stop — the
-    // answer is what tells it so.
+    // The client still shows a panel because the ended event went out over a
+    // wire that was down. There is nothing to stop. The answer leaves the run
+    // out of both lists, and the client takes that as the end.
     const { pool, shells, drained } = makePool();
     pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
     shells[0].emit(began("a") + ended("a", 0));
@@ -661,7 +663,7 @@ describe("claiming what a client can still show", () => {
     expect(pool.claim(MAC, ["a"]).orphaned).toEqual(["b"]);
     expect(shells[0].interrupts).toBe(0);
     expect(shells[1].interrupts).toBe(1);
-    // And the overflow shell goes with its run, as it does on any other end.
+    // The overflow shell goes with its run, as it does on any other end.
     shells[1].emit(ended("b", 130));
     drained();
     expect(shells[1].closed).toBe(true);
@@ -670,8 +672,8 @@ describe("claiming what a client can still show", () => {
 
 describe("runs belong to the client that started them", () => {
   test("a claim does not collect another client's runs", () => {
-    // The whole of it: a phone finishing its boot must not interrupt the build
-    // a Mac is watching. It cannot show that run, cannot stop it, and was never
+    // A phone finishing its boot must not interrupt the build a Mac is
+    // watching. The phone cannot show that run, cannot stop it, and was never
     // told it existed.
     const { pool, shells, drained } = makePool();
     pool.run("note", "mac-build", "source /tmp/a.sh", { client: MAC });
@@ -683,9 +685,9 @@ describe("runs belong to the client that started them", () => {
   });
 
   test("and does not report them as running either", () => {
-    // The other direction of the same silence. A phone asking about an id it
-    // does not have could only be a collision, and answering "yes, running"
-    // would hand it a panel over somebody else's shell.
+    // The same scoping, in the reporting direction. A phone asking about an id
+    // it did not start could only be a collision, and answering "yes, running"
+    // would hand it a panel over another client's shell.
     const { pool, shells, drained } = makePool();
     pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
     shells[0].emit(began("a"));
@@ -696,8 +698,9 @@ describe("runs belong to the client that started them", () => {
   });
 
   test("each client's own orphans are still collected, in the same note", () => {
-    // Scoping is not a truce: within a client nothing changes, and two clients
-    // running blocks in one note is two shells, not a shared one.
+    // Scoping by client changes nothing within a client: a client's own
+    // unclaimed runs are still interrupted. Two clients running blocks in one
+    // note get two shells, not a shared one.
     const { pool, shells, drained } = makePool();
     pool.run("note", "mine", "source /tmp/a.sh", { client: MAC });
     shells[0].emit(began("mine"));
@@ -715,9 +718,9 @@ describe("runs belong to the client that started them", () => {
   });
 
   test("a persistent shell carries whoever's block it is running now", () => {
-    // The slot outlives the run, so its client is not a property of the shell.
-    // Sequential blocks from two clients reuse one shell, and each claim has to
-    // see the run that is actually in it.
+    // The slot outlives the run, so the client belongs to the run and not to
+    // the shell. Sequential blocks from two clients reuse one shell, and each
+    // claim has to see the run that is in it now.
     const { pool, shells, drained } = makePool();
     pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
     shells[0].emit(began("a") + ended("a"));
@@ -733,9 +736,9 @@ describe("runs belong to the client that started them", () => {
   });
 
   test("clients with no id of their own share one bucket", () => {
-    // As they share a layout key (bun/layout.ts). Two of them cannot be told
-    // apart, so they collect each other's runs — which is the same answer the
-    // pool gave everybody before it knew what a client was.
+    // Clients with no id share one layout key too (bun/layout.ts). Two of them
+    // cannot be told apart, so they collect each other's runs. That is the
+    // answer the pool gave every client before it recorded who started a run.
     const { pool, shells, drained } = makePool();
     pool.run("note", "a", "source /tmp/a.sh", { client: "" });
     shells[0].emit(began("a"));
@@ -746,10 +749,11 @@ describe("runs belong to the client that started them", () => {
   });
 });
 
-// The drain loop no longer ticks at a fixed rate: it runs fast while bytes are
-// moving and backs off when they are not (bun/server.ts). These are the two
-// answers the pool owes it, and getting either wrong is a stall rather than a
-// crash — output that arrives late, or never, with nothing in the log.
+// The drain loop runs fast while bytes are moving and backs off when they are
+// not (bun/server.ts). These are the two answers the pool owes it: whether any
+// shell spoke, and whether any shell still has input the tty has not taken.
+// Getting either wrong stalls rather than crashes: output arrives late, or
+// never, with nothing in the log.
 describe("what the drain loop reads to set its cadence", () => {
   test("drain reports whether any shell spoke", () => {
     const { pool, shells, drained } = makePool();
@@ -791,8 +795,10 @@ describe("what the drain loop reads to set its cadence", () => {
   });
 
   test("a shell too old to report pending never holds the loop fast", () => {
-    // `pending` is optional on InlineShellIO: a shell that does not answer is
-    // one the loop cannot slow down FOR, not one it refuses to slow down.
+    // `pending` is optional on InlineShellIO. A shell that does not report it
+    // never keeps the loop at its fast cadence. It does not force the loop to
+    // slow down either: pending() is true as soon as any shell reports
+    // pending.
     const { pool, shells } = makePool();
     pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
     delete (shells[0] as { pending?: boolean }).pending;
@@ -800,12 +806,11 @@ describe("what the drain loop reads to set its cadence", () => {
   });
 });
 
-// The hook that ends blocks, and what happens to a shell that never got it.
-// A pty discards whatever is queued when its line discipline comes up, and the
-// hook was the first thing written to every shell — so losing it cost that
-// shell every block it would ever run: each one began, printed, and could
-// never end (bun/markers.ts, and the panel sat on "Running" with the shell's
-// own prompt rendered inside it).
+// The hook that ends blocks, and what happens to a shell that never got it. A
+// pty discards whatever is queued when its line discipline comes up, and the
+// hook used to be written on its own at spawn. A shell that lost the hook
+// still began and printed every block it ran. It could never end one, so the
+// panel sat on "Running" with the shell's own prompt inside (bun/markers.ts).
 describe("installing the hook that ends a block", () => {
   test("it rides on the block's own line, so the two cannot be separated", () => {
     const { pool, shells } = makePool();
@@ -831,8 +836,8 @@ describe("installing the hook that ends a block", () => {
     const { pool, shells, drained } = makePool();
     pool.run("note", "a", "cmd-a", { client: MAC });
     // The line arrived damaged: the block runs and ends, the hook never landed.
-    // (Contrived on this shell, which cannot really end a block without one —
-    // what is being pinned is that the pool keeps offering it, not the shell.)
+    // A real shell could not end a block without the hook, so this fake is
+    // contrived. What it pins is that the pool keeps offering the hook.
     shells[0].emit(unhooked("a") + ended("a"));
     drained();
 
@@ -851,7 +856,7 @@ describe("installing the hook that ends a block", () => {
   test("stop ends a block that began on a shell with no hook", () => {
     const { pool, shells, drained } = makePool();
     pool.run("note", "a", "cmd-a", { client: MAC });
-    // The ack comes before the start marker on the same line, so a start
+    // The ack comes before the start marker in the same write, so a start
     // marker without one is damage rather than a race: no prompt on this shell
     // will ever report a D, and the block would sit on "Running" for good.
     shells[0].emit(unhooked("a"));
@@ -859,15 +864,15 @@ describe("installing the hook that ends a block", () => {
 
     pool.cancel("note", "a");
     expect(shells[0].interrupts).toBe(1);
-    // Closed out by the pool, since nothing else can, and the shell goes with
-    // it rather than serving the next block from a state nobody can describe.
+    // The pool closes the run out, since nothing else can. The shell goes with
+    // it rather than serving the next block from an unknown state.
     expect(drained()).toEqual([{ type: "ended", blockId: "a", exitCode: null }]);
     expect(shells[0].closed).toBe(true);
   });
 
   test("a healthy running block is still only interrupted", () => {
-    // The guard on the rule above: an acked shell reports its own 130, and
-    // closing the run out here would replace that with a blank ending.
+    // The guard on the rule above. An acked shell reports its own 130, and
+    // closing the run out here would replace that with a null exit code.
     const { pool, shells, drained } = makePool();
     pool.run("note", "a", "cmd-a", { client: MAC });
     shells[0].emit(began("a"));

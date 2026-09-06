@@ -1,4 +1,5 @@
-// The ignore grammar, pure (parseIgnore): what the note walk skips beyond
+// Tests parseIgnore, which compiles `.ledgeignore` text into a matcher and
+// reads no files. The matcher says what the note walk skips beyond
 // dot-entries. The walk-level behavior (pruning, .ledgeignore read from disk,
 // search inheriting the skips) lives in notes.fs.test.ts.
 import { describe, expect, test } from "bun:test";
@@ -45,7 +46,7 @@ describe("patterns", () => {
     const ig = parseIgnore("docs/internal\n");
     expect(ig.ignores("docs/internal", true)).toBe(true);
     expect(ig.ignores("elsewhere/docs/internal", true)).toBe(false);
-    // The leading-slash spelling means the same thing.
+    // A leading slash anchors the same way an interior slash does.
     expect(parseIgnore("/scratch\n").ignores("scratch", true)).toBe(true);
     expect(parseIgnore("/scratch\n").ignores("deep/scratch", true)).toBe(false);
   });
@@ -56,7 +57,8 @@ describe("patterns", () => {
     expect(ig.ignores("deep/plan.wip.md", false)).toBe(true);
     expect(ig.ignores("temp-1", true)).toBe(true);
     expect(ig.ignores("temp-12", true)).toBe(false);
-    // An anchored glob's * cannot swallow a path separator.
+    // An anchored pattern is matched against the whole relative path, where
+    // there is a slash for * to eat. It still stops at one.
     expect(parseIgnore("docs/*.md\n").ignores("docs/a.md", false)).toBe(true);
     expect(parseIgnore("docs/*.md\n").ignores("docs/sub/a.md", false)).toBe(false);
   });

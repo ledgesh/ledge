@@ -1,9 +1,8 @@
-// What a client's held run output does when there is more of it than the cap
-// (server.ts holdRunEvent, remote.md §7).
-//
-// The trimming rule is the whole of the pure logic: which events a full buffer
-// gives up, and which it must not. The wiring around it — when a gap starts,
-// when it is released — is over a real socket in daemon.fs.test.ts.
+// holdRunEvent trims a client's held run output once it passes the cap
+// (server.ts, remote.md §7). That trimming rule is the whole of the pure
+// logic: which events a full buffer gives up, and which it must not. The
+// wiring around it (when a gap starts, when it is released) is tested over a
+// real socket in daemon.fs.test.ts.
 import { describe, expect, test } from "bun:test";
 import { holdRunEvent, type HeldRuns } from "./server";
 import type { InlineEvent } from "./inlinePool";
@@ -33,8 +32,10 @@ describe("holding a run's output for a client that is not there", () => {
     expect(held.bytes).toBe(7);
   });
 
-  // One order across every run, because two runs interleaving is a fact about
-  // what happened: a queue per run would replay them as two blocks.
+  // One queue for all of a client's runs, not one per run. Two runs that
+  // interleaved replay in the order the shell printed them. The interleaving
+  // is a fact about what happened on the machine. A queue per run would
+  // replay them as two blocks.
   test("two runs share one order", () => {
     const held = empty();
     holdRunEvent(held, out("r1", "a"), 1024);
@@ -44,8 +45,10 @@ describe("holding a run's output for a client that is not there", () => {
     expect(held.events.map((e) => (e.type === "output" ? e.blockId : e.type))).toEqual(["r1", "r2", "r1"]);
   });
 
-  // The tail, like the drawer's scrollback: what a panel needs to make sense of
-  // is where the build got to, not where it started.
+  // Trimming drops the oldest output and keeps the tail: a panel needs to show
+  // where the run got to, not where it started. The loop is the same one the
+  // drawer's scrollback ring runs (sbPush in server.ts), though the hold is
+  // not that ring (remote.md §7).
   test("past the cap the oldest output goes", () => {
     const held = empty();
     holdRunEvent(held, out("r1", "aaaa"), 6);
@@ -55,10 +58,10 @@ describe("holding a run's output for a client that is not there", () => {
     expect(held.bytes).toBe(4);
   });
 
-  // The invariant the cap must not break. A panel whose `ended` was trimmed
-  // sits on "Running" for good with its block's Run button dead behind it,
-  // which is the failure the hold exists to prevent — so a full buffer gives up
-  // text and never state.
+  // The cap must never drop `began` or `ended`. A panel whose `ended` was
+  // trimmed sits on "Running" for good, with its block's Run button disabled
+  // behind it (remote.md §7). Preventing that is what the hold is for. A full
+  // buffer gives up output and never markers.
   test("the markers survive a buffer that overflowed many times over", () => {
     const held = empty();
     holdRunEvent(held, { type: "began", blockId: "r1" }, 8);
@@ -67,14 +70,17 @@ describe("holding a run's output for a client that is not there", () => {
 
     expect(held.events[0]).toEqual({ type: "began", blockId: "r1" });
     expect(held.events[held.events.length - 1]).toEqual({ type: "ended", blockId: "r1", exitCode: 3 });
-    // One chunk over, since trimming stops at the first event that brings the
-    // total under: a 10-byte chunk cannot be split to fit an 8-byte cap, and
-    // dropping it as well would leave the panel with nothing at all.
+    // Trimming normally stops as soon as the total is back within the cap.
+    // Here it stops at the last output event: a 10-byte chunk cannot be split
+    // to fit an 8-byte cap. One chunk survives even though it is over the cap.
+    // Dropping it would leave the panel with nothing at all.
     expect(said(held)).toBe("0123456789");
   });
 
-  // A cap cannot act on what a cap cannot drop, and a buffer of nothing but
-  // markers must terminate rather than spin looking for output to remove.
+  // holdRunEvent records every event, then returns before the byte accounting
+  // for anything that is not output. So a marker is kept, adds no bytes, and
+  // starts no trimming: a buffer holding nothing but markers is left alone
+  // even at a cap of 0.
   test("a buffer with no output in it is left alone", () => {
     const held = empty();
     holdRunEvent(held, { type: "began", blockId: "r1" }, 0);

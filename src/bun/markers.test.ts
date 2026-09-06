@@ -35,9 +35,9 @@ function outputText(events: ReturnType<MarkerParser["feed"]>): string {
 describe("markerCommand / markerInit", () => {
   test("the block's line does not carry the end marker", () => {
     const cmd = markerCommand("source /tmp/b.sh", NONCE, "web-1");
-    // The whole point: an interrupt aborts this line, so anything on it that was
-    // meant to report the exit code would never run. Only the start marker lives
-    // here; the end comes from the prompt hook.
+    // An interrupt aborts this line, so anything on it that reports the exit
+    // code would never run. Only the start marker goes here. The end marker
+    // comes from the prompt hook.
     expect(cmd).toContain("133;C;");
     expect(cmd).not.toContain("133;D;");
   });
@@ -56,26 +56,24 @@ describe("markerCommand / markerInit", () => {
   });
 
   test("the first byte written to a fresh pty is expendable", () => {
-    // This line is the first thing ever written to a new pty, and on Linux the
-    // first byte of it can be swallowed by a line discipline that is still
-    // coming up. There is no error to see when it happens: one byte short, the
-    // definition names `_ledge_precmd` and the registration still names
-    // `__ledge_precmd`, so every block begins and none ever ends. A leading
-    // newline is what makes the loss cost nothing — whatever is left of it is
-    // an empty command line, and the definition starts on the next one.
+    // This line is the first thing ever written to a new pty, and on Linux
+    // the line discipline can swallow its first byte with no error. One byte
+    // short, the definition names `_ledge_precmd` while the registration
+    // names `__ledge_precmd`, so every block begins and none ever ends. The
+    // leading newline is that byte. The definition starts on the next line.
     const init = markerInit(NONCE);
     expect(init.startsWith("\n")).toBe(true);
     expect(init.slice(1).startsWith("__ledge_precmd()")).toBe(true);
-    // And the sacrifice has to be a byte the shell does nothing with: losing
-    // part of a padding COMMAND would leave the rest of it to run.
+    // The expendable byte has to be one the shell does nothing with: losing
+    // part of a padding command would leave the rest of that command to run.
     expect(init.indexOf("\n")).toBe(0);
   });
 
-  // What makes a lost hook detectable instead of permanent. The C marker rides
-  // on the block's own line and arrives whatever happened to the hook, so
-  // without an ack a shell that never installed one is indistinguishable from a
-  // working shell right up until the block fails to end — and by then there is
-  // nothing to be done about it.
+  // The ack is what makes a lost hook detectable. The C marker rides on the
+  // block's own line, so it arrives whatever happened to the hook. Without an
+  // ack, a shell that never installed one looks like a working shell until
+  // the block fails to end. bun/inlinePool.ts sends the init line again with
+  // the next block when no ack has arrived.
   test("the hook says so once it is installed", () => {
     const init = markerInit(NONCE);
     expect(init).toContain(`133;R;ledge=${NONCE}`);
@@ -83,8 +81,8 @@ describe("markerCommand / markerInit", () => {
 
   test("the ack is the last thing on the line, so no damage can outlive it", () => {
     // Anything that truncates this line takes the ack with it. Put earlier, a
-    // line cut after the ack and before the registration would report a hook
-    // that is not there, which is worse than no ack at all.
+    // cut after the ack and before the registration would report a hook that
+    // is not there. A hook reported and missing is worse than no ack at all.
     const init = markerInit(NONCE);
     expect(init.trimEnd().endsWith(`printf '\\033]133;R;ledge=${NONCE}\\a'`)).toBe(true);
     expect(init.indexOf("133;R;")).toBeGreaterThan(init.indexOf("precmd_functions"));
@@ -92,8 +90,8 @@ describe("markerCommand / markerInit", () => {
   });
 
   test("the hook stays quiet when no block is running", () => {
-    // Prompts happen for reasons other than blocks; without this guard every one
-    // of them would emit an end marker for whatever ran last.
+    // Prompts happen for reasons other than blocks. Without this guard every
+    // one of them would emit an end marker for whatever ran last.
     expect(markerInit(NONCE)).toContain('[ -n "$__ledge_id" ] || return');
   });
 
@@ -102,10 +100,11 @@ describe("markerCommand / markerInit", () => {
   });
 
   test("the hook registers in zsh and bash alike", () => {
-    // Remote inline shells are bash (bun/remoteSpawn.ts); local ones zsh. The
-    // one init line must land the hook in whichever it hits, and its body must
-    // stay POSIX — a zsh-ism would error line-by-line in bash and never report
-    // an end marker, leaving every remote block Running forever.
+    // Remote inline shells are bash (bun/remoteSpawn.ts), local ones zsh. One
+    // init line has to install the hook in either, so its body stays POSIX. A
+    // zsh-ism errors in bash without stopping the line, which runs on
+    // statement by statement. The hook goes unregistered and no end marker
+    // ever arrives, leaving every remote block on "Running".
     const init = markerInit(NONCE);
     expect(init).toContain("precmd_functions+=(__ledge_precmd)");
     expect(init).toContain('PROMPT_COMMAND="__ledge_precmd${PROMPT_COMMAND:+;$PROMPT_COMMAND}"');
@@ -113,32 +112,33 @@ describe("markerCommand / markerInit", () => {
   });
 
   test("zsh's partial-line mark is off, and only inside the zsh branch", () => {
-    // PROMPT_SP prints a reverse-video `%` (plus padding and a CR) before every
-    // prompt. It is emitted before precmd, so it lands INSIDE the C..D window the
-    // parser keeps, and its self-erase is sized to the pty's winsize — mismatch
-    // the panel's grid and the `%` survives as a stray line under the output.
-    // Nobody reads this shell's prompt, so the option only ever costs.
+    // PROMPT_SP prints a reverse-video `%` (plus padding and a CR) before
+    // every prompt, ahead of precmd, so it lands inside the C..D window the
+    // parser keeps. Its self-erase is sized to the pty's winsize, and a
+    // winsize that disagrees with the panel's grid leaves the `%` as a stray
+    // line under the output. Nothing reads this shell's prompt, so the
+    // option only costs here.
     const init = markerInit(NONCE);
     expect(init).toContain("unsetopt PROMPT_SP");
-    // `unsetopt` is a zsh builtin: reaching a remote bash it would be a
-    // command-not-found on the init line, which is the line that also installs
-    // the end-marker hook.
+    // `unsetopt` is a zsh builtin. If it reached a remote bash it would be a
+    // command-not-found on the init line, the same line that installs the
+    // end-marker hook.
     const zshBranch = init.slice(init.indexOf('if [ -n "$ZSH_VERSION" ]'), init.indexOf("else "));
     expect(zshBranch).toContain("unsetopt PROMPT_SP");
   });
 
-  // The invariant behind SUPPORTED_SHELLS (bun/spawnParams.ts): the set of
-  // shells Ledge will resolve to is exactly the set this init has a hook for.
-  // A shell added to that list without a branch here spawns happily and never
-  // ends a block — no output, no exit code — which is the failure the list
-  // exists to prevent, so the pairing is pinned rather than remembered.
+  // SUPPORTED_SHELLS (bun/spawnParams.ts) lists the shells Ledge resolves to,
+  // and it must match the shells this init installs a hook for. A shell added
+  // to that list without a branch here spawns without complaint and then
+  // never ends a block: no output, no exit code. This test pins the pairing.
   test("the supported shells are exactly the ones this init installs a hook for", () => {
     const init = markerInit(NONCE);
     expect([...SUPPORTED_SHELLS]).toEqual(["zsh", "bash"]);
-    // zsh by its own hook array...
+    // zsh registers the hook through its own hook array.
     expect(init).toContain("precmd_functions+=(__ledge_precmd)");
-    // ...and bash by the variable only it runs before each prompt. dash and
-    // fish have neither, which is why neither is on the list.
+    // bash registers it through PROMPT_COMMAND, the variable only bash runs
+    // before each prompt. dash and fish have neither, so neither is on the
+    // list.
     expect(init).toContain("PROMPT_COMMAND=");
   });
 });
@@ -246,8 +246,11 @@ describe("MarkerParser", () => {
   });
 
   test("openBlockId names the block still waiting on its end marker", () => {
-    // How the Bun side closes out a block whose shell died before the prompt (and
-    // therefore the hook) could report it.
+    // bun/inlinePool.ts reads openBlockId to close out a block whose shell
+    // exited before the prompt (and therefore the hook) could report its end.
+    // It does this when a shell exits and when a session restarts, falling
+    // back to slot.activeRun for a shell that died before the C marker echoed
+    // back.
     const p = new MarkerParser(NONCE);
     expect(p.openBlockId).toBe(null);
     p.feed(join(begin("a"), bytes("working")));

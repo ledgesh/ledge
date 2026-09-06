@@ -1,6 +1,8 @@
 // The pure half of daily.ts: how the daily.workspace setting resolves. The
-// filesystem half — create-or-open, template instantiation against real
-// roots — lives in daily.fs.test.ts.
+// tests below also cover workspaceMatches, the name-matching helper that
+// resolution calls, because workspaces.test.ts does not. The filesystem half
+// (create-or-open, template instantiation against real roots) lives in
+// daily.fs.test.ts.
 import { describe, expect, test } from "bun:test";
 import { resolveConfiguredWorkspace } from "./daily";
 import { workspaceMatches } from "./workspaces";

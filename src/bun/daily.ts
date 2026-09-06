@@ -1,11 +1,10 @@
 // Daily notes and template instantiation: the policy layer over the note
-// store. notes.ts owns the files; this module owns what "today's note" and
-// "a note from that template" MEAN — the local-date title, the create-or-open
-// idempotency, which note a template name (or the `template: daily` role)
-// resolves to, and how the daily.workspace setting degrades. It sits beside
-// openRequest.ts in the architecture: called by the MCP daily_note tool, the
-// CLI `today` verb (through that tool), and the app's dailyOpen RPC, so all
-// three surfaces share one definition and every store guard still applies.
+// store, where notes.ts owns the files and applies its guards. This module
+// owns the local-date title, the create-or-open idempotency, what a template
+// name or the `template: daily` role resolves to, and the daily.workspace
+// fallback. The MCP daily_note tool, the CLI `today` verb (through that
+// tool), and the app's dailyOpen RPC all call into this module, so the three
+// surfaces share one definition.
 import { homedir } from "node:os";
 import type { NoteMeta } from "../shared/rpc-schema";
 import { instantiateTemplate, isoDateOf } from "../shared/template";
@@ -14,10 +13,11 @@ import { createNote, listNotes, readNote } from "./notes";
 import { assertRegisteredRoot, availableRoots, workspaceMatches } from "./workspaces";
 
 // The daily.workspace setting resolved to a registered root, or null for
-// "use the caller's own fallback" — the selected workspace in the app, cwd
-// deixis at the CLI. Null covers unset ("") and, warned, a value that names
-// nothing or several roots: a stale knob must degrade the way a bad
-// settings.jsonc field does, never strand ⌘J behind an error.
+// "use the caller's own fallback": the selected workspace in the app, cwd
+// deixis at the CLI. Null covers an unset value (""). With a warning, it
+// also covers a value that names nothing or several roots. A stale
+// `daily.workspace` must fall back the way a bad settings.jsonc field does,
+// never strand ⌘J behind an error.
 export function resolveConfiguredWorkspace(
   setting: string,
   registered: readonly string[],
@@ -35,12 +35,12 @@ export function resolveConfiguredWorkspace(
   return null;
 }
 
-// A template note's current text, found by TITLE — templates are ordinary
+// A template note's current text, found by title. Templates are ordinary
 // notes, so this is wikilink resolution: the preferred root first (a
-// workspace's own "Meeting" template outranks another's), then the remaining
-// available roots merged newest-first, the same precedence mcpTools.locate
-// gives a bare title. Null when no note bears the title (or it vanished
-// between list and read — a race that costs this call only).
+// workspace's own "Meeting" template outranks another's), then the other
+// available roots merged newest-first. mcpTools.locate gives a bare title
+// the same precedence. Null when no note bears the title, or when it
+// vanished between the listing and the read (a race costing this call only).
 export async function findTemplate(
   title: string,
   preferredRoot: string,
@@ -60,27 +60,28 @@ export async function findTemplate(
   return file ? { path: hit.path, text: templateText(file, title) } : null;
 }
 
-// A template's body is about to be stamped into a NEW, unlocked note — the
-// exact opposite of a locked one (locking.md §2's exclusivity, enforced
-// where the read happens so hand-crafted marker combinations cannot slip
-// through the MCP/CLI template path either). Throwing, not skipping: the
-// caller named this note, and a silent fall-through to a same-titled note
-// elsewhere would instantiate something they did not point at.
+// Refuse a locked note as a template source: its body would be stamped into
+// a new, unlocked note, writing the decrypted text back out in the clear
+// (locking.md §2 makes `template:` and `locked:` exclusive). templateText
+// checks readNote's result, so it catches any locked note named as a
+// template, on the MCP and CLI paths too. It throws rather than falling
+// through to a same-titled note elsewhere, which would instantiate something
+// the caller did not point at.
 function templateText(file: { text: string; locked?: true }, title: string): string {
   if (file.locked) throw new Error(`"${title}" is locked and cannot be used as a template; remove its lock first`);
   return file.text;
 }
 
-// Instantiate a template into a NEW note in `root`, or in `folder` inside it
+// Instantiate a template into a new note in `root`, or in `folder` inside it
 // when one is named (create_note's placement argument, validated by
-// ensureFolder like every other). The template was asked for by name
-// (create_note's `template`, `ledge new --template`), so a name that resolves
-// to nothing throws rather than quietly creating a bare note. Deliberately, the note need NOT carry
-// the `template: true` marker: the marker is discovery (it puts a note in
-// the ⌥⌘N picker), not permission — a note you can name, you can
-// instantiate. A null `title` means "Untitled": there is no title-prompt
-// dialog and none should be built — editing the H1 IS the rename UI, and
-// untitled.md enumerates like any other collision.
+// ensureFolder like every other). The caller names the template by title
+// (create_note's `template`, `ledge new --template`), and a title matching
+// no note throws rather than quietly creating a bare note. Any note's title
+// works: the `template: true` marker is discovery, putting a note in the
+// ⌥⌘N picker, not permission (architecture.md §1). A null `title` means
+// "Untitled". Editing the H1 is how Ledge renames a note, so Ledge should
+// not grow a title-prompt dialog, and untitled.md enumerates like any other
+// name collision.
 export async function createFromTemplate(
   root: string,
   templateTitle: string,
@@ -94,10 +95,10 @@ export async function createFromTemplate(
   return createNote(r, instantiateTemplate(template.text, title ?? "Untitled", now), folder);
 }
 
-// The same, from a PATH — the app's noteFromTemplate RPC: the ⌥⌘N picker
+// The same, from a path: the app's noteFromTemplate RPC. The ⌥⌘N picker
 // rows come from the view's live note lists, so the pick names a concrete
 // file, and resolving its title again could land on a same-named note in
-// another workspace. readNote applies the store's path guards; a template
+// another workspace. readNote applies the store's path guards. A template
 // deleted between render and pick throws rather than instantiating nothing.
 export async function createFromTemplatePath(
   root: string,
@@ -112,19 +113,20 @@ export async function createFromTemplatePath(
   return createNote(r, instantiateTemplate(file.text, title ?? "Untitled", now));
 }
 
-// The note ⌘J instantiates: the one IN THIS ROOT whose frontmatter claims
-// the role — `template: daily`. A corpus marker, not a settings knob (the
-// retired `daily.template` named a note by TITLE and went stale on rename;
-// the marker travels with the note). Strictly per-workspace, unlike
-// findTemplate's cross-root precedence: a daily note materializes unasked,
-// so borrowing another workspace's template would be action at a distance —
-// a workspace with no claimant gets the bare dated note instead. Within the
-// root several claimants resolve newest-first, warned: the degradation
-// stance of every daily fact.
+// The note ⌘J instantiates: the one in this root whose frontmatter claims
+// the role with `template: daily`. A corpus marker, not a settings knob (the
+// retired `daily.template` named a note by title and went stale on rename;
+// the marker travels with the note). Resolution is strictly per-workspace,
+// unlike findTemplate's cross-root precedence: a daily note appears without
+// being asked for, and a template in a workspace nobody is looking at would
+// silently shape it. A root with no claimant returns null and openDaily
+// writes the bare dated note. Several claimants in one root resolve
+// newest-first, with a warning.
 export async function findDailyTemplate(root: string): Promise<{ path: string; text: string } | null> {
   const r = assertRegisteredRoot(root);
-  // A locked claimant is a hand-crafted file (the commands enforce the
-  // marker exclusivity); it cannot seed a daily note, so it does not claim.
+  // A locked claimant is hand-crafted: the commands enforce the marker
+  // exclusivity. It cannot seed a daily note, so it does not claim the role,
+  // neither winning nor counting toward the warning below.
   const marked = (await listNotes(r)).filter((m) => m.template === "daily" && !m.locked);
   if (marked.length === 0) return null;
   if (marked.length > 1) {
@@ -136,17 +138,16 @@ export async function findDailyTemplate(root: string): Promise<{ path: string; t
   return file ? { path: marked[0]!.path, text: file.text } : null;
 }
 
-// Create-or-open today's note in `root`: titled with the LOCAL calendar date
-// (isoDateOf — an 11pm note is today's), resolved case-insensitively the way
-// a [[2026-07-18]] wikilink would be, created from the `template: daily`
-// note when one exists (findDailyTemplate above), bare otherwise. No
-// settings involved: the template is a corpus fact, so a marked note is
-// picked up live, no restart. Idempotent per day for one process; two
-// PROCESSES racing the same first-open (app and CLI in the same second) can
-// still mint a -2 — the reserved-names guard in createNote is in-process,
-// and closing the window cross-process would need locking the store nowhere
-// else needs. Accepted: the collision needs a same-second race that a
-// second ⌘J cannot reproduce.
+// Create-or-open today's note in `root`, titled with the local calendar date
+// (isoDateOf, so an 11pm note is today's) and matched case-insensitively the
+// way a [[2026-07-18]] wikilink resolves. openDaily creates a missing note
+// from the root's `template: daily` note (findDailyTemplate above), bare
+// otherwise. It reads no settings: the template is a corpus fact, so marking
+// a note takes effect live with no restart. Idempotent per day within one
+// process. Two processes racing the same first open (the app and the CLI in
+// the same second) can still mint a -2, because createNote's reserved-names
+// guard is in-process. Ledge accepts that rather than taking a store lock
+// nothing else needs, and a second ⌘J does not reproduce the race.
 export async function openDaily(
   root: string,
   folder: string | null = null,
@@ -154,9 +155,9 @@ export async function openDaily(
 ): Promise<{ meta: NoteMeta; created: boolean }> {
   const r = assertRegisteredRoot(root);
   const title = isoDateOf(now);
-  // Resolution is workspace-wide and the folder only says where a NEW note
-  // lands, so whoever opens today's note first decides where it lives and
-  // everyone else finds it there — ⌘J after an agent filed today's note in
+  // Resolution is workspace-wide, and `folder` only says where a new note
+  // lands. Whoever opens today's note first decides where it lives, and
+  // everyone else finds it there: ⌘J after an agent filed today's note in
   // `journal/` opens that one rather than minting a second at the root.
   const existing = resolveWikiTitle(title, await listNotes(r));
   if (existing) return { meta: existing, created: false };

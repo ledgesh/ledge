@@ -1,14 +1,19 @@
-// The spawned-process seam: the actual `bun src/bun/mcp.ts` an agent CLI
-// would launch, spoken to over its real stdin/stdout. mcp.test.ts proves the
-// dispatcher and mcpTools.fs.test.ts the tools; what only this can prove is
-// the assembly — import.meta.main fires, the registry loads from the env the
-// client set, replies are one JSON line each, and NOTHING else lands on
-// stdout (a stray log there would corrupt every client's stream).
+// The spawned-process seam: this test runs `bun src/bun/mcp.ts` as its own
+// process and talks JSON-RPC over its real stdin and stdout, as an agent CLI
+// does with an MCP server. mcp.test.ts covers the dispatcher and
+// mcpTools.fs.test.ts the tools. Only this file covers the assembly:
+//   - import.meta.main fires
+//   - the registry loads from the env the client set
+//   - each reply is one JSON line
+//   - nothing else reaches stdout, where a stray log line would corrupt every
+//     client's stream
 //
-// The child gets its own scratch home, built by hand: it is a separate
-// process, so the preload's APP_HOME does not reach it, and crafting the
-// registry file directly is exactly what "the app wrote it earlier" looks
-// like to the server.
+// The child gets its own scratch home, built by hand. It computes its own
+// APP_HOME at import time from LEDGE_NOTES_ROOT (workspaces.ts), so the test
+// passes that variable to point it at the hand-built home instead of the
+// preload's scratch root. The .workspaces.json written below is the same file
+// the app writes at its own launch, so the server reads a registry that looks
+// like one the app left behind.
 import { afterAll, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -45,8 +50,8 @@ test("a full client session: initialize, list, call — one JSON line per reply"
   expect(await proc.exited).toBe(0);
 
   const replies = out.split("\n").filter((l) => l !== "").map((l) => JSON.parse(l) as Record<string, unknown>);
-  // Three requests, three replies, nothing else on stdout — the notification
-  // got no answer and no log line leaked into the stream.
+  // Three requests, three replies, nothing else on stdout. The notification
+  // got no answer, and no log line leaked into the stream.
   expect(replies.map((r) => r["id"])).toEqual([1, 2, 3]);
 
   const init = replies[0]!["result"] as Record<string, unknown>;
