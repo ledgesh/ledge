@@ -52,12 +52,15 @@ the app as its built-in docs, via `src/bun/docsContent.ts`) lives in
   Its touch column is implemented and now lives in interactions.md §1a. Read
   before touching `src/shared/transport.ts`, `src/mainview/boot.tsx`, `ios/`,
   or continuing phase 7.
-- **[writing.md](docs/contributor/writing.md)** — documentation style: headings
-  name the feature keyword-first, lead with the answer, one idea per sentence,
-  mechanism before rationale, no aphorisms or design self-commentary, facts in
-  tables, Diátaxis mode separation, plus the `docs/user/` mechanics (one line
-  per paragraph, no em dashes, H1s are wikilink targets). Read before writing
-  or editing any page in `docs/`.
+- **[writing.md](docs/contributor/writing.md)** — prose style, for the docs and
+  for the comments in the source: headings name the feature keyword-first, lead
+  with the answer, one idea per sentence, mechanism before rationale, no
+  aphorisms or design self-commentary, no em dashes, facts in tables, Diátaxis
+  mode separation, plus the `docs/user/` mechanics (one line per paragraph, H1s
+  are wikilink targets) and the comment mechanics (§11: name what the comment
+  explains, five lines is the ceiling, cite the contributor page rather than
+  restating it). Read before writing or editing any page in `docs/`, and before
+  writing a comment.
 
 These are normative: if code and doc disagree, one of them is wrong — fix
 deliberately, not silently.

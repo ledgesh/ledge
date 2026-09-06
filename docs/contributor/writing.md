@@ -1,7 +1,9 @@
 # Ledge documentation style
 
-Governs `docs/user/` (the manual compiled into the app) and the prose parts
-of `docs/contributor/`. The reference model is the documentation developers
+Governs `docs/user/` (the manual compiled into the app), the prose parts of
+`docs/contributor/`, and the comments in the source. Sections 3 to 7 apply to
+all three. The rest are for documentation pages, except §11, which covers what
+comments need on top. The reference model is the documentation developers
 actually rate: Stripe, Tailwind, the Google developer documentation style
 guide, and Diátaxis for structure. Those share one property this manual had
 lost: **a reader scanning for a word finds it, and the sentence they land on
@@ -163,7 +165,43 @@ contains and states what happens when it runs, in the indicative. A tutorial
   page.
 - Link with `[[Page Title]]` on first substantive mention, not every mention.
 
-## 11. The check
+## 11. Mechanics for code comments
+
+Sections 3 to 7 govern comments as written, including the em dash ban in §7.
+The source had 1,469 comment blocks carrying one. Two rules in §7 do not
+carry over. A comment describes code, so it uses the indicative and names the
+code that acts ("the daemon closes", not "you close" and not "we close").
+
+**Name what the comment explains.** A comment about an argument states the
+argument. One that does not sends the reader to the callee to find out what
+the comment was about.
+
+**Five lines is the ceiling.** A longer comment is documentation in the wrong
+file, or a sign the code needs better names. Move the rationale to the page
+in `docs/contributor/` that owns it and cite the section, the way
+`src/bun/docsContent.test.ts` cites §10.
+
+> **Don't:**
+>
+> ```js
+> // Said as a stop rather than as the last word (wire.ts `bye`): a daemon
+> // exits for reasons that are over in seconds — an idle timeout, a
+> // `systemctl restart`, the SIGTERM a person sends by hand — and a client
+> // that took this for a refusal sat there disconnected with a Reconnect
+> // button that had nothing left to dial. Displacement below is the goodbye
+> // that IS final, and it is the only one.
+> ```
+>
+> **Do:**
+>
+> ```js
+> // Close as retryable, not as `bye`. Most daemon exits are temporary: an
+> // idle timeout, a service restart, a SIGTERM sent by hand. `bye` would
+> // tell the client the server is gone for good, so its Reconnect button
+> // would stop working. Displacement below is where `bye` gets sent.
+> ```
+
+## 12. The check
 
 Before calling a page done, scan its `##` headings alone. If they do not read
 as a table of contents that answers "can Ledge do X", the headings are wrong.
