@@ -555,7 +555,9 @@ the failure it prevents, which is running a command on the wrong box.
 - **It is drawn as a control, not as a status line.** A labelled two-line row:
   "Notes on" above the machine's name, the machine's icon beside both, and a
   switcher's chevrons at the end. The chevrons become the dial-now arrow
-  whenever the bar means Reconnect rather than the switcher. Trouble takes a
+  whenever the bar means Reconnect rather than the switcher, and the chevrons
+  reappear beside it as the narrow half of a split button, on the pattern the
+  workspace strip already uses for New Workspace. Trouble takes a
   third line of its own — "not reachable", "reconnecting…", "disconnected" — so
   a long machine name and a dropped wire never compete for the same few pixels
   of a narrow sidebar. The label is what makes the name mean something: "v1"
@@ -616,18 +618,32 @@ the failure it prevents, which is running a command on the wrong box.
   first, so a prompt here would only teach the click-through §4 warns about.
 - **The indicator's click has a second verb, for when the link is down.**
   `connection.reconnect`, titled "Reconnect", tells this client's wire to dial
-  now instead of waiting for its next beat (remote.md §7). The bar means it
-  whenever the link is not live and means the switcher otherwise, because the
-  switcher is the wrong offer at exactly that moment: it reloads the page, so
-  the refusal above can be the only thing it has to say, and a chooser that
-  opens in order to say no would be the app's entire visible answer to being
-  disconnected. It is offered nowhere while the link is fine, since a Reconnect
-  that is present and inert on a working connection teaches nobody anything
-  (§8). It takes no chord: the app is already dialling on its own, so this is
-  impatience made pressable rather than a step anybody needs to know. Nothing is
-  awaited — the dial's outcome arrives as a link state like any other — so the
-  press answers for itself with a notice naming the machine, or it would read as
-  a dead button every time the server was still unreachable.
+  now instead of waiting for its next beat (remote.md §7). The bar's wide half
+  means it whenever the link is not live and means the switcher otherwise,
+  because the switcher is the wrong offer to LEAD with at exactly that moment:
+  it reloads the page, so the refusal above can be the only thing it has to say,
+  and a chooser that opens in order to say no would be the app's entire visible
+  answer to being disconnected. It is offered nowhere while the link is fine,
+  since a Reconnect that is present and inert on a working connection teaches
+  nobody anything (§8). It takes no chord: the app is already dialling on its
+  own, so this is impatience made pressable rather than a step anybody needs to
+  know. Nothing is awaited — the dial's outcome arrives as a link state like any
+  other — so the press answers for itself with a notice naming the machine, or
+  it would read as a dead button every time the server was still unreachable.
+- **Leading with Reconnect is not the same as removing the switcher.** It was,
+  for a while: one button meant one verb, so a window whose server had not come
+  back could neither reconnect nor leave, and the only route to the chooser was a
+  palette entry nobody looks for while staring at a bar that says "disconnected".
+  A machine that is not answering is exactly when moving to another one is worth
+  offering, so the chevrons stay, as the narrow half. It opens the chooser and
+  dials nothing; the two halves touch, so its width is a target of its own (§1a).
+- **And Reconnect always dials.** Its one job is to say "now" to something that
+  was going to happen anyway, which used to leave one state where it said it to
+  nobody: a server that says goodbye stops the client for good (remote.md §7),
+  and there the press had nothing to bring forward. A goodbye that says the
+  server is coming back is now dialled past like any other drop, and a press
+  against the goodbyes that are final starts the dialling itself — a person who
+  can see the machine is back is holding the one fact the client cannot have.
 - **A connection that will not open costs nothing.** The new server is reached
   *before* the old one is torn down, so a typo or a sleeping laptop leaves the
   session exactly where it was, with the reason in the dialog. At boot the

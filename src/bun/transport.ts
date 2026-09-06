@@ -53,7 +53,10 @@ export interface ServerConnection {
    * same answer, because neither is a client to keep a process for. */
   hold(): number;
   closed: Promise<void>;
-  close(why?: string): void;
+  /** `back` when this server expects to be reachable again — a stop, not a
+   * refusal — which is what decides whether the client dials again at all
+   * (wire.ts `bye`). */
+  close(why?: string, back?: boolean): void;
 }
 
 function concat(...parts: Uint8Array[]): Uint8Array {
@@ -183,9 +186,9 @@ export function serverConnection(duplex: Duplex, opts: ServerOpts): ServerConnec
     else raw(encodeControl(msg));
   }
 
-  function close(why?: string): void {
+  function close(why?: string, back = false): void {
     if (!open) return;
-    if (why !== undefined) send({ t: "bye", why });
+    if (why !== undefined) send({ t: "bye", why, ...(back ? { back: true } : {}) });
     open = false;
     stopWatching?.();
     stopWatching = null;

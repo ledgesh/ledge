@@ -944,7 +944,7 @@ describe("a client that reconnects", () => {
       dial,
       cut: () => current?.pipe.a.close(),
       blackHole: () => current?.blackHole(),
-      bye: (why: string) => current?.server.close(why),
+      bye: (why: string, back = false) => current?.server.close(why, back),
       dials: () => dials,
       hold: () => current?.server.hold() ?? -1,
     };
@@ -1411,6 +1411,84 @@ describe("a client that reconnects", () => {
     await beats.release();
     expect(wire.dials()).toBe(1);
     expect(beats.waiting()).toBe(0);
+    client.close();
+  });
+
+  // The exception, and the one the shipped daemon actually sends: a server that
+  // says it is COMING BACK has decided about this connection and not about this
+  // client (wire.ts `bye`). Every graceful stop is this — an idle exit, a
+  // `systemctl restart`, the SIGTERM behind a `pkill` — and reading it as final
+  // left the window disconnected with a Reconnect that had nothing to dial,
+  // recoverable only by opening another one.
+  test("but a server that says it is coming back is dialled again", async () => {
+    const wire = reconnectable(handlers());
+    const states: string[] = [];
+    const client = await reconnectingClient({
+      dial: wire.dial,
+      push: recordingPush().push,
+      build: "0.1.0",
+      onState: (s, d) => states.push(`${s}:${d}`),
+      ...instant,
+    });
+    wire.bye("this server is shutting down", true);
+    await settle();
+    expect(wire.dials()).toBe(2);
+    // In the server's own words on the way down, too: "the connection dropped"
+    // about a server that said it was stopping sends the user to look at their
+    // network for something that is not there.
+    expect(states).toEqual(["reconnecting:This server is shutting down. Reconnecting…", "live:"]);
+    expect(await client.requests.vaultState({})).toBeDefined();
+    client.close();
+  });
+
+  // The button, in the one state where it used to be a button that did nothing
+  // (interactions.md §4-1). A client told the goodbye was final dials for
+  // nobody — but a person pressing Reconnect is not the client guessing, it is
+  // the one fact the client cannot have, which is that somebody can see the
+  // machine is back.
+  test("and a press dials even a client that was told the goodbye was final", async () => {
+    const wire = reconnectable(handlers());
+    const states: string[] = [];
+    const client = await reconnectingClient({
+      dial: wire.dial,
+      push: recordingPush().push,
+      build: "0.1.0",
+      onState: (s, d) => states.push(`${s}:${d}`),
+      ...instant,
+    });
+    wire.bye("this client opened another connection to this server");
+    await settle();
+    expect(wire.dials()).toBe(1);
+    client.recheck();
+    await settle();
+    expect(wire.dials()).toBe(2);
+    expect(states.at(-1)).toBe("live:");
+    expect(await client.requests.vaultState({})).toBeDefined();
+    client.close();
+  });
+
+  // And it is one dial per press rather than a second ssh child racing the
+  // first: everywhere else the wire is already dialling, a press is nothing.
+  test("a press while something is already dialling is the no-op it should be", async () => {
+    const wire = reconnectable(handlers());
+    const beats = pacer();
+    const client = await reconnectingClient({
+      dial: wire.dial,
+      push: recordingPush().push,
+      build: "0.1.0",
+      delaysMs: [30_000],
+      sleep: beats.sleep,
+      retryEveryMs: 30_000,
+    });
+    wire.cut();
+    await settle();
+    // Mid-ladder: the next rung is coming and pressing does not add one.
+    client.recheck();
+    client.recheck();
+    await settle();
+    expect(wire.dials()).toBe(1);
+    await beats.release();
+    expect(wire.dials()).toBe(2);
     client.close();
   });
 

@@ -1183,20 +1183,45 @@ anybody waits on either, because three things bring the next dial forward to now
 system saying an interface came back (`online` in the view), and the person who
 pressed the button.
 
-**A `bye` still stops for good, and that is the whole of the split.** A wire
-that broke cannot say anything, so a reason means the server decided, and no
-amount of beating improves on an answer. Displacement is what makes it matter
-rather than merely tidy: the daemon serves one client and gives the session to
-whoever dialled last, so two beating clients would kick each other off twice a
-minute forever, at an ssh handshake and a server process apiece.
+**A `bye` still stops for good unless it says otherwise, and that is the whole
+of the split.** A wire that broke cannot say anything, so a reason means the
+server decided, and no amount of beating improves on an answer. Displacement is
+what makes it matter rather than merely tidy: the daemon serves one client and
+gives the session to whoever dialled last, so two beating clients would kick
+each other off twice a minute forever, at an ssh handshake and a server process
+apiece.
+
+The exception is the one decision that undoes itself. A daemon that is STOPPING
+says so on the way out (`bye.back` in `wire.ts`), and stopping is not a verdict
+about this client: an idle exit, a `systemctl restart`, the SIGTERM behind a
+`pkill` are all over in seconds, and the next dial is answered by the process
+that replaces it. Reading that as final was worse than reading nothing at all,
+because a server killed outright — no `bye`, nothing said — recovered on its own
+while a server stopped POLITELY left the window disconnected until somebody
+opened another one. The two ends of `back` are therefore the whole rule: the
+daemon marks its shutdown and marks nothing else, and displacement stays the
+only goodbye a client does not dial past.
 
 **Reconnect is a verb** (`connectionReconnect`, `interactions.md` §4-1). It is
 not a request to the server — there may be no server to ask — but to this
 client's own shell, telling the wire to stop waiting for its next beat. The
-indicator's click means it while the link is down and means the switcher while
-it is up, because the switcher is the wrong offer at the moment the machine you
-are on cannot be reached. Nothing is awaited and nothing is returned: what came
-of the dial arrives as a link state, the way it does when nobody asked.
+indicator's wide half means it while the link is down and means the switcher
+while it is up, because the switcher is the wrong offer to lead with at the
+moment the machine you are on cannot be reached; the chevrons stay beside it as
+the narrow half, since a machine that is not answering is when moving to another
+one is worth offering. Nothing is awaited and nothing is returned: what came of
+the dial arrives as a link state, the way it does when nobody asked.
+
+**And a press always dials.** What `recheck` does depends on where the link is,
+and one of those places had nothing for it to do: live it probes, mid-ladder and
+mid-dial it is deliberately nothing (the next attempt is seconds away and a
+second one beside it is two ssh children racing), asleep between beats it brings
+the beat forward — and against a client that had been told the goodbye was
+final it used to do nothing at all, which is the one state where the button is
+on screen and the app has otherwise given up. So a press there starts the beat
+itself. It cannot become the fight the rule above prevents, because a person
+pressing a button is not a loop, and because what the press dials is a server
+that either answers or does not.
 
 **A wire that comes back on its own is reported, like one that gives up.** A
 connection giving up is told to `connectionManager.ts` so that choosing the same
@@ -1248,15 +1273,18 @@ not resumes the old one where it left off and reaches the end. Ten seconds is
 well below any link a person would call working and well above a flap, which
 was measured at three a second.
 
-**A server that says goodbye is not dialled again.** A wire that broke cannot
-say anything, so a reason means the server decided: this client replaced its own
-connection with a later one (§1), it is shutting down, or it refused the
-handshake. The
-ladder is for the wire, and running it against a decision is an argument with
-a server that has already answered. The state goes straight to `lost` in the
-server's own words. The difference is carried on the connection
-(`farewell()`) rather than by matching on the wording of an error, for the same
-reason `ConnectionLost` is a type.
+**A server that says goodbye is not dialled again, unless it said it is coming
+back.** A wire that broke cannot say anything, so a reason means the server
+decided: this client replaced its own connection with a later one (§1), it is
+shutting down, or it refused the handshake. The ladder is for the wire, and
+running it against a decision is an argument with a server that has already
+answered. The state goes straight to `lost` in the server's own words. The
+difference is carried on the connection (`farewell()`) rather than by matching
+on the wording of an error, for the same reason `ConnectionLost` is a type — and
+so is the exception, since "it is shutting down" is a decision that expires and
+the other two are not. A stop climbs the ladder like a drop, opening with what
+the server said rather than with "the connection dropped", which would send
+somebody to look at their network for a fault that is not there.
 
 The measurement that produced this rule was two clients on one daemon, back when
 the server handed the session to whoever dialled last: each displaced the other,
@@ -2017,11 +2045,14 @@ Per `testing.md`'s categories:
   prevented; and a whole `serve` process killed and restarted, with the
   server's state still there.
 - **The reconnect ladder, at both of its ends** (`transport.test.ts`): a bye
-  is not dialled again; a connection that dies as soon as it is made does not
-  buy a fresh ladder; and a connection that HELD gets the whole ladder back,
-  which is the half that would otherwise disconnect a working session on its
-  ninth ordinary drop. The clock is injected beside `sleep`, so none of the
-  three waits for anything.
+  is not dialled again, unless it said the server is coming back, which is
+  dialled past like any other drop and in the server's own words; a press dials
+  even against the byes that are final, and is the no-op it should be while
+  something is already dialling; a connection that dies as soon as it is made
+  does not buy a fresh ladder; and a connection that HELD gets the whole ladder
+  back, which is the half that would otherwise disconnect a working session on
+  its ninth ordinary drop. The clock is injected beside `sleep`, so none of them
+  waits for anything.
 - **e2e (headless WebKit)**: the harness gains a real server over an
   in-process transport beside `FakeStore`, so the same specs run against both
   and disagreements surface as failures rather than as drift; connection
@@ -2101,6 +2132,16 @@ Per `testing.md`'s categories:
   instrument as a command, which is how a phone's twenty seconds became testable
   from a Simulator (`ios.md` §13).
 
+- **A daemon stopped the way a person stops one**, in the same probe's `[stop]`
+  step. SIGTERM to the daemon, which is what `pkill` and `systemctl restart`
+  send, and unlike the `[restart]` step's `kill -9` it goes out with a `bye` on
+  it. That is the whole point: a goodbye used to end the client, so the polite
+  stop was the unrecoverable one while the crash recovered by itself. The beat
+  is left at its shipped half-minute, so a recovery inside a second is the
+  ladder dialling past the goodbye and cannot be credited to anything else. The
+  press has its own client in the same step, with no ladder under it at all, so
+  the moment it gives up is not in a race with a rung landing.
+
 What it establishes, and each of these was a claim in this document before it
 was a fact: a key carrying `command="ledge-server serve"` runs that and not
 `whoami`, and not a shell; a changed host key refuses the connection with
@@ -2133,6 +2174,13 @@ goes on answering ssh-keyscan throughout — so what noticed was not the wire,
 and nothing under the protocol had anything to notice. The daemon that comes
 back is the same run of the same process, which is what makes it a stall rather
 than the crash the instance check is for.
+
+And, from `[stop]`: a daemon told to stop says so on its way out, and the client
+is back on a fresh one 0.5 seconds later, having said what the server said
+rather than blaming the wire; the process answering afterwards is a different
+one, started by the reconnect itself. And a client with the wire cut under it
+sits `lost` for 19.5 seconds with a beat half a minute away, until a press,
+which lands 0.2 seconds later.
 
 And, from `[password]`: a password stored with `security` and read back by the
 helper brings the protocol up over `password` and over `keyboard-interactive`,

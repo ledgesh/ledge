@@ -336,7 +336,13 @@ export async function startDaemon(opts: DaemonOpts = {}): Promise<Daemon> {
     if (stopped) return;
     stopped = true;
     if (idleTimer) clearTimeout(idleTimer);
-    for (const conn of clients.values()) conn.close("this server is shutting down");
+    // Said as a stop rather than as the last word (wire.ts `bye`): a daemon
+    // exits for reasons that are over in seconds — an idle timeout, a
+    // `systemctl restart`, the SIGTERM a person sends by hand — and a client
+    // that took this for a refusal sat there disconnected with a Reconnect
+    // button that had nothing left to dial. Displacement below is the goodbye
+    // that IS final, and it is the only one.
+    for (const conn of clients.values()) conn.close("this server is shutting down", true);
     clients.clear();
     listener.stop(true);
     server.shutdown();

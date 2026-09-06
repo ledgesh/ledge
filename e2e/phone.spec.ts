@@ -1846,6 +1846,15 @@ test.describe("every target a finger chooses between", () => {
     // third is destructive (§4-1).
     expect(await sweep(page)).toEqual([]);
   });
+
+  test("and that bar with the link down, which is two verbs touching", async ({ page }) => {
+    await openSidebar(page);
+    await page.evaluate(() => window.__harness.linkState("lost", "Lost the connection: host is down."));
+    // The split: the wide half dials and the narrow half opens the chooser, and
+    // the miss between them is one or the other (§4-1).
+    await expect(page.locator("[data-switch]")).toBeVisible();
+    expect(await sweep(page)).toEqual([]);
+  });
 });
 
 // --- the stacking ladder (index.css) -----------------------------------------

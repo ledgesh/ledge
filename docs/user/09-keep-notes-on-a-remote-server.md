@@ -383,7 +383,7 @@ Reconnecting to a server that has restarted meanwhile works too, and it is what 
 
 A short absence keeps them. Ledge asks every server it connects to hold its shells for five minutes after the connection ends, which covers a lift, a lid closed for a meeting, or a walk between buildings.
 
-Ledge also stops when the server hangs up on purpose rather than the wire failing, and hovering the bar says why. One reason is the server shutting down. The other is a second copy of Ledge on this same device connecting to it: the server keeps the newer connection and tells the older one, which stops instead of the two taking the server off each other in a loop. Another device connecting is not a reason (see above).
+Ledge also stops when the server hangs up on purpose rather than the wire failing, and hovering the bar says why. The reason is a second copy of Ledge on this same device connecting to it: the server keeps the newer connection and tells the older one, which stops instead of the two taking the server off each other in a loop. Another device connecting is not a reason (see above).
 
 ## Limits
 

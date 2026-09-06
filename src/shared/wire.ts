@@ -190,7 +190,19 @@ export type WireMessage =
   // The last frame before a deliberate hangup, carrying why. A refused
   // handshake has no request to answer, so without this the client would see
   // only a closed pipe and could not say what was wrong.
-  | { t: "bye"; why: string };
+  //
+  // `back` is the server saying it expects to be reachable again: it is
+  // stopping, not refusing. A goodbye is otherwise the end of the line for that
+  // client (shared/transport.ts), which is right for a displaced connection and
+  // wrong for a restart, because a restart is the one outage a server can
+  // announce and every other kind is announced by nothing at all.
+  //
+  // Absent means final, which is the behavior a peer that predates the field
+  // already had, and is why this does not bump PROTOCOL_VERSION (`hold` above
+  // for the same reasoning): the framing and the message set are unchanged, and
+  // an old server on the far end costs a press of Reconnect rather than a
+  // refused connection.
+  | { t: "bye"; why: string; back?: boolean };
 
 // --- the method surface ------------------------------------------------------
 
@@ -795,7 +807,14 @@ export function parseControl(text: string): WireMessage {
       if (typeof m["m"] !== "string") return bad("a push with no message name");
       return { t: "push", m: m["m"], p: m["p"], ...bin(m["bin"]) };
     case "bye":
-      return { t: "bye", why: typeof m["why"] === "string" ? m["why"] : "no reason given" };
+      return {
+        t: "bye",
+        why: typeof m["why"] === "string" ? m["why"] : "no reason given",
+        // Only a literal true grants it. Anything else — absent, a string, a
+        // number a peer hoped would be truthy — is the final goodbye that a
+        // `bye` has always been.
+        ...(m["back"] === true ? { back: true } : {}),
+      };
     // Nothing to validate, because there is nothing on them. Whatever else the
     // peer put in the object is dropped here rather than carried onwards.
     case "ping":

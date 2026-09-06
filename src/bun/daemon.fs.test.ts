@@ -130,7 +130,7 @@ describe("several clients at once", () => {
     // an error message, because the ladder reads it to tell a server that
     // decided from a wire that broke (shared/transport.ts).
     await expect(first.requests.vaultState({})).rejects.toThrow("this client opened another connection");
-    expect(first.farewell()).toBe("this client opened another connection to this server");
+    expect(first.farewell()).toEqual({ why: "this client opened another connection to this server", back: false });
     expect(await second.requests.vaultState({})).toBeDefined();
   });
 

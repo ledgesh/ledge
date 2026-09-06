@@ -1038,6 +1038,96 @@ try {
   );
   restarting.close();
 
+  step("[stop] the daemon stopped politely, which is what a person actually does");
+  // The other way a server goes away, and the one a person is most likely to
+  // cause: `pkill ledge-server`, `systemctl restart`, or the daemon's own idle
+  // exit. Unlike the kill above it says goodbye on the way out, and a goodbye
+  // used to be the end of the client — so a server stopped POLITELY was
+  // unrecoverable in that window while a server killed outright came back by
+  // itself, which is exactly backwards (remote.md §7).
+  //
+  // The beat is left at the shipped half-minute on purpose: this step finishes
+  // in seconds, so a recovery here is the LADDER dialling past the goodbye and
+  // cannot be the beat quietly making up for it.
+  const stopStates: string[] = [];
+  const stopping = await reconnectingClient({
+    dial: () => spawnDuplex(argv),
+    push: ears().push,
+    build: BUILD_VERSION,
+    client: "probe-mac",
+    // Two rungs, because the cut below has to reach the END of the ladder and
+    // every failed dial costs ssh's own ConnectTimeout on the way (about twenty
+    // seconds a rung against a wire that swallows packets).
+    delaysMs: [250, 250],
+    retryEveryMs: 30_000,
+    onState: (st, detail) => stopStates.push(`${st}${detail && `:${detail}`}`),
+  });
+  const politePid = daemonPid();
+  await stopping.requests.noteList({ root });
+  ok("a connection to the daemon that is running now", `pid ${politePid}`);
+
+  const termed = run(["docker", "exec", NAME, "sh", "-c", `kill -TERM ${politePid}`], { quiet: true });
+  check("the daemon takes a SIGTERM, the way pkill sends one", termed.code === 0, termed.err || "signalled");
+  const stoppedAt = Date.now();
+  for (let i = 0; i < 300 && stopStates.at(-1) !== "live"; i++) await Bun.sleep(100);
+  check(
+    "a server that said goodbye on its way down is dialled again, not given up on",
+    stopStates.at(-1) === "live",
+    `${((Date.now() - stoppedAt) / 1000).toFixed(1)}s, ${stopStates.join(" → ")}`,
+  );
+  // In the server's own words while it climbs. "The connection dropped" about a
+  // server that announced it was stopping sends somebody to look at their
+  // network for a fault that is not there.
+  check(
+    "and it says what the server said rather than blaming the wire",
+    stopStates.some((s) => s.startsWith("reconnecting:This server is shutting down")),
+    stopStates.find((s) => s.startsWith("reconnecting")) ?? "nothing was said",
+  );
+  const freshPid = await stopping.requests.noteList({ root }).then(() => daemonPid());
+  check("it is a different process, started by the reconnect itself", freshPid !== politePid, `pid ${politePid} → ${freshPid}`);
+
+  stopping.close();
+
+  // And the button, against the same fixture: a wire that is genuinely gone, a
+  // client that has genuinely given up on it, and a press that dials instead of
+  // waiting out a beat half a minute wide (interactions.md §4-1).
+  //
+  // Its own client, with no ladder at all. The rungs are what [beat] above
+  // measures, and leaving them in here would put the moment this client gives
+  // up in a race with a rung landing — twenty-five seconds to notice the cut
+  // and ten per dial, twice over if one gets through. Without them the cut is
+  // followed by `lost` and nothing else, and what the press is measured
+  // against is the beat alone.
+  const pressStates: string[] = [];
+  const pressing = await reconnectingClient({
+    dial: () => spawnDuplex(argv),
+    push: ears().push,
+    build: BUILD_VERSION,
+    client: "probe-press",
+    delaysMs: [],
+    retryEveryMs: 30_000,
+    onState: (st) => pressStates.push(st),
+  });
+  await pressing.requests.noteList({ root });
+  ok("a second connection, this one with no ladder under it");
+
+  cutWire();
+  const severedAt = Date.now();
+  for (let i = 0; i < 600 && pressStates.at(-1) !== "lost"; i++) await Bun.sleep(100);
+  check("a severed wire leaves it lost, with a beat half a minute away", pressStates.at(-1) === "lost", `${((Date.now() - severedAt) / 1000).toFixed(1)}s after the cut`);
+  mendWire();
+  const pressedAt = Date.now();
+  pressing.recheck();
+  for (let i = 0; i < 150 && pressStates.at(-1) !== "live"; i++) await Bun.sleep(100);
+  const pressTook = (Date.now() - pressedAt) / 1000;
+  check(
+    "and a press dials at once rather than waiting for it",
+    pressStates.at(-1) === "live" && pressTook < 15,
+    `${pressTook.toFixed(1)}s after the press, against a 30s beat`,
+  );
+  check("and the connection it made answers", (await pressing.requests.noteList({ root })).notes.length >= 0);
+  pressing.close();
+
   /**
    * The password door, against sshd instances that take no keys at all
    * (remote.md §4).

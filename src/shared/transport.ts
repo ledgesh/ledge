@@ -45,6 +45,19 @@ export interface Duplex {
   onClose?: (() => void) | undefined;
 }
 
+/**
+ * A server hanging up on purpose, and whether that is the end of it.
+ *
+ * `back` is the server saying it expects to be reachable again (wire.ts
+ * `bye`) — it is stopping, not refusing this client. The two are not the same
+ * news: one is answered by dialling again in a moment, the other by not
+ * dialling at all, and nothing under the protocol can tell them apart.
+ */
+export interface Farewell {
+  why: string;
+  back: boolean;
+}
+
 /** The client's half. `requests` is the same shape a local server returns, so
  * everything above it is unchanged by being on another machine. */
 export interface ClientConnection {
@@ -85,15 +98,17 @@ export interface ClientConnection {
   recheck(): void;
   closed: Promise<void>;
   /**
-   * Why the server said it was hanging up, once `closed` has settled. Null for
-   * a wire that simply stopped.
+   * What the server said on its way out, once `closed` has settled. Null for a
+   * wire that simply stopped.
    *
    * A wire cannot say anything, so a reason means the server DECIDED: it gave
    * the session to another client (bun/daemon.ts), it is shutting down, or it
-   * refused this client's handshake. Re-dialling a decision is not recovery,
-   * which is why this is on the interface rather than folded into the error.
+   * refused this client's handshake. Re-dialling a decision it has not said it
+   * will reverse is not recovery, which is why this is on the interface rather
+   * than folded into the error — and why the middle case carries `back`, since
+   * a server that is stopping is the one decision that undoes itself.
    */
-  farewell(): string | null;
+  farewell(): Farewell | null;
   close(): void;
 }
 
@@ -216,7 +231,7 @@ export function clientConnection(
   // Why the server hung up, when it said. Without it a refused handshake is
   // indistinguishable from a broken pipe, and the difference is the whole
   // content of the error the user needs to see.
-  let farewell: string | null = null;
+  let farewell: Farewell | null = null;
   // What killed this connection, whoever decided it. Unlike `farewell` this is
   // set however it died, and it exists so that a request made a moment too late
   // is told the same thing a request that was in flight is told: "the
@@ -334,7 +349,7 @@ export function clientConnection(
         return;
       }
       case "bye": {
-        farewell = msg.why;
+        farewell = { why: msg.why, back: msg.back === true };
         // Before the handshake finished, a `bye` is the far end refusing this
         // one: the two hellos cross, so a version mismatch is decided at both
         // ends at once and whichever verdict lands first is the one reported.
@@ -445,7 +460,7 @@ export function clientConnection(
     }
   };
   duplex.onClose = () => {
-    fail(new Error(farewell ?? "the connection to the server closed"));
+    fail(new Error(farewell?.why ?? "the connection to the server closed"));
   };
 
   async function call(method: string, params: unknown, op?: string): Promise<unknown> {
@@ -457,7 +472,7 @@ export function clientConnection(
     // map nothing will ever answer. It is the same failure a request in flight
     // gets, and reconnectingClient tells them apart from a refusal the same
     // way — which is what lets this one be replayed too.
-    if (!open) throw new ConnectionLost(farewell ?? cause ?? "the connection to the server closed");
+    if (!open) throw new ConnectionLost(farewell?.why ?? cause ?? "the connection to the server closed");
     // Two ways a call can be one this server will not answer, and they are not
     // the same fact about the world, so they must not be the same sentence.
     //
@@ -645,9 +660,11 @@ export async function reconnectingClient(opts: ReconnectOpts): Promise<ClientCon
   // reconnects: one attempt cannot tell a flap from a drop.
   let rung = 0;
   let liveSince = now();
-  // Set only by a server that said goodbye, which is what makes it different
-  // from every other way a connection ends.
-  let goodbye: string | null = null;
+  // Set only by a server that said goodbye FOR GOOD, which is what makes it
+  // different from every other way a connection ends. A server that said it is
+  // coming back said goodbye too, and is not this: what it ended is one
+  // connection, and the ladder below is the answer to that.
+  let goodbye: Farewell | null = null;
   let settleClosed!: () => void;
   const closed = new Promise<void>((resolve) => (settleClosed = resolve));
   // Resolves whenever the connection is live again, so a request that arrives
@@ -659,6 +676,12 @@ export async function reconnectingClient(opts: ReconnectOpts): Promise<ClientCon
   // during the ladder the no-op it should be — something is already happening,
   // and it is happening within seconds.
   let interrupt: (() => void) | null = null;
+  // Whether a recovery is already under way, over the two paths that dial by
+  // themselves: the ladder climbing, and the beat running or out on a dial.
+  // What `recheck` reads to tell a press that brings the next attempt forward
+  // from one that would put a second ssh child alongside the first.
+  let climbing = false;
+  let beating = false;
 
   function open(): Promise<ClientConnection> | ClientConnection {
     const dialed = opts.dial();
@@ -707,34 +730,55 @@ export async function reconnectingClient(opts: ReconnectOpts): Promise<ClientCon
       // clients that both re-dialled would kick each other off forever, several
       // times a second, each turn costing an ssh handshake and a process on the
       // server.
-      const why = c.farewell();
-      if (why !== null) {
-        goodbye = why;
-        return give(`Disconnected: ${why}.`);
+      //
+      // Unless the decision was to STOP (`back`), which is a decision about
+      // this connection and not about this client. A daemon that is restarting
+      // will answer the next dial, so the ladder is exactly right for it — and
+      // treating it as final was how a `systemctl restart`, or the SIGTERM
+      // behind a `pkill`, left a window disconnected until someone opened
+      // another one.
+      const bye = c.farewell();
+      if (bye !== null && !bye.back) {
+        goodbye = bye;
+        return give(`Disconnected: ${bye.why}.`);
       }
-      void reconnect();
+      void reconnect(bye?.why);
     });
   }
 
-  async function reconnect(): Promise<void> {
+  /**
+   * The ladder, from wherever it is up to.
+   *
+   * `said` is the server's own words when it announced the stop, and they
+   * outrank a guess about the wire in both places a reason is reported: a
+   * client that says "the connection dropped" about a server that said it was
+   * shutting down sends the user to look at their network for something that is
+   * not there.
+   */
+  async function reconnect(said?: string): Promise<void> {
     let wake!: () => void;
     resume = new Promise<void>((r) => (wake = r));
-    announce("reconnecting", "The connection dropped. Reconnecting…");
-    // A connection that HELD has earned a fresh ladder; one that died as soon
-    // as it was made has not, and climbing from the bottom again is how a
-    // bounded retry becomes an unbounded one (STEADY_MS).
-    if (now() - liveSince >= STEADY_MS) rung = 0;
-    let last = "the connection dropped";
-    while (rung < delays.length) {
-      await sleep(delays[rung++]!);
-      if (shut) return wake();
-      const why = await attempt(wake);
-      if (why === null) return;
-      last = why;
+    climbing = true;
+    try {
+      announce("reconnecting", `${said ? capitalise(said) : "The connection dropped"}. Reconnecting…`);
+      // A connection that HELD has earned a fresh ladder; one that died as soon
+      // as it was made has not, and climbing from the bottom again is how a
+      // bounded retry becomes an unbounded one (STEADY_MS).
+      if (now() - liveSince >= STEADY_MS) rung = 0;
+      let last = said ?? "the connection dropped";
+      while (rung < delays.length) {
+        await sleep(delays[rung++]!);
+        if (shut) return wake();
+        const why = await attempt(wake);
+        if (why === null) return;
+        last = why;
+      }
+      // Out of rungs, not out of hope: the fast part is over and the slow one
+      // starts, with everything about being `lost` true in between.
+      stall(`Lost the connection: ${last}.`, wake);
+    } finally {
+      climbing = false;
     }
-    // Out of rungs, not out of hope: the fast part is over and the slow one
-    // starts, with everything about being `lost` true in between.
-    stall(`Lost the connection: ${last}.`, wake);
   }
 
   /**
@@ -819,28 +863,52 @@ export async function reconnectingClient(opts: ReconnectOpts): Promise<ClientCon
     announce("lost", detail);
     strand(new Error(detail));
     wake();
-    void beating();
+    void beat(false);
   }
 
-  async function beating(): Promise<void> {
-    while (!shut && state === "lost") {
-      await new Promise<void>((resolve) => {
-        interrupt = resolve;
-        void sleep(retryEveryMs).then(resolve);
-      });
-      interrupt = null;
-      if (shut || state !== "lost") return;
-      const why = await attempt(() => {});
-      if (why === null) return;
-      announce("lost", `Cannot reach the server: ${why}.`);
+  /**
+   * Dial every `retryEveryMs` until this client is live or closed.
+   *
+   * `soon` starts with the dial instead of with the wait, which is what a press
+   * on a client nothing else was going to dial for wants: the whole content of
+   * the press is that the wait is unnecessary.
+   *
+   * One at a time. Two beats would be two ssh children racing to be the one
+   * connection, which is the same waste `recheck` refuses mid-ladder.
+   */
+  async function beat(soon: boolean): Promise<void> {
+    if (beating) return;
+    beating = true;
+    try {
+      let wait = !soon;
+      while (!shut && state === "lost") {
+        if (wait) {
+          await new Promise<void>((resolve) => {
+            interrupt = resolve;
+            void sleep(retryEveryMs).then(resolve);
+          });
+          interrupt = null;
+        }
+        wait = true;
+        if (shut || state !== "lost") return;
+        const why = await attempt(() => {});
+        if (why === null) return;
+        announce("lost", `Cannot reach the server: ${why}.`);
+        // A client with no beat under it (`retryEveryMs`) gets the one dial the
+        // press asked for and no more, rather than a loop with nothing in it
+        // to wait on.
+        if (retryEveryMs <= 0) return;
+      }
+    } finally {
+      beating = false;
     }
   }
 
-  // Over: the server said goodbye, or nobody is going to dial again. Recovery
-  // from here is choosing the connection again (interactions.md §4-1), which
-  // rebuilds everything from boot: nothing in this module could re-establish a
-  // session's state by itself, and pretending otherwise would mean an app that
-  // looks connected to sessions that no longer exist.
+  // Over, as far as anything that happens by itself goes: the server said a
+  // goodbye it did not expect to take back, or nobody is going to dial again.
+  // `closed` settles here because that is what it reports — that this client
+  // stopped — and a press on `recheck` can still start it up again, since a
+  // person looking at the machine knows something this client does not.
   function give(detail: string, wake: () => void = () => {}): void {
     announce("lost", detail);
     strand(new Error(detail));
@@ -919,7 +987,19 @@ export async function reconnectingClient(opts: ReconnectOpts): Promise<ClientCon
     recheck() {
       if (shut) return;
       if (state === "live") return conn.recheck();
-      interrupt?.();
+      // A beat asleep between dials: the next one is now.
+      if (interrupt) return interrupt();
+      // A ladder mid-climb, or a dial already out on either path. Nothing to
+      // bring forward, and that is the honest answer: the next attempt is
+      // seconds away and a second one beside it is two ssh children racing.
+      if (climbing || beating) return;
+      // Nothing is going to dial at all, which now has one cause: a goodbye
+      // this client was told was final. It is also the one state in which the
+      // Reconnect the chrome offers used to be a button that did nothing
+      // (interactions.md §4-1). A press is not a loop — it is the person who
+      // can see the machine is back, which is the one thing this client has no
+      // way to know.
+      void beat(true);
     },
     close() {
       shut = true;
@@ -1013,6 +1093,13 @@ function reasonOf(err: unknown): string {
 
 function plural(n: number): string {
   return n === 1 ? "One request" : `${n} requests`;
+}
+
+// The server's own words, opening a sentence this end wrote. A `bye` is a
+// clause ("this server is shutting down") because it is also read mid-sentence,
+// after "Disconnected: ".
+function capitalise(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 // --- a transport somebody else drives ----------------------------------------

@@ -224,7 +224,7 @@ describe("a client facing a server that will not talk", () => {
     // ssh's account of a wire that died mid-session is worth having; only the
     // handshake's verdict outranks it.
     await expect(client.closed).resolves.toBeUndefined();
-    expect(client.farewell()).toBe("another client took this session");
+    expect(client.farewell()).toEqual({ why: "another client took this session", back: false });
   });
 
   // Not a hang. A caller that awaits a request on a connection that is already
