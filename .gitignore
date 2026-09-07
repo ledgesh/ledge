@@ -5,7 +5,7 @@ node_modules/
 
 # Build output (Vite view build + Electrobun app bundle + bundled CLI +
 # the compiled PTY trampolines + the assembled ledge-server package). The
-# package's hand-written half lives in npm/ and IS committed; dist-npm/ is
+# package's hand-written half lives in npm/ and is committed; dist-npm/ is
 # what scripts/build-npm.ts assembles out of it.
 dist/
 dist-cli/
@@ -19,8 +19,8 @@ build/
 ledge-server-*.tgz
 
 # SwiftPM's checkouts and object files for the iOS client. Package.resolved is
-# committed on purpose — the pins are the supply chain — but the tree it clones
-# is a cache.
+# committed, because the pins are the supply chain, but the tree it clones is
+# a cache.
 ios/.build/
 
 # Release artifacts (the DMG, the update tarball, update.json). Tens of

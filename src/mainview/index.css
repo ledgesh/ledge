@@ -4,11 +4,12 @@
 
 /* --- shadcn/ui design tokens ------------------------------------------------
    Every palette below is keyed off `data-theme` on <html>, never off
-   prefers-color-scheme: the OS appearance is only the DEFAULT, and
-   `appearance.theme` in settings.jsonc can pin the other side. lib/theme.ts is
-   what resolves the two into the attribute (and tailwind's `dark:` variant
-   reads the same selector — tailwind.config.js); index.html stamps the system
-   answer before first paint so a launch never flashes. */
+   prefers-color-scheme: the OS appearance is only the default, and
+   `appearance.theme` in settings.jsonc can pin the other side.
+
+   lib/theme.ts resolves the two into the attribute, and tailwind's `dark:`
+   variant reads the same selector (tailwind.config.js). index.html stamps the
+   system answer before first paint so a launch never flashes. */
 @layer base {
   :root {
     color-scheme: light;
@@ -24,13 +25,15 @@
     --muted-foreground: 240 3.8% 46.1%;
     --accent: 240 4.8% 95.9%;
     --accent-foreground: 240 5.9% 10%;
-    /* Text, not fill — the note in the dark palette below says why the two are
-       separate tokens. They are the same red HERE, and that is the point: red-600
-       on white is 4.83:1 to write with and 4.62:1 under the near-white label of a
-       filled button, so against a light background one value does both jobs. It is
-       dark mode that forces them apart. (Stock shadcn fills with red-500, which
-       carries that label at 3.60:1 — under AA for a 12px `text-sm` string, and it
-       is the same defect as the dark one, a step smaller.) */
+    /* Text, not fill. The note in the dark palette below says why the two are
+       separate tokens; in this mode they hold the same red. red-600 on white is
+       4.83:1 to write with and 4.62:1 under the near-white label of a filled
+       button, so against a light background one value does both jobs. Dark mode
+       is what forces them apart.
+
+       Stock shadcn fills with red-500, which carries that label at 3.60:1,
+       under AA for a 12px `text-sm` string. It is the same defect as the dark
+       one, a step smaller. */
     --destructive: 0 72.2% 50.6%;
     --destructive-fill: 0 72.2% 50.6%;
     --destructive-foreground: 0 0% 98%;
@@ -54,28 +57,31 @@
     --muted-foreground: 240 5% 64.9%;
     --accent: 240 3.7% 15.9%;
     --accent-foreground: 0 0% 98%;
-    /* The one token in this file that is READ more often than it is painted on,
-       and the one place shadcn's defaults are wrong for this app.
+    /* The one token in this file that is read from more often than it is
+       painted on, and the one place shadcn's defaults are wrong for this app.
 
        Upstream ships a single `--destructive` per mode and darkens it here to
-       red-900, because upstream's destructive thing is a BUTTON: a filled
+       red-900, because upstream's destructive thing is a button: a filled
        rectangle carrying `--destructive-foreground` on top, where a dark fill
-       under near-white text is exactly right (9.59:1). Ledge is the other way
-       round. It writes with this colour — every dial failure, every settings
-       complaint, every refused rename is `text-destructive` prose, 18 sites
-       against the one button that fills with it — and red-900 on this
-       background is 1.99:1. That is below the 3:1 floor for LARGE text, and
-       these messages are 11 and 12 pixels. "Could not reach v1: Ledge's server
-       is not installed on that machine" was the report; it is dark red on near
-       black.
+       under near-white text is right (9.59:1).
+
+       Ledge is the other way round. It writes with this colour: every dial
+       failure, every settings complaint and every refused rename is
+       `text-destructive` prose, 18 sites against the one button that fills with
+       it. red-900 on this background is 1.99:1, below the 3:1 floor for large
+       text, and these messages are 11 and 12 pixels.
+
+       "Could not reach v1: Ledge's server is not installed on that machine"
+       was the report, in dark red on near black.
 
        So the token means the text colour, tuned per mode against that mode's
        background: red-400 here (7.20:1), red-600 in light (4.83:1). Both were
        measured against the backgrounds above rather than picked by eye, and
-       e2e/appearance.spec.ts re-measures them in WebKit. The button keeps its
-       own fill at the value it has always had, because the colour you WRITE
-       with and the colour you fill a rectangle with cannot be one value once
-       the background stops being white. */
+       e2e/appearance.spec.ts re-measures them in WebKit.
+
+       The button keeps its own fill at the value it has always had: the colour
+       prose is written in and the colour a rectangle is filled with cannot be
+       one value once the background stops being white. */
     --destructive: 0 90.6% 70.8%;
     --destructive-fill: 0 62.8% 30.6%;
     --destructive-foreground: 0 0% 98%;
@@ -177,15 +183,17 @@ body {
 }
 
 /* Rows and tabs are objects, not prose (interactions.md §1a). A press held on
-   one opens its menu, and on a touch screen the platform's own answer to that
-   gesture — the text-selection callout, with its magnifier and its handles —
-   would arrive on top of ours over text nobody is trying to select. Selection
-   is turned off where it was never wanted anyway: a note title in the sidebar
-   is a label for a file, and the file is what the row's verbs act on.
+   one opens its menu, and on a touch screen the platform answers that gesture
+   with the text-selection callout, its magnifier and its handles, which would
+   arrive on top of the row menu over text nobody is trying to select.
 
-   Deliberately NOT touch-action: a row sits inside a scrolling list, and a
-   finger that starts on a row is how you scroll it. That gesture wins — the
-   press cancels itself when the finger travels (useRowMenu.ts). */
+   Selection is turned off where it was never wanted anyway: a note title in
+   the sidebar is a label for a file, and the file is what the row's verbs act
+   on.
+
+   `touch-action` is left alone, because a row sits inside a scrolling list and
+   a finger that starts on a row is how the list scrolls. That gesture wins:
+   the press cancels itself when the finger travels (useRowMenu.ts). */
 [data-list-row],
 [data-tab] {
   user-select: none;
@@ -196,10 +204,11 @@ body {
 /* --- Tab strip ----------------------------------------------------------------
    The tab bar's scrolling region (workspace/PaneTree.tsx). Tabs overflowing the
    pane scroll horizontally, but never show a scrollbar: a bar would eat the
-   tabs' height. In its place, a fade mask on whichever edge is clipping tabs
-   (the -clip-* classes, driven from scroll state via tabStrip.ts) says "more
-   this way"; the wheel and the active tab auto-scrolling into view do the
-   moving. */
+   tabs' height.
+
+   In its place, a fade mask on whichever edge is clipping tabs says "more this
+   way" (the -clip-* classes, driven from scroll state via tabStrip.ts). The
+   wheel and the active tab auto-scrolling into view do the moving. */
 .ledge-tabstrip {
   scrollbar-width: none;
   --tabclip-l: 0px;
@@ -247,10 +256,11 @@ body {
 
 /* --- Frontmatter block --------------------------------------------------------
    Line decorations (editor/frontmatter.ts) render a note's params block dimmed
-   and at one size: it is machinery, not prose. The `span` reset is what keeps
-   markdown's own styling out of it — the parser reads `# comment` lines as
-   headings and would render the quiet block as the loudest thing on screen.
-   Color only; the caret, selection, and edit behavior are untouched. */
+   and at one size: it is machinery, not prose. The `span` reset keeps
+   markdown's own styling out of it, since the parser reads `# comment` lines
+   as headings and would render the quiet block as the loudest thing on screen.
+
+   Color only. The caret, selection, and edit behavior are untouched. */
 .cm-line.ledge-fm,
 .cm-line.ledge-fm span {
   color: var(--ed-muted);
@@ -283,8 +293,8 @@ body {
 }
 /* Compact variant for the profile edit chip: block-control buttons are sized
    for a code card's padded corner, and next to one small dimmed line they
-   dwarf it. Rendered height (16 + 2 + 2) = FM_CHIP_H in blocks.ts, which
-   centers the chip on the line — keep the two in sync. */
+   dwarf it. Rendered height (16 + 2 + 2) is FM_CHIP_H in blocks.ts, which
+   centers the chip on the line, so the two have to stay in sync. */
 .ledge-ctl-group.ledge-fm-chip {
   padding: 1px;
 }
@@ -300,12 +310,13 @@ body {
 
 /* --- Live preview (editor/livePreview.ts) ------------------------------------
    Markdown links with their syntax concealed: link color plus a dotted
-   underline, the hand cursor over RENDERED links via the hotspot layer
-   below (in-editor `cursor` being unreliable in the WKWebView), and the
-   underline goes solid while ⌘ is held (the metaHeld plugin) — for a
-   REVEALED link that's the "a click right now FOLLOWS instead of placing
-   the caret" signal, same affordance stack as the frontmatter profile
-   name above. */
+   underline, and the hand cursor over rendered links via the hotspot layer
+   below, since in-editor `cursor` is unreliable in the WKWebView.
+
+   The underline goes solid while ⌘ is held (the metaHeld plugin). On a
+   revealed link that is the signal that a click now follows the link rather
+   than placing the caret, the same affordance stack as the frontmatter
+   profile name above. */
 .ledge-mdlink,
 .ledge-mdlink span {
   color: var(--link);
@@ -316,18 +327,17 @@ body {
 .ledge-meta .ledge-mdlink span {
   text-decoration-style: solid;
 }
-/* A link that will OPEN on plain click (rendered — livePreview.ts liveLink)
+/* A rendered link opens on a plain click (livePreview.ts liveLink) and so
    asks for the hand. The in-editor rule helps engines that honour it, but
    the WKWebView does not do so reliably inside the editing context, so the
-   cursor that actually ships comes from the hotspot layer below. */
+   cursor that ships comes from the hotspot layer below. */
 .ledge-mdlink-live,
 .ledge-mdlink-live span {
   cursor: pointer;
 }
-/* A rendered wikilink whose title names no note (editor/wikilinks.ts):
-   still link-shaped — it wants to be one — but muted, and with no hand
-   cursor or hotspot: a plain click is the ordinary caret move, which
-   reveals the raw [[...]] for fixing. */
+/* A rendered wikilink whose title names no note (editor/wikilinks.ts): still
+   link-shaped, but muted, and with no hand cursor or hotspot. A plain click is
+   the ordinary caret move, which reveals the raw [[...]] for fixing. */
 .ledge-wikilink-dangling,
 .ledge-wikilink-dangling span {
   color: var(--ed-muted);
@@ -335,9 +345,10 @@ body {
   text-underline-offset: 2px;
 }
 /* Inline #tags (editor/tags.ts + livePreview.ts): a quiet pill in the link
-   color. Styled ALWAYS — nothing conceals, so the text never jumps between
-   touched and rendered — and the hand cursor over the live (untouched) ones
-   comes from the hotspot layer below, like every rendered link. */
+   color. Styled whether or not the caret is on them, because nothing conceals
+   here and the text never jumps between touched and rendered. The hand cursor
+   over the untouched ones comes from the hotspot layer below, like every
+   rendered link. */
 .ledge-hashtag,
 .ledge-hashtag span {
   color: var(--link);
@@ -349,7 +360,7 @@ body {
   cursor: pointer;
 }
 /* Declared tags on the frontmatter tags: line (editor/frontmatter.ts):
-   the profile name's affordance stack — link-colored dotted underline
+   the profile name's affordance stack, meaning a link-colored dotted underline
    against the muted block, solid while ⌘ says a click follows. */
 .cm-line.ledge-fm .ledge-fm-tag,
 .cm-line.ledge-fm .ledge-fm-tag span {
@@ -365,11 +376,14 @@ body {
 /* What the parser could not read on a block line (editor/frontmatter.ts): a
    thin accent down the line's left edge, and the message drawn after its text.
    The accent is an inset shadow, not a border, so marking a line cannot reflow
-   it. Both are toned toward the block's muted color rather than sitting at full
+   it.
+
+   Both are toned toward the block's muted color rather than sitting at full
    --err: a line is wrong for as long as it takes to finish typing it, and a
-   red bar flashing on every keystroke would make the block unwriteable. The
-   selector carries three classes because `.cm-line.ledge-fm span` above sets
-   color, size, weight and style on everything inside the block, and would
+   red bar flashing on every keystroke would make the block unwriteable.
+
+   The selector carries three classes because `.cm-line.ledge-fm span` above
+   sets color, size, weight and style on everything inside the block, and would
    otherwise win. */
 .cm-line.ledge-fm-bad {
   box-shadow: inset 2px 0 0 color-mix(in srgb, var(--err) 55%, transparent);
@@ -387,9 +401,11 @@ body {
 /* --- The stacking ladder ----------------------------------------------------
    Two layers in this app are parented to <body> rather than to the pane whose
    editor they cover (.ledge-linklayer here and .ledge-overlay below, both for
-   the same WKWebView reason). Being body-parented, their z-index competes with
-   the React tree's at the root, so the whole ladder has to be written in one
-   place or the two halves cannot be compared:
+   the same WKWebView reason).
+
+   Being body-parented, their z-index competes with the React tree's at the
+   root, so the whole ladder has to be written in one place or the two halves
+   cannot be compared:
 
       10  .ledge-linklayer   hotspots over rendered links and checkboxes
       20  .ledge-overlay     a block's run / terminal / copy / dismiss controls
@@ -398,14 +414,15 @@ body {
       50  every modal: dialogs, menus, pickers, the palette   (Tailwind z-50)
       60  .ledge-booting     the boot's own screen, before there is an app
 
-   The body-parented pair sits BELOW the modal layer. They were 90 and 100 —
-   above everything the app can put on screen — which painted a code block's
-   run and copy buttons over an open dialog. On a pointer client that was
-   cosmetic. On a touch client those buttons are 44 points square with
-   `pointer-events: auto`, so a tap aimed at the dialog ran the block behind it
-   instead. Every dialog covers the viewport with its own backdrop, so once the
-   controls are under 50 the backdrop takes the tap and the ladder needs no
-   help from React state.
+   The body-parented pair sits below the modal layer. They were 90 and 100,
+   above everything the app can put on screen, which painted a code block's run
+   and copy buttons over an open dialog. On a pointer client that was cosmetic.
+
+   On a touch client those buttons are 44 points square and take pointer
+   events, so a tap aimed at the dialog ran the block behind it instead. Every
+   dialog covers the viewport with its own backdrop, so once the controls are
+   under 50 the backdrop takes the tap and the ladder needs no help from React
+   state.
 
    The top rung is the one exception to comparing at all: `.ledge-booting` is
    raised before the first render and removed by it (lib/booting.ts), so it
@@ -434,15 +451,17 @@ body {
 /* A task's [ ]/[x] marker, rendered as a real checkbox while concealed
    (livePreview.ts TaskWidget). Sized to the text it sits in; accent follows
    the link color so checked boxes read as "the app did this". Explicit
-   pointer, like .ledge-mdlink-live — the box acts on plain click.
+   pointer, like .ledge-mdlink-live, because the box acts on plain click.
 
-   The margin is arithmetic, not taste: it pins the box's ADVANCE to exactly
+   The margin is arithmetic, not taste: it pins the box's advance to exactly
    1ch. The widget stands in for `- [ ]` (the bullet hides with the marker),
-   and the space after it is still drawn as text — so a 1ch box puts a task's
-   label at column 2, which is where `- ` puts a plain bullet's, where a
-   mixed list needs both to line up, and what the continuation indent aims
-   for (editor/lists.ts). Sizing the gap in ch against an em-sized box is
-   what keeps all three agreeing at any font size. */
+   and the space after it is still drawn as text, so a 1ch box puts a task's
+   label at column 2.
+
+   That is where `- ` puts a plain bullet's label, where a mixed list needs
+   both to line up, and what the continuation indent aims for
+   (editor/lists.ts). Sizing the gap in ch against an em-sized box keeps all
+   three agreeing at any font size. */
 .ledge-task {
   width: 0.95em;
   height: 0.95em;
@@ -458,19 +477,22 @@ body {
   text-decoration: line-through;
 }
 /* Strong emphasis. Lives here rather than in setup.ts's HighlightStyle so the
-   pending-Setext rule below can name it — see that comment. */
+   pending-Setext rule below can name it; see that comment. */
 .ledge-strong {
   font-weight: 700;
 }
 /* Inline code (`like this`). Live preview conceals the backticks and the whole
    editor is already monospace, so without a chip of its own inline code reads
-   as ordinary prose — the marked-up text and the text around it look the same.
+   as ordinary prose: the marked-up text and the text around it look the same.
+
    The class comes from the HighlightStyle in editor/setup.ts, which puts the
-   InlineCode node on a tag nothing else uses; upstream shares one tag between
+   InlineCode node on a tag nothing else uses. Upstream shares one tag between
    inline code and fenced-block content, and a chip behind every line of an
-   unlabelled fence is not what this is for. No border and small `em` padding:
-   an inline mark that takes horizontal room pushes the rest of its line off
-   the character grid the editor otherwise keeps. */
+   unlabelled fence is not what this is for.
+
+   No border and small `em` padding: an inline mark that takes horizontal room
+   pushes the rest of its line off the character grid the editor otherwise
+   keeps. */
 .ledge-inline-code {
   background: var(--inline-code-bg);
   border-radius: 3px;
@@ -480,11 +502,13 @@ body {
 /* The two lines of a Setext heading whose underline is still just the `-` of
    a list item being typed (editor/setext.ts): drawn as the prose they are
    about to go back to being. `inherit` rather than a size, so each span
-   resolves to whatever the line itself is; the descendant selector is what
-   outranks the single-class rules HighlightStyle generates. Only size and
-   weight are touched — italics, strikes, and colors are not the heading's
-   doing — and real bold is exempted, since CodeMirror emits a span that is
-   both heading and strong as ONE class list, not as nested spans. */
+   resolves to whatever the line itself is, and the descendant selector
+   outranks the single-class rules HighlightStyle generates.
+
+   Only size and weight are touched, since italics, strikes and colors are not
+   the heading's doing. Real bold is exempted, because CodeMirror emits a span
+   that is both heading and strong as one class list rather than as nested
+   spans. */
 .ledge-setext-pending,
 .ledge-setext-pending span {
   font-size: inherit;
@@ -548,8 +572,8 @@ body {
   border-radius: 6px;
 }
 /* Inside a selection that swept past it (editor/images.ts): the image stays
-   drawn, and CodeMirror's selection layer paints BEHIND it, so the picture
-   would be the one thing in the band that looked untouched. Lay the same
+   drawn, and CodeMirror's selection layer paints behind it, so the picture
+   would be the one thing in the band that looked untouched. This lays the same
    translucent selection color over it instead. */
 .ledge-mdimage.is-selected .ledge-mdimage-frame::after {
   content: "";
@@ -569,10 +593,11 @@ body {
 /* --- Fenced code-block panel ------------------------------------------------
    Line decorations (built in editor/blocks.ts) wrap every line of a fenced code
    block in a rounded, bordered card so code stands out from surrounding prose.
+
    The background spans the content box (inset by `.cm-content` padding), the
-   fence lines round the top/bottom corners, and horizontal padding insets the
-   code from the card edge. Vertical space is padding (not margin) so CodeMirror
-   measures it and the gutter line numbers stay aligned. */
+   fence lines round the top and bottom corners, and horizontal padding insets
+   the code from the card edge. Vertical space is padding rather than margin, so
+   CodeMirror measures it and the gutter line numbers stay aligned. */
 .cm-line.ledge-code {
   background: var(--code-panel-bg);
   border-left: 1px solid var(--code-panel-border);
@@ -594,24 +619,27 @@ body {
 }
 /* The closing fence of a block that has an output panel under it (emitted by
    blocks.ts instead of `-bottom`): the card stays open and the panel closes it,
-   so the two are one card rather than a terminal parked underneath. The padding
-   stays — the fence line is real editable text sitting directly on a
-   contenteditable=false widget, and without the cushion clicking the caret back
-   onto it gets fiddly. */
+   so the two are one card rather than a terminal parked underneath.
+
+   The padding stays, because the fence line is real editable text sitting
+   directly on a contenteditable=false widget, and without the cushion clicking
+   the caret back onto it gets fiddly. */
 .cm-line.ledge-code-attached {
   padding-bottom: 8px;
 }
 
 /* --- Block chrome overlay ---------------------------------------------------
    Interactive block controls (run/terminal/copy per block, dismiss per output)
-   are drawn in this layer. It is parented to <body>, NOT to the editor, and
-   pinned over the editor's rect (top/left/size set from JS). WebKit forces the
-   text I-beam on anything inside the `.cm-editor` editing context regardless of
-   `cursor`; living outside that subtree lets the control buttons honour
-   `cursor: pointer`. The layer never eats pointer events, only its buttons do.
+   are drawn in this layer. It is parented to <body> rather than to the editor,
+   and pinned over the editor's rect (top/left/size set from JS).
 
-   z-index 20, which is the ladder's (see .ledge-linklayer): above the editor it
-   covers, below anything modal that covers IT. */
+   WebKit forces the text I-beam on anything inside the `.cm-editor` editing
+   context regardless of `cursor`, so living outside that subtree is what lets
+   the control buttons honour `cursor: pointer`. The layer never eats pointer
+   events, only its buttons do.
+
+   z-index 20, which is the ladder's (see .ledge-linklayer): above the editor
+   it covers, and below anything modal that covers the overlay. */
 .ledge-overlay {
   position: fixed;
   overflow: hidden;
@@ -679,10 +707,12 @@ body {
   opacity: 0.3;
   cursor: default;
 }
-/* Behind the media query for the reason every `hover:` utility is (§1a): iOS
-   sends a synthetic mousemove ahead of the click of a tap, and WebKit withholds
-   that click when the mousemove changed the rendering — so a hover background
-   here spends the first tap on painting itself, and the ▶ needs a second one.
+/* Behind the media query for the reason every `hover:` utility is
+   (interactions.md §1a): iOS sends a synthetic mousemove ahead of a tap's
+   click, and WebKit withholds that click when the mousemove changed the
+   rendering. A hover background here spends the first tap on painting itself,
+   and the ▶ needs a second one.
+
    Hand-written CSS, which is why Tailwind's hoverOnlyWhenSupported never
    covered it: the tab strip's first-tap defect, one layer down. */
 @media (hover: hover) {
@@ -707,27 +737,32 @@ body {
    Two changes, and the second follows from the first. The controls are always
    lit, because the reveal above is a pointer's grammar: with no hover, a phone
    would spend one tap summoning the pair and a second using it, and running a
-   block is the note's whole point. And they are 44 points, because a lit pair
-   is a pair a finger chooses between — the ▶ beside Copy, where the miss runs
-   the neighbour. Everything else here follows from those two: the card makes
-   room for the taller group, and the one control whose verb the palette carries
-   just as directly goes away instead of growing. */
+   block is what the note is for.
+
+   They are also 44 points, because a lit pair is a pair a finger chooses
+   between: the ▶ sits beside Copy, and a miss runs the neighbour.
+
+   Everything else here follows from those two. The card makes room for the
+   taller group, and the one control whose verb the palette carries just as
+   directly goes away instead of growing. */
 @media (hover: none) {
   .ledge-ctl-group {
     opacity: 1;
     gap: 8px;
     /* The box is not drawn here. A pointer client's group is two small glyphs
-       floating OVER the first line of the code, and the fill and border are
-       what separate them from it; this one has a lane of its own and floats
-       over nothing, so the same box is a 50-point empty panel with a speck in
-       it. Transparent rather than removed: the 2px padding and the 1px border
-       are what put the glyph column 13px inside the card, which is where
+       floating over the first line of the code, and the fill and border are
+       what separate them from it. This one has a lane of its own and floats
+       over nothing, so the same box would be a 50-point empty panel with a
+       speck in it.
+
+       Transparent rather than removed: the 2px padding and the 1px border are
+       what put the glyph column 13px inside the card, which is where
        editor/blocks.ts puts the output panel's own pair to line up with. */
     background: transparent;
     border-color: transparent;
-    /* The group is 22 points taller and grows UPWARD, so that it ends where the
+    /* The group is 22 points taller and grows upward, so that it ends where the
        small one did: just past the opening fence, clear of the code. blocks.ts
-       anchors it to the fence's glyph and knows nothing about this; the card's
+       anchors it to the fence's glyph and knows nothing about this. The card's
        matching top padding below is the same 22, and the two belong next to
        each other rather than one of them in the measurement. */
     margin-top: -22px;
@@ -745,22 +780,23 @@ body {
   }
   /* The lane the lifted group sits in: the pointer client's 8 plus that same 22.
      The fence's own text is at the left of the card and the controls at the
-     right, so the two never meet — this buys height, not a second line. */
+     right, so the two never meet. This buys height, not a second line. */
   .cm-line.ledge-code-top {
     padding-top: 30px;
   }
   /* The profile chip is the one control here that goes the other way: absent,
-     with the palette carrying the verb (§1a). It is a pointer accelerator for
-     ⌘-clicking the profile name, a chord a phone has not got either, and
-     `profile.open` — Edit Note Profile… — is note-scoped, so the palette entry
-     is exactly as direct as the chip. Nothing like that is true of the ▶, which
-     acts on ONE block and would cost a caret placement first. `display: none`
-     and not a fade: an invisible 16-point button still takes every tap that
-     lands on it. */
+     with the palette carrying the verb (interactions.md §1a). It is a pointer
+     accelerator for ⌘-clicking the profile name, a chord a phone has not got
+     either, and `profile.open` (Edit Note Profile…) is note-scoped, so the
+     palette entry is as direct as the chip.
+
+     Nothing like that is true of the ▶, which acts on one block and would cost
+     a caret placement first. `display: none` and not a fade, because an
+     invisible 16-point button still takes every tap that lands on it. */
   .ledge-ctl-group.ledge-fm-chip {
     display: none;
   }
-  /* The output panel's pair, for the same reason and one worse: the ✕ INTERRUPTS
+  /* The output panel's pair, for the same reason and one worse: the ✕ interrupts
      a running command (blocks.ts cancels on dismiss), so a miss onto it is the
      most expensive miss in the app. Copy sits between it and the Back to note
      button, so the neighbour on that side is harmless. */
@@ -804,10 +840,10 @@ body {
   width: 48px;
 }
 /* On touch the header is where all three of the panel's tap targets live, so it
-   is sized for one — unconditionally, not only while focused: a header that grew
-   when the run took the keyboard would move the terminal under the thumb about
-   to answer it. blocks.ts hands the overlay pair whatever height this leaves,
-   and the pair centres itself in it. */
+   is sized for one, and unconditionally rather than only while focused: a
+   header that grew when the run took the keyboard would move the terminal under
+   the thumb about to answer it. blocks.ts hands the overlay pair whatever
+   height this leaves, and the pair centres itself in it. */
 @media (hover: none) {
   .ledge-output-header {
     height: auto;
@@ -818,10 +854,12 @@ body {
   }
   /* The 96-point pair (two 44s and the gap between them), the 8 points it sits
      inside the header's own right edge, and 16 points of clear space in front
-     of it. `flex: 0 0` because the reserved width is the only thing standing
-     between the header's text and an overlay it cannot see: let it shrink and
-     the Back to note button ends up UNDER the ✕ that interrupts the run, which
-     is what happened at 108 and flexible. What gives instead is the spacer. */
+     of it.
+
+     `flex: 0 0` because the reserved width is the only thing standing between
+     the header's text and an overlay it cannot see. Let it shrink and the Back
+     to note button ends up under the ✕ that interrupts the run, which is what
+     happened at 108 and flexible. What gives instead is the spacer. */
   .ledge-term-gap {
     flex: 0 0 120px;
   }
@@ -860,7 +898,7 @@ body {
 }
 /* A run whose machine went away: the muted base, stated rather than inherited.
    Neither the pulse (which claims it is going) nor the error red (which claims
-   it stopped) is true, and a dot that says nothing is the honest one. */
+   it stopped) is true, so the dot claims neither. */
 .ledge-dot-unknown {
   background: var(--ed-muted);
 }
@@ -872,9 +910,10 @@ body {
 /* The panel holds the keyboard: a live run takes focus when it starts talking
    (inlineTerm.ts claimFocus), or when a finger taps it on a client where that
    claim is off, so typing goes to the program and not the note.
-   That has to be visible without looking for a cursor, hence a lit border and
-   a header line naming the state and the way out. Both are pure :focus-within,
-   so they cannot drift from where focus actually is. */
+
+   That has to be visible without hunting for a cursor, hence a lit border and a
+   header line naming the state and the way out. Both are pure :focus-within, so
+   they cannot drift from where focus actually is. */
 .ledge-output:focus-within {
   border-color: color-mix(in srgb, var(--link) 60%, var(--panel-border));
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--link) 18%, transparent);
@@ -889,13 +928,16 @@ body {
   -webkit-user-select: none;
 }
 /* The disclosure, in the two forms the two kinds of client can actually use
-   (interactions.md §6a). Each media query only ADDS, so the two can never both
+   (interactions.md §6a). Each media query only adds, so the two can never both
    apply and never both be missing: a client either hovers or it does not.
-   A pointer client gets the sentence and the keys it names; a touch client gets
-   the button, which says the same thing by existing — "Back to note" only means
-   anything to someone who is not in the note — and says it in a form that is
-   also the way out. Not both: at 390 points the header has room for one, and
-   the pair that interrupts the run has to fit beside it. */
+
+   A pointer client gets the sentence and the keys it names. A touch client gets
+   the button, which says the same thing by existing, since "Back to note" only
+   means anything to someone who is not in the note, and says it in a form that
+   is also the way out.
+
+   Not both: at 390 points the header has room for one, and the pair that
+   interrupts the run has to fit beside it. */
 @media (hover: hover) {
   .ledge-output:focus-within .ledge-focus-hint,
   .ledge-output:focus-within .ledge-focus-key {
@@ -908,20 +950,22 @@ body {
   }
   /* The invitation, and the reason it is only here: a run on this client does
      not take the keyboard, because taking it means raising one over half the
-     screen (editor/blocks.ts). So a program that is waiting on an answer is
-     waiting on a tap, and nothing else in the panel says so. It goes the moment
-     the panel has the keyboard — the line beside it says the rest — and the
-     moment the run stops being one. */
+     screen (editor/blocks.ts). So a program waiting on an answer is waiting on
+     a tap, and nothing else in the panel says so.
+
+     It goes the moment the panel has the keyboard, where the line beside it
+     says the rest, and the moment the run stops being one. */
   .ledge-term-live:not(:focus-within) .ledge-tap-hint {
     display: inline-flex;
   }
 }
 /* Hidden until those rules show them, and both are buttons rather than lines of
    text. Back to note, because the keys it stands in for do not exist on this
-   client and tapping the prose — the Mac's other way out — is unavailable
-   exactly when a full-screen program has taken the screen. Tap to type, because
-   an instruction sitting beside a terminal gets aimed at as well as read: the
-   words and the target had better be the same thing. */
+   client, and tapping the prose (the Mac's other way out) is unavailable
+   exactly when a full-screen program has taken the screen.
+
+   Tap to type, because an instruction sitting beside a terminal gets aimed at
+   as well as read, so the words and the target are the same thing. */
 .ledge-term-leave,
 .ledge-tap-hint {
   display: none;
@@ -969,9 +1013,10 @@ body {
   word-break: break-word;
   cursor: text;
   /* The panel is a contenteditable=false widget inside the editor's
-     contenteditable surface; without an explicit user-select the browser will
-     not let you drag-select the output. With it (and OutputWidget.ignoreEvent
-     returning true) the text selects natively and Cmd+C copies it. */
+     contenteditable surface, and without an explicit user-select the browser
+     refuses to drag-select the output. With it, and with
+     OutputWidget.ignoreEvent returning true, the text selects natively and
+     Cmd+C copies it. */
   user-select: text;
   -webkit-user-select: text;
 }
@@ -983,8 +1028,8 @@ body {
    inset and its own background so it reads as a terminal within the card. */
 .ledge-term-body {
   /* Same 12px inset as `.ledge-code`, so the terminal's first column lands
-     under the code's first column — the strongest single cue that the output
-     belongs to the block rather than sitting beneath it. */
+     under the code's first column, which is the strongest single cue that the
+     output belongs to the block rather than sitting beneath it. */
   padding: 6px 12px;
 }
 /* Before the first byte: name the silence instead of showing a bare header
@@ -1012,8 +1057,8 @@ body {
 .ledge-term-host {
   width: 100%;
 }
-/* Before the first byte: laid out (so the panel's ResizeObserver fires and the
-   run's shell learns the real column count BEFORE its command runs) but taking
+/* Before the first byte: laid out, so the panel's ResizeObserver fires and the
+   run's shell learns the real column count before its command runs, but taking
    no height, so what shows is the placeholder above and not an empty terminal
    row. See the constructor in editor/inlineTerm.ts. */
 .ledge-term-host.ledge-term-unshown {
@@ -1033,16 +1078,18 @@ body {
 
 /* --- The fused card ---------------------------------------------------------
    A panel whose block is directly above it (that block's closing fence carries
-   `.ledge-code-attached`; see blocks.ts) is not a panel at all — it is the lower
-   half of the code block's card. It gives up its own top border, its radius, and
-   its side margins so its edges continue the card's, and the gap between them
-   becomes a hairline seam: the header's top border.
+   `.ledge-code-attached`; see blocks.ts) is not a panel at all, but the lower
+   half of the code block's card.
 
-   The sibling combinator IS the pairing test, evaluated by the browser, so it
+   It gives up its own top border, its radius and its side margins so its edges
+   continue the card's, and the gap between them becomes a hairline seam: the
+   header's top border.
+
+   The sibling combinator is the pairing test, evaluated by the browser, so it
    can never disagree with the decoration that emitted the class. A panel whose
    block was deleted out from under it has no `.ledge-code-attached` before it
-   and keeps the free-standing styling above, which is the shape that reads
-   correctly when there is nothing to fuse to. */
+   and keeps the free-standing styling above, which reads correctly when there
+   is nothing to fuse to. */
 .ledge-code-attached + .ledge-output {
   margin: 0 0 4px;
   border-color: var(--code-panel-border);
@@ -1054,12 +1101,13 @@ body {
   border-top: 1px solid var(--code-panel-border);
   border-bottom: none;
 }
-/* Focus, fused. The free-standing panel lights its border and casts a halo; a
-   halo here would spill 2px past the card's sides and over the code above,
-   which is the "half-lit box" the fusing is meant to avoid. The terminal zone
-   is already a closed rectangle — seam on top, panel border on the other three
-   sides — so lighting those four edges names the focused zone exactly, without
-   claiming the code above is taking keystrokes too. */
+/* Focus, fused. The free-standing panel lights its border and casts a halo, but
+   a halo here would spill 2px past the card's sides and over the code above,
+   which is the half-lit box the fusing is meant to avoid.
+
+   The terminal zone is already a closed rectangle, with the seam on top and the
+   panel border on the other three sides, so lighting those four edges names the
+   focused zone exactly without claiming the code above is taking keystrokes. */
 .ledge-code-attached + .ledge-output:focus-within {
   border-color: color-mix(in srgb, var(--link) 60%, var(--code-panel-border));
   box-shadow: none;
@@ -1074,12 +1122,13 @@ body {
    This is what fills it.
 
    The two reveals are animation delays and not timers, the same idiom as
-   `.ledge-term-waiting` above: a boot that finishes inside the first delay
-   paints none of this, so the ordinary case — a server in this process, or one
-   on the same desk — costs no flash. The panel arrives at 600ms, which is past
-   any local boot and short of the point where a blank window reads as broken;
-   the second line and the way out arrive at 4s, which is where a slow
-   connection stops being a slow connection. */
+   `.ledge-term-waiting` above. A boot that finishes inside the first delay
+   paints none of this, so the ordinary case costs no flash: a server in this
+   process, or one on the same desk.
+
+   The panel arrives at 600ms, which is past any local boot and short of the
+   point where a blank window reads as broken. The second line and the way out
+   arrive at 4s, past the point where waiting still reads as loading. */
 .ledge-booting {
   position: fixed;
   inset: 0;

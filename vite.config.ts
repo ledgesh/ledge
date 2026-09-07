@@ -9,9 +9,11 @@ import { electrobunViteAliases } from "./.hutch/devkit/api/config/electrobun-vit
 //
 // Hutch injects the devkit aliases into the bundles it builds itself, but Vite
 // resolves on its own and would find node_modules/electrobun, whose only module
-// throws by design. So main.tsx's `electrobun/view` import needs the aliases
-// spelled out here; the helper derives them from the devkit's export map, which
-// is why the array form is required (an object alias cannot carry them).
+// throws when imported. So main.tsx's `electrobun/view` import needs the
+// aliases spelled out here.
+//
+// The helper derives them from the devkit's export map, which is why the array
+// form is required: an object alias cannot carry them.
 export default defineConfig({
   plugins: [react()],
   root: "src/mainview",

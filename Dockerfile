@@ -1,30 +1,34 @@
-# A Ledge server as an image, for the machine that is always on when your
-# laptop is not (docs/contributor/remote.md §11).
+# A Ledge server as an image, for the machine that is always on when a laptop
+# is not (remote.md §11).
 #
-# The image ships NO sshd, and that is the design rather than an omission.
-# §3's whole argument for ssh is that Ledge inherits the most-audited daemon on
-# the machine instead of writing an authentication system; running a second
-# sshd inside a container — its own host keys, its own published port, its own
-# authorized_keys to keep — would give that back. So the host's sshd is the one
-# that answers, and the forced command §4 describes reaches in:
+# The image ships no sshd. remote.md §3's argument for ssh is that Ledge
+# inherits the most-audited daemon on the machine instead of writing an
+# authentication system, and a second sshd inside a container would give that
+# back: its own host keys, its own published port, its own authorized_keys to
+# keep.
+#
+# So the host's sshd is the one that answers, and the forced command
+# remote.md §4 describes reaches in:
 #
 #     restrict,command="docker exec -i ledge ledge-server serve" ssh-ed25519 AAAA...
 #
-# -i and not -t, for §4's reason: this stdout IS the protocol, and a pty would
-# translate newlines inside a length-prefixed stream.
+# -i and not -t, for remote.md §4's reason: this stdout carries the protocol,
+# and a pty would translate newlines inside a length-prefixed stream.
 #
-# PID 1 is the daemon itself, so `docker exec` runs the cheap half — a pump to
-# a socket that is already there, holding the notes and the running shells
-# (§1). A container the user started is also why the daemon does not idle out
-# here: `ledge-server daemon` without --autostart stays until it is stopped,
-# because a supervisor restarting a process every minute for correctly deciding
-# nobody was home is not a design anyone would choose.
+# PID 1 is the daemon itself, so `docker exec` runs the cheap half: a pump to a
+# socket that is already there, holding the notes and the running shells
+# (remote.md §1).
+#
+# A container the user started is also why the daemon does not idle out here.
+# `ledge-server daemon` without --autostart stays until it is stopped, because
+# a supervisor would otherwise restart it every minute for correctly deciding
+# nobody was home.
 #
 # Build it for the architecture it will run on. There is no fat ELF, so the
 # trampolines (`scripts/build-native.ts`) are compiled inside this build rather
-# than cross-compiled into it; `docker build --platform` is the knob.
+# than cross-compiled into it, and `docker build --platform` is the knob.
 
-# debian-slim and not alpine, per §11: the PTY layer is bun:ffi over
+# debian-slim and not alpine, per remote.md §11: the PTY layer is bun:ffi over
 # posix_spawn and forkpty, and musl has no posix_spawn_file_actions_addchdir_np
 # at all.
 FROM oven/bun:1-debian AS native
@@ -35,7 +39,7 @@ FROM oven/bun:1-debian AS native
 # backwards. Compile here; the runtime stage gets the .so and no toolchain.
 #
 # procps is for `bun test` rather than for the build: this stage is also where
-# the suite runs against glibc (`remote.md` §13), and pty.fs.test.ts asks `ps`
+# the suite runs against glibc (remote.md §13), and pty.fs.test.ts asks `ps`
 # whether a closed shell was collected or left as a zombie.
 RUN apt-get update \
   && apt-get install -y --no-install-recommends build-essential procps \
@@ -73,14 +77,16 @@ RUN bun build src/bun/serve.ts --compile --outfile /out/ledge-server \
 FROM debian:trixie-slim
 
 # zsh because the image gets to choose, and `useradd --shell` below is how it
-# says so: the seeded default is this account's login shell where Ledge can
+# says so. The seeded default is this account's login shell where Ledge can
 # read block output from it (bun/spawnParams.ts), which is zsh or bash and
 # nothing else. Debian would otherwise give the account /bin/sh, which is dash,
-# which has no hook to end a block with — so this line and that flag are one
-# decision and have to move together. openssh-client for `host:`
-# frontmatter, where the SERVER makes the outbound connection (§6). Everything
-# a user's notes actually run — git, a language, a cloud CLI — is theirs to add
-# in a `FROM ledge-server` of their own; guessing at that list here would be a
+# which has no hook to end a block with, so this line and that flag are one
+# decision and have to move together.
+#
+# openssh-client is for `host:` frontmatter, where the server makes the
+# outbound connection (remote.md §6). Everything a user's notes actually run,
+# meaning git, a language or a cloud CLI, is theirs to add in a
+# `FROM ledge-server` of their own. Guessing at that list here would be a
 # maintenance claim on somebody else's toolchain.
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates openssh-client zsh \
@@ -94,23 +100,25 @@ RUN apt-get update \
 COPY --from=build /out/ledge-server /usr/local/bin/ledge-server
 COPY --from=build /out/libledge_pty.so /usr/local/bin/libledge_pty.so
 
-# TWO directories hold state, and only one of them is obvious.
+# Two directories hold state, and only one of them is obvious.
 #
 # /data is the app home: notes, workspace registry, vault, layout, logs
-# (remote.md §5). That is the one this file used to claim was the whole
-# backup, and it is not.
+# (remote.md §5). That is the one this file used to claim was the whole backup,
+# and it is not.
 #
-# The account's home is the other. Profiles live at ~/.config/ledge/profiles
-# and are OUTSIDE the app home on purpose (architecture.md §6a: the app home is
-# the folder people sync, and layout is what keeps credentials out of a synced
-# notes folder). ~/.ssh is there too, and it is what `host:` frontmatter dials
-# out with (§6). Neither is on a volume, so `docker rm` took both: notes that
-# say `profile: prod` came back without the values, and every `host:` target
-# came back unreachable.
+# The account's home is the other. Profiles live at ~/.config/ledge/profiles,
+# outside the app home, because the app home is the folder people sync and
+# keeping credentials out of a synced notes folder is what that layout is for
+# (architecture.md §6a). ~/.ssh is there too, and it is what `host:`
+# frontmatter dials out with (remote.md §6).
 #
-# The fix is a second mount rather than a second VOLUME line, and the reason is
-# the recipe this image tells people to write. A `FROM ledge-server` that runs
-# `pip install --user` or `npm i -g` into a DECLARED volume has its writes
+# Neither is on a volume, so `docker rm` took both: notes that say
+# `profile: prod` came back without the values, and every `host:` target came
+# back unreachable.
+#
+# The fix is a second mount rather than a second VOLUME line, because of the
+# recipe this image tells people to write. A `FROM ledge-server` that runs
+# `pip install --user` or `npm i -g` into a declared volume has its writes
 # discarded at build time, silently. So the run command in
 # docs/user/09-keep-notes-on-a-remote-server.md names both:
 #

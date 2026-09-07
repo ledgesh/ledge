@@ -11,8 +11,8 @@
        Ad hoc on the Simulator, so the identifier has no team prefix. A device
        build replaces both halves with a real identity and a provisioning
        profile, which is the same phase that needs a paid membership
-       (ios.md §12) — and it is the profile, not this file, that decides what
-       the identifier really is. -->
+       (ios.md §12). It is the profile, not this file, that decides what the
+       identifier really is. -->
   <key>application-identifier</key>
   <string>dev.ledge.ios</string>
   <key>keychain-access-groups</key>
