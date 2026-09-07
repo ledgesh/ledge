@@ -79,6 +79,10 @@ function stubDeps(
       calls.push(`removeLockNow:${folder}:${path}`);
       return null;
     },
+    favoriteNoteNow: async (folder, path, on) => {
+      calls.push(`favoriteNoteNow:${folder}:${path}:${on}`);
+      return null;
+    },
     openNoteIn: (root, note) => calls.push(`openNoteIn:${root}:${note.path}`),
     revealBacklink: (path, line, raw) => calls.push(`revealBacklink:${path}:${line}:${raw}`),
     revealTitle: (path) => calls.push(`revealTitle:${path}`),
@@ -754,6 +758,29 @@ describe("registry", () => {
     expect(confirmed).toEqual([sealed.path]);
   });
 
+  test("run: note.favorite toggles the targeted row's marker, and titles itself", () => {
+    // One command with two titles, not two commands: it holds a bare key, and
+    // the dispatcher resolves those without consulting `when` (keys.ts). The
+    // title is what tells the reader which way it will go.
+    const plain = note("/n/a.md", "A");
+    const marked = { ...note("/n/b.md", "B"), favorite: true as const };
+    const state = initialState(FOLDER, [plain, marked]);
+    const calls: string[] = [];
+    const cmds = buildCommands(stubDeps(calls));
+    const onPlain: CommandCtx = { ...makeCtx(state), target: { kind: "note", path: plain.path } };
+    const onMarked: CommandCtx = { ...onPlain, target: { kind: "note", path: marked.path } };
+    const cmd = find(cmds, "note.favorite");
+    const titleOn = typeof cmd.title === "function" ? cmd.title(onPlain) : cmd.title;
+    const titleOff = typeof cmd.title === "function" ? cmd.title(onMarked) : cmd.title;
+    expect([titleOn, titleOff]).toEqual(["Favorite", "Unfavorite"]);
+    cmd.run(onPlain);
+    cmd.run(onMarked);
+    expect(calls).toEqual([
+      `favoriteNoteNow:${FOLDER}:${plain.path}:true`,
+      `favoriteNoteNow:${FOLDER}:${marked.path}:false`,
+    ]);
+  });
+
   test("run: note.open opens the targeted row's note", () => {
     const n = note("/n/a.md", "A");
     const dispatched: Action[] = [];
@@ -813,6 +840,14 @@ describe("registry", () => {
     expect(
       resolveChord(commands, r, { domain: "list", modalOpen: false, targetKind: "trash" })?.id,
     ).toBe("note.restore");
+    const f = { key: "f", meta: false, ctrl: false, alt: false, shift: false };
+    expect(
+      resolveChord(commands, f, { domain: "list", modalOpen: false, targetKind: "note" })?.id,
+    ).toBe("note.favorite");
+    // Not on the other row kinds, and not while focus is in a document: `f`
+    // there is a letter being typed.
+    expect(resolveChord(commands, f, { domain: "list", modalOpen: false, targetKind: "trash" })).toBeNull();
+    expect(resolveChord(commands, f, { domain: "editor", modalOpen: false, targetKind: "note" })).toBeNull();
     // ⌘D stays the split key even with a row focused.
     const cmdD = { key: "d", meta: true, ctrl: false, alt: false, shift: false };
     expect(

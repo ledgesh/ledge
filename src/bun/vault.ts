@@ -380,7 +380,7 @@ export async function commitPassphraseChange(newKey: Buffer, newSalt: Buffer): P
 // lines included. The split must round-trip byte for byte (head + body ===
 // text), because writeNote re-splits on every save.
 
-import { frontmatterEnd } from "../shared/frontmatter";
+import { blockLines, frontmatterEnd } from "../shared/frontmatter";
 
 export function splitHead(text: string): { head: string; body: string } {
   const fmEnd = frontmatterEnd(text);
@@ -473,21 +473,6 @@ export function rewrapAssetBytes(sealed: Uint8Array, oldKey: Buffer, newKey: Buf
 // A top-level `locked:` line, never an indented one. An indented one would
 // be an env var named "locked" under `env:`.
 const LOCKED_LINE = /^locked\s*:/;
-
-// The frontmatter block's lines, split so the surgery can address them.
-// `close` is the closing fence's index into `lines` (the opening fence is
-// index 0), and the content is the lines between them, both fences excluded.
-// `end` is frontmatterEnd's offset. Returns null when the text has no block
-// (frontmatterEnd's definition).
-function blockLines(text: string): { end: number; lines: string[]; close: number } | null {
-  const end = frontmatterEnd(text);
-  if (end === 0) return null;
-  const lines = text.slice(0, end).split("\n");
-  for (let i = lines.length - 1; i > 0; i -= 1) {
-    if (/^---\s*$/.test(lines[i]!)) return { end, lines, close: i };
-  }
-  return null; // unreachable: frontmatterEnd found a closing fence
-}
 
 /** Force the frontmatter to carry `locked: <headerValue>`: replace the
  * existing line where it sits (dropping stray duplicates), insert one as the

@@ -129,3 +129,19 @@ export function useCommands(): CommandsApi {
   if (!api) throw new Error("useCommands must be used within CommandProvider");
   return api;
 }
+
+/**
+ * One command's live title for a target, for a control that is not a menu row.
+ *
+ * A button that runs a command takes its label from the registry rather than
+ * writing one out (interactions.md §5), and a command whose title is a
+ * function needs the target to answer: the note browser's star is Favorite on
+ * one row and Unfavorite on the next. CommandMenuItem resolves the same way
+ * for the menu.
+ */
+export function useCommandTitle(id: string, target?: CommandTarget): string {
+  const { commands, ctx } = useCommands();
+  const cmd = commands.find((c) => c.id === id);
+  if (!cmd) return "";
+  return typeof cmd.title === "function" ? cmd.title({ ...ctx(), target }) : cmd.title;
+}

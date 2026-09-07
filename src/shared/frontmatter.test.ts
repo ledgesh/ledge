@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { frontmatterEnd, parseFrontmatter } from "./frontmatter";
+import { frontmatterEnd, parseFrontmatter, setFavoriteLine } from "./frontmatter";
 
 const fm = (inner: string, body = "# Title\n") => `---\n${inner}---\n${body}`;
 
@@ -48,15 +48,15 @@ describe("frontmatterEnd", () => {
 describe("parseFrontmatter", () => {
   test("a note with no frontmatter yields empty params and no problems", () => {
     const { params, problems, end } = parseFrontmatter("# Title\nbody");
-    expect(params).toEqual({ cwd: null, profile: null, envFile: null, env: {}, hosts: [], tags: [], template: false, confirm: false, locked: null });
+    expect(params).toEqual({ cwd: null, profile: null, envFile: null, env: {}, hosts: [], tags: [], template: false, confirm: false, favorite: false, locked: null });
     expect(problems).toEqual([]);
     expect(end).toBe(0);
   });
 
-  test("all nine keys parse together", () => {
+  test("all ten keys parse together", () => {
     const { params, problems } = parseFrontmatter(
       fm(
-        "cwd: ~/Projects/ledge\nprofile: petstore\nenvFile: ./.env\nhost: web1 deploy@prod\ntags: work, ledge\ntemplate: true\nconfirm: true\nlocked: v1.aa.bb.cc\nenv:\n  NODE_ENV: development\n  PORT: 3000\n",
+        "cwd: ~/Projects/ledge\nprofile: petstore\nenvFile: ./.env\nhost: web1 deploy@prod\ntags: work, ledge\ntemplate: true\nconfirm: true\nfavorite: true\nlocked: v1.aa.bb.cc\nenv:\n  NODE_ENV: development\n  PORT: 3000\n",
       ),
     );
     expect(params).toEqual({
@@ -68,6 +68,7 @@ describe("parseFrontmatter", () => {
       tags: ["work", "ledge"],
       template: true,
       confirm: true,
+      favorite: true,
       locked: "v1.aa.bb.cc",
     });
     expect(problems).toEqual([]);
@@ -107,6 +108,16 @@ describe("parseFrontmatter", () => {
     // the note's author can tell which blocks pause.
     expect(params.confirm).toBe(false);
     expect(problems).toEqual([{ line: 2, message: `"confirm" must be true or false: "always"` }]);
+  });
+
+  test("favorite takes exactly true or false; anything else costs the line", () => {
+    expect(parseFrontmatter(fm("favorite: true\n")).params.favorite).toBe(true);
+    expect(parseFrontmatter(fm("favorite: false\n")).params.favorite).toBe(false);
+    const { params, problems } = parseFrontmatter(fm("favorite: yes\n"));
+    // A typo does not put the note in the Favorites section. The section is
+    // short by design, and a row nobody asked for is a row nobody trusts.
+    expect(params.favorite).toBe(false);
+    expect(problems).toEqual([{ line: 2, message: `"favorite" must be true or false: "yes"` }]);
   });
 
   test("an env var named template is an env var, not the marker", () => {
@@ -370,8 +381,54 @@ describe("parseFrontmatter", () => {
 
   test("an empty block is valid and empty", () => {
     const { params, problems, end } = parseFrontmatter("---\n---\n# Title\n");
-    expect(params).toEqual({ cwd: null, profile: null, envFile: null, env: {}, hosts: [], tags: [], template: false, confirm: false, locked: null });
+    expect(params).toEqual({ cwd: null, profile: null, envFile: null, env: {}, hosts: [], tags: [], template: false, confirm: false, favorite: false, locked: null });
     expect(problems).toEqual([]);
     expect(end).toBeGreaterThan(0);
+  });
+});
+
+// The Favorite command's half of the marker: the line goes in and comes out
+// without disturbing anything else in the block (bun/notes.ts favoriteNote).
+describe("setFavoriteLine", () => {
+  test("a note with no block grows one holding just the marker", () => {
+    expect(setFavoriteLine("# Title\n\nbody\n", true)).toBe("---\nfavorite: true\n---\n# Title\n\nbody\n");
+  });
+
+  test("the marker lands after the keys already there, and leaves them alone", () => {
+    const text = fm("cwd: /tmp/proj\n# a comment\ntags: work\n");
+    expect(setFavoriteLine(text, true)).toBe(fm("cwd: /tmp/proj\n# a comment\ntags: work\nfavorite: true\n"));
+  });
+
+  test("a hand-written false is turned over where it sits, not doubled", () => {
+    const text = fm("favorite: false\ncwd: /tmp\n");
+    expect(setFavoriteLine(text, true)).toBe(fm("favorite: true\ncwd: /tmp\n"));
+  });
+
+  test("unfavoriting takes the whole block when the marker was all of it", () => {
+    // Favoriting a plain note and unfavoriting it leaves the note as it was
+    // found, husk included. stripLockedLine's rule (bun/vault.ts).
+    const plain = "# Title\n\nbody\n";
+    expect(setFavoriteLine(setFavoriteLine(plain, true), false)).toBe(plain);
+  });
+
+  test("a block holding anything else is the user's and stays", () => {
+    const text = fm("favorite: true\n# a comment\n");
+    expect(setFavoriteLine(text, false)).toBe(fm("# a comment\n"));
+  });
+
+  test("either direction is a no-op when the note already reads that way", () => {
+    const marked = fm("favorite: true\n");
+    const plain = "# Title\n";
+    expect(setFavoriteLine(marked, true)).toBe(marked);
+    expect(setFavoriteLine(plain, false)).toBe(plain);
+    expect(setFavoriteLine(fm("cwd: /tmp\n"), false)).toBe(fm("cwd: /tmp\n"));
+  });
+
+  test("an env var named favorite is left where it is", () => {
+    // An indented line belongs to the env map. Stripping it would delete a
+    // variable, and stamping over it would move the marker inside the map.
+    const text = fm("env:\n  favorite: yes\n");
+    expect(setFavoriteLine(text, false)).toBe(text);
+    expect(setFavoriteLine(text, true)).toBe(fm("env:\n  favorite: yes\nfavorite: true\n"));
   });
 });

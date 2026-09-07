@@ -85,7 +85,15 @@ describe("the schema's shape against the protocol version", () => {
   // touches the notes. What a peer of either age does to the notes is
   // `noteDelete`'s move into the trash, which both ends have always had, so an
   // old server cannot half-delete a folder.
-  const PINNED = { protocol: 5, shape: "a51a2fc0e12f5890" };
+  //
+  // Then the favorite marker. NoteMeta gained an optional `favorite`, and
+  // noteFavorite is a new method: folder's two calls again, and they land the
+  // same way. A server that predates the method refuses it by name at the
+  // handshake's method check, so favoriting fails loudly instead of writing
+  // somewhere wrong, and a NoteMeta with no `favorite` reads as unmarked,
+  // which is what every note on such a server is. Nothing was retyped, made
+  // required, or narrowed. The pin moves and the version does not.
+  const PINNED = { protocol: 5, shape: "1717880ad464b32e" };
 
   test("a payload shape does not change without someone deciding whether it breaks", async () => {
     const shape = digest(shapeOf(await Bun.file(SCHEMA).text()));

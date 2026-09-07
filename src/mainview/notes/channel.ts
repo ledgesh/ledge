@@ -70,6 +70,11 @@ interface NoteHandlers {
   retitle: (path: string, text: string) => Promise<NoteMeta>;
   // Move a note into another folder of its own workspace (rpc noteMove).
   move: (path: string, subfolder: string | null) => Promise<NoteMeta>;
+  // Add or remove the note's `favorite: true` frontmatter line (rpc
+  // noteFavorite). One line of the file changes, so an open buffer picks the
+  // edit up the way it picks up any external one (editorPool
+  // reloadOpenNotes).
+  favorite: (path: string, on: boolean) => Promise<NoteMeta>;
   // Rename one folder of a workspace, in place (rpc folderRename). `name` is
   // one segment, never a path. Resolves to the folder's new root-relative
   // path and to every note that travelled: old path beside new meta.
@@ -206,6 +211,12 @@ export function deleteFolder(folder: string, subfolder: string): Promise<FolderD
 // a name: Bun derives the slug, so it cannot be handed a path.
 export function retitleNote(path: string, text: string): Promise<NoteMeta> {
   return bridge().retitle(path, text);
+}
+
+// Mark or unmark a note as a favorite. Resolves to the note as the marker
+// leaves it, so the caller can tell a no-op from a change.
+export function favoriteNote(path: string, on: boolean): Promise<NoteMeta> {
+  return bridge().favorite(path, on);
 }
 
 // Resolves to where the note landed in the trash (the handle Undo restores

@@ -30,6 +30,7 @@ import {
   deleteNote,
   deleteTrashed,
   emptyTrash,
+  favoriteNote,
   firstLockedHeader,
   isNoteLocked,
   listNotes,
@@ -773,6 +774,7 @@ export async function createServer(deps: { push: Audience; native: NativeDeps })
     folderRename: ({ root, folder, name }) => renameFolder(root, folder, name),
     folderDelete: ({ root, folder }) => deleteFolder(root, folder),
     noteRetitle: async ({ path, text }) => ({ note: await retitleNote(path, text) }),
+    noteFavorite: async ({ path, on }) => ({ note: await favoriteNote(path, on) }),
     // The daily.workspace setting outranks the view's selected workspace,
     // which is only the fallback. daily.folder says where inside it, and
     // matters only on the day the note is created: an existing one is found

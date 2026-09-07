@@ -19,14 +19,16 @@ import {
   deleteFolder as deleteFolderFile,
   deleteNote as trashFile,
   deleteTrashed as unlinkTrashed,
+  dispatchNotesChanged,
   emptyTrash,
+  favoriteNote as markFavorite,
   listTrash,
   moveNote as moveFile,
   renameFolder as renameFolderFile,
   restoreNote as untrashFile,
   type NoteMeta,
 } from "./channel";
-import { forgetDoc, freezeDoc, retargetDoc } from "./store";
+import { forgetDoc, freezeDoc, retargetDoc, saveNow } from "./store";
 import { folderRenamed } from "./expansion";
 import type { Action } from "@/workspace/store";
 
@@ -160,6 +162,40 @@ export async function moveNoteTo(
   // editor, its undo history and the note's shells carry through the move.
   dispatch({ type: "noteRenamed", path, note });
   return { note, error: null };
+}
+
+// Favorite a note, or unfavorite it. The row's menu, its bare `f`, and the
+// hover star all land here.
+//
+// The buffers are flushed first, and that is the whole subtlety. Bun edits the
+// note's frontmatter on disk (bun/notes.ts favoriteNote), so an open buffer
+// with unsaved keystrokes in it would be one version behind the moment the
+// marker lands, and its next save would carry the pre-marker text: the
+// divergence guard would take the marked file to the trash and the favorite
+// with it. Saving first leaves nothing to diverge, and the marked text comes
+// back to the editor through the ordinary external-edit reload
+// (workspace/editorPool.ts reloadOpenNotes), which the notesChanged dispatch
+// below fires.
+//
+// `docIds` is every open tab on the note, as in moveNoteTo. Resolves to an
+// error message, or null.
+export async function favoriteNoteNow(
+  path: string,
+  on: boolean,
+  folder: string,
+  docIds: string[],
+): Promise<string | null> {
+  try {
+    for (const id of docIds) await saveNow(id);
+    await markFavorite(path, on);
+  } catch (err) {
+    console.error("[notes] favorite failed", err);
+    return err instanceof Error ? err.message : String(err);
+  }
+  // The same refresh a lock does (vault/channel.ts): the folder's list is
+  // re-read, and every clean open buffer picks the marker line up.
+  dispatchNotesChanged(folder);
+  return null;
 }
 
 // Rename one folder of the selected workspace. The sidebar's inline field on a

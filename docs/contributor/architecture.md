@@ -718,7 +718,10 @@ snapshot at construction time through `lib/settings.ts`.
   relaunch, and went stale against the notes it described, while the
   marker is edited where the note is, read live off the note lists
   (`NoteMeta.template`), travels through renames, and is stripped at
-  instantiation. **A new setting is also documented in `docs/user/`, on the
+  instantiation. WHICH notes are favorites took that settled argument as its
+  starting point and never had a knob: `favorite: true` in the note, read off
+  the same lists (`NoteMeta.favorite`), written by the Favorite command
+  (`bun/notes.ts` favoriteNote) and by hand. **A new setting is also documented in `docs/user/`, on the
   page its feature lives on** — not only in the template comment. The
   template is visible only to someone already inside the file; the manual is
   what full-text search, and every agent, can reach. Four knobs (`shell.*`,

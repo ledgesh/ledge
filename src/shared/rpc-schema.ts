@@ -66,6 +66,12 @@ export interface NoteMeta {
   // notes a row means. Derived from the path Bun-side, so it cannot go stale.
   // Optional, so a workspace with no folders sends nothing extra.
   folder?: string;
+  // Present when the note's frontmatter declares `favorite: true`, absent
+  // otherwise. The note browser draws its Favorites section from the per-folder
+  // lists it already has, the way the ⌥⌘N picker draws itself from `template`,
+  // so the marker needs no query and no registry. It rides the same head read
+  // the title does.
+  favorite?: true;
   // Present when the note is locked (its frontmatter carries the crypto
   // header, locking.md). The sidebar and ⌘P lock glyph, the scans' skip, and
   // the agent listings' flag all read this. It rides the same head read the
@@ -386,6 +392,15 @@ export type LedgeRPC = {
       // actually changes, never on an ordinary edit. The docId is untouched, so
       // the note's editor and shell are unaffected.
       noteRetitle: { params: { path: string; text: string }; response: { note: NoteMeta } };
+      // Add or remove the note's `favorite: true` frontmatter line, the marker
+      // the browser's Favorites section reads. One line of the block changes
+      // and every other byte is preserved, so this is a text edit Bun happens
+      // to make: the same line typed by hand means the same thing. A locked
+      // note takes it with the vault shut, since the marker sits in the
+      // plaintext head beside its tags (locking.md §2) and the body is never
+      // read. `on` false on a note that is not marked is a no-op, so the two
+      // command faces cannot fight over a stale list.
+      noteFavorite: { params: { path: string; on: boolean }; response: { note: NoteMeta } };
       // Create or open today's daily note (bun/daily.ts openDaily). Bun
       // computes the local YYYY-MM-DD title and resolves it by title in the
       // daily workspace: the daily.workspace setting when it names a registered

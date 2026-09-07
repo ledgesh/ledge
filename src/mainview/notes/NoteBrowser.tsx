@@ -37,6 +37,7 @@ import {
   LockOpen,
   Plus,
   RotateCcw,
+  Star,
   Trash2,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -46,7 +47,7 @@ import { useListNav } from "@/lib/useListNav";
 import { useRowMenu } from "@/lib/useRowMenu";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ContextMenu, MenuDivider } from "@/components/ContextMenu";
-import { useCommands } from "@/commands/CommandProvider";
+import { useCommands, useCommandTitle } from "@/commands/CommandProvider";
 import { CommandMenuItem } from "@/commands/CommandMenuItem";
 import { configureUi } from "@/commands/glue";
 import { tooltip } from "@/commands/format";
@@ -70,7 +71,7 @@ import {
   restoreNote,
 } from "./actions";
 import { createNote } from "./channel";
-import { browserRows, folderList, folderOf, folderRowId, type BrowserRow } from "./folders";
+import { browserRows, favoriteRows, folderList, folderOf, folderRowId, type BrowserRow } from "./folders";
 import { expandFolder, toggleFolder, useExpanded } from "./expansion";
 import { requestTitleCaret } from "@/workspace/editorPool";
 import type { NoteMeta, TrashMeta } from "./channel";
@@ -143,14 +144,17 @@ export function NoteBrowser() {
   // (notes/expansion.ts): Move to Folder… and New Note in Folder both have to
   // reveal where the note landed, so the state cannot live in this component.
   const expanded = useExpanded(selected.folder);
-  // The tree, flattened. browserRows applies the sort within each folder.
-  const rows = useMemo(
-    () =>
-      browserRows(notes, expanded, (a, b) =>
-        readOnly ? a.path.localeCompare(b.path) : a.title.localeCompare(b.title),
-      ),
-    [notes, expanded, readOnly],
+  const order = useMemo(
+    () => (a: NoteMeta, b: NoteMeta) =>
+      readOnly ? a.path.localeCompare(b.path) : a.title.localeCompare(b.title),
+    [readOnly],
   );
+  // The tree, flattened. browserRows applies the sort within each folder.
+  const rows = useMemo(() => browserRows(notes, expanded, order), [notes, expanded, order]);
+  // The favorites, above the tree. Their rows are the tree's rows over again,
+  // with ids of their own, so ↑/↓ walk the section and the tree as one list
+  // and every row verb reaches a favorite twice over.
+  const favorites = useMemo(() => favoriteRows(notes, order), [notes, order]);
   // Every folder of this workspace, for the chooser's list.
   const folders = useMemo(() => folderList(notes), [notes]);
   const open = useMemo(() => openNotePaths(state), [state]);
@@ -358,6 +362,32 @@ export function NoteBrowser() {
       </div>
 
       <div {...nav.containerProps} className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-2">
+        {/* The favorites, in a section of their own above the tree. It draws
+            nothing while nothing is marked, the Trash section's stance: a
+            heading over an empty list only takes room from the notes. */}
+        {favorites.length > 0 && (
+          <>
+            <div className="px-2 pb-0.5 pt-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70">
+              Favorites
+            </div>
+            {favorites.map((row, i) => (
+              <NoteRow
+                key={row.id}
+                note={row.note}
+                depth={0}
+                current={row.note.path === current}
+                open={open.has(row.note.path)}
+                unlocked={vault === "unlocked"}
+                draggable={false}
+                rowProps={nav.rowProps(row.id, i)}
+                onOpen={() => exec("note.open", { kind: "note", path: row.note.path })}
+                onFavorite={() => exec("note.favorite", { kind: "note", path: row.note.path })}
+                onContextMenu={(x, y) => setMenu({ kind: "note", path: row.note.path, x, y })}
+              />
+            ))}
+            <div className="mx-2 my-1 border-t" />
+          </>
+        )}
         {rows.length === 0 ? (
           <p className="px-2 py-1.5 text-[11px] leading-snug text-muted-foreground">
             No notes yet. A new note is saved to this workspace's folder as soon as you type in it.
@@ -370,7 +400,7 @@ export function NoteBrowser() {
                 row={row}
                 dropping={dropOn === row.folder}
                 renaming={renaming === row.folder}
-                rowProps={nav.rowProps(row.id, i)}
+                rowProps={nav.rowProps(row.id, favorites.length + i)}
                 onRename={(name) => rename(row.folder, name)}
                 onEndRename={() => setRenaming(null)}
                 onToggle={() => toggleFolder(selected.folder, row.folder)}
@@ -390,8 +420,9 @@ export function NoteBrowser() {
                 open={open.has(row.note.path)}
                 unlocked={vault === "unlocked"}
                 draggable={!readOnly}
-                rowProps={nav.rowProps(row.id, i)}
+                rowProps={nav.rowProps(row.id, favorites.length + i)}
                 onOpen={() => exec("note.open", { kind: "note", path: row.note.path })}
+                onFavorite={readOnly ? undefined : () => exec("note.favorite", { kind: "note", path: row.note.path })}
                 onContextMenu={(x, y) => setMenu({ kind: "note", path: row.note.path, x, y })}
               />
             ),
@@ -527,6 +558,15 @@ export function NoteBrowser() {
               ever take them. */}
           {!readOnly && (
             <>
+          {/* The marker verbs, above filing. The item titles itself Favorite
+              or Unfavorite from the row's live flag (registry.ts), so the menu
+              says which way it goes the way the row's star shows which way it
+              is. */}
+          <CommandMenuItem
+            id="note.favorite"
+            target={{ kind: "note", path: menu.path }}
+            onClose={() => setMenu(null)}
+          />
           {/* Filing, above the lock faces and well clear of Delete. Move and
               Delete both relocate the note's file, but the destructive one
               keeps the bottom of the menu to itself (interactions.md §4). */}
@@ -855,6 +895,7 @@ function NoteRow({
   draggable,
   rowProps,
   onOpen,
+  onFavorite,
   onContextMenu,
 }: {
   note: NoteMeta;
@@ -868,12 +909,17 @@ function NoteRow({
   draggable: boolean;
   rowProps: ReturnType<ReturnType<typeof useListNav>["rowProps"]>;
   onOpen: () => void;
+  // Toggle the favorite marker. Undefined in the manual, whose pages take no
+  // marker, which is what leaves those rows without the star.
+  onFavorite?: () => void;
   onContextMenu: (x: number, y: number) => void;
 }) {
   // A click opens the note. A press held on the row opens the menu instead.
   // useRowMenu swallows the click WebKit sends afterwards, so a long press
   // does not also open the note it was asking about (interactions.md §1a).
   const press = useRowMenu(onContextMenu, onOpen);
+  // The star's tooltip, from the command itself: this row's face of it.
+  const favoriteTitle = useCommandTitle("note.favorite", { kind: "note", path: note.path });
   return (
     <div
       {...rowProps}
@@ -914,6 +960,35 @@ function NoteRow({
       <div className={cn("min-w-0 flex-1 truncate text-sm leading-tight", !open && "text-muted-foreground")}>
         {note.title}
       </div>
+      {/* The star, the trash row's hover-verb pattern (interactions.md §3). A
+          marked note wears a filled one at rest, since that is what the
+          section above is drawn from; an unmarked one shows a hollow one on
+          hover. Hover is the pointer's shortcut and not the verb's only home:
+          the row menu and `f` carry it where there is no hover. The click is
+          stopped here so the row underneath does not also open the note. */}
+      {onFavorite && (
+        <button
+          className={cn(
+            "hidden size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground",
+            note.favorite ? "hoverable:flex" : "hoverable:group-hover:flex",
+          )}
+          title={favoriteTitle}
+          onClick={(e) => {
+            e.stopPropagation();
+            onFavorite();
+          }}
+        >
+          <Star className={cn("size-3", note.favorite && "fill-current")} />
+        </button>
+      )}
+      {/* On touch the button is absent rather than small (interactions.md
+          §1a): a 20-point control between the title and the row's own tap is
+          a mis-tap, and the long press already carries the verb. What the row
+          still has to say is which notes are marked, so the star stays as a
+          glyph with no box of its own. */}
+      {note.favorite && (
+        <Star data-testid="note-favorite-glyph" className="hidden size-3 shrink-0 fill-current text-muted-foreground touch:block" />
+      )}
       {open && !current && <span className="size-1.5 shrink-0 rounded-full bg-muted-foreground/50" />}
     </div>
   );

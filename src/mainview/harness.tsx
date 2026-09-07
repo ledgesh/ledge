@@ -12,7 +12,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import type { BacklinkHit, NoteMeta, TagHit, TerminalClaim, TrashMeta, VaultState, WorkspaceRootInfo } from "../shared/rpc-schema";
 import { headingOf, labelOf, slugify, slugOf } from "../shared/slug";
-import { frontmatterEnd, parseFrontmatter } from "../shared/frontmatter";
+import { frontmatterEnd, parseFrontmatter, setFavoriteLine } from "../shared/frontmatter";
 import { instantiateTemplate, isoDateOf } from "../shared/template";
 import { collectHits, type SearchHit } from "../shared/search";
 import { folderContains, folderLeafProblem, folderScopeOf, notesUnder } from "../shared/folders";
@@ -292,6 +292,7 @@ class FakeStore {
       mtimeMs: n.mtimeMs,
       ...(folder === "" ? {} : { folder }),
       ...(p.template ? { template: p.template } : {}),
+      ...(p.favorite ? { favorite: true as const } : {}),
       ...(p.locked !== null ? { locked: true as const } : {}),
     };
   }
@@ -531,6 +532,20 @@ class FakeStore {
     const mtimeMs = this.tick();
     data.notes.set(path, { text, mtimeMs });
     return { mtimeMs, divergedTo };
+  }
+
+  // Mirrors favoriteNote (bun/notes.ts): the frontmatter marker goes on or
+  // off, the rest of the note is untouched, and the file's mtime moves only
+  // when the line actually changed. A locked note takes it with the vault
+  // shut, as it does there: the marker is head text, not body.
+  favorite(path: string, on: boolean): NoteMeta {
+    this.assertWritable(path);
+    const { data } = this.rootOf(path);
+    const cur = data.notes.get(path);
+    if (!cur) throw new Error(`no note at ${path}`);
+    const text = setFavoriteLine(cur.text, on);
+    if (text !== cur.text) data.notes.set(path, { text, mtimeMs: this.tick() });
+    return this.meta(data, path);
   }
 
   retitle(path: string, text: string): NoteMeta {
@@ -777,6 +792,7 @@ configureNotes({
   create: async (folder, text, subfolder) => store.create(folder, text, subfolder),
   retitle: async (path, text) => store.retitle(path, text),
   move: async (path, subfolder) => store.moveNote(path, subfolder),
+  favorite: async (path, on) => store.favorite(path, on),
   renameFolder: async (folder, subfolder, name) => store.renameFolder(folder, subfolder, name),
     deleteFolder: async (folder, subfolder) => store.deleteFolder(folder, subfolder),
   remove: async (path) => store.remove(path),

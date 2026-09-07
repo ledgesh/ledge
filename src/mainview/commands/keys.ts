@@ -219,6 +219,18 @@ export const COMMANDS = {
   "note.delete": { title: "Delete", listKeys: ["d", "Backspace"] },
   "note.deleteCurrent": { title: "Delete Note", keys: ["Mod-Backspace"] },
   "note.copyPath": { title: "Copy Path", listKeys: ["c"] },
+  // The favorite marker, which puts a note in the browser's Favorites section
+  // as well as its folder. One command that toggles, not the two faces the
+  // template and lock markers use: those are palette-only, and this one holds
+  // a bare key, which the dispatcher resolves without consulting `when`
+  // (commands/keymap.ts). Two faces sharing `f` would leave whichever
+  // registered first swallowing the key on every row the other face owns. The
+  // registry retitles it "Unfavorite" on a marked note, as frontmatter.edit
+  // retitles itself. `f` is the note row's spare mnemonic beside `m`, and
+  // favoriting is a row act above all: the note you want at the top is one you
+  // are usually looking at in the list. No chord, since the ⌘ letters are
+  // spent (interactions.md §2) and the section is a click away.
+  "note.favorite": { title: "Favorite", listKeys: ["f"] },
   // Filing. No chord for any of the three: putting a note somewhere is a
   // once-in-a-while act, and the N family is already spent (interactions.md
   // §2). `m` is the note row's spare mnemonic. The folder row's Enter is its

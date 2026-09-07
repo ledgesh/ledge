@@ -16,7 +16,7 @@ import { mkdir, readdir, readFile, rename, rmdir, stat, unlink, writeFile } from
 import type { Stats } from "node:fs";
 import { ASSETS_DIRNAME, type BacklinkHit, type NoteMeta, type TagHit, type TrashMeta } from "../shared/rpc-schema";
 import { headingOf, labelOf, slugOf, titleOf } from "../shared/slug";
-import { parseFrontmatter } from "../shared/frontmatter";
+import { parseFrontmatter, setFavoriteLine } from "../shared/frontmatter";
 import { collectHits, type SearchHit } from "../shared/search";
 import { resolveWikiTitle, wikiRefsOf } from "../shared/wikilinks";
 import { normalizeTag, tagDirectoryOf, tagRefsOf, type TagInfo } from "../shared/tags";
@@ -81,10 +81,11 @@ function baseFor(text: string): string {
 
 // A note as the view sees it. `title` is the display label: the note's heading
 // ("Shipping Notes"), else its filename, a slug of that same heading
-// (shipping-notes.md). `template` and `locked` come from the frontmatter in
-// the text already in hand, so neither costs an extra read: the ⌥⌘N template
-// picker builds its registry out of the listing. Each is present only when the
-// note is marked, and `template` carries `true` or the `daily` role.
+// (shipping-notes.md). `template`, `favorite` and `locked` come from the
+// frontmatter in the text already in hand, so none of them costs an extra
+// read: the ⌥⌘N template picker and the browser's Favorites section both build
+// themselves out of the listing. Each is present only when the note is marked,
+// and `template` carries `true` or the `daily` role.
 async function metaFor(path: string, text: string): Promise<NoteMeta> {
   const p = parseFrontmatter(text).params;
   const root = rootContaining(path);
@@ -95,6 +96,7 @@ async function metaFor(path: string, text: string): Promise<NoteMeta> {
     mtimeMs: (await stat(path)).mtimeMs,
     ...(folder === "" ? {} : { folder }),
     ...(p.template ? { template: p.template } : {}),
+    ...(p.favorite ? { favorite: true as const } : {}),
     ...(p.locked !== null ? { locked: true as const } : {}),
   };
 }
@@ -120,6 +122,7 @@ async function metaAt(path: string, root?: string): Promise<NoteMeta> {
     mtimeMs: (await stat(path)).mtimeMs,
     ...(folder === "" ? {} : { folder }),
     ...(p?.template ? { template: p.template } : {}),
+    ...(p?.favorite ? { favorite: true as const } : {}),
     ...(p !== null && p.locked !== null ? { locked: true as const } : {}),
   };
 }
@@ -659,6 +662,36 @@ function rebaseAssetRefs(text: string, root: string, from: string, to: string): 
     }
     return `${open}${assetRefFor(root, asset, to)}${close}`;
   });
+}
+
+// Mark a note as one of its workspace's favorites, or unmark it: one line of
+// the frontmatter changes (shared/frontmatter.ts setFavoriteLine) and every
+// other byte is preserved, because the rest of the block is the user's.
+//
+// The file's own bytes are edited rather than a decrypted buffer. The marker
+// sits in the plaintext head beside the note's tags, so a locked note is
+// favorited with the vault shut and no body is read or written (locking.md
+// §2). writeSealed is the write, for its own half of that function's job: a
+// foreign edit that landed since the read goes to the trash instead of being
+// overwritten by bytes from a moment ago.
+//
+// Already-the-asked-for-way is the outcome asked for, as in lockNote: the
+// listing a command fired from can be a beat stale, and a second Favorite must
+// not rewrite the file to say what it already says.
+export async function favoriteNote(path: string, on: boolean): Promise<NoteMeta> {
+  assertWritableRoot(assertNote(path)); // the manual's pages take no marker
+  touchVault();
+  let raw: string;
+  let mtimeMs: number;
+  try {
+    mtimeMs = (await stat(path)).mtimeMs;
+    raw = await readFile(path, "utf8");
+  } catch {
+    throw new Error(`no note at ${path}`);
+  }
+  const next = setFavoriteLine(raw, on);
+  if (next !== raw) await writeSealed(path, next, mtimeMs);
+  return metaAt(path);
 }
 
 // Lock a note: mint its header (a random data key wrapped by the master key,

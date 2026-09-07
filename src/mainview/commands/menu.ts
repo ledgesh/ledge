@@ -164,6 +164,10 @@ export const MENU: readonly MenuSection[] = [
       { command: "block.runInTerminal" },
       { command: "session.restart" },
       "---",
+      // The favorite marker, which is one command wearing the title of the
+      // face it will run (registry.ts), where the pairs below are two
+      // commands. Either way the visible item says what will happen.
+      { command: "note.favorite" },
       // Two-faces pairs: the registry keeps exactly one of each live, so the
       // visible item always says what will happen.
       { command: "note.templateOn", hideWhenDisabled: true },

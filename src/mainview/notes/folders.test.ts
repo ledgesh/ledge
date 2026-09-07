@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import {
   browserRows,
   countIn,
+  favoriteRowId,
+  favoriteRows,
   expandedRenamed,
   expandedWith,
   expandedWithout,
@@ -169,5 +171,34 @@ describe("expansion", () => {
 
   test("a collapsed folder stays collapsed under its new name", () => {
     expect([...expandedRenamed(new Set(["admin"]), "projcts", "projects")]).toEqual(["admin"]);
+  });
+});
+
+describe("favoriteRows", () => {
+  const fav = (path: string, title: string, folder?: string): NoteMeta => ({
+    ...note(path, title, folder),
+    favorite: true,
+  });
+
+  test("only marked notes, sorted, flat", () => {
+    // Flat and at depth 0 wherever the note actually sits: the section says
+    // which notes, and the tree below says where they are.
+    const notes = [fav("/r/p/z.md", "Zebra", "projects"), note("/r/a.md", "Plain"), fav("/r/b.md", "Alpha")];
+    const rows = favoriteRows(notes, byTitle);
+    expect(rows.map((r) => r.note.title)).toEqual(["Alpha", "Zebra"]);
+    expect(rows.every((r) => r.depth === 0)).toBe(true);
+  });
+
+  test("nothing marked is no section", () => {
+    expect(favoriteRows([note("/r/a.md", "Plain")], byTitle)).toEqual([]);
+  });
+
+  test("a favorite's two rows carry different ids", () => {
+    // The same note is a row here and a row in the tree. One id on both would
+    // take the roving tabindex together (lib/useListNav.ts).
+    const notes = [fav("/r/a.md", "Alpha")];
+    const inTree = browserRows(notes, new Set(), byTitle);
+    expect(favoriteRows(notes, byTitle)[0]!.id).not.toBe(inTree[0]!.id);
+    expect(favoriteRowId("/r/a.md")).not.toBe("/r/a.md");
   });
 });

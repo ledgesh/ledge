@@ -28,7 +28,7 @@ describe("frontmatterCompletionSource: keys", () => {
   test("typing at the start of a body line offers the params keys, hinted", () => {
     const r = complete("---\ncw\n---\n", 6);
     expect(r?.from).toBe(4);
-    expect(labels(r)).toEqual(["cwd", "profile", "envFile", "env", "host", "tags", "template", "confirm"]);
+    expect(labels(r)).toEqual(["cwd", "profile", "envFile", "env", "host", "tags", "template", "confirm", "favorite"]);
     // Every key carries a one-line hint in `detail`.
     expect(r?.options.every((o) => typeof o.detail === "string" && o.detail.length > 0)).toBe(true);
     // Accepting a key writes the colon too, so the caret lands at the value.
@@ -44,7 +44,7 @@ describe("frontmatterCompletionSource: keys", () => {
 
   test("an empty line pops only on an explicit ask", () => {
     expect(complete("---\n\n---\n", 4)).toBeNull();
-    expect(labels(complete("---\n\n---\n", 4, true))).toHaveLength(8);
+    expect(labels(complete("---\n\n---\n", 4, true))).toHaveLength(9);
   });
 
   test("silent on the fences, outside the block, and without a block", () => {
@@ -68,6 +68,13 @@ describe("frontmatterCompletionSource: values", () => {
   test("confirm: offers exactly true and false, each explained", () => {
     const r = complete("---\nconfirm: t\n---\n", 14);
     expect(r?.from).toBe(13);
+    expect(labels(r)).toEqual(["true", "false"]);
+    expect(r?.options.every((o) => typeof o.detail === "string" && o.detail.length > 0)).toBe(true);
+  });
+
+  test("favorite: offers exactly true and false, each explained", () => {
+    const r = complete("---\nfavorite: t\n---\n", 15);
+    expect(r?.from).toBe(14);
     expect(labels(r)).toEqual(["true", "false"]);
     expect(r?.options.every((o) => typeof o.detail === "string" && o.detail.length > 0)).toBe(true);
   });

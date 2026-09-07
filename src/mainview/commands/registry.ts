@@ -56,6 +56,7 @@ import {
   Server as ServerIcon,
   Settings as SettingsIcon,
   Shapes,
+  Star,
   SquareCheck,
   SquareX,
   TableOfContents,
@@ -67,7 +68,7 @@ import {
   X,
 } from "lucide-react";
 import { findLeaf, focusedDocId, focusedTab, leafIds } from "@/workspace/tree";
-import { notesOf, trashOf } from "@/workspace/store";
+import { docIdsForPath, notesOf, trashOf } from "@/workspace/store";
 import { SCRATCH_DOC } from "@/workspace/seeds";
 import { parseFrontmatter } from "../../shared/frontmatter";
 import type { NoteMeta } from "../../shared/rpc-schema";
@@ -951,6 +952,30 @@ export function buildCommands(deps: RegistryDeps): Command[] {
     // exactly. The destination is asked for rather than passed in, because the
     // chooser is also where a folder that does not exist yet gets created
     // (components/FolderPicker.tsx).
+    // The favorite marker, toggled. One command with two titles rather than
+    // the marker pairs' two commands (keys.ts says why), and the title is what
+    // tells the reader which way it will go, since the star in the row already
+    // says which way the note is now. Target-scoped like note.delete: the
+    // sidebar row's menu passes its note, the palette passes none and
+    // targetNote falls back to the focused tab. Absent in the manual, whose
+    // pages take no marker (Bun refuses the write regardless).
+    {
+      id: "note.favorite",
+      title: (ctx) => (targetNote(ctx)?.favorite ? "Unfavorite" : "Favorite"),
+      listKeys: listKeysOf("note.favorite"),
+      icon: Star,
+      targetKind: "note",
+      when: (ctx) => !!targetNote(ctx) && !docsSelected(ctx),
+      run: (ctx) => {
+        const note = targetNote(ctx);
+        if (!note) return;
+        void deps
+          .favoriteNoteNow(ctx.selected.folder, note.path, !note.favorite, docIdsForPath(ctx.state, note.path))
+          .then((error) => {
+            if (error) ctx.ui.showError?.(error);
+          }, failed(ctx));
+      },
+    },
     cmd("note.move", {
       icon: FolderInput,
       targetKind: "note",

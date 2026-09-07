@@ -1,6 +1,6 @@
 // Completion inside the frontmatter block, the `[[` and `#` picker stance:
 // three closed vocabularies the view already holds. The params keys at line
-// start; the values of `template:` and `confirm:`; the workspace's tags after
+// start; the values of `template:`, `confirm:` and `favorite:`; the tags after
 // `tags:` (the `#tag` vocabulary, same bridge) and "local" after `host:`.
 // `profile:` completes nothing: the view holds no profile list. Profiles live
 // outside the notes root, on the Bun side. The `profile` hint says so.
@@ -27,9 +27,16 @@ const KEY_OPTIONS: readonly Completion[] = [
   { label: "tags", apply: "tags: ", detail: "this note's tags (also spelled inline as #tag)" },
   { label: "template", apply: "template: ", detail: "true joins the ⌥⌘N picker; daily seeds ⌘J" },
   { label: "confirm", apply: "confirm: ", detail: "true makes every block here ask before it runs" },
+  { label: "favorite", apply: "favorite: ", detail: "true keeps this note in the sidebar's Favorites" },
 ];
 
-// true and false, nothing else: the parser reports any other value as a typo.
+// true and false, nothing else, for the two boolean keys. The parser reports
+// any other value as a typo, so each popup lists that key's whole grammar.
+const FAVORITE_VALUES: readonly Completion[] = [
+  { label: "true", detail: "kept in the note browser's Favorites section" },
+  { label: "false", detail: "explicitly not a favorite" },
+];
+
 const CONFIRM_VALUES: readonly Completion[] = [
   { label: "true", detail: "every runnable block asks first (a block may opt out with confirm=no)" },
   { label: "false", detail: "only blocks marked confirm on their fence ask" },
@@ -86,7 +93,7 @@ export function frontmatterCompletionSource(context: CompletionContext): Complet
     return { from: line.from, options, validFor: /^[A-Za-z]*$/ };
   }
 
-  const value = /^(template|confirm|tags|host)[ \t]*:([^]*)$/.exec(before);
+  const value = /^(template|confirm|favorite|tags|host)[ \t]*:([^]*)$/.exec(before);
   if (!value) return null;
   // "[" ends the token, the way a separator does: it opens a `tags:` flow
   // sequence (shared/frontmatter.ts unbracket), so the completion inserts
@@ -95,8 +102,9 @@ export function frontmatterCompletionSource(context: CompletionContext): Complet
   // become `tags: [work`, not `tags: work`.
   const token = /[^,\s[]*$/.exec(value[2]!)![0];
 
-  if (value[1] === "template" || value[1] === "confirm") {
-    const options = value[1] === "template" ? TEMPLATE_VALUES : CONFIRM_VALUES;
+  if (value[1] === "template" || value[1] === "confirm" || value[1] === "favorite") {
+    const options =
+      value[1] === "template" ? TEMPLATE_VALUES : value[1] === "confirm" ? CONFIRM_VALUES : FAVORITE_VALUES;
     return { from: pos - token.length, options, validFor: /^[A-Za-z]*$/ };
   }
 

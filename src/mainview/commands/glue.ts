@@ -26,6 +26,7 @@ import {
 } from "@/editor/clipboard";
 import { pickImageAsset } from "@/lib/assets";
 import { flushAllNow, saveNow } from "@/notes/store";
+import { favoriteNoteNow } from "@/notes/actions";
 import { lockNoteAndRefresh, lockVault, removeLockAndRefresh, vaultState } from "@/vault/channel";
 import { expandFolder, isExpanded, toggleFolder } from "@/notes/expansion";
 import {
@@ -160,6 +161,7 @@ export const registryDeps: RegistryDeps = {
   },
   lockNoteNow: lockNoteAndRefresh,
   removeLockNow: removeLockAndRefresh,
+  favoriteNoteNow: (folder, path, on, docIds) => favoriteNoteNow(path, on, folder, docIds),
   editor: {
     find: (docId) => withView(docId, (view) => openSearchPanel(view)),
     replace: (docId) => withView(docId, (view) => openReplace(view)),

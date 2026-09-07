@@ -59,5 +59,6 @@ After editing the block, run "Restart Note Shell" from the command palette (⇧�
 | `host:` | Machines the note's blocks run on. See [[Run Code on Remote Hosts]]. |
 | `tags:` | Tags, the same vocabulary as inline `#hashtags`. See [[Finding Things]]. |
 | `template:` | `true` lists the note in the New Note from Template picker; `daily` makes it the daily template. See [[Daily Notes and Templates]]. |
+| `favorite:` | `true` keeps the note in the Favorites section at the top of the note list. Usually written for you by the Favorite command. See [[Notes and Workspaces]]. |
 | `confirm:` | `true` makes every runnable block in the note ask before running. A single block opts out with `confirm=no` on its fence. See [[Running Code]]. |
 | `locked:` | Written by "Lock This Note…" to mark an encrypted note. You never type it. See [[Note Locking]]. |

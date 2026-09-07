@@ -69,6 +69,15 @@ export interface NoteParams {
   // first is a fact about the note, not a setting about the app. Never feeds a
   // spawn; it lives here because the block has one parser.
   confirm: boolean;
+  // Whether the note is one of the workspace's favorites: it sits in the note
+  // browser's Favorites section as well as in its folder (interactions.md §3).
+  // Which notes those are is a fact about the notes, so the marker lives in
+  // the note, on the `template:` argument (architecture.md §6a): no registry
+  // to keep in sync, nothing to go stale when the note retitles or moves. The
+  // Favorite verbs write this line (bun/notes.ts favoriteNote) and it is
+  // ordinary hand-editable text either way, unlike `locked:`. Never feeds a
+  // spawn; it lives here because the block has one parser.
+  favorite: boolean;
   // The note-locking crypto header (locking.md §2): non-null means the note's
   // body on disk is ciphertext. Bun owns the value's structure (bun/vault.ts
   // parseLockedHeader); here it is one opaque string, parsed like every key
@@ -205,7 +214,7 @@ export function frontmatterEnd(text: string): number {
 /** Parse a note's frontmatter into spawn params (see the header for grammar). */
 export function parseFrontmatter(text: string): Frontmatter {
   const end = frontmatterEnd(text);
-  const params: NoteParams = { cwd: null, profile: null, envFile: null, env: {}, hosts: [], tags: [], template: false, confirm: false, locked: null };
+  const params: NoteParams = { cwd: null, profile: null, envFile: null, env: {}, hosts: [], tags: [], template: false, confirm: false, favorite: false, locked: null };
   const problems: FrontmatterProblem[] = [];
   if (end === 0) return { params, problems, end };
 
@@ -328,6 +337,14 @@ export function parseFrontmatter(text: string): Frontmatter {
         else if (value === "false") params.confirm = false;
         else problem(`"confirm" must be true or false: "${value}"`);
         break;
+      case "favorite":
+        // Exactly true or false, `confirm`'s rule. A typo defaulting to true
+        // would put a note in the Favorites section nobody put there, and the
+        // section is short by design.
+        if (value === "true") params.favorite = true;
+        else if (value === "false") params.favorite = false;
+        else problem(`"favorite" must be true or false: "${value}"`);
+        break;
       case "locked":
         // Opaque here; bun/vault.ts owns the structure. A non-empty value
         // marks the note locked even when malformed: the vault then refuses to
@@ -374,4 +391,69 @@ export function unquote(v: string): string {
 export function unbracket(v: string): string {
   if (v.length >= 2 && v[0] === "[" && v[v.length - 1] === "]") return v.slice(1, -1);
   return v;
+}
+
+// --- line surgery -----------------------------------------------------------
+// Two commands write a frontmatter line rather than the writer: Lock This Note
+// stamps `locked:` (bun/vault.ts) and Favorite writes `favorite:`
+// (bun/notes.ts). Both edit one line and preserve the bytes around it, because
+// every other line in the block is the user's.
+
+/**
+ * The frontmatter block's lines, split so that surgery can address them.
+ * `close` is the closing fence's index into `lines` (the opening fence is
+ * index 0), and the content is the lines between them, both fences excluded.
+ * `end` is frontmatterEnd's offset. Returns null when the text has no block
+ * (frontmatterEnd's definition).
+ */
+export function blockLines(text: string): { end: number; lines: string[]; close: number } | null {
+  const end = frontmatterEnd(text);
+  if (end === 0) return null;
+  const lines = text.slice(0, end).split("\n");
+  for (let i = lines.length - 1; i > 0; i -= 1) {
+    if (FENCE.test(lines[i]!)) return { end, lines, close: i };
+  }
+  return null; // unreachable: frontmatterEnd found a closing fence
+}
+
+// A top-level `favorite:` line, never an indented one. An indented one would
+// be an env var named "favorite" under `env:`.
+const FAVORITE_LINE = /^favorite\s*:/;
+
+/**
+ * The note's text with `favorite: true` present or every `favorite:` line
+ * gone.
+ *
+ * Adding writes the line last, after the keys the writer typed, and grows a
+ * block on a note that has none. Removing takes the whole block with it when
+ * nothing but blank lines is left, so favoriting and unfavoriting a plain note
+ * leaves it as it was found. A block still holding comments or other keys is
+ * the user's and it stays, the rule stripLockedLine follows.
+ *
+ * Idempotent in both directions: a note that already reads the asked-for way
+ * comes back unchanged, so the caller can skip the write.
+ */
+export function setFavoriteLine(text: string, on: boolean): string {
+  const b = blockLines(text);
+  if (!on) {
+    if (b === null) return text;
+    const content = b.lines.slice(1, b.close);
+    const kept = content.filter((l) => !FAVORITE_LINE.test(l));
+    if (kept.length === content.length) return text;
+    if (kept.every((l) => l.trim() === "")) return text.slice(b.end);
+    return [b.lines[0]!, ...kept, ...b.lines.slice(b.close)].join("\n") + text.slice(b.end);
+  }
+  const line = "favorite: true";
+  if (b === null) return `---\n${line}\n---\n${text}`;
+  const content = b.lines.slice(1, b.close);
+  const at = content.findIndex((l) => FAVORITE_LINE.test(l));
+  // Replace where it sits (dropping stray duplicates), so a hand-written
+  // `favorite: false` becomes true in place rather than gaining a second line
+  // the parser would then have to arbitrate.
+  const stamped =
+    at === -1
+      ? [...content, line]
+      : content.map((l, i) => (i === at ? line : l)).filter((l, i) => i === at || !FAVORITE_LINE.test(l));
+  if (stamped.join("\n") === content.join("\n")) return text;
+  return [b.lines[0]!, ...stamped, ...b.lines.slice(b.close)].join("\n") + text.slice(b.end);
 }

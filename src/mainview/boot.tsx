@@ -264,6 +264,7 @@ export function bootView(requests: RequestClient): Promise<void> {
     create: (folder, text, subfolder) => requests.noteCreate({ root: folder, text, folder: subfolder }).then((r) => r.note),
     retitle: (path, text) => requests.noteRetitle({ path, text }).then((r) => r.note),
     move: (path, subfolder) => requests.noteMove({ path, folder: subfolder }).then((r) => r.note),
+    favorite: (path, on) => requests.noteFavorite({ path, on }).then((r) => r.note),
     renameFolder: (folder, subfolder, name) => requests.folderRename({ root: folder, folder: subfolder, name }),
     deleteFolder: (folder, subfolder) => requests.folderDelete({ root: folder, folder: subfolder }),
     remove: (path) => requests.noteDelete({ path }).then((r) => r.trashed),

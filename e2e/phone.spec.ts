@@ -1780,6 +1780,17 @@ test.describe("every target a finger chooses between", () => {
     expect(await sweep(page)).toEqual([]);
   });
 
+  test("a favorited row, whose star is a glyph here and not a control", async ({ page }) => {
+    // The state a phone reaches by long-pressing a note and choosing Favorite.
+    // The desktop's hover star is absent here (interactions.md §1a), so what
+    // the sweep must find in this state is a row and no 20-point button.
+    await openSidebar(page);
+    await pressAndHold(noteRow(page, "Alpha"));
+    await page.getByRole("menu").getByRole("menuitem", { name: "Favorite" }).tap();
+    await expect(page.locator('[data-testid="note-favorite-glyph"]').first()).toBeVisible();
+    expect(await sweep(page)).toEqual([]);
+  });
+
   test("the three right-hand panels", async ({ page }) => {
     await openSidebar(page);
     await noteRow(page, "Alpha").tap();

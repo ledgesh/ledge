@@ -98,7 +98,7 @@ tags: finance
   `note.removeLock` command (§7), which sets an explicit intent flag on the
   write. The editor renders the value dimmed/collapsed (the frontmatter
   styling layer already dims the block); the grammar joins
-  `shared/frontmatter.ts` as the eighth known key, parsed on both sides
+  `shared/frontmatter.ts` as another known key, parsed on both sides
   like the rest.
 - `template:` and `locked:` are **mutually exclusive** — a template's body
   exists to be stamped out into new notes, which is the opposite of locked.
@@ -263,9 +263,11 @@ it. Assets are therefore in scope from v1, with one structural decision:
   setup dialog's one-line help states the trade ("Title and front matter
   are not encrypted"). Opaque filenames are a possible v2, not a v1
   promise.
-- **The frontmatter** — spawn params, tags. A tag on a locked note is
-  visible in the tags panel by design (it is in the plaintext head, where
-  the user put it).
+- **The frontmatter** — spawn params, tags, the favorite marker. A tag on a
+  locked note is visible in the tags panel by design (it is in the plaintext
+  head, where the user put it), and the same head is why Favorite works on a
+  locked note with the vault shut: the line goes in beside the tags and no
+  body is read or written (`bun/notes.ts` favoriteNote).
 - **Existence, mtime, size** — file metadata is the filesystem's.
 - **Pre-lock history** — sync services and backups keep the plaintext
   versions they already took (§1).
@@ -354,7 +356,7 @@ so refusing at the notes.ts seam refuses everywhere at once.
 
 - **Unit (colocated `bun test`)**: envelope round-trip; wrong passphrase
   refused via key-check; tamper fails the GCM tag; header grammar in
-  `shared/frontmatter.ts` (eighth key, both-sides parse); head/body split
+  `shared/frontmatter.ts` (`locked:`, both-sides parse); head/body split
   stability; marker exclusivity.
 - **Invariant tests, scratch root**: after lock-and-save, the note file and
   the whole root contain no plaintext substring of the body (byte grep —

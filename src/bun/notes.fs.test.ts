@@ -21,6 +21,7 @@ import {
   folderPathOf,
   deleteTrashed,
   emptyTrash,
+  favoriteNote,
   isNoteLocked,
   listNotes,
   listTrash,
@@ -40,7 +41,7 @@ import {
   trashDirOf,
   writeNote,
 } from "./notes";
-import { createVault, lockVault, resetVaultForTests } from "./vault";
+import { createVault, lockVault, resetVaultForTests, unlockVault } from "./vault";
 import { MAX_HITS, MAX_HITS_PER_NOTE } from "../shared/search";
 
 if (!resolve(APP_HOME).startsWith(resolve(tmpdir()) + sep)) {
@@ -1079,6 +1080,71 @@ describe("the unlink paths", () => {
     // be set, and listTrash reads it as the deleted-at time.
     expect(await purgeTrash(ROOT, -60_000)).toBe(1);
     expect(await listTrash(ROOT)).toEqual([]);
+  });
+});
+
+// --- favorites -----------------------------------------------------------
+// The marker is ordinary frontmatter that a command happens to write, so these
+// check the two things that makes true: the rest of the note is untouched, and
+// a locked note takes the marker without its body being read.
+describe("favoriteNote", () => {
+  test("marking adds the line and lists the note as a favorite", async () => {
+    const note = await createNote(ROOT, "# Runbook\n\nsteps\n");
+    const meta = await favoriteNote(note.path, true);
+    expect(meta.favorite).toBe(true);
+    expect(await readRaw(note.path, "utf8")).toBe("---\nfavorite: true\n---\n# Runbook\n\nsteps\n");
+    expect((await listNotes(ROOT))[0]?.favorite).toBe(true);
+  });
+
+  test("unmarking restores the exact original bytes", async () => {
+    const original = "# Runbook\n\nsteps\n";
+    const note = await createNote(ROOT, original);
+    await favoriteNote(note.path, true);
+    const meta = await favoriteNote(note.path, false);
+    expect(meta.favorite).toBeUndefined();
+    expect(await readRaw(note.path, "utf8")).toBe(original);
+  });
+
+  test("the frontmatter around the marker survives both directions", async () => {
+    const note = await createNote(ROOT, "---\ncwd: /tmp\ntags: work\n---\n# Runbook\n\nsteps\n");
+    await favoriteNote(note.path, true);
+    expect(await readRaw(note.path, "utf8")).toContain("cwd: /tmp");
+    await favoriteNote(note.path, false);
+    expect(await readRaw(note.path, "utf8")).toBe("---\ncwd: /tmp\ntags: work\n---\n# Runbook\n\nsteps\n");
+  });
+
+  test("marking a note that is already marked writes nothing", async () => {
+    // The listing a command fires from can be a beat stale, so the second call
+    // has to be a no-op rather than a rewrite: an untouched mtime is what
+    // keeps an open buffer from being reloaded for nothing.
+    const note = await createNote(ROOT, "# Runbook\n\nsteps\n");
+    await favoriteNote(note.path, true);
+    const before = (await stat(note.path)).mtimeMs;
+    await favoriteNote(note.path, true);
+    expect((await stat(note.path)).mtimeMs).toBe(before);
+  });
+
+  test("a locked note takes the marker with the vault shut, and stays sealed", async () => {
+    resetVaultForTests();
+    await createVault("test passphrase");
+    const note = await createNote(ROOT, "# Secrets\n\nplutonium shipment schedule\n");
+    await lockNote(note.path);
+    lockVault();
+    const meta = await favoriteNote(note.path, true);
+    expect(meta.favorite).toBe(true);
+    expect(meta.locked).toBe(true);
+    const raw = await readRaw(note.path, "utf8");
+    expect(raw).toContain("favorite: true");
+    expect(raw).toContain("locked: v1.");
+    expect(raw).not.toContain("plutonium shipment schedule");
+    // And the body still opens: the marker went into the head, which is not
+    // what the seal authenticates.
+    await unlockVault("test passphrase");
+    expect((await readNote(note.path))?.text).toContain("plutonium shipment schedule");
+  });
+
+  test("a note that is gone is an error, not a new file", async () => {
+    expect(favoriteNote(join(ROOT, "nothing-here.md"), true)).rejects.toThrow(/no note/);
   });
 });
 

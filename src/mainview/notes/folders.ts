@@ -107,6 +107,32 @@ export function browserRows(
   return rows;
 }
 
+/**
+ * The Favorites section's rows: every note marked `favorite: true`, in the
+ * same order the tree sorts by, all at depth 0.
+ *
+ * A separate list rather than a sort that lifts those notes to the top. The
+ * tree says where a note lives, and hoisting a row out of its folder's group
+ * would make it say something false. So a favorite note has two rows, and the
+ * ids differ (favoriteRowId): one id on two rows would take the roving
+ * tabindex together, the collision browserRows' own ids avoid.
+ */
+export function favoriteRows(
+  notes: readonly NoteMeta[],
+  order: (a: NoteMeta, b: NoteMeta) => number,
+): Extract<BrowserRow, { kind: "note" }>[] {
+  return notes
+    .filter((n) => n.favorite)
+    .sort(order)
+    .map((note) => ({ kind: "note", id: favoriteRowId(note.path), note, depth: 0 }));
+}
+
+/** A favorites row's list id. Prefixed for folderRowId's reason, against the
+ * note's own row in the tree below. */
+export function favoriteRowId(path: string): string {
+  return `fav:${path}`;
+}
+
 /** A folder row's list id. Prefixed because note ids are absolute paths. */
 export function folderRowId(folder: string): string {
   return `dir:${folder}`;

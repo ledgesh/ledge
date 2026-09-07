@@ -269,7 +269,7 @@ export const ledgeTools: McpTool[] = [
   {
     name: "list_notes",
     description:
-      "List notes — title, path, workspace, folder, last modified — newest first, across every available workspace or scoped to one, or to one folder inside it. A row's `folder` is where the note sits inside its workspace (absent at the top level); two notes may share a title, and the folder is what tells them apart. A note whose frontmatter declares `template: true` (or `template: daily`) carries that value in its row: those are the user's note templates, the ones create_note's `template` argument is usually pointed at — and the `daily` one is what daily_note instantiates. A row flagged `locked: true` is one of the user's private locked notes: its body cannot be read, searched, or edited by agents.",
+      "List notes — title, path, workspace, folder, last modified — newest first, across every available workspace or scoped to one, or to one folder inside it. A row's `folder` is where the note sits inside its workspace (absent at the top level); two notes may share a title, and the folder is what tells them apart. A note whose frontmatter declares `template: true` (or `template: daily`) carries that value in its row: those are the user's note templates, the ones create_note's `template` argument is usually pointed at — and the `daily` one is what daily_note instantiates. A row flagged `favorite: true` is one the user has favorited, which puts it at the top of their note browser. A row flagged `locked: true` is one of the user's private locked notes: its body cannot be read, searched, or edited by agents.",
     inputSchema: {
       type: "object",
       properties: {
@@ -293,6 +293,10 @@ export const ledgeTools: McpTool[] = [
         // Present only when the note is marked, as on the meta: most rows
         // carry nothing, and a daily template's row carries template: "daily".
         ...(n.template ? { template: n.template } : {}),
+        // The user's favorites, the handful they keep at the top of their note
+        // browser. Worth knowing which notes those are when a request says
+        // "the usual" or asks where to put something.
+        ...(n.favorite ? { favorite: true } : {}),
         // Agents plan against listings, so a note whose body will refuse
         // must say so in the row (locking.md §8).
         ...(n.locked ? { locked: true } : {}),

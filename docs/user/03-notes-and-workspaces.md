@@ -61,6 +61,20 @@ A locked note has to be unlocked before it can move, because those image referen
 
 Two notes in different folders may share a title. Ledge shows the folder beside the title wherever the list is flat: quick-open, full text search, backlinks, and tag results.
 
+## Favorites
+
+A favorite note sits in a Favorites section at the top of the sidebar, above the tree, however deep in a folder it actually lives.
+
+Favorite a note by pressing `f` with its row focused, by choosing "Favorite" from its right-click menu, or by clicking the star that appears on the row when you point at it. The same three ways unfavorite it, and the menu item says "Unfavorite" once the note is marked.
+
+The note stays where it is. Its row in the tree does not move, because the tree says where a note lives and the section says which notes you keep coming back to. A favorite has a row in both places, and either row's `f`, star or menu unfavorites it.
+
+Favorites are per workspace, and the section is not there at all until you mark something.
+
+Marking a note writes `favorite: true` into its frontmatter ([[Frontmatter and Environments]]), so it is part of the note: it survives a rename, travels when you move the note to another folder, and comes across with the file if you sync your notes to another machine. You can type the line yourself instead, and take it out by deleting the line.
+
+A locked note can be favorited without unlocking it, because the marker sits in the part of the file that stays readable ([[Note Locking]]).
+
 ## Which files become notes
 
 Every `.md` file in the workspace folder and its subfolders is a note, with two kinds of exception.

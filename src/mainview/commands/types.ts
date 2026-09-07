@@ -277,6 +277,11 @@ export interface RegistryDeps {
   // quiet success.
   lockNoteNow(folder: string, path: string): Promise<{ error: string | null; notice: string | null }>;
   removeLockNow(folder: string, path: string): Promise<string | null>;
+  // Put the note's `favorite: true` marker on or take it off, and refresh the
+  // folder's list. Resolves to an error message to surface, or null, like the
+  // two note ops above. `docIds` is every open tab on the note, which the
+  // action saves before the marker lands (notes/actions.ts favoriteNoteNow).
+  favoriteNoteNow(folder: string, path: string, on: boolean, docIds: string[]): Promise<string | null>;
   editor: {
     find(docId: string): void;
     replace(docId: string): void;
