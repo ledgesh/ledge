@@ -7,20 +7,22 @@ import Security
 /// This cannot be: a password is a string somebody typed and can type again, so
 /// what protects it is the keychain's own scoping rather than hardware.
 ///
-/// **This is where the two clients genuinely differ.** A Mac's item is reached
-/// through `/usr/bin/security` and is readable by anything running as that user
-/// (bun/secrets.ts). This one is reached through `SecItem` with no access group,
-/// so it belongs to this app alone and no other app on the phone can ask for it.
+/// This is where the two clients differ. A Mac's item is reached through
+/// `/usr/bin/security` and is readable by anything running as that user
+/// (bun/secrets.ts). This one is reached through `SecItem` with no access
+/// group, so it belongs to this app alone and no other app on the phone can
+/// ask for it.
+///
 /// The Mac's arrangement is the price of not binding an ACL to a code signature
-/// that changes when the app is re-signed; iOS has no such problem, because the
-/// item's owner is the application identifier and that does not move.
+/// that changes when the app is re-signed. iOS has no such problem: the item's
+/// owner is the application identifier, and that does not move.
 ///
 /// `WhenUnlockedThisDeviceOnly` for `DeviceKey`'s reasons: the password is used
 /// while somebody is holding the phone, and the attribute keeps it out of every
 /// backup and off every restored device.
 enum ServerPassword {
-    /// The same service string the Mac files these under, which costs nothing
-    /// and means one grep finds both.
+    /// The same service string the Mac files these under, so one grep finds
+    /// both.
     private static let service = "sh.ledge.app.server"
 
     /// The password for a server, or nil when it has none.
@@ -95,11 +97,13 @@ enum ServerPassword {
     /// Every id that is not in `keep` loses its password.
     ///
     /// The page decides what the server list is (mainview/lib/nativeBridge.ts)
-    /// and hands the whole list back on every change, so this is where a removal
-    /// takes the credential with it. Sweeping rather than deleting one by id
-    /// keeps that rule in one place: a record can leave the list by being
-    /// removed, by failing to decode, or by an install being restored over
-    /// another, and only the survivors are knowable here.
+    /// and hands the whole list back on every change, so this is where a
+    /// removal takes the credential with it.
+    ///
+    /// Sweeping rather than deleting one by id keeps that rule in one place: a
+    /// record can leave the list by being removed, by failing to decode, or by
+    /// an install being restored over another, and only the survivors are
+    /// knowable here.
     static func keepOnly(_ keep: [String]) {
         var item: CFTypeRef?
         let status = SecItemCopyMatching(

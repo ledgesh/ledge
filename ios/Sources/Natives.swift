@@ -41,9 +41,9 @@ enum Natives {
 
     /// The pasteboard's image as base64 PNG, or "" for none.
     ///
-    /// Bytes only. The FILE is the server's to name (remote.md §2), so the
-    /// page sends these on to `assetWrite` and the name comes back — which is
-    /// why this returns a string rather than answering `assetPaste` itself.
+    /// Bytes only. The file is the server's to name (remote.md §2), so the page
+    /// sends these on to `assetWrite` and the name comes back. That is why this
+    /// returns a string rather than answering `assetPaste` itself.
     static func clipboardImage() -> String {
         guard UIPasteboard.general.hasImages, let image = UIPasteboard.general.image,
             let png = image.pngData()
@@ -54,11 +54,11 @@ enum Natives {
     /// Put a string in front of the system share sheet: AirDrop, Messages,
     /// Mail, Notes, whatever the device has (ios.md §4).
     ///
-    /// One caller's worth of generality on purpose. What crosses it is the
+    /// One caller's worth of generality, and no more. What crosses it is the
     /// `authorized_keys` line, which has to reach a machine that is not this
     /// one, and the pasteboard cannot carry it there. Nothing else in the app
-    /// shares anything, so this takes a string rather than growing an activity
-    /// item protocol for a case that does not exist yet.
+    /// shares anything, so this takes a string rather than an activity item
+    /// protocol for a case that does not exist yet.
     ///
     /// `from` is not decoration. On an iPad the sheet is a popover and UIKit
     /// traps on one with no anchor, so a caller with a button hands it over and

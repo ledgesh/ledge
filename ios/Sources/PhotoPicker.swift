@@ -3,36 +3,34 @@ import UIKit
 
 /// The photo library, for Insert Image… (ios.md §11).
 ///
-/// **PHPicker rather than UIImagePickerController**, which is the whole reason
-/// there is no permission prompt anywhere in this file: the picker runs in a
-/// process of its own and hands back only what the user chose, so the app never
-/// asks for — and never holds — access to the library. `NSPhotoLibraryUsageDescription`
-/// is not required for it and is deliberately not in the Info.plist, because a
-/// string explaining why we want the library would be describing a thing we do
-/// not do.
+/// PHPicker rather than UIImagePickerController, which is why there is no
+/// permission prompt in this file. The picker runs in a process of its own and
+/// hands back only what the user chose, so the app never asks for or holds
+/// access to the library. `NSPhotoLibraryUsageDescription` is not required for
+/// it and is not in the Info.plist.
 ///
-/// **Bytes only, as JPEG.** The FILE is the server's to name (remote.md §2), so
-/// this answers base64 and the page sends it on to `assetWrite`, which reads the
-/// magic and writes `.jpg` (bun/assets.ts extensionFor). JPEG rather than PNG
-/// because what comes out of a camera roll is a PHOTOGRAPH: the first one ever
-/// inserted from a phone was 3 MB on the device and 28 MB re-encoded losslessly,
-/// which is ten times the bytes over ssh, ten times the disk on the server, and
-/// nothing anybody can see. A screenshot pasted on a Mac is still PNG, because
-/// there the source really is one.
+/// Bytes only, as JPEG. The file is the server's to name (remote.md §2), so
+/// this answers base64 and the page sends it on to `assetWrite`, which reads
+/// the magic and writes `.jpg` (bun/assets.ts extensionFor).
+///
+/// JPEG because a camera roll holds photographs: the first one inserted from a
+/// phone was 3 MB on the device and 28 MB re-encoded losslessly. A screenshot
+/// pasted on a Mac is still PNG, where the source really is one.
 ///
 /// Re-encoding rather than forwarding the original file also drops the EXIF, so
-/// the GPS coordinates a phone stamps on every picture do not travel to the
-/// server with it. That is a side effect worth stating out loud, because it is
-/// the kind that would be missed if it ever stopped happening.
+/// the GPS coordinates a phone stamps on a picture do not reach the server.
 enum PhotoPicker {
-    /// Present over `host` and answer base64 PNG, or "" for a cancel, a
+    /// Present over `host` and answer base64 JPEG, or "" for a cancel, a
     /// non-image, or a picture the library could not produce.
     static func pick(over host: UIViewController, then answer: @escaping (String) -> Void) {
+        // Constructed without a `photoLibrary:`, so the results carry no asset
+        // identifiers: what comes back is bytes rather than a handle into a
+        // library the server cannot see.
         var config = PHPickerConfiguration()
         config.filter = .images
         config.selectionLimit = 1
-        // The bytes, not a reference: a PHAsset identifier would be a handle
-        // into a library the server cannot see.
+        // The representation the library already holds, rather than a transcode
+        // on the way out. The JPEG below is this file's own encode.
         config.preferredAssetRepresentationMode = .current
 
         let picker = PHPickerViewController(configuration: config)

@@ -7,14 +7,14 @@ import UIKit
 ///
 /// This is the client-side configuration remote.md §8 describes: an ssh
 /// destination and the host key pinned when it was added. Nothing about it is
-/// stored on a server, and the private half of the key it authenticates with is
-/// not stored here either — it is in the enclave (`DeviceKey`).
+/// stored on a server, and the private half of the key it authenticates with
+/// is in the enclave rather than here (`DeviceKey`).
 ///
 /// `id` and `name` are what a list needs and a single record did not: the id
 /// survives renaming and re-addressing, and the name is what the connection
-/// chrome shows. Both default to empty so that a candidate — a destination
-/// someone is still typing, dialled to ask for its fingerprint — can be made
-/// without inventing either.
+/// chrome shows. Both default to empty so a candidate can be made without
+/// inventing either, such as a destination someone is still typing that gets
+/// dialled to ask for its fingerprint.
 struct ServerRecord: Codable, Equatable {
     var id: String = ""
     var name: String = ""
@@ -34,9 +34,9 @@ struct ServerRecord: Codable, Equatable {
     var hostKey: String
     /// Which door this server is reached through: "password", or anything else
     /// for the device key (shared/connections.ts `AuthMode`). A string rather
-    /// than an enum because that is what self-healing wants — a value this
-    /// build does not recognise is the key door, which is where every record
-    /// written before this field existed already opens.
+    /// than an enum so that decoding self-heals: a value this build does not
+    /// recognise is the key door, which is where every record written before
+    /// this field existed already opens.
     var auth: String = "key"
 
     var user: String { String(destination.prefix(while: { $0 != "@" })) }
@@ -49,9 +49,9 @@ struct ServerRecord: Codable, Equatable {
     ///
     /// The Mac's `validateConnection` allows a bare host and lets ssh supply
     /// the local username. A phone has no local username worth offering, so the
-    /// account is required here, and saying so at pairing is better than the
-    /// "Permission denied (publickey)" it would otherwise become — which is
-    /// also what a missing `authorized_keys` line looks like.
+    /// account is required here. Saying so at pairing beats the "Permission
+    /// denied (publickey)" it would otherwise become, which is also what a
+    /// missing `authorized_keys` line looks like.
     static func problem(with destination: String) -> String? {
         let text = destination.trimmingCharacters(in: .whitespaces)
         if text.isEmpty { return "Enter the server, as user@host." }
@@ -100,8 +100,8 @@ struct ServerRecord: Codable, Equatable {
 ///
 /// The page owns the shape and this owns the bytes, which is the same split
 /// `.layout.json` has on a Mac (architecture.md §6). Swift reads exactly two
-/// things out of a record — a destination to dial and a key to pin — and every
-/// rule about what may be added, renamed or removed is in the webview
+/// things out of a record, a destination to dial and a key to pin. Every rule
+/// about what may be added, renamed or removed is in the webview
 /// (mainview/lib/nativeBridge.ts), beside the Mac's.
 enum ServerStore {
     private static let listKey = "LedgeServers"
@@ -150,11 +150,12 @@ enum ServerStore {
     ///
     /// `-LedgeServer ledge@127.0.0.1 -LedgeHostKey "ssh-ed25519 AAAA…"` is how
     /// testing.md §6 points a Simulator at a scratch server without a human
-    /// tapping Trust. Both halves are read from the ARGUMENT domain and BOTH
-    /// are required, which is what makes it safe: an address and a pin that
-    /// named each other on one command line cannot be mismatched, and that
-    /// mismatch is the whole reason `migrated()` below reads the persistent
-    /// domain instead. Nothing is written, so this vanishes at the next launch
+    /// tapping Trust. Both halves are read from the argument domain, and both
+    /// are required: an address and a pin that named each other on one command
+    /// line cannot be mismatched.
+    ///
+    /// That mismatch is why `migrated()` below reads the persistent domain
+    /// instead. Nothing is written here, so this vanishes at the next launch
     /// and shadows what is stored rather than replacing it.
     ///
     /// It is not a back door. Nothing on a device can set an argument domain,
@@ -190,7 +191,7 @@ enum ServerStore {
     @discardableResult
     static func pair(destination: String, port: Int, hostKey: String, auth: String = "key", password: String = "") -> ServerRecord {
         var stored = load()
-        // By address AND port, because that pair is what a host key belongs to:
+        // By address and by port, since that pair is what a host key belongs to:
         // two sshd instances on one machine really can offer different keys
         // (shared/connections.ts).
         if let at = stored.servers.firstIndex(where: { $0.destination == destination && $0.port == port }) {
@@ -257,8 +258,8 @@ enum ServerStore {
         let defaults = UserDefaults.standard
         // The persistent domain and not `string(forKey:)`, because a probe
         // launches with `-LedgeServer ledge@127.0.0.1` and the argument domain
-        // wins over the stored value: migrating what a launch argument said
-        // would pair a previously stored HOST KEY to a different address.
+        // wins over the stored value. Migrating what a launch argument said
+        // would pair a previously stored host key to a different address.
         let persistent = defaults.persistentDomain(forName: Bundle.main.bundleIdentifier ?? "") ?? [:]
         let destination = persistent[destinationKey] as? String ?? ""
         let hostKey = persistent[hostKeyKey] as? String ?? ""
@@ -308,10 +309,10 @@ struct ShellConfig {
     /// better to offer.
     ///
     /// `simctl launch <device> <bundle> -LedgeServer ledge@127.0.0.1` sets it:
-    /// UserDefaults reads `-key value` pairs off the command line for free,
-    /// which is how a probe points a build at a scratch server without
-    /// rebuilding it. It is a suggestion and never a pin — the host key still
-    /// has to be confirmed by whoever is holding the phone.
+    /// UserDefaults reads `-key value` pairs off the command line, which is how
+    /// a probe points a build at a scratch server without rebuilding it. It is
+    /// a suggestion and never a pin, so the host key still has to be confirmed
+    /// by whoever is holding the phone.
     static var suggestion: String {
         UserDefaults.standard.string(forKey: "LedgeServer")
             ?? (Bundle.main.object(forInfoDictionaryKey: "LedgeServer") as? String)
@@ -321,11 +322,11 @@ struct ShellConfig {
     /// What this device calls itself, for the presence list every other client
     /// on the same server is pushed (shared/wire.ts `Hello.label`).
     ///
-    /// Since iOS 16 this is the MODEL name — "iPhone", "iPad" — for any app
-    /// without the user-assigned-device-name entitlement, and that is the right
-    /// answer to ship: the sentence it has to make is "iPhone took this shell",
-    /// which needs a device and not a person. An app that later earns the
-    /// entitlement gets the user's own name for it here with no other change.
+    /// Since iOS 16 this is the model name ("iPhone", "iPad") for any app
+    /// without the user-assigned-device-name entitlement. The sentence it has
+    /// to make is "iPhone took this shell", which needs a device rather than a
+    /// person. An app that later earns the entitlement gets the user's own name
+    /// here with no other change.
     static var label: String {
         UIDevice.current.name
     }

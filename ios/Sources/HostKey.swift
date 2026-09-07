@@ -89,10 +89,12 @@ final class PinnedHostKey: NIOSSHClientServerAuthenticationDelegate {
 ///
 /// What `ssh-keyscan` is on a Mac (bun/connections.ts), and it has to be a dial
 /// because there is no keyscan here: the host key arrives during key exchange,
-/// before any authentication, so this learns the fingerprint without the phone's
-/// key ever going on the wire and without the server needing to accept it yet.
-/// Refusing is the point rather than a side effect — this connection exists to
-/// ask a question, and the answer is read off `offered` afterwards.
+/// before any authentication, so this learns the fingerprint without the
+/// phone's key going on the wire and without the server accepting it yet.
+///
+/// Refusing is what the delegate is for rather than a side effect. The
+/// connection exists to ask one question, and the answer is read off
+/// `offered`.
 final class CapturingHostKey: NIOSSHClientServerAuthenticationDelegate {
     private(set) var offered: HostKeyOffer?
 
@@ -106,9 +108,9 @@ final class CapturingHostKey: NIOSSHClientServerAuthenticationDelegate {
 ///
 /// The delegate is asynchronous, which buys a property the Mac client does not
 /// have. There, `ssh-keyscan` fetches a key, the user confirms it, and a second
-/// connection later trusts what was written down. Here the key being shown IS
-/// the key of the connection in progress, and that connection only continues if
-/// the person holding the phone says so.
+/// connection later trusts what was written down. Here the key on screen is the
+/// key of the connection in progress, and that connection continues only if the
+/// person holding the phone says so.
 final class ConfirmingHostKey: NIOSSHClientServerAuthenticationDelegate {
     /// Called on the main queue with the offer and a decision callback.
     private let ask: (HostKeyOffer, @escaping (Bool) -> Void) -> Void

@@ -11,11 +11,11 @@ import UIKit
 final class AppDelegate: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
     private var host: WebHost?
-    /// The shell's own screens — the server list and the pairing form — when
-    /// they are what the window is showing. A navigation controller because
-    /// adding a server is a step off the list, and a step off wants a way back:
-    /// the form pushed onto it is the same form that is the ROOT on a phone
-    /// with no servers at all, where there is nothing to go back to.
+    /// The shell's own screens, the server list and the pairing form, when they
+    /// are what the window is showing. A navigation controller because adding a
+    /// server is a step off the list and needs a way back. The form pushed onto
+    /// it is the same form that roots the stack on a phone with no servers at
+    /// all, where there is nothing to go back to.
     private var chooser: UINavigationController?
 
     func application(
@@ -32,9 +32,9 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     /// The shell's screens until there is a server to dial, then the app.
     ///
     /// The two are swapped rather than stacked, so choosing a server tears the
-    /// web view down and choosing again builds a new one. That is deliberate:
-    /// the page holds a connection and half its state comes from a server, and
-    /// there is no useful meaning for "the same page, pointed somewhere else".
+    /// web view down and choosing again builds a new one. The page holds a
+    /// connection and half its state comes from a server, so there is no useful
+    /// meaning for "the same page, pointed somewhere else".
     private func show() {
         let config = ShellConfig.current()
         guard let server = config.server else { return showServers(because: nil) }
@@ -57,9 +57,9 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     /// The server list, and the pairing form when the list has nothing in it.
     ///
     /// Asked for by name rather than reached by re-reading the configuration,
-    /// because `repair` below has to END somewhere: a stored record that
-    /// survives being forgotten would otherwise build another web view, which
-    /// would fail the same way, and ask for repair again.
+    /// because `repair` below has to terminate: a stored record that survives
+    /// being forgotten would otherwise build another web view, which would fail
+    /// the same way and ask for repair again.
     ///
     /// A phone with no servers roots the stack at the form, so a first launch
     /// is one screen and has no Back button pointing at an empty list. Every
@@ -80,10 +80,10 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
             },
             onAdd: { [weak self] suggest, port in
                 guard let self else { return }
-                // No reason carried across: whatever sent us to the list is
-                // about a server that is already there, and repeating it over
-                // the form for a different one would be a refusal of something
-                // nobody has tried yet.
+                // No reason carried across: whatever sent the app to the list
+                // is about a server that is already there, and repeating it
+                // over the form for a different one would be a refusal of
+                // something nobody has tried yet.
                 self.chooser?.pushViewController(
                     self.pairingScreen(suggest: suggest, port: port, because: nil),
                     animated: true
@@ -138,9 +138,9 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     // so the page's reconnect ladder cannot be what notices: the client dials
     // on the foreground notification instead, and foregrounding is a boot.
     //
-    // Both edges are reported and the page decides. Closing the socket on the
-    // way out is deliberate: a half-open one that the OS killed while we were
-    // away looks identical to a live one until the first write fails.
+    // Both edges are reported and the page decides. The socket is closed on the
+    // way out rather than left: one the system killed during a suspension looks
+    // identical to a live one until the first write fails.
     func applicationDidEnterBackground(_ application: UIApplication) {
         host?.willSuspend()
     }

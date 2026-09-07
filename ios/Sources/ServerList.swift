@@ -4,16 +4,18 @@ import UIKit
 ///
 /// Managing servers is the connection dialog's job (remote.md §8), and that
 /// dialog is React inside a web view that only exists once a connection has
-/// been made. This is the same list for the state that breaks the assumption: a
-/// phone whose saved server has stopped answering has no page, and without this
-/// screen its only control is a retry button that will fail the same way for as
+/// been made.
+///
+/// This is the same list for the state that breaks the assumption. A phone
+/// whose saved server has stopped answering has no page, and without this
+/// screen its only control is a retry button that fails the same way for as
 /// long as anyone presses it.
 ///
-/// It selects and it adds. It does not rename, edit or remove, because those
-/// are rules, and the rules are in the webview beside the Mac's copy of them
-/// (ios.md §4) rather than written twice in two languages. Selecting is not one
-/// of them — Swift already picks a record to dial at every launch — and adding
-/// is the pairing screen, which is here anyway.
+/// It selects and it adds. It does not rename, edit or remove: those are rules,
+/// and both clients drive them through the same schema methods rather than
+/// writing them twice in two languages (remote.md §8). Selecting is not one of
+/// those rules, since Swift already picks a record to dial at every launch, and
+/// adding is the pairing screen, which is here anyway.
 final class ServerListViewController: UIViewController {
     private let servers: [ServerRecord]
     private let selected: String
@@ -51,10 +53,10 @@ final class ServerListViewController: UIViewController {
         super.viewDidLoad()
         view.backgroundColor = .systemGroupedBackground
 
-        // Why this screen is on the screen, when something sent us here. The
-        // page's own words, which name the machine and what went wrong with it:
-        // "could not reach" with no address is the one message nobody can act
-        // on, and the same sentence was already on the page that failed.
+        // Why this screen came up, when something sent the app here. The page's
+        // own words, which name the machine and what went wrong with it: "could
+        // not reach" with no address is the one message nobody can act on, and
+        // the same sentence was already on the page that failed.
         reason.font = .preferredFont(forTextStyle: .callout)
         reason.adjustsFontForContentSizeCategory = true
         reason.textColor = .systemRed
@@ -114,9 +116,9 @@ extension ServerListViewController: UITableViewDataSource, UITableViewDelegate {
         // the address is what actually gets dialled. The port only when it is
         // not ssh's, which is the answer almost every row has.
         let where_ = server.port == 0 ? server.destination : "\(server.destination):\(server.port)"
-        // A record whose pin was dropped cannot be dialled — connecting would
-        // mean trusting whatever answers (remote.md §4) — so the row says so and
-        // leads to the form rather than to a connection.
+        // A record whose pin was dropped cannot be dialled, because connecting
+        // would mean trusting whatever answers (remote.md §4). The row says so
+        // and leads to the form rather than to a connection.
         content.secondaryText = server.hostKey.isEmpty ? "\(where_) (needs pairing again)" : where_
         if server.hostKey.isEmpty { content.secondaryTextProperties.color = .secondaryLabel }
         cell.contentConfiguration = content

@@ -7,9 +7,9 @@ import NIOSSH
 ///
 /// This is the file phase 4 replaced (ios.md §14): the page is handed a
 /// `Duplex`, and a duplex does not know what carries it. Everything above the
-/// byte stream — the handshake, the op ids, the reconnect ladder, the held
-/// requests — is the same JavaScript the Mac runs over `/usr/bin/ssh`, and the
-/// difference is entirely here.
+/// byte stream, meaning the handshake, the op ids, the reconnect ladder and
+/// the held requests, is the same JavaScript the Mac runs over `/usr/bin/ssh`.
+/// The difference is entirely here.
 ///
 /// What `bun/connections.ts` says with argv, this says with objects:
 ///
@@ -31,7 +31,7 @@ import NIOSSH
 /// connection that fails, not a capability nobody granted it.
 ///
 /// The last three rows are the only ones where the phone needs a different
-/// MECHANISM rather than a different implementation of the same one, and
+/// mechanism rather than a different implementation of the same one, and
 /// `probeAfterIdle` below says why.
 ///
 /// This class parses no frame and knows no method name.
@@ -41,9 +41,9 @@ final class SSHTransport {
     /// from a generation it has moved on from (nativeBridge.ts).
     let generation: Int
 
-    /// Where ssh looks when a connection names no port. A destination has none
-    /// in it on either client — the Mac passes `-p` and this passes a number —
-    /// and the fixture testing.md §6 describes holds 127.0.0.1:22 so that a
+    /// Where ssh looks when a connection names no port. A destination carries
+    /// none on either client, since the Mac passes `-p` and this passes a
+    /// number, and the fixture testing.md §6 describes holds 127.0.0.1:22 so a
     /// record with nothing set still reaches it.
     static let defaultPort = 22
 
@@ -54,7 +54,7 @@ final class SSHTransport {
     private static let dialTimeout = TimeAmount.seconds(15)
 
     /// One group for the process. A group per dial would be a thread pair per
-    /// reconnect, and reconnecting is the ordinary path on a phone (§5).
+    /// reconnect, and reconnecting is the ordinary path on a phone (ios.md §5).
     private static let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
 
     /// What `ServerAliveInterval` and `ServerAliveCountMax` buy the Mac, in the
@@ -62,44 +62,45 @@ final class SSHTransport {
     ///
     /// A network that goes away does not end a connection. There is no FIN and
     /// no RST; the socket stays open and the bytes stop. Everything the page
-    /// does about a lost server — the ladder, the held requests, the replay
-    /// under the same op ids — is armed by the connection ENDING, so on the
-    /// client that loses wires for a living, this is what has to end it.
+    /// does about a lost server (the ladder, the held requests, the replay
+    /// under the same op ids) is armed by the connection ending, so on a client
+    /// that loses wires routinely, this is what has to end it.
     ///
     /// OpenSSH needs one mechanism for both cases because it counts at the
     /// application layer: a SERVER_ALIVE that went unanswered went unanswered
     /// whether or not there was data outstanding. The kernel has two, and which
     /// one runs depends on exactly that.
     ///
-    /// - **Nothing in flight.** Keepalive probes: the first after
-    ///   `probeAfterIdle` seconds of quiet, another every `probeEvery`, and the
-    ///   socket fails once `probeCount` go unanswered. `SO_KEEPALIVE` alone,
-    ///   which is all this asked for before, is this case at Darwin's default
-    ///   idle time of two HOURS.
-    /// - **A request in flight whose bytes were never acknowledged.** No
-    ///   keepalive fires at all — TCP only probes an idle connection — and the
-    ///   retransmit timer decides instead. Its own limit is TCP_MAXRXTSHIFT
-    ///   doublings, which is minutes. `dropAfterStall` caps the episode.
+    /// - Nothing in flight: keepalive probes, the first after `probeAfterIdle`
+    ///   seconds of quiet, another every `probeEvery`, and the socket fails
+    ///   once `probeCount` go unanswered. `SO_KEEPALIVE` alone, which is all
+    ///   this asked for before, is this case at Darwin's default idle time of
+    ///   two hours.
+    /// - A request in flight whose bytes were never acknowledged: no keepalive
+    ///   fires, because TCP only probes an idle connection, and the retransmit
+    ///   timer decides instead. Its own limit is TCP_MAXRXTSHIFT doublings,
+    ///   which is minutes. `dropAfterStall` caps the episode.
     ///
     /// Both land on the twenty seconds the Mac measures, and for the same
     /// reason: hanging up on a link that was only stalled costs a reconnect,
     /// and not hanging up costs the session.
     ///
     /// The cost while nothing is happening is one 40-byte segment every five
-    /// seconds, and only while the wire is genuinely idle — any traffic in
-    /// either direction restarts the idle timer. A suspended app is a separate
-    /// question with a separate answer (§5): the ladder is not running then,
-    /// and what keeps the sessions is the hold it asked for, not a probe.
+    /// seconds, and only while the wire is genuinely idle: traffic in either
+    /// direction restarts the idle timer. A suspended app is a separate
+    /// question with a separate answer (ios.md §5), where the ladder is not
+    /// running and what keeps the sessions is the hold it asked for.
     ///
-    /// These are now the BACKSTOP rather than the whole answer. The protocol
-    /// carries its own heartbeat (remote.md §7) and it runs in the page, in the
-    /// same JavaScript the Mac runs, so it reached this client by being written
-    /// once: a `ping` after five seconds of quiet, a `pong` from the daemon
-    /// itself, three unanswered and the connection ends. That one cannot be
-    /// answered on the server's behalf by a proxy, a bastion or a healthy sshd
-    /// in front of a stalled daemon, which is what these four cannot say. What
-    /// these still cover is the half above — a suspended app runs no timers,
-    /// and the kernel does not need one to be scheduled.
+    /// These are the backstop rather than the whole answer. The protocol
+    /// carries its own heartbeat (remote.md §7), running in the page: a `ping`
+    /// after five seconds of quiet, a `pong` from the daemon itself, three
+    /// unanswered and the connection ends.
+    ///
+    /// Nothing can answer that one on the server's behalf, not a proxy, a
+    /// bastion, or a healthy sshd in front of a stalled daemon, which is what
+    /// these four cannot say. What they still cover is the half above: a
+    /// suspended app runs no timers, and the kernel does not need one to be
+    /// scheduled.
     private static let probeAfterIdle: CInt = 5
     private static let probeEvery: CInt = 5
     private static let probeCount: CInt = 3
@@ -167,8 +168,8 @@ final class SSHTransport {
         let loop = Self.group.next()
         // Every closure below runs on this one loop, which is what makes a
         // plain Bool the right guard for "already settled". The timeout is
-        // cancelled HERE and not when the channel opens: a channel exists as
-        // soon as the far end agrees to one, and the thing being waited for is
+        // cancelled here and not when the channel opens: a channel exists as
+        // soon as the far end agrees to one, and what is being waited for is
         // the exec request's answer, which can still never come.
         let settle: (Result<Void, Error>) -> Void = { result in
             loop.assertInEventLoop()
@@ -216,12 +217,12 @@ final class SSHTransport {
                         // that goes wrong during a handshake arrives as an
                         // error rather than as a message: a host key that does
                         // not match the pin, a key the server will not take.
+                        //
                         // NIOSSH fires those and nothing more, so without a
-                        // handler here they reach the tail, get logged by NIO
+                        // handler here they reach the tail, are logged by NIO
                         // as unhandled, and leave a connection that is neither
-                        // up nor down until the dial times out — which reports
-                        // "no answer in time" for a refusal that was immediate
-                        // and specific.
+                        // up nor down until the dial times out, reporting "no
+                        // answer in time" for an immediate, specific refusal.
                         FailOnError { [weak self] error in
                             settle(.failure(self?.explain(error) ?? error))
                         },
@@ -237,8 +238,9 @@ final class SSHTransport {
                 let opened = channel.eventLoop.makePromise(of: Channel.self)
                 // A connection that dies before the session channel exists,
                 // with no error to explain it: a server that hangs up mid
-                // handshake, or one that closes the moment it sees us. NIOSSH
-                // has nothing to fail the pending channel with there, so
+                // handshake, or one that closes the moment it sees a client.
+                //
+                // NIOSSH has nothing to fail the pending channel with there, so
                 // without this the dial waits out its timeout and calls a
                 // hangup a silence. Failing an already-settled promise is a
                 // no-op, so this only speaks when nothing else did.
@@ -415,8 +417,8 @@ enum SSHFailure: Error, LocalizedError {
 /// The tail of the connection's pipeline: an error is the end of this dial.
 ///
 /// NIO's default is to log an unhandled error and carry on, which for a
-/// handshake is the worst of the three options — the connection stays open,
-/// nothing else is coming, and the only thing left to notice is a timeout.
+/// handshake leaves the connection open with nothing else coming, so the only
+/// thing left to notice it is a timeout.
 private final class FailOnError: ChannelInboundHandler {
     typealias InboundIn = Any
 
@@ -470,14 +472,15 @@ private final class PublicKeyAuth: ClientAuth {
     ) {
         guard availableMethods.contains(.publicKey), !offered else {
             exhausted = true
-            // FAILED, not succeeded with nil. The protocol's own documentation
-            // says a delegate with nothing left should fail this promise, and
-            // it means it: NIOSSH has a `noFurtherMethods()` for the nil case
-            // that nothing in the library ever calls, so answering nil sends
-            // no message and the connection sits there until something else
-            // gives up. The symptom is a refused key reported fifteen seconds
-            // later as a timeout, which is the wrong sentence and the wrong
-            // wait (ios.md §3: building blocks, not a client).
+            // Failed, not succeeded with nil. NIOSSH's documentation says a
+            // delegate with nothing left should fail this promise, and it has a
+            // `noFurtherMethods()` for the nil case that nothing in the library
+            // ever calls, so answering nil sends no message and the connection
+            // sits there until something else gives up.
+            //
+            // The symptom is a refused key reported fifteen seconds later as a
+            // timeout, which is the wrong sentence and the wrong wait (ios.md
+            // §3: building blocks, not a client).
             nextChallengePromise.fail(SSHFailure.outOfKeys)
             return
         }
@@ -495,14 +498,14 @@ private final class PublicKeyAuth: ClientAuth {
 /// One password, offered once (remote.md §4).
 ///
 /// The same shape as the key above, and the same reason for failing rather than
-/// answering nil when there is nothing left. What it does NOT do is retry: a
-/// password that was refused is refused, and a delegate that offered it again
-/// would spend the server's `MaxAuthTries` proving it.
+/// answering nil when there is nothing left. It never retries: a password that
+/// was refused is refused, and a delegate that offered it again would spend the
+/// server's `MaxAuthTries` proving it.
 ///
-/// **Only the `password` method.** NIOSSH has no keyboard-interactive, so a
-/// server configured to answer with that alone refuses this client with
-/// "no supported authentication methods" while the same account works from a
-/// Mac (`PreferredAuthentications` there names both). ios.md §3 records it: the
+/// Only the `password` method. NIOSSH has no keyboard-interactive, so a server
+/// configured to answer with that alone refuses this client with "no supported
+/// authentication methods" while the same account works from a Mac
+/// (`PreferredAuthentications` there names both). ios.md §3 records it: the
 /// building blocks are not a client, and this is one of the places that shows.
 private final class PasswordAuth: ClientAuth {
     private let username: String

@@ -7,28 +7,28 @@ import UIKit
 /// anyone else's (ios.md §4).
 ///
 /// The private half is generated inside the Secure Enclave and cannot be read
-/// out of it — what the keychain holds is a wrapped reference that only this
+/// out of it. What the keychain holds is a wrapped reference that only this
 /// device's enclave can use, and signing is a call into hardware. A lost phone
 /// therefore hands over no key material at all, and revoking it is deleting one
 /// line from `authorized_keys` on the server.
 ///
 /// That decides the key type. The enclave does P-256 and nothing else, so the
-/// key is `ecdsa-sha2-nistp256`; OpenSSH accepts it by default, and a server
-/// whose `PubkeyAcceptedAlgorithms` has been narrowed to Ed25519 will refuse
-/// it, which is a posture to name in the manual rather than debug in the field.
+/// key is `ecdsa-sha2-nistp256`. OpenSSH accepts it by default, and a server
+/// whose `PubkeyAcceptedAlgorithms` has been narrowed to Ed25519 refuses it,
+/// which is a posture to name in the manual rather than debug in the field.
 ///
-/// **Deleting the app destroys the key.** The container goes and the enclave
+/// Deleting the app destroys the key. The container goes and the enclave
 /// reference with it, so a reinstall is a new client with a new id, a new key,
 /// and a stale line in `authorized_keys` that will never authenticate again.
-/// Correct, and worth saying out loud: the symptom is "my phone stopped working
-/// after I reinstalled" and the fix is pairing again.
+/// The symptom is "my phone stopped working after I reinstalled", and the fix
+/// is pairing again.
 enum DeviceKey {
     /// One of the two ways this device can hold a P-256 key.
     ///
     /// The software case exists for the Simulator, which has no enclave. It is
-    /// refused on real hardware: a key on disk is a weaker thing than the one
-    /// §4 promises, and silently downgrading to it is exactly how a security
-    /// property becomes a claim nobody checked.
+    /// refused on real hardware: a key on disk is a weaker thing than ios.md §4
+    /// promises, and downgrading to it silently is how a security property
+    /// becomes a claim nobody checked.
     enum Held {
         case enclave(SecureEnclave.P256.Signing.PrivateKey)
         case software(P256.Signing.PrivateKey)
@@ -85,10 +85,10 @@ enum DeviceKey {
     /// `~/.ssh/authorized_keys` on the server.
     ///
     /// `restrict` turns off port forwarding, agent forwarding, X11 and pty
-    /// allocation; `command=` means this key cannot ask for anything else. Both
-    /// halves are the server's enforcement, not ours — this app only prints the
-    /// line, and a client that spoke SSH badly would get a connection that
-    /// fails rather than a capability nobody granted it.
+    /// allocation; `command=` means this key cannot ask for anything else. The
+    /// server enforces both halves. This app only prints the line, so a client
+    /// that spoke SSH badly would get a connection that fails rather than a
+    /// capability nobody granted it.
     static func authorizedKeysLine(_ held: Held, client: String) -> String {
         // A comment that says which phone, because revoking is deleting the
         // right line out of a file that may have several.
@@ -108,12 +108,11 @@ enum DeviceKey {
 
     private static func mint() throws -> Held {
         if SecureEnclave.isAvailable {
-            // The default access control is `.privateKeyUsage` with
-            // "when unlocked, this device only", and that is deliberate: it
-            // gates the key on the device being unlocked rather than on a
-            // prompt per signature. `.userPresence` would put a Face ID scan in
-            // front of every reconnect, and §5's whole point is that
-            // reconnecting is the ordinary path on a phone, not the exception.
+            // The default access control is `.privateKeyUsage` with "when
+            // unlocked, this device only", which gates the key on the device
+            // being unlocked rather than on a prompt per signature.
+            // `.userPresence` would put a Face ID scan in front of every
+            // reconnect, and ios.md §5 has reconnecting as the ordinary path.
             return .enclave(try SecureEnclave.P256.Signing.PrivateKey())
         }
         #if targetEnvironment(simulator)
@@ -184,10 +183,9 @@ enum DeviceKey {
                 kSecValueData as String: data,
                 // Unlocked, this device only: the key is used while someone is
                 // holding the phone, and `ThisDeviceOnly` keeps it out of every
-                // backup and off every restored device. For the enclave case
-                // the wrapped blob is useless elsewhere anyway; for the
-                // Simulator's software key this attribute is the whole of the
-                // protection.
+                // backup and off every restored device. The enclave's wrapped
+                // blob is useless elsewhere anyway; for the Simulator's
+                // software key this attribute is the only protection.
                 kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
             ] as CFDictionary,
             nil

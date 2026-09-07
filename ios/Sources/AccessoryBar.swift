@@ -9,35 +9,32 @@ import WebKit
 /// the iPhone software keyboard does not even have a Tab key, and the backtick
 /// is three trips through the numeric page away. This is where they go.
 ///
-/// **The second face is a different keyboard, not more verbs.** While a block
-/// is running, the keys the program wants — Ctrl-C, Ctrl-D, Escape, the arrows
-/// — do not exist on a software keyboard at all, so a phone could answer a
-/// `[y/N]` by typing and could not interrupt, page or navigate anything. The
-/// page says which face to wear (`@focus`), because only the page knows that
-/// the panel a run draws lives inside the editor it is running under.
+/// The second face is a different keyboard rather than more verbs. The keys a
+/// running program wants (Ctrl-C, Ctrl-D, Escape, the arrows) do not exist on
+/// a software keyboard, so a phone could answer a `[y/N]` by typing and could
+/// not interrupt, page or navigate. The page says which face to wear
+/// (`@focus`): only it knows that a run's panel lives inside the editor.
 ///
-/// **The third face is one button, and it is why there is always a bar.** A
-/// keyboard the user cannot put away is a trap, and this page has nowhere to
-/// tap that would dismiss one: it is full height, and its chrome does not blur
-/// a field. So the answer to "what goes over a search box" is not "nothing" —
-/// which is what it was, and what left a phone stuck behind its own keyboard —
-/// but the one control that is never wrong to offer.
+/// The third face is one button, and it is why there is always a bar. This
+/// page is full height and its chrome does not blur a field, so nothing on
+/// screen dismisses the keyboard. An earlier version put no bar over a search
+/// box at all, which left a phone stuck behind its own keyboard until the app
+/// was killed.
 ///
-/// **Both carry names, not behavior.** A verb tap posts `{t: "verb", id: ...}`
-/// and the page's command registry decides what that means, exactly as the
-/// Mac's menu bar does (mainview/lib/menu.ts); a key tap posts
-/// `{t: "key", k: ...}` and the page's terminal decides what bytes that is
-/// (mainview/editor/inlineTerm.ts). So a renamed command leaves a button that
-/// does nothing and logs why rather than one that quietly does something else,
-/// and Swift holds no opinion about what "bold" is or what Ctrl-C sends.
+/// Both carry names, not behavior. A verb tap posts `{t: "verb", id: ...}` and
+/// the page's command registry decides what that means (mainview/lib/menu.ts);
+/// a key tap posts `{t: "key", k: ...}` and the page's terminal decides what
+/// bytes that is (mainview/editor/inlineTerm.ts). Swift holds no opinion about
+/// what "bold" is, so a renamed command leaves a button that logs why.
 ///
-/// **HTML was the alternative and §7 rules it out.** A bar drawn in the page
-/// has to track the visual viewport for the life of the app: every keyboard
-/// animation, every rotation, every scroll of a focused field. `inputAccessoryView`
-/// is attached to the keyboard by the system and needs none of that. It is also
-/// the only place the run's keys can live and still be reachable: the panel's
-/// own header scrolls with the note, and a run pinned to 24 rows puts it off
-/// the top of the screen.
+/// HTML was the alternative, and ios.md §7 rules it out. A bar drawn in the
+/// page would track the visual viewport for the life of the app: every
+/// keyboard animation, every rotation, every scroll of a focused field.
+/// `inputAccessoryView` is attached to the keyboard by the system instead.
+///
+/// It is also the only place the run's keys stay reachable. The panel's own
+/// header scrolls with the note, and a run pinned to 24 rows puts it off the
+/// top of the screen.
 enum AccessoryBar {
     /// The note's face, left to right. Outdent before indent because that is
     /// the order they sit in on every toolbar that has both, and the pair
@@ -49,9 +46,8 @@ enum AccessoryBar {
         ("format.bold", "bold", "Bold"),
         ("format.italic", "italic", "Italic"),
         ("format.link", "link", "Insert Link"),
-        // The `[[` picker. Typed on a desktop, and typeable here too — the
-        // point is that it takes two taps on a bracket key that lives behind
-        // the software keyboard's second page.
+        // The `[[` picker. Typeable here too, but it takes two taps on a
+        // bracket key that lives behind the software keyboard's second page.
         ("format.wikiLink", "text.append", "Link to Note"),
         // ``` and its closer, which is the block this whole app is for and the
         // most expensive thing to type on this keyboard: the backtick is behind
@@ -65,8 +61,8 @@ enum AccessoryBar {
 
     /// One key on the run's face. `symbol` is an SF Symbol where one says the
     /// key (`escape` and the arrows are drawn glyphs on real keyboards too);
-    /// `title` is for the two that have no glyph anywhere, and where `^C` is
-    /// what the key is CALLED.
+    /// `title` is for the two that have no glyph anywhere, where `^C` is the
+    /// name of the key.
     private struct Key {
         let name: String
         let symbol: String?
@@ -74,9 +70,9 @@ enum AccessoryBar {
         let label: String
     }
 
-    /// The run's face: the four things a software keyboard cannot say
-    /// (ios.md §14), in the order a hand reaches for them. The names are the
-    /// page's `RUN_KEYS`, and nothing here knows what any of them sends.
+    /// The run's face: the keys a software keyboard does not have (ios.md §7),
+    /// in the order a hand reaches for them. The names are the page's
+    /// `RUN_KEYS`, and nothing here knows what any of them sends.
     private static let keys: [Key] = [
         Key(name: "ctrlC", symbol: nil, title: "^C", label: "Control C"),
         Key(name: "ctrlD", symbol: nil, title: "^D", label: "Control D"),
@@ -99,9 +95,8 @@ enum AccessoryBar {
     /// Not a command, and apart from the verbs. Nothing else on this screen
     /// puts the keyboard away: the editor fills the window, so there is no
     /// blank page to tap, and tapping the chrome does not blur a
-    /// contenteditable. Without this the keyboard takes a third of the phone
-    /// for the rest of the session, which is why every iOS accessory bar that
-    /// ships has one — and why two of the three faces carry it.
+    /// contenteditable. Without it the keyboard holds a third of the phone for
+    /// the rest of the session, which is why two of the three faces carry it.
     private static func hideKeyboard(_ dismiss: @escaping () -> Void) -> UIButton {
         button(
             symbol: "keyboard.chevron.compact.down",
@@ -112,14 +107,13 @@ enum AccessoryBar {
         )
     }
 
-    /// The face over everything else: a search box, a rename, a passphrase —
-    /// any field where the note's verbs would act on the note behind it.
+    /// The face over everything else: a search box, a rename, a passphrase, any
+    /// field where the note's verbs would act on the note behind it.
     ///
-    /// One button, and it is the one that is not a verb. The alternative was no
-    /// bar at all, which is what this used to be, and it left the keyboard with
-    /// no way out: nothing on this screen dismisses it, since the page is
-    /// full-height and tapping chrome does not blur a field. A row of Markdown
-    /// verbs over a passphrase is wrong; Hide Keyboard over one never is.
+    /// One button, and it is the one that is not a verb. This used to be no bar
+    /// at all, which left the keyboard with no way out, since nothing on this
+    /// screen dismisses it. Markdown verbs over a passphrase would act on the
+    /// note underneath, so the row is empty and only Hide Keyboard remains.
     static func bare(dismiss: @escaping () -> Void) -> UIView {
         bar(row: [], trailing: hideKeyboard(dismiss))
     }
@@ -172,8 +166,8 @@ enum AccessoryBar {
     private static func bar(row: [UIButton], trailing: UIButton) -> UIView {
         let bar = BarView()
         bar.frame = CGRect(x: 0, y: 0, width: 0, height: 44)
-        // The keyboard sets the width; the height is ours and 44 is the touch
-        // target UIKit uses everywhere else.
+        // The keyboard sets the width. The height is this bar's, and 44 is the
+        // touch target UIKit uses everywhere else.
         bar.autoresizingMask = .flexibleWidth
 
         let keys = UIStackView(arrangedSubviews: row)
@@ -222,29 +216,26 @@ private var accessoryProviderKey: UInt8 = 0
 extension WKWebView {
     /// Give the web view's editing surface an accessory view.
     ///
-    /// **The awkward part, and why it is done this way.** The first responder
-    /// while you type in a web page is not this `WKWebView` — it is a private
+    /// The first responder during typing is not this `WKWebView` but a private
     /// content view inside its scroll view, so overriding `inputAccessoryView`
-    /// on a WKWebView subclass gets you a method UIKit never calls. The way
-    /// every app that ships a bar over a web view does it is the way below: at
-    /// run time, make a subclass of whatever class that content view actually
-    /// is, give the subclass an `inputAccessoryView` that returns ours, and
-    /// re-point the instance at it.
+    /// on a `WKWebView` subclass defines a method UIKit never calls. What works
+    /// is below: at run time, subclass whatever class that content view is,
+    /// give the subclass an `inputAccessoryView`, and re-point the instance.
     ///
-    /// No private API is *named* here — the class is discovered from the live
-    /// object rather than looked up by a hardcoded string — and every step can
-    /// fail without consequence: a miss returns nil and the app runs with the
-    /// system's own bar, which is what it had before. That matters more than
-    /// usual, because the alternative failure is a crash on the first keystroke.
+    /// No private API is named here: the class is discovered from the live
+    /// object rather than looked up by a hardcoded string. Every step can fail
+    /// without consequence, since a miss returns nil and the app runs with the
+    /// system's own bar. The failure that matters is the other one, a crash on
+    /// the first keystroke.
     ///
-    /// `provider` is asked every time UIKit wants the bar rather than being
-    /// captured as a view, because that content view is the first responder for
-    /// EVERY text field in the page — the search box, a rename, a passphrase,
-    /// a running block's terminal — and a formatting bar over any of them is a
-    /// row of buttons that would act on the note behind it. Which face comes
-    /// back is `WebHost`'s, and it is told by the page (ios.md §7); nil is left
-    /// for the case where there is no host at all, since a keyboard with no way
-    /// to dismiss it is worse than the wrong verbs over one.
+    /// `provider` is asked every time UIKit wants the bar rather than captured
+    /// as a view, because that content view is the first responder for every
+    /// text field in the page: the search box, a rename, a passphrase, a
+    /// running block's terminal. A formatting bar over any of those would act
+    /// on the note behind it.
+    ///
+    /// `WebHost` chooses the face, told by the page (ios.md §7), and answers
+    /// nil only when there is no host at all.
     ///
     /// Answers the view whose `reloadInputViews()` re-asks, since the responder
     /// does not change when focus moves between two fields on one page.
@@ -252,9 +243,9 @@ extension WKWebView {
     func installAccessoryView(_ provider: @escaping () -> UIView?) -> UIView? {
         // Only after the first load: the content view does not exist until the
         // web view has something to show. Matched on the class name of the live
-        // object, which is why this is a `contains` and not an `NSClassFromString`
-        // — the name is an observation about what is on screen, not a symbol
-        // this binary links against.
+        // object, which is why this is a `contains` rather than an
+        // `NSClassFromString`. The name is an observation about what is on
+        // screen, not a symbol this binary links against.
         guard
             let content = scrollView.subviews.first(where: {
                 String(describing: type(of: $0)).contains("ContentView")
@@ -263,13 +254,14 @@ extension WKWebView {
 
         // On the view, not in the class. A class pair can be registered once
         // under one name and never again, so a closure baked into the getter
-        // below would answer for the FIRST web view this process ever built —
-        // and there is a second whenever pairing swaps the root controller out
-        // (a host key that changed, a server list emptied). It would not fail
-        // loudly either: the old `WebHost` is kept alive by the message handler
-        // its web view retains, so the getter would go on reading a `face` that
-        // nothing updates any more, and the whole bar would be missing, Hide
-        // Keyboard included, until the app was killed.
+        // below would answer for the first web view this process built, and
+        // there is a second whenever pairing swaps the root controller out (a
+        // host key that changed, a server list emptied).
+        //
+        // It would not fail loudly either. The old `WebHost` is kept alive by
+        // the message handler its web view retains, so the getter would go on
+        // reading a `face` nothing updates, and the whole bar would be missing,
+        // Hide Keyboard included, until the app was killed.
         objc_setAssociatedObject(
             content,
             &accessoryProviderKey,

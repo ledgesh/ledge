@@ -4,26 +4,27 @@ import WebKit
 /// Which keyboard the keyboard is over, as the page reports it (`@focus`, and
 /// `BarFace` in mainview/lib/nativeBridge.ts). The raw values are the wire's.
 enum BarFace: String {
-    /// Some other field in the page — a search box, a rename, a passphrase —
-    /// where the note's verbs would act on the note behind the overlay. Not
-    /// "no bar": the strip is still there, carrying the one button that is
-    /// never wrong (`AccessoryBar.bare`).
+    /// Some other field in the page: a search box, a rename, a passphrase, any
+    /// place the note's verbs would act on the note behind the overlay. Not
+    /// "no bar", because the strip is still there carrying Hide Keyboard
+    /// (`AccessoryBar.bare`).
     case none
     /// The note itself: the Markdown face.
     case note
-    /// A running block's terminal, which lives INSIDE the note's editor and so
+    /// A running block's terminal, which lives inside the note's editor and so
     /// cannot be told apart from it by anything this end can see.
     case run
 }
 
 /// The window, the web view, and the bridge between them and the socket.
 ///
-/// This is the whole of what Swift does with the protocol, which is nothing:
-/// a frame arrives from the page as base64 and goes down the socket as bytes,
-/// and bytes off the socket go up as base64. No frame is parsed here and no
-/// method name is understood except the eighteen in `SHELL_CALLS`
-/// (mainview/lib/nativeBridge.ts), which are the things only a device can
-/// answer.
+/// This is the whole of what Swift does with the protocol, which is nothing: a
+/// frame arrives from the page as base64 and goes down the socket as bytes, and
+/// bytes off the socket go up as base64.
+///
+/// No frame is parsed here and no method name is understood except the eighteen
+/// in `SHELL_CALLS` (mainview/lib/nativeBridge.ts), which are the things only a
+/// device can answer.
 final class WebHost: UIViewController {
     private let config: ShellConfig
     /// Which server the next `@open` dials. A var because the page edits the
@@ -66,10 +67,9 @@ final class WebHost: UIViewController {
     private weak var editingSurface: UIView?
     /// While the app is away, a dial is refused rather than attempted. iOS
     /// gives about thirty seconds of background execution and the page's
-    /// reconnect ladder is 31.75s long (ios.md §5), so without this the whole
-    /// ladder would run in the background, succeed, and hand back a socket
-    /// that suspension kills a moment later — which looks live until the first
-    /// write fails.
+    /// reconnect ladder is 31.75s long (ios.md §5), so without this the ladder
+    /// would run in the background, succeed, and hand back a socket that
+    /// suspension kills a moment later while it still looks live.
     private var away = false
 
     init(
@@ -119,19 +119,20 @@ final class WebHost: UIViewController {
         // env(safe-area-inset-*) threaded through a layout that also has to
         // work in a desktop window.
         //
-        // The bottom is the keyboard's, and that is the whole of ios.md §7's
-        // keyboard rule. A page pinned to the safe area keeps its full height
-        // when the keyboard comes up, so WebKit reveals the caret the only way
-        // left to it: by scrolling the document — which on a full-height app
-        // means scrolling the header and the tab strip off the top of the
-        // screen. Constrained to the keyboard instead, the page is simply
-        // shorter while the keyboard is up, the chrome stays where it is, and
-        // the editor's own scroller does the revealing.
+        // The bottom is the keyboard's, which is ios.md §7's keyboard rule. A
+        // page pinned to the safe area keeps its full height when the keyboard
+        // comes up, so WebKit reveals the caret by scrolling the document,
+        // which on a full-height app scrolls the header and the tab strip off
+        // the top of the screen.
+        //
+        // Constrained to the keyboard instead, the page is shorter while the
+        // keyboard is up, the chrome stays where it is, and the editor's own
+        // scroller does the revealing.
         //
         // Two constraints rather than one because the guide sits at the view's
-        // bottom edge when no keyboard is up, which is BELOW the safe area: the
-        // required one is the floor, and the keyboard's is high-priority so it
-        // can lose to it.
+        // bottom edge when no keyboard is up, below the safe area. The required
+        // one is the floor, and the keyboard's is high-priority so it can lose
+        // to it.
         let toKeyboard = web.bottomAnchor.constraint(equalTo: root.keyboardLayoutGuide.topAnchor)
         toKeyboard.priority = .defaultHigh
         NSLayoutConstraint.activate([
@@ -146,8 +147,8 @@ final class WebHost: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        // The label is here because it is otherwise invisible from this device:
-        // what it names is what the OTHER clients on that server show
+        // The label is here because it is otherwise invisible from this device.
+        // What it names is what the other clients on that server show
         // (remote.md §7), so this console line is the only place a probe can
         // read what this phone is about to call itself.
         print("[shell] ledge -> \(server.destination), client \(config.client), as \"\(ShellConfig.label)\"")
@@ -162,15 +163,14 @@ final class WebHost: UIViewController {
         socket = nil
     }
 
-    /// Foregrounding is a boot, and this is that sentence made literal: the
-    /// page reloads unless its connection is still live, which after the close
-    /// above it never is.
+    /// Foregrounding is a boot. The page reloads unless its connection is still
+    /// live, which after the close above it never is.
     ///
-    /// The alternative — hold the socket across a short app switch and probe it
-    /// on the way back — is an optimization, and the number that says whether
-    /// it is worth anything is the boot latency this phase measures. Guessing
-    /// at it first would be guessing about a half-open socket, which is the one
-    /// thing that looks exactly like a working one.
+    /// The alternative is to hold the socket across a short app switch and
+    /// probe it on the way back. That is an optimization, and the boot latency
+    /// this phase measures is the number that says whether it is worth
+    /// anything. Guessing first would be guessing about a half-open socket,
+    /// which looks exactly like a working one.
     func didResume() {
         away = false
         deliver(["t": "resumed"])
@@ -222,8 +222,8 @@ final class WebHost: UIViewController {
             // Read here and not held between connections: a password is in the
             // keychain, and this is the moment it is needed (`ServerPassword`).
             // Nil for a record on the key door, and nil for one that says
-            // password and has none — which fails as a refusal naming the
-            // server rather than as a dial that offers an empty string.
+            // password and has none. That fails as a refusal naming the server
+            // rather than as a dial that offers an empty string.
             password: server.usesPassword ? ServerPassword.read(server.id) : nil,
             log: { print("[shell] \($0)") }
         )
@@ -263,10 +263,9 @@ final class WebHost: UIViewController {
     ///
     /// `connectionProbe`'s answer, in the shape `bun/connections.ts` gives it,
     /// so the same dialog reads both. There is no `ssh-keyscan` on a phone, so
-    /// this is a dial — but only as far as key exchange, which happens before
-    /// authentication: the fingerprint arrives without this phone's key going
-    /// on the wire and without the server having accepted it yet, which is
-    /// exactly what a keyscan is (`CapturingHostKey`).
+    /// this is a dial, but only as far as key exchange: the fingerprint arrives
+    /// before authentication, without this phone's key going on the wire and
+    /// without the server accepting it (`CapturingHostKey`).
     ///
     /// Generation 0, like pairing's: a page socket's generation is always
     /// positive, so a `@close` for one can never reach this.
@@ -296,10 +295,10 @@ final class WebHost: UIViewController {
                     guard let self else { return }
                     transport.close()
                     self.probing = nil
-                    // The refusal IS the success: the delegate above declines
-                    // every key, so a captured offer means the handshake got far
-                    // enough to ask, and anything else is a host that could not
-                    // be reached at all.
+                    // The refusal is the success. The delegate above declines
+                    // every key, so a captured offer means the handshake got
+                    // far enough to ask, and anything else is a host that could
+                    // not be reached at all.
                     if let offer = capture.offered {
                         return answer(offer.openSSHLine, offer.fingerprint, offer.keyType, "")
                     }
@@ -316,11 +315,11 @@ final class WebHost: UIViewController {
 
     /// Take the list the page saved, and point at whatever it selected.
     ///
-    /// The page owns every rule about what may be added, renamed or removed —
-    /// they are the same rules the Mac's `connectionManager.ts` enforces, in the
-    /// same language (mainview/lib/nativeBridge.ts). This end stores the bytes
-    /// and reads two fields out of the selection: an address to dial, and a key
-    /// to pin.
+    /// The page owns every rule about what may be added, renamed or removed.
+    /// They are the same rules the Mac's `connectionManager.ts` enforces, in
+    /// the same language (mainview/lib/nativeBridge.ts). This end stores the
+    /// bytes and reads two fields out of the selection: an address to dial, and
+    /// a key to pin.
     private func saveServers(_ id: Int, _ params: [String: Any]) {
         let rows = params["servers"] as? [[String: Any]] ?? []
         let servers = rows.map {
@@ -347,9 +346,9 @@ extension WebHost: WKNavigationDelegate {
     /// The accessory bar goes on after the page has loaded, because the view it
     /// attaches to does not exist before then (AccessoryBar.swift).
     ///
-    /// Every load, not only the first: §5 makes foregrounding a reload, and a
-    /// content view rebuilt by one would otherwise come back with the system's
-    /// bar and no way to indent.
+    /// Every load, not only the first: ios.md §5 makes foregrounding a reload,
+    /// and a content view rebuilt by one would otherwise come back with the
+    /// system's bar and no way to indent.
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         // A fresh page has focused nothing yet, and a reload that kept the flag
         // set would put the bar over whatever the new page focuses first.
@@ -387,9 +386,9 @@ extension WebHost: WKNavigationDelegate {
             }
         }
         guard let surface else {
-            // Not fatal, and worth a line: the app keeps the system's bar, so
-            // the symptom is a missing strip rather than anything broken, and
-            // this is the only place that would say why.
+            // Not fatal: the app keeps the system's bar, so the symptom is a
+            // missing strip rather than anything broken, and this is the only
+            // place that would say why.
             print("[shell] no accessory bar: the web view's content view was not found")
             return
         }
@@ -416,7 +415,7 @@ extension WebHost: WKScriptMessageHandler {
         switch method {
         case "@hello":
             // The `authorized_keys` line goes with the client id because it is
-            // the same kind of fact: about this DEVICE, asked once, and needed
+            // the same kind of fact: about this device, asked once, and needed
             // before a connection exists. The page shows it in the form that
             // adds a server, since installing it there is the step before any
             // new connection can work (ios.md §4).
@@ -460,14 +459,13 @@ extension WebHost: WKScriptMessageHandler {
             }
         // The way out of a boot that failed. The page paints its own refusal
         // when the first connection cannot be made (mainview/ios.tsx) and its
-        // other button is a retry, which is the right answer to a phone that
-        // walked into a lift and the wrong one to a server that has moved or
-        // been turned off. This is that page asking for the screen it cannot
-        // draw: the connection dialog is React and needs a connection.
+        // other button is a retry, which is right for a phone that walked into
+        // a lift and wrong for a server that has moved or been turned off.
         //
-        // Replied to before the screens are swapped, because the swap tears
-        // down the web view that asked and a call with no reply is a promise
-        // that never settles.
+        // This is that page asking for the screen it cannot draw: the
+        // connection dialog is React and needs a connection. Replied to before
+        // the screens are swapped, because the swap tears down the web view
+        // that asked and a call with no reply is a promise that never settles.
         case "servers.choose":
             reply(id, ["ok": true])
             onServers(params["because"] as? String ?? "")
@@ -494,10 +492,10 @@ extension WebHost: WKScriptMessageHandler {
             let next = BarFace(rawValue: params["over"] as? String ?? "") ?? .none
             if next != face {
                 face = next
-                // The responder has not changed — focus moved between two
-                // fields on one page, or from the note into the panel of a run
-                // inside it — so UIKit will keep the bar it already has until it
-                // is asked again.
+                // The responder has not changed. Focus moved between two fields
+                // on one page, or from the note into the panel of a run inside
+                // it, so UIKit keeps the bar it already has until it is asked
+                // again.
                 editingSurface?.reloadInputViews()
             }
             reply(id, NSNull())
@@ -512,16 +510,15 @@ extension WebHost: WKScriptMessageHandler {
             reply(id, Natives.clipboardImage())
         case "photos.pick":
             // The one call that waits on a person. The reply is deferred until
-            // the picker closes, which the bridge already allows for — a call
-            // is a promise and nothing about it is timed on this end.
+            // the picker closes, which the bridge already allows for: a call is
+            // a promise and nothing about it is timed on this end.
             PhotoPicker.pick(over: self) { [weak self] base64 in self?.reply(id, base64) }
         case "link.open":
             reply(id, ["ok": Natives.linkOpen(params["url"] as? String ?? "")])
         case "share.text":
-            // Answered when the sheet is UP, unlike `photos.pick` above: the
+            // Answered once the sheet is up, unlike `photos.pick` above: the
             // page is not waiting on what the user picks, and there is nothing
-            // for it to do with the answer. Presenting is the whole of the
-            // call.
+            // for it to do with the answer. Presenting is the whole call.
             reply(id, ["ok": Natives.share(params["text"] as? String ?? "", over: self, from: nil)])
         case "menu.set":
             // There is no menu bar on a phone. The page answers this itself and

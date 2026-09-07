@@ -3,14 +3,13 @@ import WebKit
 
 /// The built view, served to the web view over a scheme of its own.
 ///
-/// The alternative is `loadFileURL`, and a custom scheme is worth the fifty
-/// lines: `file://` gives every resource its own opaque origin, which ES
-/// modules and `import()` — CodeMirror loads a language mode per fence
-/// (`@codemirror/language-data`) — do not survive. Under `ledge://app/`
-/// everything the page loads shares one origin, and the page cannot see
-/// anything outside the bundle's `view/` directory.
+/// The alternative is `loadFileURL`, but `file://` gives every resource its
+/// own opaque origin, which ES modules and `import()` do not survive
+/// (CodeMirror loads a language mode per fence, `@codemirror/language-data`).
+/// Under `ledge://app/` everything the page loads shares one origin, and the
+/// page cannot see anything outside the bundle's `view/` directory.
 ///
-/// It is also the seam §2 names for later: if the bridge's base64 ever
+/// It is also the seam ios.md §2 names for later: if the bridge's base64 ever
 /// measures as the bottleneck, streaming `Data` server-to-client is a handler
 /// here rather than a change to the protocol.
 final class BundleScheme: NSObject, WKURLSchemeHandler {
@@ -27,10 +26,10 @@ final class BundleScheme: NSObject, WKURLSchemeHandler {
     }
 
     func webView(_ webView: WKWebView, start task: WKURLSchemeTask) {
-        // Answered synchronously, start to finish. A `WKURLSchemeTask` that is
-        // written to after WebKit has stopped it traps, and doing the whole
-        // thing on this call is what makes that unreachable rather than
-        // unlikely — there is no suspension point for a stop to interleave at.
+        // Answered synchronously, start to finish. A `WKURLSchemeTask` written
+        // to after WebKit has stopped it traps. Completing the response on this
+        // call leaves no suspension point for a stop to interleave at, which
+        // makes that unreachable rather than merely unlikely.
         guard let url = task.request.url else {
             return task.didFailWithError(URLError(.badURL))
         }
@@ -44,8 +43,9 @@ final class BundleScheme: NSObject, WKURLSchemeHandler {
             headerFields: [
                 "Content-Type": Self.mime(file.pathExtension),
                 "Content-Length": String(data.count),
-                // The bundle is the app; a stale module across a reinstall
-                // would be a mystery worth days.
+                // The bundle ships with the app, so a cached module could
+                // outlive the build it came from and be served after an
+                // upgrade.
                 "Cache-Control": "no-store",
             ]
         )!
@@ -83,9 +83,9 @@ final class BundleScheme: NSObject, WKURLSchemeHandler {
         case "woff2": return "font/woff2"
         case "woff": return "font/woff"
         case "ttf": return "font/ttf"
-        // Deliberately not application/octet-stream: an unknown type that the
-        // page tried to load as a module would fail with a MIME error rather
-        // than a missing-file one, and the second is the true report.
+        // Every type the built view emits is named above. Anything else the
+        // page can still fetch, but not `import()`: WebKit refuses a module
+        // served as application/octet-stream.
         default: return "application/octet-stream"
         }
     }

@@ -8,17 +8,15 @@ import UIKit
 ///
 /// Pairing is a line the user copies or shares. The app shows its public key
 /// and the whole `authorized_keys` line, forced command included, exactly as
-/// remote.md §4 writes it; getting that line onto the server is the user's
-/// problem, which is the same problem the Mac client has today and a harder one
-/// here, because the server is not on this device and neither is the
-/// pasteboard's other end (ios.md §4).
+/// remote.md §4 writes it. Getting that line onto the server is the user's
+/// problem, and a harder one than on a Mac: the server is not this device, and
+/// neither is the pasteboard's other end (ios.md §4).
 ///
 /// The host key is confirmed here rather than scanned. `ssh-keyscan` fetches a
 /// key and a later connection trusts what was written down; this asks about the
-/// key of the connection in progress, and there is no button that says continue
-/// anyway. That is where remote.md §4's "no blind accept" lives on a phone: not
-/// in the comparison, which is bytes, but in the fact that the interface offers
-/// no third answer.
+/// key of the connection in progress, and there is no continue-anyway button.
+/// That absence is where remote.md §4's "no blind accept" lives on a phone,
+/// rather than in the comparison, which is bytes either way.
 final class PairingViewController: UIViewController {
     private let client: String
     private let suggestion: String
@@ -66,8 +64,8 @@ final class PairingViewController: UIViewController {
         self.suggestedPort = suggestPort
         self.onPaired = onPaired
         super.init(nibName: nil, bundle: nil)
-        // The navigation bar's, not a label in the stack: this screen is inside
-        // a stack now, and a title drawn twice is a title drawn wrong.
+        // The navigation bar's, not a label in the stack: this screen sits
+        // inside a navigation stack, which draws the title itself.
         title = "Pair with a server"
         reason.text = because
         reason.isHidden = because == nil
@@ -83,7 +81,7 @@ final class PairingViewController: UIViewController {
 
         // The key is minted on the first launch that reaches this screen, which
         // is the first launch. A failure here is not something a user can fix,
-        // so it is said plainly instead of retried.
+        // so it is reported rather than retried.
         do {
             let key = try DeviceKey.load()
             held = key
@@ -200,16 +198,16 @@ final class PairingViewController: UIViewController {
         status.textColor = .secondaryLabel
         status.numberOfLines = 0
 
-        // What the line IS comes first. A reader who does not know it carries
+        // What the line is comes first. A reader who does not know it carries
         // this device's public key cannot tell why the server needs it, and a
-        // step that opens on hardening is explaining the option before the
-        // thing it is an option on.
+        // step that opens on hardening explains the option before the thing it
+        // is an option on.
         //
         // Then what the restriction is good for, rather than a claim that the
         // key is harmless: it narrows ssh's feature set around the protocol,
-        // and the protocol behind the forced command runs code by design
-        // (remote.md §4a). "Cannot open a shell" was true at the ssh layer and
-        // read as a guarantee this design does not make.
+        // and running code is what the protocol behind the forced command is
+        // for (remote.md §4a). "Cannot open a shell" was true at the ssh layer
+        // and read as a guarantee Ledge does not make.
         keyStep.text =
             "2. Add this line to ~/.ssh/authorized_keys on the server. It is this device's public key, which is how that server knows to let this device in. The restrict prefix keeps the key from forwarding ports or copying files."
         keyStep.font = .preferredFont(forTextStyle: .body)
