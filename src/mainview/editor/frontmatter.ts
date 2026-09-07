@@ -1,26 +1,22 @@
-// Styles a note's frontmatter block: visible but quiet.
+// Styles a note's frontmatter block. The block is dimmed and set at one
+// size, and stays ordinary editable text (the file-is-the-UI stance
+// settings.jsonc takes, architecture.md §6).
 //
-// The block is real note text and stays editable in place — the file is the
-// UI, same stance as settings.jsonc — but it is machinery, not prose, so it
-// renders dimmed and at one size. The markdown parser knows nothing about
-// frontmatter (to it the opening fence is a thematic break and `# comment`
-// lines are headings), so the line decorations here also neutralize whatever
-// markdown styling lands inside the block: a comment rendered as a giant H1
-// would make the quiet block the loudest thing on screen.
+// The markdown parser knows nothing about frontmatter: it reads the opening
+// fence as a thematic break and `# comment` lines as headings. The line
+// decorations here override that styling, so a comment does not render as an
+// H1 inside the quiet block.
 //
-// Extent comes from shared/frontmatter.ts — the same `frontmatterEnd` the
-// params parser and the title logic use, so what gets dimmed is exactly what
-// gets parsed, never one line more or less.
+// The extent comes from `frontmatterEnd` in shared/frontmatter.ts, the same
+// function the params parser and the title logic use. What gets dimmed is
+// what gets parsed, never one line more or less.
 //
-// It is also where the block SAYS what it could not read. The parser refuses
-// per line (an unknown key, a name that could never reach a shell, a token
-// that is not a tag) and the refusal is drawn on the line it belongs to,
-// because the alternative is a note whose frontmatter silently does nothing.
-// This is the settings dialog's stance in the place frontmatter is actually
-// edited (architecture.md §6: validation previewed live, advisory only) —
-// nothing here blocks a keystroke, gates a save, or refuses to spawn. A
-// half-typed line is wrong for as long as it takes to finish typing it, so
-// the message has to be quiet enough to write through.
+// The decorations below also draw what the parser refused: an unknown key, a
+// name that could never reach a shell, a token that is not a tag. Each
+// message is drawn beside the line it was refused on, and the report is
+// advisory (architecture.md §6a): it blocks no keystroke, no save, and no
+// spawn. A half-typed line is wrong until it is finished, so the message
+// stays quiet enough to write through.
 import { StateField, type EditorState, type Extension, type Range } from "@codemirror/state";
 import {
   Decoration,
@@ -40,10 +36,10 @@ import {
 import { editProfile, openTag } from "./bridge";
 import { sessionIdFacet } from "./session";
 
-// Enough of a note to find the block's end — the same cap as everywhere else
-// that peeks at a head (bun/notes.ts HEAD_BYTES), with the same accepted edge:
-// a block that outgrows it simply stops being recognized, here and in the
-// parser alike.
+// How much of a note to read to find the block's end. The same cap as
+// everywhere else that peeks at a head (bun/notes.ts HEAD_BYTES), and the
+// same accepted consequence: a block that outgrows it stops being
+// recognized, here and in the parser alike.
 const HEAD_BYTES = 4096;
 
 /**
@@ -54,9 +50,9 @@ const HEAD_BYTES = 4096;
 export function frontmatterLineSpan(head: string): { first: 1; last: number } | null {
   const end = frontmatterEnd(head);
   if (end === 0) return null;
-  // Lines are newline counts + 1; `end` sits just past the closing fence's
-  // newline (or at text end when it has none), so counting up to end - 1
-  // lands on the fence's own line either way.
+  // A line number is the newline count plus 1. `end` sits just past the
+  // closing fence's newline, or at text end when it has none, so counting up
+  // to end - 1 lands on the fence's own line either way.
   let last = 1;
   for (let i = 0; i < end - 1; i += 1) if (head.charCodeAt(i) === 10) last += 1;
   return { first: 1, last };
@@ -64,11 +60,10 @@ export function frontmatterLineSpan(head: string): { first: 1; last: number } | 
 
 /**
  * The `profile:` value's character span within one block line, or null when
- * the line is not a usable top-level profile line (indented lines belong to
- * `env:`, and a name the parser would refuse is no link — clicking it could
- * only open a file that can never exist). The span covers the raw token,
- * quotes included; `name` is what the click should open. Pure, like
- * frontmatterLineSpan, so the mapping is testable without an editor.
+ * the line is not a usable top-level profile line: indented lines belong to
+ * `env:`, and a name the parser would refuse is no link (clicking it could
+ * only open a file that cannot exist). The span covers the raw token, quotes
+ * included; `name` is what the click opens. Pure, like frontmatterLineSpan.
  */
 export function profileValueSpan(
   lineText: string,
@@ -81,22 +76,21 @@ export function profileValueSpan(
 }
 
 /**
- * The `tags:` value's per-token character spans within one block line —
- * profileValueSpan's multi-token sibling. Only tokens the parser would accept
- * are spans (a refused token is no link, the profile rule); each carries the
- * tag the click should show, leading `#` stripped. A wholly-quoted list
- * (`tags: "a b"`) yields nothing: the quote glues into the first token and
- * fails isTagToken — styling degrades, parsing doesn't. The flow sequence's
- * brackets are the case where degrading was NOT acceptable: `tags: [a, b]` is
- * the common spelling, so they come off by the parser's own rule (unbracket)
- * rather than costing every token its pill. Pure, like its sibling, so the
- * mapping is testable without an editor.
+ * The `tags:` value's per-token character spans within one block line, the
+ * multi-token sibling of profileValueSpan. Only tokens the parser would
+ * accept get a span, and each carries the tag the click shows, with a leading
+ * `#` stripped. Brackets come off by the parser's own rule (unbracket), so
+ * the tokens in `tags: [a, b]` get spans too. A wholly quoted list
+ * (`tags: "a b"`) yields no spans: the quotes stay on the outer tokens and
+ * fail isTagToken. parseFrontmatter unquotes the value first, so those tags
+ * still parse. Pure, like its sibling.
  */
 export function tagsValueSpans(lineText: string): { from: number; to: number; tag: string }[] {
   const m = /^(tags[ \t]*:[ \t]*)(\S.*?)[ \t]*$/.exec(lineText.replace(/\r$/, ""));
   if (!m) return [];
-  // A stripped "[" shifts every token one column right of where it sits in
-  // `inner`; the spans are the LINE's, so the offset has to come back.
+  // The spans are the line's, not `inner`'s. When a "[" is stripped, every
+  // token sits one column further right on the line than it does in `inner`,
+  // so base adds that column back.
   const inner = unbracket(m[2]!);
   const base = m[1]!.length + (inner === m[2]! ? 0 : 1);
   const out: { from: number; to: number; tag: string }[] = [];
@@ -110,9 +104,9 @@ export function tagsValueSpans(lineText: string): { from: number; to: number; ta
 }
 
 /**
- * The block's EFFECTIVE profile line in `head`: the last usable one, matching
- * the parser's duplicate-keys-last-wins, so the edit button (blocks.ts) always
- * opens the profile the shell would actually get.
+ * The block's effective profile line in `head`: the last usable one. That
+ * matches the parser, where a repeated key's last value wins, so the edit
+ * button (blocks.ts) opens the profile the shell would actually get.
  */
 export function effectiveProfileLine(
   head: string,
@@ -128,9 +122,9 @@ export function effectiveProfileLine(
   return found;
 }
 
-// Doc-based conveniences over the pure helpers, shared with the overlay layer
-// in blocks.ts so its button and these decorations can never disagree about
-// where the block is or which profile is live.
+// Document-based conveniences over the pure helpers, shared with the overlay
+// layer in blocks.ts so its button and these decorations cannot disagree
+// about where the block is or which profile is live.
 export function frontmatterRange(state: EditorState): { from: number; to: number } | null {
   const span = frontmatterLineSpan(state.sliceDoc(0, Math.min(HEAD_BYTES, state.doc.length)));
   return span ? { from: 0, to: state.doc.line(span.last).to } : null;
@@ -143,11 +137,11 @@ export function profileChipAnchor(state: EditorState): { pos: number; name: stri
 }
 
 /**
- * The hosts this note's `host:` line declares, from the LIVE document — the
- * picker must reflect what is on screen, not the store's debounced last send.
- * (Bun still validates the eventual choice against what it was last SENT,
- * so a pick made inside the autosave window degrades to a warning, never to
- * an undeclared machine.)
+ * The hosts this note's `host:` line declares, read from the live document.
+ * The picker has to show what is on screen, not the store's debounced last
+ * send. Bun still validates the eventual choice against the params it was
+ * last sent (resolveHost in bun/server.ts), so a pick made inside the
+ * autosave window falls back with a warning, never to an undeclared machine.
  */
 export function declaredHosts(state: EditorState): string[] {
   return parseFrontmatter(state.sliceDoc(0, Math.min(HEAD_BYTES, state.doc.length))).params.hosts;
@@ -155,31 +149,30 @@ export function declaredHosts(state: EditorState): string[] {
 
 const FENCE = Decoration.line({ class: "ledge-fm ledge-fm-fence" });
 const BODY = Decoration.line({ class: "ledge-fm" });
-// The cursor stays an I-beam whatever this says — WebKit forces it inside the
-// editing context (see the .ledge-overlay comment in index.css) — so the
+// The cursor stays an I-beam whatever this says: WebKit forces it inside the
+// editing context (see the .ledge-overlay comment in index.css). The
 // affordance is the link styling plus this tooltip.
 const PROFILE = Decoration.mark({
   class: "ledge-fm-profile",
   attributes: { title: "⌘-click to edit profile" },
 });
-// A declared tag, ⌘-clickable like the profile name — the same follow-vs-
-// edit grammar, landing where every tag click lands (the Tags panel).
+// A declared tag, ⌘-clickable like the profile name, under the same grammar:
+// ⌘-click follows, a plain click edits. The click lands where every tag click
+// lands, the Tags panel.
 const FM_TAG = Decoration.mark({
   class: "ledge-fm-tag",
   attributes: { title: "⌘-click to show tagged notes" },
 });
-// The line the parser refused, so the message below has something to point at
-// on a narrow window: read the message, look left, that line.
+// The line the parser refused, accented down its left edge (index.css). On a
+// narrow window the accent is what ties the message below to its own line.
 const PROBLEM = Decoration.line({ class: "ledge-fm ledge-fm-bad" });
 
-// What the parser could not read, drawn at the end of its own line.
-//
-// A widget rather than the `title` tooltip the two marks above use, because
-// those tooltips label an affordance someone went looking for and this is
-// news: a message you have to hover to discover is barely louder than the
-// silence it replaces, and a touch client has no hover to discover it with.
-// It is inert — `ignoreEvent` keeps clicks and selection out, so the block
-// stays ordinary editable text with something written in the margin.
+// What the parser could not read, drawn at the end of its own line. A widget
+// rather than the `title` tooltip the two marks above use: a message found
+// only by hovering is barely louder than the silence it replaces, and a touch
+// client has no hover to find it with. `ignoreEvent` keeps clicks and
+// selection out, so the block stays ordinary editable text with something
+// written in the margin.
 class ProblemWidget extends WidgetType {
   constructor(readonly message: string) {
     super();
@@ -191,9 +184,9 @@ class ProblemWidget extends WidgetType {
     const el = document.createElement("span");
     el.className = "ledge-fm-problem";
     el.textContent = this.message;
-    // Decorative: the line's own text already carries the content, and a
-    // screen reader walking the document should not read the annotation as
-    // though the user had typed it.
+    // Decorative. The line's own text carries the content, and a screen
+    // reader walking the document should not read this annotation as though
+    // the writer had typed it.
     el.setAttribute("aria-hidden", "true");
     return el;
   }
@@ -206,9 +199,9 @@ function build(state: EditorState): DecorationSet {
   const head = state.sliceDoc(0, Math.min(HEAD_BYTES, state.doc.length));
   const span = frontmatterLineSpan(head);
   if (!span) return Decoration.none;
-  // Every problem on a line, in the parser's own order. Keyed by line because
-  // one line can be wrong more than once (`tags: 123 456` is two refusals),
-  // and reporting only the first would make fixing it look like whack-a-mole.
+  // Every problem on a line, in the parser's own order. One line can be wrong
+  // more than once (`tags: 123 456` is two refusals), so the map keys by line
+  // and the widget shows them all rather than only the first.
   const byLine = new Map<number, string[]>();
   for (const p of parseFrontmatter(head).problems) {
     const at = byLine.get(p.line);
@@ -247,14 +240,13 @@ const field = StateField.define<DecorationSet>({
   provide: (f) => EditorView.decorations.from(f),
 });
 
-// ⌘-click on the profile name opens the editor dialog; a PLAIN click must
-// stay a caret move (the name is editable text, and click is how you get at
-// it). ⌘ is the raw-editor convention for "follow, don't edit" — and note
-// CodeMirror's own ⌘-click (add a cursor) still works everywhere else,
-// because this handler consumes the event only on the profile token itself.
-// Position comes from coordinates and the document, not from the clicked DOM
-// span: syntax highlighting can split the marked range into several spans,
-// and a fragment's textContent would be a fragment of the name.
+// ⌘-click on the profile name opens the editor dialog. A plain click stays a
+// caret move: the name is editable text, and ⌘ is the raw-editor convention
+// for following rather than editing. The handler consumes the event on the
+// profile and tag tokens only, so CodeMirror's own ⌘-click (add a cursor)
+// still works elsewhere. The position comes from the coordinates and the
+// document, not from the clicked DOM span, which syntax highlighting can
+// split into fragments of the name.
 const clickToEdit = EditorView.domEventHandlers({
   mousedown: (event, view) => {
     if (!event.metaKey || event.button !== 0) return false;
@@ -283,13 +275,12 @@ const clickToEdit = EditorView.domEventHandlers({
   },
 });
 
-// While ⌘ is held, the profile link switches to a solid underline in the
-// link color at full strength (index.css .ledge-meta) — live feedback that a
-// click right now FOLLOWS instead of edits, since the cursor cannot say so
-// (WebKit pins the I-beam). window-level listeners because the editor only
-// gets key events while focused, and the ⌘ press this reacts to usually
-// starts elsewhere; blur clears the class so ⌘-Tabbing away does not leave
-// the link lit.
+// While ⌘ is held, the profile and tag links' underlines go solid (index.css
+// .ledge-meta). That shows a click now would follow rather than edit. The
+// cursor cannot show it: WebKit pins the I-beam. The listeners sit on window
+// because the editor gets key events only while focused, and the ⌘ press
+// usually starts elsewhere. Blur clears the class, so ⌘-Tabbing away does not
+// leave the link lit.
 const metaHeld = ViewPlugin.fromClass(
   class {
     private down = (e: KeyboardEvent) => {

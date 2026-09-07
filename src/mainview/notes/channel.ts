@@ -1,18 +1,19 @@
-// The view end of the note-store RPC, mirroring terminal/channel.ts: the store
-// and the editor pool call these, and main.tsx binds them to the Electroview RPC
-// once it exists. Keeping the shim separate means the persistence logic
-// (notes/store.ts) is testable without an RPC or a webview.
+// The view end of the note-store RPC, mirroring terminal/channel.ts. The store
+// and the editor pool call these functions. boot.tsx binds them once the view
+// is connected to a server, and harness.tsx binds test doubles. Keeping the
+// shim separate keeps the persistence logic (notes/store.ts) testable without
+// an RPC or a webview.
 import type { BacklinkHit, ExternalOpenInfo, NoteMeta, TagHit, TrashMeta } from "../../shared/rpc-schema";
 import type { NoteParams } from "../../shared/frontmatter";
 import type { SearchHit } from "../../shared/search";
 import type { TagInfo } from "../../shared/tags";
 
-// What a read hands back: the note's text plus its disk version, which the
-// store echoes into the next write's baseMtimeMs (external-edit guard).
-// `locked` marks a locked note; `held: true` means the body was WITHHELD
-// (vault locked — text is only the plaintext head, and the tab shows the
-// placeholder face, never an editor); `damaged` rides on held when the
-// ciphertext fails authentication (rpc-schema noteRead says the shape).
+// A read hands back the note's text and its disk version, which the store
+// echoes into the next write's baseMtimeMs (external-edit guard). `locked`
+// marks a locked note. `held: true` means the body was withheld: the vault is
+// locked, or the body would not open. `text` is then the plaintext head alone,
+// and the tab shows the placeholder, never an editor. `damaged` rides on held
+// when the ciphertext fails authentication (rpc-schema noteRead has the shape).
 export interface NoteFile {
   text: string;
   mtimeMs: number;
@@ -23,36 +24,35 @@ export interface NoteFile {
 
 // What a folder rename reports: where the folder is now, and every note that
 // travelled with it. `from` is the path the view's tabs and note list still
-// hold; `note` is the same note where it now lives.
+// hold. `note` is the same note where it now lives.
 export interface FolderRenamed {
   folder: string;
   moved: Array<{ from: string; note: NoteMeta }>;
 }
 
-// What a folder delete reports: every note that went to the trash, `from` the
-// path the view's tabs and note list still hold, `to` where it landed — the
-// handle Undo restores each of them from, exactly as a single delete returns
-// one (bun/notes.ts deleteFolder). Notes the walk did not see are not in here
-// and were not touched.
+// What a folder delete reports: every note that went to the trash. `from` is
+// the path the view's tabs and note list still hold, `to` where it landed, the
+// handle Undo restores it from. Deleting one note returns that same handle on
+// its own (bun/notes.ts deleteNote). Notes the walk did not see are not in
+// here and were not touched.
 export interface FolderDeleted {
   trashed: Array<{ from: string; to: string }>;
 }
 
 // What a guarded write reports: the new disk version, and where an external
-// edit went (the root's trash) when the save displaced one — null normally.
+// edit went (the root's trash) when the save displaced one. Null normally.
 export interface WriteResult {
   mtimeMs: number;
   divergedTo: string | null;
 }
 
 interface NoteHandlers {
-  // Scoped calls carry the workspace folder (an opaque root handle from Bun);
-  // per-note calls carry just the path — its folder is derivable Bun-side.
+  // Scoped calls carry the workspace folder, an opaque root handle from Bun.
+  // Per-note calls carry just the path, since Bun derives its folder.
   list: (folder: string) => Promise<NoteMeta[]>;
   read: (path: string) => Promise<NoteFile | null>;
-  // The body scans carry lockedSkipped — how many locked notes the answer
-  // deliberately does not cover (locking.md §4) — for the overlay and
-  // panel footers.
+  // The body scans carry lockedSkipped: how many locked notes the answer does
+  // not cover (locking.md §4). The overlay and the panel footers show it.
   search: (folder: string, query: string, scope: string) => Promise<{ hits: SearchHit[]; lockedSkipped: number }>;
   backlinks: (path: string) => Promise<{ backlinks: BacklinkHit[]; lockedSkipped: number }>;
   tags: (folder: string, scope: string) => Promise<{ tags: TagInfo[]; lockedSkipped: number }>;
@@ -62,17 +62,17 @@ interface NoteHandlers {
   // (rpc noteStash). The stranded-edit path calls it and nothing else does.
   stash: (path: string, text: string) => Promise<string>;
   // `subfolder` is where inside the workspace the note goes (root-relative,
-  // "" or null for the root itself) — the only name the view chooses, guarded
-  // Bun-side. Named apart from `folder` because in this file `folder` has
-  // always meant the workspace root, and the two must not be confused at a
-  // call site.
+  // "" or null for the root itself). It is the only name the view chooses,
+  // and Bun guards it. It is not called `folder` because `folder` means the
+  // workspace root everywhere in this file, and a call site must not confuse
+  // the two.
   create: (folder: string, text: string, subfolder?: string | null) => Promise<NoteMeta>;
   retitle: (path: string, text: string) => Promise<NoteMeta>;
   // Move a note into another folder of its own workspace (rpc noteMove).
   move: (path: string, subfolder: string | null) => Promise<NoteMeta>;
   // Rename one folder of a workspace, in place (rpc folderRename). `name` is
   // one segment, never a path. Resolves to the folder's new root-relative
-  // path and to every note that travelled — old path beside new meta.
+  // path and to every note that travelled: old path beside new meta.
   renameFolder: (folder: string, subfolder: string, name: string) => Promise<FolderRenamed>;
   // Delete one folder of a workspace by deleting the notes in it (rpc
   // folderDelete). Resolves to every note that went to the trash.
@@ -86,18 +86,19 @@ interface NoteHandlers {
   // and nothing there can act on an acknowledgement.
   configureSession: (sessionId: string, params: NoteParams, notePath: string | null) => void;
   // Consume any CLI open request pending from before launch (`ledge <title>`
-  // with the app closed). Called once at boot, AFTER the openExternal
-  // subscription is up — the pull exists because a push at boot could fire
+  // with the app closed). Called once at boot, after the openExternal
+  // subscription is up. The pull exists because a push at boot could fire
   // before anyone listens.
   takeOpenRequest: () => Promise<ExternalOpenInfo | null>;
   // Create-or-open today's daily note (rpc dailyOpen). `folder` is the
-  // selected workspace — the fallback when the daily.workspace setting does
-  // not pin one. The ExternalOpenInfo comes back for the caller to feed to
-  // dispatchExternalOpen: the CLI-open subscriber owns select-then-open.
+  // selected workspace, the fallback when the daily.workspace setting does not
+  // resolve to exactly one registered root. The ExternalOpenInfo comes back
+  // for the caller to feed to dispatchExternalOpen: the CLI-open subscriber
+  // owns select-then-open.
   openDaily: (folder: string) => Promise<{ open: ExternalOpenInfo; created: boolean }>;
-  // Instantiate a template note — a PATH from the live note lists, the
-  // picker's concrete pick — into a new note in `folder` (rpc
-  // noteFromTemplate). Title null creates it as "Untitled".
+  // Instantiate a template note into a new note in `folder` (rpc
+  // noteFromTemplate). `templatePath` is a path from the live note lists, the
+  // picker's concrete pick. Title null creates it as "Untitled".
   createFromTemplate: (folder: string, templatePath: string, title: string | null) => Promise<NoteMeta>;
 }
 
@@ -121,14 +122,12 @@ export function readNote(path: string): Promise<NoteFile | null> {
 }
 
 // Full-text hits for `query` within one workspace's notes, newest note first
-// (shared/search.ts owns the grammar and the caps). Bun does the scanning —
-// the view never holds the corpus, only the result list. lockedSkipped rides
-// along for the overlay's footer: locked notes are never searched.
-//
-// `scope` narrows it to one folder of that workspace and the folders inside
-// it; "" is the whole workspace. Bun narrows before the scan rather than the
-// view filtering after, because the hit cap would otherwise be spent on notes
-// the caller has already said it does not want.
+// (shared/search.ts owns the grammar and the caps). Bun scans, so the view
+// holds the result list and never the corpus. lockedSkipped feeds the
+// overlay's footer: locked notes are never searched. `scope` narrows to one
+// folder of that workspace and the folders inside it, "" to the whole
+// workspace. Bun narrows before the scan, so the hit cap is not spent on
+// notes the caller has already said it does not want.
 export function searchNotes(folder: string, query: string, scope = ""): Promise<{ hits: SearchHit[]; lockedSkipped: number }> {
   return bridge().search(folder, query, scope);
 }
@@ -142,11 +141,11 @@ export function backlinksOf(path: string): Promise<{ backlinks: BacklinkHit[]; l
 }
 
 // One workspace's tag directory (frontmatter tags: + inline #hashtags,
-// shared/tags.ts owns the grammar), alphabetical with per-note counts. Feeds
-// the Tags panel, the overlay's tag rows, and the # completion vocabulary —
-// Bun scans, the searchNotes stance again. Locked notes contribute exactly
-// their plaintext head's tags; lockedSkipped counts their unscanned bodies.
-// `scope` narrows to one folder, exactly as searchNotes' does.
+// shared/tags.ts owns the grammar), alphabetical with per-note counts. Bun
+// scans, as it does for searchNotes. It feeds the Tags panel, the overlay's
+// tag rows, and the # completion vocabulary. Locked notes contribute only
+// their plaintext head's tags, and lockedSkipped counts their unscanned
+// bodies. `scope` narrows to one folder, as searchNotes' does.
 export function listTags(folder: string, scope = ""): Promise<{ tags: TagInfo[]; lockedSkipped: number }> {
   return bridge().tags(folder, scope);
 }
@@ -157,18 +156,18 @@ export function notesTagged(folder: string, tag: string): Promise<{ hits: TagHit
   return bridge().tagged(folder, tag);
 }
 
-// `baseMtimeMs` is the disk version this note last read or wrote (null before
-// the first read lands): Bun refuses to silently overwrite a file that moved
-// past it — see noteWrite in the rpc schema for the arbitration.
+// `baseMtimeMs` is the disk version this note last read or wrote, null before
+// the first read lands. Bun refuses to silently overwrite a file that moved
+// past it (noteWrite in the rpc schema states the arbitration).
 export function writeNote(path: string, text: string, baseMtimeMs: number | null): Promise<WriteResult> {
   return bridge().write(path, text, baseMtimeMs);
 }
 
-// Put text somewhere recoverable that is NOT this note: the root's trash, under
-// the note's own name (rpc noteStash). For a buffer that was typed while the
-// server was unreachable and has been overtaken there since — it is writing,
-// it is not the note, and it needs a home before the note's real text replaces
-// it on screen (workspace/editorPool.ts resolveStrandedNotes).
+// Put text somewhere recoverable that is not this note: the root's trash,
+// under the note's own name (rpc noteStash). For a buffer typed here while the
+// server was unreachable, whose note the server has changed since. That
+// buffer is somebody's writing, not the note. It is parked before the editor
+// shows the note's real text (workspace/editorPool.ts resolveStrandedNotes).
 export function stashNote(path: string, text: string): Promise<string> {
   return bridge().stash(path, text);
 }
@@ -186,10 +185,10 @@ export function moveNote(path: string, subfolder: string | null): Promise<NoteMe
 }
 
 // Rename a folder of the selected workspace, keeping it where it sits (rpc
-// folderRename). `name` is the folder's new NAME and not a path: renaming does
+// folderRename). `name` is the folder's new name, not a path: the rename does
 // not move it, so nothing under it changes depth and no note's body is read or
-// rewritten — which is why this works on a folder holding locked notes with
-// the vault shut, where moving one does not.
+// rewritten. That is why this works on a folder holding locked notes with the
+// vault shut, where moving one note is refused.
 export function renameFolder(folder: string, subfolder: string, name: string): Promise<FolderRenamed> {
   return bridge().renameFolder(folder, subfolder, name);
 }
@@ -197,8 +196,8 @@ export function renameFolder(folder: string, subfolder: string, name: string): P
 // Delete a folder of the selected workspace (rpc folderDelete): every note in
 // it, at any depth, moved into the trash exactly as deleting one note is. The
 // folder then stops being listed because nothing is in it, and the emptied
-// directories are removed — except any still holding something the note list
-// never showed, which keeps its folder.
+// directories are removed. A directory still holding something the note list
+// never showed keeps its folder.
 export function deleteFolder(folder: string, subfolder: string): Promise<FolderDeleted> {
   return bridge().deleteFolder(folder, subfolder);
 }
@@ -237,7 +236,7 @@ export function emptyTrash(folder: string): Promise<number> {
 }
 
 // Hand Bun a note's spawn params (parsed from its frontmatter), keyed by the
-// tab's docId — the same key its shells live under. It rides the note-store
+// tab's docId, the same key its shells live under. It rides the note-store
 // channel rather than the terminal one because the sender is notes/store.ts:
 // the save path is the one place that sees every text change.
 export function configureSession(sessionId: string, params: NoteParams, notePath: string | null): void {
@@ -246,11 +245,11 @@ export function configureSession(sessionId: string, params: NoteParams, notePath
 
 // --- external changes --------------------------------------------------------
 // Bun's watcher push (`notesChanged` in the rpc schema): one workspace root's
-// files moved behind the app's back. main.tsx feeds the message in; App
+// files moved behind the app's back. boot.tsx feeds the message in. App
 // subscribes and answers with a folder refresh plus a reload of clean open
-// buffers. A subscriber set rather than a Handlers field: this is a push the
-// view REACTS to, not a capability it calls, and it can arrive before (or
-// without) configureNotes in tests.
+// buffers. A subscriber set rather than a Handlers field: the view reacts to
+// this push rather than calling it, and it can arrive before or without
+// configureNotes in tests.
 
 const changeSubs = new Set<(root: string) => void>();
 
@@ -264,23 +263,21 @@ export function dispatchNotesChanged(root: string): void {
 }
 
 // --- the wire coming back ----------------------------------------------------
-// Not Bun's, unlike everything above: this end raises it about its own
-// connection (wire.ts CLIENT_PUSHES) and boot.tsx feeds it in. It lives here
-// because what a dropped wire costs is precisely what `notesChanged` covers.
-//
-// A push with nowhere to go is dropped rather than queued (bun/daemon.ts), so
-// every `notesChanged` for every root that moved while the wire was down is
-// simply gone — another device's save, a git checkout, an agent working in a
-// drawer. Nothing re-sends them, and the lists and every open buffer go on
-// showing what was true when the wire went. Window focus is the belt that
-// catches this on a Mac, and it is no help at all where it matters most: the
-// window never left, or there is no window focus to have (ios.md §5).
-//
+// Raised by this end about its own connection (wire.ts CLIENT_PUSHES), unlike
+// everything above, and boot.tsx feeds it in. It lives here because a dropped
+// wire loses exactly what `notesChanged` covers. A push with nowhere to go is
+// dropped rather than queued (bun/daemon.ts, remote.md §7), so nothing tells
+// the view about the roots that moved while the wire was down: another
+// device's save, a git checkout, an agent working in a drawer. The lists and
+// every open buffer go on showing what was true when the wire went. Window
+// focus is a second net on a Mac, and it misses the cases that matter most:
+// the window never left, or there is no window focus to have (ios.md §5).
+
 // One sink, replaced not stacked, like the drawer's (terminal/channel.ts):
 // App owns the folder list and the open tabs and is the only thing that can
-// answer. The tags and backlinks panels need no subscription of their own —
-// they re-fetch when the store's note list for their folder changes, which is
-// what the refresh produces.
+// answer. The tags and backlinks panels need no relink subscription of their
+// own. They re-fetch when the store's note list for their folder changes,
+// which is what the refresh produces.
 let relinkSink: (() => void) | null = null;
 
 export function onNotesRelink(sink: () => void): () => void {
@@ -316,14 +313,14 @@ export function takeOpenRequest(): Promise<ExternalOpenInfo | null> {
 }
 
 // Create-or-open today's daily note. The caller (commands/glue.ts) feeds the
-// returned open through dispatchExternalOpen so the CLI-open subscriber does
-// the select-workspace-then-open — one definition, not a parallel path.
+// returned open through dispatchExternalOpen, so the CLI-open subscriber does
+// the select-workspace-then-open.
 export function openDailyNote(folder: string): Promise<{ open: ExternalOpenInfo; created: boolean }> {
   return bridge().openDaily(folder);
 }
 
-// A new note from a template note (addressed by its path — the ⌥⌘N picker
-// picked a concrete row), landing in `folder`.
+// A new note from a template note, landing in `folder`. The template is
+// addressed by path because the ⌥⌘N picker picked a concrete row.
 export function createNoteFromTemplate(folder: string, templatePath: string, title: string | null): Promise<NoteMeta> {
   return bridge().createFromTemplate(folder, templatePath, title);
 }

@@ -101,7 +101,8 @@ describe("parseAnsi", () => {
   });
 
   test("39/49 reset fg/bg to default without clearing other attrs", () => {
-    // bold + red, then default-fg: keeps bold, drops colour.
+    // 31 = red -> ANSI16[1], 1 = bold. The 39 resets the foreground to
+    // default, and chunk b keeps the bold weight.
     expect(flat("\x1b[1;31ma\x1b[39mb")).toEqual([
       ["a", "color:#d0453b;font-weight:600"],
       ["b", "font-weight:600"],

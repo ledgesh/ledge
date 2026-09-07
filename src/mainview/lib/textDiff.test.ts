@@ -1,11 +1,12 @@
-// changedSpan feeds reloadOpenNotes' dispatch, so what these pin down is the
-// positional story: an external append must become an insertion AT THE END,
-// not a whole-document replace, or every anchored position teleports.
+// changedSpan feeds the dispatch in reloadOpenNotes (workspace/editorPool.ts),
+// so these tests check where the span lands. An external append must be an
+// insertion at the end of the document, not a whole-document replace. A
+// replace would move every anchored position.
 import { describe, expect, test } from "bun:test";
 import { changedSpan } from "./textDiff";
 
-// Apply a span the way CodeMirror would, so every case can assert round-trip
-// correctness besides its shape.
+// A span applied the way CodeMirror would apply it, so the cases can assert
+// the resulting text, not just the span's shape.
 function apply(a: string, span: { from: number; to: number; insert: string }): string {
   return a.slice(0, span.from) + span.insert + a.slice(span.to);
 }
@@ -49,8 +50,9 @@ describe("changedSpan", () => {
   });
 
   test("a surrogate pair is never split", () => {
-    // "😀" -> "😁": the halves share the high surrogate; a code-unit trim
-    // would leave a lone surrogate in both span and insert.
+    // "😀" and "😁" share their high surrogate. A code-unit trim would put
+    // that half in the common prefix and leave a lone surrogate in both the
+    // span and the insert.
     const span = changedSpan("a😀", "a😁")!;
     expect(apply("a😀", span)).toBe("a😁");
     expect(span.insert).toBe("😁");
@@ -61,7 +63,8 @@ describe("changedSpan", () => {
   test("emoji appended after emoji stays a whole-character insertion", () => {
     const span = changedSpan("a😀b", "a😀😀b")!;
     expect(apply("a😀b", span)).toBe("a😀😀b");
-    // The inserted text must itself be a valid pair, not half of each.
+    // The insert holds whole characters, not the trailing half of one emoji
+    // followed by the leading half of the next.
     expect([...span.insert].every((ch) => ch.length === 2 || ch.charCodeAt(0) < 0xd800)).toBe(true);
   });
 });

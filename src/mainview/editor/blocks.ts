@@ -41,15 +41,14 @@ export interface RunInfo {
   from: number; // block start (maps through edits), used to match on re-run
   pos: number; // anchor for the output panel (block end line), maps through edits
   lang: string | null;
-  // The machine this run targets (null = local/undeclared). Shown in the
-  // output panel's header: with multiple machines in play, output that does
-  // not say where it came from is a misread waiting to happen.
+  // The machine this run targets (null = local or undeclared). Shown in the
+  // output panel's header, so output from a note with several machines in
+  // play says which one produced it.
   host: string | null;
-  // "unknown" is a run whose machine went away while it was going: it was
-  // running when the wire dropped, and whether it still is cannot be known
-  // from here. It is not a fourth outcome but the absence of one, and it
-  // resolves on reconnect — back to "running" for the runs the server still
-  // has, and to a finish for the ones it does not (bridge.ts reconcileRuns).
+  // "unknown" is a run that was going when the wire dropped: whether it is
+  // still running cannot be told from here. It resolves on reconnect, back to
+  // "running" for the runs the server still has and to a finish for the ones
+  // it does not (bridge.ts reconcileRuns).
   state: "running" | "done" | "error" | "unknown";
   exitCode: number | null;
   startedAt: number;
@@ -63,14 +62,14 @@ interface Block {
   lang: string | null;
   code: string;
   // Whether a closing fence ends the block (see fenceClosed). Everything that
-  // offers to RUN hangs off this.
+  // offers to run the block hangs off this.
   closed: boolean;
   // The fence's confirm marker resolved against the note's default, or null
   // when this block runs straight through (editor/fenceInfo.ts).
   confirm: ConfirmSpec | null;
-  // Whether the fence is marked `norun`: here to be read or copied, not run
-  // from this note (editor/fenceInfo.ts, interactions.md §4e). Everything
-  // that offers to RUN hangs off this too.
+  // Whether the fence is marked `norun`: the block is there to be read or
+  // copied, not run from this note (editor/fenceInfo.ts, interactions.md
+  // §4e). Everything that offers to run the block hangs off this too.
   norun: boolean;
 }
 
@@ -84,27 +83,24 @@ const removeRun = StateEffect.define<string>();
 // any still-running runs first (see the dismiss button) or it will orphan their
 // programs in the note's shells.
 export const clearRunsEffect = StateEffect.define<null>();
-// A no-op effect whose only purpose is to nudge the body-parented layers to
-// re-measure. Dispatched when a pooled editor is re-parented between panes or
-// tabs, so they re-pin or collapse at once.
+// A no-op effect that nudges the body-parented layers to re-measure.
+// Dispatched when a pooled editor is re-parented between panes or tabs, so
+// they re-pin or collapse at once.
 const pingOverlayEffect = StateEffect.define<null>();
 
-// Force BOTH body-parented layers to re-measure now: this one and the hotspot
+// Force both body-parented layers to re-measure now: this one and the hotspot
 // layer in livePreview.ts. Used by the editor pool when an editor's DOM host is
-// attached to, or detached from, a visible pane.
-//
-// Neither plugin reads this effect by name — each treats any transaction
-// carrying effects as a trigger, which is the clause that has to exist in both.
-// The hotspot layer was missing it and therefore never heard a detach, so a
-// background tab's links stayed clickable over the tab in front
-// (interactions.md §5, "an obligation to leave"). A new body-parented layer
-// needs the same clause, and there is nothing here that can enforce that for it.
+// attached to, or detached from, a visible pane. Neither plugin reads this
+// effect by name: each re-measures on any transaction carrying effects. The
+// hotspot layer was missing that clause and so never heard a detach, leaving a
+// background tab's links clickable over the tab in front (interactions.md §6).
+// A new body-parented layer needs the same clause; nothing here enforces that.
 export function pingOverlay(view: EditorView): void {
   view.dispatch({ effects: pingOverlayEffect.of(null) });
 }
 
-// Whether a run is over. "unknown" is not: it is a run whose ending, if it had
-// one, happened where this client could not see it.
+// Whether a run is over. "unknown" is not over: if that run ended, it ended
+// where this client could not see it.
 function ended(state: RunInfo["state"]): boolean {
   return state === "done" || state === "error";
 }
@@ -117,10 +113,10 @@ const runsField = StateField.define<RunInfo[]>({
       next = next.map((r) => ({
         ...r,
         from: tr.changes.mapPos(r.from, -1),
-        // assoc -1, same as `from`: text inserted exactly at the anchor — an
-        // agent appending to a note that ENDS with this block puts it right
-        // here — must land BELOW the output panel, not push the panel down
-        // past itself. The panel hugs its fence; what arrives after follows.
+        // assoc -1, same as `from`, so text inserted exactly at the anchor
+        // lands below the output panel rather than pushing the panel down past
+        // it. An agent appending to a note that ends with this block inserts
+        // right here.
         pos: tr.changes.mapPos(r.pos, -1),
       }));
     }
@@ -139,11 +135,10 @@ const runsField = StateField.define<RunInfo[]>({
                 ...r,
                 state: e.value.state,
                 exitCode: e.value.exitCode,
-                // Only an ending stamps a duration, because only an ending has
-                // one. The other two transitions are a run being confirmed
-                // started and a run losing its machine, and neither is a length
-                // of time: a header reading "Running 0 ms" was this stamping
-                // whatever moment it happened to hear about.
+                // Only an ending stamps a duration. The other two transitions
+                // are a run confirmed started and a run losing its machine,
+                // and neither is a length of time. Stamping those produced
+                // headers reading "Running 0 ms".
                 durationMs: ended(e.value.state)
                   ? r.startedAt
                     ? Date.now() - r.startedAt
@@ -164,9 +159,9 @@ const runsField = StateField.define<RunInfo[]>({
 
 function blockAt(state: EditorView["state"], pos: number): Block | null {
   // Held on an object property, not a bare local: the assignment happens inside
-  // the iterate() callback, and TS control-flow analysis would otherwise narrow a
-  // local to `null` after the call (it can't see the closure run) and reject the
-  // reads below.
+  // the iterate() callback, and TS control-flow analysis cannot see that the
+  // callback runs. A local would stay narrowed to `null` after the call, and
+  // the reads below would not typecheck.
   const box: { range: { from: number; to: number } | null } = { range: null };
   syntaxTree(state).iterate({
     enter(node) {
@@ -179,8 +174,9 @@ function blockAt(state: EditorView["state"], pos: number): Block | null {
 }
 
 // The opening fence line's info string, e.g. `sh confirm` from "```sh confirm".
-// Read from the line text rather than Lezer child nodes, whose names/shape are
-// less stable; the grammar (and what an attribute means) lives in fenceInfo.ts.
+// Read from the line text rather than from Lezer child nodes, whose names and
+// shape are less stable. The grammar, and what an attribute means, lives in
+// fenceInfo.ts.
 function infoFromFence(state: EditorView["state"], from: number) {
   return parseFenceInfo(state.doc.lineAt(from).text);
 }
@@ -188,11 +184,10 @@ function infoFromFence(state: EditorView["state"], from: number) {
 /**
  * Whether the block's last line is a closing fence.
  *
- * Lezer gives an unterminated block a FencedCode node too — it simply ends on
- * the last BODY line — so the node's shape alone cannot tell "```sh / pwd /
- * ```" from a note that stops mid-block. Nothing downstream can recover the
- * difference either, which is why it is read once, here, off the two fence
- * lines the block claims to have.
+ * Lezer gives an unterminated block a FencedCode node too, ending it on the
+ * last body line, so the node's shape alone cannot tell a closed block from a
+ * note that stops mid-block. Nothing downstream can recover the difference, so
+ * it is read here, off the block's first and last lines.
  */
 function fenceClosed(state: EditorView["state"], from: number, to: number): boolean {
   const openLine = state.doc.lineAt(from);
@@ -211,12 +206,12 @@ function readBlock(state: EditorView["state"], from: number, to: number): Block 
   const lang = info.lang;
   const closed = fenceClosed(state, from, to);
 
-  // Body is the lines strictly between the opening fence and the closing one —
-  // or, in an unterminated block, everything after the opener: there the node
-  // ends on the last body line, so discounting it would silently eat that line
-  // (and, in a one-line block, the entire body). Nothing may RUN from here
-  // while `closed` is false (runBlock), but the copy button reads this same
-  // body, and copying all-but-the-last-line is its own quiet lie.
+  // Body is the lines strictly between the opening fence and the closing one.
+  // In an unterminated block it is everything after the opener, because the
+  // node ends on the last body line: discounting that line would drop it, and
+  // in a one-line block the whole body with it. Nothing runs while `closed` is
+  // false (runBlock), but the copy button reads this same body, and copying
+  // every line but the last hands back text the block does not contain.
   const firstBody = openLine.number + 1;
   const lastBody = closed ? endLine.number - 1 : endLine.number;
   let code = "";
@@ -227,9 +222,9 @@ function readBlock(state: EditorView["state"], from: number, to: number): Block 
 }
 
 // Every fenced block in the document, as the facts its chrome is built from.
-// An object rather than positional arguments: `asks` and `closed` are both
-// booleans, and a transposition there would be invisible at the call site and
-// loud on screen.
+// The callback takes an object rather than positional arguments: `asks`,
+// `closed` and `norun` are all booleans, and swapping two at a call site would
+// not show up until the chrome drew wrong.
 function eachBlock(
   state: EditorView["state"],
   cb: (b: { from: number; to: number; lang: string | null; asks: boolean; closed: boolean; norun: boolean }) => void,
@@ -253,17 +248,13 @@ function eachBlock(
 
 // --- Running ---------------------------------------------------------------
 
-// A run id has to be unique across every page a server is serving, not just
-// within this one. The pool keys its overflow shells and its stashed resizes by
-// it and now files each run under the client that asked (bun/inlinePool.ts), so
-// two pages that minted the same id would drive each other's shells. Two pages
-// means the obvious one — a Mac and a phone on one server — and also this page
-// before and after a reload, whose runs are still executing until the claim
-// that collects them.
-//
-// So: a nonce for the page, a counter within it. The clock cannot do this job.
-// Two pages first opened in the same millisecond both start their counter at 1,
-// and that is likelier than it sounds for two clients booting off one action.
+// A run id is a per-page nonce plus a counter, unique across every page a
+// server is serving. The pool keys its overflow shells and its stashed resizes
+// by run id and files each run under the client that asked (bun/inlinePool.ts),
+// so two pages minting the same id would drive each other's shells. Two pages
+// means a Mac and a phone on one server, and also this page before and after a
+// reload, whose runs keep executing until the claim collects them. A clock
+// cannot do this job: two pages opened in the same millisecond both start at 1.
 const PAGE = Math.random().toString(36).slice(2, 8);
 let idCounter = 0;
 function nextId(): string {
@@ -271,19 +262,17 @@ function nextId(): string {
   return `web-${PAGE}-${idCounter}`;
 }
 
-// Whether one of THIS block's runs is still going. Inline concurrency is per
-// block, not per note: each run gets its own shell on the Bun side (a busy note
-// shell diverts the run to a fresh overflow shell; see bun/inlinePool.ts), so
-// another block running is no reason to gate this one. The same block is
-// different: addRun replaces any earlier run anchored inside it, and replacing a
-// live run's panel would orphan its process — still running, nothing on screen
-// to show or stop it. So one live run per block; re-running waits for (or
-// dismisses) the current one.
+// Whether one of this block's own runs is still going. Inline concurrency is
+// per block, not per note: a run that lands on a busy note shell gets a fresh
+// overflow shell (bun/inlinePool.ts). Within one block, addRun replaces any
+// earlier run anchored inside it, and replacing a live run's panel would leave
+// its process running with nothing on screen to show or stop it. So one live
+// run per block, and re-running waits for the current one or dismisses it.
 //
-// A run whose machine went away counts, and has to: "unknown" means it may
-// still be executing over there, so starting a second one is exactly the
-// double-run this gate exists to prevent. The block comes back when the
-// reconnect settles which it was (reconcileRuns).
+// An "unknown" run counts, because it may still be executing on the machine
+// that went away. Starting a second one is the double-run this gate prevents.
+// The block frees up when the reconnect settles which it was (editor/bridge.ts
+// reconcileRuns).
 export function isBlockRunning(state: EditorState, from: number, to: number): boolean {
   const end = state.doc.lineAt(Math.min(to, state.doc.length)).to;
   return state
@@ -292,11 +281,10 @@ export function isBlockRunning(state: EditorState, from: number, to: number): bo
 }
 
 // Whether `pos` sits in a block the run verbs would accept: a fenced block
-// whose language is runnable, whose closing fence is there, and which is not
-// marked `norun`. Asked by the editor's context menu before it offers Run
-// Block Inline (interactions.md §11) — an unterminated fence has no agreed
-// body (§4c) and a marked one has declined (§4e), so the menu leaves the pair
-// out rather than offering a run that answers with a notice.
+// whose language is runnable, whose closing fence is present, and which is not
+// marked `norun`. The editor's context menu asks before offering Run Block
+// Inline (interactions.md §11): an unterminated fence (§4c) and a marked one
+// (§4e) get no run entry rather than one that answers with a notice.
 export function runnableBlockAt(state: EditorState, pos: number): boolean {
   const block = blockAt(state, pos);
   return !!block && block.closed && !block.norun && isRunnable(block.lang);
@@ -306,37 +294,28 @@ export function runnableBlockAt(state: EditorState, pos: number): boolean {
  * Whether this client has given up on the machine the note lives on
  * (remote.md §7).
  *
- * A run is the one thing in the editor that cannot report its own failure.
- * `runBlock` is a request like any other, but the view sends it with a `void`
- * and then waits for output to arrive on its own, because that is what a run
- * IS: there is no reply to hold a panel open against. So a run asked for at a
- * server this client has stopped reaching rejects into nothing, and the panel
- * it already opened says "Running" for as long as the note stays open, with
- * nothing coming to correct it because nothing is running.
+ * A run cannot report its own failure. The request returns nothing and the
+ * panel waits for output to arrive on its own, so a run asked for at a server
+ * this client has stopped reaching leaves a panel reading "Running" for as
+ * long as the note stays open. Predicting the failure is the only way to
+ * report it, which makes this the app's only such gate: every other verb sends
+ * the request and shows what came back (interactions.md §4d).
  *
- * "lost" and not "reconnecting", which is the whole precision of it. Mid-ladder
- * a request is HELD and replayed when the wire comes back (shared/transport.ts),
- * so a run asked for there really does start, seconds late — and if the ladder
- * runs out instead, the `lost` that ends it marks the panel unknown on its way
- * past (setRunsLink). Both endings are already honest. Gating the ladder would
- * refuse a run that was going to work, and would put this one verb out of step
- * with every other thing the view does while reconnecting.
- *
- * So this is a gate rather than a report, and the only one: the one place in
- * the app where predicting the failure is the only way to tell the truth about
- * it.
+ * The gate is on "lost", not on "reconnecting". Mid-ladder a request is held
+ * and replayed when the wire comes back (shared/transport.ts), so a run asked
+ * for then really does start, seconds late. If the ladder runs out instead,
+ * the `lost` that ends it marks the panel unknown on the way past
+ * (setRunsLink). Gating the ladder would refuse a run that was going to work.
  */
 function linkDown(): boolean {
   return linkState().state === "lost";
 }
 
-// Whether a block can be sent to `destination` right now. The terminal drawer is
-// one serial shell per note — a block sent while it is busy queues invisibly, so
-// that gate is note-wide. Inline runs gate per block (above).
-//
-// Runs are per editor and an editor is per note, and terminal busy is keyed by
-// the note's session, so neither rule reaches across notes: their shells are
-// separate and so is their state.
+// Whether a block can be sent to `destination` right now. The terminal drawer
+// is one serial shell per note, and a block sent while it is busy queues
+// invisibly, so that gate is note-wide. Inline runs gate per block (above).
+// Neither gate reaches across notes: runs live in the editor, which is per
+// note, and terminal busy is keyed by the note's session.
 export function canRun(view: EditorView, block: { from: number; to: number }, destination: RunDestination): boolean {
   if (linkDown()) return false;
   return destination === "terminal"
@@ -344,14 +323,15 @@ export function canRun(view: EditorView, block: { from: number; to: number }, de
     : !isBlockRunning(view.state, block.from, block.to);
 }
 
-// Whether this editor's note is LOCKED (its frontmatter carries the crypto
-// header — the doc is decrypted plaintext, but the note's contract holds).
-// A head read like every frontmatter question: `when`-cheap.
+// Whether this editor's note is locked: its frontmatter carries the crypto
+// header. The doc holds decrypted plaintext, but the note's contract still
+// applies. Reads the head of the document only, like every frontmatter
+// question, so it stays cheap to ask often.
 function noteLocked(state: EditorState): boolean {
   return parseFrontmatter(state.sliceDoc(0, Math.min(4096, state.doc.length))).params.locked !== null;
 }
 
-// Whether this note declares `confirm: true` — every runnable block asks
+// Whether this note declares `confirm: true`. Every runnable block then asks
 // first, unless its own fence says otherwise. Same cheap head read.
 function noteConfirms(state: EditorState): boolean {
   return parseFrontmatter(state.sliceDoc(0, Math.min(4096, state.doc.length))).params.confirm;
@@ -360,48 +340,44 @@ function noteConfirms(state: EditorState): boolean {
 export function runBlock(view: EditorView, pos: number, destination: RunDestination): boolean {
   const block = blockAt(view.state, pos);
   if (!block || !isRunnable(block.lang)) return false;
-  // An unterminated fence has no agreed end, so there is nothing honest to
-  // run: what the block "contains" is decided by whatever closer turns up
-  // below it, and until one does, Lezer ends the node on the last body line.
-  // Sending that guess to a shell is how an empty body reaches `source` and
-  // reports a cheerful exit 0 having run nothing at all.
-  //
-  // The buttons are simply absent for this (rebuild), so this is the chord's
-  // and the palette's half — and it answers rather than returning false,
-  // because a key that does nothing reads as a broken key.
+  // An unterminated fence has no agreed end, so there is nothing to run
+  // (interactions.md §4c). Lezer ends the node on the last body line, and
+  // running that guess can send an empty body to a shell that then exits 0
+  // having run nothing. The buttons are absent here (rebuild), so only the
+  // chord and the palette reach this. They answer with a notice rather than
+  // returning false, because a key that does nothing reads as broken.
   if (!block.closed) {
     notifyUser(BLOCK_UNCLOSED);
     return true;
   }
-  // A fence marked `norun` has declined (interactions.md §4e): the buttons are
-  // absent, and the chord and the palette answer rather than run, same shape
-  // as the unclosed case above.
+  // A fence marked `norun` is not to be run from this note (interactions.md
+  // §4e). The buttons are absent, and the chord and the palette answer with a
+  // notice, the same shape as the unclosed case above.
   if (block.norun) {
     notifyUser(BLOCK_NORUN);
     return true;
   }
-  // A ```prompt fence's contract is "pipe this body to the agent CLI" — in a
-  // locked note it does not run, either destination (locking.md §8: the
-  // send-direction half of the no-agents invariant; Bun re-validates, this is
-  // the UI half). The chord answers with the notice strip, not silence, and
-  // returns true: the chord was understood and refused, not unclaimed.
-  // Other languages stay runnable — a locked ops note's commands are the
-  // user's own compute, and running them may be the point.
+  // A ```prompt fence pipes its body to the agent CLI, so in a locked note it
+  // does not run, to either destination (locking.md §8: the send-direction
+  // half of the no-agents invariant, which Bun re-validates behind this UI
+  // check). The chord answers with the notice strip and returns true, so it
+  // reads as understood and refused rather than unclaimed. Other languages
+  // stay runnable: a locked ops note's commands are the user's own compute.
   if (block.lang === "prompt" && noteLocked(view.state)) {
     notifyUser(PROMPT_SEALED);
     return true;
   }
-  // Before canRun rather than inside it, for the same reason the unclosed
-  // fence is: canRun's refusals are silent and the chord's must not be. A run
-  // offered at a machine that is not there is the app's loudest untruth, so
-  // its refusal is the one that most needs saying out loud.
+  // Checked before canRun rather than inside it, for the same reason the
+  // unclosed fence is: canRun refuses silently and the chord must not. A run
+  // offered at a machine that cannot be reached needs a refusal the user can
+  // read (interactions.md §4d).
   if (linkDown()) {
     notifyUser(runOffline());
     return true;
   }
-  // Checked here rather than only on the buttons, so the keymap and the palette
-  // are held to the same rule: a disabled-looking button and a live Cmd+Enter
-  // would just move the invisible queue somewhere else.
+  // Checked here rather than only on the buttons, so the keymap and the
+  // palette follow the same rule. A disabled-looking button beside a live
+  // ⌘↩ would only move the invisible queue somewhere else.
   if (!canRun(view, block, destination)) return false;
 
   // This note's id, so the run reaches this note's own shell (see bridge.ts).
@@ -409,12 +385,12 @@ export function runBlock(view: EditorView, pos: number, destination: RunDestinat
   const hosts = declaredHosts(view.state);
 
   if (destination === "terminal") {
-    // Output goes to the drawer; no inline panel is created here. The declared
-    // list rides along un-picked: the drawer is one shell with one host for
-    // its whole life, so whether a picker is even meaningful (only when this
-    // paste is what spawns the shell) is App's call, not per-block ours. The
-    // confirm marker rides along for the same reason — the dialog belongs
-    // after the machine is settled, and App is where that happens.
+    // Output goes to the drawer, so no inline panel is created here. The
+    // declared host list is sent un-picked: the drawer is one shell with one
+    // host for its whole life, so App decides whether a picker applies at all
+    // (only when this paste is what spawns the shell). The confirm marker is
+    // sent for the same reason. The dialog comes after the machine is
+    // settled, and App is where that happens.
     toNative({
       type: "run",
       sessionId,
@@ -428,14 +404,13 @@ export function runBlock(view: EditorView, pos: number, destination: RunDestinat
     return true;
   }
 
-  // More than one declared host: nothing executes until the user names the
-  // machine — every run, deliberately (a prod/staging list must never run on
-  // a remembered default; the remembered pick is only the preselection).
+  // More than one declared host: nothing runs until the user names the
+  // machine, on every run (interactions.md §4a). A prod/staging list must not
+  // run on a remembered default, so the remembered pick only preselects a row.
   //
-  // The confirm dialog comes AFTER the pick, never before: on a multi-host
-  // note the frightening part of "run this" is WHICH MACHINE, so the question
-  // has to be able to name it. Cancelling the dialog leaves the pick spent
-  // and nothing run, which is the correct shape — the next run asks again.
+  // The confirm dialog comes after the pick, never before, so the question can
+  // name the machine it is about. Cancelling the dialog spends the pick and
+  // runs nothing, and the next run asks again.
   if (hosts.length > 1) {
     requestHostPick(sessionId, {
       hosts,
@@ -449,10 +424,10 @@ export function runBlock(view: EditorView, pos: number, destination: RunDestinat
   return true;
 }
 
-// Interpose the confirmation when the block asked for one, then run. The one
-// place an INLINE run can be gated, so the chord, the palette, and the run
-// button cannot diverge into an unconfirmed path (interactions.md §4). The
-// terminal destination is gated in App, after its own host question settles.
+// Show the confirmation when the block asks for one, then run. The only place
+// an inline run is gated, so the chord, the palette, and the run button cannot
+// diverge into an unconfirmed path (interactions.md §4b). The terminal
+// destination is gated in App, after its own host question settles.
 function confirmThen(block: Block, host: string | null, proceed: () => void): void {
   if (!block.confirm) {
     proceed();
@@ -468,8 +443,9 @@ function confirmThen(block: Block, host: string | null, proceed: () => void): vo
   });
 }
 
-// Where the host picker opens: at the block's control corner, which is where
-// the click that asked for it (or the block the caret is in) already is.
+// Where the host picker opens: at the block's control corner. A click on the
+// run button is already there, and a chord comes from the block the caret is
+// in.
 function pickerAnchor(view: EditorView, from: number): { x: number; y: number } {
   const base = view.dom.getBoundingClientRect();
   let y = base.top + 40;
@@ -488,9 +464,9 @@ function startInlineRun(
   block: Block,
   host: string | null,
 ): boolean {
-  // Re-checked when the answer comes back asynchronously: the block's earlier
-  // run may have started (double ⌘↵) while the picker or the confirmation was
-  // open.
+  // Re-checked because the answer arrives asynchronously. An earlier run of
+  // this block may have started (double ⌘↵) while the picker or the
+  // confirmation was open.
   if (isBlockRunning(view.state, block.from, block.to)) return false;
   const id = nextId();
   view.dispatch({
@@ -507,30 +483,11 @@ function startInlineRun(
     }),
   });
   toNative({ type: "run", sessionId, id, code: block.code, language: block.lang, destination: "inline", host });
-  // Hand the keyboard to the run when it starts talking, so an inline command
-  // that asks something (a sudo password, a y/N) can be answered by typing —
-  // the old behavior left focus in the prose and typed the answer into the
-  // note, which for a password meant writing a secret to disk.
-  //
-  // The claim lapses unless this editor still has focus and the caret has not
-  // moved when the first byte lands (inlineTerm.claimFocus): pressing ⌘↩ and
-  // going back to writing is a common flow, and a build that prints its first
-  // line thirty seconds later must not swallow the sentence in progress.
-  //
-  // The test is deliberately taken THEN and not now: a run started from the
-  // host picker (or a run button) leaves focus on the popover for a beat, and
-  // the question that matters is where the user is when the answer is wanted.
-  //
-  // Not on a client whose keyboard is on screen, and the test above is why. It
-  // asks whether the EDITOR has focus, which on a Mac is the same question as
-  // "is the user typing here" and on a phone is not: the editor holds focus
-  // with no keyboard up from the moment a pane opens (workspace/PaneTree.tsx)
-  // and again after every run hands it back (inlineTerm.freeze). So the claim
-  // was always true there, and honoring it moved focus to a text field — which
-  // is how iOS is asked to raise the keyboard. Every run a finger started
-  // opened the keyboard over the output it had just asked to see, and left it
-  // there. On a phone the panel takes the keyboard when it is TAPPED, which is
-  // the same rule the rest of this client already follows (interactions.md §6a).
+  // Hand the keyboard to the run once it starts printing, so a command that
+  // asks for something (a sudo password, a y/N) is answered by typing rather
+  // than into the note. claimFocus takes focus only if this editor still has
+  // it and the caret has not moved. Skipped where the keyboard is on screen:
+  // that test is always true on a phone (interactions.md §6a).
   if (!softKeyboard()) {
     const head = view.state.selection.main.head;
     getInlineTerm(id)?.claimFocus(() => view.hasFocus && view.state.selection.main.head === head);
@@ -540,20 +497,21 @@ function startInlineRun(
 
 // --- Output widget ---------------------------------------------------------
 //
-// The output panel is a block widget: it reserves vertical space and pushes the
-// following text down, which only an in-content block widget can do. For a normal
-// run it renders the note's output through a real terminal emulator (xterm.js),
-// which lives in a pool keyed by run id (see inlineTerm.ts) because a widget is
-// rebuilt on every change but a terminal must persist and be written to
-// incrementally. The widget only re-parents the pooled DOM; handleRunEvent writes
-// bytes and updates the header imperatively. `eq` therefore only distinguishes id:
-// state/duration changes are pushed to the live DOM, so CodeMirror keeps the
-// terminal mounted across them. A block that launches a full-screen or interactive
-// program (vim, claude, a REPL) renders and is driven inline; the block's terminal
-// button stays the escape hatch to the full drawer.
+// The output panel is a block widget, the one kind that reserves vertical
+// space and pushes the following text down. It renders the run through an
+// xterm.js terminal pooled by run id (inlineTerm.ts), because the widget is
+// rebuilt on every change and a terminal has to persist and take bytes
+// incrementally.
 //
-// Its dismiss/copy buttons live in the overlay layer (see `overlayPlugin`) so they
-// sit outside the editable surface, where the browser honours `cursor: pointer`.
+// The widget only re-parents that pooled DOM. handleRunEvent writes the bytes
+// and updates the header, so `eq` compares id alone and CodeMirror keeps the
+// terminal mounted across state and duration changes.
+//
+// Full-screen and interactive programs (vim, claude, a REPL) render and are
+// driven inline; the block's terminal button is still the way to the full
+// drawer. The dismiss and copy buttons live in the overlay layer
+// (`overlayPlugin`), outside the editable surface, where the browser honours
+// `cursor: pointer`.
 
 class OutputWidget extends WidgetType {
   constructor(readonly run: RunInfo) {
@@ -605,13 +563,13 @@ const CHECK_ICON = svg('<path d="M3.5 8.4l3 3 6-6.8"/>');
 const KEY_ICON = svg('<circle cx="5" cy="11" r="2.7"/><path d="M7 9l6.5-6.5"/><path d="M10.5 5.5l2.2 2.2"/>');
 const CLOSE_ICON = svg('<path d="M4 4l8 8M12 4l-8 8"/>');
 
-// Why a run button is off. Worth spelling out on the button itself: "nothing
-// happened when I clicked" is the problem we are fixing, and a gray button with no
-// reason is a quieter version of the same mystery.
+// Why a run button is off, spelled out on the button itself. A gray button
+// with no reason on it leaves the user with "nothing happened when I clicked".
 const INLINE_BUSY = "This block is still running";
 const TERM_BUSY = "This note's terminal is busy";
-// A prompt fence's why in a locked note — one sentence for the button
-// tooltip AND the chord's notice (bridge notifyUser), so they cannot drift.
+// Why a prompt fence does not run in a locked note. One sentence for both the
+// button tooltip and the chord's notice (bridge notifyUser), so the two cannot
+// drift.
 const PROMPT_SEALED =
   "Prompt blocks can't be run in locked notes. AI agents aren't allowed to read locked notes.";
 // The chord's answer for a fence with no closing line. Only the chord and the
@@ -622,21 +580,22 @@ const BLOCK_UNCLOSED = "This code block has no closing fence, so there is nothin
 // someone else (the manual, say) marked, not its author.
 const BLOCK_NORUN = "This block is marked norun: it is here to read or copy, not to run from this note.";
 // The button tooltip and the chord's notice for a machine that cannot be
-// reached (linkDown). Names the machine, because on a client with several
-// servers the useful half of the sentence is which one went: the bar says the
-// same name a foot away, and a tooltip that said "the server" would leave the
-// reader to work out that they are the same fact.
+// reached (linkDown). It names the machine, because a client with several
+// servers needs to know which one went. The connection bar shows that same
+// name, so a tooltip saying "the server" would leave the reader to match the
+// two up.
 const runOffline = (): string =>
   `Not connected to ${activeConnection().name}, so there is nowhere to run this.`;
 
-// Gray out a run button while its shell cannot take a block. The native `disabled`
-// does the work: it stops the mousedown, so the click cannot queue anything, and
-// there is no second code path to keep in step with the CSS.
-// `hostHint` keeps the target machine visible where no picker will interrupt:
-// a single-host note runs on that host silently, so the tooltip is the one
-// place that says so before the click. `asks` says the click opens the
-// confirmation rather than executing (interactions.md §4b) — the fence's own
-// `confirm` word is the loud disclosure, this is the one on the button.
+// Gray out a run button while its shell cannot take a block. The native
+// `disabled` stops the mousedown, so the click cannot queue anything and there
+// is no second code path to keep in step with the CSS.
+//
+// `hostHint` names the target machine where no picker will interrupt: a
+// single-host note runs on that host silently, so the tooltip is the one place
+// that says so before the click. `asks` says the click opens the confirmation
+// rather than running (interactions.md §4b). The fence's own `confirm` word
+// discloses that in the note; this is the disclosure on the button.
 function setBusy(
   btn: HTMLButtonElement | null,
   busy: boolean,
@@ -675,17 +634,17 @@ function flashCopied(btn: HTMLButtonElement): void {
 
 // --- Overlay layer ---------------------------------------------------------
 //
-// All clickable chrome (run/terminal/copy per block, dismiss per output) is drawn
-// here, in a layer parented to <body> (not the editor) and pinned as a fixed box
-// over the editor's rect, re-measured on edit, geometry change, and scroll so each
-// control stays glued to its block. Living outside the `.cm-editor` subtree is what
-// lets the buttons honour `cursor: pointer`: WebKit forces the text I-beam on any
-// element inside that editing context regardless of the CSS `cursor`.
+// All clickable chrome (run, terminal and copy per block, dismiss per output)
+// is drawn here, in a layer parented to <body> rather than to the editor. It is
+// a fixed box pinned over the editor's rect, re-measured on edit, geometry
+// change and scroll, so each control stays on its block. Outside `.cm-editor`
+// the buttons honour `cursor: pointer`; inside it WebKit forces the text I-beam
+// whatever the CSS says.
 //
-// Known gap: the dismiss button sits over the output panel, a block widget that IS
-// inside `.cm-editor`, and WebKit's cursor hit-test reaches the panel through the
-// overlay, so that one button still shows the I-beam. The run/copy controls, which
-// sit over plain lines, render the pointer correctly. Unsolved; revisit.
+// Known gap: the dismiss button sits over the output panel, a block widget
+// inside `.cm-editor`, and WebKit's cursor hit-test reaches the panel through
+// the overlay, so that one button still shows the I-beam. The run and copy
+// controls sit over plain lines and render the pointer correctly. Unsolved.
 
 interface ControlSpec {
   from: number;
@@ -693,39 +652,40 @@ interface ControlSpec {
   top: number;
   right: number;
   caret: boolean;
-  // Per destination, because the shells are independent: a block can be running
-  // inline and still free to send to the drawer. runBusy is also per BLOCK —
-  // concurrent inline runs each get their own shell, so only the block's own
-  // live run gates it.
+  // Two flags, one per destination: the shells are independent, so a block
+  // running inline is still free to go to the drawer. runBusy is per block as
+  // well, since concurrent inline runs each get their own shell. Only the
+  // block's own live run gates it.
   runBusy: boolean;
   termBusy: boolean;
   // Whether the fence is terminated. An unclosed one gets no run pair at all
-  // (rebuild), so this rides in the signature below: the buttons have to
-  // appear the moment the closing fence is typed.
+  // (rebuild), so `closed` rides in the signature below. The buttons appear as
+  // soon as the closing fence is typed.
   closed: boolean;
-  // Whether the fence is marked `norun`: no run pair either, and for the same
-  // reason it rides here — the pair has to go the moment the word is typed.
+  // Whether the fence is marked `norun`. It gets no run pair either, and rides
+  // in the signature for the same reason: the pair has to go as soon as the
+  // word is typed.
   norun: boolean;
-  // Whether a click here opens the confirmation first. Said on the button, in
-  // the same breath as the host: where a run will happen and whether it will
-  // stop to ask are the two things worth knowing BEFORE the click.
+  // Whether a click opens the confirmation first. The tooltip says so next to
+  // the host hint, so where a run will happen and whether it stops to ask both
+  // read before the click.
   asks: boolean;
 }
 interface CloseSpec {
   id: string;
   top: number;
   right: number;
-  // The header's measured height, handed to the wrapper as its own so flexbox
-  // centres the pair in it. Neither number is a constant: the header is 24
-  // points on a pointer client and 48 on a touch one, and the buttons inside
-  // are 22 or 44 (index.css). Arithmetic here would have to know both.
+  // The header's measured height, given to the wrapper so flexbox centres the
+  // pair in it. Both sizes vary: the header is 24 points on a pointer client
+  // and 48 on a touch one, and the buttons inside are 22 or 44 (index.css).
+  // Computing an offset here would have to know both.
   height: number;
 }
 // The frontmatter profile's edit button, anchored just past the value's last
-// glyph. It lives in this layer, not in the text, for the same reason every
-// other button does: out here it gets a real pointer cursor and an obvious
-// click target, which the in-text ⌘-click (editor/frontmatter.ts) — kept as
-// the accelerator — cannot offer while WebKit pins the I-beam.
+// glyph. It lives in this layer rather than in the text for the reason every
+// other button does: outside `.cm-editor` it gets a real pointer cursor and a
+// visible click target. The in-text ⌘-click (editor/frontmatter.ts) stays as
+// the accelerator, and WebKit pins the I-beam over it.
 interface ProfileSpec {
   name: string;
   top: number;
@@ -741,8 +701,8 @@ interface Measured {
   closes: CloseSpec[];
   profile: ProfileSpec | null;
   // Tooltip suffix for the run buttons: where a click will execute ("on web1"
-  // for the single declared host) or that it will ask ("choose machine…").
-  // Note-level, not per block — the frontmatter is one declaration.
+  // for a single declared host) or that it will ask ("choose machine…").
+  // Note-level rather than per block, since the frontmatter declares once.
   hostHint: string | null;
   sig: string;
 }
@@ -763,31 +723,30 @@ const overlayPlugin = ViewPlugin.fromClass(
     constructor(readonly view: EditorView) {
       this.layer = document.createElement("div");
       this.layer.className = "ledge-overlay";
-      // Parent to <body>, NOT to the editor: WebKit forces the text I-beam over
-      // any element inside the `.cm-editor` editing context, regardless of
-      // `cursor`, `contenteditable=false`, or pointer-events. Only elements
-      // outside that subtree honour `cursor: pointer`. The layer is a fixed box
-      // pinned over the editor's rect (updated each measure) so buttons still
-      // track their blocks while living outside the editing context.
+      // Parent to <body> rather than to the editor. WebKit forces the text
+      // I-beam over any element inside the `.cm-editor` editing context,
+      // whatever its `cursor`, `contenteditable`, or pointer-events; only
+      // elements outside that subtree honour `cursor: pointer`. The layer is a
+      // fixed box re-pinned over the editor's rect on every measure, so the
+      // buttons still track their blocks.
       document.body.appendChild(this.layer);
 
       this.onMove = (e) => this.updateHover(e.clientX, e.clientY);
       this.onScroll = () => this.schedule();
-      // Cmd+C over a selection inside an output panel: the panel is a
-      // contenteditable=false widget and the WebView's native copy does not put
-      // its text on the clipboard, so copy the selection explicitly through the
-      // native clipboard. Capture phase, so it runs before CodeMirror's own key
-      // handling. Scoped to this editor's panels, so with pooled editors only the
-      // one holding the selection acts.
+      // Cmd+C over a selection inside an output panel. The panel is a
+      // contenteditable=false widget whose text the WebView's native copy does
+      // not put on the clipboard, so copy it explicitly. Capture phase, ahead
+      // of CodeMirror's own key handling, and scoped to this editor's panels so
+      // that among pooled editors only the one holding the selection acts.
       this.onKeyDown = (e) => this.handleCopyKey(e);
-      // The terminal drawer's shell going busy or idle is invisible to the editor's
-      // own update cycle (no doc, geometry, or run-state change), so the chrome has
-      // to be told. Every editor subscribes; read() filters by its own note.
+      // The editor's own update cycle does not see the terminal drawer's shell
+      // go busy or idle (no doc, geometry, or run-state change), so this
+      // subscription tells the chrome. Every editor subscribes, and read()
+      // filters by its own note's session.
       this.offBusy = onTerminalBusyChange(() => this.schedule());
-      // And the same for the connection: a wire that drops grays every run
-      // button in the note, and that is invisible to the editor's own update
-      // cycle exactly like the drawer going busy. Not folded into offBusy
-      // because the two unsubscribe separately.
+      // The same for the connection: a dropped wire grays every run button in
+      // the note, and the editor's update cycle does not see that either. Kept
+      // apart from offBusy because the two unsubscribe separately.
       this.offLink = subscribeConnections(() => this.schedule());
       document.addEventListener("keydown", this.onKeyDown, true);
       view.scrollDOM.addEventListener("mousemove", this.onMove);
@@ -860,9 +819,9 @@ const overlayPlugin = ViewPlugin.fromClass(
 
     read(): Measured {
       const view = this.view;
-      // A pooled editor for an inactive tab is detached from the DOM (kept alive
-      // off-screen; see editorPool.ts). Measuring it would leave the last set of
-      // floating buttons stranded on screen, so collapse the overlay entirely
+      // A pooled editor for an inactive tab is detached from the DOM and kept
+      // alive off-screen (workspace/editorPool.ts). Measuring it would strand
+      // the last set of floating buttons on screen, so collapse the overlay
       // until its host is re-parented into a visible pane.
       if (!view.dom.isConnected) {
         return {
@@ -879,11 +838,11 @@ const overlayPlugin = ViewPlugin.fromClass(
       const base = view.dom.getBoundingClientRect();
       const head = view.state.selection.main.head;
 
-      // The card's right border, measured rather than assumed. A block's card is a
-      // line decoration, so it spans `.cm-content`'s content box: its right edge
-      // moves whenever that box narrows, and a note long enough to scroll narrows it
-      // by the scrollbar's width. Deriving the inset from the editor's outer rect
-      // instead would leave the buttons where the card used to end, hanging off it.
+      // The card's right border, measured rather than assumed. A block's card
+      // is a line decoration, so it spans `.cm-content`'s content box, and that
+      // box narrows by the scrollbar's width once a note is long enough to
+      // scroll. Deriving the inset from the editor's outer rect instead would
+      // leave the buttons where the card used to end, past its edge.
       const content = view.contentDOM.getBoundingClientRect();
       const padRight = parseFloat(getComputedStyle(view.contentDOM).paddingRight) || 0;
       const cardInset = base.right - (content.right - padRight);
@@ -933,9 +892,9 @@ const overlayPlugin = ViewPlugin.fromClass(
         const r = panel.getBoundingClientRect();
         // Measured rather than assumed: the header is 24 points on a pointer
         // client and 48 on a touch one, where it holds 44-point controls
-        // (index.css, interactions.md §6a). Give the wrapper that height and
-        // sit it on the panel's first inner pixel, and centring is CSS's
-        // problem — which is where the button sizes are.
+        // (index.css, interactions.md §6a). The wrapper gets that height and
+        // sits on the panel's first inner pixel, which leaves the centring to
+        // the CSS that also sets the button sizes.
         const headerH =
           panel.querySelector(".ledge-output-header")?.getBoundingClientRect().height ?? 24;
         closes.push({
@@ -944,17 +903,16 @@ const overlayPlugin = ViewPlugin.fromClass(
           height: headerH,
           // Column-aligned with the block's own controls above. Those sit at
           // `cardInset + 10` inside a group with 2px padding and a 1px border,
-          // so their glyphs land 13px in from the card edge; this wrapper has
-          // neither, and the panel is now flush to the card, so 13 puts the two
-          // clusters on one line — which is the point of fusing them into one
-          // card in the first place.
+          // so their glyphs land 13px in from the card edge. This wrapper has
+          // neither padding nor border, and the panel is flush to the card, so
+          // 13 puts the two clusters in one column.
           right: cardInset + 13,
         });
       }
 
-      // The frontmatter profile's edit button (see ProfileSpec). Same
-      // reveal grammar as block controls: visible while the pointer or the
-      // caret is in the block. Centered on the line's glyph box — the compact
+      // The frontmatter profile's edit button (see ProfileSpec). Same reveal
+      // grammar as the block controls: visible while the pointer or the caret
+      // is in the block. Centered on the line's glyph box, because the compact
       // chip sits beside one small text line, not in a card's padded corner.
       let profile: ProfileSpec | null = null;
       const anchor = profileChipAnchor(view.state);
@@ -1008,12 +966,11 @@ const overlayPlugin = ViewPlugin.fromClass(
         this.rebuild(m);
         this.sig = m.sig;
       }
-      // A prompt fence in a locked note wears the busy-button grammar
-      // PERMANENTLY: disabled, with the reason as the tooltip. A gray button
-      // with no reason is a mystery (the setBusy comment above), and a
-      // missing button beside the sh fence's live pair is the same mystery,
-      // quieter. runBlock refuses the chords with the same sentence, and Bun
-      // re-validates behind both.
+      // A prompt fence in a locked note gets the busy-button grammar on every
+      // write pass: disabled, with the reason as its tooltip (setBusy, above).
+      // Disabled rather than removed, so the reason reads beside the live pair
+      // on an `sh` fence in the same note. runBlock refuses the chords with the
+      // same sentence, and Bun re-validates behind both.
       const sealedNote = noteLocked(this.view.state);
       // Asked once for the whole layer: it is one fact about the connection,
       // not a fact about any block.
@@ -1055,30 +1012,21 @@ const overlayPlugin = ViewPlugin.fromClass(
         const group = document.createElement("div");
         group.className = "ledge-ctl-group";
         group.dataset.block = String(c.from);
-        // Every runnable fence gets its buttons — a prompt fence in a locked
-        // note included: the update pass right after this rebuild disables
-        // its pair with the sealed reason as tooltip (see the comment there),
-        // so the buttons are born gray, never live.
+        // Every runnable fence gets its run pair, a prompt fence in a locked
+        // note included: the setBusy pass right after this rebuild disables
+        // that pair with the sealed reason as its tooltip, so the buttons are
+        // born gray and never live.
         //
-        // An UNCLOSED fence and a fence marked `norun` are the two cases that
-        // get no pair at all, rather than a disabled one with a reason. The
-        // marked one is simplest: its author said the block is not for running
-        // here, and a grey button offering to would contradict the note.
-        // The unclosed one is the subtler case. The usual argument for the gray
-        // button (a missing control is a mystery) does not apply: this block
-        // has no end yet because it is still being typed, and a run pair that
-        // blinks into existence on the fence line the user is halfway through
-        // writing is noise, not an affordance. It appears when the block does.
-        // The client's own facts alongside the language test: a client that
-        // does not run blocks must not draw the button that runs one, and one
-        // with no drawer must not draw the button that fills it (ios.md §8,
-        // lib/shell.ts). Absent rather than disabled — the gray-button argument
-        // is for a control that could work in another moment, and these never
-        // can on this client — and the copy button below stays, because copying
-        // is not running.
+        // Three cases get no pair at all. A fence marked `norun` and an
+        // unclosed fence are each absent rather than disabled for their own
+        // reason, and each pair returns when the mark is deleted or the fence
+        // is closed (interactions.md §4e and §4c). A client that does not run
+        // blocks draws no ▶, and one with no drawer draws no terminal button:
+        // those are permanent limits, not conditions that end (ios.md §8,
+        // lib/shell.ts). The copy button below stays: copying is not running.
         //
-        // Separately, because the pair is not a unit: the phase after v1 runs
-        // blocks on a phone that still has no drawer, and there the ▶ is the
+        // The two client flags are read separately because the pair is not a
+        // unit: a phone runs blocks and has no drawer, so there the ▶ is the
         // whole group.
         const runnable = isRunnable(c.lang) && c.closed && !c.norun;
         if (runnable && runsBlocks()) {
@@ -1124,17 +1072,17 @@ const overlayPlugin = ViewPlugin.fromClass(
         wrap.appendChild(
           iconButton(CLOSE_ICON, tooltip("block.dismissOutput"), (e) => {
             e.preventDefault();
-            // Dismissing a still-running block must not orphan its process: with
-            // the panel gone there is nothing on screen to show it or stop it, so
-            // interrupt it on the way out. The cancel is addressed by run id, so
-            // it reaches exactly this run's shell and no other block's; the state
-            // check keeps dismissing an old finished panel from touching anything.
+            // Interrupt a still-running block on the way out: with the panel
+            // gone, nothing on screen shows its process or stops it. The cancel
+            // names the run id, so it reaches this run's shell and no other
+            // block's. The state check keeps dismissing an old finished panel
+            // from touching anything.
             //
-            // An "unknown" run is dismissible too, and safely: the cancel goes
-            // nowhere while the wire is down, but dropping the panel drops the
-            // id from the claim this client makes when it comes back, and a run
-            // the claim leaves out is one the server interrupts (bridge.ts
-            // reconcileRuns). Letting go of it here IS how it gets stopped.
+            // An "unknown" run is dismissible too. Its cancel goes nowhere
+            // while the wire is down, but dropping the panel drops the id from
+            // the claim this client makes when it comes back, and the server
+            // interrupts every run the claim leaves out (bridge.ts
+            // reconcileRuns).
             const run = this.view.state.field(runsField).find((r) => r.id === c.id);
             if (run?.state === "running" || run?.state === "unknown") cancelRun(this.view.state.facet(sessionIdFacet), c.id);
             this.view.dispatch({ effects: removeRun.of(c.id) });
@@ -1155,7 +1103,7 @@ const overlayPlugin = ViewPlugin.fromClass(
         );
         this.layer.appendChild(wrap);
       }
-      // Re-lighting after a rebuild: keep the hovered block's controls visible.
+      // Keep the hovered block's controls visible across a rebuild.
       if (this.hovered != null) {
         const g = this.layer.querySelector<HTMLElement>(`.ledge-ctl-group[data-block="${this.hovered}"]`);
         g?.classList.add("hover");
@@ -1180,14 +1128,14 @@ const overlayPlugin = ViewPlugin.fromClass(
 // and closing fence lines additionally round the top/bottom corners. Emitted
 // first, in document order, so the combined set stays sorted by position.
 //
-// A block with a run attached closes differently: its output panel is fused to
-// the card (index.css, `.ledge-code-attached + .ledge-output`) so the two read as
-// one object rather than a micro-terminal parked underneath, which means the
-// closing fence must leave the card OPEN — no bottom border, no bottom radius.
-// The seam is the panel header's top border. The CSS pairing is the sibling
-// combinator, so it cannot drift from this class: a panel orphaned by having its
-// block deleted out from under it finds no `.ledge-code-attached` before it and
-// keeps the free-standing styling.
+// A block with a run attached closes differently. Its closing fence must leave
+// the card open: no bottom border, no bottom radius, and the seam left to the
+// panel header's top border. That fuses the output panel to the card
+// (index.css, `.ledge-code-attached + .ledge-output`), so the two read as one
+// object rather than a micro-terminal parked underneath. The CSS pairs on the
+// sibling combinator, so it cannot drift from the class emitted here. A panel
+// whose block was deleted out from under it finds no `.ledge-code-attached`
+// before it and keeps the free-standing styling.
 function fencePanelDecorations(state: EditorView["state"], out: Range<Decoration>[]): void {
   const runs = state.field(runsField);
   eachBlock(state, ({ from, to }) => {
@@ -1230,14 +1178,15 @@ const decorationsField = StateField.define<DecorationSet>({
 // --- Native -> web ---------------------------------------------------------
 
 export function handleRunEvent(view: EditorView, id: string, kind: string, payload: unknown): void {
-  // Every open note's editor gets every run event (bridge.ts broadcasts to all
-  // sinks), so the first question is whether this view is the one that started the
-  // run. Only the view that dispatched addRun has the id in its runsField.
+  // Drop events for runs this view did not start. Every open note's editor
+  // registers a sink (workspace/editorPool.ts), including the ones detached
+  // off-screen for a background tab, and only the view that dispatched addRun
+  // has the id in its runsField.
   //
-  // The state effects below already no-op for a foreign id, but the terminal pool
-  // is keyed by run id alone and so is reachable from any view: without this,
-  // output would be written once per open editor, and one `echo hi` would print
-  // as many lines as you had notes open.
+  // The state effects below already no-op for a foreign id, but the inline
+  // terminal pool is keyed by run id alone and so is reachable from any view.
+  // Without this check, one `echo hi` would be written into its panel once per
+  // open note.
   if (!view.state.field(runsField).some((r) => r.id === id)) return;
 
   switch (kind) {
@@ -1271,18 +1220,17 @@ export function handleRunEvent(view: EditorView, id: string, kind: string, paylo
 }
 
 /**
- * The runs this editor still shows as going — what it claims when the client
+ * The runs this editor still shows as going: what the client claims when it
  * lines itself up with the server (bridge.ts reconcileRuns).
  *
- * Panels are the only record a run has on this side: an editor destroyed by a
- * relock, a tab closed, a page reloaded all take theirs with them, and a run
- * this returns nothing for is one nobody here could see or stop.
+ * Panels are the only record a run has on this side. An editor destroyed by a
+ * relock, a tab that closed, a page that reloaded all take theirs with them,
+ * and a run this returns nothing for is one nobody here can see or stop.
  *
- * Which is why "unknown" is in the answer and not just "running". Every run
- * this client is unsure about was made unsure by the very outage that this
- * question is asked at the end of, so a filter on "running" alone would name
- * none of them — and the server, hearing a claim that leaves them out, would
- * interrupt the lot. The panels are on screen; they are ours; we are asking.
+ * "unknown" is in the answer alongside "running" because the outage this
+ * question follows is what made those runs unknown. A filter on "running"
+ * alone would name none of them, and the server interrupts every run a claim
+ * leaves out.
  */
 export function runningRunIds(state: EditorState): string[] {
   return state
@@ -1295,19 +1243,16 @@ export function runningRunIds(state: EditorState): string[] {
  * The machine these runs are on became unreachable, or reachable again
  * (mainview/boot.tsx connectionState).
  *
- * Down, a run that was going becomes "unknown". Nothing about the run changed —
- * that is the point, and it is why this is not `failAllRuns`, which is what
- * used to be here: a panel that answers a dropped wire by saying the run ended
- * is inventing an ending, and the run it invented one for may be four minutes
- * into a deploy. The panel keeps its output, keeps its block gated, and says
- * that it does not know.
+ * Down, a run that was going becomes "unknown". Nothing about the run itself
+ * changed, which is why this is not the `failAllRuns` that used to be here: a
+ * panel that answers a dropped wire by saying the run ended invents an ending,
+ * and that run may be four minutes into a deploy. The panel keeps its output,
+ * keeps its block gated, and says that it does not know.
  *
- * Up, every unknown run goes back to "running", and reconcileRuns settles which
- * of them that was actually true of a beat later. The restore is not the
- * answer, it is the question being reopened: until the server replies, a run
+ * Up, every unknown run goes back to "running", and reconcileRuns settles a
+ * beat later which of them that was true of. Until the server replies, a run
  * that survived the outage and a run that died in it look identical from here,
- * and "running" is the one of the two that does not need undoing if it was
- * right.
+ * and "running" is the guess that needs no undoing when it is right.
  */
 export function setRunsLink(view: EditorView, up: boolean): void {
   const was = up ? "unknown" : "running";
@@ -1315,8 +1260,8 @@ export function setRunsLink(view: EditorView, up: boolean): void {
   for (const r of view.state.field(runsField)) {
     if (r.state !== was) continue;
     view.dispatch({ effects: setRunState.of({ id: r.id, state: now, exitCode: null }) });
-    // Not frozen, either way: freezing is for a run that has finished, and the
-    // whole claim here is that this one has not been seen to.
+    // Not frozen in either direction: freezing is for a run that has finished,
+    // and this run has not been seen to finish.
     const updated = view.state.field(runsField).find((x) => x.id === r.id);
     if (updated) getInlineTerm(r.id)?.setState(updated);
   }
@@ -1348,11 +1293,10 @@ export function ledgeBlocks(): Extension {
     runsField,
     decorationsField,
     overlayPlugin,
-    // The chords, on a client that has them. Withheld with the buttons rather
-    // than left live: a phone reached by a paired hardware keyboard would
-    // otherwise be the one way to run a block on a client whose whole story is
-    // that it does not — and one chord at a time, because a client can run
-    // blocks and still have nowhere to put one in a terminal.
+    // The chords, gated by the same client facts as the buttons above
+    // (lib/shell.ts). A client that does not run blocks must not run one from a
+    // paired hardware keyboard either. Gated one chord at a time, because a
+    // client can run blocks and still have nowhere to put one in a terminal.
     keymap.of([
       ...(runsBlocks()
         ? [

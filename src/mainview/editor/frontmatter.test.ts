@@ -39,15 +39,19 @@ describe("profileValueSpan", () => {
   });
 
   test("other keys, indented lines, and non-profile text are not links", () => {
-    // Indented means the env: map (shared/frontmatter.ts) — an env var named
-    // "profile" must not become a link to a profile that does not exist.
+    // Indented lines are only meaningful under `env:` (shared/frontmatter.ts),
+    // so an indented "profile:" is an env var. Spanning it would draw a link
+    // to a profile that does not exist.
     expect(profileValueSpan("cwd: ~/x")).toBeNull();
     expect(profileValueSpan("  profile: demo")).toBeNull();
     expect(profileValueSpan("profiles: demo")).toBeNull();
   });
 
   test("a name the parser would refuse is no link", () => {
-    // Clicking it could only open a file that can never exist.
+    // There is no profile for "../evil" or "two words" to open: isProfileName
+    // refuses both names (shared/frontmatter.ts). The empty value never
+    // reaches that check, because profileValueSpan's own regex requires a
+    // non-space value.
     expect(profileValueSpan("profile: ../evil")).toBeNull();
     expect(profileValueSpan("profile: two words")).toBeNull();
     expect(profileValueSpan("profile:")).toBeNull();
@@ -63,8 +67,9 @@ describe("tagsValueSpans", () => {
   });
 
   test("a refused token is no link, and costs only itself", () => {
-    // Same stance as the profile name: clicking it could only show a tag the
-    // parser would never count.
+    // Same rule as the profile name: isTagToken refuses "123"
+    // (shared/frontmatter.ts). The parser counts no tag by that name, so a
+    // pill on the token would show a tag nothing carries.
     expect(tagsValueSpans("tags: work 123 home").map((t) => t.tag)).toEqual(["work", "home"]);
     expect(tagsValueSpans("tags:")).toEqual([]);
   });
@@ -80,8 +85,10 @@ describe("tagsValueSpans", () => {
   });
 
   test("a bracketed list is spanned inside the brackets", () => {
-    // The parser takes `[a, b]` (shared/frontmatter.ts unbracket), so the
-    // pills have to as well; the brackets themselves stay unstyled.
+    // The parser strips the brackets from `[a, b]` (shared/frontmatter.ts
+    // unbracket), and tagsValueSpans strips them at the same point. Otherwise
+    // a list the parser accepts would render as refused tokens, with no pill
+    // on either tag. The brackets themselves stay unstyled.
     expect(tagsValueSpans("tags: [ops, runbook]")).toEqual([
       { from: 7, to: 10, tag: "ops" },
       { from: 12, to: 19, tag: "runbook" },

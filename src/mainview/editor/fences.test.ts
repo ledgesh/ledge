@@ -9,8 +9,9 @@ import {
   typedFence,
 } from "./fences";
 
-// The command half, headless (quotes.test.ts's harness): the pairing scan is
-// pure text, so no parser is even needed in the extensions.
+// The command half, run headless: closeFence on a state built from `doc` with
+// the caret at `caret`. The pairing scan reads plain text, so this state
+// carries no markdown parser extension (quotes.test.ts's harness does).
 function apply(doc: string, caret: number): { handled: boolean; doc: string; caret: number } {
   let state = EditorState.create({ doc, selection: EditorSelection.cursor(caret) });
   const handled = closeFence({
@@ -22,7 +23,9 @@ function apply(doc: string, caret: number): { handled: boolean; doc: string; car
   return { handled, doc: state.doc.toString(), caret: state.selection.main.head };
 }
 
-// The typing half: `mark` arriving at `caret`, and what the document becomes.
+// The typing half: typedFence for `mark` typed at `caret`, and the resulting
+// document. When typedFence declines, `handled` is false and the document
+// comes back unchanged.
 function type(
   doc: string,
   caret: number,
@@ -106,8 +109,9 @@ describe("closeFence: code fences", () => {
     expect(apply("```a`b", 6).handled).toBe(false);
   });
 
-  // The block below owns a closer, but that closer is not this opener's: left
-  // unclosed, CommonMark pairs the two and swallows the block between them.
+  // The block below has a closer of its own, not this opener's. CommonMark
+  // pairs an unclosed opener with that closer anyway, and the block between
+  // them becomes the new block's content.
   test("an opener typed above an existing block still closes", () => {
     expect(apply("```\n\n```sh\npwd\n```", 3)).toEqual({
       handled: true,
@@ -135,9 +139,9 @@ describe("typedFence", () => {
     expect(type("  ``", 4)).toEqual({ handled: true, doc: "  ```\n  ```", caret: 5 });
   });
 
-  // The bug this half exists for: the closer belonging to the block below
-  // pairs with the opener being typed, and until something answers it the note
-  // reads as one block from here to there.
+  // The bug this half exists for: an opener typed above an existing block
+  // pairs with that block's closer. Until a closer of its own arrives, the
+  // note reads as one block from here to there.
   test("a fence typed above an existing block gets its own closer at once", () => {
     expect(type("``\n\n```sh\necho 123\n```", 2)).toEqual({
       handled: true,
@@ -165,9 +169,9 @@ describe("typedFence", () => {
     expect(type("``", 2, "x").handled).toBe(false);
   });
 
-  // A closer shorter than its opener does not close it, so the pair grows
-  // together — otherwise the fourth backtick of a ````-fence would silently
-  // unterminate the block the third one just closed.
+  // A closer shorter than its opener does not close it, so opener and closer
+  // grow together. Otherwise the fourth backtick of a ````-fence would
+  // silently unterminate the block the third one just closed.
   test("a fourth mark grows the closer it planted", () => {
     expect(type("```\n```", 3)).toEqual({ handled: true, doc: "````\n````", caret: 4 });
   });
@@ -177,9 +181,11 @@ describe("typedFence", () => {
   });
 });
 
-// The verb behind the same block: what a client with no backtick key asks for
-// (format.codeBlock). `|` marks a caret and a `[...]` pair a selection, so the
-// case being tested reads as the document it is about.
+// Reads a test's document string into the text and selection it stands for.
+// `|` marks a caret, and a `[...]` pair marks a selection, so each case reads
+// as the document it is about. The insertCodeBlockSpec cases below use it:
+// that is the same block as the `format.codeBlock` command, which a phone
+// offers because typing a backtick there takes a long press (ios.md §7).
 function place(doc: string): { text: string; anchor: number; head: number } {
   const bar = doc.indexOf("|");
   if (bar !== -1) return { text: doc.replace("|", ""), anchor: bar, head: bar };
@@ -188,8 +194,9 @@ function place(doc: string): { text: string; anchor: number; head: number } {
   return { text: doc.replace("[", "").replace("]", ""), anchor: open, head: close };
 }
 
-// The document after the command, with `|` back where the caret is (or the
-// selection's own brackets, which is how the wrap's answer is read).
+// The document after the command, with `|` back where the caret is. A
+// selection comes back in its own brackets, which is how a wrap's result is
+// read.
 function block(doc: string): string | null {
   const { text, anchor, head } = place(doc);
   const state = EditorState.create({ doc: text, selection: EditorSelection.range(anchor, head) });
@@ -212,8 +219,8 @@ describe("insertCodeBlockSpec", () => {
     expect(block("run this|")).toBe("run this\n\n```sh\n|\n```");
   });
 
-  // The caret is where it is, not where the line ends: a block belongs after
-  // the sentence being written, never inside it.
+  // The block goes after the whole line, not at the caret. A block belongs
+  // after the sentence being written, not inside it.
   test("a caret mid-line still gets a whole block after the line", () => {
     expect(block("run| this")).toBe("run this\n\n```sh\n|\n```");
   });
@@ -227,8 +234,8 @@ describe("insertCodeBlockSpec", () => {
     expect(block("ec[ho h]i")).toBe("```[sh]\necho hi\n```");
   });
 
-  // A triple-click's selection ends at the START of the line below, which is
-  // the line the eye never highlighted — and, next to a block, is its fence.
+  // A triple-click's selection ends at the start of the line below, a line
+  // nobody highlighted. Next to a block, that line is its opening fence.
   test("a selection ending at the next line's start stops on the line above", () => {
     expect(block("[echo hi\n]")).toBe("```[sh]\necho hi\n```\n");
     expect(block("[echo hi\n]```sh\nls\n```")).toBe("```[sh]\necho hi\n```\n```sh\nls\n```");
@@ -262,8 +269,8 @@ describe("pairedBelow", () => {
     expect(pairedBelow(["just", "prose"], "```")).toBe(false);
   });
 
-  // A bare fence line is an opener and a closer at once; CommonMark reads it as
-  // the closer, and so does this.
+  // A bare fence line is an opener and a closer at once. CommonMark reads it
+  // as the closer, and pairedBelow does the same.
   test("a bare fence below is read as the closer", () => {
     expect(pairedBelow(["", "```", "pwd", "```"], "```")).toBe(true);
   });

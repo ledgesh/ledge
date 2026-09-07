@@ -1,15 +1,18 @@
-// Where to put the selection when a search hit opens its note — the pure core
-// of the editor pool's reveal (testing.md §2: the decision is tested
-// here; the dispatch that acts on it stays a thin wrapper in editorPool.ts).
-//
-// The hit's line number is a claim about the file at search time, and the file
-// may have moved on (an edit, an autosave race). So the line is clamped, the
-// query is re-found on it, and every miss degrades one step: no match on the
-// line → its start; line gone → the last line. A reveal that lands nearby
-// beats one that throws.
+// Where the selection goes when a search hit opens its note: the pure core of
+// the editor pool's reveal, tested here. editorPool.ts queues the request and
+// applies the result (testing.md §2). None of these functions throws. When the
+// target is gone from the note, the result is a nearby position rather than an
+// error.
 import type { Text } from "@codemirror/state";
 import { atxHeading } from "../../shared/wikilinks";
 
+/**
+ * Where a search hit's selection goes: `query`, found again on `line`. That
+ * line number is where the match was when the search ran, and an edit or an
+ * autosave race may have moved it since. A line past the end of the note
+ * clamps to the last line. An empty `query`, or one the line no longer holds,
+ * puts the caret at the line's start.
+ */
 export function revealSelection(
   doc: Text,
   line: number,
@@ -23,16 +26,15 @@ export function revealSelection(
 }
 
 /**
- * Where a `#heading` anchor lands: the first ATX heading whose text matches
- * (case-insensitive, whitespace-trimmed — the raw heading text, not its
- * slug). The grammar itself lives in shared/wikilinks.ts (atxHeading), where
- * the MCP server's heading-targeted append reads the SAME rule — the two
- * ends of [[note#heading]] must agree on what a heading is. Same degradation
- * stance as revealSelection: the anchor is a claim about the note, and a
- * note that has moved on gets the top of the document rather than a throw.
- * (Line-by-line, not fence-aware like headingsOf: a reveal that lands on a
- * fenced fake heading is a nearby miss, which is this module's failure mode
- * anyway.)
+ * Where a `#heading` anchor lands: the first ATX heading whose text equals
+ * `heading`, ignoring case and surrounding whitespace. The comparison is on
+ * the raw heading text, not a slug. shared/wikilinks.ts defines the grammar
+ * (atxHeading), and appendToNote resolves append_note's `heading` argument
+ * with it: both ends of `[[note#heading]]` must agree on what a heading is.
+ * A heading the note no longer has returns the top of the document. This scan
+ * is line by line, not fence-aware like headingsOf, so a `#` line inside a
+ * fence can be the target. That is a nearby miss, accepted rather than fixed
+ * (appendToNote, which is fence-aware, refuses the same anchor).
  */
 export function revealHeading(doc: Text, heading: string): { anchor: number; head: number } {
   const want = heading.trim().toLowerCase();
@@ -47,17 +49,17 @@ export function revealHeading(doc: Text, heading: string): { anchor: number; hea
 }
 
 /**
- * Where the caret goes in a NOTE JUST CREATED: inside its title, right after
- * the `# ` marker, so the first keystroke types into the H1 — which is the
- * rename UI — rather than in front of the hash that makes it a heading.
- * The first ATX heading, not line 1: a note instantiated from a template can
- * carry frontmatter above its title. Same degradation stance as the reveals
- * above — a note with no heading at all gets the top of the document.
+ * Where the caret goes in a just-created note: inside the title, right after
+ * the `# ` marker. The first keystroke then types into the H1, which is the
+ * rename UI, instead of landing in front of the hash. The scan takes the first
+ * ATX heading, not line 1, because a note made from a template can carry
+ * frontmatter above its title. A note with no heading returns the top of the
+ * document.
  *
  * `placeholder` says the title is a word the app made up ("Untitled") rather
- * than one it computed (a daily note's date): the made-up word is SELECTED,
- * so typing the real name replaces it in one go, while a computed title only
- * gets the caret — a stray keystroke must not eat the date the note is for.
+ * than one it computed, such as a daily note's date. A made-up title is
+ * selected, so typing the real name replaces it. A computed title gets the
+ * caret alone, so a stray keystroke does not overwrite the date.
  */
 export function revealTitle(doc: Text, placeholder = false): { anchor: number; head: number } {
   for (let i = 1; i <= doc.lines; i += 1) {

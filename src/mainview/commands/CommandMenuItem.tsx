@@ -1,6 +1,8 @@
-// A context-menu item rendered from the command registry: title, icon, key
+// A context-menu item rendered from the command registry. Title, icon, key
 // chip, destructive styling, and enablement all come from the command
-// definition, so a menu can never advertise a key the dispatcher doesn't bind.
+// definition, so the menu cannot advertise a key nothing binds
+// (interactions.md §5). The chip shows one key, not every binding: `chipOf`
+// in format.ts picks the first, while the dispatcher matches all of them.
 import { MenuItem } from "@/components/ContextMenu";
 import { chipOf } from "./format";
 import { useCommands } from "./CommandProvider";
@@ -15,8 +17,10 @@ export function CommandMenuItem({
   id: string;
   target?: CommandTarget;
   onClose: () => void;
-  // An extra title= line for context the command name doesn't carry (e.g.
-  // Delete's "Recoverable from Trash for 30 days").
+  // Tooltip text for context the command's title does not carry, set as the
+  // `title` attribute on the menu row's button. Delete passes "Recoverable
+  // from Trash for 30 days"; the callers are in notes/NoteBrowser.tsx and
+  // workspace/Sidebar.tsx.
   hint?: string;
 }) {
   const { exec, commands, ctx } = useCommands();

@@ -1,28 +1,28 @@
-// The view's read-only window onto settings, mirroring lib/clipboard.ts:
-// main.tsx configures it with the snapshot Bun validated (harness.tsx with a
-// fake), and consumers read it at construction time — every editor, terminal,
-// and block widget is created after boot, so a plain getter is enough and no
-// reactivity is needed. Settings apply at launch, never live (architecture.md,
-// "Settings"), which is why there is no subscription here on purpose.
+// The view's read-only window onto settings: a configureSettings call plus
+// plain getters, the shape lib/clipboard.ts uses. boot.tsx passes the snapshot
+// Bun validated, harness.tsx passes a fake. Editors, terminals, and block
+// widgets are built after boot and read settings as they are constructed.
+// Settings apply at launch, never live (architecture.md §6), so there is no
+// subscribe call here.
 import { DEFAULT_SETTINGS, type Settings, type SettingsHome } from "../../shared/settings";
 
 interface SettingsHandlers {
-  // The settings editor dialog's load/save: raw settings.jsonc text, comments
-  // and all (Bun knows where each file lives and seeds the commented template
-  // on first read). `home` picks which of the two — the machine holding the
-  // notes, or this app on this screen (remote.md §5). Saves apply at the next
-  // launch, like every setting.
+  // The settings editor dialog's load and save: the raw settings.jsonc text,
+  // comments and all. Bun resolves the path for each home and seeds the
+  // commented template on first read. `home` picks the file: "server" is the
+  // machine holding the notes and "client" is this app on this screen
+  // (remote.md §5). A save applies at the next launch, like every setting.
   readSettingsFile: (home: SettingsHome) => Promise<string>;
   writeSettingsFile: (home: SettingsHome, text: string) => Promise<void>;
-  // The profile editor's load/save — the same in-app-dialog shape (macOS
-  // binds no app to ".env", so there never was an OS-editor path). Bun
-  // validates the name.
+  // The profile editor loads and saves one profile's env file through its own
+  // in-app dialog. macOS binds no app to ".env", so these files never had an
+  // OS-editor path. Bun validates the name (bun/profiles.ts).
   readProfile: (name: string) => Promise<string>;
   writeProfile: (name: string, text: string) => Promise<void>;
 }
 
-// Defaults until configured: a boot that failed to reach Bun still renders,
-// and DEFAULT_SETTINGS is exactly what Bun would have sent for a missing file.
+// The defaults until configureSettings runs, so settings() answers with a
+// whole Settings before the boot snapshot arrives.
 let current: Settings = DEFAULT_SETTINGS;
 let handlers: SettingsHandlers | null = null;
 

@@ -1,53 +1,46 @@
-// The screen a boot puts up while it is still waiting on a server.
-//
+// The screen a boot puts up while it waits on a server (interactions.md §4-1).
 // Both shells start on an empty `#root` and fill it once there is something to
-// render against (boot.tsx). That gap is a few milliseconds against a server in
-// this process and it is seconds against one across a network: a phone dialling
-// a machine that is not there waits out the whole dial timeout — fifteen
-// seconds (ios/Sources/SSHTransport.swift) — and a Mac that reloaded onto a
-// slow link waits out boot's prefetch. Until this, all of that was a black
-// rectangle with no words in it and nothing to press, and the refusal at the
-// end of the wait was the first thing either shell said. A connection that was
-// merely slow and an app that had hung looked identical for as long as it took.
+// render against (boot.tsx). Locally that gap is milliseconds. Across a
+// network it is seconds. A phone dialling a machine that is not there waits
+// out the fifteen-second dial timeout (ios/Sources/SSHTransport.swift), and a
+// Mac reloading onto a slow link waits out boot's prefetch. Without this panel
+// the wait is a blank window, and a slow connection looks like a hung app
+// until the refusal arrives.
 //
-// DOM rather than a component, for the reason `ios.tsx` refuse() is: what this
-// covers is the stretch before there is a server to render React against, and
-// on a phone the boot it covers may never reach React at all. Its button is a
-// button and not a command (interactions.md §1) for the same reason — the
-// registry is built by CommandProvider, which is downstream of everything this
-// is waiting for.
+// The panel is DOM rather than a React component, for the same reason as
+// `ios.tsx` refuse(). It covers the stretch before there is a server to render
+// React against. On a phone that boot may never reach React at all. Its button
+// is a button and not a command (interactions.md §1) because CommandProvider
+// builds the command registry, downstream of everything this waits for.
 //
-// Nothing here is on a timer. The two reveals are CSS animation delays
-// (index.css `.ledge-booting`), the same idiom as the inline terminal's
-// "waiting" line: a boot that lands inside the delay never paints this at all,
-// so the ordinary case costs no flash.
+// Nothing here is on a timer. Both reveals are CSS animation delays (index.css
+// `.ledge-booting`), the same idiom as the inline terminal's waiting line. A
+// boot that lands inside the first delay never paints this at all.
 
 /**
  * What the panel says it is waiting for.
  *
- * The address rather than the connection's name, because that is the string
- * that identifies a machine: two servers can share a name, and a phone's
- * `@hello` carries the destination and not the name anyway (ios.md §4). Empty
- * is the Mac's answer at this point in boot — the connection list is one of the
- * round trips being waited on — and "Connecting…" is the honest thing to say
- * when the machine cannot be named yet.
+ * The label names the address rather than the connection's name, because two
+ * servers can share a name. A phone's `@hello` answers with a destination and
+ * no server name anyway (ios.md §5). On a Mac the destination is empty this
+ * early in boot: the connection list is one of the round trips being waited
+ * on. The label then reads "Connecting…" and names no machine.
  */
 export function bootingLabel(destination: string): string {
   const where = destination.trim();
   return where ? `Connecting to ${where}…` : "Connecting…";
 }
 
-/** The panel, while it is up. Null between boots, which is nearly always. */
+/** The panel while it is up. Null between boots. */
 let panel: HTMLElement | null = null;
 
 /**
- * Put it up, unless it is already up.
+ * Puts the panel up, unless it is already up.
  *
- * First caller wins, and that ordering is deliberate rather than incidental: on
- * a phone `ios.tsx` raises this before the dial, where it knows the destination
- * and has a real way out of it, and `boot.tsx` raises it again a moment later
- * around the prefetch. The second call must not replace a panel that names a
- * machine with one that cannot.
+ * The first caller wins. On a phone `ios.tsx` raises this before the dial,
+ * where it knows the destination and has a way out of it, and `boot.tsx`
+ * raises it again a moment later around the prefetch. The second call must not
+ * replace a panel that names a machine with one that cannot.
  */
 export function showBooting(opts: { destination: string; onCancel?: () => void }): void {
   if (panel) return;
@@ -57,8 +50,8 @@ export function showBooting(opts: { destination: string; onCancel?: () => void }
   const box = document.createElement("div");
   box.className = "ledge-booting";
   box.setAttribute("role", "status");
-  // Polite, not assertive: this is a progress report, and the reveal delay
-  // already means it is only ever announced for a wait somebody noticed.
+  // Polite rather than assertive: the panel reports progress, and has nothing
+  // that has to interrupt what a screen reader is already saying.
   box.setAttribute("aria-live", "polite");
 
   const inner = document.createElement("div");
@@ -74,19 +67,19 @@ export function showBooting(opts: { destination: string; onCancel?: () => void }
 
   inner.append(spinner, head);
 
-  // The second reveal, several seconds in. Split from the first because they
-  // answer different questions: the first says the app is doing something, and
-  // this one says it has been doing it for longer than it should have taken.
-  // A connection that lands in between says neither more than once.
+  // The second reveal, four seconds in (index.css `.ledge-booting-slow`). The
+  // first line says the app is doing something. This one says it has been
+  // doing it for longer than it should have taken. A boot that lands between
+  // the two reveals shows the first line and never this one.
   const slow = document.createElement("p");
   slow.className = "ledge-booting-slow";
   slow.textContent = "No answer yet.";
   inner.append(slow);
 
-  // Only where there is somewhere to go. On a phone that is the shell's own
-  // server list, which is the screen a failed boot ends on anyway (ios.tsx);
-  // on a Mac the wire is already open and the wait is the prefetch behind it,
-  // so there is nothing here a button could stop.
+  // The button is drawn only where there is somewhere to go. On a phone that
+  // is the shell's own server list, the screen a failed boot ends on anyway
+  // (ios.tsx). On a Mac the wire is already open and the wait is the prefetch
+  // behind it, so there is nothing a button could stop.
   if (opts.onCancel) {
     const cancel = document.createElement("button");
     cancel.type = "button";
@@ -102,13 +95,13 @@ export function showBooting(opts: { destination: string; onCancel?: () => void }
 }
 
 /**
- * Take it down.
+ * Takes the panel down.
  *
- * Called by `boot.tsx` immediately before the first render, which is the moment
- * that makes it wrong, and by `ios.tsx` refuse(), which replaces the page with
- * a sentence rather than an app: that path clears `#root`, and this panel is
- * parented to <body> and would otherwise sit over the refusal explaining that
- * we are still connecting.
+ * `boot.tsx` calls this immediately before the first render, the moment the
+ * panel goes stale. `ios.tsx` refuse() calls it too. That path clears `#root`
+ * and replaces the page with a sentence, and this panel is parented to
+ * <body>. Left up, it would cover the refusal with a panel reading
+ * "Connecting to …".
  */
 export function hideBooting(): void {
   panel?.remove();

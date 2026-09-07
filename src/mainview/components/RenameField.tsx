@@ -1,10 +1,10 @@
-// The inline "type a new name here" input, shared by the workspace strip and the
-// note list. Enter or blur commits, Escape abandons.
+// The inline "type a new name here" input, shared by the workspace strip and
+// the note list. Enter or blur commits, Escape abandons.
 //
-// The autocorrect attributes are not boilerplate: this is a native <input> in a
-// WKWebView, where macOS text substitution is on by default and will capitalise
-// and "correct" a name as you type it ("sh" becomes "Sh"). Filenames must be the
-// characters the user typed.
+// The autocorrect attributes are load-bearing, not copy-paste noise to clean
+// up: this is a native <input> in a WKWebView, where macOS text substitution
+// is on by default and capitalises or "corrects" a name as the user types it
+// ("sh" becomes "Sh"). The filename has to be exactly what the user typed.
 import { useEffect, useRef, useState } from "react";
 
 export function RenameField({
@@ -18,8 +18,9 @@ export function RenameField({
 }) {
   const [draft, setDraft] = useState(initial);
   const ref = useRef<HTMLInputElement>(null);
-  // Escape unmounts this field, which fires a blur on the way out; without this
-  // the abandoned draft would be committed by the blur handler anyway.
+  // Set once the name has been committed or the edit abandoned. Escape
+  // unmounts the field, which fires a blur on the way out. Without this flag
+  // the blur handler would commit the draft that was just abandoned.
   const done = useRef(false);
 
   useEffect(() => {
@@ -53,17 +54,18 @@ export function RenameField({
       onDoubleClick={(e) => e.stopPropagation()}
       onBlur={commit}
       onKeyDown={(e) => {
-        // The palette and the layout hotkeys both listen on the window; a name
-        // being typed here is not a command.
+        // The palette and the layout hotkeys listen on the window in the
+        // bubble phase (commands/CommandProvider.tsx). A name being typed here
+        // is not a command, so the key does not reach them.
         e.stopPropagation();
         if (e.key === "Enter") commit();
         else if (e.key === "Escape") abandon();
       }}
-      // It opens focused and selected, so this is not a target to FIND; it is
-      // one to put a caret back into after the first thing you typed was wrong,
-      // and 22 points is not that. Taking §1a's 44 rather than a smaller number
-      // that would also do, so the sweep in phone.spec.ts has no exception to
-      // carry: the row it sits in grows to hold it and shrinks back after.
+      // It opens focused and selected, so this is not a target to find. It is
+      // one to put the caret back into after a typo, and 22 points is not that.
+      // touch:min-h-[44px] takes interactions.md §1a's 44, more than it needs,
+      // so the sweep in e2e/phone.spec.ts needs no exception for it. The row
+      // grows to hold the field and shrinks back when the rename ends.
       className="w-full rounded border bg-background px-1 py-0.5 text-sm outline-none touch:min-h-[44px]"
     />
   );

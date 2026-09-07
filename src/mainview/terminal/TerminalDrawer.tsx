@@ -29,33 +29,23 @@ function xtermTheme(dark: boolean) {
 }
 
 // The drawer shows one note's terminal shell, named by `sessionId` (the focused
-// note's docId). App keys this component by sessionId, so switching notes cleanly
+// note's docId). App keys this component by sessionId, so switching notes
 // unmounts (detaching the old note's shell, which keeps running) and remounts
-// (attaching the new note's, replaying its scrollback).
-//
+// (attaching the new note's, replaying its scrollback). Three paths replay the
+// shell's history here: the mount's attach, a take-back attach, and a claim
+// after a reconnect.
+
 // `onReady` fires once the terminal has mounted and subscribed to output, so a
-// queued "run in terminal" command can be flushed without racing the first output.
-// `onClose` hides the drawer (Escape); the shell keeps running for next open.
-// `spawnHost` is the machine picked for this open, consumed only if this
-// attach is what spawns the shell; `onHost` reports the host the shell is
-// actually on (from the attach response), which App shows as the badge.
-//
-// One shell has one drawer across the whole server, not one per client: another
-// client attaching takes this one's bytes, keystrokes and winsize with it, and
-// what arrives here is a `terminalDetached` push. That is the notice below, and
-// its button attaches again, which takes the shell back (remote.md §7).
-//
-// A drawer that is already open also has to survive the WIRE going, which is a
-// third path into the same terminal: the shell keeps printing at a connection
-// that is not there and those pushes are dropped, so the reconnect claims the
-// session and replays the ring (rpc-schema terminalClaim). Mounting attaches,
-// reconnecting claims, and the difference is that one of them may take a shell
-// and spawn one while the other may do neither.
-//
-// While that wire is down the drawer also stops TAKING anything, and says so.
-// A terminal is the one piece of chrome that looks identical whether it is
-// waiting for the shell or unable to reach it, so without the notice below the
-// only feedback for a typed line is that no echo comes back.
+// queued "run in terminal" command flushes without racing the first output.
+// `onClose` hides the drawer (Escape); the shell keeps running. `spawnHost` is
+// the machine picked for this open, used only if this attach spawns the shell.
+// `onHost` reports the host from the attach response, shown as App's badge.
+
+// A shell has one drawer across the whole server, not one per client. Another
+// client attaching takes this one's bytes, keystrokes and winsize, and a
+// `terminalDetached` push arrives here (remote.md §7). A dropped wire is the
+// other case: the drawer stops sending input, since a terminal waiting for the
+// shell and one unable to reach it look the same. Both notices are below.
 export function TerminalDrawer({
   sessionId,
   spawnHost,
@@ -74,17 +64,14 @@ export function TerminalDrawer({
   // mount effect (which builds the terminal once).
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
-  // Another client took this note's shell (rpc-schema terminalDetached): the
-  // xterm on screen is a still frame from the moment it left, and the notice
-  // covering it is the only thing that says so.
-  //
-  // null while this client has the shell; otherwise what took it — its label
-  // from the presence list, or "" for a device that gave no name. Resolved when
-  // the push arrives rather than at every render, so the notice does not change
-  // its wording later because the other device has since gone away.
+  // Label of the client that took this note's shell (rpc-schema
+  // terminalDetached), null while this client has it. labelFor resolves it from
+  // the presence list ("" when that list has no entry) as the push arrives, not
+  // at each render, so the notice keeps its wording after that device goes
+  // away. The xterm keeps its last frame: only the notice says the shell left.
   const [takenBy, setTakenBy] = useState<string | null>(null);
-  // Attaching again, which is how the shell comes back — published by the mount
-  // effect, since that is where the terminal it writes into lives.
+  // Takes the shell back by attaching again. The mount effect publishes this
+  // ref, since that is where the terminal the attach writes into lives.
   const takeBack = useRef<() => void>(() => {});
   // The wire to the machine this shell is on is down (lib/connections.ts).
   // Only for drawing: what the keystroke path reads is linkState() itself, so
@@ -110,21 +97,15 @@ export function TerminalDrawer({
 
     // Whether this client owns the shell right now (bun/server.ts `Term.owner`).
     // False until the first attach answers, and false again from the moment
-    // another client takes it: input and resize are the owner's alone, and Bun
-    // refuses them either way — this is so the refused ones are never sent.
+    // another client takes it. Input and resize are the owner's alone, and Bun
+    // refuses them from anyone else. This flag keeps them from being sent.
     let mine = false;
 
-    // Keystrokes / pasted text -> Bun, while there is both a shell of ours to
-    // take them and a wire to carry them. Refused rather than sent, because
-    // `terminalInput` is a `void` call (boot.tsx) whose rejection nothing reads:
-    // a line typed at a dropped connection would vanish without a word.
-    //
-    // "lost" and not merely "reconnecting", matching the run gate in
-    // editor/blocks.ts and for the same reason: a request made mid-ladder is
-    // HELD and replayed when the wire comes back (shared/transport.ts), so
-    // refusing then would throw away keystrokes that were going to arrive. A
-    // reconnect that lands is a terminal that was briefly slow; a ladder that
-    // runs out is a terminal that is not connected to anything.
+    // The handler sends keystrokes and pasted text to Bun while this client has
+    // the shell and a wire to carry them, and skips the send otherwise:
+    // `terminalInput` is a `void` call (boot.tsx) whose rejection nothing reads,
+    // so a line typed at a dropped connection would disappear silently. The gate
+    // is "lost" and not "reconnecting", as in editor/blocks.ts `linkDown`.
     const dataSub = term.onData((data) => {
       if (mine && linkState().state !== "lost") sendTerminalText(sessionId, data);
     });
@@ -136,26 +117,27 @@ export function TerminalDrawer({
     // still sends SIGINT; Cmd+A selects the whole buffer.
     term.attachCustomKeyEventHandler((e) => {
       if (e.type !== "keydown") return true;
-      // Escape hides the drawer rather than sending ESC to the shell. (Tradeoff:
-      // full-screen TUIs in the drawer can't receive a bare Escape; acceptable
-      // for a notes-app scratch terminal.)
+      // Escape hides the drawer rather than sending ESC to the shell. The
+      // tradeoff is accepted: a full-screen TUI in the drawer cannot receive a
+      // bare Escape, which is fine for a notes-app scratch terminal.
       if (e.key === "Escape") {
         e.preventDefault();
         onCloseRef.current?.();
         return false;
       }
       // Ctrl+` (the Toggle Terminal key, from commands/keys.ts) closes the
-      // drawer from inside it too; the shell never sees the chord. Without
-      // this, the key that opens the terminal is dead while you're in it.
+      // drawer from inside it too, and the shell never sees the chord. Without
+      // this, the key that opens the terminal does nothing while the terminal
+      // has focus.
       if (matchesKey(keyOf("terminal.toggle")!, eventToChord(e))) {
         e.preventDefault();
         onCloseRef.current?.();
         return false;
       }
       const cmd = e.metaKey && !e.ctrlKey && !e.altKey;
-      // preventDefault on the keys we handle: otherwise the unhandled Cmd-key
-      // reaches AppKit's key-equivalent path, which rings the system alert (the
-      // "blip") even though the copy/paste itself succeeded.
+      // preventDefault on the handled keys. An unhandled Cmd-key reaches
+      // AppKit's key-equivalent path, which rings the system alert (the "blip")
+      // even though the copy or paste itself succeeded.
       if (cmd && (e.key === "c" || e.key === "C") && term.hasSelection()) {
         e.preventDefault();
         copyText(term.getSelection());
@@ -188,11 +170,11 @@ export function TerminalDrawer({
       else queue.push(bytes);
     });
 
-    // Attach, and again for every take-back. `replace` is what makes the second
-    // one safe: the snapshot is the WHOLE scrollback, so writing it onto a
-    // terminal that already shows part of it would print the session twice.
-    // Reset first and the screen is rebuilt from the shell's history, including
-    // everything it printed while another client had it.
+    // The mount attaches, and every take-back attaches again. `replace` resets
+    // the terminal first: the snapshot is the entire scrollback, so writing it
+    // onto a terminal that already shows part of it would print the session
+    // twice. After the reset the screen is rebuilt from the shell's history,
+    // including everything it printed while another client had it.
     const attach = (replace: boolean): void => {
       ready = false;
       void terminalAttach(sessionId, spawnHost).then(({ snapshot, host }) => {
@@ -205,10 +187,10 @@ export function TerminalDrawer({
         ready = true;
         mine = true;
         setTakenBy(null);
-        // The pty's grid is the OWNER's window, so it is set here rather than at
-        // mount: before the attach answers there is no shell to size, and after
-        // a take-back the shell has to be re-sized to this window (the client it
-        // came from may have had a different one).
+        // The pty's grid follows the owner's window, so the resize is sent here
+        // rather than at mount. Before the attach answers there is no shell to
+        // size. After a take-back the shell may come from a client whose window
+        // was a different size, so it has to be resized to this one.
         sendTerminalResize(sessionId, term.cols, term.rows);
         if (replace) term.focus();
         else onReady?.();
@@ -217,32 +199,27 @@ export function TerminalDrawer({
     takeBack.current = () => attach(true);
     attach(false);
 
-    // The wire dropped and came back. Ownership survived it (a client id
-    // outlives its connection, bun/server.ts `Term.owner`) so live bytes are
-    // already arriving again — but everything the shell printed while the wire
-    // was down was pushed at a connection that was not there and dropped, and
-    // the ring is the only place it still exists. Claiming is how it comes back,
-    // and how the two pushes that may also have been dropped arrive late.
-    //
-    // Only when this client believes the shell is its own. With the notice up,
-    // another device has it and taking it back is the button's job, not a
-    // reconnect's: the wire coming back is not somebody asking for the shell.
+    // The relink handler runs after a reconnect. Ownership survives the outage
+    // (a client id outlives its connection, bun/server.ts `Term.owner`), and
+    // the claim delivers what the dead wire dropped: the ring's bytes, a detach,
+    // or an exit (rpc-schema TerminalClaim). The handler skips it unless `mine`:
+    // a wire coming back is not somebody asking for the shell (remote.md §7).
     const offRelink = onTerminalRelink(() => {
       if (!mine) return;
-      // Buffered from here, exactly as an attach buffers: this client is still
-      // the owner, so the shell's live bytes are already arriving again, and a
-      // push that lands while the claim is in flight would otherwise be written
-      // and then wiped by the reset below — while being too late to appear in a
-      // snapshot the server has already taken.
+      // The handler buffers output from here, as an attach does. This client is
+      // still the owner, so live bytes are already arriving. A push that lands
+      // while the claim is in flight would be written and then wiped by the
+      // reset below, and it is too late to appear in a snapshot the server has
+      // already taken.
       ready = false;
       void terminalClaim(sessionId).then((claim) => {
         if (disposed) return;
         if (claim.state === "attached") {
-          // Everything the shell has said, over a reset screen, which is
-          // exactly what a take-back does and for the same reason: the snapshot
-          // is the WHOLE scrollback, so writing it onto what is already there
-          // would print the session twice. Without the focus a take-back takes
-          // — nobody pressed anything, and the caret may be in the note.
+          // This branch writes the whole scrollback over a reset screen, as a
+          // take-back does: the snapshot is the entire history, so writing it
+          // onto what is already on screen would print the session twice. It
+          // does not focus the terminal, unlike a take-back: nobody pressed
+          // anything, and the caret may be in the note.
           onHost?.(claim.host);
           term.reset();
           const snapshot = b64ToBytes(claim.dataB64);
@@ -253,48 +230,48 @@ export function TerminalDrawer({
           sendTerminalResize(sessionId, term.cols, term.rows);
           return;
         }
-        // Nothing is coming for either of these — the bytes go to the client
-        // that has the shell, or there is no shell — but the buffer is let go
-        // rather than left closed, so a take-back later starts from empty.
+        // No output is coming for either state: the bytes go to the client that
+        // has the shell, or there is no shell. The queue is dropped and writes
+        // are re-enabled anyway, so a later take-back starts from empty.
         queue.length = 0;
         ready = true;
-        // The shell moved, or ended, while this client was unreachable. Both
-        // are pushes that went nowhere, so they are delivered here by hand
-        // through the paths that would have carried them: the notice, and the
-        // exit App closes the drawer on.
+        // The shell moved to another client, or ended, while this client was
+        // unreachable. Both pushes went nowhere, so they are delivered here by
+        // hand through the paths that would have carried them: the notice, and
+        // the exit App closes the drawer on.
         mine = false;
         if (claim.state === "held") setTakenBy(labelFor(claim.by));
         else dispatchTerminalExit(sessionId);
       }).catch(() => {
         // The wire went again mid-question, which is likelier here than
-        // anywhere: this is asked the moment a reconnect lands. Nothing is
-        // decided from a question that was not answered — the terminal is left
-        // as it is, and the connection that replaces this one asks again
-        // (bridge.ts reconcileRuns does the same for a panel). Only the buffer
-        // has to be let go, or the output that comes back would queue behind an
-        // answer that is never coming.
+        // elsewhere: the claim is sent the moment a reconnect lands. An
+        // unanswered question decides nothing, so the terminal is left as it
+        // is. The next connection asks again (editor/bridge.ts reconcileRuns
+        // does the same for a panel). Only the write gate reopens, or output
+        // that comes back would queue behind an answer that is never coming.
         ready = true;
       });
     });
 
-    // Another client attached: the bytes go there now, so stop sending what Bun
-    // would refuse and let the notice explain the terminal that stopped moving.
+    // The detach handler runs when another client attached, which sends the
+    // bytes there. It drops ownership so this client stops sending what Bun
+    // would refuse, and the notice explains the terminal that stopped moving.
     const offDetached = onTerminalDetached((sid, by) => {
       if (sid !== sessionId) return;
       mine = false;
       setTakenBy(labelFor(by));
     });
 
-    // Keep the pty's winsize matched to the rendered grid — while this client is
-    // the one whose grid it should match.
+    // The observer keeps the pty's winsize matched to the rendered grid, but
+    // only while this client owns the shell.
     const ro = new ResizeObserver(() => {
       fit.fit();
       if (mine) sendTerminalResize(sessionId, term.cols, term.rows);
     });
     ro.observe(host);
 
-    // The palette can still move under a running terminal: "system" tracks the
-    // OS live (lib/theme.ts). A pinned theme simply never fires.
+    // The palette can move under a running terminal: "system" tracks the OS
+    // live (lib/theme.ts). A pinned theme never fires this.
     const offAppearance = onAppearanceChange((a) => (term.options.theme = xtermTheme(a === "dark")));
 
     term.focus();
@@ -310,9 +287,9 @@ export function TerminalDrawer({
       dataSub.dispose();
       term.dispose();
     };
-    // onReady is intentionally not a dep: the terminal is created once per mount.
-    // App remounts (via key=sessionId) to switch notes, so sessionId is fixed for
-    // a given mount and safe to close over.
+    // onReady is not a dep, and should not become one: the terminal is created
+    // once per mount. App remounts (via key=sessionId) to switch notes, so
+    // sessionId is fixed for a given mount and safe to close over.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -320,18 +297,16 @@ export function TerminalDrawer({
     <div className="relative h-full w-full">
       <div ref={hostRef} className="h-full w-full" />
       {offline && (
-        // Over the terminal for the same reason the take-back notice is, and
-        // ahead of it when both are true: while the wire is down, whether
-        // another device still holds the shell is not knowable from here, and
-        // the button that would take it back is a request that cannot be sent.
-        //
-        // No Reconnect button of its own. The connection bar is on screen
-        // throughout and is already that button (workspace/ConnectionBar.tsx),
-        // which is also where the app reports that it is dialling on its own.
-        // Pointer-transparent, unlike the take-back notice, which has a button
-        // to press. Nothing here does, and an outage lasts as long as the
-        // outage: the terminal underneath stays clickable so its last output
-        // can still be selected and copied while this explains itself over it.
+        // The offline notice covers the terminal, and hides the take-back one
+        // while the wire is down: from here, whether another device still holds
+        // the shell is unknowable, and the take-back button could not send its
+        // request anyway.
+
+        // It has no Reconnect button of its own. The connection bar stays on
+        // screen and is already that button, and it reports when the app dials
+        // on its own (workspace/ConnectionBar.tsx). The take-back notice has a
+        // button to press, this one has nothing, so it lets pointer events
+        // through and the terminal's last output stays selectable and copyable.
         <div
           className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background/85 px-4 text-center"
           data-testid="terminal-offline"
@@ -344,16 +319,16 @@ export function TerminalDrawer({
         </div>
       )}
       {!offline && takenBy !== null && (
-        // Over the terminal rather than instead of it: what is underneath is
-        // the last thing this shell said here, and it stays readable while the
-        // notice explains why nothing has been added to it.
+        // The notice covers the terminal rather than replacing it. Underneath
+        // is the last thing this shell said here, and it stays readable while
+        // the notice explains why nothing has been added to it.
         <div
           className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background/85 px-4 text-center"
           data-testid="terminal-taken"
         >
-          {/* By name when there is one: which machine has the shell is the
-              first thing worth knowing about a shell that is somewhere else,
-              and "another device" is what is left when a client gave no name. */}
+          {/* The label names the machine that has the shell when the presence
+              list has one for it. "Another device" is the fallback for a client
+              that gave no name. */}
           <p className="text-[12px] font-medium">{takenBy || "Another device"} took this shell.</p>
           <p className="max-w-[42ch] text-[11px] text-muted-foreground">
             Its output is going there now. Taking it back brings everything it printed while it was away.

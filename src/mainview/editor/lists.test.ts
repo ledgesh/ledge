@@ -12,8 +12,10 @@ import {
   listContentIndent,
 } from "./lists";
 
-// The command half, headless: EditorState + the markdown parser is all these
-// read, so the exact editor scenario is testable without a DOM (quotes.test.ts).
+// The command half: runs one command against a state built from `doc`, with no
+// DOM. EditorState plus the markdown parser is all these commands read, so the
+// editor scenario needs nothing else (quotes.test.ts). The wired editor's half
+// is e2e/lists.spec.ts.
 function run(cmd: (t: any) => boolean, doc: string, caret: number) {
   let state = EditorState.create({
     doc,
@@ -29,16 +31,16 @@ function run(cmd: (t: any) => boolean, doc: string, caret: number) {
   return { handled, doc: state.doc.toString(), caret: state.selection.main.head, state };
 }
 
-// Shift+Enter as the editor actually resolves it: our binding first (Prec.high),
-// CodeMirror's default soft newline when it declines.
+// Shift+Enter as the editor resolves it. continueListItem runs first
+// (Prec.high), then CodeMirror's default soft newline when it declines.
 function shiftEnter(doc: string, caret: number) {
   const ours = run(continueListItem, doc, caret);
   return ours.handled ? ours : run(insertNewlineAndIndent, doc, caret);
 }
 
-// Enter as the editor actually resolves it: ours, then markdown's markup
-// continuation, then the default newline. quoteExit/closeFence sit in the same
-// band but never match the shapes below.
+// Enter as the editor resolves it. The three commands from ./lists run first,
+// then the default newline. continueMarkup is one of them: it wraps upstream's
+// markup continuation and trims the blank line upstream prepends (lists.ts).
 function enter(doc: string, caret: number) {
   // The editor's Enter band, in registration order (setup.ts). quoteExit and
   // closeFence sit in it too, but never match the shapes below.
@@ -123,7 +125,7 @@ describe("continueListBody", () => {
   });
 
   test("a block with its own line grammar inside an item keeps it", () => {
-    // A quote nested in an item: upstream's Enter owes it another `> `.
+    // A quote nested in an item. Upstream's Enter adds the next `> `.
     expect(run(continueListBody, "- foo\n  > quoted", 16).handled).toBe(false);
     expect(run(continueListBody, "- foo\n  ```\n  x\n  ```", 15).handled).toBe(false);
   });
@@ -152,8 +154,8 @@ describe("exitListContinuation", () => {
   });
 });
 
-// The reported bug, end to end: Shift+Enter then typing then Enter used to
-// leave the list — and on an ordered item, delete the typed line outright.
+// The reported bug, end to end. Shift+Enter, then typing, then Enter used to
+// leave the list. On an ordered item it deleted the typed line outright.
 describe("Shift+Enter then Enter", () => {
   test("the continuation survives the next Enter, ordered items included", () => {
     for (const [item, indent] of [
@@ -176,20 +178,21 @@ describe("Shift+Enter then Enter", () => {
 
 describe("continueMarkup", () => {
   test("Enter on an empty marker exits the list, two-item list included", () => {
-    // The reported shape: a fresh two-item list, which is what the end of a
-    // note gives you. Upstream promotes it to a loose list instead, and the
-    // blank line reads as a stray double newline.
+    // The reported shape: a fresh two-item list, the shape at the end of a
+    // note. Upstream's Enter makes the list loose instead of leaving it, so a
+    // blank line lands above the marker.
     expect(enter("- Line 1\n- ", 11)).toMatchObject({ doc: "- Line 1\n", caret: 9 });
     expect(run(insertNewlineContinueMarkup, "- Line 1\n- ", 11).doc).toBe("- Line 1\n\n- ");
 
-    // One more item above and upstream already agreed — still does.
+    // One more item above and upstream's Enter already leaves the list.
+    // continueMarkup agrees there, and the blank-line trim keeps it that way.
     expect(enter("- a\n- b\n- ", 10)).toMatchObject({ doc: "- a\n- b\n", caret: 8 });
     expect(enter("- [ ] a\n- [ ] ", 14)).toMatchObject({ doc: "- [ ] a\n", caret: 8 });
   });
 
   test("a loose list does not spread its blank lines into the next item", () => {
-    // The reported shape: a blank line below an earlier item makes ONE loose
-    // list, and upstream then prefixes every new item with a blank of its own.
+    // The reported shape: a blank line below an earlier item makes one loose
+    // list. Upstream then prefixes every new item with a blank line of its own.
     expect(enter("- [ ] Security\n\n- test", 22)).toMatchObject({
       doc: "- [ ] Security\n\n- test\n- ",
       caret: 25,

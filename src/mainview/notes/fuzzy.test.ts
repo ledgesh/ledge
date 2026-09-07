@@ -27,7 +27,7 @@ describe("fuzzyScore", () => {
   });
 
   test("rejects a subsequence in the wrong order", () => {
-    // Both letters are present, but "n" does not follow an "s" that follows it.
+    // "notes" contains an "s" and an "n", but the "n" comes first.
     expect(fuzzyScore("sn", "notes")).toBeNull();
   });
 
@@ -82,8 +82,12 @@ describe("fuzzyFilter boost", () => {
   const boostFor = (want: string) => (s: string) => (s === want ? CHORD_BOOST : 0);
 
   test("outweighs where in the title the match sits — the palette's chorded-command case", () => {
-    // Same-quality "Daily" run in both; unboosted, the earlier match wins on
-    // the position penalty. The boost (⌘J's chord) must flip exactly this.
+    // The chord boost flips this ranking. Both titles contain the same
+    // "Daily" run, unbroken and starting at a word boundary. Unboosted, Edit
+    // Daily Template wins on the position penalty alone, 113 to 108: the
+    // seed in fuzzy.ts subtracts how far into the title the run starts,
+    // capped at MAX_GAP_PENALTY. The palette adds CHORD_BOOST to Open
+    // Today's Daily Note, which carries ⌘J (keys.ts).
     const items = ["Edit Daily Template", "Open Today's Daily Note"];
     expect(fuzzyFilter("daily", items, label)[0]).toBe("Edit Daily Template");
     expect(fuzzyFilter("daily", items, label, boostFor("Open Today's Daily Note"))[0]).toBe(
@@ -92,9 +96,11 @@ describe("fuzzyFilter boost", () => {
   });
 
   test("cannot beat a genuinely tighter match", () => {
-    // "edit daily" matches Edit Daily Template as boundary runs and the other
-    // only scattered: a chord is a nudge between comparable matches, never an
-    // override of match quality.
+    // "edit daily" is a prefix run through Edit Daily Template and does not
+    // match the other title at all, so fuzzyFilter drops that one on its
+    // `score !== null` guard before any boost is added. The boost's size is
+    // what keeps it from outranking a tighter match, and this test does not
+    // check it: CHORD_BOOST's comment in fuzzy.ts states the bound.
     const items = ["Edit Daily Template", "Open Today's Daily Note"];
     expect(fuzzyFilter("edit daily", items, label, boostFor("Open Today's Daily Note"))[0]).toBe(
       "Edit Daily Template",

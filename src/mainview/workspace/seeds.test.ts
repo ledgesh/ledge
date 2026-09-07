@@ -1,8 +1,12 @@
-// The welcome note is the one place a new user is meant to press Run, so it
-// must actually offer to: every fence in it is a runnable language and none
-// carries the manual's `norun` mark (the opposite invariant from
-// bun/docsContent.test.ts, for the opposite reason). Its H1 is the tab's
-// title, so the tab a fresh start opens reads the same as the note under it.
+// These tests check three things about the welcome note. It is the one place
+// a new user is meant to press Run, since the manual's own fences are all
+// marked `norun`. Its fences therefore have to work: each of them is in a
+// runnable language and carries no `norun`. bun/docsContent.test.ts asserts
+// the opposite invariant of the manual's pages, for the opposite reason
+// (writing.md §10). Its H1 is WELCOME_TITLE, the title the first tab carries
+// when this seed fills it (store.tsx), so the tab a fresh start opens reads
+// the same as the note under it. Its prose follows the docs/user/ mechanics
+// too: no em dashes, one line per paragraph.
 import { describe, expect, test } from "bun:test";
 import { DEFAULT_SETTINGS } from "../../shared/settings";
 import { headingOf } from "../../shared/slug";

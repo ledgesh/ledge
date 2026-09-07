@@ -30,18 +30,15 @@ import type { NoteMeta, TrashMeta } from "../../shared/rpc-schema";
 export interface AppState {
   workspaces: Workspace[];
   selectedId: string;
-  // Every known note, PER WORKSPACE FOLDER, as the note browser and quick-open
-  // palette see them (both scoped to the selected workspace). Each list is
-  // held in listNotes order (most recently modified first) because that is
-  // what picks the note to open at boot; the browser sorts a copy by title for
-  // display, since re-sorting by mtime would make rows jump around as you
-  // type. Keyed by folder rather than workspace id because it is a fact about
-  // the folder on disk, and the folder is the stable key persistence speaks.
+  // Every known note, keyed by workspace folder: a fact about the folder, and
+  // the key persist.ts saves. The note browser and quick-open palette read
+  // the selected workspace's list, in listNotes order (newest first), which
+  // picks the note to open at boot. The browser sorts a copy by title, since
+  // autosave rewrites mtime on each keystroke burst and rows would shuffle.
   notes: Record<string, NoteMeta[]>;
-  // Each workspace folder's deleted notes still sitting in its .ledge-trash, newest
-  // deletion first. Held here rather than fetched by the Trash section when it
-  // opens, so the count shows on the collapsed header: a trash you have to
-  // open to discover is the one we already had, and it filled up silently.
+  // Each workspace folder's deleted notes, still in its .ledge-trash, newest
+  // deletion first. Held here rather than fetched when the Trash section
+  // opens, so the count shows on the collapsed header.
   trash: Record<string, TrashMeta[]>;
 }
 
@@ -59,17 +56,17 @@ function makeWorkspace(name: string, folder: string, tab: TabState): Workspace {
   return { id: uid("ws"), name, symbol: DEFAULT_ICON, folder, root: leaf, focusedPaneId: leaf.id };
 }
 
-// The fresh-start launch state, built from one workspace folder and the notes
-// already in it (newest first, as listNotes returns them): one workspace, one
-// note — the one you edited last, or the welcome note (workspace/seeds.ts) when
-// the folder is empty. That welcome note is unsaved like any other new note, so
-// a first launch you do not type in still leaves the folder empty.
+// The fresh-start launch state: one workspace on `folder`, one tab. The tab
+// holds the most recently edited note (`notes` arrives in listNotes order,
+// newest first), or the welcome note (workspace/seeds.ts) when the folder is
+// empty. The welcome note is unsaved like any other new note, so the folder
+// is still empty after a first launch with no typing in it.
 //
-// This is the FALLBACK, not the normal boot: a saved session restores through
-// workspace/persist.ts, and this state is what a first launch (or a corrupt
-// .layout.json) gets instead.
-//
-// Exported for unit tests (store.test.ts); the app goes through WorkspaceProvider.
+// This is the fallback, not the normal boot: a saved session restores through
+// workspace/persist.ts, whose restoredState calls this whenever restoreLayout
+// returns null (no file yet, text it cannot use, or no saved workspace still
+// registered). Exported for unit tests (store.test.ts); the app goes through
+// WorkspaceProvider.
 export function initialState(folder: string, notes: NoteMeta[] = [], trash: TrashMeta[] = []): AppState {
   const newest = notes[0];
   const tab = newest ? makeNoteTab(newest.path, newest.title) : makeTab("demo", WELCOME_TITLE);
@@ -83,14 +80,15 @@ export function initialState(folder: string, notes: NoteMeta[] = [], trash: Tras
 }
 
 /**
- * The page the manual opens on: the one asked for by title, else Getting
- * Started, else the first page in path order — which is the manifest's reading
- * order, since the pages are numbered (bun/docsContent.ts).
+ * The page the manual opens on: the page asked for by title, or Getting
+ * Started when `page` is empty. A title that matches nothing (a corpus that
+ * changed under a stale docs root) falls back to the first page in path
+ * order. The pages are numbered (bun/docsContent.ts), so that is the reading
+ * order.
  *
- * A page that has gone missing (a corpus that changed under a stale docs root)
- * falls back the same way rather than opening nothing. Undefined only where the
- * folder listed empty, which the callers render as an empty pane: a scratch tab
- * in a folder that refuses writes is an Untitled that can never save.
+ * Undefined only when the folder listed no notes at all. Callers render that
+ * as an empty pane rather than a scratch tab: the docs folder refuses writes,
+ * so an Untitled there could never save.
  */
 export function docsLanding(notes: NoteMeta[], page = ""): NoteMeta | undefined {
   const wanted = (page || "getting started").toLowerCase();
@@ -101,13 +99,13 @@ export function docsLanding(notes: NoteMeta[], page = ""): NoteMeta | undefined 
 }
 
 /**
- * The manual window's launch state: one workspace, one page, and nothing else
+ * The manual window's launch state: one workspace, one page, nothing else
  * (remote.md §8a).
  *
- * `initialState`'s sibling — a boot state built from one folder and its notes —
- * for the window whose whole job is the manual. The saved layout is not
- * consulted and not written: this window holds no arrangement anyone chose, and
- * what it shows is decided by which page was asked for.
+ * `initialState`'s sibling, a boot state built from one folder and its notes,
+ * for the window that shows only the manual. The saved layout is neither read
+ * nor written: bun/index.ts no-ops `layoutGet` and `layoutSave` for this
+ * window, and `page` decides what it opens on.
  */
 export function docsState(folder: string, notes: NoteMeta[], page = ""): AppState {
   const start = docsLanding(notes, page);
@@ -128,19 +126,18 @@ export function docsState(folder: string, notes: NoteMeta[], page = ""): AppStat
 export type Action =
   | { type: "selectWorkspace"; id: string }
   // A workspace whose folder Bun just created or attached (workspace/actions.ts
-  // did the round trip; the reducer stays pure). If some workspace already owns
-  // the folder, it is selected instead of duplicated — one workspace per folder.
-  // `note` seeds the first tab with an existing note instead of a scratch tab:
-  // the docs open lands on Getting Started rather than an editable-looking
-  // untitled tab in a folder that refuses writes.
+  // did the round trip; the reducer stays pure). One workspace per folder: a
+  // folder some workspace already owns is selected, not duplicated. `note`
+  // seeds the first tab with an existing note rather than a scratch tab, so
+  // opening the docs lands on Getting Started, not on an unsavable Untitled.
   | { type: "addWorkspace"; name: string; folder: string; note?: NoteMeta }
   | { type: "closeWorkspace"; id: string }
   // A workspace's folder moved on disk (Bun renamed it; workspace/actions.ts
-  // did the round trip). The workspace keeps its identity — id, name, icon,
-  // strip position — but every open tab's path named the old folder, so the
-  // pane tree resets to one scratch tab: App's reconciliation effect turns the
-  // dropped docIds into editor teardowns and closeSession calls, the same
-  // cleanup every close path gets. Arrangement loss, not data loss.
+  // did the round trip). Every open tab's path named the old folder, so the
+  // pane tree resets to one scratch tab. The workspace keeps its id, name,
+  // icon and strip position. App's reconciliation effect gives the dropped
+  // docIds the editor teardown and closeSession calls every close path gets.
+  // The files on disk are untouched.
   | { type: "workspaceFolderMoved"; id: string; folder: string }
   | { type: "renameWorkspace"; id: string; name: string }
   | { type: "setWorkspaceIcon"; id: string; symbol: string }
@@ -150,8 +147,9 @@ export type Action =
   | { type: "closeTab"; paneId: string; tabId: string }
   | { type: "selectTab"; paneId: string; tabId: string }
   | { type: "moveTab"; fromPaneId: string; tabId: string; toPaneId: string; toIndex: number }
-  // `empty` splits without seeding the new pane a scratch tab: the read-only
-  // docs workspace has no such thing as a new note (registry.ts sets it).
+  // `empty` splits without seeding the new pane a scratch tab. A scratch tab
+  // in the read-only docs workspace could never be saved, so
+  // commands/registry.ts sets the flag when that workspace is selected.
   | { type: "splitPane"; dir: SplitDir; paneId?: string; empty?: boolean }
   | { type: "closePane"; paneId?: string }
   | { type: "setRatio"; splitId: string; ratio: number }
@@ -174,17 +172,13 @@ export type Action =
   | { type: "noteDeleted"; path: string }
   // One workspace folder's trash was re-read (at boot and at every refresh).
   | { type: "trashLoaded"; folder: string; items: TrashMeta[] }
-  // A note joined a workspace's list without a tab of this app's having
-  // written it: a trashed note came back (Undo, or the Restore button), or a
-  // command created one outright (New Folder…, New Note in Folder, the
-  // starter template). `note` is where it landed, which need not be the name
-  // that was asked for: an existing name may have been taken. No tab is
-  // opened here — the note simply joins the browser, and whoever wants it in
-  // front of the user dispatches openNote as well.
-  //
-  // The watcher's refresh would bring it in a moment later anyway; this is
-  // what keeps the row from arriving after the note it names is already on
-  // screen.
+  // A note joined a workspace's list without a tab in this app having written
+  // it: a trashed note came back (Undo, or the Restore button), or a command
+  // created one outright (New Folder…, New Note in Folder, the starter
+  // template). `note` is where it landed, under a name that need not be the
+  // one asked for: an existing name may have been taken. No tab opens here,
+  // so callers that want it on screen dispatch openNote too. The watcher's
+  // refresh would bring the row in later, after the note it names is open.
   | { type: "noteAppeared"; folder: string; note: NoteMeta }
   // What a note is called on screen changed: its H1 was edited (or removed, and
   // the label fell back to the filename). Separate from noteRenamed because a
@@ -201,9 +195,9 @@ function withSelected(state: AppState, fn: (ws: Workspace) => Workspace): AppSta
 }
 
 // Rewrite every folder's note list via `fn`, preserving identity when nothing
-// changed. Paths are globally unique (each lives under exactly one folder), so
-// per-path updates need no folder key from the caller — the scan is over a
-// handful of small lists.
+// changed. Paths are globally unique (each note lives under exactly one
+// folder), so a per-path update needs no folder key from the caller. The scan
+// is over a handful of small lists.
 function mapNoteLists(
   lists: Record<string, NoteMeta[]>,
   fn: (n: NoteMeta) => NoteMeta | null,
@@ -233,8 +227,9 @@ export function reducer(state: AppState, action: Action): AppState {
         : state;
 
     case "addWorkspace": {
-      // One workspace per folder: re-adding (attaching a folder that is
-      // already a workspace) selects the existing one, openNote's move.
+      // One workspace per folder: attaching a folder that is already a
+      // workspace selects the existing one, the way openNote focuses a tab
+      // that is already open.
       const existing = state.workspaces.find((w) => w.folder === action.folder);
       if (existing) return { ...state, selectedId: existing.id };
       const tab = action.note ? makeNoteTab(action.note.path, action.note.title) : makeTab("scratch");
@@ -262,7 +257,7 @@ export function reducer(state: AppState, action: Action): AppState {
           ? workspaces[Math.min(idx, workspaces.length - 1)].id
           : state.selectedId;
       // Drop the folder's lists with it (one workspace per folder, so nothing
-      // else reads them). The files stay on disk; only the view forgets.
+      // else reads them). The files stay on disk; only this state drops them.
       const notes = { ...state.notes };
       const trash = { ...state.trash };
       delete notes[closing.folder];
@@ -273,8 +268,8 @@ export function reducer(state: AppState, action: Action): AppState {
     case "workspaceFolderMoved": {
       const ws = state.workspaces.find((w) => w.id === action.id);
       if (!ws || ws.folder === action.folder) return state;
-      // One workspace per folder still holds; Bun refuses nested/duplicate
-      // destinations, so a collision here is a stale dispatch — drop it.
+      // One workspace per folder still holds. Bun refuses nested and duplicate
+      // destinations, so a collision here is a stale dispatch: drop it.
       if (state.workspaces.some((w) => w.folder === action.folder)) return state;
       const leaf = makeLeaf(makeTab("scratch"));
       const workspaces = state.workspaces.map((w) =>
@@ -304,8 +299,8 @@ export function reducer(state: AppState, action: Action): AppState {
     }
 
     case "setWorkspaceIcon": {
-      // An unknown key would render as the default anyway (iconFor), so storing
-      // one would silently pretend the choice took.
+      // An unknown key renders as the default anyway (icons.ts iconFor), so
+      // storing one would leave the row drawing the default icon.
       if (!isIconKey(action.symbol)) return state;
       return {
         ...state,
@@ -385,11 +380,10 @@ export function reducer(state: AppState, action: Action): AppState {
       return withSelected(state, (ws) => {
         const paneId = action.paneId ?? ws.focusedPaneId;
         if (!findLeaf(ws.root, paneId)) return ws;
-        // A fresh split gets its own scratch tab; an empty pane is a dead grey
-        // rectangle, so every new pane is seeded (matches the Swift build).
-        // Except where a new note is not a thing the workspace has: seeding the
-        // read-only docs workspace would hand you an untypable, unsavable
-        // "Untitled", so its splits open onto the empty state instead.
+        // Every new pane is seeded a scratch tab, so none opens blank
+        // (matching the Swift build), except in the read-only docs workspace:
+        // an "Untitled" there could not be typed in or saved, so its splits
+        // open onto the empty state instead.
         const newLeaf = makeLeaf(action.empty ? undefined : makeTab("scratch"));
         const root = splitLeaf(ws.root, paneId, action.dir, newLeaf);
         return { ...ws, root, focusedPaneId: newLeaf.id };
@@ -412,8 +406,8 @@ export function reducer(state: AppState, action: Action): AppState {
       }));
 
     case "noteCreated": {
-      // Not withSelected: a save can land while you are in another workspace, and
-      // the tab that owns the docId is wherever it has been dragged to by now.
+      // Not withSelected: a save can land while another workspace is selected,
+      // and the tab that owns the docId may have been dragged anywhere by now.
       let touched = false;
       const workspaces = state.workspaces.map((ws) => {
         const root = mapTabs(ws.root, (t) =>
@@ -435,9 +429,9 @@ export function reducer(state: AppState, action: Action): AppState {
       return { ...state, notes: { ...state.notes, [action.folder]: action.notes } };
 
     case "noteRenamed": {
-      // The docId is untouched, so the editor, its undo history, and the note's
-      // shells carry straight through the rename: only the path and the tab label
-      // move. That separation is the whole reason the two are different keys.
+      // The docId is untouched, so the editor, its undo history and the note's
+      // shells carry straight through the rename. Only the path and the tab
+      // label move, which is why path and docId are separate keys (tree.ts).
       const workspaces = state.workspaces.map((ws) => {
         const root = mapTabs(ws.root, (t) =>
           t.path === action.path ? { ...t, path: action.note.path, title: action.note.title } : t,
@@ -445,15 +439,15 @@ export function reducer(state: AppState, action: Action): AppState {
         return root === ws.root ? ws : { ...ws, root };
       });
       // The row is replaced wherever its old path is found (paths are globally
-      // unique) by the WHOLE new meta — which carries the new folder, so a move
-      // regroups the note in the browser's tree without a folder refresh.
+      // unique) by the whole new meta. That meta carries the new folder, so a
+      // move regroups the note in the browser's tree without a folder refresh.
       const notes = mapNoteLists(state.notes, (n) => (n.path === action.path ? action.note : n));
       return { ...state, workspaces, notes };
     }
 
     case "noteTitled": {
-      // The tab is found by docId (the live session), and the browser row by the
-      // path that tab holds: one edit, both surfaces, so the list does not sit on
+      // The tab is found by docId (the live session), and the browser row by
+      // the path that tab holds. Updating both here stops the browser showing
       // a stale heading until the next folder refresh.
       let path: string | null = null;
       const workspaces = state.workspaces.map((ws) => {
@@ -475,8 +469,8 @@ export function reducer(state: AppState, action: Action): AppState {
         const root = removeTabsBy(ws.root, (t) => t.path === action.path);
         return root === ws.root ? ws : { ...ws, root };
       });
-      // Closing the tabs is what drops their docIds out of the live set, which is
-      // what App's reconciliation effect turns into an editor teardown and a
+      // Closing the tabs drops their docIds out of the live set. App's
+      // reconciliation effect then tears down the editor and calls
       // closeSession for the note's shells.
       return { ...state, workspaces, notes: mapNoteLists(state.notes, (n) => (n.path === action.path ? null : n)) };
     }
@@ -487,10 +481,10 @@ export function reducer(state: AppState, action: Action): AppState {
     case "noteAppeared": {
       const list = state.notes[action.folder] ?? [];
       if (list.some((n) => n.path === action.note.path)) return state;
-      // Re-sorted rather than pushed to the front: a restored note keeps its real
-      // last-edited time (the trash records the deletion in ctime and leaves mtime
-      // alone), so it belongs wherever that puts it. The list is held in listNotes
-      // order, and a refresh would put it there anyway.
+      // Re-sorted rather than pushed to the front. A restored note keeps its
+      // real last-edited time (the trash records the deletion in ctime and
+      // leaves mtime alone), so it belongs wherever that puts it. The list is
+      // held in listNotes order, and a refresh would put it there anyway.
       const notes = {
         ...state.notes,
         [action.folder]: [...list, action.note].sort((a, b) => b.mtimeMs - a.mtimeMs),
@@ -499,9 +493,9 @@ export function reducer(state: AppState, action: Action): AppState {
     }
 
     case "openNote": {
-      // Already open? Focus that tab wherever it lives, rather than opening the
-      // note twice: two tabs on one path means two docIds, two editors, and two
-      // autosaves racing to write the same file.
+      // A note already open is not opened twice. The loop below focuses its
+      // existing tab wherever it lives: two tabs on one path would be two
+      // docIds, two editors, and two autosaves racing to write the same file.
       for (const ws of state.workspaces) {
         const hit = findTabBy(ws.root, (t) => t.path === action.note.path);
         if (!hit) continue;
@@ -552,7 +546,7 @@ interface Store {
 
 const WorkspaceContext = createContext<Store | null>(null);
 
-// `initial` is built at boot from the notes on disk (main.tsx), so the first
+// `initial` is built at boot from the notes on disk (boot.tsx), so the first
 // render already has the right note in its tab: no empty-then-populate flash.
 export function WorkspaceProvider({ initial, children }: { initial: AppState; children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initial);
@@ -583,7 +577,7 @@ export function openNotePaths(state: AppState): Set<string> {
 
 // The live sessions a note is open under. Normally one (openNote focuses an
 // existing tab rather than opening a second), but a rename or a delete has to
-// reach every one of them, and asking the tree beats assuming.
+// reach every one, so this scans the tree instead of assuming there is one.
 export function docIdsForPath(state: AppState, path: string): string[] {
   return state.workspaces.flatMap((ws) => tabsBy(ws.root, (t) => t.path === path).map((t) => t.docId));
 }

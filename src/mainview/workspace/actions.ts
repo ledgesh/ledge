@@ -1,7 +1,7 @@
 // The workspace operations that need a Bun round trip before the reducer can
-// act, mirroring notes/actions.ts: the reducer stays pure, so creating a
-// folder, opening the attach dialog, and detaching a closed workspace's folder
-// all orchestrate here.
+// act, mirroring notes/actions.ts. The reducer stays pure, so creating a
+// folder, opening the attach dialog, and detaching a closed workspace's
+// folder all orchestrate here.
 import { listNotes, listTrash } from "../notes/channel";
 import { flushAllNow } from "../notes/store";
 import {
@@ -15,10 +15,11 @@ import {
 import { docsLanding, notesOf, type Action, type AppState } from "./store";
 import { tabPaths } from "./tree";
 
-// New Workspace: ask Bun for a folder first (it slugs the display name and
-// allocates against what exists), then add the workspace over it. The name
-// counts existing workspaces the way the old pure action did, so the strip
-// still reads Workspace 2, Workspace 3, ...
+// New Workspace. Bun creates the folder first (it slugs the display name and
+// allocates a name nothing else holds, bun/workspaces.ts), then this adds the
+// workspace over it. The name counts the existing workspaces the way the old
+// pure action did, so the strip still reads Workspace 2, Workspace 3, and so
+// on.
 export async function createWorkspace(
   state: AppState,
   dispatch: (action: Action) => void,
@@ -34,12 +35,12 @@ export async function createWorkspace(
   }
 }
 
-// Attach Folder as Workspace: the native picker runs Bun-side; all the view
-// gets back is a root handle (or a refusal). Cancelling costs nothing. An
-// already-attached folder selects its existing workspace (the reducer's
-// one-workspace-per-folder rule). The workspace is named after the folder —
-// the last path segment is what the user just picked it by — and its lists
-// are fetched right away so the browser is not empty until the next refresh.
+// Attach Folder as Workspace. The native picker runs Bun-side, and the view
+// gets back a root handle, a refusal, or null for a cancel. An already
+// attached folder selects its existing workspace (one workspace per folder,
+// in the reducer). The new workspace takes the folder's last path segment,
+// the name the user just picked it by, and its lists load now, not at the
+// next refresh.
 export async function attachWorkspace(
   dispatch: (action: Action) => void,
 ): Promise<string | null> {
@@ -58,42 +59,29 @@ export async function attachWorkspace(
   return null;
 }
 
-// Open the built-in Documentation workspace IN THIS WINDOW, which is what the
-// manual does on a client that has one window and can only have one (a phone,
-// ios.md §4). A shell with windows gives the manual one of its own instead, and
-// the two paths meet nowhere but the command that chooses between them
-// (commands/registry.ts docs.toggle, on lib/shell.ts multiWindow).
-//
-// Select it if it is already open, else add it over the docs folder Bun
-// reported at boot, landing on the Getting Started page (else the first page in
-// path order — the browser's order for docs: the manifest's numbered filenames,
-// bun/docsContent.ts). The page list comes from the store when a restored
-// session already carries it, else one listNotes round trip: the fresh-start
-// boot seeds only the first workspace's lists, and an open that trusted the
-// store alone would land on a scratch tab in a folder that refuses writes. It
-// joins state.workspaces like any workspace — panes, tabs, search, quick-open
-// all just work — and the strip simply declines to show it (Sidebar filters
-// kind "docs").
-//
-// The already-open branch must still land on a page: a docs workspace can be
-// sitting on nothing but a reseeded scratch tab (its pages all closed, so
-// closeTab's reseed rule ran in a folder where an unsaved note can never
-// save), and since the strip never shows the workspace, "selected, showing
-// nothing" is indistinguishable from a dead button — the click has to make
-// the landing page appear, not merely select.
-//
-// `page` names a page to land on by title, for the menu items that mean one
-// page rather than the manual (Help > Third-Party Licenses). Asking for a page
-// also gives up the shortcut below: "open the manual again" should leave you
-// where you were, while "show me the licenses" has to actually show them.
-//
-// The workspace the manual was opened FROM, so the same button can put it away
-// (closeDocs below). A module-level `let` like the rest of the view's small
-// singletons: it is one id, it belongs to no note and no workspace, and
-// keeping it in the store would put a fact about a header button into the
-// state that gets persisted and reduced.
+// The workspace the manual was opened from, so the same button can put it
+// away (closeDocs below). A module-level `let`, like the view's other small
+// singletons: it is one id that belongs to no note and no workspace, and the
+// store would put a fact about a header button into the state that gets
+// persisted and reduced.
 let cameFrom: string | null = null;
 
+// Open the built-in Documentation workspace in this window. A client that has
+// one window and can only have one takes this path (a phone; ios.md §11), and
+// a shell with windows gives the manual a window of its own. The two paths
+// meet nowhere but the command that chooses between them (commands/registry.ts
+// docs.toggle, on lib/shell.ts multiWindow).
+//
+// Selects the docs workspace if it is already open, otherwise adds it over the
+// docs folder Bun reported at boot. The manual opens on the Getting Started
+// page, or on the first page in path order: the manifest's numbered filenames
+// (bun/docsContent.ts), which is the order the browser lists a read-only
+// workspace in (NoteBrowser.tsx).
+//
+// `page` names a page to land on by title, for the menu items that mean one
+// page rather than the manual (Help > Third-Party Licenses). Passing it also
+// gives up the shortcut below: reopening the manual keeps the page it was
+// showing, while asking for the licenses has to open that page.
 export async function openDocs(
   state: AppState,
   dispatch: (action: Action) => void,
@@ -102,10 +90,14 @@ export async function openDocs(
   const folder = docsFolder();
   if (!folder) return; // Bun never reported one; the command's `when` hides this path
   const existing = state.workspaces.find((w) => w.folder === folder);
-  // Recorded before anything is selected, and only when coming from somewhere
-  // else: opening the manual twice in a row must not overwrite the way back
-  // with the manual itself.
+  // Record the way back before anything is selected, and only when coming
+  // from another workspace. Opening the manual twice in a row must not
+  // overwrite the way back with the manual itself.
   if (!existing || state.selectedId !== existing.id) cameFrom = state.selectedId;
+  // The shortcut: an already-open manual with a page in it is selected and
+  // nothing more. Every page closed leaves tabPaths empty, and the rest of the
+  // function lands on a page instead. The strip does not show this workspace,
+  // so selecting it and showing an empty pane would look like a dead button.
   if (!page && existing && tabPaths(existing.root).length > 0) {
     dispatch({ type: "selectWorkspace", id: existing.id });
     return;
@@ -113,8 +105,12 @@ export async function openDocs(
   let notes = notesOf(state, folder);
   let fetched = false;
   if (notes.length === 0) {
-    // A failed list costs the landing page, not the open: the workspace still
-    // appears (empty), and the focus refresh re-lists like any folder's.
+    // The page list comes from the store when a restored session already
+    // carries it. A fresh-start boot seeds only the first workspace's lists,
+    // so an empty list here means one round trip: trusting the store alone
+    // would land on a scratch tab in a folder that refuses writes. A failed
+    // list costs the landing page, not the open. The workspace still appears,
+    // empty, and the focus refresh re-lists it like any folder (App.tsx).
     notes = await listNotes(folder).catch(() => []);
     fetched = true;
   }
@@ -125,48 +121,48 @@ export async function openDocs(
     // the select above and the page opens in the docs workspace's pane.
     if (start) dispatch({ type: "openNote", note: start });
   } else {
+    // The docs workspace joins state.workspaces like any other, so panes,
+    // tabs, search and quick-open all work on it. The strip does not list it
+    // (Sidebar.tsx filters kind "docs").
     dispatch({ type: "addWorkspace", name: "Documentation", folder, note: start });
   }
-  // The browser (and quick-open) need the page list now, not at the next
-  // focus refresh; the reducer seeded the folder empty.
+  // The browser and quick-open need the page list now rather than at the next
+  // focus refresh: the reducer seeded the folder empty.
   if (fetched) dispatch({ type: "notesLoaded", folder, notes });
 }
 
 /**
  * Put the manual away: select the workspace it was opened from.
  *
- * The other half of one toggle (docs.toggle), and the reason there is one. The
- * docs workspace is deliberately not a strip row and not a ⌘1…9 slot, so the
- * documented way back — select some other workspace — is a surface the manual
- * itself is covering. On a Mac that costs a glance at the strip; on a phone the
- * strip is inside a drawer, and a lit button that does nothing when pressed
- * again is a dead end (ios.md §9).
+ * The other half of docs.toggle. The docs workspace is not a strip row and
+ * not a ⌘1…9 slot, so the usual way back is to pick another workspace out of
+ * the strip: a glance on a Mac, and on a phone a drawer the manual is
+ * covering (ios.md §9). Pressing the lit docs button again runs this instead.
  *
  * Nothing is closed. The docs workspace stays in `state.workspaces` with its
- * tabs where they were, which is what makes coming back cheap and is already
- * how every other workspace switch behaves.
- *
- * The remembered id is checked against the live list rather than trusted: the
- * workspace it names can have been closed while the manual was up.
+ * tabs where they were, so coming back is cheap, the same as every other
+ * workspace switch.
  */
 export function closeDocs(state: AppState, dispatch: (action: Action) => void): void {
   const folder = docsFolder();
+  // The remembered id is checked against the live list rather than trusted:
+  // the workspace it names can have been closed while the manual was up.
   const back =
     state.workspaces.find((w) => w.id === cameFrom && w.folder !== folder) ??
-    // Whatever is left that is not the manual. A workspace ALWAYS is: the
-    // reducer refuses to close the last one, and the docs workspace is never
-    // the first (it is added by openDocs, over a folder Bun reported).
+    // Fall back to any workspace that is not the manual. One always exists:
+    // the reducer refuses to close the last workspace, and the docs workspace
+    // is never the first (openDocs adds it, over a folder Bun reported).
     state.workspaces.find((w) => w.folder !== folder);
   if (!back) return;
   cameFrom = null;
   dispatch({ type: "selectWorkspace", id: back.id });
 }
 
-// Close Workspace, the folder half: the reducer closes the view (refusing the
-// last workspace), and only if the workspace actually went does the folder
-// leave the registry. Detach never touches files — the folder is re-attachable
-// with everything still in it — so no confirmation gates this (the hint on the
-// command says so; interactions.md §4).
+// Close Workspace, the folder half. The reducer closes the view (refusing the
+// last workspace), and the folder leaves the registry only if the workspace
+// actually went. Detach never touches files: the folder is re-attachable with
+// everything still in it, so nothing asks the user to confirm
+// (interactions.md §4; commands/registry.ts workspace.close says the same).
 export function closeWorkspace(
   id: string,
   state: AppState,
@@ -175,24 +171,22 @@ export function closeWorkspace(
   const ws = state.workspaces.find((w) => w.id === id);
   if (!ws || state.workspaces.length <= 1) return; // the reducer would refuse too
   dispatch({ type: "closeWorkspace", id });
-  // The docs folder never detaches: its registry line is Bun's own (detachRoot
-  // would refuse anyway), and closing the Documentation workspace is purely a
-  // view arrangement — the docs icon reopens it.
+  // The docs folder never detaches. Its registry line is Bun's own, and
+  // detachRoot refuses it anyway (bun/workspaces.ts). Closing the
+  // Documentation workspace is a view arrangement: the docs icon reopens it.
   if (workspaceKind(ws.folder) === "docs") return;
   detachWorkspaceFolder(ws.folder).catch((err) => {
-    // The workspace is gone from the view either way; a failed detach costs a
-    // stale registry line that the next attach of the same folder reuses.
+    // The workspace is gone from the view either way. A failed detach costs a
+    // stale registry line, which the next attach of the same folder reuses.
     console.error("[workspace] detach failed", err);
   });
 }
 
-// Move Workspace Folder… (and its Home face, `home: true`): flush pending
-// saves first — they must land while the folder is still where their paths
-// say (⌘L's flush-then-act ordering) — then Bun runs the destination picker
-// (or targets the app home directly) and the rename, and the reducer swaps
-// the workspace onto the new root. Open tabs close with the swap: their paths
-// named the old location, and arrangement loss needs no confirm
-// (interactions.md §4) — every note travels with the folder.
+// Move Workspace Folder… and its Home face (`home: true`). This flushes
+// pending saves first, so they land while the folder is still where their
+// paths say (⌘L's flush-then-act ordering). Bun then runs the destination
+// picker (or targets the app home directly) and the rename, and the reducer
+// swaps the workspace onto the new root.
 export async function moveWorkspace(
   id: string,
   state: AppState,
@@ -213,12 +207,16 @@ export async function moveWorkspace(
   // Cancelled, or the pick was the folder's own parent (Bun's no-op answer):
   // nothing moved, so nothing closes.
   if (res.root === null || res.root === ws.folder) return null;
+  // Open tabs close with the swap: their paths named the old location. Every
+  // note travels with the folder, so this loses an arrangement and asks for no
+  // confirmation (interactions.md §4).
   dispatch({ type: "workspaceFolderMoved", id, folder: res.root });
   await refreshFolder(res.root, dispatch);
   return null;
 }
 
-// Re-fetch one folder's notes and trash, each failure costing itself only.
+// Re-fetch one folder's notes and trash. Each list dispatches on its own, so
+// one of them failing still leaves the other loaded.
 export async function refreshFolder(
   folder: string,
   dispatch: (action: Action) => void,

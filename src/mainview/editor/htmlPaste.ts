@@ -1,29 +1,20 @@
 // Rich text pasted as Markdown: what ⌘V does when the pasteboard carries an
-// HTML flavor beside its plain text.
+// HTML flavor beside its plain text (editor/clipboard.ts is the caller). The
+// plain-text flavor arrives with its formatting already thrown away, so the
+// HTML is translated instead, the way Obsidian and every other Markdown editor
+// does it. `richPasteMarkdown` is the whole policy (interactions.md §3), and
+// `hasFormatting` is the test that keeps the plain text when the HTML carries
+// no formatting to translate. Do not loosen that test. A copy out of a
+// terminal, VS Code, or DevTools is spans and divs holding nothing but colors,
+// and converting one double-spaces the most common paste in a developer's
+// notebook.
 //
-// Every app that copies formatted text — a browser, Mail, Slack, Notion, Google
-// Docs — puts two renditions on the pasteboard: `public.html` and a plain-text
-// fallback that has already thrown the formatting away. Pasting the fallback
-// into a Markdown note loses exactly the structure Markdown can hold: a
-// bulleted list arrives as unmarked lines, a heading as a bare sentence, a link
-// as its label with the URL gone. So the HTML is translated here instead, the
-// way Obsidian and every other Markdown editor does it.
-//
-// **The plain text still wins whenever the HTML carries no formatting to
-// translate.** That is not a fallback, it is the rule that makes this safe: a
-// copy out of a terminal, VS Code, or DevTools also puts HTML on the
-// pasteboard, but it is span-and-div soup holding nothing but colors — and a
-// naive walk turns its one-div-per-line shape into double-spaced paragraphs,
-// wrecking the most common paste in a developer's notebook. `hasFormatting` is
-// that gate; `richPasteMarkdown` is the whole policy, and it also declines when
-// the conversion would say what the plain text already said.
-//
-// Split per testing.md §2: everything above `--- The DOM wrapper` is the pure
-// core over a plain node tree (`PasteNode`), tested with hand-built trees; the
-// wrapper is DOMParser plus one call into it. The core deliberately does not
-// parse HTML itself — DOMParser is right there and hardened, and a second
-// parser with its own opinions about entities and implied end tags would be a
-// liability, not a test convenience.
+// Split per testing.md §2: the pure core over a plain node tree (`PasteNode`)
+// sits above `--- The DOM wrapper`, and the wrapper is DOMParser plus one call
+// into it. The core does not parse HTML itself. Hand-rolling a parser to keep
+// the core DOM-free would be a liability, not a test convenience: DOMParser is
+// already there and hardened, and a second one brings its own opinions about
+// entities and implied end tags.
 import { ensureSyntaxTree, syntaxTree } from "@codemirror/language";
 import type { EditorState } from "@codemirror/state";
 import { frontmatterRange } from "./frontmatter";
@@ -31,7 +22,7 @@ import { frontmatterRange } from "./frontmatter";
 /**
  * The pasteboard HTML as the core sees it: elements with lower-cased tags and
  * attribute names, and text. Comments, CDATA and processing instructions never
- * arrive — the wrapper drops them.
+ * arrive, because the wrapper keeps only element and text nodes (`nodeOf`).
  */
 export type PasteNode =
   | { text: string }
@@ -44,9 +35,9 @@ function isEl(node: PasteNode): node is El {
 }
 
 // Elements carrying no prose: their subtree is dropped whole. Media and
-// controls are here because their text (a `<select>`'s options, a `<video>`'s
-// fallback) is chrome, not content — and `<style>` text pasted as prose is the
-// classic rich-paste bug.
+// controls are here because their text is chrome, not content: a `<select>`'s
+// options, a `<video>`'s fallback. `<style>` is here because its text pasted as
+// prose is the classic rich-paste bug.
 const DROP = new Set([
   "script",
   "style",
@@ -103,17 +94,17 @@ const TRANSPARENT_BLOCK = new Set([
   "p",
 ]);
 
-// A `<div>` is a line box, not a paragraph: browsers draw `<div>a</div>
-// <div>b</div>` as two lines and `<p>a</p><p>b</p>` with space between them.
-// Markdown can say both, so it says both — a div's inline content joins the
-// next div's with ONE newline. This is what keeps a copied stack of lines
-// (Slack's DOM, a diff, a terminal selection) from arriving double-spaced.
+// A `<div>` is a line box, not a paragraph. Browsers draw `<div>a</div>
+// <div>b</div>` as two lines and `<p>a</p><p>b</p>` with space between them,
+// and Markdown can say both. A div's inline content joins the next div's with a
+// single newline, so a copied stack of lines (Slack's DOM, a diff, a terminal
+// selection) does not arrive double-spaced.
 const LINE_BLOCK = new Set(["div"]);
 
 const HEADING = /^h([1-6])$/;
 
-// Everything that ends the paragraph being accumulated. `br` is absent on
-// purpose: it is a line break inside one.
+// Everything that ends the paragraph being accumulated. `br` is absent: it is a
+// line break inside a paragraph, not a break between two.
 function isBlock(tag: string): boolean {
   return (
     TRANSPARENT_BLOCK.has(tag) ||
@@ -173,13 +164,13 @@ const FORMATTING = new Set([
 /** One converted block, and how it joins to the one before it. */
 interface Block {
   text: string;
-  // True for a `<div>`'s inline content: two adjacent ones are two LINES, not
-  // two paragraphs. Only honoured between two tight blocks — a single newline
-  // after a real paragraph would just be a lazy continuation of it.
+  // True for a `<div>`'s inline content: two adjacent ones are two lines, not
+  // two paragraphs. Only honoured between two tight blocks. A single newline
+  // after a real paragraph would read as a lazy continuation of it.
   tight: boolean;
-  // A list, which a list ITEM hugs with a single newline: `- outer` followed
-  // straight by its indented sub-list is the tight nesting everyone writes by
-  // hand, and a blank line there would make the whole outer list loose.
+  // A list. A list item hugs one with a single newline, the tight nesting
+  // everyone writes by hand: `- outer` followed straight by its indented
+  // sub-list. A blank line there would make the whole outer list loose.
   list?: boolean;
 }
 
@@ -188,8 +179,8 @@ type Mark = "strong" | "em" | "del";
 const MARKS: Record<Mark, string> = { strong: "**", em: "*", del: "~~" };
 
 interface Ctx {
-  // Nodes already consumed out of order — a list item's leading checkbox is
-  // read by the item and must not be converted again where it sits.
+  // Nodes already consumed out of order. A list item's leading checkbox is read
+  // by the item and must not be converted again where it sits.
   skip: Set<PasteNode>;
   // Inline marks currently open, so `<b><strong>x` emits one `**` pair rather
   // than `****x****`, which is not bold at all. Nested identical marks are
@@ -203,28 +194,27 @@ interface Ctx {
 const NBSP = /\u00a0/g;
 const INVISIBLE = /[\u200b-\u200d\ufeff]/g;
 
-// HTML whitespace is not significant: any run of it is one space. The two
-// classes of invisible are folded here too — a pasted non-breaking space looks
-// like a space forever after but behaves like a letter (no wrap, no word
-// boundary), and a zero-width character is one nobody can see, search for, or
-// delete on purpose.
+// HTML whitespace is not significant: any run of it becomes one space. Two
+// classes of invisible character are folded here too. A non-breaking space
+// looks like a space but behaves like a letter (no wrap, no word boundary), so
+// it becomes a space. A zero-width character is invisible and unsearchable, and
+// deleting one means aiming at it blind, so `collapse` drops it.
 function collapse(text: string): string {
   return text.replace(NBSP, " ").replace(INVISIBLE, "").replace(/[\t\n\r ]+/g, " ");
 }
 
-// Characters that would turn pasted prose into markup. `_` is deliberately not
-// escaped: GFM's intraword rule already refuses emphasis inside a word, so
-// `snake_case` is safe, and escaping it would litter every pasted identifier
-// and URL with backslashes for the rare `_word_` a copying app would have sent
-// as `<em>` anyway. `<` is left alone for the same reason — Ledge renders no
-// HTML, so a literal angle bracket is only ever text.
+// Escapes the characters that would turn pasted prose into markup. `_` is left
+// alone. GFM's intraword rule already refuses emphasis inside a word, so
+// `snake_case` is safe, and escaping it would put a backslash in every pasted
+// identifier and URL. A copying app sends the rare `_word_` as `<em>` anyway.
+// `<` is left alone too: Ledge renders no HTML, so an angle bracket is text.
 function escapeInline(text: string): string {
   return text.replace(/([\\`*[\]])/g, "\\$1");
 }
 
-// The block markers, which only bite at the start of a line. Threaded through
-// the walk rather than applied to the finished paragraph because by then the
-// emphasis marks we generated are indistinguishable from pasted asterisks, and
+// Escapes the block markers, which only matter at the start of a line. This
+// runs during the walk rather than over the finished paragraph: by then the
+// emphasis marks the walk emitted look no different from pasted asterisks, and
 // escaping `**bold` would print the stars instead of the bold.
 function escapeLineStart(text: string): string {
   return text
@@ -235,11 +225,11 @@ function escapeLineStart(text: string): string {
     .replace(/^(\s*)([>|])/, "$1\\$2");
 }
 
-// A code span's or fence's content: text as typed, no escaping (the backticks
-// protect it) and, in a fence, no collapsing either. Block-level children emit
-// a newline as they close, so a `<pre>` built out of one div or table row per
-// line — GitHub's, and every syntax highlighter's — does not arrive as a single
-// run of glued-together lines.
+// A code span's or fence's content: text as typed, with no escaping (the
+// backticks protect it) and, when `keepNewlines` is set for a fence, no
+// collapsing either. Block-level children emit a newline as they close, so a
+// `<pre>` built out of one div or table row per line (GitHub's, and every
+// syntax highlighter's) does not arrive as one run of glued-together lines.
 function verbatimText(nodes: PasteNode[], keepNewlines: boolean): string {
   let out = "";
   for (const node of nodes) {
@@ -261,9 +251,9 @@ function verbatimText(nodes: PasteNode[], keepNewlines: boolean): string {
 // --- Inline -----------------------------------------------------------------
 
 /**
- * The inline Markdown for `nodes`. `atLineStart` says whether what comes back
- * begins a line, which is the only place the block markers need escaping; it
- * travels down through wrappers that emit nothing and stops at any that emits a
+ * The inline Markdown for `nodes`. `atLineStart` says whether the result begins
+ * a line, the only place the block markers need escaping. `atLineStart` travels
+ * down through wrappers that emit nothing and stops at any wrapper that emits a
  * mark of its own.
  */
 function inlineOf(nodes: PasteNode[], ctx: Ctx, atLineStart: boolean): string {
@@ -300,17 +290,16 @@ function elementInline(el: El, ctx: Ctx, atLineStart: boolean): string {
   }
   const mark = markOf(el);
   if (mark) return wrapMark(el, ctx, mark);
-  // Anything left is a wrapper with nothing to say — a span, a font, a label,
-  // or a block element HTML allowed inside inline content. Its children carry
-  // on in place.
+  // Anything left is a wrapper with no Markdown of its own: a span, a font, a
+  // label, or a block element HTML allowed inside inline content. Its children
+  // carry on in place.
   return inlineOf(el.children, ctx, atLineStart);
 }
 
 // The mark an element asks for, by tag or by the style a WYSIWYG editor uses
-// instead of one. Google Docs and Apple Notes ship bold as
-// `<span style="font-weight:700">` with no `<b>` anywhere, so reading the
-// declaration is the difference between converting those pastes and dropping
-// their formatting on the floor.
+// instead of a tag. Google Docs and Apple Notes ship bold as
+// `<span style="font-weight:700">` with no `<b>` anywhere, so `markOf` reads
+// the style declaration too.
 function markOf(el: El): Mark | null {
   switch (el.tag) {
     case "strong":
@@ -340,9 +329,9 @@ function wrapMark(el: El, ctx: Ctx, mark: Mark): string {
   ctx.marks.add(mark);
   const inner = inlineOf(el.children, ctx, false);
   ctx.marks.delete(mark);
-  // A mark around nothing but space is the copying app's wrapper, not
-  // emphasis — and `** **` would not be emphasis anyway. The space survives,
-  // the marks do not.
+  // A mark around nothing but space is the copying app's wrapper, not emphasis,
+  // and `** **` would not be emphasis anyway. `wrapMark` returns the space and
+  // drops the marks.
   if (inner.trim() === "") return inner;
   // Emphasis cannot open or close against a space, so the padding moves outside
   // the marks: `<b> x </b>` is ` **x** `, never `** x **`.
@@ -353,8 +342,9 @@ function wrapMark(el: El, ctx: Ctx, mark: Mark): string {
   return `${lead}${m}${body}${m}${tail}`;
 }
 
-// Backticks long enough to hold the content, padded when it starts or ends with
-// one — the CommonMark rule, so a copied `` `x` `` survives.
+// Wraps `text` in a backtick run long enough to hold it, and pads with a space
+// when the text starts or ends with a backtick. Both are what CommonMark asks
+// for, so a copied `` `x` `` survives.
 function codeSpanOf(text: string): string {
   if (text === "") return "";
   const runs = [...text.matchAll(/`+/g)].map((m) => m[0].length);
@@ -364,8 +354,8 @@ function codeSpanOf(text: string): string {
 }
 
 // A destination is bracketed when it carries characters that would end it
-// early. CommonMark allows spaces inside `<…>`, which is what a copied URL with
-// one needs.
+// early. CommonMark allows spaces inside `<…>`, so a copied URL holding one
+// survives.
 function destination(url: string): string {
   return /[\s()<>]/.test(url) ? `<${url.replace(/[<>]/g, "")}>` : url;
 }
@@ -373,13 +363,14 @@ function destination(url: string): string {
 function linkOf(el: El, ctx: Ctx, atLineStart: boolean): string {
   const label = inlineOf(el.children, ctx, atLineStart);
   const href = (el.attrs.href ?? "").trim();
-  // An in-page anchor and a scripted link mean nothing once the page is gone,
-  // and an empty target is not a link at all: the label is the whole content.
+  // An in-page anchor and a `javascript:` link mean nothing once the page is
+  // gone, and an empty target is not a link at all. All three convert to their
+  // label alone.
   if (href === "" || href.startsWith("#") || /^javascript:/i.test(href)) return label;
   const bare = href.replace(/^mailto:/i, "");
-  // A link whose label IS its target is how a browser copies a bare URL.
-  // Round-tripping that as `[url](url)` is noise — Ledge renders the bare form
-  // as a link either way (livePreview.ts).
+  // A link whose label is its target is how a browser copies a bare URL.
+  // Writing that as `[url](url)` adds noise: Ledge renders the bare form as a
+  // link either way (livePreview.ts).
   if (label === escapeInline(bare) || label === escapeInline(href)) return bare;
   if (label.trim() === "") return destination(href);
   return `[${label}](${destination(href)})`;
@@ -390,18 +381,19 @@ function imageOf(el: El): string {
   const alt = collapse(el.attrs.alt ?? "").trim();
   // A 1×1 image is a tracking pixel or a spacer, never content.
   if (el.attrs.width === "1" || el.attrs.height === "1") return "";
-  // Only sources a note can resolve become images (images.ts renders remote
-  // URLs and workspace-relative assets). A `data:` URI would inline a base64
-  // wall into the prose, and `file:`/`cid:` point somewhere this machine cannot
-  // follow; those keep their alt text, the only part that still means anything.
+  // Only sources a note can resolve become images, which leaves http(s). A
+  // relative src points into the copied page, but images.ts resolves one
+  // against the note's workspace. A `data:` URI would inline a base64 wall into
+  // the prose, and `file:`/`cid:` point somewhere this machine cannot read. All
+  // of those keep their alt text and drop the reference.
   if (!/^https?:\/\//i.test(src)) return alt === "" ? "" : escapeInline(alt);
   return `![${escapeInline(alt)}](${destination(src)})`;
 }
 
 // --- Blocks -----------------------------------------------------------------
 
-/** The Markdown blocks of `nodes`, each already whole; `joinBlocks` spaces
- * them. */
+/** The Markdown blocks of `nodes`, each one already whole. `joinBlocks` spaces
+ * them apart. */
 function blocksOf(nodes: PasteNode[], ctx: Ctx): Block[] {
   const blocks: Block[] = [];
   let pending: PasteNode[] = [];
@@ -434,9 +426,9 @@ function joinBlocks(blocks: Block[]): string {
   return out;
 }
 
-// A paragraph's lines: the `<br>` newlines are kept (a break the writer put
-// there), the spaces around them are not, and a line that ends up empty was the
-// whitespace between two elements, never a paragraph of its own.
+// A paragraph's lines. The newlines from `<br>` are kept and the spaces around
+// them are trimmed. A line that ends up empty is dropped: it was the whitespace
+// between two elements, not a line of prose.
 function paragraphOf(inline: string): string {
   return inline
     .split("\n")
@@ -474,9 +466,10 @@ function blockOf(el: El, ctx: Ctx): Block[] {
   return blocks;
 }
 
-// A fence, marked long enough to hold a body containing fences of its own, and
-// labelled from the highlighter's own class when it left one: `language-ts` is
-// the convention every renderer writes and reads.
+// A fence, with a backtick run long enough to hold a body containing fences of
+// its own. The language label comes from the highlighter's class when it left
+// one: `language-ts` is the convention every renderer writes and reads, and
+// LANG_CLASS matches its variants.
 function fenceOf(el: El): string {
   const body = verbatimText(el.children, true).replace(/^\n/, "").replace(/\s+$/, "");
   const runs = [...body.matchAll(/`{3,}/g)].map((m) => m[0].length);
@@ -516,9 +509,9 @@ function listOf(el: El, ctx: Ctx): string {
   for (const child of el.children) {
     if (!isEl(child)) continue;
     if (child.tag === "ul" || child.tag === "ol") {
-      // A nested list hung straight off the parent, with no `<li>` around it,
-      // is how several editors spell a deeper level. Indent it under the last
-      // item rather than losing it.
+      // Several editors write a deeper level as a nested list hung straight off
+      // the parent, with no `<li>` around it. Indent it under the last item
+      // rather than losing it.
       const nested = indentRest(listOf(child, ctx), "  ");
       if (items.length > 0) items[items.length - 1] += `\n  ${nested}`;
       else items.push(`  ${nested}`);
@@ -529,25 +522,26 @@ function listOf(el: El, ctx: Ctx): string {
     const marker = ordered ? `${n}. ` : "- ";
     const box = task === null ? "" : task ? "[x] " : "[ ] ";
     const blocks = blocksOf(child.children, ctx);
-    // A sub-list does not make its parent loose (it hugs the item's text), so
-    // only the item's own prose blocks are counted.
+    // Only the item's own prose blocks count toward looseness. A sub-list joins
+    // the item's text with a single newline and does not make the list loose.
     if (blocks.filter((block) => !block.list).length > 1) loose = true;
-    // Continuation lines line up with the item's content column, which is past
-    // the marker but NOT past a checkbox: the box is the item's content, the
-    // same 1ch advance Ledge's own task lines use (interactions.md, lists.ts).
+    // Continuation lines line up with the item's content column: past the
+    // marker, but not past a checkbox. The box is the item's content, at the
+    // same 1ch advance as Ledge's own task lines (interactions.md, lists.ts).
     const body = indentRest(joinItemBlocks(blocks), " ".repeat(marker.length));
     if (`${box}${body}`.trim() === "") continue;
     items.push(`${marker}${box}${body}`);
     n += 1;
   }
   // Ledge writes tight lists (interactions.md, `tightLists`), so items sit on
-  // consecutive lines — unless an item holds more than one block, whose own
-  // blank lines would break the list apart without matching ones between items.
+  // consecutive lines. An item holding more than one block is the exception:
+  // its own blank lines would break the list apart unless the items were
+  // separated by blank lines too.
   return items.join(loose ? "\n\n" : "\n");
 }
 
-// One list item's blocks: its sub-lists hug the line above, its prose blocks
-// keep the blank line that separates paragraphs anywhere else.
+// One list item's blocks. A sub-list joins with a single newline. A prose block
+// keeps the blank line that separates paragraphs anywhere else.
 function joinItemBlocks(blocks: Block[]): string {
   let out = "";
   blocks.forEach((block, i) => {
@@ -601,8 +595,8 @@ function tableOf(el: El, ctx: Ctx): Block[] {
   const rows = rowsOf(el);
   if (rows.length === 0) return [];
   const width = Math.max(...rows.map((row) => row.length));
-  // A one-column table is a layout wrapper, not data — mail and newsletters are
-  // built out of them. Its cells are the content, laid out as ordinary blocks.
+  // A one-column table is a layout wrapper, not data: mail and newsletters are
+  // built out of them. Its cells hold the content, laid out as ordinary blocks.
   if (width < 2) {
     return rows.flatMap((row) => row.flatMap((cell) => blocksOf(cell.children, ctx)));
   }
@@ -620,11 +614,11 @@ function tableOf(el: El, ctx: Ctx): Block[] {
     }
   });
   while (rule.length < width) rule.push("---");
-  // GFM has no headerless table, so the first row becomes the header whether or
-  // not it was `<th>`: promoting a data row keeps every cell visible, where an
-  // invented blank header row would read as a bug in the note. Column spans are
-  // not represented — a spanned cell lands in its first column, since Markdown
-  // has nowhere else to put it.
+  // The first row becomes the header whether or not it was `<th>`, since GFM
+  // has no headerless table. Promoting a data row keeps every cell visible,
+  // where an invented blank header row would read as a bug in the note. Column
+  // spans are not represented: a spanned cell lands in its first column, which
+  // is the only place Markdown has for it.
   const lines = [
     rowLine(header, width, ctx),
     `| ${rule.join(" | ")} |`,
@@ -673,7 +667,7 @@ function rowLine(row: El[], width: number, ctx: Ctx): string {
 
 // --- The policy -------------------------------------------------------------
 
-/** Every block of `root`, joined — the Markdown for a whole pasteboard HTML. */
+/** Every block of `root`, joined: the Markdown for a whole pasteboard HTML. */
 export function markdownFromNode(root: PasteNode): string {
   const ctx: Ctx = { skip: new Set(), marks: new Set() };
   return joinBlocks(blocksOf([root], ctx)).replace(/[ \t]+$/gm, "");
@@ -688,10 +682,10 @@ export function hasFormatting(root: PasteNode): boolean {
 
 /**
  * The Markdown to paste for a pasteboard holding both flavors, or null to paste
- * `text` unchanged. Null is the answer whenever the HTML holds no formatting
- * (the header's rule), when it converts to nothing, and when the conversion
- * says what the plain text already said — a paste that only rewrites whitespace
- * is a paste the user would have to undo.
+ * `text` unchanged. Null when `html` is null (the pasteboard carried no HTML
+ * flavor), when it holds no formatting (the header's rule), when it converts to
+ * nothing, and when the conversion says what `text` already said and would only
+ * rewrite trailing whitespace.
  */
 export function richPasteMarkdown(text: string, html: PasteNode | null): string | null {
   if (!html || !hasFormatting(html)) return null;
@@ -702,10 +696,10 @@ export function richPasteMarkdown(text: string, html: PasteNode | null): string 
 }
 
 /**
- * The insert for a converted paste at a caret whose line already reads
- * `lineBefore`: block Markdown is nudged onto a line of its own, since a list
- * or heading that starts mid-line is not one. imagePasteInsert's rule
- * (images.ts), for the same reason.
+ * The text to insert for a converted paste, given the caret's line so far in
+ * `lineBefore`. Block Markdown gets a leading newline when `lineBefore` already
+ * has text, so it starts a line of its own: a list or heading that starts
+ * mid-line is not one. imagePasteInsert states the same condition (images.ts).
  */
 export function blockPasteInsert(lineBefore: string, md: string): string {
   const block = md.includes("\n") || /^(#{1,6} |[-+*] |\d+[.)] |> |```|---)/.test(md);
@@ -714,8 +708,8 @@ export function blockPasteInsert(lineBefore: string, md: string): string {
 
 // --- The DOM wrapper --------------------------------------------------------
 
-/** DOMParser's tree as a `PasteNode`, keeping only elements and text — a
- * comment carries no prose and would otherwise arrive as some. */
+/** DOMParser's tree as a `PasteNode`, keeping only elements and text. A comment
+ * carries no prose, so `nodeOf` drops it instead of passing it on as text. */
 export function nodeOf(el: Element): PasteNode {
   const attrs: Record<string, string> = {};
   for (const attr of el.attributes) attrs[attr.name.toLowerCase()] = attr.value;
@@ -735,19 +729,18 @@ export function parsePasteHtml(html: string): PasteNode | null {
 }
 
 /**
- * Whether the caret sits somewhere a paste must stay verbatim: inside a code
- * block or span, or in the frontmatter. Both are places where the bytes are the
- * point — a fence holds the command that will run, frontmatter holds the note's
- * params — and Markdown structure written into either is damage, not a
- * translation.
+ * Whether `pos` sits where a paste must stay verbatim: inside a code block or
+ * span, or in the frontmatter. A fence holds the command that will run and
+ * frontmatter holds the note's params, so converted Markdown structure written
+ * into either would break it.
  */
 export function verbatimPaste(state: EditorState, pos: number): boolean {
   const front = frontmatterRange(state);
   if (front !== null && pos >= front.from && pos <= front.to) return true;
   let inside = false;
-  // ensureSyntaxTree, not the incremental tree: in a long note the parse can
+  // ensureSyntaxTree, not the incremental tree. In a long note the parse can
   // stop short of the caret, and a fence the parser has not reached yet would
-  // read as prose — the one wrong answer here that damages a block.
+  // read as prose, converting a paste that should have stayed verbatim.
   const tree = ensureSyntaxTree(state, pos, 50) ?? syntaxTree(state);
   tree.iterate({
     from: pos,

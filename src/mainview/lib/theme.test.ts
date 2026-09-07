@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { resolveAppearance } from "./theme";
 
-// The pure core of lib/theme.ts; the DOM half (one dataset write plus a
-// matchMedia listener) is the thin wrapper testing.md §2 leaves untested.
+// resolveAppearance is the pure core of lib/theme.ts. The DOM half is one
+// dataset write and a matchMedia listener; that thin wrapper stays untested
+// (testing.md §2).
 describe("resolveAppearance", () => {
   test('"system" is whatever the OS is wearing', () => {
     expect(resolveAppearance("system", true)).toBe("dark");

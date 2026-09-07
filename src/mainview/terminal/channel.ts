@@ -1,8 +1,9 @@
-// The terminal drawer's side of the RPC, kept as a small module singleton so the
-// xterm component and main.tsx can meet without prop-drilling through App. Input
-// and resize go webview -> Bun; raw output comes back Bun -> webview. Every call
-// carries the note's `sessionId` (its docId): shells are per note, so the drawer
-// attaches to, types into, and resizes one note's terminal shell.
+// The terminal drawer's side of the RPC. A module singleton, so the xterm
+// component and the RPC wiring reach each other without prop-drilling through
+// App (the configureX pattern, architecture.md §5). Input and resize go
+// webview -> Bun; raw output comes back Bun -> webview. Shells are per note, so
+// every call carries the note's `sessionId` (its docId): the drawer attaches
+// to, types into, and resizes one note's shell.
 
 import type { TerminalClaim } from "../../shared/rpc-schema";
 
@@ -31,7 +32,7 @@ let claimFn: ((sessionId: string) => Promise<TerminalClaim>) | null = null;
 let closeSessionFn: ((sessionId: string) => void) | null = null;
 let restartSessionFn: ((sessionId: string) => void) | null = null;
 
-// Wired by main.tsx once the Electroview RPC exists.
+// Wired by the view's boot once the RPC client exists (mainview/boot.tsx).
 export function configureTerminal(fns: {
   sendInput: (sessionId: string, dataB64: string) => void;
   sendPaste: (sessionId: string, text: string, language?: string | null, host?: string | null) => void;
@@ -55,10 +56,10 @@ export function configureTerminal(fns: {
 }
 
 /**
- * Enable live streaming for a note and return its scrollback bytes to replay,
- * plus the host the shell is on (what the drawer's badge shows). `host` is
- * used only if this attach is the one that spawns the shell; a live shell's
- * host is fixed at its birth (rpc-schema terminalAttach).
+ * Turns on live streaming for a note and returns its scrollback bytes to
+ * replay, plus the host the shell is on (what the drawer's badge shows). The
+ * `host` argument is used only when this attach is what spawns the shell. A
+ * live shell's host is fixed at birth (rpc-schema terminalAttach).
  */
 export async function terminalAttach(
   sessionId: string,
@@ -70,9 +71,11 @@ export async function terminalAttach(
 }
 
 /**
- * Whether the note's terminal shell is alive right now, and where. Asked
- * before opening the drawer (or sending a block to it) on a multi-host note:
- * only a spawn-to-be warrants the host picker.
+ * Reports whether the note's terminal shell is alive right now, and which host
+ * it is on. The view asks before opening the drawer (or sending a block to it)
+ * on a multi-host note. A shell that is already alive skips the picker:
+ * opening the drawer or pasting into it can only reach the host that shell
+ * is on (interactions.md §4a).
  */
 export async function terminalStatus(sessionId: string): Promise<{ live: boolean; host: string | null }> {
   if (!statusFn) return { live: false, host: null };
@@ -80,13 +83,12 @@ export async function terminalStatus(sessionId: string): Promise<{ live: boolean
 }
 
 /**
- * What became of an open drawer's shell while the wire was down (rpc-schema
- * terminalClaim). Sent by the drawer after a reconnect, never at boot: a drawer
- * that is mounting attaches instead.
- *
- * "gone" when there is nothing to ask, which is what an unconfigured seam
- * answers too — a claim with no RPC behind it has learned nothing, and the
- * caller treats the shell as ended rather than as still its own.
+ * Asks what became of an open drawer's shell while the wire was down
+ * (rpc-schema terminalClaim). The drawer sends it after a reconnect, never at
+ * boot: a drawer that is mounting attaches instead. "gone" means no shell is
+ * left under the session: it exited, or another client restarted it. An
+ * unconfigured seam answers "gone" too. A claim with no RPC behind it reads
+ * to the caller as a shell that ended.
  */
 export async function terminalClaim(sessionId: string): Promise<TerminalClaim> {
   if (!claimFn) return { state: "gone" };
@@ -101,17 +103,19 @@ export function sendTerminalInput(sessionId: string, dataB64: string): void {
   sendInputFn?.(sessionId, dataB64);
 }
 
-/** Convenience for sending literal text (keystrokes). */
+/** Encodes literal text (keystrokes) and sends it as input. */
 export function sendTerminalText(sessionId: string, text: string): void {
   sendTerminalInput(sessionId, bytesToB64(encoder.encode(text)));
 }
 
 /**
- * Run a block in the terminal as if pasted. The Bun side wraps it in
- * bracketed-paste markers and holds it until the shell is ready, so all commands
- * echo together then run under one prompt (see rpc-schema terminalPaste).
- * `language` (the block's fence word) makes Bun paste an interpreted block's
- * runner line instead of its raw code; omit it for literal pastes (Cmd+V).
+ * Runs a block in the terminal as if it were pasted (rpc-schema
+ * terminalPaste). Bun holds the text until the shell is ready, then wraps it
+ * in bracketed-paste markers. Every line echoes together and runs under one
+ * prompt. A shell that never announces that mode gets the text after a quiet
+ * period instead, with no markers (bun/paste.ts takePaste). `language`, the
+ * block's fence word, makes Bun paste an interpreted block's runner line
+ * instead of raw code. Cmd+V pastes omit it.
  */
 export function sendTerminalPaste(sessionId: string, text: string, language?: string | null, host?: string | null): void {
   sendPasteFn?.(sessionId, text, language, host);
@@ -121,23 +125,25 @@ export function sendTerminalResize(sessionId: string, cols: number, rows: number
   sendResizeFn?.(sessionId, cols, rows);
 }
 
-/** Tear down both of a note's shells (its tab closed). */
+/** Tears down both of a note's shells. Sent when its tab, its pane, or its
+ * workspace closes and its docId drops out of the live set (App.tsx). */
 export function closeSession(sessionId: string): void {
   closeSessionFn?.(sessionId);
 }
 
 /**
- * Kill both of a note's shells but keep the tab (and the session's params):
- * the next run or attach spawns fresh shells with the note's current
- * frontmatter params. The "Restart Note Shell" command.
+ * Kills both of a note's shells but keeps the tab and the session's params.
+ * The next run or attach spawns fresh shells with the note's current
+ * frontmatter params. This is what the Restart Note Shell command runs.
  */
 export function restartSession(sessionId: string): void {
   restartSessionFn?.(sessionId);
 }
 
-// Bun -> webview raw pty output, tagged with the note it came from. The mounted
-// xterm registers a sink and ignores output for a note other than the one it
-// shows (harmless overlap during a tab switch).
+// Bun -> webview raw pty output, tagged with the note it came from. The
+// mounted xterm registers a sink and ignores output for a note other than the
+// one it shows. A tab switch can bring output for both notes, and ignoring
+// the note that is not shown does no harm.
 let outputSink: ((sessionId: string, dataB64: string) => void) | null = null;
 
 export function onTerminalOutput(sink: (sessionId: string, dataB64: string) => void): () => void {
@@ -152,7 +158,8 @@ export function dispatchTerminalOutput(sessionId: string, dataB64: string): void
 }
 
 // Bun -> webview: a note's terminal shell exited on its own (the user typed
-// `exit`). App subscribes and closes the drawer when the shown note's shell quits.
+// `exit`). App subscribes and closes the drawer when the shown note's shell
+// quits.
 let exitSink: ((sessionId: string) => void) | null = null;
 
 export function onTerminalExit(sink: (sessionId: string) => void): () => void {
@@ -167,14 +174,12 @@ export function dispatchTerminalExit(sessionId: string): void {
 }
 
 // Bun -> webview: another client attached to this note's shell, so this one no
-// longer has it (rpc-schema terminalDetached). The mounted drawer subscribes and
-// shows its notice; nothing else in the view cares, since the shell is still
-// running and the note is otherwise unaffected.
-//
-// `by` is the client id that took it, which the drawer turns into a name
-// through the presence list (lib/connections.ts). Passed through rather than
-// resolved here: this file moves messages, and what a client is called is the
-// connection chrome's business.
+// longer has it (rpc-schema terminalDetached). The mounted drawer subscribes
+// and shows its notice. Nothing else does: the shell is still running and the
+// note is otherwise unchanged. `by` is the id of the client that took it,
+// which the drawer names from the presence list. This file passes the id
+// along; naming clients is the connection chrome's job (lib/connections.ts
+// labelFor).
 let detachedSink: ((sessionId: string, by: string) => void) | null = null;
 
 export function onTerminalDetached(sink: (sessionId: string, by: string) => void): () => void {
@@ -188,15 +193,13 @@ export function dispatchTerminalDetached(sessionId: string, by: string): void {
   detachedSink?.(sessionId, by);
 }
 
-// The wire came back (mainview/boot.tsx connectionState). Not a message from
-// Bun at all, unlike everything above it: this end raises it about its own
-// connection, and it is here because the only subscriber is the drawer, beside
-// the pushes it exists to recover.
-//
-// The mounted drawer answers by claiming its shell. Nothing else in the view
-// subscribes — a reconnect's other halves belong to the modules that own them
-// (editor/bridge.ts reconcileRuns for the panels, lib/connections.ts for the
-// bar).
+// The wire came back. Unlike everything above it, this is not a push from Bun:
+// the view raises it about its own connection (mainview/boot.tsx
+// connectionState). It lives here because the drawer is its only subscriber:
+// the mounted drawer answers by claiming its shell, which recovers the pushes
+// dropped while the wire was down. A reconnect's other halves belong to their
+// own modules, editor/bridge.ts reconcileRuns for the panels and
+// lib/connections.ts for the bar.
 let relinkSink: (() => void) | null = null;
 
 export function onTerminalRelink(sink: () => void): () => void {

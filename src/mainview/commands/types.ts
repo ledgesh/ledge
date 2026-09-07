@@ -8,58 +8,58 @@ import type { Workspace } from "@/workspace/tree";
 import type { NoteMeta, TrashMeta, VaultState } from "../../shared/rpc-schema";
 import type { FocusDomain } from "./keymap";
 
-// What should happen once the vault dialog succeeds (unlock or first-time
-// setup): the act the user was actually reaching for when the passphrase got
-// in the way. App orchestrates the follow-up; the dialog stays a passphrase
-// prompt and nothing more.
+// What to run once the vault dialog succeeds (unlock or first-time setup):
+// the command that was waiting on the passphrase. App.tsx runs the follow-up.
+// The dialog only collects the passphrase.
 export interface VaultFollowUp {
   lock?: { path: string; folder: string };
   removeLock?: { path: string; title: string; folder: string };
-  // Not a follow-up but a FACE: open the dialog in its change-passphrase
-  // form (new passphrase twice; unlocked only — the command gates).
+  // Not a follow-up: opens the dialog in its change-passphrase face, which
+  // asks for the new passphrase twice. The command's `when` allows it only
+  // while the vault is unlocked.
   changePassphrase?: true;
 }
 
-// What a context-menu invocation — or a bare key on a focused list row — acts
-// on. Absent for hotkey/palette invocations, which act on the focused/selected
-// object. A "note" is live in the notes root; a "trash" is a deleted one,
-// which is a different kind because the verbs are different (Restore, Delete
-// Permanently) and confusing the two would delete the wrong file.
+// What a context-menu invocation, or a bare key on a focused list row, acts
+// on. Absent for hotkey and palette invocations, which act on the focused or
+// selected object. A "note" is live in the notes root; a "trash" is a deleted
+// one. They are separate kinds because the verbs differ (Restore, Delete
+// Permanently) and mixing them would delete the wrong file.
 export type CommandTarget =
   | { kind: "workspace"; id: string }
   | { kind: "note"; path: string }
   | { kind: "trash"; path: string }
-  // A folder row in the note browser's tree: a ROOT-RELATIVE folder of the
-  // selected workspace ("projects/api"), never a path. A distinct kind from
-  // "note" because its verbs are different — a folder opens by disclosing what
-  // is in it, and it is the one row you can put a new note into.
+  // A folder row in the note browser's tree: a root-relative folder of the
+  // selected workspace ("projects/api"), never a path. A separate kind from
+  // "note" because the verbs differ. A folder opens by disclosing what is in
+  // it, and it is the only row a new note can be filed into.
   | { kind: "folder"; folder: string }
-  // A row in the Backlinks panel: the LINKING note, plus where its link sits —
-  // the 1-based line and the `[[...]]` text as written, which is the reveal
-  // query (workspace/reveal.ts re-finds it on the line). A distinct kind from
-  // "note" because the verb is different: Enter opens the note AT ITS LINK,
-  // not at wherever the editor last was.
+  // A row in the Backlinks panel: the linking note, plus where its link sits.
+  // `line` is 1-based, and `raw` is the `[[...]]` text as written, which is
+  // the reveal query (workspace/reveal.ts re-finds it on the line). A separate
+  // kind from "note" because the verb differs: Enter opens the note at its
+  // link, not where the editor last was.
   | { kind: "backlink"; path: string; line: number; raw: string }
-  // A row in the Outline panel: one heading of the ACTIVE tab's live doc.
+  // A row in the Outline panel: one heading of the active tab's live doc.
   // Keyed by docId, not path, because the outline follows the focused tab and
-  // an unsaved scratch note has headings before it has a file. `text` doubles
-  // as the reveal query: the jump re-finds it on the line, so a doc that
-  // shifted since the row rendered still lands on the heading.
+  // an unsaved scratch note has headings before it has a file. `text` is also
+  // the reveal query: the jump re-finds it on the line, so a doc that shifted
+  // since the row rendered still lands on the heading.
   | { kind: "heading"; docId: string; line: number; text: string }
-  // A row in the Tags panel's directory (or a tag row in the overlay, or a
-  // rendered #tag in the editor): one tag of the selected workspace. The
-  // spelling rides as displayed; matching folds case Bun-side.
+  // A row in the Tags panel's directory, a tag row in the overlay, or a
+  // rendered #tag in the editor: one tag of the selected workspace. The tag
+  // carries the spelling as displayed. Bun folds case when matching.
   | { kind: "tag"; tag: string }
-  // A row in the Tags panel's drill-in: the note BEARING the tag, plus where
-  // the tag sits — backlink's shape, for backlink's open-at-the-place verb.
+  // A row in the Tags panel's drill-in: the note bearing the tag, plus where
+  // the tag sits. Backlink's shape, for backlink's open-at-the-place verb.
   | { kind: "tagnote"; path: string; line: number; raw: string }
   | { kind: "tab"; paneId: string; tabId: string }
   | { kind: "pane"; paneId: string };
 
-// Component-owned capabilities the registry reaches through, mirroring the
-// editor bridge's configureBridge pattern: each owner registers its own hooks
-// (Shell the chrome toggles, Sidebar the rename field, NoteBrowser the
-// delete-with-undo strip) without the registry importing any component.
+// Component-owned capabilities the registry calls, following the editor
+// bridge's configureBridge pattern: each owner registers its own hooks (Shell
+// the chrome toggles, Sidebar the rename field, NoteBrowser the
+// delete-with-undo strip), so the registry imports no component.
 export interface UiHooks {
   toggleTerminal(): void;
   closeTerminal(): void;
@@ -67,74 +67,75 @@ export interface UiHooks {
   toggleBacklinks(): void;
   toggleOutline(): void;
   toggleTags(): void;
-  // Open the right panel on the Tags face, drilled into one tag — where every
-  // tag click lands (a panel directory row, an overlay tag row, a rendered
-  // #tag in the editor via the bridge).
+  // Open the right panel on the Tags face, drilled into one tag. Every tag
+  // click lands here: a panel directory row, an overlay tag row, and a
+  // rendered #tag in the editor (which arrives via the bridge).
   showTag(tag: string): void;
-  // `initialQuery` seeds the input (filter text only, never sigil-parsed):
+  // `query` seeds the input as filter text, never parsed for a sigil. It is
   // how note.fromTemplate lands in the palette pre-filtered to its entries.
-  // `folder` scopes the overlay to one folder of the selected workspace (its
-  // note list and its text search both), "" or absent being the whole of it.
+  // `folder` scopes the overlay to one folder of the selected workspace, both
+  // its note list and its text search. "" or absent means the whole workspace.
   openOverlay(mode: "notes" | "commands" | "search", opts?: { query?: string; folder?: string }): void;
   beginRenameWorkspace(id: string): void;
-  // Put the inline rename field on a folder row of the note browser — the
-  // workspace strip's rename gesture, one register down. The browser owns it
-  // for the browser's own reason: the field replaces a ROW, and only the list
-  // knows which row that is.
+  // Put the inline rename field on a folder row of the note browser, the same
+  // gesture the workspace strip uses. The browser owns it because the field
+  // replaces a row, and only the list knows which row that is.
   beginRenameFolder(folder: string): void;
   // Open the icon picker on a workspace, anchored to its row in the strip.
   pickWorkspaceIcon(id: string): void;
-  // Open the move-destination chooser (Sidebar's dialog) on an EXTERNAL
-  // workspace: back to ~/.ledge, or the native picker. workspace.move sends
-  // managed workspaces straight to the picker without this stop.
+  // Open the move-destination chooser (Sidebar's dialog) on an external
+  // workspace: back to ~/.ledge, or on to the native picker. workspace.move
+  // sends managed workspaces straight to the picker without this stop.
   pickMoveDestination(id: string): void;
-  // Trash the note and offer the Undo strip — the same path as the note list's
-  // Delete, so ⌘⌫ and the menu item are one behavior.
+  // Trash the note and offer the Undo strip. The same path as the note list's
+  // Delete, so ⌘⌫ and the menu item behave alike.
   deleteNoteWithUndo(note: NoteMeta): void;
-  // Open the folder chooser (components/FolderPicker.tsx) — the destination
-  // question Move to Folder… and New Folder… both ask. The browser owns it
+  // Open the folder chooser (components/FolderPicker.tsx), the destination
+  // question both Move to Folder… and New Folder… ask. The browser owns it
   // because it also owns the tree the answer changes: a note filed into a
-  // collapsed folder has to arrive somewhere you can see it.
+  // collapsed folder still has to end up visible.
   pickFolder(request: FolderRequest): void;
   // Open the confirmation for deleting a folder, which deletes the notes in
-  // it. Confirmed not because it is irreversible — every note lands in the
-  // trash and the Undo strip follows — but because a collapsed row does not
-  // say how many notes are under it, and the dialog does (interactions.md §4).
+  // it. The delete is reversible: every note lands in the trash and the Undo
+  // strip follows. It is confirmed because a collapsed row does not say how
+  // many notes are under it and the dialog does (interactions.md §4).
   confirmDeleteFolder(folder: string): void;
-  // Bring a trashed note back — the same operation Undo uses.
+  // Bring a trashed note back. The same operation Undo uses.
   restoreTrashed(path: string): void;
   // Open the Empty Trash confirmation.
   confirmEmptyTrash(): void;
-  // Open the confirmation for unlinking ONE trashed note. Irreversible, so it
+  // Open the confirmation for unlinking one trashed note. Irreversible, so it
   // is a confirm rather than an undo (interactions.md §4).
   confirmDeleteTrashed(item: TrashMeta): void;
-  // Open the profile editor dialog on one named profile (the in-app UI for
-  // profile files; macOS binds no app to ".env", so there is no OS-editor
-  // path to reach them by).
+  // Open the profile editor dialog on one named profile. This is the in-app
+  // UI for profile files: macOS binds no app to ".env", so it has no editor
+  // to open them with.
   openProfileEditor(name: string): void;
-  // Open the settings editor dialog — settings.jsonc in an in-app CodeMirror
-  // (components/SettingsEditor.tsx). The file is still the UI; Ledge is just
-  // the editor it opens in now.
+  // Open the settings editor dialog: settings.jsonc in an in-app CodeMirror
+  // (components/SettingsEditor.tsx). The file itself is still the settings
+  // UI. Ledge only supplies the editor.
   openSettingsEditor(): void;
-  // Open the connection chooser — which machine holds the notes
+  // Open the connection chooser, which picks the machine that holds the notes
   // (components/ConnectionPicker.tsx, remote.md §8). A dialog rather than an
   // anchored menu: switching rebuilds the whole session, and adding a server
   // means reading a host-key fingerprint before anything is pinned.
   openConnectionPicker(): void;
-  // Open the vault passphrase dialog (components/VaultDialog.tsx): the
-  // unlock face when a vault exists, the create-with-no-recovery-sentence
-  // face when none does. `then` carries the act that was waiting on it.
+  // Open the vault passphrase dialog (components/VaultDialog.tsx): the unlock
+  // face when a vault exists, and when none does the create face, which says
+  // there is no recovery. `then` carries the command that was waiting on it.
   openVaultDialog(then?: VaultFollowUp): void;
-  // Open the Remove Lock confirmation: not §4-destructive (nothing is
-  // destroyed — the note decrypts), but the consequence is silent EXPOSURE
-  // (the next sync or agent scan sees the body), which earns the one confirm.
+  // Open the Remove Lock confirmation. Not destructive under interactions.md
+  // §4: the note decrypts, and nothing is destroyed. It is confirmed anyway
+  // because the body becomes readable and nothing else marks it. The next
+  // sync or agent scan sees the plain text.
   confirmRemoveLock(note: { path: string; title: string; folder: string }): void;
-  // Show an error under the note list (the browser's error strip): where a
-  // failed workspace create/attach reports, same surface as a failed delete.
+  // Show an error under the note list (the browser's error strip). A failed
+  // workspace create or attach reports here, on the same surface a failed
+  // delete uses.
   showError(message: string): void;
   // The same strip in a neutral tone, for outcomes that are answers rather
-  // than failures (where the CLI shim landed). Expires on its own — a
-  // confirmation that never leaves becomes chrome.
+  // than failures (where the CLI shim landed). The strip clears itself after
+  // a timeout, on the same clock as the Undo offer.
   showNotice(message: string): void;
 }
 
@@ -158,124 +159,122 @@ export interface CommandCtx {
 export interface RegistryDeps {
   copyText(text: string): void;
   // Write the `ledge` CLI shim onto the PATH. Resolves to the outcome to
-  // surface — Bun composes the message; ok picks the strip's tone.
+  // surface: Bun composes the message, and `ok` picks the strip's tone.
   installCli(): Promise<{ ok: boolean; message: string }>;
-  // Show the session log in Finder. Fire-and-forget: the outcome is a Finder
-  // window, which is its own feedback.
+  // Show the session log in Finder. Returns nothing: the Finder window it
+  // opens is the feedback.
   revealLog(): void;
   // Open another window, which is another client of another server (remote.md
-  // §8a). Fire-and-forget: the outcome is a window, which is its own feedback.
+  // §8a). Returns nothing: the new window is the feedback.
   newWindow(): void;
-  // Workspace lifecycle (workspace/actions.ts): each needs a Bun round trip
-  // (create a folder / open the native picker / detach the registry entry),
-  // so the reducer cannot do it alone. Each resolves to an error message to
-  // surface, or null.
+  // Workspace lifecycle (workspace/actions.ts). Each needs a Bun round trip
+  // (create a folder, open the native picker, detach the registry entry), so
+  // the reducer cannot do it alone. The two async ones resolve to an error
+  // message to surface, or null.
   createWorkspace(state: AppState, dispatch: (a: Action) => void): Promise<string | null>;
   attachWorkspace(dispatch: (a: Action) => void): Promise<string | null>;
   closeWorkspace(id: string, state: AppState, dispatch: (a: Action) => void): void;
-  // Relocate a workspace's folder on disk (native destination picker + rename,
-  // both Bun-side; `home` skips the picker and targets the app home — the
-  // return trip). Resolves to an error message to surface, or null.
+  // Relocate a workspace's folder on disk. The native destination picker and
+  // the rename are both Bun-side. `home` skips the picker and targets the app
+  // home. Resolves to an error message to surface, or null.
   moveWorkspace(id: string, state: AppState, dispatch: (a: Action) => void, home?: boolean): Promise<string | null>;
-  // The recorded kind of a workspace folder (view-side mirror of Bun's
-  // derived truth) — what gates the Move Home face to external workspaces
-  // and every read-only verb to the docs workspace.
+  // The recorded kind of a workspace folder, mirrored view-side from what Bun
+  // derives. It gates the Move Home face to external workspaces, and gates
+  // every verb the read-only docs workspace does not allow.
   workspaceKind(folder: string): "managed" | "external" | "docs" | null;
-  // The built-in documentation's folder handle (null when Bun reported none —
-  // the docs.toggle command hides then), and the open itself: select the
-  // Documentation workspace, adding it over that folder first if needed
-  // (workspace/actions.ts openDocs).
+  // The built-in documentation's folder handle, null when Bun reported none.
+  // The docs.toggle command hides while it is null. openDocs below selects
+  // the Documentation workspace, adding it over that folder first if needed
+  // (workspace/actions.ts).
   docsFolder(): string | null;
-  // `page` lands on one page by title instead of the manual's front (Help >
-  // Third-Party Licenses).
+  // `page` opens one page by title instead of the manual's front page. Help >
+  // Third-Party Licenses passes one.
   openDocs(state: AppState, dispatch: (a: Action) => void, page?: string): Promise<void>;
-  // The same verb where the shell has windows: the manual gets one of its own,
-  // opened or raised by the shell (lib/windows.ts). Which of the two paths a
-  // command takes is lib/shell.ts's multiWindow, and the one below is what a
-  // client with a single window does instead (ios.md §4).
+  // Show the manual in a window of its own, which the shell opens or raises
+  // (lib/windows.ts). lib/shell.ts's multiWindow decides which path
+  // docs.toggle takes: a client with a single window calls openDocs and
+  // closeDocs instead (ios.md §11).
   openDocsWindow(page: string): void;
   // The other half of the toggle: select the workspace the manual was opened
-  // from, leaving it open behind. Nothing closes — a workspace switch is what
-  // this is.
+  // from, leaving the Documentation workspace open behind it. Nothing closes:
+  // the only change is which workspace is selected.
   closeDocs(state: AppState, dispatch: (a: Action) => void): void;
   // Kill a note's shells so the next run respawns them with its current
   // frontmatter params.
   restartSession(docId: string): void;
-  // Queue "open with this line's link selected" (editorPool requestReveal) —
-  // called BEFORE the openNote dispatch, the search overlay's pattern: the
-  // open's render is what attaches the editor the reveal lands in. A dep, not
-  // inline, because requestReveal lives in the editor stack and the registry
-  // must stay importable by pure unit tests.
+  // Queue "open with this line's link selected" (editorPool requestReveal).
+  // Called before the openNote dispatch, the same order Overlay.tsx uses: the
+  // open's render is what attaches the editor the reveal lands in. A dep
+  // rather than an import, because requestReveal lives in the editor stack
+  // and the registry must stay importable by pure unit tests.
   revealBacklink(path: string, line: number, raw: string): void;
   // Queue "open with the placeholder title selected" (editorPool
-  // requestTitleCaret) for a note this command just CREATED — called before
-  // the open, like revealBacklink, and a dep for the same reason. Every
-  // command that calls it creates an "Untitled", so the first keystroke names
-  // the note. Only creation calls it: an open of a note that already exists
-  // must not move anybody's caret.
+  // requestTitleCaret) for a note the command just created. Called before the
+  // open, like revealBacklink, and a dep for the same reason. Every caller
+  // creates an "Untitled", so the first keystroke names the note. Only
+  // creation calls it: an open of an existing note must not move the caret.
   revealTitle(path: string): void;
   // Move the caret to an Outline row's heading in the note's own live editor.
-  // No open involved — the outline always describes the focused tab. A dep
-  // for the same reason as revealBacklink: the view lookup lives in the
+  // No open is involved: the outline always describes the focused tab. A dep
+  // for the same reason as revealBacklink, since the view lookup lives in the
   // editor stack (editorPool), which the registry must not import.
   jumpToHeading(docId: string, line: number, text: string): void;
-  // Create-or-open today's daily note. `folder` is the selected workspace —
-  // the fallback when the daily.workspace setting pins none; Bun decides.
-  // The open itself rides the external-open subscriber (glue feeds Bun's
-  // answer to dispatchExternalOpen), so the command never dispatches an
-  // openNote of its own. Resolves to an error message to surface, or null —
-  // the createWorkspace contract.
+  // Create or open today's daily note. `folder` is the selected workspace,
+  // the fallback Bun uses when the daily.workspace setting pins none. The open
+  // goes through the external-open subscriber (glue passes Bun's answer to
+  // dispatchExternalOpen), so the command dispatches no openNote itself.
+  // Resolves to an error message to surface, or null, as createWorkspace does.
   openDailyNote(folder: string): Promise<string | null>;
-  // Instantiate a template note — `templatePath` is the picker row's concrete
-  // pick from the live note lists — into `folder`, titled "Untitled": the H1
-  // is the rename UI, so there is no title prompt. Resolves to the created
-  // note, for an ordinary openNote dispatch. (Which notes ARE templates is
-  // not a dep: the registry reads NoteMeta.template from ctx.state itself,
-  // which is what keeps the ⌥⌘N entries live without a rebuild.)
+  // Instantiate a template note into `folder`, titled "Untitled": the H1 is
+  // the rename UI, so there is no title prompt. `templatePath` is the picker
+  // row's pick from the live note lists. Resolves to the created note, for an
+  // ordinary openNote dispatch. Which notes are templates is not a dep: the
+  // registry reads NoteMeta.template from ctx.state, which keeps the
+  // note.fromTemplate palette entries live without a rebuild.
   newNoteFromTemplate(folder: string, templatePath: string): Promise<NoteMeta>;
-  // Create a note from literal text in `folder` — the starter template's
-  // birth (registry.ts owns the text). The same channel createNote every
-  // first save uses, so naming and collision behavior cannot differ.
+  // Create a note from literal text in `folder`, which is how the starter
+  // template is written (registry.ts holds the text). The same createNote
+  // channel every first save uses, so naming and collision behavior match.
   createNote(folder: string, text: string, subfolder?: string | null): Promise<NoteMeta>;
-  // Which folders the browser's tree has open, and the toggle (notes/
-  // expansion.ts). Both take the workspace root first: expansion is per
+  // Which folders the browser's tree has open, and the toggle for one
+  // (notes/expansion.ts). Both take the workspace root first: expansion is per
   // workspace, so two workspaces sharing a folder name do not share an answer.
-  // A dep rather than an import so registry tests are not talking to a live
-  // module-level set — and, like vaultState, it is cheap enough for a `when`
-  // and a title to ask on every render.
+  // A dep rather than an import, so registry tests do not read a live
+  // module-level set. Like vaultState below, it is cheap enough for a `when`
+  // or a title to ask per render.
   folderExpanded(root: string, folder: string): boolean;
   toggleFolder(root: string, folder: string): void;
   // Open a folder and its ancestors, so a note the command just put there is
   // on screen where it landed rather than behind a closed disclosure.
   expandFolder(root: string, folder: string): void;
-  // The daily.workspace setting resolved to a registered root at boot (null =
-  // unset/stale), mirrored from Bun with the workspace registry. The Edit/New
-  // Daily Template faces read it so they act in the workspace ⌘J will act in,
-  // not merely the selected one. A dep, not ctx.state: it is boot-frozen
-  // like every setting, not live view state.
+  // The daily.workspace setting resolved to a registered root at boot, null
+  // when unset or stale, mirrored from Bun with the workspace registry. The
+  // Edit and New Daily Template faces read it so they act in the workspace ⌘J
+  // acts in, not merely the selected one. A dep rather than ctx.state because
+  // it is frozen at boot like every setting, not live view state.
   dailyRoot(): string | null;
   // Open a note that may live outside the selected workspace, by its root and
-  // meta — glued to the external-open subscriber, whose select-then-open is
-  // the one definition of that move.
+  // meta. Goes through the external-open subscriber, which holds the only
+  // select-workspace-then-open path.
   openNoteIn(root: string, note: NoteMeta): void;
-  // The head of a note's live document — enough of it to parse frontmatter —
-  // or null when no editor holds that doc. A head, not the whole text: `when`
-  // runs on every menu/palette render, and a note carrying a pasted blob
-  // should not be serialized just to ask whether it names a profile.
+  // The head of a note's live document, enough of it to parse frontmatter, or
+  // null when no editor holds that doc. Not the whole text: `when` runs on
+  // every menu and palette render. A note carrying a pasted blob would
+  // otherwise be serialized in full just to ask whether it names a profile.
   noteHead(docId: string): string | null;
-  // Whether that editor holds a non-empty selection — what greys Cut and Copy
-  // in the editor's context menu. A range comparison rather than a doc read,
-  // so unlike noteHead above this costs nothing to ask on every menu render.
+  // Whether that editor holds a non-empty selection, which is what greys Cut
+  // and Copy in the editor's context menu. It checks the selection ranges
+  // rather than reading the doc, so unlike noteHead it is cheap per render.
   hasSelection(docId: string): boolean;
-  // The vault (note locking, locking.md). State is the view's mirrored
-  // copy (vault/channel.ts) — cheap enough for `when` to read per render.
-  // The two note ops resolve to an error message to surface, or null (the
-  // createWorkspace contract); both refresh the note lists themselves.
+  // The vault (note locking, locking.md). vaultState reads the view's
+  // mirrored copy (vault/channel.ts), cheap enough for `when` to ask per
+  // render. The two note ops resolve to an error message to surface, or null,
+  // as createWorkspace does. Both refresh the note lists themselves.
   vaultState(): VaultState;
   lockVaultNow(): void;
-  // Lock resolves to what to SURFACE: an error, or a notice (the sweep
-  // sealed images other notes also show — proceed-and-say, locking.md
-  // §5); both null on a quiet success.
+  // Lock resolves to what to surface: an error, or a notice that the sweep
+  // sealed images other notes also show (locking.md §5). Both are null on a
+  // quiet success.
   lockNoteNow(folder: string, path: string): Promise<{ error: string | null; notice: string | null }>;
   removeLockNow(folder: string, path: string): Promise<string | null>;
   editor: {
@@ -296,39 +295,39 @@ export interface RegistryDeps {
     bold(docId: string): void;
     italic(docId: string): void;
     insertLink(docId: string): void;
-    // CodeMirror's own indentMore/indentLess, and the `[[` picker opened
-    // rather than typed. Named here because the keyboard that would otherwise
-    // reach them does not exist on a phone (ios.md §7).
+    // CodeMirror's own indentMore and indentLess, plus the `[[` picker opened
+    // rather than typed. Named here because a phone has no keyboard that
+    // reaches them (ios.md §7).
     indent(docId: string): void;
     outdent(docId: string): void;
     wikiLink(docId: string): void;
-    // A fenced block where the caret is, or the selection wrapped in one
-    // (editor/fences.ts): the same block typing ``` opens, for the keyboard
-    // that has no backtick on it.
+    // Insert a fenced block at the caret, or wrap the selection in one
+    // (editor/fences.ts). The same block typing ``` opens, for a keyboard
+    // with no backtick on it.
     codeBlock(docId: string): void;
-    // Ask the device for a picture and embed it. Async all the way down (a
-    // picker waits for a person), and the command does not wait on it: what
-    // comes back is an edit, not an answer.
+    // Ask the device for a picture and embed it. Async all the way down,
+    // since the picker waits for a person. The command does not wait on it:
+    // the result arrives as an edit, not as a return value.
     insertImage(docId: string): void;
-    // Add or remove the note's `template: true` frontmatter line in its LIVE
-    // editor (editor/templateFlag.ts): an ordinary undoable edit, so autosave
+    // Add or remove the note's `template: true` frontmatter line in its live
+    // editor (editor/templateFlag.ts). An ordinary undoable edit, so autosave
     // and the watcher-driven list refresh carry the change everywhere else.
     toggleTemplate(docId: string): void;
     // Put the caret inside the note's frontmatter block, creating empty
-    // fences at the top when there is none (editor/frontmatterEdit.ts) —
-    // the same ordinary-undoable-edit stance as toggleTemplate.
+    // fences at the top when there is none (editor/frontmatterEdit.ts). An
+    // ordinary undoable edit, like toggleTemplate.
     editFrontmatter(docId: string): void;
     // The clipboard (editor/clipboard.ts), which goes through the Bun process
     // because views:// is not a secure context. The same four the chords run,
-    // so a menu item and a chord are one act with one undo entry. Cut and Copy
-    // do nothing with an empty selection; paste translates formatted HTML to
-    // Markdown, and pastePlain is that paste with the translation left out.
+    // so a menu item and a chord make one edit with one undo entry. Cut and
+    // Copy do nothing with an empty selection. paste translates formatted HTML
+    // to Markdown; pastePlain leaves the translation out.
     cut(docId: string): void;
     copy(docId: string): void;
     paste(docId: string): void;
     pastePlain(docId: string): void;
-    // CodeMirror's own selectAll — the ⌘A its defaultKeymap already binds,
-    // named here so the context menu has something to render.
+    // CodeMirror's own selectAll, the ⌘A its defaultKeymap already binds.
+    // Named here so the context menu has something to render.
     selectAll(docId: string): void;
   };
 }

@@ -1,11 +1,10 @@
 // The workspace icon picker: a grid popover anchored to the workspace's row in
-// the strip. Reached from the row's context menu, the `i` row verb, and the
-// palette (interactions.md §1) — which is why it anchors to the row rather
-// than to a click point: the palette has no click point, and the popover has to
-// appear next to the thing it is about either way.
-//
-// Choosing is the whole interaction, so a click commits and closes. There is no
-// Cancel: the choice is one dispatch and undone by picking again.
+// the strip. Opened from the row's context menu, the `i` row verb, or the
+// palette (interactions.md §1). It anchors to the row because a palette entry
+// has no click point, and because the popover should sit next to the workspace
+// it is about however it was opened. A click picks the icon and closes. There
+// is no Cancel: the pick is one `setWorkspaceIcon` dispatch, undone by picking
+// again.
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { pushLayer } from "@/commands/layers";
@@ -20,8 +19,9 @@ export function IconPicker({
   onPick,
   onClose,
 }: {
-  // The row the picker belongs to. Measured on open, so a scroll or a resize
-  // closes rather than leaving the popover pointing at nothing.
+  // The row the picker belongs to. Its position is measured once, when the
+  // picker opens, so a scroll or a resize closes the picker instead of leaving
+  // it misplaced.
   anchor: HTMLElement;
   current: string;
   onPick: (key: string) => void;
@@ -30,8 +30,9 @@ export function IconPicker({
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
 
-  // Place it before paint: measure the popover's own height so it can flip
-  // above a row near the bottom of the strip instead of hanging off-screen.
+  // Position the popover before paint. Its own height decides whether it opens
+  // below the row or flips above it, so a picker opened from a row near the
+  // bottom of the strip does not hang off the screen.
   useLayoutEffect(() => {
     const r = anchor.getBoundingClientRect();
     const h = ref.current?.offsetHeight ?? 0;
@@ -46,8 +47,9 @@ export function IconPicker({
     const onDown = (e: PointerEvent) => {
       if (!ref.current?.contains(e.target as Node | null)) onClose();
     };
-    // Escape goes through the shared layer stack like every other modal, so a
-    // picker opened from the palette closes strictly before it.
+    // Escape goes through the shared layer stack (interactions.md §6), not one
+    // of its own. The stack is LIFO, so the picker takes Escape ahead of any
+    // layer opened before it.
     const offLayer = pushLayer("menu", onClose);
     window.addEventListener("pointerdown", onDown, true);
     window.addEventListener("blur", onClose);
@@ -62,8 +64,9 @@ export function IconPicker({
     };
   }, [onClose]);
 
-  // Open on the current icon: the picker's job is usually to change a choice,
-  // so the keyboard should start where the choice is.
+  // The picker focuses the workspace's current icon, so the arrow keys below
+  // start from the existing choice. A `current` that names no icon in the
+  // catalog falls back to the first cell.
   useEffect(() => {
     const grid = ref.current;
     if (!grid) return;
@@ -72,8 +75,9 @@ export function IconPicker({
     (cells[Math.max(0, i)] ?? cells[0])?.focus();
   }, [current]);
 
-  // Arrow keys walk the grid. Tab order alone would make you cross 24 buttons
-  // to reach a neighbour one row down.
+  // Arrow keys walk the grid: left and right by one cell, up and down by a
+  // whole row. Tab order alone steps one cell at a time through all 24
+  // buttons.
   const onKeyDown = (e: React.KeyboardEvent) => {
     const delta =
       e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : e.key === "ArrowDown" ? COLS : e.key === "ArrowUp" ? -COLS : 0;
@@ -94,7 +98,9 @@ export function IconPicker({
         width: W,
         left: pos?.left ?? 0,
         top: pos?.top ?? 0,
-        // Hidden for the measuring pass only: one frame at (0,0) reads as a flash.
+        // Hidden for the measuring pass only. The layout effect above reads
+        // this element's height off the DOM to decide whether to flip above
+        // the row, so the popover has to render before pos exists.
         visibility: pos ? "visible" : "hidden",
       }}
       className="fixed z-50 grid grid-cols-6 gap-1 rounded-md border bg-card p-2 text-card-foreground shadow-md"
@@ -106,10 +112,11 @@ export function IconPicker({
           aria-label={label}
           aria-pressed={key === current}
           className={cn(
-            // A 6-wide grid of 28-point cells three points apart was the worst
-            // ratio of target to neighbour in the app, and every neighbour is
-            // another icon for the same workspace. At 44 the grid is 295 points
-            // wide, which still fits a phone.
+            // Cells grow to 44 points on touch (interactions.md §1a). At rest
+            // they are 28 points three points apart, one of the tight targets
+            // that section measured. Every neighbour sets a different icon on
+            // the same workspace. `W` above is a fixed 224 and does not grow
+            // on touch.
             "flex size-8 items-center justify-center rounded outline-none touch:size-[44px]",
             key === current
               ? "bg-accent text-foreground"

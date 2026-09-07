@@ -1,24 +1,19 @@
-// The two ways a row's context menu opens, and the click that must not fire
-// behind it.
-//
-// A right-click is a pointer gesture with no touch form (interactions.md §1a):
-// a phone has no second button, so the menu — R6's canonical home for every
-// row verb — would be unreachable there, and with it every verb that has no
-// other surface. A press HELD on the row opens the same menu at the same
-// place, so the two inputs meet at one implementation rather than at two
-// grammars.
-//
-// The decisions are pure and tested (which pointers get the gesture, when a
-// press has become a scroll); what is left is the timer and the DOM.
+// Opens a row's context menu from a right-click or a long press, at the same
+// point from one callback, and keeps a press that opened the menu from also
+// activating the row. A phone has no right button, so without the press the
+// menu would be out of reach, and with it every verb the menu is the only
+// home for (interactions.md §1a, R6). The pure predicates below (tested in
+// useRowMenu.test.ts) decide which pointers the press is for and when it has
+// become a scroll. What is left here is the timer and the DOM.
 import { useCallback, useEffect, useRef, type MouseEvent, type PointerEvent } from "react";
 
-// How long a finger stays down before the press is a menu rather than a tap.
-// The platform's own long press is ~500ms and muscle memory is calibrated to
-// it, so this is not a knob.
+// How long a finger stays down before the press counts as a menu rather than
+// a tap. The platform's own long press is ~500ms and muscle memory is
+// calibrated to it, so this is not a setting.
 export const PRESS_MS = 500;
-// How far it may drift on the way and still be a press. A finger is never
-// still; a list is always scrollable. Below this the press survives, above it
-// the gesture was a scroll and belonged to the list.
+// How far the pointer may drift in pixels and still count as a press. A
+// finger is never quite still, and a list is always scrollable. Past this the
+// gesture was a scroll, and it belongs to the list.
 export const PRESS_SLOP = 10;
 
 export interface PressPoint {
@@ -26,23 +21,26 @@ export interface PressPoint {
   y: number;
 }
 
-// Which pointers get the long press: the ones with no other way to a menu. A
-// mouse is excluded deliberately — it has the right button already, and a held
-// left button is how the workspace strip and the tab strip reorder (R4).
+// Which pointers get the long press: the ones with no other way to a menu.
+// A mouse is excluded. It has the right button already, and a held left
+// button is how the workspace strip and the tab strip reorder
+// (interactions.md R4).
 export function pressOpensMenu(pointerType: string): boolean {
   return pointerType === "touch" || pointerType === "pen";
 }
 
-// Has the pointer left the press? Per axis rather than by distance: the
-// gesture this loses to is a vertical scroll, and the cheap comparison says
-// the same thing about it.
+// Whether the pointer has drifted too far for this to still be a press.
+// Compares each axis against the slop rather than computing a distance. The
+// gesture a press loses to is a vertical scroll, and the per-axis test is
+// enough to catch it.
 export function pressMoved(from: PressPoint, to: PressPoint): boolean {
   return Math.abs(to.x - from.x) > PRESS_SLOP || Math.abs(to.y - from.y) > PRESS_SLOP;
 }
 
-// A control inside a row owns its own press: the workspace row's close ✕, the
-// trash row's restore button, the inline rename field. Their gesture is a tap
-// on themselves, not a press on the row underneath.
+// Whether the pointer landed on a control inside the row: the workspace row's
+// close ✕, the trash row's restore button, the inline rename field. A press on
+// one of those is a tap on the control rather than on the row underneath, so
+// it opens no menu.
 function onOwnControl(el: EventTarget | null): boolean {
   return el instanceof Element && el.closest("button, input, textarea") !== null;
 }
@@ -56,13 +54,14 @@ export interface RowMenuProps {
   onClick: (e: MouseEvent) => void;
 }
 
-// Spread onto the row element, after the useListNav row props (nothing
-// overlaps). `openMenu` is the row's own "open my menu here" — the same
-// callback the right-click already had. `activate` is what the row does on a
-// plain click (open the note, switch to the workspace), passed through here so
-// a press that already opened a menu does not also run it: on touch the click
-// arrives after the press, and a long press that opened a note as well as its
-// menu would act on the very row the user was still deciding about.
+// Returns the props to spread onto the row element, after the useListNav row
+// props (nothing overlaps). `openMenu` opens this row's menu at a point, the
+// same callback the right-click uses. `activate` is the row's plain click
+// action (open the note, switch to the workspace). The hook runs it from
+// onClick below, and skips it after a press opened the menu: WebKit sends a
+// click after every touch, and a long press that opened a note as well as its
+// menu would act on the row the user was still deciding about
+// (interactions.md §1a).
 export function useRowMenu(
   openMenu: (x: number, y: number) => void,
   activate?: (e: MouseEvent) => void,
@@ -70,8 +69,8 @@ export function useRowMenu(
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Where the press started, while it is still a press; null once it is not.
   const from = useRef<PressPoint | null>(null);
-  // Whether the press that is ending opened the menu, read by the click that
-  // WebKit sends afterwards.
+  // Whether the press opened a menu. The click handler reads it and skips
+  // `activate` for the click WebKit sends after the press.
   const fired = useRef(false);
 
   const cancel = useCallback(() => {
@@ -80,9 +79,9 @@ export function useRowMenu(
     from.current = null;
   }, []);
 
-  // A row can unmount under a held finger (its note deleted from elsewhere,
-  // its workspace switched away), and a timer that outlives the row would open
-  // a menu for a row that is gone.
+  // Clears the timer when the row unmounts under a held finger (its note
+  // deleted from elsewhere, its workspace switched away). A timer that
+  // outlived the row would open a menu for a row that is gone.
   useEffect(() => cancel, [cancel]);
 
   return {
@@ -101,10 +100,10 @@ export function useRowMenu(
       timer.current = setTimeout(() => {
         cancel();
         fired.current = true;
-        // Focus the row first. On a phone there is no hover to have said which
-        // row this is, so the focus ring is the whole answer to "what is the
-        // menu about" — and it is what the row verbs address if a keyboard
-        // ever does turn up (interactions.md §1a, R5).
+        // Focus the row before opening the menu. A phone has no hover, so the
+        // focus ring is the only sign of which row the menu is about. The
+        // focused row is also what the row verbs act on (interactions.md §1a,
+        // R5).
         row.focus();
         openMenu(at.x, at.y);
       }, PRESS_MS);

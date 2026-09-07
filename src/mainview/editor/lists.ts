@@ -1,26 +1,25 @@
 // Shift+Enter inside a list item continues it on a line indented under the
-// item's TEXT, not under its marker.
+// item's text, not under its marker (interactions.md §3).
 //
-// Upstream gives Shift+Enter to CodeMirror's insertNewlineAndIndent (the
+// Upstream binds Shift+Enter to CodeMirror's insertNewlineAndIndent (the
 // `shift` half of defaultKeymap's Enter binding), which reindents to the
-// line's own indentation — for `- foo` that is column 0, so the new line lands
-// under the dash and markdown no longer reads it as part of the item. The
-// damage shows up on the NEXT Enter: the parser has an ordinary paragraph
-// where the item's second line should be, so the list stops continuing, and
-// for ordered items insertNewlineContinueMarkup deletes the orphaned line
-// outright. Indenting to the item's content column fixes both at the source —
-// the continuation stays inside the ListItem, so every later Enter sees the
-// list it is standing in.
+// line's own indentation. For `- foo` that is column 0, so the new line lands
+// under the dash and markdown stops reading it as part of the item. The damage
+// shows on the next Enter. The parser has an ordinary paragraph where the
+// item's second line should be, so the list stops continuing. For ordered
+// items insertNewlineContinueMarkup deletes the orphaned line. Indenting to
+// the item's content column fixes both failures, because the continuation
+// stays inside the ListItem.
 //
-// Two paired Enter bindings follow, both about lines the item has already
-// continued onto — Enter on the item's FIRST line is untouched, since that is
-// where "next item" lives and upstream inserts the marker for it.
-// exitListContinuation is the way out: an indent-only line is what a
-// Shift+Enter you changed your mind about leaves behind, and upstream's Enter
-// pushes the whitespace DOWN (newline first, indent still trailing under the
-// caret) rather than clearing it, so this clears the line and leaves the caret
-// on it — the one-press exit quotes.ts gives blockquotes. continueListBody is
-// the way on, and exists for task items specifically: see its own comment.
+// Two Enter bindings follow, both for lines the item has already continued
+// onto. Enter on the item's first line is untouched: that is where "next item"
+// lives, and upstream inserts the marker for it. exitListContinuation takes
+// the indent-only line an abandoned Shift+Enter leaves behind, clearing the
+// line and leaving the caret on it, the one-press exit quotes.ts gives
+// blockquotes. Upstream's Enter would push that whitespace down instead
+// (newline first, indent still trailing under the caret). continueListBody
+// takes the other continuation lines, and exists for task items specifically
+// (see its own comment).
 import type { SyntaxNode } from "@lezer/common";
 import {
   EditorSelection,
@@ -33,25 +32,23 @@ import { ensureSyntaxTree } from "@codemirror/language";
 import { keymap } from "@codemirror/view";
 import { insertNewlineContinueMarkupCommand } from "@codemirror/lang-markdown";
 
-// A list item's opening run: indent (group 1, which may carry blockquote
-// markers — a list inside a quote is still a list), the bullet or ordered
-// marker, and the space after it. CommonMark's ordered markers cap at 9
-// digits; a marker with no space after it is not a marker.
+// A list item's opening run: the indent (group 1), the bullet or ordered
+// marker, and the space after it. The indent may carry blockquote markers,
+// since a list inside a quote is still a list. CommonMark caps ordered markers
+// at 9 digits; a marker with no space after it is not a marker.
 //
-// A task item's `[ ]` is deliberately NOT part of the run. It is the item's
-// content, not its marker — the content column of `- [ ] foo` is still 2 —
-// and under live preview the box draws as one compact glyph, so indenting
-// past the four raw characters would step the continuation visibly further
-// right than the text it belongs to.
+// A task item's `[ ]` is not part of the run. It is content, so the content
+// column of `- [ ] foo` is still 2. Live preview draws the box as one compact
+// glyph (livePreview.ts). Indenting past the four raw characters would put the
+// continuation visibly right of the text it belongs to.
 const MARKER = /^([ \t]*(?:>[ \t]*)*)(?:[-*+]|\d{1,9}[.)])[ \t]+/;
 
 /**
- * The whitespace that puts a new line under `lineText`'s item content — the
- * marker run turned into blanks — or null when the line opens no list item.
- * The prefix is copied verbatim so a tab-indented list keeps its own
- * indentation unit and a quoted list keeps its `>`; only the list marker
- * itself becomes blanks. Pure, so the column arithmetic is testable line by
- * line.
+ * The whitespace that puts a new line under `lineText`'s item content: the
+ * marker run turned into blanks. Null when the line opens no list item. The
+ * prefix is copied verbatim, so a tab-indented list keeps its indentation
+ * unit and a quoted list keeps its `>`. Pure, so the column arithmetic is
+ * testable line by line.
  */
 export function listContentIndent(lineText: string): string | null {
   const m = MARKER.exec(lineText);
@@ -59,17 +56,18 @@ export function listContentIndent(lineText: string): string | null {
 }
 
 /**
- * Whether a line is indentation and nothing else — the abandoned continuation
- * Enter should clear. An empty line is not one: it is already the exit.
+ * Whether a line is indentation and nothing else: the abandoned continuation
+ * Enter should clear. An empty line does not count, since it is already the
+ * exit.
  */
 export function isIndentOnly(lineText: string): boolean {
   return /^[ \t]+$/.test(lineText.replace(/\r$/, ""));
 }
 
-// A block INSIDE a list item that owns its own line grammar: its Enter and its
-// indentation are that block's business, not the item's. The walk below stops
+// Blocks inside a list item that own their own line grammar: their Enter and
+// their indentation belong to the block, not to the item. The walk below stops
 // on these, so a fenced block's `- ` stays code and a quote nested in an item
-// keeps getting its `> ` from upstream. A NESTED list needs no entry: walking
+// keeps getting its `> ` from upstream. A nested list needs no entry: walking
 // out from the caret reaches the inner ListItem before its list.
 const NOT_ITEM_TEXT = new Set(["FencedCode", "CodeBlock", "Blockquote", "Table", "HTMLBlock"]);
 
@@ -87,9 +85,9 @@ function listItemAt(state: EditorState, pos: number): SyntaxNode | null {
 }
 
 // The indent that continues the item `pos` sits in, or null when it sits in no
-// item. Read from the ITEM's first line, since the caret may already be on a
-// continuation; `firstLine` reports whether it is, which is the whole
-// difference between the two bindings below.
+// item. The indent comes from the item's first line, since the caret may
+// already be on a continuation. `firstLine` is true when the caret is on that
+// opening line, the only difference between the two bindings below.
 function continuation(
   state: EditorState,
   pos: number,
@@ -146,12 +144,13 @@ export const continueListItem: StateCommand = ({ state, dispatch }) => {
 
 /**
  * The Enter binding for a line the item already continues onto: another line
- * at the same indent. Upstream mostly agrees — but for a TASK item it measures
- * emptiness from past the `[ ]`, so a continuation indented to the bullet
- * (which is where it belongs: the checkbox is content, not marker) reads as an
- * empty item and Enter DELETES the item's text. Owning the case keeps the two
- * keys telling the same story. The item's FIRST line stays upstream's: that is
- * where Enter means "next item", and inserting the marker is its job.
+ * at the same indent. It runs on the continuation line of any list item, so
+ * Enter and Shift+Enter indent a continuation the same way. Upstream agrees,
+ * except on a task item, where it measures emptiness from past the `[ ]`. A
+ * continuation indented to the bullet then reads as an empty item, and Enter
+ * deletes the item's text. The checkbox is content, not marker, so the bullet
+ * is where that continuation belongs. The item's first line stays upstream's,
+ * where Enter means "next item" and inserting the marker is its job.
  */
 export const continueListBody: StateCommand = ({ state, dispatch }) => {
   const indents = new Map<number, string>();
@@ -167,7 +166,7 @@ export const continueListBody: StateCommand = ({ state, dispatch }) => {
 /**
  * The Enter binding: on an indent-only line directly under a list item, clear
  * the line rather than pushing its whitespace ahead of the caret. Everything
- * else falls through — including a marker-only line, which is upstream's own
+ * else falls through, including a marker-only line. That is upstream's own
  * empty-item case and stays upstream's.
  */
 export const exitListContinuation: StateCommand = ({ state, dispatch }) => {
@@ -177,7 +176,7 @@ export const exitListContinuation: StateCommand = ({ state, dispatch }) => {
     const line = state.doc.lineAt(range.head);
     if (line.number === 1 || !isIndentOnly(line.text)) return false;
     // The line itself is blank, so the parser parents it to the Document, not
-    // to the item it trails; the line ABOVE is what says a list is open here.
+    // to the item it trails. The line above is what says a list is open here.
     if (!listItemAt(state, state.doc.line(line.number - 1).to)) return false;
     clear.push({ from: line.from, to: line.to });
   }
@@ -199,39 +198,38 @@ export function listContinuation() {
 }
 
 // Upstream's Enter with its first loose-list branch switched off by config:
-// Enter on an empty `- ` now always LEAVES the list. Without this it does,
-// except in one shape — a TIGHT list of exactly two items whose second is
-// that empty marker, where it pushes the marker down a line to make the list
-// loose instead. That shape is what the end of a note gives you (one real
-// item plus the marker you just opened), which is why the stray blank line
-// appeared only there: one more item above and the exit branch wins already.
+// Enter on an empty `- ` now always leaves the list. Without the config it
+// leaves in every shape but one: a tight list of exactly two items whose
+// second is that empty marker, where it pushes the marker down a line to make
+// the list loose instead. A list typed at the end of a note lands in that
+// shape (one real item plus the marker just opened), so the stray blank line
+// appeared only there. With one more item above, the exit branch already wins.
 const markupCommand = insertNewlineContinueMarkupCommand({ nonTightLists: false });
 
 /**
  * Upstream's Enter again, minus the blank line it prepends when the list is
- * ALREADY loose. That is its second looseness rule and has no config: given
- * `- a` / `` / `- b`, Enter on `b` inserts `\n\n- `, propagating the blank
- * spacing to every item you go on to type. One blank line is how you leave a
- * list and start a new one, so in practice every list written under an
- * earlier one inherits double spacing forever.
+ * already loose. That is its second looseness rule and has no config: given
+ * `- a` / `` / `- b`, Enter on `b` inserts `\n\n- `, and every item typed
+ * after that inherits the blank spacing. One blank line is also how a list
+ * ends and a new one starts, so every list written under an earlier one is
+ * double spaced from then on.
  *
- * Suppressing it costs nothing that renders: looseness is a property of the
- * WHOLE list, so a tight item added to a loose list leaves the HTML exactly
- * as it was, and Ledge's live preview draws neither differently. What it buys
- * is Enter meaning one thing — the next item, on the next line.
+ * Suppressing the blank changes nothing that renders. Looseness is a property
+ * of the whole list, so a tight item added to a loose list leaves the HTML as
+ * it was, and Ledge's live preview draws a tight item and a loose one alike
+ * (interactions.md §3).
  *
- * Done by trimming upstream's own output rather than reimplementing it: the
+ * This command trims upstream's own output instead of reimplementing it. The
  * insertion is always `\n` + the blank line + `\n` + the marker, so keeping it
- * from its LAST line break drops the blank and nothing else. Marker choice,
- * nesting indent, and ordered-list renumbering stay upstream's, which is the
- * point — those are the parts worth not owning.
+ * from its last line break drops the blank and nothing else. Marker choice,
+ * nesting indent, and ordered-list renumbering stay upstream's.
  */
 export const continueMarkup: StateCommand = ({ state, dispatch }) => {
   let out: Transaction | undefined;
   if (!markupCommand({ state, dispatch: (tr) => (out = tr) })) return false;
   const tr = out!;
-  // One caret only: with several, "the" insertion is not a single thing to
-  // trim, and upstream's result — blank lines and all — is still correct.
+  // One caret only: with several there is no single insertion to trim, and
+  // upstream's result, blank lines included, is still correct.
   if (state.selection.ranges.length !== 1) {
     dispatch(tr);
     return true;
@@ -260,8 +258,8 @@ export const continueMarkup: StateCommand = ({ state, dispatch }) => {
   dispatch(
     state.update({
       changes,
-      // mapPos with assoc -1 lands at the START of the insertion (past any
-      // renumbering above it); the caret goes at its end, on the new marker.
+      // mapPos with assoc -1 lands at the start of the insertion, past any
+      // renumbering above it. The caret goes at its end, on the new marker.
       selection: EditorSelection.cursor(changes.mapPos(from, -1) + length),
       scrollIntoView: true,
       userEvent: "input",
@@ -271,10 +269,10 @@ export const continueMarkup: StateCommand = ({ state, dispatch }) => {
 };
 
 /**
- * Ships as its own extension because of where it has to sit: ahead of
- * markdown()'s keymap (that is the binding it displaces) but BEHIND
- * fenceClose(), which owns Enter at the end of a fence opener — including one
- * inside a list item, which this command would happily answer first.
+ * Ships as its own extension for where it has to sit: ahead of markdown()'s
+ * keymap, whose Enter binding it displaces, and behind fenceClose(), which
+ * owns Enter at the end of a fence opener. That includes a fence opener
+ * inside a list item, which this command would otherwise answer first.
  */
 export function tightLists() {
   return Prec.high(keymap.of([{ key: "Enter", run: continueMarkup }]));

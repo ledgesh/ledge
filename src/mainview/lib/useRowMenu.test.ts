@@ -14,8 +14,8 @@ describe("which pointers open a menu by being held", () => {
     expect(pressOpensMenu("mouse")).toBe(false);
   });
 
-  // WebKit reports "" for a synthesized pointer with no type. Treating that as
-  // touch would make every held mouse button on the desktop a menu.
+  // WebKit reports "" for a synthesized pointer with no type. On the desktop,
+  // treating that as touch would let a held mouse button open the menu.
   test("an untyped pointer does not", () => {
     expect(pressOpensMenu("")).toBe(false);
   });

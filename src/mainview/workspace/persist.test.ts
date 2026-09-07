@@ -1,10 +1,9 @@
-// Session persistence: the serialize/restore round trip and, mostly, the
-// self-healing — .layout.json is machine-written state (architecture.md §6),
-// so every malformed or stale piece must cost exactly itself and total
-// failure must fall back to a fresh start, never a throw. Since the
-// per-workspace split, restore also enforces the folder story: a workspace
-// needs a registered folder, tabs stay inside their own folder's notes, and
-// an unmounted folder is held dormant rather than pruned.
+// Session persistence: serializeLayout and restoreLayout, mostly the
+// self-healing. `.layout.json` is machine-written state (architecture.md §6):
+// a bad piece costs only itself, and a total failure falls back to a fresh
+// start instead of throwing. Since the per-workspace split, restore also
+// checks folders: a workspace needs a registered one, each tab must be in its
+// own folder's boot noteList, and an unmounted folder goes dormant, not pruned.
 import { afterEach, describe, expect, test } from "bun:test";
 import type { NoteMeta, WorkspaceRootInfo } from "../../shared/rpc-schema";
 import { initialState, reducer, type AppState } from "./store";
@@ -27,9 +26,9 @@ const NOTES = [
 
 // Notes in folders, so there is a tree for the open-folder tests to be about.
 // folderList derives `projects`, `projects/api` and `admin` from these, and
-// restore prunes the saved open set against exactly that list. Both workspaces
-// get a `projects`, because a folder name two workspaces share is the case the
-// file has to keep apart.
+// restore prunes the saved open set against that list. Both workspaces get a
+// `projects`: the file has to keep apart two workspaces with a folder of the
+// same name.
 const filed = (path: string, title: string, folder: string): NoteMeta => ({ ...note(path, title), folder });
 const FILED = [
   filed("/r/projects/api/spec.md", "Spec", "projects/api"),
@@ -46,14 +45,14 @@ const ROOTS = [root(FOLDER), root(FOLDER2)];
 const NOTES_BY = { [FOLDER]: NOTES, [FOLDER2]: [] as NoteMeta[] };
 const FILED_BY = { [FOLDER]: [...NOTES, ...FILED], [FOLDER2]: FILED2 };
 
-// Serialize now READS the live open set (notes/expansion.ts) and restore SEEDS
-// it, so a test that opened a folder would otherwise hand it to the next one.
+// serializeLayout reads the live open set (notes/expansion.ts) and restore
+// seeds it, so a test that opened a folder would leak it into the next one.
 afterEach(resetExpansion);
 
 // A state exercising everything the layout records: two workspaces (each on
 // its own folder), a split, tab order, active tabs, focus, selection. Built
-// through the reducer, per testing.md §4 — hand-assembled AppState literals
-// rot as the shape grows.
+// through the reducer, per testing.md §4, because hand-assembled AppState
+// literals rot as the shape grows.
 function richState(): AppState {
   let s = initialState(FOLDER, NOTES);
   s = reducer(s, { type: "renameWorkspace", id: s.workspaces[0].id, name: "Writing" });
@@ -101,9 +100,10 @@ describe("round trip", () => {
   });
 
   test("the open folders come back, and each workspace keeps its own", () => {
-    // Both workspaces have a `projects`. Only the first one's is open, and the
-    // file records them per workspace for the same reason the live module keys
-    // by root (notes/expansion.ts).
+    // Both workspaces have a `projects`. Only the first one's is open. The
+    // file records open folders per workspace for the same reason the live
+    // module keys them by root: two workspaces cannot share an answer for a
+    // folder name they have in common (notes/expansion.ts).
     const before = richState();
     expandFolder(FOLDER, "projects/api");
     const text = serializeLayout(before);
@@ -115,9 +115,9 @@ describe("round trip", () => {
   });
 
   test("the saved order is the folders themselves, not the order they were opened in", () => {
-    // Which matters only because the save is deduped on its own text
-    // (scheduleLayoutSave): open b then a, and an insertion-ordered list would
-    // write a layout nobody changed.
+    // The sort matters only because the save is deduped on its own text
+    // (scheduleLayoutSave): open b then a, and an insertion-ordered list
+    // would write a layout nobody changed.
     const s1 = richState();
     expandFolder(FOLDER, "admin");
     expandFolder(FOLDER, "projects");
@@ -175,7 +175,8 @@ describe("folders", () => {
 
   test("a tab pointing into ANOTHER workspace's folder is pruned: tabs live in their own folder", () => {
     // A hand-edited layout must not smuggle one folder's file into another
-    // workspace: each workspace's tabs validate against ITS folder's noteList.
+    // workspace: each workspace's tabs validate against its own folder's boot
+    // noteList.
     const text = JSON.stringify({
       version: 2,
       selectedIndex: 0,
@@ -197,9 +198,9 @@ describe("folders", () => {
     const before = richState();
     const rootsWithVolumeOut = [root(FOLDER), root(FOLDER2, false)];
     const after = restoreLayout(serializeLayout(before), rootsWithVolumeOut, NOTES_BY, {})!;
-    // Not shown this session...
+    // Not shown this session.
     expect(after.workspaces.map((w) => w.name)).toEqual(["Writing"]);
-    // ...but the next save still carries it, verbatim enough to restore later.
+    // The next save still records it, with enough to restore it later.
     const saved = JSON.parse(serializeLayout(after)) as { workspaces: Array<{ name: string; folder: string }> };
     expect(saved.workspaces.map((w) => w.name)).toEqual(["Writing", "Workspace 2"]);
     expect(saved.workspaces[1].folder).toBe(FOLDER2);
@@ -214,9 +215,9 @@ describe("folders", () => {
     const text = serializeLayout(before);
     resetExpansion();
 
-    // FOLDER2's volume is out, so its workspace is held dormant — and there is
-    // no noteList for it this session, which is exactly why its open folders
-    // are carried verbatim rather than pruned against one.
+    // FOLDER2's volume is out, so its workspace is held dormant. This session
+    // has no noteList for it, so its open folders are carried verbatim rather
+    // than pruned against one.
     const out = [root(FOLDER), root(FOLDER2, false)];
     const after = restoreLayout(text, out, FILED_BY, {})!;
     expect([...expandedIn(FOLDER2)]).toEqual([]); // not this session: no workspace to open
@@ -234,21 +235,22 @@ describe("folders", () => {
   test("a layout whose only workspace is dormant falls back fresh but keeps the record on save", () => {
     const s = initialState(FOLDER, NOTES);
     const rootsOut = [root(FOLDER, false), root(FOLDER2)];
-    // Serialized ONCE, before any restore: serializeLayout appends whatever is
-    // dormant from the latest restore, which is the behavior under test, not
-    // an input this test wants baked into its fixture.
+    // Serialized once, before any restore: serializeLayout appends whatever
+    // the latest restore left dormant. That is the behavior under test, not
+    // an input this fixture should already carry.
     const text = serializeLayout(s);
     expect(restoreLayout(text, rootsOut, NOTES_BY, {})).toBeNull();
     const fresh = restoredState(text, rootsOut, NOTES_BY, {});
-    expect(fresh.workspaces[0].folder).toBe(FOLDER2); // first AVAILABLE folder
+    expect(fresh.workspaces[0].folder).toBe(FOLDER2); // the first available folder
     const saved = JSON.parse(serializeLayout(fresh)) as { workspaces: Array<{ folder: string }> };
     expect(saved.workspaces.map((w) => w.folder)).toEqual([FOLDER2, FOLDER]);
   });
 
   test("the fresh-start fallback never lands on the docs root", () => {
-    // Bun lists the built-in docs root FIRST (bun/workspaces.ts registers it
-    // at every load), and it is available — but a first launch must boot into
-    // a folder a first note can save to, not the read-only documentation.
+    // Bun lists the built-in docs root first (bun/workspaces.ts registers it
+    // at every load) and it is available. A first launch still has to boot
+    // into a folder a first note can save to, not the read-only
+    // documentation.
     const docs: WorkspaceRootInfo = { root: "/docs", kind: "docs", available: true };
     const fresh = restoredState(null, [docs, root(FOLDER)], { [FOLDER]: NOTES, "/docs": [] }, {});
     expect(fresh.workspaces[0].folder).toBe(FOLDER);
@@ -257,7 +259,8 @@ describe("folders", () => {
   test("a docs workspace recorded in the layout restores like any other", () => {
     // Open docs tabs survive a relaunch: the folder is registered and its
     // boot noteList vouches for the page paths, so the ordinary restore path
-    // carries it — hiding it from the strip is presentation, not persistence.
+    // carries them. The strip hides the docs workspace (Sidebar.tsx), which
+    // is presentation, not persistence.
     const page = note("/docs/getting-started.md", "Getting Started");
     let s = initialState(FOLDER, NOTES);
     s = reducer(s, { type: "addWorkspace", name: "Documentation", folder: "/docs", note: page });
@@ -269,8 +272,10 @@ describe("folders", () => {
   });
 
   test("an empty pane in the docs workspace restores empty, not reseeded", () => {
-    // Reseeding it would put back exactly what splitPane refuses to create
-    // there: a read-only "Untitled" that can never be typed in or saved.
+    // Reseeding it would put back what the docs workspace refuses to create:
+    // a read-only "Untitled" that can never be typed in or saved. The split
+    // commands pass `empty` there (commands/registry.ts), and splitPane makes
+    // an empty leaf for it (store.tsx).
     const page = note("/docs/getting-started.md", "Getting Started");
     let s = initialState(FOLDER, NOTES);
     s = reducer(s, { type: "addWorkspace", name: "Documentation", folder: "/docs", note: page });
@@ -285,17 +290,17 @@ describe("folders", () => {
   });
 
   test("a docs workspace with no surviving page is dropped, even when it was selected", () => {
-    // The real-user bug behind this rule: quit inside the docs workspace with
-    // its pages closed (or with paths a corpus upgrade retired), and restore
-    // would boot into a blank read-only workspace with no strip row saying
-    // where you are — and the help button, "selecting" the already-selected
-    // docs, would look dead. Dropping it restores somewhere real; the help
-    // button recreates it on demand, landing on a page.
+    // From a real bug: quitting inside the docs workspace with its pages
+    // closed (or with paths a corpus upgrade retired) restored a blank
+    // read-only workspace, and the strip has no row for it. The help button
+    // then selected the already-selected docs, so it looked dead. Dropping
+    // the workspace restores elsewhere, and the help button builds it again
+    // on a page (actions.ts openDocs).
     const stale = note("/docs/getting-started.md", "Getting Started");
     const current = note("/docs/01-getting-started.md", "Getting Started");
     let s = initialState(FOLDER, NOTES);
     s = reducer(s, { type: "addWorkspace", name: "Documentation", folder: "/docs", note: stale });
-    // Selected at quit time: the docs workspace was added last, so it is.
+    // The docs workspace was added last, so it was selected at quit time.
     const docs: WorkspaceRootInfo = { root: "/docs", kind: "docs", available: true };
     const after = restoredState(serializeLayout(s), [...ROOTS, docs], { ...NOTES_BY, "/docs": [current] }, {});
     expect(after.workspaces.some((w) => w.folder === "/docs")).toBe(false);
@@ -329,8 +334,8 @@ describe("pruning", () => {
 
     restoreLayout(text, ROOTS, FILED_BY, {});
     // `gone` holds no note in the boot list, so the browser draws no row for
-    // it and the entry could never match one. Dropping it is what keeps a
-    // folder deleted from a shell from riding the file forever.
+    // it and the entry can never match one. Without the drop, a folder
+    // deleted in a shell would sit in the file forever.
     expect([...expandedIn(FOLDER)].sort()).toEqual(["projects", "projects/api"]);
   });
 
@@ -375,8 +380,8 @@ describe("self-healing", () => {
   test("no saved layout, unparseable JSON, a non-object, and an unknown version each fall back to a fresh start", () => {
     for (const text of [null, "{not json", '"a string"', JSON.stringify({ version: 3, workspaces: [] })]) {
       expect(restoreLayout(text, ROOTS, NOTES_BY, {})).toBeNull();
-      // ...and restoredState turns that into initialState's single-note boot
-      // on the first available folder.
+      // restoredState turns that into initialState's single-note boot on the
+      // first available folder.
       const s = restoredState(text, ROOTS, NOTES_BY, {});
       expect(s.workspaces.length).toBe(1);
       expect(s.workspaces[0].folder).toBe(FOLDER);
@@ -401,9 +406,10 @@ describe("self-healing", () => {
   test("a malformed open-folder list, and a file written before there was one, both restore closed", () => {
     const leaf = { kind: "leaf", tabs: ["/r/alpha.md"], activeIndex: 0 };
     const ws = (folder: string, expanded: unknown) => ({ name: "W", symbol: DEFAULT_ICON, folder, expanded, root: leaf });
-    // `expanded: "projects"` is a string where a list belongs, and one of the
-    // entries in the next workspace is a number. Each costs itself; neither
-    // costs the workspace, which restores with its tabs and its folders shut.
+    // `expanded: "projects"` is a string where a list belongs, and one entry
+    // in the next workspace is a number. Each bad value costs only the open
+    // folders, not the workspace. Both workspaces restore: the first with
+    // every folder shut, the second with its one good entry open.
     const text = JSON.stringify({
       version: 2,
       selectedIndex: 0,
@@ -414,8 +420,9 @@ describe("self-healing", () => {
     expect([...expandedIn(FOLDER)]).toEqual([]);
     expect([...expandedIn(FOLDER2)]).toEqual(["projects"]);
 
-    // No `expanded` key at all is the file an older build wrote: still a valid
-    // version 2, and all it can mean is what that build did — nothing open.
+    // A file with no `expanded` key at all is what an older build wrote. It
+    // is still a valid version 2, and it restores with nothing open, which is
+    // what that build did.
     resetExpansion();
     const old2 = JSON.stringify({
       version: 2,

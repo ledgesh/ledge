@@ -1,16 +1,19 @@
 // The profile editor: a modal of KEY=value rows over one profile's env file.
 //
-// This dialog exists because macOS binds no application to ".env": handing
-// the file to the OS editor dead-ends with LSApplicationNotFound, so "the
-// file is the UI" needed an in-app editor — the move settings.jsonc later
-// adopted too (components/SettingsEditor.tsx). The file on
-// disk stays a plain dotenv — greppable, hand-editable — and saves go through
-// serializeDotenv, which preserves comments and untouched lines byte-for-byte
-// (shared/dotenv.ts), so hand edits and dialog edits coexist.
+// The dialog is in-app because macOS binds no application to ".env": handing
+// the file to the OS editor dead-ends with LSApplicationNotFound
+// (architecture.md §6a). Settings later adopted the same shape by choice
+// (§6; components/SettingsEditor.tsx).
 //
-// Values are masked by default: profiles hold exactly the secrets the
-// frontmatter design keeps OFF the screen, so the editor must not become the
-// place they end up visible anyway. One toggle reveals them deliberately.
+// The file on disk stays a plain dotenv, greppable and editable by hand.
+// Saves go through serializeDotenv, which preserves comments and untouched
+// lines byte for byte (shared/dotenv.ts), so a person's hand edits and the
+// dialog's edits coexist rather than one rewriting the other.
+//
+// Values are masked by default. A profile's values are resolved Bun-side at
+// spawn and otherwise never reach the webview process (architecture.md §6a).
+// This dialog is the one exception, so it must not become the place those
+// secrets end up on screen. "Show values" reveals them.
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Eye, EyeOff, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -20,14 +23,12 @@ import { readProfile, writeProfile } from "@/lib/settings";
 import { parseDotenvDoc, serializeDotenv } from "../../shared/dotenv";
 import { isEnvName } from "../../shared/frontmatter";
 
-// ⌘A/C/X/V on the dialog's inputs, handled in JS: without a native Edit menu
+// ⌘A/C/X/V on the dialog's inputs, handled in JS. Without a native Edit menu
 // the webview gets the keydown but none of the standard editing selectors, so
-// select-all does nothing and the clipboard keys go nowhere (lib/clipboard.ts
-// has the whole story) — and a profile value — an API key from a provider
-// dashboard — is exactly the string nobody should have to retype.
-// preventDefault doubles as the no-AppKit-beep move the editor's clipboard
-// keymap makes by returning true. Copy works on a masked value too: the mask
-// governs the screen, not the user's access to their own secret.
+// select-all does nothing and the clipboard keys go nowhere (lib/clipboard.ts).
+// preventDefault also keeps the key from reaching AppKit and ringing the
+// system alert (editor/clipboard.ts). Paste is how an API key gets from a
+// provider dashboard into this dialog. Copy works on a masked value.
 function clipboardKeys(e: KeyboardEvent<HTMLInputElement>, setValue: (v: string) => void): void {
   if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
   const key = e.key.toLowerCase();
@@ -62,8 +63,9 @@ interface Row {
 }
 
 export function ProfileEditor({ name, onClose }: { name: string; onClose: () => void }) {
-  // null while the file loads; the dialog frame shows immediately so the
-  // command feels instant even if the RPC round trip does not.
+  // null while the file loads. The dialog frame renders right away, with a
+  // "Loading…" line where the rows will go, so the command opens the dialog
+  // without waiting for the read round trip to Bun.
   const [text, setText] = useState<string | null>(null);
   const [rows, setRows] = useState<Row[]>([]);
   const [reveal, setReveal] = useState(false);
@@ -75,8 +77,8 @@ export function ProfileEditor({ name, onClose }: { name: string; onClose: () => 
       if (!alive) return;
       setText(t);
       const parsed = parseDotenvDoc(t);
-      // An empty profile opens straight onto a blank row: the next act is
-      // always "add a variable", so the dialog starts there.
+      // An empty profile opens on one blank row, since the next step is
+      // always adding a variable.
       setRows(parsed.length > 0 ? parsed : [{ line: null, key: "", value: "", exported: false }]);
     });
     return () => {
@@ -94,8 +96,9 @@ export function ProfileEditor({ name, onClose }: { name: string; onClose: () => 
   const set = (i: number, patch: Partial<Row>) =>
     setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)));
 
-  // A key is wrong only when non-empty and unusable; fully empty rows are
-  // simply skipped on save, so an abandoned "Add variable" costs nothing.
+  // A row's key is wrong only when the row has content and that key is not a
+  // usable variable name. Rows with an empty key and an empty value are
+  // skipped on save, so an abandoned "Add variable" changes nothing.
   const badKey = (r: Row) => (r.key !== "" || r.value !== "") && !isEnvName(r.key);
   const savable = text !== null && !rows.some(badKey);
 
@@ -109,8 +112,9 @@ export function ProfileEditor({ name, onClose }: { name: string; onClose: () => 
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-6"
-      // Backdrop click cancels, but only a click that started there (same
-      // rule as ConfirmDialog): a drag out of an input must not eat edits.
+      // A click on the backdrop cancels, but only a click that started there
+      // (the same rule as ConfirmDialog). A drag that starts in an input and
+      // ends outside it must not discard the edits.
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}

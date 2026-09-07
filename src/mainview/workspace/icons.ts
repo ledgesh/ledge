@@ -1,11 +1,12 @@
-// The workspace icon catalog: the only place icon keys are defined, so the
-// strip, the picker, and any future persisted workspace agree on what a key
-// means. `Workspace.symbol` holds one of these keys.
+// The workspace icon catalog. This file defines every icon key, so the strip,
+// the picker, and persisted workspaces agree on what a key means.
+// `Workspace.symbol` holds one of these keys.
 //
-// A workspace's icon is chosen, never assigned: new workspaces all start on
-// DEFAULT_ICON. Handing them icons by index (as this used to) looks like the
-// app knows something about the workspace when it only knows what order you
-// made them in, and the icon then shuffles the moment you reorder the strip.
+// A workspace's icon is chosen, never assigned. Every new workspace starts on
+// DEFAULT_ICON. Deriving an icon instead (by creation index, as an earlier
+// version did) implies the app knows something about the workspace when it
+// only knows what order the workspaces were made in. An index also changes
+// when the strip is reordered, so the icon changes with it.
 import {
   Beaker,
   Bookmark,
@@ -40,8 +41,8 @@ export interface WorkspaceIcon {
   Icon: LucideIcon;
 }
 
-// Ordered as the picker renders them: the plain shapes first, then the ones
-// people reach for by meaning.
+// Ordered as the picker renders them (IconPicker.tsx maps this list into its
+// grid): the plain shapes first, then the ones people pick for what they mean.
 export const WORKSPACE_ICONS: readonly WorkspaceIcon[] = [
   { key: "layers", label: "Layers", Icon: Layers },
   { key: "inbox", label: "Inbox", Icon: Inbox },
@@ -74,9 +75,12 @@ export const DEFAULT_ICON = "layers";
 
 const BY_KEY = new Map(WORKSPACE_ICONS.map((i) => [i.key, i]));
 
-// The component for a key. Unknown keys resolve to the default rather than
-// rendering nothing: a workspace row with no icon reads as a broken row, and a
-// key can go stale (a persisted workspace outliving a catalog edit).
+// The icon component for a key. An unknown key resolves to the default
+// rather than rendering nothing, because a workspace row with no icon reads
+// as a broken row. Callers screen keys first: persist.ts coerces a persisted
+// symbol the catalog no longer has to DEFAULT_ICON, and store.tsx's
+// `setWorkspaceIcon` refuses one. This is the backstop if a key gets past
+// them.
 export function iconFor(key: string): LucideIcon {
   return (BY_KEY.get(key) ?? BY_KEY.get(DEFAULT_ICON)!).Icon;
 }

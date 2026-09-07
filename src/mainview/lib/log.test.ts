@@ -2,18 +2,18 @@ import { describe, expect, test } from "bun:test";
 import { configureLog, describeError, logFailure } from "./log";
 
 describe("describeError", () => {
-  // The stack is the reason any of this exists: a forwarded line without one
-  // says that something somewhere threw, which nobody can act on.
+  // The stack is what makes a forwarded line worth reading. Without it the
+  // line says only that something somewhere threw.
   test("an Error keeps its stack", () => {
     const err = new Error("render failed");
     expect(describeError(err, "?")).toContain("Error: render failed");
     expect(describeError(err, "?")).toContain("log.test.ts");
   });
 
-  // The view runs in JavaScriptCore, which — unlike the V8-shaped stacks
-  // `bun test` produces — leaves the message OUT of `stack`. A live probe
-  // caught this as forwarded lines that were a minified file:line and nothing
-  // else; this pins the fix against a stack shaped the way WebKit shapes one.
+  // The view runs in JavaScriptCore, which leaves the message out of `stack`.
+  // `bun test` produces V8-shaped stacks that carry the message. This test
+  // sets a WebKit-shaped stack by hand. A live probe surfaced this: forwarded
+  // lines that were a minified file:line and nothing else.
   test("a WebKit-shaped stack still leads with the message", () => {
     const err = new Error("render failed");
     err.stack = "@views://mainview/assets/index-BhqPzFdB.js:565:10428";
@@ -32,8 +32,10 @@ describe("describeError", () => {
     expect(describeError("nope", "?")).toBe("nope");
   });
 
-  // window.onerror fires with a null error for cross-origin script failures;
-  // the fallback is the message-and-position the event carries instead.
+  // A cross-origin script failure reaches the `error` listener with a null
+  // `error`. captureFailures always passes a `fallback` (log.ts), and three
+  // different ones: the message and position the event carries, "(no reason)"
+  // for an unhandled rejection, `String(a)` for a console.error argument.
   test("nothing thrown falls back to what the event knew", () => {
     expect(describeError(null, "Script error. (views://x.js:1)")).toBe("Script error. (views://x.js:1)");
     expect(describeError(undefined, "fallback")).toBe("fallback");
@@ -51,18 +53,20 @@ describe("describeError", () => {
   });
 });
 
-// The only test that touches the module's per-session counter, so it owns it.
+// Only this block calls logFailure. The module's per-session line counter
+// never resets, so a second block that logged failures would start with the
+// budget already spent.
 describe("the session budget", () => {
   test("an erroring render loop is cut off, and the log says it was", () => {
     const sent: string[] = [];
     configureLog({ append: (_level, text) => sent.push(text), reveal: () => {} });
     for (let i = 0; i < 500; i += 1) logFailure("error", `failure ${i}`);
-    // The head is kept, not the tail: the first failures are the ones that
-    // explain the rest.
+    // The cap keeps the head, not the tail. The first failures explain the
+    // cascade that follows them.
     expect(sent[0]).toBe("failure 0");
     expect(sent.length).toBeLessThan(500);
-    // Silence would read as "nothing more went wrong", which is the opposite
-    // of what happened.
+    // logFailure writes a last line saying the rest were suppressed.
+    // Otherwise the silence would read as nothing more going wrong.
     expect(sent[sent.length - 1]).toContain("suppressed");
   });
 });

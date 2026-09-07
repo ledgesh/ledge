@@ -7,8 +7,10 @@ describe("workspace icons", () => {
   });
 
   test("keys are unique", () => {
-    // The picker renders keyed by these; a duplicate is a React key collision
-    // and two cells that highlight as one.
+    // IconPicker.tsx renders one button per entry, keyed by i.key. A
+    // duplicate gives React two children with the same key. When the
+    // duplicated key is also the workspace's current icon, both of those
+    // buttons highlight as chosen. Focus opens on the first of them.
     const keys = WORKSPACE_ICONS.map((i) => i.key);
     expect(new Set(keys).size).toBe(keys.length);
   });
@@ -25,7 +27,9 @@ describe("workspace icons", () => {
   });
 
   test("an unknown key falls back to the default rather than nothing", () => {
-    // A workspace row with no icon reads as broken, and keys can go stale.
+    // The sidebar draws each workspace row's icon with iconFor
+    // (Sidebar.tsx). Keys can go stale. A row with no icon looks broken, so
+    // the fallback keeps every row showing one.
     expect(iconFor("aardvark")).toBe(iconFor(DEFAULT_ICON));
     expect(isIconKey("aardvark")).toBe(false);
   });

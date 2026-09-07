@@ -105,9 +105,11 @@ describe("resolveChord", () => {
   test("editor-owned chords are not window-dispatched in the editor", () => {
     const c = chord("`", { ctrl: true });
     expect(resolveChord(commands, c, { domain: "page", modalOpen: false })?.id).toBe("terminal.toggle");
-    // In the editor, the CodeMirror keymap owns Ctrl-` and preventDefaults it;
-    // domains: ["page"] keeps the window layer from double-firing if it ever
-    // saw the event anyway.
+    // The editor's CodeMirror keymap (editor/setup.ts) binds Ctrl-` and
+    // preventDefaults it, and the window dispatcher returns early on an event
+    // already marked defaultPrevented (CommandProvider.tsx). domains: ["page"]
+    // is the second guard: the window layer will not fire the command even if
+    // the event does reach it.
     expect(resolveChord(commands, c, { domain: "editor", modalOpen: false })).toBeNull();
   });
 
@@ -152,7 +154,8 @@ describe("resolveChord in the list domain", () => {
   test("the same bare key means different things on different rows", () => {
     expect(resolveChord(commands, chord("r"), on("trash"))?.id).toBe("note.restore");
     expect(resolveChord(commands, chord("r"), on("workspace"))?.id).toBe("workspace.rename");
-    // A row kind with no verb for `r` gets nothing, rather than the first one.
+    // On a row kind with no verb for `r`, the chord resolves to nothing
+    // rather than to note.restore, the first command bound to it.
     expect(resolveChord(commands, chord("r"), on("note"))).toBeNull();
   });
 
@@ -162,12 +165,13 @@ describe("resolveChord in the list domain", () => {
         resolveChord(commands, chord("d"), { domain, modalOpen: false, targetKind: "note" }),
       ).toBeNull();
     }
-    // Nor with no row focused at all.
+    // With no row focused, a row verb does not fire either.
     expect(resolveChord(commands, chord("d"), on(undefined))).toBeNull();
   });
 
   test("page commands still work with a row focused", () => {
-    // Focusing a note row must not cost you ⌘N: list is inside the page.
+    // The list domain sits inside the page, so a page command like ⌘N still
+    // resolves while a row has focus.
     expect(resolveChord(commands, chord("n", { meta: true }), on("note"))?.id).toBe("note.new");
     expect(resolveChord(commands, chord("Backspace", { meta: true }), on("note"))?.id).toBe(
       "note.deleteCurrent",

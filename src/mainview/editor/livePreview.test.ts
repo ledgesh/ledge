@@ -1,17 +1,19 @@
-// The concealment core, tested against @lezer/markdown directly (the same
-// grammar family the editor's lang-markdown uses) so no DOM or editor is
-// involved. Most assertions go through `visible`, which applies the hide
-// spans to the source text — asserting on what the reader would see keeps the
-// tests independent of exactly how the parser slices its mark nodes.
+// Tests for the concealment core, run against @lezer/markdown directly so no
+// DOM or editor is involved. The editor builds on the same parser, through
+// @codemirror/lang-markdown (editor/setup.ts). Most assertions go through
+// `visible`, which applies the hide spans to the source text. Asserting on
+// the visible text keeps them independent of how the parser slices marks.
 import { describe, expect, test } from "bun:test";
 import { GFM, parser } from "@lezer/markdown";
 import { blockRevealed, concealments, linkAt, linkTargetAt, type Conceal, type Span } from "./livePreview";
 import { wikiLinkExtension } from "./wikilinks";
 import { hashtagExtension } from "./tags";
 
-// GFM plus the wikilink and hashtag grammars — the same set the editor's
-// parser carries (editor/setup.ts), so the core is tested against the tree
-// it will see.
+// GFM plus the wikilink and hashtag grammars, so the core is tested against
+// the nodes it reads in the editor. The editor's parser is not identical
+// (editor/setup.ts): it also carries inlineCodeExtension, which only re-tags
+// for styling, and lang-markdown's base adds Subscript, Superscript and
+// Emoji, which concealments does not look at.
 const md = parser.configure([GFM, wikiLinkExtension, hashtagExtension]);
 
 const doc = (text: string) => ({
@@ -57,7 +59,7 @@ describe("concealments", () => {
     // Caret on the element's leading edge counts as inside it.
     expect(visible(text, [{ from: 3, to: 3 }])).toBe(text);
     expect(visible(text, [{ from: 6, to: 6 }])).toBe(text);
-    // ...but a caret elsewhere on the line does not.
+    // A caret elsewhere on the line does not count as inside it.
     expect(visible(text, [{ from: 2, to: 2 }])).toBe("x\n\nbold");
   });
 
@@ -164,8 +166,10 @@ describe("concealments", () => {
       { kind: "task", from: 5, to: 8, checked: false },
       { kind: "task", from: 16, to: 19, checked: true },
     ]);
-    // The bullet hides with it — the checkbox IS the bullet. The label is
-    // untouched (the marker is widget-replaced, never text-hidden).
+    // The `- ` bullet hides along with the marker, since the checkbox stands
+    // in for it. Those two spans are the only hides. The marker becomes a
+    // widget rather than hidden text, and no label is hidden either (the
+    // checked one gets a `done` span instead).
     expect(out.filter((c) => c.kind === "hide")).toEqual([
       { kind: "hide", from: 3, to: 5 },
       { kind: "hide", from: 14, to: 16 },
@@ -238,8 +242,10 @@ describe("concealments", () => {
   });
 
   test("a #tag is emitted even under the caret — the bare-URL stance", () => {
-    // Touched-vs-not is a draw-time decision (plain mark vs armed one);
-    // the core reports the tag either way so the styling never blinks.
+    // The core emits the tag span whether or not the selection touches it,
+    // so the styling never blinks. Which mark the span gets is decided at
+    // draw time from the selection: an untouched tag gets the clickable
+    // mark, a touched one the plain mark (livePreview.ts).
     const text = "x\n\ndo #work now";
     expect(tags_(text, [{ from: 5, to: 5 }])).toEqual([{ text: "#work", tag: "work" }]);
   });
@@ -313,8 +319,10 @@ describe("blockRevealed", () => {
   });
 
   // The bug this rule exists for: a selection dragged past a block must not
-  // change its face, in either direction, or the reflow moves the text out
-  // from under the pointer and the block flaps.
+  // change whether the block is revealed, in either direction. Revealing a
+  // block during a drag pulls the lines below it up past the pointer. The
+  // selection head then sits off the block, so the block draws again and
+  // pushes those lines back down, flipping for the rest of the drag.
   test("a selection sweeping across the block from below leaves it drawn", () => {
     expect(blockRevealed(block, [range(40, 15)])).toBe(false);
     expect(blockRevealed(block, [range(40, 5)])).toBe(false);

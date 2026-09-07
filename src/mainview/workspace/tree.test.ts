@@ -176,7 +176,8 @@ describe("moveTab", () => {
     test("dropping onto its own slot is a no-op (same tree reference)", () => {
       const { leaf, ids } = leafWith(3);
       expect(moveTab(leaf, leaf.id, ids[1], leaf.id, 1)).toBe(leaf);
-      expect(moveTab(leaf, leaf.id, ids[1], leaf.id, 2)).toBe(leaf); // just past itself, adjusted back
+      // dropping just after itself adjusts back to its own slot
+      expect(moveTab(leaf, leaf.id, ids[1], leaf.id, 2)).toBe(leaf);
     });
   });
 
@@ -199,7 +200,7 @@ describe("moveTab", () => {
     });
 
     test("moving the active source tab falls the source to the slid-in neighbour", () => {
-      const { a, b, root } = twoLeaves(); // A active tab is ids[0]
+      const { a, b, root } = twoLeaves(); // A's active tab is ids[0]
       const out = moveTab(root, a.leaf.id, a.ids[0], b.leaf.id, 1);
       const src = findLeaf(out, a.leaf.id)!;
       expect(src.tabs.map((t) => t.id)).toEqual([a.ids[1]]);

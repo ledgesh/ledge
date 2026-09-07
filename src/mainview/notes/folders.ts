@@ -1,17 +1,16 @@
 // The note browser's shape: one flat list of rows for a tree of folders.
 //
-// Folders are DERIVED from the notes, never listed separately. A folder is a
-// folder because a note is in it — which is what keeps an attached project
-// from showing `src/`, `dist/` and every other directory that holds no note as
-// an empty row, and what means nothing here can disagree with the note list it
-// came from. The cost is that an empty folder is not a thing the browser can
-// show, and that is why New Folder creates a note in the folder it makes
-// (commands/registry.ts): a folder with nothing in it would vanish.
+// Folders are derived from the notes, never listed separately. A folder
+// exists because a note is in it. An attached project shows no row for `src/`,
+// `dist/` or any other directory holding no note, and this list cannot
+// disagree with the note list it came from. The browser cannot show an empty
+// folder, so New Folder creates a note in the folder it makes
+// (commands/registry.ts).
 //
-// Flat rather than nested because the list is KEYBOARD-NAVIGABLE
+// The list is flat rather than nested because it is keyboard-navigable
 // (interactions.md R5): ↑/↓ walk rows by index, and a nested render would have
-// to flatten itself anyway to answer "which row is next". Depth is a number the
-// row indents by, and a collapsed folder simply stops emitting its subtree.
+// to flatten itself anyway. Depth is a number the row indents by, and a
+// collapsed folder stops emitting its subtree.
 import { folderContains } from "../../shared/folders";
 import type { NoteMeta } from "../../shared/rpc-schema";
 
@@ -26,7 +25,8 @@ export function segmentsOf(folder: string): string[] {
   return folder === "" ? [] : folder.split("/");
 }
 
-/** The last segment — what a folder row is labelled with. */
+/** The last segment of a folder path. The browser draws it as the folder
+ * row's label (NoteBrowser.tsx). */
 export function nameOf(folder: string): string {
   const parts = segmentsOf(folder);
   return parts[parts.length - 1] ?? "";
@@ -40,10 +40,9 @@ export function parentOf(folder: string): string {
 
 /**
  * Every folder the browser knows about, sorted: each folder holding a note,
- * plus every ANCESTOR of one. The ancestors matter because a note at
- * `a/b/c.md` with nothing in `a/` still needs an `a` row to hang `a/b` off —
- * a tree that skipped it would draw `b` at the top level and lie about where
- * the note is.
+ * plus every ancestor of one. A note at `a/b/c.md` with nothing directly in
+ * `a/` still needs an `a` row for `a/b` to sit under. Without it, `b` would be
+ * drawn at the top level, as if the note were not in `a`.
  */
 export function folderList(notes: readonly NoteMeta[]): string[] {
   const out = new Set<string>();
@@ -54,7 +53,8 @@ export function folderList(notes: readonly NoteMeta[]): string[] {
   return [...out].sort((a, b) => a.localeCompare(b));
 }
 
-/** How many notes sit at or below a folder — what a collapsed row hides. */
+/** How many notes sit at or below a folder. A collapsed row shows the count
+ * of what it is hiding (NoteBrowser.tsx). */
 export function countIn(notes: readonly NoteMeta[], folder: string): number {
   return notes.filter((n) => folderContains(folder, folderOf(n))).length;
 }
@@ -66,17 +66,17 @@ export type BrowserRow =
 /**
  * The rows to draw, in order: at every level the folders come first
  * (alphabetically), then that level's own notes in `order`. A folder not in
- * `expanded` emits its row and stops — its notes and subfolders are what the
- * disclosure is hiding.
+ * `expanded` emits its row and stops, hiding its notes and subfolders.
  *
  * `order` is the browser's chosen note sort (by title, or by path in the
- * manual), applied WITHIN a folder rather than across the whole list: sorting
- * a tree globally is the one thing that would make a note's row jump to
- * another folder's group.
+ * manual). It applies within a folder, not across the whole list: a global
+ * sort would move a note's row into another folder's group.
  *
- * A folder row's id is prefixed so it cannot collide with a note's, whose id is
- * its absolute path — the ids are what useListNav moves focus between, and two
- * rows answering to one id is a focus that lands on the wrong one.
+ * A folder row's id is prefixed so it cannot collide with a note's, whose id
+ * is its absolute path. The id is a row's identity in the list: two rows
+ * sharing one would take the roving tabindex together (lib/useListNav.ts
+ * rowProps), and the focus restore after a rename would land on whichever
+ * came first (NoteBrowser.tsx).
  */
 export function browserRows(
   notes: readonly NoteMeta[],
@@ -113,12 +113,11 @@ export function folderRowId(folder: string): string {
 }
 
 /**
- * Closing a folder closes everything under it, so reopening it does not spill
- * a subtree you closed a while ago and had forgotten was open.
- *
- * `folderContains` is what decides "under it" — shared with the agent
- * surfaces' folder scoping, because the sibling-prefix trap (`a` must not
- * close `ab`) is the same trap on both ends.
+ * The open set after a folder is closed: the folder and everything under it
+ * come out, so reopening it does not spill a subtree closed long ago.
+ * `folderContains` decides "under it" (shared/folders.ts). The agent surfaces
+ * scope folders with the same function, because the sibling-prefix trap (`a`
+ * must not close `ab`) is the same trap on both ends.
  */
 export function expandedWithout(expanded: ReadonlySet<string>, folder: string): Set<string> {
   return new Set([...expanded].filter((f) => !folderContains(folder, f)));
@@ -126,23 +125,21 @@ export function expandedWithout(expanded: ReadonlySet<string>, folder: string): 
 
 /**
  * The open set after a folder is renamed: the folder and everything under it
- * answer to their new path. A rename opens and closes nothing — the same
- * folders are open, and only what they are called changed, so a tree that
- * collapsed itself would be losing state to an operation that changed no
- * state.
- *
- * `folderContains` decides "under it" here too, and its root case is the one
- * thing this must not inherit: `from` is a folder with a ROW, never the
- * workspace itself, which has no name to change.
+ * answer to their new path. Nothing opens or closes, since a rename changes
+ * only what a folder is called. `folderContains` decides "under it" here too,
+ * but not its root case: the workspace itself has no name to change, so `from`
+ * is always a folder with a row. A `from` of "" would rewrite every open
+ * folder.
  */
 export function expandedRenamed(expanded: ReadonlySet<string>, from: string, to: string): Set<string> {
   if (from === "") return new Set(expanded);
   return new Set([...expanded].map((f) => (folderContains(from, f) ? `${to}${f.slice(from.length)}` : f)));
 }
 
-/** Opening a folder opens its ancestors too: a row you cannot see is not
- * revealed by opening it. What Move to Folder… and New Note in Folder both
- * call, so the note they just filed is on screen where it landed. */
+/** The open set after a folder is opened, with its ancestors too: opening a
+ * folder whose ancestor is closed would reveal nothing. Move to Folder… and
+ * New Note in Folder both reach this (notes/expansion.ts expandFolder), so the
+ * note they just filed is on screen where it landed. */
 export function expandedWith(expanded: ReadonlySet<string>, folder: string): Set<string> {
   const next = new Set(expanded);
   const parts = segmentsOf(folder);

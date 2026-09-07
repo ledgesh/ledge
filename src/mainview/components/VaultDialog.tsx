@@ -1,13 +1,8 @@
-// The vault passphrase dialog (locking.md §7): one component, two faces
-// decided by the mirrored vault state — UNLOCK (a vault exists: one field,
-// wrong-passphrase shakes and stays) and SETUP (first lock ever: passphrase
-// twice, and the no-recovery sentence said out loud, once, where it cannot be
-// missed). The dialog is only the passphrase prompt: what happens next (lock
-// the note the user was reaching for, open the remove-lock confirm) is App's
-// follow-up via onUnlocked — the dialog neither knows nor cares.
-//
-// The field clears on close regardless of outcome, and the passphrase goes
-// nowhere but the one RPC (vault/channel.ts): no state, no echo, no log.
+// The vault passphrase dialog (locking.md §7). The mirrored vault state picks
+// the face: setup on the first lock ever, unlock after that. A wrong
+// passphrase shakes and stays, and the field clears on close regardless of
+// outcome. onUnlocked runs the act that needed the key: locking the note, or
+// opening the remove-lock confirm. The passphrase goes nowhere but the RPC.
 import { useEffect, useRef, useState } from "react";
 import { Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -20,8 +15,8 @@ export function VaultDialog({
   onUnlocked,
   onNotice,
 }: {
-  // "auto" is the unlock/setup pair (by vault state); "change" is the
-  // Change Vault Passphrase… face — new passphrase twice, unlocked only.
+  // "auto" picks the unlock or the setup face from the vault state. "change"
+  // is the Change Vault Passphrase… face: new passphrase twice, unlocked only.
   mode?: "auto" | "change";
   onClose: () => void;
   onUnlocked: () => void;
@@ -41,8 +36,9 @@ export function VaultDialog({
     passRef.current?.focus();
   }, []);
 
-  // A dialog layer like confirm and the profile editor (interactions.md §6):
-  // Escape addresses this, topmost-only; the window keymap sleeps under it.
+  // A dialog layer, like confirm and the profile editor (interactions.md §6).
+  // Escape addresses the topmost layer only, and the window keymap is
+  // suppressed while this one is open.
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
   useEffect(() => pushLayer("dialog", () => onCloseRef.current()), []);
@@ -71,8 +67,11 @@ export function VaultDialog({
       }
       const ok = setup ? await createVault(pass) : await unlockVault(pass);
       if (!ok) {
-        // Wrong passphrase (or a create race): shake, clear, stay — the
-        // classic grammar, and the field never holds a wrong guess.
+        // False means a wrong passphrase, or a create that did not go
+        // through: the mirrored state said there was no vault but one exists
+        // by now, or the vault file could not be written (createVault in
+        // src/bun/vault.ts throws, and src/bun/server.ts maps that to ok
+        // false). Shake, clear both fields, stay open.
         setProblem(setup ? "Could not create the vault." : "Wrong passphrase.");
         setPass("");
         setConfirm("");
@@ -101,8 +100,8 @@ export function VaultDialog({
         aria-label={setup ? "Lock Notes" : "Unlock Notes"}
         data-testid="vault-dialog"
         className="w-full max-w-sm rounded-lg border bg-background p-4 shadow-xl"
-        // Tailwind has no shake; a three-keyframe inline animation is less
-        // machinery than a css file entry for one dialog.
+        // Tailwind has no shake animation. Its three keyframes are in the
+        // <style> element below, rather than in a css file for one dialog.
         style={shake ? { animation: "ledge-shake 0.3s ease-in-out" } : undefined}
       >
         <style>{`@keyframes ledge-shake { 0%,100% { transform: translateX(0) } 25% { transform: translateX(-6px) } 75% { transform: translateX(6px) } }`}</style>

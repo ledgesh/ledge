@@ -1,20 +1,20 @@
 import { useRef } from "react";
 import { cn } from "@/lib/utils";
 
-// A thin draggable divider with two modes sharing one pointer-capture
-// implementation (cursor/userSelect handling included):
-//
-// - px mode (`current` + `onResize`): reports a proposed absolute size as the
-//   pointer moves; the parent clamps and stores it. Used for fixed-size panels
-//   (sidebar width, workspace-strip height, terminal height). `invert` flips
-//   the delta for a handle that sits on the far side of the panel it controls
-//   (e.g. the terminal's handle is above it, so dragging up must grow it).
-//
-// - fraction mode (`containerRef` + `onResizeFraction`): reports the pointer's
-//   position as a 0..1 fraction of the container, for ratio-based splits (the
-//   pane divider); the reducer clamps the ratio.
-//
+// A thin draggable divider with two modes sharing one drag implementation
+// (it sets the body cursor and blocks text selection for the drag either way).
 // `axis`: "x" resizes width (drag horizontally), "y" height (drag vertically).
+//
+// - px mode (`current` + `onResize`) reports a proposed absolute size as the
+//   pointer moves, and the parent clamps and stores it. The sidebar and the
+//   right panel use it for their width, the workspace strip and the terminal
+//   for their height. `invert` flips the delta for a handle that sits on the
+//   far side of the panel it controls. The terminal's handle is above the
+//   terminal, so dragging up grows it.
+//
+// - fraction mode (`containerRef` + `onResizeFraction`) reports the pointer's
+//   position as a 0..1 fraction of the container, for ratio-based splits (the
+//   pane divider). The reducer clamps the ratio.
 export function ResizeHandle({
   axis,
   current = 0,
@@ -34,8 +34,8 @@ export function ResizeHandle({
   title?: string;
   className?: string;
 }) {
-  // The container rect is measured once per drag, not per move: the split's
-  // own resize is what the drag causes, and re-measuring mid-drag would chase it.
+  // The container rect that fraction mode divides by. It is measured once at
+  // pointerdown and reused for every move of that drag.
   const rectRef = useRef<DOMRect | null>(null);
 
   const onPointerDown = (e: React.PointerEvent) => {

@@ -1,24 +1,32 @@
-// The "Add/Edit Frontmatter" verb's editing arm: put the caret inside the
-// note's frontmatter block, creating the block when there is none. The block
-// stays hand-edited text (the file is the UI — frontmatter.ts's stance); this
-// command only spares the gesture that hurt: scroll to the top, type a fence
-// that renders as an hr, type the closing fence, find your way back in. An
-// ordinary CodeMirror transaction, templateFlag.ts's reasoning: undoable,
-// autosaved, watcher-refreshed like any keystroke.
+// The editing arm of the "Edit Frontmatter" verb: put the caret inside the
+// note's frontmatter block, creating the block when there is none. The
+// registry titles the verb "Add Frontmatter" while the note has no block
+// (commands/registry.ts). Nothing else happens: no dialog, no validation. The
+// block is hand-edited text, the file-is-the-UI stance settings.jsonc takes
+// (editor/frontmatter.ts, architecture.md §6), so the command spares only the
+// gesture: scroll to the top, type an opening fence that renders as a
+// thematic rule until it is closed, type the closing fence, find the way back
+// in. The edit is an ordinary CodeMirror transaction, as in templateFlag.ts:
+// undoable, autosaved, watcher-refreshed like any keystroke.
 import { EditorView } from "@codemirror/view";
 import { frontmatterEnd } from "../../shared/frontmatter";
 import { frontmatterLineSpan } from "./frontmatter";
 
-// Enough of the note to hold its frontmatter block — the HEAD_BYTES cap and
-// its accepted edge, shared with every other head-peeker (bun/notes.ts).
+// Enough of the note to hold its frontmatter block: the same 4096 the other
+// head-peekers slice (bun/notes.ts HEAD_BYTES, commands/glue.ts noteHead). A
+// longer block has no closing fence inside the slice, so this command reads
+// the note as having no block and inserts a second one above it. Sites that
+// parse the whole document (notes/store.ts syncParams) still read the
+// original block.
 const HEAD_BYTES = 4096;
 
 /**
- * What the edit gesture does to a note starting with `head`: optionally an
- * insertion (creating the block, or giving an empty block a body line to
- * land on), and where the caret goes. Offsets are within `head`, which is a
- * prefix of the doc, so they are doc offsets too. Pure, so the three shapes
- * — no block, empty block, block with body — are testable without an editor.
+ * What editFrontmatter does to a note starting with `head`, returned as a
+ * plan rather than applied: an optional insertion (creating the block, or
+ * giving an empty block a body line to land on) and where the caret goes.
+ * Offsets are within `head`, a prefix of the doc, so they are doc offsets
+ * too. Pure, so the three shapes (no block, empty block, block with body) are
+ * testable without an editor.
  */
 export function frontmatterEditPlan(
   head: string,

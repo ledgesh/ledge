@@ -4,8 +4,9 @@ import { CompletionContext, type CompletionResult } from "@codemirror/autocomple
 import { configureBridge } from "./bridge";
 import { frontmatterCompletionSource } from "./frontmatterComplete";
 
-// The bridge is module-global; registering workspaceTags here is the same
-// stubbing-at-the-seam move as tags.test.ts beside it.
+// The bridge holds its handlers in a module-global, so this one registration
+// of workspaceTags covers every test below. tags.test.ts beside this file
+// stubs the same seam.
 configureBridge({
   workspaceTags: () => [
     { tag: "work", count: 2 },
@@ -13,8 +14,9 @@ configureBridge({
   ],
 });
 
-// No parser in the extensions: the source reads the block by text (the same
-// frontmatterLineSpan the styling uses), never the syntax tree.
+// This state carries no language extension. The completion source finds the
+// block by text with frontmatterLineSpan (the same helper the decorations in
+// frontmatter.ts use), never from the syntax tree.
 function complete(docText: string, pos: number, explicit = false): CompletionResult | null {
   const state = EditorState.create({ doc: docText });
   return frontmatterCompletionSource(new CompletionContext(state, pos, explicit));
@@ -27,7 +29,7 @@ describe("frontmatterCompletionSource: keys", () => {
     const r = complete("---\ncw\n---\n", 6);
     expect(r?.from).toBe(4);
     expect(labels(r)).toEqual(["cwd", "profile", "envFile", "env", "host", "tags", "template", "confirm"]);
-    // Every key carries its one-line hint — the popup is the documentation.
+    // Every key carries a one-line hint in `detail`.
     expect(r?.options.every((o) => typeof o.detail === "string" && o.detail.length > 0)).toBe(true);
     // Accepting a key writes the colon too, so the caret lands at the value.
     expect(r?.options[0]?.apply).toBe("cwd: ");
@@ -82,8 +84,8 @@ describe("frontmatterCompletionSource: values", () => {
   });
 
   test("a flow sequence's opening bracket is punctuation, not part of the token", () => {
-    // `from` past the bracket is what keeps accepting an option from eating
-    // it: `tags: [` + work must become `tags: [work`, never `tags: work`.
+    // `from` sits past the bracket, so accepting an option does not overwrite
+    // it: typing work after `tags: [` gives `tags: [work`, not `tags: work`.
     const open = complete("---\ntags: [\n---\n", 11);
     expect(open?.from).toBe(11);
     expect(labels(open)).toEqual(["work", "project/ledge"]);
@@ -91,8 +93,9 @@ describe("frontmatterCompletionSource: values", () => {
   });
 
   test("tags inside a still-unclosed bracket are not offered again", () => {
-    // The line before the caret has no closing "]" yet, so the dedupe cannot
-    // wait for splitTagList's matched pair.
+    // The prefix before the caret has no closing "]" yet. splitTagList strips
+    // only a matched pair, so the source takes the opening bracket off itself
+    // before deduping.
     expect(labels(complete("---\ntags: [work, w\n---\n", 18))).toEqual(["project/ledge"]);
   });
 

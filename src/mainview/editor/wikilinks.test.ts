@@ -1,8 +1,8 @@
 // The wikilink CodeMirror seams: what parses as a `[[...]]` node and what the
-// `[[` picker offers. (The pure target/resolution decisions are tested with
-// their code in shared/wikilinks.test.ts.) Parser assertions run against
-// @lezer/markdown directly (livePreview.test.ts's move); completion
-// assertions build a real EditorState — still no DOM.
+// `[[` picker offers. The pure target and resolution decisions are tested
+// beside their code in shared/wikilinks.test.ts. Parser assertions run against
+// @lezer/markdown directly, as in livePreview.test.ts. Completion assertions
+// build a real EditorState. Neither needs a DOM.
 import { describe, expect, test } from "bun:test";
 import { GFM, parser } from "@lezer/markdown";
 import { EditorState } from "@codemirror/state";
@@ -53,8 +53,10 @@ describe("wikiLinkExtension", () => {
   });
 
   test("a nested [ bails out to the ordinary link machinery", () => {
-    // `[[a](url)` must still parse as a bracketed markdown link, not half a
-    // wikilink swallowing the syntax.
+    // The extension parses `before: "Link"` (wikilinks.ts), so it gets the
+    // first look at the opening `[`. Here its match fails at the `]` whose
+    // next character is `(` rather than a second `]`, so the text falls to
+    // the ordinary link parser, which finds a Link from the second `[`.
     const text = "x [[a](https://e.com) y";
     expect(wikiSpans(text)).toEqual([]);
     let sawLink = false;
@@ -96,8 +98,9 @@ describe("wikiTargetAt", () => {
 });
 
 describe("wikiCompletionSource", () => {
-  // The bridge is module-global; registering wikiNotes here is the same
-  // stubbing-at-the-seam move as the store tests (testing.md §4).
+  // Registering `wikiNotes` stubs the note list at the seam, the way the
+  // store tests do (testing.md §4). The bridge keeps its handlers in a
+  // module-global, so the stub stays in effect for the whole describe.
   configureBridge({
     wikiNotes: () => [note("Alpha"), note("Beta"), note("Bad [title]"), note("Has#Hash")],
   });

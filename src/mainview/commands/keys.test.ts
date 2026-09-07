@@ -45,8 +45,11 @@ describe("command key table", () => {
   });
 
   test("badge semantics are pinned: ⌘N = workspace, ⌃N = tab", () => {
-    // The held-modifier badges (useCmdHeld.ts) advertise these; if this test
-    // fails, the badges are lying.
+    // The quick-jump badges number workspace rows (workspace/Sidebar.tsx) and
+    // the focused pane's tabs (workspace/PaneTree.tsx) while ⌘ or ⌃ is held.
+    // They draw the digit alone, never the modifier, so which modifier reaches
+    // which list is pinned here. Swapping these two in commands/keys.ts sends
+    // every badge to the wrong list.
     expect(workspaceSelectKey(1)).toBe("Mod-1");
     expect(tabSelectKey(1)).toBe("Ctrl-1");
   });
@@ -56,9 +59,10 @@ describe("command key table", () => {
   });
 
   test("row verbs are bare keys", () => {
-    // A modifier on a listKey would be a chord wearing the wrong hat: the
-    // resolver only consults listKeys for unmodified events, so it could never
-    // fire (interactions.md §2).
+    // A binding with a modifier is a chord, and chords go in `keys`, never in
+    // `listKeys` (interactions.md §2). Shift is barred by that rule, not by
+    // the resolver: resolveChord in keymap.ts counts a shift-only event as
+    // bare, so a shifted row verb would in fact fire.
     for (const id of ids) {
       for (const binding of listKeysOf(id)) {
         expect({ id, binding, ...parseKey(binding) }).toMatchObject({
@@ -72,8 +76,8 @@ describe("command key table", () => {
   });
 
   test("a command with both advertises its chord, not its row verb", () => {
-    // ⌘⌫ works anywhere in the page; ⌫ needs the row focused. The tooltip
-    // should promise the one that always holds.
+    // ⌘⌫ works anywhere in the page; ⌫ needs the row focused. keyOf returns
+    // the chord first, so the tooltip shows ⌘⌫.
     expect(keyOf("note.deleteCurrent")).toBe("Mod-Backspace");
     expect(keyOf("note.delete")).toBe("d"); // no chord: the row verb is all there is
   });

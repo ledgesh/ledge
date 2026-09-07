@@ -1,18 +1,14 @@
-// The anchored "which machine?" menu for notes that declare more than one
-// host. It interposes on every run (interactions.md §4 spirit: prod next to
-// staging must never execute on a remembered default), so it must cost almost
-// nothing when the answer is "same as last time": it opens with the session's
-// last pick focused, Enter confirms, arrows move, Escape (via the ContextMenu
-// layer) or an outside press cancels — the whole exchange stays on the keys
-// that asked for the run.
+// The anchored "which machine?" menu for a note that declares more than one
+// host. Every inline run opens it, so a note listing prod next to staging
+// never runs a block on a remembered default. The terminal drawer asks only
+// when its shell is not yet alive (interactions.md §4a). The session's last
+// pick opens focused: Enter confirms, arrow keys move, and Escape (the shared
+// layer stack in commands/layers.ts) or an outside press cancels.
 //
-// On a touch client none of that grammar exists, and the preselection is the
-// part that suffers: there is no Enter to make it cheap and no arrow to make
-// leaving it deliberate, so every row costs one tap and the focus ring is
-// carrying a fact nothing else says. So the preferred row is MARKED as well as
-// focused — the same information, in the one form a client with no keyboard can
-// read. Marked on every client, because a Mac reading it is a Mac not squinting
-// at a focus ring either.
+// A touch client has no Enter and no arrow keys, so every row there costs one
+// tap. Without a mark, the focus ring would be the only thing saying which
+// machine ran last. The preferred row therefore shows a check as well, on
+// every client, because a focus ring is no easier to read on a Mac.
 import { useEffect, useRef } from "react";
 import { Check, Server, Laptop } from "lucide-react";
 import { ContextMenu, MenuItem } from "./ContextMenu";
@@ -20,21 +16,22 @@ import { middleEllipsis } from "../commands/format";
 import { LOCAL_HOST } from "../../shared/frontmatter";
 import type { HostPickRequest } from "../editor/bridge";
 
-// ~what fits the widened menu at the 12px mono below. Longer destinations
-// middle-ellipsize — the tail is what tells `…-01` from `…-02`, so an
-// end-ellipsis would render the exact items this menu exists to distinguish
-// as identical — and carry the full value in their tooltip. Three characters
-// shorter than the width alone allows, so the marked row below has somewhere to
-// put its mark and every row stays the same length as the ones it is being
-// compared against.
+// MENU_WIDTH is the menu's width in pixels. LABEL_MAX is the longest host
+// name that fits it at the 12px monospace of the rows below, three characters
+// short of what the width alone allows. That leaves the marked row room for
+// its check, and it caps every label at the same count so the rows line up.
+// Longer names middle-ellipsize (commands/format.ts) and show in full in the
+// row's tooltip. The ellipsis goes in the middle because the tail is what
+// tells `…-01` from `…-02`.
 const MENU_WIDTH = 280;
 const LABEL_MAX = 27;
 
 export function HostPicker({ req, onClose }: { req: HostPickRequest; onClose: () => void }) {
   const listRef = useRef<HTMLDivElement>(null);
 
-  // Focus the preferred host (or the first) once mounted, so Enter repeats the
-  // last choice and a different machine takes a deliberate arrow first.
+  // Focus the preferred host (or the first) once mounted. Enter then repeats
+  // the last choice, and choosing a different machine takes an arrow key
+  // first.
   useEffect(() => {
     const items = listRef.current?.querySelectorAll<HTMLButtonElement>("[role=menuitem]");
     if (!items?.length) return;

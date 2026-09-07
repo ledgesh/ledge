@@ -1,27 +1,31 @@
-// Wikilinks: `[[Note Title]]` / `[[Note Title#Heading]]` links BETWEEN notes.
+// Wikilinks: `[[Note Title]]` and `[[Note Title#Heading]]` links between notes.
 //
-// Internal links address a note by its TITLE, not its path, resolved live
-// against the note's own workspace list every time they are drawn or
-// followed. That is a deliberate answer to rename churn: filenames follow the
-// H1 (notes/store.ts syncTitle), so a stored path would rot on every retitle,
-// and rewriting other notes' bytes to compensate would put a grep-and-edit
-// pass inside Bun's save path. A title resolves or it doesn't, visibly — a
-// dangling link is styled as such and edits like plain text.
+// A wikilink addresses a note by its title, not its path. The title is
+// resolved live against the note's own workspace list every time the link is
+// drawn or followed. Filenames follow the H1 (notes/store.ts syncTitle), so a
+// stored path would go stale on every retitle. Keeping such paths current
+// would put a grep-and-edit pass over other notes inside Bun's save path. A
+// title that matches no note still parses as a link. livePreview.ts draws it
+// as dangling, and it edits like plain text.
 //
-// Everything here stays view-side: resolution runs against NoteMeta lists the
-// store already holds (handed out by Bun's noteList), and following a link
-// dispatches openNote with one of those known paths. No new path shape ever
-// crosses the RPC (architecture.md §2).
+// Everything here stays view-side. Resolution runs against the NoteMeta lists
+// the store already holds (from Bun's noteList). Following a link dispatches
+// openNote with one of those known paths, so no new path shape crosses the
+// RPC (architecture.md §2).
 //
-// This module is the CodeMirror seams:
-// - `wikiLinkExtension` teaches @lezer/markdown the `[[...]]` inline syntax
-//   (a real parse node, so concealment/click/reveal reuse the same tree
-//   machinery as ordinary links in livePreview.ts);
+// This module holds the CodeMirror seams:
+// - `wikiLinkExtension` teaches @lezer/markdown the `[[...]]` inline syntax.
+//   It is a real parse node, so concealment, clicks, and reveal reuse the
+//   same tree machinery as ordinary links in livePreview.ts.
+// - `wikiTargetAt` reports the wikilink at a position, for livePreview.ts's
+//   click and Open Link paths.
 // - `wikiCompletionSource` is the `[[` picker (phase 2), reading the note
-//   list through the editor bridge.
-// The pure decisions — `parseWikiTarget` / `resolveWikiTitle` — moved to
+//   list through the editor bridge. `appCompletion` bundles it with the
+//   editor's other completion sources.
+// The pure decisions, `parseWikiTarget` and `resolveWikiTitle`, moved to
 // shared/wikilinks.ts when the MCP server started resolving the same titles
-// Bun-side; re-exported here so editor code keeps one import for wikilinks.
+// Bun-side. They are re-exported here so editor code keeps one import for
+// wikilinks.
 import type { SyntaxNode, Tree } from "@lezer/common";
 import type { MarkdownConfig } from "@lezer/markdown";
 import { tags } from "@lezer/highlight";
@@ -51,10 +55,10 @@ const NEWLINE = 10;
 
 /**
  * The `[[...]]` inline syntax, as a real markdown parse node. Runs before the
- * standard Link parser so the leading `[` is claimed here first. Single-line
- * and flat by design: a newline, a nested `[`, or a missing `]]` leaves the
- * text to the ordinary link machinery (`[[a](url)` must still parse as a
- * bracketed link, not half a wikilink).
+ * standard Link parser so the leading `[` is claimed here first. The match is
+ * single-line and flat: a newline, a nested `[`, or a missing `]]` leaves the
+ * text to the ordinary link machinery, so `[[a](url)` still parses as a
+ * bracketed link rather than half a wikilink.
  */
 export const wikiLinkExtension: MarkdownConfig = {
   defineNodes: [{ name: WIKILINK_NODE, style: tags.link }],
@@ -68,8 +72,9 @@ export const wikiLinkExtension: MarkdownConfig = {
           const ch = cx.char(i);
           if (ch === NEWLINE || ch === BRACKET) return -1;
           if (ch === CLOSE) {
-            // `[[]]` stays raw: an empty target names nothing, and eating it
-            // would make typing `[[` feel like the editor swallowed a key.
+            // `[[]]` stays raw. An empty target names nothing, and a link
+            // node here would conceal all four brackets (livePreview.ts), so
+            // they would disappear from the note once the caret left them.
             if (cx.char(i + 1) !== CLOSE || i === pos + 2) return -1;
             return cx.addElement(cx.elt(WIKILINK_NODE, pos, i + 2));
           }
@@ -80,18 +85,19 @@ export const wikiLinkExtension: MarkdownConfig = {
   ],
 };
 
-// A title the `[[...]]` grammar can actually express: brackets would end (or
-// break) the link, `#` would read as an anchor. Notes named outside the
-// grammar simply don't appear in the picker — linking them is what the
-// grammar cannot say.
+// Whether the `[[...]]` grammar can express this title. A bracket would end
+// or break the link, and a `#` would read as a heading anchor. A note whose
+// title falls outside the grammar does not appear in the picker, and no
+// wikilink can name it.
 function linkableTitle(title: string): boolean {
   return title.trim() !== "" && !/[\[\]#]/.test(title);
 }
 
 /**
- * The wikilink a follow-the-link gesture at `pos` addresses — its span (the
- * reveal unit) and inner target text — or null. Mirrors livePreview.ts
- * `linkAt`: resolved from both sides so a caret at either edge counts.
+ * The wikilink a follow-the-link gesture at `pos` addresses, or null. Returns
+ * its span (the reveal unit) and its inner target text. Mirrors livePreview.ts
+ * `linkAt`: it resolves through the tree from both sides of `pos`, so a caret
+ * at either edge of a link still counts as on it.
  */
 export function wikiTargetAt(
   doc: { sliceString(from: number, to: number): string },
@@ -110,9 +116,10 @@ export function wikiTargetAt(
 
 // --- The `[[` picker ---------------------------------------------------------
 
-// Insert the picked title and close the brackets — unless the user already
-// typed the `]]` (half-typed link being corrected), in which case just step
-// past them. Either way the caret lands after the completed link.
+// Insert the picked title and close the brackets. When the `]]` is already in
+// the document (a half-typed link being corrected), the insert is the title
+// alone and the caret steps past those brackets. Either way the caret lands
+// after the completed link.
 function applyWiki(view: EditorView, completion: Completion, from: number, to: number): void {
   const closed = view.state.sliceDoc(to, to + 2) === "]]";
   view.dispatch({
@@ -124,9 +131,9 @@ function applyWiki(view: EditorView, completion: Completion, from: number, to: n
 
 /**
  * Completion source for `[[`: every linkable note title in this note's own
- * workspace (the same list clicks resolve against, via the bridge). Inactive
- * inside code — a `[[` in a fence is code, and the parser above will not make
- * a link of it either.
+ * workspace, read through the bridge (the same list clicks resolve against).
+ * Returns null inside a code node. The parser above makes no wikilink there
+ * either.
  */
 export function wikiCompletionSource(context: CompletionContext): CompletionResult | null {
   const m = context.matchBefore(/\[\[[^\[\]]*/);
@@ -148,11 +155,11 @@ export function wikiCompletionSource(context: CompletionContext): CompletionResu
 }
 
 /** The app's completions as one editor extension: the `[[` note picker, the
- * `#` tag picker (editor/tags.ts), and the frontmatter block's keys/values
- * (editor/frontmatterComplete.ts). ONE `autocompletion()` with all sources in
- * its `override` — a second instance would race this one, and `override` is
- * deliberate: nothing language-provided should ever pop. A new completion
- * source joins this array, never its own autocompletion(). */
+ * `#` tag picker (editor/tags.ts), and the frontmatter block's keys and values
+ * (editor/frontmatterComplete.ts). One `autocompletion()` holds every source
+ * in its `override`. A second instance would race this one, and `override`
+ * keeps language-provided completions from popping. A new source joins this
+ * array rather than adding another autocompletion(). */
 export function appCompletion(): Extension {
   return autocompletion({
     override: [frontmatterCompletionSource, wikiCompletionSource, tagCompletionSource],

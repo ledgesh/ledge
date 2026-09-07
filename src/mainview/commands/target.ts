@@ -1,18 +1,16 @@
-// What a keystroke on a focused list row acts on.
+// What a keystroke on a focused list row acts on. A right-click passes its
+// CommandTarget explicitly. A bare `d` knows only where focus is. Rows carry
+// their identity in data attributes, and the dispatcher reads them off the
+// focused element (CommandProvider.tsx, interactions.md §7). A module holding
+// each list's selection would be a second source of truth that goes stale.
 //
-// A right-click passes its CommandTarget explicitly, but a bare `d` only knows
-// where focus is. Rather than have every list publish its selection into a
-// module the dispatcher reads (a second source of truth, and one that goes
-// stale), rows carry their identity as data attributes and the dispatcher
-// reads it back off the focused element: the DOM already owns focus, so it may
-// as well own what focus means.
-//
-// The decoding is pure (targetFromDataset, unit-tested); targetFromElement is
-// the two-line DOM wrapper over it.
+// targetFromDataset does the decoding and is pure (target.test.ts).
+// targetFromElement is the three-line DOM wrapper over it, small enough to
+// leave untested (testing.md §2).
 import type { CommandTarget } from "./types";
 
-// The dataset shape a row publishes. Camel-cased like DOMStringMap, because
-// that is what it is read back out of.
+// The dataset shape a row publishes. The keys are camel-cased because they
+// are read back out of an element's DOMStringMap (its `dataset`).
 export interface TargetDataset {
   targetKind?: string;
   targetPath?: string;
@@ -25,17 +23,19 @@ export interface TargetDataset {
   targetFolder?: string;
 }
 
-// The attribute a row marks itself with. The values mirror CommandTarget's
-// kinds, and targetFromElement is the only reader.
+// The attributes a row marks itself with. data-target-kind's values mirror
+// CommandTarget's kinds; the rest carry that kind's payload.
+// targetFromElement below is the only code that reads these attribute names
+// back off the DOM. Sidebar.tsx and the e2e specs also select on them.
 export function targetAttrs(target: CommandTarget): Record<string, string> {
   switch (target.kind) {
     case "note":
     case "trash":
       return { "data-target-kind": target.kind, "data-target-path": target.path };
     case "folder":
-      // A folder rides in its own attribute, not targetPath: it is a
-      // root-relative folder of the selected workspace, and a decoder that
-      // read it as a path would hand a command half a filename.
+      // The folder gets its own attribute rather than targetPath: it is a
+      // root-relative folder of the selected workspace, not a path. A decoder
+      // that read it as a path would hand a command half a filename.
       return { "data-target-kind": "folder", "data-target-folder": target.folder };
     case "backlink":
       return {
@@ -45,7 +45,7 @@ export function targetAttrs(target: CommandTarget): Record<string, string> {
         "data-target-raw": target.raw,
       };
     case "heading":
-      // targetRaw carries the heading text — it plays the same role as a
+      // targetRaw carries the heading text. It plays the same role as a
       // backlink's raw [[...]]: the query the jump re-finds on the line.
       return {
         "data-target-kind": "heading",
@@ -56,8 +56,8 @@ export function targetAttrs(target: CommandTarget): Record<string, string> {
     case "tag":
       return { "data-target-kind": "tag", "data-target-tag": target.tag };
     case "tagnote":
-      // Backlink's attribute shape: raw is the tag as written on the line,
-      // the reveal query.
+      // Backlink's attribute shape. targetRaw is the reveal query: the tag as
+      // written on the line.
       return {
         "data-target-kind": "tagnote",
         "data-target-path": target.path,
@@ -77,8 +77,8 @@ export function targetAttrs(target: CommandTarget): Record<string, string> {
   }
 }
 
-// A row's dataset back into a target. An attribute set without its partner
-// yields undefined rather than a half-built target pointed at nothing.
+// Decodes a row's dataset back into a target. An attribute set without its
+// partner yields undefined rather than a half-built target.
 export function targetFromDataset(d: TargetDataset): CommandTarget | undefined {
   switch (d.targetKind) {
     case "note":
@@ -86,22 +86,24 @@ export function targetFromDataset(d: TargetDataset): CommandTarget | undefined {
     case "trash":
       return d.targetPath ? { kind: "trash", path: d.targetPath } : undefined;
     case "folder":
-      // An empty folder string is the workspace's top level, which is not a
-      // ROW: the tree draws no row for the root, so an empty attribute here is
-      // a half-built target, not a target on the root.
+      // An empty folder string means the workspace's top level. browserRows
+      // (notes/folders.ts) draws no row for it, so an empty attribute is a
+      // half-built target rather than a target on the top level.
       return d.targetFolder ? { kind: "folder", folder: d.targetFolder } : undefined;
     case "backlink": {
-      // The line rides the DOM as a string; a row that lost (or garbled) it
-      // yields no target at all, per the half-built-target rule above. raw may
-      // legitimately be absent-as-empty — the reveal degrades to line start.
+      // data-target-line comes back as text, so the line is parsed here.
+      // A row that lost or garbled it yields no target, per the
+      // half-built-target rule above. An absent raw is fine: the reveal then
+      // lands on the start of the line (workspace/reveal.ts revealSelection).
       const line = Number(d.targetLine);
       return d.targetPath && Number.isInteger(line) && line >= 1
         ? { kind: "backlink", path: d.targetPath, line, raw: d.targetRaw ?? "" }
         : undefined;
     }
     case "heading": {
-      // Same rules as backlink: a garbled line yields no target; a missing
-      // text degrades to line start rather than dropping the jump.
+      // Same rules as backlink. A garbled line yields no target. With no
+      // text, the jump still happens and lands on the start of the line
+      // (glue.ts jumpToHeading, through revealSelection).
       const line = Number(d.targetLine);
       return d.targetId && Number.isInteger(line) && line >= 1
         ? { kind: "heading", docId: d.targetId, line, text: d.targetRaw ?? "" }
@@ -110,8 +112,9 @@ export function targetFromDataset(d: TargetDataset): CommandTarget | undefined {
     case "tag":
       return d.targetTag ? { kind: "tag", tag: d.targetTag } : undefined;
     case "tagnote": {
-      // Backlink's decoding rules: a garbled line yields no target; a missing
-      // raw degrades to line start rather than dropping the open.
+      // Backlink's decoding rules. A garbled line yields no target. With no
+      // raw, the note still opens and the reveal lands on the start of the
+      // line.
       const line = Number(d.targetLine);
       return d.targetPath && Number.isInteger(line) && line >= 1
         ? { kind: "tagnote", path: d.targetPath, line, raw: d.targetRaw ?? "" }
@@ -130,9 +133,9 @@ export function targetFromDataset(d: TargetDataset): CommandTarget | undefined {
   }
 }
 
-// The target of the nearest enclosing row, or undefined when focus isn't on
-// one — which is every non-list surface, and is what makes the row verbs inert
-// everywhere else.
+// The target of the nearest enclosing row, or undefined when the element is
+// not in one. An element outside every list decodes to no target, so the row
+// verbs do nothing there.
 export function targetFromElement(el: EventTarget | null): CommandTarget | undefined {
   if (!(el instanceof Element)) return undefined;
   const row = el.closest<HTMLElement>("[data-target-kind]");

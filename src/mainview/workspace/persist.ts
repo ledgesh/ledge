@@ -1,29 +1,27 @@
-// Session persistence: the workspace/pane/tab arrangement, serialized to the
-// dotted .layout.json Bun keeps in the app home and rebuilt at boot. The
-// file is machine-written state (architecture.md §6), so this module is where
-// its one hard requirement lives: a corrupt or stale file must self-heal —
-// anything that does not parse or no longer exists costs exactly itself, and
-// total failure falls back to a fresh initialState. Never an error dialog over
-// a file no human edits.
+// Session persistence: the workspace, pane and tab arrangement, serialized to
+// the dotted .layout.json Bun keeps in the app home and rebuilt at boot. The
+// file is machine-written state (architecture.md §6), so this module must
+// rebuild around a corrupt or stale one. Anything that does not parse, or that
+// no longer exists, is dropped and nothing else with it; a file that fails
+// outright falls back to a fresh initialState. No error dialog, since no human
+// edits this file.
 //
-// What is deliberately NOT persisted:
-// - ids (workspace/pane/tab/doc). uid() is a per-process counter; docIds name
-//   live sessions (editors, shells) that die with the process, so a restored
-//   tab gets fresh ids and its editor/shells respawn lazily like any open.
-// - unsaved tabs. A tab never typed in has no file (noteCreate fires on first
-//   edit) and its text lives nowhere but the editor; persisting its existence
-//   without its content would restore a lie. Its pane survives as arrangement
-//   and comes back reseeded with a fresh scratch tab.
-// - tab titles. The boot noteList is authoritative (a note can be retitled
-//   from a shell while Ledge is closed); a persisted title could only be stale.
+// What is not persisted:
+// - ids (workspace, pane, tab, doc). uid() counts per process, and docIds name
+//   live sessions (editors, shells) that end with the process. A restored tab
+//   gets fresh ids and respawns its editor and shells lazily.
+// - unsaved tabs. A tab never typed in has no file, since noteCreate fires on
+//   the first edit, and its text lives nowhere but the editor. Saving the tab
+//   without its text would restore an empty tab. Its pane comes back holding
+//   a fresh scratch tab.
+// - tab titles. A note can be retitled from a shell while Ledge is closed, so
+//   the boot noteList is authoritative and a saved title could only be stale.
 //
-// One thing it DOES save does not come from AppState: which folders the note
-// browser has open lives in notes/expansion.ts, a mirrored module rather than
-// reducer state (architecture.md §5 — several commands act on it, and a field
-// on AppState is a field every reducer test then carries). This module reaches
-// across for it on both legs. Nothing else about it changes: it is per
-// workspace, like everything else in the file, and it is arrangement, like the
-// pane tree it sits beside.
+// One thing this module saves does not come from AppState: which folders the
+// note browser has open. That set lives in notes/expansion.ts, a mirrored
+// module rather than reducer state (architecture.md §5). This module reads it
+// on the way to the file and seeds it on the way back. Which folders are open
+// is arrangement, per workspace, like the pane tree it sits beside.
 import {
   firstLeaf,
   makeNoteTab,
@@ -43,17 +41,17 @@ import type { NoteMeta, TrashMeta, WorkspaceRootInfo } from "../../shared/rpc-sc
 import { expandedIn, seedExpansion } from "../notes/expansion";
 import { folderList } from "../notes/folders";
 
-// The persisted shape, version 2 (v1 predates per-workspace folders; there is
-// no migration — the product is unreleased — so v1 text restores as null and
-// boots fresh). Each workspace carries its notes `folder` (the opaque root
-// handle from Bun) and tabs as note paths; restore only ever opens paths that
-// folder's boot noteList also returned, so a hand-edited file cannot smuggle
-// in another root's file — the tab∈folder invariant is enforced here.
+// The persisted shape, version 2. Version 1 predates per-workspace folders and
+// has no migration (the product is unreleased), so v1 text restores as null
+// and boots fresh. Each workspace carries its notes `folder` (the opaque root
+// handle from Bun) and its tabs as note paths. restoreNode opens only paths
+// that folder's boot noteList also returned, so a hand-edited file cannot
+// smuggle in another root's file.
 //
-// `expanded` arrived after the shape was named and is read defensively for
-// exactly that reason: a file written before it existed is a perfectly good
-// version-2 file whose folders are all closed, which is what the build that
-// wrote it did anyway. Nothing to migrate, so no new version.
+// restore reads `expanded` defensively, since it arrived after the shape was
+// named. A file written before it existed is a good version-2 file whose
+// folders are all closed, and the build that wrote it opened with every folder
+// closed too. Nothing to migrate, so no new version.
 interface PersistedLeaf {
   kind: "leaf";
   tabs: string[];
@@ -81,11 +79,10 @@ interface PersistedLayout {
 }
 
 // Workspaces whose folder is registered but not on disk this session (an
-// unmounted volume). They are dropped from the live AppState — there is
-// nothing to show — but carried VERBATIM through every save, so one unmounted
-// volume costs the session, not the saved layout: remount and relaunch, and
-// the workspace is back as it was. Reset on every restore; appended by
-// serializeLayout below.
+// unmounted volume). restoreLayout drops them from the live AppState (nothing
+// to show) and resets this list; serializeLayout writes them back verbatim. An
+// unmounted volume costs this session's view, never the saved layout: the
+// workspace comes back as it was after a remount and a relaunch.
 let dormant: PersistedWorkspace[] = [];
 
 /** A persisted list of strings, defensively: anything else is an empty one. */
@@ -113,9 +110,9 @@ function persistNode(node: PaneNode, focusedPaneId: string): PersistedNode {
     };
   }
   const kept = node.tabs.filter((t) => t.path !== null);
-  // The active tab's slot among the kept tabs. If the active tab itself is
-  // unsaved (not persisted), fall to the neighbour that slides into its slot —
-  // the same rule closeTab applies, because dropping it at serialize time IS a
+  // The active tab's slot among the kept tabs. When the active tab is itself
+  // unsaved, and so not persisted, fall to the neighbour that slides into its
+  // slot. That is closeTab's rule (store.tsx), and dropping the tab here is a
   // deferred close.
   let activeIndex = kept.findIndex((t) => t.id === node.activeTabId);
   if (activeIndex < 0) {
@@ -144,15 +141,15 @@ export function serializeLayout(state: AppState): string {
         name: ws.name,
         symbol: ws.symbol,
         folder: ws.folder,
-        // Sorted so the text is a function of the SET rather than of the order
-        // it was built in: open a, open b, close b leaves the same folder open
-        // as opening a alone, and an insertion-ordered list would make that a
-        // byte change and so a write of a layout that did not change.
+        // Sorted so the text depends on the set rather than on the order it
+        // was built in. Opening a, opening b and closing b leaves the same
+        // folder open as opening a alone. An insertion-ordered list would make
+        // that a byte change, and so a write of a layout that did not change.
         expanded: [...expandedIn(ws.folder)].sort(),
         root: persistNode(ws.root, ws.focusedPaneId),
       })),
-      // The unmounted-volume workspaces ride along untouched, after the live
-      // ones so selectedIndex stays an index into what the user can see.
+      // The unmounted-volume workspaces follow the live ones, untouched, so
+      // selectedIndex stays an index into what is on screen.
       ...dormant,
     ],
   };
@@ -166,14 +163,14 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 }
 
 // Rebuild one node, degrading per branch: a malformed half of a split costs
-// that half (the sibling takes its place), a whole malformed subtree costs the
-// workspace. `byPath` holds only THIS workspace's folder's notes, which is
+// that half (the sibling takes its place), and a whole malformed subtree costs
+// the workspace. `byPath` holds only this workspace's folder's notes, which is
 // what pins every restored tab inside its own folder. `opened` spans every
-// workspace: a note open twice would be two docIds racing autosaves over one
-// file — the invariant openNote enforces live, enforced here against a file
-// that could have been duplicated by hand.
-// `docs` marks the read-only documentation workspace, where a pane left with
-// no page is NOT reseeded (splitPane's rule, held across a restart).
+// workspace. A note open twice would be two docIds racing autosaves over one
+// file: openNote rules that out while the app runs, and `opened` rules it out
+// for a file that could have been duplicated by hand. `docs` marks the
+// read-only documentation workspace, where a pane left with no page is not
+// reseeded (splitPane's rule, held across a restart).
 function restoreNode(
   raw: unknown,
   byPath: Map<string, NoteMeta>,
@@ -200,7 +197,7 @@ function restoreNode(
   if (raw.kind !== "leaf" || !Array.isArray(raw.tabs)) return null;
 
   // Survivors: paths that are strings, still exist in this workspace's folder
-  // (per its boot noteList — the only authority on paths), and are not already
+  // (per its boot noteList, the only authority on paths), and are not already
   // open in a pane restored before this one. origIndex keys the active-tab
   // fixup below.
   const survivors: Array<{ meta: NoteMeta; origIndex: number }> = [];
@@ -221,11 +218,11 @@ function restoreNode(
     active = Math.min(before, Math.max(survivors.length - 1, 0));
   }
 
-  // A pane whose every tab was pruned survives as arrangement, reseeded like
-  // any fresh pane: an empty pane is a dead grey rectangle (store.tsx), and a
-  // note going missing is not a reason to collapse the user's layout — the
-  // same stance removeTabsBy takes on delete. In the docs workspace it stays
-  // empty instead: the seed there is a note that can never save.
+  // A pane whose every tab was pruned keeps its place in the tree and gets a
+  // fresh scratch tab rather than the "No open notes" placeholder. A missing
+  // note is no reason to collapse the layout, and removeTabsBy leaves an
+  // emptied pane standing on the same grounds (tree.ts). The docs workspace
+  // stays empty: a scratch tab there is a note that can never save.
   const tabs: TabState[] =
     survivors.length > 0
       ? survivors.map((s) => makeNoteTab(s.meta.path, s.meta.title))
@@ -261,8 +258,8 @@ function restoreWorkspace(
 }
 
 // Keep a raw persisted workspace verbatim for re-serialization (the dormant
-// path). Only the fields the shape owns are copied — anything else a
-// hand-editor added dies here, the same cleanup a live round trip would do.
+// path). This copies only the fields the shape owns, dropping anything else a
+// hand-editor added, the same cleanup a live round trip does.
 function keepDormant(raw: Record<string, unknown>, folder: string): void {
   dormant.push({
     name: typeof raw.name === "string" ? raw.name : "",
@@ -273,14 +270,14 @@ function keepDormant(raw: Record<string, unknown>, folder: string): void {
   });
 }
 
-// Rebuild the boot AppState from the saved layout text, or null when there is
-// nothing restorable — no file yet, unparseable JSON, an unknown version, or
-// no workspace surviving validation. Degradation per workspace: a folder no
-// longer registered costs its workspace; a folder registered but unavailable
-// (unmounted volume) is retained dormant — excluded from the state, carried
-// through saves. The caller falls back to initialState; this function never
-// throws, because the file it reads is machine-written and "refuse to boot"
-// is not an acceptable failure mode for it.
+// Rebuild the boot AppState from the saved layout text, or null when nothing
+// is restorable: no file yet, unparseable JSON, an unknown version, or no
+// workspace surviving validation. Each workspace degrades on its own. A folder
+// that is no longer registered costs its workspace. A folder that is
+// registered but unavailable (an unmounted volume) stays dormant: out of the
+// state, carried through saves. The caller falls back to initialState. This
+// never throws, because the file it reads is machine-written and refusing to
+// boot over it is not an acceptable failure.
 // Exported for unit tests; the app goes through restoredState below.
 export function restoreLayout(
   text: string | null,
@@ -324,19 +321,19 @@ export function restoreLayout(
     );
     if (!ws) continue;
     // A docs workspace that restored with no page open is dropped rather than
-    // kept: its panes would hold only reseeded scratch tabs, which in the
-    // read-only docs folder are notes that can never save — and if it was the
-    // SELECTED workspace, the app would boot into that blank with no strip row
-    // to say where it is (a real user hit exactly this). The help button
-    // recreates it on demand, landing on Getting Started.
+    // kept. Its panes hold nothing (a scratch tab in the read-only docs folder
+    // would be a note that can never save), and if it was the selected
+    // workspace the app would boot into that blank with no strip row to say
+    // where it is, which a real user hit. The help button opens the manual
+    // again on Getting Started (commands/registry.ts docs.toggle).
     if (info.kind === "docs" && tabPaths(ws.root).length === 0) continue;
     workspaces.push(ws);
-    // The open folders, pruned to folders this workspace still has — the same
-    // rule as a restored tab, on the same authority: the boot noteList, which
-    // is what folderList derives the tree from. A folder deleted or renamed
-    // from a shell while Ledge was closed simply comes back closed, which is
-    // what an entry matching no row already looked like (notes/expansion.ts);
-    // pruning is what keeps it from riding the file forever.
+    // The open folders, pruned to the folders this workspace still has. The
+    // authority is the boot noteList, the one that prunes a restored tab and
+    // the list folderList derives the folder tree from. A folder deleted or
+    // renamed from a shell while Ledge was closed comes back closed, like any
+    // entry matching no row (notes/expansion.ts). Pruning keeps that entry out
+    // of the file from then on.
     const live = new Set(folderList(notesByFolder[raw.folder] ?? []));
     seedExpansion(
       raw.folder,
@@ -357,11 +354,11 @@ export function restoreLayout(
 }
 
 // The boot state: the saved session if it restores, else a fresh start on the
-// first available workspace folder. This is main.tsx's (and the harness's) one
-// entry point, so the fallback rule lives here rather than at every boot site.
-// No available folder at all (Bun unreachable, or a registry healed to empty
-// before ensureDefault could run) falls to a folder-less state that renders
-// but cannot save — the same degradation the old boot had with no note list.
+// first available workspace folder. boot.tsx and the harness both come through
+// here, so the fallback rule lives here and not at every boot site. With no
+// available folder at all (Bun unreachable, or a registry healed to empty
+// before ensureDefault ran), the state has no folder: it renders but cannot
+// save, the same degradation the old boot had with no note list.
 export function restoredState(
   text: string | null,
   roots: WorkspaceRootInfo[],
@@ -370,9 +367,9 @@ export function restoredState(
 ): AppState {
   const restored = restoreLayout(text, roots, notesByFolder, trashByFolder);
   if (restored) return restored;
-  // Never the docs root: a fresh start must land somewhere a first note can
-  // save, and the read-only documentation is not it (ensureDefault guarantees
-  // a real folder exists whenever Bun was reachable at all).
+  // Never the docs root: a fresh start has to land somewhere a first note can
+  // save, and the documentation folder is read-only. ensureDefault guarantees
+  // a real folder exists whenever Bun was reachable at all.
   const first = roots.find((r) => r.available && r.kind !== "docs");
   const folder = first?.root ?? "";
   return initialState(folder, notesByFolder[folder] ?? [], trashByFolder[folder] ?? []);
@@ -380,10 +377,11 @@ export function restoredState(
 
 // --- the save side ----------------------------------------------------------
 
-// The layout channel, mirroring notes/channel.ts: main.tsx binds save to the
-// layoutSave RPC, the harness to memory. Unconfigured is a silent no-op rather
-// than a throw — a missed layout save must never take the app down, and the
-// debounce timer below fires with no caller left to catch anything.
+// The layout channel, mirroring notes/channel.ts. boot.tsx binds save to the
+// layoutSave RPC, and the harness binds it to memory. Unconfigured is a silent
+// no-op rather than a throw: a missed layout save must never take the app
+// down, and the debounce timer below fires with no caller left to catch
+// anything.
 interface LayoutHandlers {
   save: (text: string) => void;
 }
@@ -400,9 +398,9 @@ let timer: ReturnType<typeof setTimeout> | null = null;
 let pending: string | null = null;
 let lastSaved: string | null = null;
 
-// Called on every workspace-state change (App's effect); serializes eagerly —
-// the trees are small — so identical states (focus bounced and came back, say)
-// collapse to no write at all.
+// Called on every workspace-state change (App.tsx's effect). It serializes
+// eagerly, which is cheap on trees this small. Identical states (focus bounced
+// away and came back, say) then collapse to no write at all.
 export function scheduleLayoutSave(state: AppState): void {
   const text = serializeLayout(state);
   if (text === lastSaved) {
@@ -414,9 +412,9 @@ export function scheduleLayoutSave(state: AppState): void {
   timer = setTimeout(flushLayout, SAVE_DELAY_MS);
 }
 
-// Write the pending layout through now. Called by the timer, and on
-// blur/pagehide alongside the note-autosave flush: quit inside the debounce
-// window is the one exposure, and it is the same one notes have.
+// Write the pending layout through now. Called by the timer, and on blur and
+// pagehide alongside the note-autosave flush (App.tsx). Quitting inside the
+// debounce window is the one exposure, the same one notes have.
 export function flushLayout(): void {
   if (timer !== null) {
     clearTimeout(timer);

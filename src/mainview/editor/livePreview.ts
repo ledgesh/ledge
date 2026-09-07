@@ -1,39 +1,38 @@
 // Live preview: markdown syntax conceals where it is noise and reveals where
-// the caret is. The document is untouched — every conceal is a view-time
+// the caret is. The document is unchanged. Every conceal is a view-time
 // Decoration.replace over marker characters, so the text you edit is still
-// the text on disk; what changes is only whether the markers are drawn. The
-// reveal rule is Obsidian's: an element shows its raw syntax whenever any
-// selection range touches it (endpoints inclusive), which also means the
-// caret can never sit invisibly inside a hidden range — the moment it
-// arrives, the range is no longer hidden. No atomicRanges needed.
+// the text on disk and only the drawing of the markers changes. The reveal
+// rule is Obsidian's: an element shows its raw syntax whenever any selection
+// range touches it, endpoints included. A caret therefore cannot sit inside
+// a hidden range, because arriving there reveals it. No atomicRanges needed.
 //
-// What conceals: emphasis/strong/strikethrough marks, inline-code backticks,
-// ATX heading #s (with their separator space), link/image/autolink syntax
-// (the text stays, styled as a link), wikilink `[[` `]]` brackets (the target
-// stays, styled resolved or dangling — editor/wikilinks.ts owns the grammar
-// and resolution), code-fence ``` marks, the `- ` bullet
-// on task lines (the checkbox is the bullet), escape backslashes, backslash
-// hard breaks, decodable HTML entities (drawn as their character), and
-// `---` thematic breaks (drawn as a rule). Tables and images are the
-// block-level halves of the same idea and live in tables.ts / images.ts (an
-// image alone on its line draws as the image; inline in prose it stays the
-// concealed-link treatment below). What deliberately does not
-// conceal: fence CONTENT (byte-exact code is the app's promise; only the
-// fence marks go), the language label on the opening fence (restyled small,
-// kept as the block's caption), setext underlines and blockquote/list marks
-// (already dimmed; concealing them buys little and the list marks are
-// load-bearing for wrap.ts's column math — the task bullet is the one
-// exception because the checkbox replaces its meaning entirely), ordered
-// task numbers (the number carries information a checkbox doesn't),
-// HTML blocks/tags and link-reference definitions (rendering HTML is a
-// non-goal; raw is honest), undecodable entities, and everything inside the
-// frontmatter block — the markdown parser misreads that block wholesale
-// (frontmatter.ts), so concealment there would hide fences that are not
-// fences.
+// What conceals: emphasis, strong and strikethrough marks, inline-code
+// backticks, ATX heading #s with their separator space, link/image/autolink
+// syntax (the text stays, styled as a link), wikilink `[[` `]]` brackets (the
+// target stays, styled resolved or dangling; editor/wikilinks.ts owns the
+// grammar and resolution), code-fence ``` marks, the `- ` bullet on task
+// lines (the checkbox is the bullet), escape backslashes, backslash hard
+// breaks, decodable HTML entities (drawn as their character), and `---`
+// thematic breaks (drawn as a rule). Tables and images are the block-level
+// halves of the same idea and live in tables.ts and images.ts. An image alone
+// on its line draws as the image; inline in prose it keeps the concealed-link
+// treatment below.
+//
+// What does not conceal: fence content (the app promises byte-exact code, so
+// only the fence marks go), the language label on the opening fence (restyled
+// small, kept as the block's caption), setext underlines, and blockquote and
+// list marks. Those marks are already dimmed, and wrap.ts counts the list
+// marks for its hanging-indent column. The task bullet is the one exception,
+// because the checkbox replaces its meaning. Ordered task numbers stay: the
+// number carries information a checkbox does not. HTML blocks and HTML tags
+// stay raw (rendering HTML is a non-goal), and so do link-reference
+// definitions, undecodable entities and everything inside the frontmatter
+// block. The markdown parser misreads that block wholesale (frontmatter.ts),
+// so concealing there would hide fences that are not fences.
 //
 // Split per testing.md §2: `concealments` and `linkTargetAt` are the pure
-// core (values in, spans out — tested against @lezer/markdown with no DOM);
-// the plugin and click handler below are the thin wrappers.
+// core (values in, spans out, tested against @lezer/markdown with no DOM).
+// The plugin and click handler below are the thin wrappers.
 import type { SyntaxNode, Tree } from "@lezer/common";
 import { syntaxTree } from "@codemirror/language";
 import { StateEffect, type EditorState, type Extension, type Range } from "@codemirror/state";
@@ -59,13 +58,13 @@ export interface Span {
 }
 
 /** One concealment decision. `link`, `wikilink` and `done` mark visible text
- * (never remove it); `link`'s `url` is openableUrl-approved, or null when the
- * link has no openable target (reference links, relative paths) and should be
- * styled only. `wikilink` carries the raw `[[target]]` inner text — whether it
- * resolves to a note is decided at draw time (editor/wikilinks.ts), not here:
- * the core stays pure while the note list lives in the store. `task` replaces
+ * and never remove it. `link`'s `url` is openableUrl-approved, or null when
+ * the link has no openable target (reference links, relative paths) and is
+ * only styled. `wikilink` carries the raw `[[target]]` inner text. Draw time
+ * decides whether that target resolves to a note (editor/wikilinks.ts), so
+ * this core stays pure while the note list lives in the store. `task` replaces
  * a `[ ]`/`[x]` marker with a real checkbox, `rule` a `---` line with a drawn
- * rule, `entity` an HTML entity with its decoded character. */
+ * rule, and `entity` an HTML entity with its decoded character. */
 export type Conceal =
   | (Span & { kind: "hide" })
   | (Span & { kind: "link"; url: string | null })
@@ -75,9 +74,10 @@ export type Conceal =
   | (Span & { kind: "done" })
   | (Span & { kind: "rule" })
   | (Span & { kind: "entity"; text: string })
-  // An inline #hashtag (editor/tags.ts) — emitted ALWAYS, the bare-URL
-  // stance: nothing conceals, the kind exists so the draw side can style
-  // and arm it. `tag` is the text without the `#`.
+  // An inline #hashtag (editor/tags.ts). Nothing conceals, the same stance
+  // as a bare URL: the kind is emitted regardless of what the selection
+  // touches, so the draw side can style the tag and make it clickable. `tag`
+  // is the text without the `#`.
   | (Span & { kind: "tag"; tag: string });
 
 // The slice of a document the core needs: CodeMirror's Text satisfies it, and
@@ -102,30 +102,30 @@ function touches(span: Span, ranges: readonly Span[]): boolean {
   return ranges.some((r) => r.from <= span.to && r.to >= span.from);
 }
 
-/** A selection range as the block reveal rule reads it: the span, plus which
- * end of it the user is holding still. CodeMirror's SelectionRange satisfies
+/** A selection range as the block reveal rule reads it: the span plus its
+ * anchor, the end a drag holds still. CodeMirror's SelectionRange satisfies
  * this. */
 export interface AnchoredSpan extends Span {
   anchor: number;
 }
 
 /**
- * Whether a BLOCK element — a table or an alone-on-its-line image, the two
- * things that draw as a widget of their own height — shows its raw markdown.
+ * Whether a block element shows its raw markdown: a table or an image alone
+ * on its line, the two things that draw as a widget of their own height.
  *
- * Inline concealment reveals on any touch (`touches`, above), but a block
- * cannot use that rule: its widget is taller than the markdown it replaces,
- * so revealing one mid-drag pulls every line below it up past the pointer,
- * which moves the selection's head, which can carry the selection back off
- * the block, which re-renders it and pushes those lines down again. The
- * pointer chases the reflow and the block flaps between its two faces, so a
- * selection spanning one never settles.
+ * Inline concealment reveals on any touch (`touches`, above). A block cannot
+ * use that rule, because its widget is taller than the markdown it replaces.
+ * Revealing one mid-drag pulls every line below it up past the pointer. That
+ * moves the selection's head, which can carry the selection back off the
+ * block. The block then re-renders and pushes those lines down again. The
+ * pointer chases the reflow, the block flips between its two faces for the
+ * rest of the drag, and a selection spanning one never settles.
  *
- * A block therefore reads the ANCHOR: it reveals when a selection STARTS on
- * it, and stays rendered when one merely sweeps across. The anchor is the end
- * a drag holds still, so each block's face is fixed for the whole of a drag
- * in either direction — while a caret landing on the block (anchor and head
- * together) reveals it exactly as before.
+ * A block reads the anchor instead: it reveals when a selection starts on it,
+ * and stays rendered when one only sweeps across. The anchor is the end a
+ * drag holds still, so each block keeps one face for the whole of a drag in
+ * either direction. A caret landing on the block puts anchor and head
+ * together and reveals it as before.
  */
 export function blockRevealed(span: Span, ranges: readonly AnchoredSpan[]): boolean {
   return ranges.some((r) => r.anchor >= span.from && r.anchor <= span.to);
@@ -133,8 +133,8 @@ export function blockRevealed(span: Span, ranges: readonly AnchoredSpan[]): bool
 
 /**
  * Every concealment for `doc` under `selection`, sorted by position. `tree`
- * is the markdown parse (syntaxTree in the editor, @lezer/markdown in tests);
- * `exclude` is a region left raw wholesale — the frontmatter block.
+ * is the markdown parse (syntaxTree in the editor, @lezer/markdown in tests).
+ * `exclude` is a region left raw wholesale: the frontmatter block.
  */
 export function concealments(
   doc: DocSlice,
@@ -143,7 +143,7 @@ export function concealments(
   exclude: Span | null,
 ): Conceal[] {
   const out: Conceal[] = [];
-  // Whether the element owning [span] shows raw right now.
+  // Whether the element owning `span` shows raw right now.
   const revealed = (span: Span) =>
     (exclude !== null && span.from <= exclude.to && span.to >= exclude.from) ||
     touches(span, selection);
@@ -212,9 +212,9 @@ export function concealments(
       if (LINKISH.has(name)) {
         const el = node.node;
         if (revealed(el)) return;
-        // Everything around the visible text is syntax — hidden as two spans
-        // rather than child by child, so the whitespace BETWEEN syntax
-        // children (`](url "title")`) goes with them.
+        // Everything around the visible text is syntax. Two hide spans cover
+        // it, rather than one span per syntax child, so the whitespace
+        // between those children (`](url "title")`) hides too.
         const text = visibleTextSpan(el, name === "Autolink");
         if (!text) {
           out.push({ kind: "hide", from: el.from, to: el.to });
@@ -227,11 +227,11 @@ export function concealments(
       }
 
       // A task's `[ ]`/`[x]` renders as a real checkbox unless the caret is
-      // on the marker itself (caret in the task's TEXT keeps the checkbox —
-      // editing the label should not flicker the marker open). The `- `
-      // bullet before it hides too: the checkbox IS the bullet, so drawing
-      // both is noise (an ordered task's number stays — it carries order).
-      // A checked task's label is styled done whether or not the marker is
+      // on the marker itself. A caret in the task's text keeps the checkbox,
+      // so editing the label does not flicker the marker open. The `- `
+      // bullet before it hides too, since the checkbox stands in for the
+      // bullet. An ordered task's number stays, because it carries order. A
+      // checked task's label is styled done whether or not the marker is
       // concealed, like the link styling on a bare URL.
       if (name === "TaskMarker") {
         const parent = node.node.parent;
@@ -242,9 +242,9 @@ export function concealments(
             ? item.getChild("ListMark")
             : null;
         const checked = /x/i.test(doc.sliceString(node.from, node.to));
-        // Bullet and marker reveal as one unit — a caret between them (or at
-        // line start, via endpoint-inclusive touch) shows the whole raw
-        // prefix rather than a checkbox floating next to a bare `-`.
+        // Bullet and marker reveal as one unit. A caret between them, or at
+        // line start via the endpoint-inclusive touch, shows the whole raw
+        // prefix rather than a checkbox next to a bare `-`.
         if (!revealed({ from: bullet ? bullet.from : node.from, to: node.to })) {
           if (bullet) out.push({ kind: "hide", from: bullet.from, to: node.from });
           out.push({ kind: "task", from: node.from, to: node.to, checked });
@@ -260,7 +260,7 @@ export function concealments(
       }
 
       // A thematic break draws as an actual rule. The node is the whole
-      // `---`/`***` line, so the reveal unit is the line — caret onto it
+      // `---`/`***` line, so the reveal unit is the line. A caret on it
       // shows the raw dashes.
       if (name === "HorizontalRule") {
         if (!revealed(node)) out.push({ kind: "rule", from: node.from, to: node.to });
@@ -273,18 +273,18 @@ export function concealments(
         return;
       }
 
-      // A backslash hard break: the `\` hides (the break it makes stays a
-      // real newline). The two-trailing-spaces form is already invisible —
-      // concealing whitespace buys nothing, so it is left alone.
+      // A backslash hard break: the `\` hides, and the break it makes stays
+      // a real newline. The two-trailing-spaces form is already invisible,
+      // so it is left alone.
       if (name === "HardBreak") {
         if (doc.sliceString(node.from, node.from + 1) !== "\\") return;
         if (!revealed(node)) out.push({ kind: "hide", from: node.from, to: node.from + 1 });
         return;
       }
 
-      // An HTML entity draws as the character it names, when we can decode
-      // it. Unknown names stay raw — showing `&whatever;` is honest; showing
-      // a wrong character is not.
+      // An HTML entity draws as the character it names, when the name
+      // decodes. An unknown name stays raw rather than drawing a character it
+      // may not mean.
       if (name === "Entity") {
         const decoded = decodeEntity(doc.sliceString(node.from, node.to));
         if (decoded !== null && !revealed(node)) {
@@ -293,10 +293,10 @@ export function concealments(
         return;
       }
 
-      // An inline #hashtag: nothing to hide (the # is part of how a tag
-      // reads), but it is a navigable thing and should say so. Skipped in
-      // the frontmatter block — its tags: line has its own styling
-      // (editor/frontmatter.ts), and a # there opens a comment.
+      // An inline #hashtag: nothing hides, because the `#` is part of the
+      // tag, but the span is emitted so the draw side can mark it navigable.
+      // Skipped inside the frontmatter block: its `tags:` line has its own
+      // styling (editor/frontmatter.ts), and a `#` there opens a comment.
       if (name === HASHTAG_NODE) {
         if (exclude !== null && node.from <= exclude.to && node.to >= exclude.from) return;
         out.push({
@@ -308,9 +308,9 @@ export function concealments(
         return;
       }
 
-      // A bare GFM autolink (https://… loose in prose): nothing to hide,
-      // but it is a link and should say so. Skipped inside Link/Autolink,
-      // whose handler above owns it.
+      // A bare GFM autolink (https://… loose in prose): nothing hides, but
+      // the span is emitted so the draw side can style it as a link. Skipped
+      // inside Link/Autolink, whose handler above owns it.
       if (name === "URL") {
         const parent = node.node.parent;
         if (parent && LINKISH.has(parent.name)) return;
@@ -329,9 +329,9 @@ export function concealments(
 }
 
 // The characters entities decode to, without a DOM (the core is DOM-free and
-// so are its tests). Numeric forms decode by code point; named forms come
-// from this table — the ones that plausibly appear in notes, not all 2000+
-// of HTML's. Anything else returns null and stays raw.
+// so are its tests). Numeric forms decode by code point. Named forms come
+// from this table, which holds the ones that plausibly appear in notes rather
+// than all 2000+ of HTML's. Anything else returns null and stays raw.
 const NAMED_ENTITIES: Record<string, string> = {
   amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ",
   copy: "©", reg: "®", trade: "™", deg: "°", middot: "·", bull: "•",
@@ -375,11 +375,11 @@ function visibleTextSpan(el: SyntaxNode, autolink: boolean): Span | null {
 }
 
 /**
- * The link element a follow-the-link gesture at `pos` addresses: its span
- * (the reveal unit — what a selection must touch for the link to be showing
- * raw) and its openable URL, or null. Resolves through the tree from both
- * sides of the position so a caret at either edge of a link still counts as
- * "on" it.
+ * The link element a follow-the-link gesture at `pos` addresses, or null. The
+ * span is the reveal unit: what a selection must touch for the link to show
+ * raw. The url is its openable target. Resolves through the tree from both
+ * sides of the position, so a caret at either edge of a link still counts as
+ * being on it.
  */
 export function linkAt(
   doc: DocSlice,
@@ -406,12 +406,11 @@ export function linkTargetAt(doc: DocSlice, tree: Tree, pos: number): string | n
 
 const HIDE = Decoration.replace({});
 const FENCE_INFO = Decoration.mark({ class: "ledge-fence-lang" });
-// Two openable variants because the gesture differs by reveal state (see
-// clickToOpen): a rendered link opens on plain click and gets its hand
-// cursor from an overlay hotspot (hotspotPlugin below — in-editor `cursor`
-// is unreliable in the WKWebView, the same story as the block buttons); a
-// revealed one is raw text under the I-beam that needs ⌘. The data-url on
-// the live mark is what the hotspot layer looks for.
+// Two openable variants, because the gesture differs by reveal state (see
+// clickToOpen). A rendered link opens on a plain click, and its hand cursor
+// comes from hotspotPlugin below, which finds the mark by its data-url (the
+// WKWebView does not reliably honour in-editor `cursor`, as with the block
+// buttons). A revealed link is raw text under the I-beam and needs ⌘.
 const liveLinkMarks = new Map<string, Decoration>();
 function liveLink(url: string): Decoration {
   let mark = liveLinkMarks.get(url);
@@ -432,8 +431,9 @@ const LINK_OPENABLE = Decoration.mark({
 const LINK_PLAIN = Decoration.mark({ class: "ledge-mdlink" });
 const DONE = Decoration.mark({ class: "ledge-task-done" });
 
-// A rendered wikilink whose title resolves: opens on plain click, hand cursor
-// via the hotspot layer keying on data-wiki (the same story as data-url).
+// A rendered wikilink whose title resolves. It opens on a plain click, and
+// the hotspot layer gives it a hand cursor by keying on data-wiki, the same
+// way it keys on data-url for a link.
 const liveWikiMarks = new Map<string, Decoration>();
 function liveWiki(target: string): Decoration {
   let mark = liveWikiMarks.get(target);
@@ -447,19 +447,19 @@ function liveWiki(target: string): Decoration {
   }
   return mark;
 }
-// A rendered wikilink naming no note. Deliberately still link-shaped but
-// visibly quieter: dangling is a statement about the title, not an error, and
-// a plain click on it is a caret move that reveals the raw text for fixing.
+// A rendered wikilink naming no note. It stays link-shaped but is drawn
+// quieter, since a dangling title is not an error. A plain click on it moves
+// the caret, which reveals the raw text for fixing.
 const WIKI_DANGLING = Decoration.mark({
   class: "ledge-wikilink-dangling",
   attributes: { title: "No note with this title" },
 });
 
-// An inline #tag the selection is not touching: opens the Tags panel on
-// plain click, hand cursor via the hotspot layer keying on data-tag (the
-// data-url/data-wiki story). The touched variant below is the same pill
-// without the affordance — the caret is in it, so a click is a caret move
-// and ⌘-click (clickToOpen) is the opener, the link grammar throughout.
+// An inline #tag the selection is not touching. A plain click opens the Tags
+// panel, and the hand cursor comes from the hotspot layer keying on data-tag
+// (like data-url and data-wiki). TAG_PLAIN below is the same pill without
+// those: the caret is in it, so a click moves the caret and ⌘-click
+// (clickToOpen) opens the tag.
 const liveTagMarks = new Map<string, Decoration>();
 function liveTag(tag: string): Decoration {
   let mark = liveTagMarks.get(tag);
@@ -475,10 +475,10 @@ function liveTag(tag: string): Decoration {
 }
 const TAG_PLAIN = Decoration.mark({ class: "ledge-hashtag" });
 
-// A concealed task marker, as a real checkbox. The input handles its own
-// mousedown (ignoreEvent keeps CodeMirror from treating it as a click into
-// the text) and toggles the `[ ]`/`[x]` in the DOCUMENT — the widget never
-// owns state, it re-renders from the text like everything else.
+// A concealed task marker, drawn as a real checkbox. The input handles its
+// own mousedown (ignoreEvent keeps CodeMirror from treating it as a click
+// into the text) and toggles the `[ ]`/`[x]` in the document. The widget
+// holds no state of its own: it re-renders from the text.
 class TaskWidget extends WidgetType {
   constructor(readonly checked: boolean) {
     super();
@@ -503,8 +503,8 @@ class TaskWidget extends WidgetType {
   }
 }
 
-// A `---` line, drawn as a rule. Spans only the line's text (never the line
-// break), so it is safe from a ViewPlugin.
+// A `---` line, drawn as a rule. The replaced span covers the line's text and
+// never the line break, so a ViewPlugin can supply it.
 class RuleWidget extends WidgetType {
   eq() {
     return true;
@@ -532,13 +532,12 @@ class EntityWidget extends WidgetType {
 }
 
 /**
- * The `[ ]` / `[x]` marker on `pos`'s line, or null. Read by the toggle below
+ * The `[ ]` / `[x]` marker on `pos`'s line, or null. Read by the toggle below,
  * and by the editor's context menu, which offers Toggle Checkbox only where
- * there is a box to toggle (interactions.md §11).
- *
- * The result rides on an object property rather than a bare local: the
- * assignment happens inside the iterate() callback, and TS control-flow
- * analysis cannot see a closure run (blocks.ts blockAt does the same).
+ * there is one (interactions.md §11). The marker rides on an object property
+ * rather than a local: TS control-flow analysis cannot see the iterate()
+ * callback run, so a local would stay narrowed to `null` after the call
+ * (blocks.ts blockAt does the same).
  */
 export function taskMarkerAt(state: EditorState, pos: number): Span | null {
   const line = state.doc.lineAt(pos);
@@ -590,23 +589,24 @@ function buildDecorations(state: EditorState): DecorationSet {
       ranges.push(Decoration.replace({ widget: new EntityWidget(s.text) }).range(s.from, s.to));
     else if (s.kind === "wikilink") {
       // Resolution happens here, at draw time, against the note's own
-      // workspace list — never in the pure core. Emitted only untouched
-      // (concealed), so a resolved one is always the plain-click kind.
+      // workspace list, never in the pure core. A wikilink span is emitted
+      // only when untouched (concealed), so a resolved one always gets the
+      // plain-click mark.
       const parsed = parseWikiTarget(s.target);
       const resolved =
         parsed !== null &&
         resolveWikiTitle(parsed.title, wikiNotes(state.facet(sessionIdFacet))) !== null;
       ranges.push((resolved ? liveWiki(s.target) : WIKI_DANGLING).range(s.from, s.to));
     } else if (s.kind === "tag") {
-      // Emitted always (bare-URL stance), so touched-ness decides here: a
-      // touched tag is text being edited and must not arm a hotspot under
-      // the caret.
+      // Tag spans are emitted always (the bare-URL stance), so touching
+      // decides here. A touched tag is text being edited, and must not arm a
+      // hotspot under the caret.
       const live = !touches(s, state.selection.ranges);
       ranges.push((live ? liveTag(s.tag) : TAG_PLAIN).range(s.from, s.to));
     } else {
-      // A link mark whose element the selection is not touching is rendered
-      // (concealed links are only ever emitted untouched; bare URLs are
-      // emitted always) — plain click opens it, and the tooltip says so.
+      // A link the selection is not touching is rendered, and a plain click
+      // opens it. The tooltip says so. Concealed links are emitted only when
+      // untouched; bare URLs are emitted always.
       const live = s.url !== null && !touches(s, state.selection.ranges);
       ranges.push((s.url ? (live ? liveLink(s.url) : LINK_OPENABLE) : LINK_PLAIN).range(s.from, s.to));
     }
@@ -614,9 +614,10 @@ function buildDecorations(state: EditorState): DecorationSet {
   return Decoration.set(ranges, true);
 }
 
-// The store's note lists changed (create/rename/delete), so a wikilink's
-// resolved-vs-dangling answer may have too. App broadcasts this to every
-// pooled editor; the conceal plugin rebuilds on it like on an edit.
+// The store's note lists changed (create, rename, delete), so a wikilink's
+// resolved-or-dangling answer may have changed too. App.tsx broadcasts this
+// to every pooled editor, and the conceal plugin rebuilds on it as on an
+// edit.
 const wikiRefresh = StateEffect.define<null>();
 
 /** Redraw `view`'s wikilinks against the current note lists. */
@@ -624,9 +625,10 @@ export function refreshWikilinks(view: EditorView): void {
   view.dispatch({ effects: wikiRefresh.of(null) });
 }
 
-// Rebuilt on selection moves as well as edits — the reveal follows the caret.
-// Full-doc like blocks.ts's decoration pass, and cheap for the same reason:
-// notes are small, and the parse is already paid for.
+// Rebuilt on selection moves as well as edits, so the reveal follows the
+// caret. The pass covers the whole document, like blocks.ts's decoration
+// pass, and is cheap for the same reason: notes are small, and the parse is
+// already paid for.
 const concealPlugin = ViewPlugin.fromClass(
   class {
     decorations: DecorationSet;
@@ -646,23 +648,22 @@ const concealPlugin = ViewPlugin.fromClass(
   { decorations: (v) => v.decorations },
 );
 
-// A RENDERED link opens on plain click — while its syntax conceals it acts
-// like a widget, same reasoning as the checkbox: the caret-move grammar
-// protects editable text, and what you see isn't the text. A REVEALED link
-// (selection touching it — raw syntax showing) is exactly that text being
-// edited, so a plain click there stays a caret move and ⌘-click is the
-// opener, same grammar as the frontmatter profile name. Mouse-editing a
-// rendered link: click anything adjacent (or arrow in), which reveals it.
-// Consumes the event only when it actually opens something, so CodeMirror's
-// own ⌘-click (add a cursor) survives everywhere else.
+// A rendered link opens on a plain click: with its syntax concealed it acts
+// like the checkbox widget, not like the text a caret move protects. A
+// revealed link is the selection touching it, raw syntax showing, and that is
+// the text being edited. There a plain click moves the caret and ⌘-click
+// opens, the same grammar as the frontmatter profile name. Clicking beside a
+// rendered link, or arrowing into it, reveals it for editing. The event is
+// consumed only on an open, so CodeMirror's own ⌘-click (add a cursor) still
+// works elsewhere.
 const clickToOpen = EditorView.domEventHandlers({
   mousedown: (event, view) => {
     if (event.button !== 0) return false;
     const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
     if (pos === null) return false;
-    // Wikilinks first (a WikiLink node can never nest a Link, so first hit
-    // wins). Same click grammar as URLs; a DANGLING one falls through to the
-    // caret move — clicking it is how you reveal and fix the title.
+    // Wikilinks first: a WikiLink node can never nest a Link, so the first
+    // hit wins. Same click grammar as URLs. A dangling one falls through to
+    // the caret move, which reveals the raw title for fixing.
     const wiki = wikiTargetAt(view.state.doc, syntaxTree(view.state), pos);
     if (wiki) {
       if (!event.metaKey && touches(wiki, view.state.selection.ranges)) return false;
@@ -673,10 +674,10 @@ const clickToOpen = EditorView.domEventHandlers({
       openWikiNote(docId, wiki.target);
       return true;
     }
-    // Tags next: same grammar — rendered opens on plain click, touched
-    // (revealed under the caret) needs ⌘. Unlike a dangling wikilink there
-    // is no unresolvable case: a tag always leads to the panel, even when
-    // its only bearer is this very line.
+    // Tags next, on the same grammar: rendered opens on a plain click, and a
+    // touched one (revealed under the caret) needs ⌘. A tag has no
+    // unresolvable case the way a wikilink does. It always opens the panel,
+    // even when the only note carrying it is this one.
     const tag = tagAt(view.state.doc, syntaxTree(view.state), pos);
     if (tag) {
       if (!event.metaKey && touches(tag, view.state.selection.ranges)) return false;
@@ -687,9 +688,9 @@ const clickToOpen = EditorView.domEventHandlers({
     const link = linkAt(view.state.doc, syntaxTree(view.state), pos);
     if (!link?.url) return false;
     if (!event.metaKey && touches(link, view.state.selection.ranges)) return false;
-    // Stop the native contenteditable click too: without this the browser
-    // still moves the DOM selection, CodeMirror syncs it back, and the
-    // caret lands in the link — revealing what the user just followed.
+    // Stop the native contenteditable click too. Without this the browser
+    // still moves the DOM selection, CodeMirror syncs it back, and the caret
+    // lands in the link, revealing the link that was just followed.
     event.preventDefault();
     openExternal(link.url);
     return true;
@@ -697,15 +698,15 @@ const clickToOpen = EditorView.domEventHandlers({
 });
 
 // --- Cursor hotspots ---------------------------------------------------------
-// The hand cursor over rendered links and checkboxes, WKWebView-proof. The
-// WebView does not reliably honour `cursor` on anything inside the
-// `.cm-editor` editing context (the block buttons hit this first — see the
-// overlay comment in blocks.ts); elements OUTSIDE that subtree behave. So a
-// body-parented layer pins over the editor and floats one invisible
-// `cursor: pointer` div over every rendered link and task checkbox. The
-// hotspot also owns the click: open for links, toggle for checkboxes — the
-// same actions the in-editor handlers implement, which stay for the engines
-// and paths (keyboard, ⌘-click on revealed text) the hotspots do not cover.
+// The hand cursor over rendered links and checkboxes, made WKWebView-proof.
+// The WebView does not reliably honour `cursor` on anything inside the
+// `.cm-editor` editing context (the block buttons hit this first: see
+// blocks.ts's overlay comment). Elements outside that subtree do honour it,
+// so a body-parented layer pins over the editor and floats one invisible
+// `cursor: pointer` div over every rendered link and task checkbox. Each
+// hotspot also owns its click: open for links, toggle for checkboxes. The
+// in-editor handlers do the same, and stay for the engines and paths the
+// hotspots do not cover (the keyboard, ⌘-click on revealed text).
 interface Hotspot {
   left: number;
   top: number;
@@ -735,17 +736,16 @@ const hotspotPlugin = ViewPlugin.fromClass(
     }
 
     update(u: ViewUpdate) {
-      // Any effect counts, which is how a detach reaches this layer at all.
-      // The pool dispatches a bare effect when it parents an editor into a
-      // pane or takes it out of one (editorPool.ts pingOverlay), and that
-      // transaction changes no document, no selection, no viewport and no
-      // geometry — a detached view has none of the last to change. Without
-      // this clause the measure never ran, so the layer stayed in <body> with
-      // the hotspots it last read, in viewport coordinates, over whichever
-      // editor came to the front. They are invisible and they are not inert:
-      // a click meant for the caret opened a background tab's note. The same
-      // clause is in blocks.ts's overlay, which is why that one collapsed and
-      // this one did not.
+      // Any effect counts, which is how a detach reaches this layer. The pool
+      // dispatches a bare effect when it parents an editor into a pane or
+      // takes it out of one (editorPool.ts pingOverlay), and that transaction
+      // changes no document, no selection, no viewport and no geometry: a
+      // detached view has none of the last to change. Without this clause the
+      // measure never ran. The layer sat in <body> with the hotspots it last
+      // read, in viewport coordinates, over whichever editor came to the
+      // front, and a click meant for the caret opened a background tab's note.
+      // blocks.ts's overlay has the same clause, which is why that one
+      // collapsed and this one did not.
       const pinged = u.transactions.some((t) => t.effects.length > 0);
       if (u.docChanged || u.viewportChanged || u.geometryChanged || u.selectionSet || pinged) {
         this.schedule();
@@ -786,8 +786,8 @@ const hotspotPlugin = ViewPlugin.fromClass(
           });
         }
       }
-      // Rendered wikilinks: same layer, but the click opens a NOTE (via the
-      // bridge into the store) instead of leaving the app.
+      // Rendered wikilinks: same layer, but the click opens a note through
+      // the bridge into the store instead of leaving the app.
       for (const el of view.contentDOM.querySelectorAll<HTMLElement>("[data-wiki]")) {
         const target = el.dataset.wiki;
         if (!target) continue;
@@ -848,8 +848,8 @@ const hotspotPlugin = ViewPlugin.fromClass(
         el.title = spot.title;
         el.addEventListener("mousedown", (e) => {
           if (e.button !== 0) return;
-          // Keep the editor's focus and caret where they are — the hotspot
-          // acts, it does not edit.
+          // Keep the editor's focus and caret where they are. The hotspot
+          // acts on the click without editing.
           e.preventDefault();
           spot.act();
         });
@@ -866,10 +866,9 @@ const hotspotPlugin = ViewPlugin.fromClass(
 
 /** What a follow-the-link gesture at `pos` would open, or null. Every kind a
  * caret can sit on: a wikilink names a note, a #tag the Tags panel, a URL
- * something outside the app. One lookup with two callers — the Open Link
- * command below, and the editor's context menu deciding whether to offer it
- * (interactions.md §11) — so a menu that offers the verb cannot then find
- * nothing to do. */
+ * something outside the app. The Open Link command below and the editor's
+ * context menu (interactions.md §11) share this one lookup, so a menu that
+ * offers the verb cannot then find nothing to do. */
 export function followableAt(
   state: EditorState,
   pos: number,

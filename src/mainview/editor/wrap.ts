@@ -7,19 +7,18 @@ import {
   type ViewUpdate,
 } from "@codemirror/view";
 
-// The column where a line's content begins: its leading whitespace plus any
-// Markdown list / ordered / blockquote markers that precede the text. This is
-// what a wrapped continuation row should hang-indent to, so the second visual
-// row lines up under the content rather than snapping back to column 0.
+// The column where a line's content begins: leading whitespace plus any
+// bullet, ordered-list, or blockquote markers before the text. Wrapped
+// continuation rows line up at this column instead of going back to column
+// 0. A marker counts only when whitespace follows it, matching Markdown's
+// own rule ("- x" is a bullet, "-x" and a lone "---" are not).
 //
-// A marker only counts when whitespace follows it, matching Markdown's own rule
-// ("- x" is a bullet, "-x" and a lone "---" are not). Headings (#) are left at 0
-// on purpose: their text is a larger font, so a ch-based hang would misalign, and
-// wrapped headings read fine flush-left.
+// Headings (#) are left at column 0. setup.ts sizes h1 to h4 up, so a
+// ch-based hang would misalign them. Wrapped headings read fine flush-left.
 //
-// Measured in characters. The editor is monospace, so one character is one `ch`,
-// which is what the decoration below uses. Tabs count as one column (rare in
-// notes; not worth expanding here).
+// The count is in characters. The editor is monospace, so one character is
+// one `ch`, the unit the decoration below uses. A tab counts as one column:
+// tabs are rare in notes, so nothing here expands them to a tab stop.
 const INDENT_RE = /^[ \t]*(?:(?:[-*+]|\d{1,9}[.)]|>)[ \t]+)*/;
 
 export function hangingIndentCols(lineText: string): number {
@@ -27,15 +26,15 @@ export function hangingIndentCols(lineText: string): number {
   return m ? m[0].length : 0;
 }
 
-// A line decoration per visible line that hangs its wrapped rows under the
-// content column: `margin-left` shifts the whole line right by N columns, and a
-// matching negative `text-indent` pulls the first row back to 0, so only the
-// wrapped continuation rows keep the indent.
+// Hangs wrapped rows under the content column. `margin-left` shifts a line
+// right by N columns. A matching negative `text-indent` pulls its first row
+// back to column 0, so only the wrapped rows keep the indent. Each visible
+// line with a nonzero hang gets one decoration.
 //
-// MARGIN, not padding: CodeMirror's base theme already gives .cm-line a small
-// padding-left, and an inline padding REPLACES it — so every list line lost
-// those pixels and its marker sat left of the column plain prose starts at.
-// Margin composes with the base padding instead of standing in for it.
+// The decoration sets margin, not padding. CodeMirror's base theme gives
+// .cm-line a small padding-left, and an inline padding replaces it rather
+// than adding to it: list lines lose those pixels, and the marker sits left
+// of where plain prose starts. Margin composes with the base padding.
 function buildDecorations(view: EditorView): DecorationSet {
   const builder = new RangeSetBuilder<Decoration>();
   for (const { from, to } of view.visibleRanges) {
@@ -70,9 +69,10 @@ const hangingIndent = ViewPlugin.fromClass(
   { decorations: (v) => v.decorations },
 );
 
-// Soft-wrap long lines (prose and code fences alike) and hang wrapped rows under
-// their content column. Global wrap is the right default for a notes editor:
-// horizontal scrolling loses text off the right edge, which a note should never do.
+// Soft-wrap long lines (prose and code fences alike) and hang wrapped rows
+// under their content column. Without wrapping the editor scrolls
+// horizontally, and part of a note sits out of view past the right edge.
+// `EditorView.lineWrapping` applies to the whole document.
 export function wrapping() {
   return [EditorView.lineWrapping, hangingIndent];
 }

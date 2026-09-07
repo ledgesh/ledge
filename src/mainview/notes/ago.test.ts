@@ -6,8 +6,8 @@ const MIN = 60 * SEC;
 const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
 
-// A fixed "now" rather than Date.now(): the boundaries below are the whole point
-// of the test, and a real clock would make them flaky.
+// A fixed "now" rather than Date.now(). The tests below assert the exact
+// boundaries between labels, and a real clock would make these tests flaky.
 const NOW = 1_700_000_000_000;
 const ago = (delta: number) => agoLabel(NOW - delta, NOW);
 
@@ -27,8 +27,9 @@ describe("agoLabel", () => {
   });
 
   test("rounds down, never up", () => {
-    // 23h59m is not yet a day. Rounding up here would show a note as older than
-    // it is, against a 30-day eviction that is counting the real number.
+    // 23h59m is not yet a day. These cases pin the floor at each step, so the
+    // label never runs ahead of the age the trash purge measures from the file
+    // itself (bun/notes.ts purgeTrash, 30 days by default).
     expect(ago(DAY - MIN)).toBe("23h ago");
     expect(ago(HOUR - SEC)).toBe("59m ago");
     expect(ago(1.9 * DAY)).toBe("1d ago");

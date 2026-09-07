@@ -57,8 +57,11 @@ describe("bold / italic toggling", () => {
   });
 
   test("italic on bold content does not steal a bold star", () => {
-    // The classic off-by-one: *un*-wrapping `**x**` by one star would silently
-    // turn bold into italic. Parity keeps it additive instead.
+    // Italic decides from star parity, instead of matching a literal marker.
+    // In `**hello**` there are two stars on each side of the word, an even
+    // number on both, so italic is off. Toggling it on adds a star to each
+    // side. Un-wrapping by one star per side instead would leave `*hello*`
+    // and lose the bold.
     expect(italic(state("**hello**", 2, 7))).toEqual({ doc: "***hello***", from: 3, to: 8 });
   });
 

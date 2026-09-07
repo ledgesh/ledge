@@ -1,10 +1,11 @@
 import { useWorkspace } from "./store";
 import { PaneTree } from "./PaneTree";
 
-// The right-hand content: the selected workspace's pane tree. Keyed by workspace
-// id so switching workspaces gives a fresh view tree (matching the Swift build's
-// `.id(session.id)`); the editors themselves survive in the pool, so switching
-// back restores each pane's caret, scroll, and inline output.
+// The main content area, right of the sidebar: the selected workspace's pane
+// tree. The `key` is the workspace id, so switching workspaces remounts this
+// subtree (the Swift build did the same with `.id(session.id)`). The editors
+// stay in the pool (editorPool.ts), so switching back restores each pane's
+// caret, scroll, and inline output.
 export function WorkspaceView() {
   const { selected } = useWorkspace();
   return (

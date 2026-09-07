@@ -1,29 +1,25 @@
-// An unterminated fence closes itself — on the mark that completes the opener,
-// and on Enter.
+// An unterminated fence closes itself: on the mark that completes the opener,
+// and on Enter. The grammar of both halves is interactions.md §3, the "Fence
+// auto-close" row.
 //
-// Typing `---` on line 1 (frontmatter) or ```lang anywhere (code) has an ugly
-// in-between moment: until the closing fence exists, the parser reads the rest
-// of the note as the fence's inside — everything below the caret dims or
-// restyles as code mid-gesture. Where a block already sits below, it is worse
-// than cosmetic: THAT block's closing fence pairs with the new opener instead,
-// and the block between them, its own opening fence included, becomes content
-// of the one being typed. Bracket-autoclose semantics fix it. The third
-// backtick (or tilde) plants the matching closer on the next line and leaves
-// the caret where it was, so the info string still gets typed and the merged
-// state never exists at all.
+// The openers are `---` on line 1 (frontmatter) and ```lang anywhere (code).
+// Until a closing fence exists, the parser reads the rest of the note as the
+// fence's inside. Text below the caret restyles as code, and a block already
+// sitting below is swallowed (see `pairedBelow`).
 //
-// Enter is the other half, for the openers typing never sees: a line-1 `---`
-// (three dashes are a thematic break or a Setext rule everywhere else, so only
-// the Enter that commits the line can read them as frontmatter), a pasted
-// opener, an opener whose closer was deleted. It inserts the closing fence and
-// leaves the caret on the empty line between. Both halves act on the
-// UNTERMINATED case only: on the opener of a block that already has an end,
-// Enter is an ordinary newline and a typed mark is an ordinary mark.
+// Typing gets bracket-autoclose semantics. The third backtick or tilde plants
+// the matching closer on the next line, so the note is never left
+// unterminated. Enter is the other half, for the openers typing never sees: a
+// pasted opener, an opener whose closer was deleted, and line 1's `---`. In
+// those the unterminated state already exists, and Enter repairs it. Line 1's
+// `---` waits for Enter because three dashes are a thematic break or a Setext
+// rule everywhere else, so only the Enter that commits the line can read them
+// as frontmatter. Both halves act only on an opener no closer answers.
 //
-// Fence pairing here is the text scan, not the syntax tree: the decision runs
-// between two fast keystrokes (quotes.ts's timing problem), and what it needs
-// — is some earlier fence still open, does any later line close this one — is
-// a line walk both ends of the app already agree on, not a parse.
+// Fence pairing here is a text scan, not the syntax tree. The decision runs
+// between two fast keystrokes (quotes.ts's timing problem). Both questions it
+// asks (is some earlier fence still open, does any later line close this one)
+// are a line walk both ends of the app already agree on.
 import {
   Prec,
   type EditorState,
@@ -38,14 +34,14 @@ import { frontmatterEnd } from "../../shared/frontmatter";
 const FM_FENCE = /^---[ \t\r]*$/;
 
 // A code-fence opener per CommonMark: up to 3 spaces of indent, then ``` or
-// ~~~ (3+ marks), then an info string — which may not contain a backtick for
-// backtick fences (` ```js`` ` is not a fence).
+// ~~~ (3+ marks), then an info string. A backtick fence's info string may not
+// contain a backtick (` ```js`` ` is not a fence).
 const OPEN_TICK = /^( {0,3})(`{3,})([^`]*)$/;
 const OPEN_TILDE = /^( {0,3})(~{3,})(.*)$/;
 
 /**
- * The line's code-fence opener shape — its indent and fence marks — or null.
- * Pure so the grammar is testable line by line.
+ * The line's code-fence opener shape (its indent and its fence marks), or
+ * null. Pure, so the grammar is testable line by line.
  */
 export function fenceOpener(lineText: string): { indent: string; marker: string } | null {
   const m = OPEN_TICK.exec(lineText) ?? OPEN_TILDE.exec(lineText);
@@ -64,16 +60,16 @@ export function fenceCloser(lineText: string, marker: string): boolean {
 
 /**
  * Whether a closer below already answers a fence opened with `marker`, reading
- * only as far as the FIRST fence-shaped line: that line is the whole answer,
+ * only as far as the first fence-shaped line. That line is the whole answer,
  * and everything past it belongs to some other block.
  *
  * Scanning the whole rest of the note instead (any closer, anywhere) is what
- * stopped a fence typed ABOVE an existing block from closing: the block below
- * owns a closer, so the opener looked answered. It is not answered, it is
- * about to eat that block — CommonMark pairs the new opener with that closer
- * and everything between them, the other block's own fence line included,
- * becomes its content. That merge is exactly what this command exists to
- * prevent, so the line that decides has to be the first one, not any one.
+ * stopped a fence typed above an existing block from closing: that block owns
+ * a closer, so the new opener looked answered. What happened instead was a
+ * merge. CommonMark pairs the new opener with that closer, and everything
+ * between them, the other block's own fence line included, becomes its
+ * content. Preventing that merge is why the line that decides is the first
+ * one, not any one.
  *
  * A line that opens but cannot close (it carries an info string, or the other
  * mark character) is another block beginning, so this fence still needs a
@@ -90,8 +86,8 @@ export function pairedBelow(lines: string[], marker: string): boolean {
 
 /**
  * The marker of the fence still open after reading `lines`, or null when they
- * end outside any fence. The walk both cases below share: a fence line toggles
- * state, everything else is content.
+ * end outside any fence. A fence line toggles the state, everything else is
+ * content.
  */
 function openMarkerAfter(lines: string[]): string | null {
   let open: string | null = null;
@@ -124,18 +120,18 @@ export const closeFence: StateCommand = ({ state, dispatch }) => {
 
   let closer: string | null = null;
   if (line.number === 1 && FM_FENCE.test(line.text)) {
-    // Line 1's `---` opens frontmatter — unless a closing fence already
-    // exists, in which case the block is real and Enter is just editing it.
+    // Line 1's `---` opens frontmatter, unless a closing fence already exists.
+    // Then the block is real and Enter is ordinary editing.
     const head = state.sliceDoc(0, Math.min(HEAD_BYTES, state.doc.length));
     if (frontmatterEnd(head) !== 0) return false;
     closer = "---";
   } else {
     const f = fenceOpener(line.text);
     if (!f) return false;
-    // Lines above decide what this line IS: inside a still-open fence it is
+    // Lines above decide what this line is: inside a still-open fence it is
     // content or the closer, not an opener. The walk starts after any
-    // frontmatter block — its fences are params, not code, and a fence-shaped
-    // line INSIDE the block is params too.
+    // frontmatter block, whose fences are params rather than code. A
+    // fence-shaped line inside that block is params too.
     const fmEnd = frontmatterEnd(state.sliceDoc(0, Math.min(HEAD_BYTES, state.doc.length)));
     if (line.from < fmEnd) return false;
     const above = state.sliceDoc(fmEnd, line.from);
@@ -158,10 +154,11 @@ export const closeFence: StateCommand = ({ state, dispatch }) => {
 };
 
 /**
- * The caret line as it will read once `mark` lands at its end — indent, three
- * or more marks of one character, nothing else — or null when it will not be a
- * bare fence line. An info string cannot be there yet: the mark is going in at
- * the END of the line, so anything already following it would be in the way.
+ * The caret line as it will read once `mark` lands at its end (indent, then
+ * three or more marks of one character, nothing else), or null when it will
+ * not be a bare fence line. An info string cannot be there yet: the mark goes
+ * in at the end of the line, so any text already on the line would fall
+ * between the fence marks and the mark being typed.
  */
 function bareFence(before: string, mark: string): { indent: string; marker: string } | null {
   if (mark !== "`" && mark !== "~") return null;
@@ -189,8 +186,8 @@ export function typedFence(state: EditorState, mark: string): TransactionSpec | 
   if (range.head !== line.to) return null;
   const f = bareFence(line.text, mark);
   if (!f) return null;
-  // Lines above decide what this line IS, exactly as in closeFence: inside a
-  // still-open fence the mark being typed CLOSES that block rather than
+  // Lines above decide what this line is, exactly as in closeFence. Inside a
+  // still-open fence the mark being typed closes that block rather than
   // opening one, and inside frontmatter it is params.
   const fmEnd = frontmatterEnd(state.sliceDoc(0, Math.min(HEAD_BYTES, state.doc.length)));
   if (line.from < fmEnd) return null;
@@ -219,30 +216,29 @@ export function typedFence(state: EditorState, mark: string): TransactionSpec | 
   };
 }
 
-// --- the block a finger asks for --------------------------------------------
+// --- inserting a block as a command ------------------------------------------
 //
-// Everything above answers a fence being TYPED, which is the desktop's way in
-// and no way at all on a phone: the backtick is not on the iPhone keyboard's
-// letter page, so the three that open a block are three trips through the
-// numeric page and a long press each (ios.md §7). `format.codeBlock` is the
-// same act as a verb, so the accessory bar can name it and the palette can
-// offer it (interactions.md §1a).
+// Everything above answers a fence being typed, which is the desktop's way in.
+// It is no way at all on a phone: the backtick is not on the iPhone keyboard's
+// letter page, so the three marks that open a block are three trips through
+// the numeric page with a long press each (ios.md §7). `format.codeBlock`
+// exposes the same act as a command, so the accessory bar can name it and the
+// palette can offer it (interactions.md §1a).
 //
-// It writes a language rather than a bare fence, because a bare fence is the
-// one shape that cannot RUN: the ▶ comes from the info string's first word
-// being in `blocks.runnable` (editor/blocks.ts isRunnable), so a command that
-// left the info empty would hand a phone the block it could not use and no
-// hint about why.
+// The command writes a language rather than a bare fence, because a bare fence
+// cannot run. The ▶ comes from the info string's first word being in
+// `blocks.runnable` (editor/blocks.ts isRunnable), so an empty info string
+// would give a phone a block it could not use and no hint about why.
 
 /**
- * The language a new block is born with.
+ * The language a new block gets.
  *
- * `sh` because this is the notebook that runs commands, and because it is the
- * one word that makes the new block runnable on the spot — the block a phone
- * asks for is nearly always a command it is about to press ▶ on. Changing it
- * is typing over a word on the letter page, which is the cheap half of what a
- * phone can do; typing three backticks is the expensive half, and that is the
- * half this command is here to spend.
+ * `sh` because this is the notebook that runs commands. It also makes the new
+ * block runnable straight away, and a block inserted on a phone is nearly
+ * always a command someone is about to press ▶ on. Writing the block by hand
+ * costs three backticks and a language word: the backticks are the expensive
+ * part on a phone, so the command types them, and changing `sh` afterwards
+ * costs a few letters on the keyboard's letter page.
  */
 export const NEW_BLOCK_LANG = "sh";
 
@@ -252,8 +248,9 @@ export const NEW_BLOCK_LANG = "sh";
  * or inside a block some earlier fence opened.
  *
  * The same walk `typedFence` does above, asked as a question rather than as a
- * bail-out, and for the same reason: a second fence inside the first does not
- * nest, it ends the block and starts junk.
+ * bail-out, and for the same reason. A second fence inside the first does not
+ * nest: it ends that block early, and the lines after it, the outer block's
+ * own closer included, land as stray prose or as a new opener.
  */
 function withinCode(state: EditorState, pos: number): boolean {
   const fmEnd = frontmatterEnd(state.sliceDoc(0, Math.min(HEAD_BYTES, state.doc.length)));
@@ -266,26 +263,26 @@ function withinCode(state: EditorState, pos: number): boolean {
 
 /**
  * The edit that puts a fenced block at the selection, or null where one cannot
- * go (see `withinCode`) — a silent no-op, the same answer Open Link and Toggle
- * Checkbox give a caret that is not on one.
+ * go (see `withinCode`). Null is a silent no-op, the same answer Open Link and
+ * Toggle Checkbox give a caret that is not on one.
  *
  * Two shapes, and the caret lands in each on the thing still missing:
- * - a caret gets an empty block and sits in its BODY, because the language is
- *   already written and the code is not;
- * - a selection is wrapped whole and the LANGUAGE is selected, because the
- *   code is already written and `sh` is a guess about it — one gesture
- *   replaces the guess, and no gesture at all accepts it.
+ * - a bare caret gets an empty block and sits in its body, because the
+ *   language is already written and the code is not;
+ * - a selection is wrapped whole and the language is selected, because the
+ *   code is already written and `sh` is a guess about it. Typing replaces the
+ *   guess, and typing nothing accepts it.
  *
  * A caret on a line with text puts the block after a blank line rather than
  * against the prose. CommonMark reads it the same either way (a fence may
- * interrupt a paragraph); what changes is the note, which a person also reads.
+ * interrupt a paragraph). The blank line is for the person reading the note.
  */
 export function insertCodeBlockSpec(state: EditorState): TransactionSpec | null {
   const range = state.selection.main;
-  // A selection ending exactly at a line's start stops on the line above it:
-  // that is where the eye says it ends, and taking `lineAt(to)` whole would
-  // swallow a line nobody highlighted — including, where the selection stops
-  // against an existing block, that block's opening fence.
+  // A selection ending exactly at a line's start stops on the line above it,
+  // where the selection looks like it ends. Taking `lineAt(to)` whole would
+  // wrap a line nobody highlighted, and where the selection stops against an
+  // existing block, that line is the block's opening fence.
   const end = !range.empty && state.doc.lineAt(range.to).from === range.to ? range.to - 1 : range.to;
   if (withinCode(state, range.from) || withinCode(state, end)) return null;
   const opener = `\`\`\`${NEW_BLOCK_LANG}`;
@@ -324,10 +321,10 @@ export const insertCodeBlock: Command = (view) => {
   return true;
 };
 
-// The typing half. An input handler and not a keymap entry: the mark has to be
-// seen as text going in at a position, which is also what makes it inert for
-// every other way characters arrive — a paste of a whole block, a programmatic
-// insert, an agent's edit — none of which want a fence invented for them.
+// The typing half. An input handler rather than a keymap entry, so the mark is
+// seen as text going in at a position. That also leaves it inert for every
+// other way characters arrive (a paste of a whole block, a programmatic
+// insert, an agent's edit), none of which want a fence invented for them.
 const typeFence = EditorView.inputHandler.of((view, from, to, text) => {
   const head = view.state.selection.main.head;
   if (from !== head || to !== head) return false;

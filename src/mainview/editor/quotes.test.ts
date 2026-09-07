@@ -3,8 +3,9 @@ import { EditorSelection, EditorState } from "@codemirror/state";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { exitQuote, isQuoteMarkerOnly } from "./quotes";
 
-// The command half, headless: EditorState + the markdown parser is all
-// exitQuote reads, so the exact editor scenario is testable without a DOM.
+// The command half, run headless: exitQuote itself, not just the
+// isQuoteMarkerOnly predicate below. EditorState plus the markdown parser is
+// all exitQuote reads, so the exact editor scenario needs no DOM.
 function apply(doc: string, caret: number): { handled: boolean; doc: string; caret: number } {
   let state = EditorState.create({
     doc,

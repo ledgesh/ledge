@@ -1,31 +1,30 @@
-// The note list: every .md in the SELECTED WORKSPACE'S folder, sitting under
-// the workspace strip in the sidebar. Notes are local to their workspace, so
-// switching workspaces swaps this whole list (and the Trash section below it)
-// for the new folder's.
+// The note list: every .md in the selected workspace's folder, under the
+// workspace strip in the sidebar. Notes are local to their workspace, so
+// switching workspaces swaps this list and the Trash section below it for the
+// new folder's.
 //
-// A TREE, drawn as one flat list. Folders come from the notes in them
-// (notes/folders.ts) and their open/closed state from notes/expansion.ts;
+// A tree drawn as one flat list. Folders come from the notes in them
+// (notes/folders.ts) and their open/closed state from notes/expansion.ts.
 // browserRows turns the two into rows with a depth, which is all the render
-// needs. Flat because the list is keyboard-navigable: ↑/↓ walk rows by index
-// (R5), and a nested render would have to flatten itself to answer "which row
-// is next" anyway.
+// needs. Flat because the list is keyboard-navigable (interactions.md R5):
+// ↑/↓ walk rows by index, and a nested render would have to flatten itself to
+// answer "which row is next".
 //
-// A note is filed by dragging its row onto a folder (or onto the header, which
-// is the top level), or through Move to Folder… — one operation either way
-// (notes/actions.ts moveNoteTo), so the drag cannot grow behavior the menu
-// item does not have.
+// A note is filed by dragging its row onto a folder (or onto the header, the
+// top level), or through Move to Folder…. Both call notes/actions.ts
+// moveNoteTo, so the drag cannot grow behavior the menu item does not have.
 //
-// A NOTE has no rename here on purpose: its filename follows its first-line H1
-// (notes/store.ts), so you rename a note by retitling it in the editor, and this
-// list shows the slug that produced. A FOLDER has one — `r` on the row, the
-// workspace strip's own gesture — because a folder has no heading to follow and
-// nothing else in the app can say what it is called.
+// A note has no rename here. Its filename follows its first-line H1
+// (notes/store.ts), so retitling it in the editor renames it and this list
+// shows the slug it produced. A folder does have one (`r` on the row, the
+// workspace strip's own gesture), because a folder has no heading to follow
+// and nothing else in the app names it.
 //
-// Both lists here (notes, trash) are keyboard-navigable row lists: ↑/↓ move the
-// focused row, and the row's verbs come from the command registry — Enter opens,
-// `d` deletes, `r` restores. The rows publish their identity as data attributes
-// (commands/target.ts) and the window dispatcher reads it back, so a right-click
-// and a keystroke run the same command against the same note.
+// Both lists here (notes, trash) are keyboard-navigable row lists. ↑/↓ move
+// the focused row, and the row's verbs come from the command registry: Enter
+// opens, `d` deletes, `r` restores. The rows publish their identity as data
+// attributes (commands/target.ts) and the window dispatcher reads it back, so
+// a right-click and a keystroke run the same command against the same note.
 import {
   CalendarDays,
   ChevronDown,
@@ -76,10 +75,9 @@ import { expandFolder, toggleFolder, useExpanded } from "./expansion";
 import { requestTitleCaret } from "@/workspace/editorPool";
 import type { NoteMeta, TrashMeta } from "./channel";
 
-// How long the "Deleted X. Undo" strip stays up. The note does not go anywhere
-// when it expires: it is in the Trash section below, which is the whole reason
-// this can be a hint rather than a decision the user has to make in eight
-// seconds.
+// How long the "Deleted X. Undo" strip stays up. The note does not move when
+// the strip expires: it sits in the Trash section below and restores from
+// there, so the strip is a hint rather than a time limit on undoing.
 const UNDO_MS = 8000;
 
 export function NoteBrowser() {
@@ -99,56 +97,53 @@ export function NoteBrowser() {
   // The New Note button's dropdown half, where New Folder… lives.
   const [addMenu, setAddMenu] = useState<{ x: number; y: number } | null>(null);
   // The folder a dragged note is currently over: null for the top level (the
-  // header), undefined for nothing. Drawing the target is the whole feedback a
-  // drag gets — without it the drop is a guess.
+  // header), undefined for nothing. Highlighting that target is the only
+  // feedback the drag gives, so without it the drop is a guess.
   const [dropOn, setDropOn] = useState<string | null | undefined>(undefined);
-  // A failed delete or restore, shown under the list rather than thrown away into
-  // the console.
+  // A failed delete or restore, shown under the list rather than logged only
+  // to the console.
   const [error, setError] = useState<string | null>(null);
-  // The same strip in a neutral tone: an outcome that is an answer, not a
-  // failure (where the CLI shim landed). Unlike an error it expires — a
-  // confirmation that never leaves becomes chrome.
+  // The same strip in a neutral tone, for outcomes that are answers rather
+  // than failures (where the CLI shim landed). This one expires; an error
+  // stays up.
   const [notice, setNotice] = useState<string | null>(null);
   // The notes just deleted, offered back, keyed by where each landed in the
-  // trash. A LIST because deleting a folder deletes the notes in it: the strip
-  // is the same strip and Undo is the same restore, N times over. `label` is
-  // the whole sentence rather than a title, since the two cases do not share
-  // a shape ("Deleted “Plan”" against "Deleted 5 notes in “projects”").
+  // trash. A list because deleting a folder deletes the notes in it: one
+  // strip either way, and Undo runs the same restore once per path. `label`
+  // is the whole sentence rather than a title, since the two cases do not
+  // share a shape ("Deleted “Plan”" against "Deleted 5 notes in “projects”").
   const [undo, setUndo] = useState<{ paths: string[]; label: string } | null>(null);
   // The folder waiting on its delete confirmation (folder.delete). Ephemeral
-  // chrome like `renaming`, and the browser's because the count in the dialog
-  // comes from the list it is already holding.
+  // chrome like `renaming`, and it lives here because the note count in the
+  // dialog comes from the list this component already holds.
   const [deletingFolder, setDeletingFolder] = useState<string | null>(null);
   // The folder whose row is currently a text field (folder.rename). Ephemeral
-  // chrome, so it stays in the component (architecture.md §5) — nothing
+  // chrome, so it stays in the component (architecture.md §5). Nothing
   // outside the list reacts to a name being typed.
   const [renaming, setRenaming] = useState<string | null>(null);
-  // A row to put focus back on, by list id. A folder's row id is its PATH
-  // (notes/folders.ts folderRowId), so a rename REPLACES the row rather than
-  // re-labelling it, and the roving tabindex has nothing left to rove from —
-  // leaving `r` as the one row verb that drops you out of the list (R5).
-  // State and not a ref: the row it names has to exist before the focus can
-  // land on it, and only a render puts it there.
+  // A row to put focus back on, by list id. A folder's row id is its path
+  // (notes/folders.ts folderRowId), so a rename replaces the row and the
+  // roving tabindex has nothing left to rove from: without this, `r` drops
+  // focus out of the list (interactions.md R5). State and not a ref: the row
+  // has to exist before focus can land on it, and only a render puts it there.
   const [refocus, setRefocus] = useState<string | null>(null);
   const nav = useListNav();
 
-  // The built-in Documentation workspace: no create, no delete, no lock —
-  // the mutating affordances hide here, and Bun refuses them regardless
+  // The built-in Documentation workspace: no create, no delete, no lock. The
+  // mutating affordances hide here, and Bun refuses them regardless
   // (bun/workspaces.ts assertWritableRoot).
   const readOnly = workspaceKind(selected.folder) === "docs";
-  // The selected workspace's notes only. Sorted by title, NOT by the mtime
-  // order the store holds them in: an autosave rewrites mtime on every
-  // keystroke burst, so an mtime-sorted list would shuffle itself under the
-  // pointer while you type. The docs workspace sorts by path instead: its
-  // filenames are numbered by the manifest (bun/docsContent.ts), which is how
-  // the manual's pages keep their curated reading order in a browser that
-  // otherwise alphabetizes.
+  // The selected workspace's notes only. The sort below is by title, not the
+  // mtime order the store holds them in: an autosave rewrites mtime on every
+  // keystroke burst, so an mtime-sorted list would reorder under the pointer
+  // while typing. The docs workspace sorts by path, whose numbered filenames
+  // (bun/docsContent.ts) keep the manual in reading order, not alphabetical.
   const notes = notesOf(state, selected.folder);
   // Which folders are open, from the module the commands also write
   // (notes/expansion.ts): Move to Folder… and New Note in Folder both have to
   // reveal where the note landed, so the state cannot live in this component.
   const expanded = useExpanded(selected.folder);
-  // The tree, flattened. The sort is applied WITHIN each folder by browserRows.
+  // The tree, flattened. browserRows applies the sort within each folder.
   const rows = useMemo(
     () =>
       browserRows(notes, expanded, (a, b) =>
@@ -164,10 +159,10 @@ export function NoteBrowser() {
   // face (and which vault verb) the menu carries.
   const menuNote = menu?.kind === "note" ? notes.find((n) => n.path === menu.path) : undefined;
 
-  // A rename field belongs to a row of the workspace it was opened in. Switching
-  // workspaces from the keyboard leaves no blur behind to close it, and a folder
-  // of the same name in the new workspace would inherit the field — and the
-  // rename.
+  // A rename field belongs to a row of the workspace it was opened in.
+  // Switching workspaces from the keyboard leaves no blur behind to close it,
+  // so a folder of the same name in the new workspace would inherit the field
+  // and the rename.
   useEffect(() => setRenaming(null), [selected.folder]);
 
   // Put focus back on a row the render just replaced (a renamed folder).
@@ -176,18 +171,18 @@ export function NoteBrowser() {
     setRefocus(null);
     nav.containerProps.ref.current?.querySelector<HTMLElement>(`[data-list-row="${CSS.escape(refocus)}"]`)?.focus();
     // `nav`'s ref is stable for the component's life, so `refocus` is the
-    // whole dependency.
+    // only dependency.
   }, [refocus]);
 
-  // The offer expires; the note does not.
+  // Clear the Undo offer after UNDO_MS. The note stays in the trash.
   useEffect(() => {
     if (!undo) return;
     const t = setTimeout(() => setUndo(null), UNDO_MS);
     return () => clearTimeout(t);
   }, [undo]);
 
-  // Same clock as the undo offer: both are transient strips, and one knob is
-  // plenty.
+  // The notice strip clears on the same timeout as the Undo offer. Both are
+  // temporary strips, so one constant covers them.
   useEffect(() => {
     if (!notice) return;
     const t = setTimeout(() => setNotice(null), UNDO_MS);
@@ -198,8 +193,8 @@ export function NoteBrowser() {
     setError(null);
     void deleteNote(note.path, selected.folder, docIdsForPath(state, note.path), dispatch).then((res) => {
       setError(res.error);
-      // No trashed path means the file was already gone, so there is nothing to
-      // offer back and an Undo button would be a lie.
+      // No trashed path means the file was already gone, so there is nothing
+      // to offer back and no strip.
       setUndo(res.trashed ? { paths: [res.trashed], label: `Deleted “${note.title}”` } : null);
     });
   };
@@ -210,11 +205,11 @@ export function NoteBrowser() {
     void restoreNote(path, selected.folder, dispatch).then(setError);
   };
 
-  // The Undo strip's button: one note, or a folder's worth. Sequential and not
-  // concurrent, which is the one way N restores differ from one — a restore
-  // lands its note under a free name in its folder, and two racing for the same
-  // name would both take it. A failure is reported and the rest still run:
-  // eight notes of nine back beats stopping at the one that will not come.
+  // The Undo strip's button: one note, or a folder's worth. Restores run one
+  // at a time. A restore lands its note under a free name in its folder, and
+  // two running at once could pick the same free name. A failure is reported
+  // and the remaining paths still run, so one note that will not come back
+  // does not block the rest.
   const undoAll = async (paths: readonly string[]) => {
     setError(null);
     setUndo(null);
@@ -225,7 +220,7 @@ export function NoteBrowser() {
 
   // File a note, from the chooser or from a drop. One path for both, so the
   // drag cannot grow behavior the menu item does not have. The destination is
-  // expanded FIRST: the note has to arrive somewhere on screen, and expanding
+  // expanded first: the note has to arrive somewhere on screen, and expanding
   // after the move would flash the row into a closed folder.
   const file = (note: NoteMeta, folder: string | null) => {
     setError(null);
@@ -235,34 +230,33 @@ export function NoteBrowser() {
     });
   };
 
-  // Rename a folder in place. Every note under it is about to be at a new path,
-  // so the tabs open on them are handed over in the same breath (actions.ts
-  // renameFolderTo does the freeze dance and the expansion carry-over).
+  // Rename a folder in place. Every note under it is about to be at a new
+  // path, so the tabs open on them are handed over too (actions.ts
+  // renameFolderTo freezes the saves and carries the open folders over).
   const rename = (folder: string, name: string) => {
     setError(null);
-    // Built BEFORE anything awaits, from the state this render closed over:
-    // which tabs hold which note is exactly what the rename is about to
-    // invalidate.
+    // Built before anything awaits, from the state this render closed over.
+    // The rename is about to invalidate which tabs hold which note.
     const docs = new Map(notesUnder(notes, folder).map((n) => [n.path, docIdsForPath(state, n.path)] as const));
     void renameFolderTo(selected.folder, folder, name, docs, dispatch).then((res) => {
       setError(res.error);
-      // Back onto the row under its new name, so `r` leaves the keyboard where
-      // it found it. On a refusal the row never moved, so this is where it is.
+      // Focus the row under its new name, so `r` leaves the keyboard on the
+      // list. On a refusal the row never moved, so the old folder is its id.
       setRefocus(folderRowId(res.folder ?? folder));
     });
   };
 
   // Delete a folder, which means deleting the notes in it. The open tabs are
-  // collected BEFORE anything awaits, for rename's reason: which tabs hold
-  // which note is exactly what this is about to invalidate.
+  // collected before anything awaits, for rename's reason: the delete is
+  // about to invalidate which tabs hold which note.
   const removeFolder = (folder: string) => {
     setError(null);
     const doomed = notesUnder(notes, folder);
     const docs = new Map(doomed.map((n) => [n.path, docIdsForPath(state, n.path)] as const));
     void deleteFolderTo(selected.folder, folder, docs, dispatch).then((res) => {
       setError(res.error);
-      // Nothing trashed means nothing to offer back, so no strip — a refusal,
-      // or a folder whose notes were already gone from disk.
+      // Nothing trashed means nothing to offer back, so no strip. That is a
+      // refusal, or a folder whose notes were already gone from disk.
       const n = res.trashed.length;
       setUndo(
         n > 0
@@ -276,32 +270,33 @@ export function NoteBrowser() {
   };
 
   // The browser owns the Undo strip, so it registers the hooks the delete and
-  // restore commands (row menus, `d`/`r`, ⌘⌫, the palette) reach it through:
-  // every path lands in the same trash-with-undo behavior. Registered via refs
-  // because these close over the live state.
+  // restore commands reach it through (row menus, `d`/`r`, ⌘⌫, the palette).
+  // Every one of those lands in the same trash-with-undo behavior. Held in a
+  // ref because the handlers close over the live state.
   const hooks = useRef({ trash, restore, file, rename, removeFolder });
   hooks.current = { trash, restore, file, rename, removeFolder };
   useEffect(() => {
     configureUi({
       deleteNoteWithUndo: (note) => hooks.current.trash(note),
       restoreTrashed: (path) => hooks.current.restore(path),
-      // Move to Folder… and New Folder… both stop here for a destination; what
-      // happens after the pick is decided below, by which request it was.
+      // Move to Folder… and New Folder… both stop here for a destination.
+      // `picked` below decides what happens after, by which request it was.
       pickFolder: (request) => setPicking(request),
       // The field replaces a row, so only the list can put it there.
       beginRenameFolder: (folder) => setRenaming(folder),
       confirmDeleteFolder: (folder) => setDeletingFolder(folder),
       // The browser's error strip doubles as the workspace commands' error
-      // surface (a refused attach, a failed create): same sidebar, same shape
-      // of failure report.
+      // surface (a refused attach, a failed create), so every failure is
+      // reported in the same place.
       showError: (message) => setError(message),
       showNotice: (message) => setNotice(message),
     });
   }, []);
 
-  // What the chooser's pick means. Moving files the note it was opened on;
-  // naming a NEW folder writes the first note into it, because a folder the
-  // browser cannot show is a folder that vanished (notes/folders.ts).
+  // What the chooser's pick means. A move files the note it was opened on.
+  // Naming a new folder writes the first note into it, because the browser
+  // derives folders from the notes in them and cannot show an empty one
+  // (notes/folders.ts).
   const picked = (folder: string | null) => {
     const request = picking;
     setPicking(null);
@@ -316,9 +311,9 @@ export function NoteBrowser() {
     void createNote(selected.folder, SCRATCH_DOC, folder).then(
       (note) => {
         requestTitleCaret(note.path, true);
-        // Into the list AND into a tab, note.newInFolder's pair: the folder
-        // row exists because this note is in it, so the row and the tab have
-        // to arrive together.
+        // note.newInFolder dispatches the same pair: into the list and into a
+        // tab. The folder row exists only because this note is in it, so the
+        // row and the tab arrive together.
         dispatch({ type: "noteAppeared", folder: selected.folder, note });
         dispatch({ type: "openNote", note });
       },
@@ -329,8 +324,8 @@ export function NoteBrowser() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* The header doubles as the top level's drop target: dragging a note
-          here files it out of whatever folder it is in, which is the one
-          destination that has no row of its own. */}
+          here files it out of whatever folder it is in. The top level is the
+          one destination with no row of its own. */}
       <div
         className={cn(
           "flex items-baseline gap-1.5 px-3 pb-1 pt-2.5",
@@ -426,11 +421,11 @@ export function NoteBrowser() {
         </div>
       )}
 
-      {/* A split button, the workspace strip's + exactly: the wide half is New
-          Note, the chevron opens the other way to start one. New Folder…
-          needs the surface — it acts on a folder row where one exists, and a
-          workspace with no folders yet has no row to open a menu on, which
-          would leave the palette as the only door to the whole feature. */}
+      {/* A split button, on the workspace strip's pattern: the wide half is
+          New Note, the chevron opens a menu holding New Folder…. That verb's
+          only other pointer surface is a folder row's menu, and a workspace
+          with no folders yet has no such row, which would leave the palette
+          as its only door. */}
       {!readOnly && (
         <div className="flex border-t">
           <button
@@ -443,8 +438,8 @@ export function NoteBrowser() {
           <button
             aria-label="New note options"
             title="New note options"
-            // The narrow half of a split button, so its width is a target too:
-            // the two halves touch, and the miss creates a note.
+            // The narrow half of a split button, given a touch width of its
+            // own: the halves touch, and a miss on this one creates a note.
             className="flex items-center border-l px-2.5 text-muted-foreground hover:bg-accent hover:text-foreground touch:min-w-[44px] touch:justify-center"
             onClick={(e) => {
               const r = e.currentTarget.getBoundingClientRect();
@@ -466,9 +461,9 @@ export function NoteBrowser() {
         </ContextMenu>
       )}
 
-      {/* A folder row's menu: its own Enter verb (Expand/Collapse, titled by
-          the live state), searching inside it, the note it can hold, and a
-          folder inside it — which is the only nesting path a pointer has. */}
+      {/* A folder row's menu: its Enter verb (Expand or Collapse, titled by
+          the live state), searching inside it, a note in it, and a folder
+          inside it. That last one is the only way a pointer nests a folder. */}
       {menu?.kind === "folder" && (
         <ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)}>
           <CommandMenuItem
@@ -476,8 +471,8 @@ export function NoteBrowser() {
             target={{ kind: "folder", folder: menu.folder }}
             onClose={() => setMenu(null)}
           />
-          {/* Above the readOnly gate: looking inside a folder is a read, and
-              the manual's own pages are worth searching a section of. */}
+          {/* Above the readOnly gate: searching inside a folder only reads,
+              so the manual's own pages keep the verb. */}
           <CommandMenuItem
             id="folder.search"
             target={{ kind: "folder", folder: menu.folder }}
@@ -500,9 +495,9 @@ export function NoteBrowser() {
                 target={{ kind: "folder", folder: menu.folder }}
                 onClose={() => setMenu(null)}
               />
-              {/* Below a divider, which §4 asks for: a destructive item does
-                  not sit flush against the safe sibling above it, and the two
-                  New… verbs are exactly what a slip would land on. */}
+              {/* Below a divider (interactions.md §4): a destructive item
+                  does not sit flush against a safe sibling, and the two New…
+                  verbs above are what a slip would land on. */}
               <MenuDivider />
               <CommandMenuItem
                 id="folder.delete"
@@ -527,27 +522,24 @@ export function NoteBrowser() {
             target={{ kind: "note", path: menu.path }}
             onClose={() => setMenu(null)}
           />
-          {/* A doc page's menu ends here: the lock faces and Delete are not
-              merely disabled but absent — a verb that can never apply to any
-              row in this workspace is noise, not discoverability. */}
+          {/* A doc page's menu ends here. The lock faces and Delete are
+              absent rather than disabled, since no row in this workspace can
+              ever take them. */}
           {!readOnly && (
             <>
-          {/* Filing, above the lock faces and well clear of Delete: the two
-              verbs that move a note's file sit together, and the destructive
-              one keeps the bottom of the menu to itself (§4). */}
+          {/* Filing, above the lock faces and well clear of Delete. Move and
+              Delete both relocate the note's file, but the destructive one
+              keeps the bottom of the menu to itself (interactions.md §4). */}
           <CommandMenuItem
             id="note.move"
             target={{ kind: "note", path: menu.path }}
             onClose={() => setMenu(null)}
           />
-          {/* The lock faces, two-faces like the palette (locking.md §7):
-              a plain row offers Lock This Note… (greyed on templates — the
-              marker exclusivity), a locked row offers Remove Lock… plus the
-              vault verb matching the state the row's glyph shows: Unlock
-              Notes… while the vault is shut, Lock Notes (⌘L) while it is
-              open. The vault verbs are vault-wide and say so in their
-              titles; they ride the row menu because the glyph on this row is
-              what advertises the state. */}
+          {/* The two lock faces, one at a time (locking.md §7): Lock This
+              Note… on a plain row, disabled on a template note (locking.md
+              §2), and Remove Lock… on a locked one. A locked row also carries
+              the vault verb matching its glyph. That verb is vault-wide. It
+              sits here because the glyph is where the vault's state shows. */}
           {menuNote?.locked ? (
             <>
               <CommandMenuItem
@@ -567,12 +559,10 @@ export function NoteBrowser() {
               onClose={() => setMenu(null)}
             />
           )}
-          {/* The command is titled "Delete", deliberately not "Move to Trash":
-              that promises the Finder Trash, with Put Back and a Dock icon, and
-              this is an app-private folder. No confirmation either: it is
-              reversible from the Trash section below, and a prompt in front of
-              an undoable action is a tax that teaches people to click through
-              prompts. */}
+          {/* The command is titled "Delete", not "Move to Trash": that would
+              promise the Finder Trash, with Put Back and a Dock icon, and this
+              trash is an app-private folder. No confirmation either, because
+              the Trash section below reverses it (interactions.md §4). */}
           <CommandMenuItem
             id="note.delete"
             target={{ kind: "note", path: menu.path }}
@@ -584,11 +574,11 @@ export function NoteBrowser() {
         </ContextMenu>
       )}
 
-      {/* Deleting a folder deletes the notes in it, and the count is the whole
-          reason this asks: a collapsed row does not say whether `d` costs one
-          note or forty. Not an irreversibility warning — every one of them is
-          in the Trash a line below, and the Undo strip comes up behind this —
-          so the body says where they went rather than that they are gone. */}
+      {/* Deleting a folder deletes the notes in it, and the dialog states the
+          count: a collapsed row does not say whether `d` costs one note or
+          forty. This is not an irreversibility warning. The notes land in the
+          Trash a line below and the Undo strip comes up behind the dialog, so
+          the body says where they went (interactions.md §4). */}
       {deletingFolder !== null && (
         <ConfirmDialog
           title={`Delete “${deletingFolder}”?`}
@@ -630,9 +620,8 @@ export function NoteBrowser() {
 
 // --- trash -----------------------------------------------------------------
 
-// Deleted notes, collapsed by default. Hidden entirely when the trash is empty:
-// the point of surfacing it is that a full trash is discoverable, and an empty
-// one has nothing to discover.
+// Deleted notes, collapsed by default. The section renders nothing while the
+// trash is empty: it exists to make a full trash visible.
 function TrashSection({
   onRestore,
   onError,
@@ -646,19 +635,19 @@ function TrashSection({
   // The trashed note queued for permanent deletion, awaiting confirmation.
   const [deleting, setDeleting] = useState<TrashMeta | null>(null);
   const [menu, setMenu] = useState<{ path: string; x: number; y: number } | null>(null);
-  // Sampled once when the section opens rather than read per row at render time,
-  // so every row's "2d ago" is measured against the same instant.
+  // Sampled when the section opens or its items change, not per row at render
+  // time, so every row's "2d ago" measures from the same instant.
   const [now, setNow] = useState(() => Date.now());
   const nav = useListNav();
 
   // The selected workspace's trash: each folder keeps its own.
   const items = trashOf(state, selected.folder);
 
-  // The section owns both confirmations, so the trash.empty and trash.delete
-  // commands open them here rather than deleting directly: the confirm IS the
-  // command's behavior, because these are the app's two irreversible actions
-  // (interactions.md §4). Opening the section is not required — a row verb
-  // can only fire on a row you can see.
+  // The section owns both confirmations, so trash.empty and trash.delete open
+  // a dialog here rather than deleting. That confirm is the command's own
+  // behavior, for the app's two irreversible actions (interactions.md §4).
+  // Both dialogs render while the section is collapsed, which trash.empty
+  // needs from the palette. trash.delete fires only on a visible row.
   useEffect(() => {
     configureUi({
       confirmEmptyTrash: () => setConfirming(true),
@@ -686,10 +675,11 @@ function TrashSection({
 
   return (
     <div className="border-t">
-      {/* 13 points of disclosure, five above the New Note button — the smallest
-          target in the app before this, and the one whose neighbour creates a
-          file. Empty is destructive and sits at the far end of the same row, so
-          it is sized here too rather than only where it fits. */}
+      {/* Both buttons are 44 points on touch (interactions.md §1a). The
+          disclosure is 13 points on its own, which was the smallest target in
+          the app. It sits just above the New Note button, so a miss creates a
+          file. Empty is destructive and sits at the far end of the same row,
+          so it is sized here too. */}
       <div className="flex items-center gap-1.5 px-3 py-1.5">
         <button
           className="flex min-w-0 flex-1 items-center gap-1 text-left touch:min-h-[44px]"
@@ -808,10 +798,10 @@ function TrashRow({
       <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground/60 group-hover:hidden">
         {agoLabel(item.deletedAt, now)}
       </span>
-      {/* Both of the row's verbs, revealed together on hover: Restore is the
-          one you reach for, so it comes first and Delete Permanently sits at
-          the edge, styled destructive. It confirms before it unlinks, which is
-          what lets it be a hover target at all. */}
+      {/* The row's two verbs, revealed together on hover. Restore comes first
+          as the common one. Delete Permanently sits at the edge, styled
+          destructive, and confirms before it unlinks (interactions.md §4),
+          which is what lets it be a hover target at all. */}
       <button
         className="hidden size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground group-hover:flex"
         title={tooltip("note.restore")}
@@ -832,31 +822,30 @@ function TrashRow({
 
 // --- notes -----------------------------------------------------------------
 
-// Shared by both lists. The focus ring is not decoration: it is the only thing
-// telling you which row `d` is about to act on.
-//
-// 44 points on touch, for the same reason MenuItem carries it (§1a): these are
-// stacked alternatives with no gap between them, and on a phone the drawer is
-// the ONLY way to change notes — a miss here opens the wrong one. `min-h` and
-// not `h`, so a row whose content already exceeds it keeps its own height.
+// The class both lists share. The focus ring is what says which row `d` is
+// about to act on. Rows are 44 points on touch for the reason MenuItem is
+// (interactions.md §1a): they are stacked with no gap between them, so a miss
+// opens the wrong note. `min-h` and not `h`, so a taller row keeps its own
+// height.
 const ROW_CLASS =
   "group flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 outline-none hover:bg-accent/50 focus-visible:ring-1 focus-visible:ring-ring touch:min-h-[44px]";
 
 // The drag's own MIME type, carrying the dragged note's path. A custom type
 // rather than text/plain because dataTransfer.types is readable during
-// dragover while the DATA is not: the drop targets have to know a Ledge note
-// is coming before they may claim the drop, and a drag from outside the app
-// (a file, a selection) must fall through to whatever the page does with it.
+// dragover while the data is not. A drop target checks the type before it
+// claims the drop, so a drag from outside the app (a file, a selection) falls
+// through to the page instead.
 const NOTE_DRAG = "application/x-ledge-note";
 
-// How far a row indents per level. Small on purpose: the sidebar is narrow,
-// and a note three folders down still has to show enough of its title to be
-// recognised.
+// How far a row indents per level, in pixels. Small because the sidebar is
+// narrow: a note three folders down still has to show enough of its title to
+// be recognised.
 const INDENT = 12;
 
-// `current` is the note in the focused pane's active tab; `open` is any note with
-// a tab somewhere. Clicking either way goes through openNote, which focuses the
-// existing tab rather than opening the file a second time.
+// One note's row. `current` is the note in the focused pane's active tab;
+// `open` is any note with a tab somewhere. A click runs note.open either way,
+// and the openNote action it dispatches focuses the existing tab rather than
+// opening the file a second time (workspace/store.tsx).
 function NoteRow({
   note,
   depth,
@@ -874,25 +863,27 @@ function NoteRow({
   open: boolean;
   // Vault state, for the locked rows' glyph: open lock while unlocked.
   unlocked: boolean;
-  // Off in the read-only manual, where there is nowhere to drop a note.
+  // Whether the row can be dragged. Off in the read-only manual, where there
+  // is nowhere to drop a note.
   draggable: boolean;
   rowProps: ReturnType<ReturnType<typeof useListNav>["rowProps"]>;
   onOpen: () => void;
   onContextMenu: (x: number, y: number) => void;
 }) {
-  // The click opens the note; a press held on the row opens the menu instead,
-  // and the click WebKit sends after it is swallowed there — a long press must
-  // not also open the note it was only asking about.
+  // A click opens the note. A press held on the row opens the menu instead.
+  // useRowMenu swallows the click WebKit sends afterwards, so a long press
+  // does not also open the note it was asking about (interactions.md §1a).
   const press = useRowMenu(onContextMenu, onOpen);
   return (
     <div
       {...rowProps}
       {...targetAttrs({ kind: "note", path: note.path })}
       {...press}
-      // A pointer gesture, not a command (interactions.md R4): its whole
-      // affordance is the drag image and the target's highlight. The long
-      // press that opens the menu belongs to touch and pen, and a held LEFT
-      // button is this — the two cannot collide (lib/useRowMenu.ts).
+      // Dragging a row is a pointer gesture, not a command (interactions.md
+      // R4): its affordance is the drag image and the target's highlight. The
+      // long press that opens the menu is touch and pen only, so a held left
+      // button reaches this instead and the two cannot collide
+      // (lib/useRowMenu.ts).
       draggable={draggable}
       onDragStart={(e) => {
         e.dataTransfer.setData(NOTE_DRAG, note.path);
@@ -902,15 +893,11 @@ function NoteRow({
       style={{ paddingLeft: 8 + depth * INDENT }}
       title={note.path}
     >
-      {/* A template note (frontmatter template: true) swaps the glyph — the
-          same LayoutTemplate the template commands wear in the palette — the
-          daily-role note (template: daily) wears ⌘J's own CalendarDays, and a
-          LOCKED note wears the vault commands' Lock (the markers are
-          mutually exclusive, so the column reads one kind per row).
-          Icons, not badges: same object, different kind, zero row width.
-          A locked note's lock OPENS while the vault is unlocked — the row is
-          where the "readable right now" state is visible without opening
-          anything, and it is what makes ⌘L's effect legible in the list. */}
+      {/* The glyph names the row's kind, wearing the command's own icon: ⌘J's
+          CalendarDays for a daily-role note (template: daily), LayoutTemplate
+          for any other template note, the vault's Lock for a locked one, which
+          opens while the vault is unlocked (locking.md §7). The markers are
+          mutually exclusive, so the column reads one kind per row. */}
       {note.template === "daily" ? (
         <CalendarDays className="size-3.5 shrink-0 text-muted-foreground" />
       ) : note.template ? (
@@ -934,14 +921,11 @@ function NoteRow({
 
 // --- folders ---------------------------------------------------------------
 
-// One folder of the workspace. Its Enter verb is the disclosure, because a
-// folder's primary action is showing what is in it (R6) — so a click toggles
-// too, and there is nothing else a click on a folder could reasonably mean.
-//
-// It is also a drop target: dragging a note onto it files the note there. The
-// row claims the drop only for a Ledge note (NOTE_DRAG), so a file dragged in
-// from the Finder falls through rather than being silently swallowed by a row
-// that cannot do anything with it.
+// One folder of the workspace. Its Enter verb is the disclosure, since showing
+// what is in a folder is its primary action (interactions.md R6), and a click
+// toggles it too. The row is also a drop target: dragging a note onto it files
+// the note there. It claims the drop only for a Ledge note (NOTE_DRAG), so a
+// file dragged in from the Finder falls through instead.
 function FolderRow({
   row,
   dropping,
@@ -970,9 +954,9 @@ function FolderRow({
     <div
       {...rowProps}
       {...targetAttrs({ kind: "folder", folder: row.folder })}
-      // While the field is up the row is not a row: a tap in it is a caret
-      // placement, not a toggle, and a long-press is a text selection, not a
-      // menu.
+      // While the rename field is up the row drops its press handlers. A tap
+      // then places the caret rather than toggling the folder, and a long
+      // press selects text rather than opening the menu.
       {...(renaming ? {} : press)}
       onDragOver={(e) => {
         if (renaming) return; // the pointer belongs to the field
@@ -991,8 +975,8 @@ function FolderRow({
       style={{ paddingLeft: 8 + row.depth * INDENT }}
       title={row.folder}
     >
-      {/* The chevron is the state; the glyph beside it says the same thing a
-          second way, which is what a row read at a glance needs. */}
+      {/* The chevron shows whether the folder is expanded. The folder glyph
+          beside it shows the same state a second way. */}
       <ChevronRight
         className={cn(
           "size-3 shrink-0 text-muted-foreground transition-transform",
@@ -1005,16 +989,17 @@ function FolderRow({
         <Folder className="size-3.5 shrink-0 text-muted-foreground" />
       )}
       {renaming ? (
-        // Seeded with the NAME, not the path: a rename says what the folder is
-        // called and not where it sits, and a field holding `projects/api`
-        // would invite a `/` the rename refuses (shared/folders.ts).
+        // Seeded with the name, not the path: a rename changes what the folder
+        // is called, not where it sits. A field holding `projects/api` would
+        // invite a `/`, which the rename refuses (shared/folders.ts).
         <RenameField initial={row.name} onCommit={onRename} onDone={onEndRename} />
       ) : (
         <div className="min-w-0 flex-1 truncate text-sm leading-tight">{row.name}</div>
       )}
-      {/* What the disclosure is hiding, so a collapsed folder still says how
-          much is in it. Withheld while it is open, where the rows say it, and
-          while it is being renamed, where the field wants the width. */}
+      {/* How many notes the disclosure is hiding, so a collapsed folder still
+          says how much is in it. Hidden while the folder is open, where the
+          rows say it, and while it is being renamed, where the field wants the
+          width. */}
       {!row.expanded && !renaming && (
         <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground/70">{row.count}</span>
       )}

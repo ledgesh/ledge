@@ -30,24 +30,26 @@ const STRIP_MIN = 88;
 const NOTES_MIN = 120;
 
 // The sidebar: the workspace strip on top, the note list below, divided by a
-// draggable handle. Notes are global to ~/.ledge while workspaces are collections
-// of tabs, so the two are independent lists and both stay visible at once.
+// draggable handle. The strip lists the workspaces, each of which is a
+// collection of tabs and panes. The browser lists the selected workspace's
+// notes (NoteBrowser.tsx). Both sections stay visible at once.
 export function Sidebar() {
   const [stripHeight, setStripHeight] = useState(STRIP_DEFAULT);
   const ref = useRef<HTMLDivElement>(null);
 
-  // Clamp against the live height so neither section can be collapsed away, the
-  // same measure-the-container rule App uses for the terminal drawer.
+  // resize clamps the height against the live container height, so neither
+  // section collapses away. App.tsx measures the same way for the terminal
+  // drawer.
   const resize = useCallback((h: number) => {
     const avail = ref.current?.clientHeight ?? window.innerHeight;
     setStripHeight(Math.max(STRIP_MIN, Math.min(h, avail - NOTES_MIN)));
   }, []);
 
-  // In the manual's window the sidebar is the manual's contents and nothing
-  // else (remote.md §8a): the strip would be an empty list under a heading —
-  // the docs workspace is filtered out of it, and no other can be added there —
-  // and the connection bar would name a machine that window cannot be switched
-  // off. What is left is exactly the table of contents, full height.
+  // In the manual's window the sidebar shows the manual's contents at full
+  // height (remote.md §8a). The strip would be an empty list under a heading,
+  // since the docs workspace is filtered out of it and that window has none of
+  // the verbs that add a workspace. The connection bar would name a machine
+  // that window cannot be switched off.
   if (docsWindow()) {
     return (
       <aside className="flex h-full w-full min-w-0 flex-col bg-muted/20">
@@ -58,9 +60,9 @@ export function Sidebar() {
 
   return (
     <aside ref={ref} className="flex h-full w-full min-w-0 flex-col bg-muted/20">
-      {/* Above the strip because it scopes it: the workspaces below, their
-          notes, and their shells all belong to the machine named here
-          (remote.md §8). */}
+      {/* The connection bar sits above the strip because it scopes it: the
+          workspaces below, their notes, and their shells all belong to the
+          machine named here (remote.md §8). */}
       <ConnectionBar />
       <div style={{ height: stripHeight }} className="flex min-h-0 shrink-0 flex-col">
         <WorkspaceStrip />
@@ -98,8 +100,9 @@ function WorkspaceStrip() {
   const [movingId, setMovingId] = useState<string | null>(null);
 
   // The strip owns the inline-rename state, the icon picker, and the move
-  // chooser, so it registers the hooks those commands (menu item, row verb,
-  // palette entry) reach it through.
+  // chooser. It registers the hooks that workspace.rename, workspace.icon and
+  // workspace.move reach it through (registry.ts), whether they are run from a
+  // menu item, a row verb, or the palette.
   useEffect(() => {
     configureUi({
       beginRenameWorkspace: setRenamingId,
@@ -113,15 +116,16 @@ function WorkspaceStrip() {
   const nav = useListNav();
   const listRef = nav.containerProps.ref;
 
-  // The rows the strip shows: every workspace except the built-in docs one,
-  // which is deliberately not a row — the header's help button is its whole
-  // presence, and while it is selected no row highlights (the way back is any
-  // row, or ⌘1…9, which index this same filtered list).
+  // The rows the strip shows: every workspace except the built-in docs one.
+  // The docs workspace is reached from the header's help button (App.tsx)
+  // instead. While it is selected no row highlights. The way back is any row,
+  // or ⌘1…9, which index this same filtered list (registry.ts).
   const strip = state.workspaces.filter((ws) => workspaceKind(ws.folder) !== "docs");
 
-  // The picker anchors to a row, and only the DOM knows where the rows are. A
-  // workspace with no row on screen has nothing to anchor to, so the open is
-  // dropped rather than left as an invisible popover holding the Escape layer.
+  // The icon picker anchors to a row, and the row's position comes from the
+  // DOM. A workspace with no row rendered has nothing to anchor to, so the
+  // open is dropped rather than left as an invisible popover holding the
+  // Escape layer.
   useLayoutEffect(() => {
     if (!pickingId) {
       setPickAnchor(null);
@@ -150,10 +154,11 @@ function WorkspaceStrip() {
     return items.length;
   };
 
-  // A strip slot as an index into the FULL workspace list (which may carry
-  // the hidden docs workspace): the reducer's moveWorkspace counts the full
-  // list, so the drop is anchored to the row it lands before — end-of-strip
-  // appends, which leaves the hidden workspace's array slot irrelevant.
+  // A strip slot as an index into the full workspace list, which may also hold
+  // the hidden docs workspace. The reducer's moveWorkspace indexes that whole
+  // list (store.tsx), so the slot resolves to the workspace it lands before. A
+  // drop past the last row moves the workspace to the end of the full list, so
+  // where the hidden workspace sits in the array does not matter.
   const fullIndexOf = (slot: number): number => {
     const anchor = strip[slot];
     return anchor ? state.workspaces.findIndex((w) => w.id === anchor.id) : state.workspaces.length;
@@ -174,8 +179,8 @@ function WorkspaceStrip() {
     setDropIndex(null);
   };
 
-  // Only clear the marker when the pointer truly leaves the list, not when it
-  // crosses between rows (those fire dragleave on the parent too).
+  // The marker clears only when the pointer leaves the list itself, not when
+  // it crosses between rows (those fire dragleave on the parent too).
   const onDragLeave = (e: React.DragEvent) => {
     if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropIndex(null);
   };
@@ -221,10 +226,10 @@ function WorkspaceStrip() {
         ))}
         {dropIndex === strip.length && <DropMarker />}
       </div>
-      {/* A split button: the wide half is New Workspace itself, the chevron
-          opens the menu of both ways to add one — the discoverable surface for
-          Attach Folder, which has no chord and would otherwise live only in
-          the palette. The chevron runs no command (it opens a menu), so its
+      {/* A split button: the wide half runs New Workspace, the chevron opens a
+          menu of both ways to add one. Attach Folder has no chord (keys.ts);
+          this menu, the File menu (menu.ts) and the palette are its three
+          homes. The chevron opens a menu rather than running a command, so its
           hand-written title is allowed (interactions.md §5). */}
       <div className="flex border-t">
         <button
@@ -237,8 +242,10 @@ function WorkspaceStrip() {
         <button
           aria-label="Add workspace options"
           title="Add workspace options"
-          // The narrow half of a split button, so its width is a target too:
-          // the two halves touch, and the miss opens a menu or creates a folder.
+          // The narrow half of a split button. The touch:min-w-[44px] class
+          // below gives it a 44 point width of its own (interactions.md §1a).
+          // The two halves touch, so a miss on the chevron creates a workspace
+          // and a miss on the wide half opens this menu.
           className="flex items-center border-l px-2.5 text-muted-foreground hover:bg-accent hover:text-foreground touch:min-w-[44px] touch:justify-center"
           onClick={(e) => {
             const r = e.currentTarget.getBoundingClientRect();
@@ -298,9 +305,9 @@ function WorkspaceStrip() {
       {(() => {
         const movingWs = state.workspaces.find((w) => w.id === movingId);
         if (!movingWs) return null;
-        // Either pick closes the dialog first, then runs the same action the
-        // command runs directly for managed folders; failures land on the
-        // note browser's error strip like every other workspace operation.
+        // Either pick closes the dialog first, then runs the same move action
+        // workspace.move runs directly for managed folders. Failures land on
+        // the note browser's error strip, like every other workspace action.
         const moveTo = (home: boolean) => {
           setMovingId(null);
           void moveWorkspace(movingWs.id, state, dispatch, home).then((err) => {
@@ -368,11 +375,13 @@ function WorkspaceRow({
       {...rowProps}
       {...targetAttrs({ kind: "workspace", id: ws.id })}
       {...press}
-      // Don't arm the drag while renaming, or the pointer can't reach the input.
+      // The row is not draggable while its rename field is up, so the pointer
+      // can reach that field.
       draggable={!renaming}
       className={cn(
-        // NoteBrowser's ROW_CLASS carries the same 44 for the same reason: a
-        // stacked alternative with no gap to the row above it.
+        // The 44px touch minimum matches the one in NoteBrowser's ROW_CLASS:
+        // both are stacked rows with no gap to the row above
+        // (interactions.md §1a).
         "group relative flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 outline-none focus-visible:ring-1 focus-visible:ring-ring touch:min-h-[44px]",
         selected ? "bg-accent" : "hover:bg-accent/50",
       )}
@@ -396,8 +405,9 @@ function WorkspaceRow({
       </div>
       {canClose && (
         <button
-          // Absent rather than invisible where nothing can hover it (the tab
-          // strip's ✕, PaneTree.tsx): Close Workspace is in this row's menu.
+          // The ✕ is absent, not invisible, on a client with no hover, the way
+          // the tab strip's ✕ is (PaneTree.tsx). Close Workspace is in this
+          // row's context menu.
           className="hidden size-5 shrink-0 items-center justify-center rounded opacity-0 hover:bg-background group-hover:opacity-100 hoverable:flex"
           title={tooltip("workspace.close")}
           onClick={(e) => {

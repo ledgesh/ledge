@@ -1,10 +1,8 @@
-// The destination chooser Move Workspace Folder… stops at for EXTERNAL
-// workspaces only. A managed folder skips this dialog entirely (the command
-// opens the native picker directly); an external one gets two destinations,
-// because its natural answer — back under ~/.ledge — is the one place the
-// native picker cannot reasonably offer (a hidden folder). Escape (via the
-// modal layer stack) or a backdrop click cancels; arrows move between the
-// options; Enter takes the focused one.
+// The destination chooser Move Workspace Folder… stops at when the workspace
+// is external. A managed one goes straight to the native picker
+// (commands/registry.ts), which does not readily reach the hidden ~/.ledge.
+// So this dialog offers two destinations: ~/.ledge and that picker. Escape
+// or a backdrop click cancels. Arrows move focus. Enter takes the focused one.
 import { useEffect, useRef } from "react";
 import { FolderInput, House } from "lucide-react";
 import { pushLayer } from "@/commands/layers";
@@ -26,9 +24,9 @@ export function MoveWorkspaceDialog({
   const homeRef = useRef<HTMLButtonElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
-  // Focus lands on the ~/.ledge option: it is the reason this dialog exists
-  // (the return trip the picker can't offer), and neither option destroys
-  // anything, so the ConfirmDialog's focus-Cancel caution does not apply.
+  // Focus lands on the ~/.ledge option, the destination this dialog exists to
+  // offer. Neither option destroys anything, so this does not need
+  // ConfirmDialog's caution about focusing Cancel.
   useEffect(() => {
     homeRef.current?.focus();
   }, []);
@@ -36,7 +34,8 @@ export function MoveWorkspaceDialog({
   // Escape goes through the shared modal layer stack, same as ConfirmDialog.
   useEffect(() => pushLayer("dialog", onCancel), [onCancel]);
 
-  // Roving focus on arrows; Enter activates the focused option natively.
+  // Roving focus: the arrows move between the options. Enter has no handler
+  // here, since it already activates the focused button.
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
     e.preventDefault();
@@ -49,8 +48,8 @@ export function MoveWorkspaceDialog({
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-6"
-      // Only a click that both started and ended on the backdrop cancels, the
-      // same drag guard ConfirmDialog carries.
+      // A click on the backdrop cancels, but only one that both started and
+      // ended there. ConfirmDialog carries the same drag guard.
       onClick={(e) => {
         if (e.target === e.currentTarget) onCancel();
       }}

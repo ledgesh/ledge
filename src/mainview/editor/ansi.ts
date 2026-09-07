@@ -1,13 +1,15 @@
-// A small ANSI SGR parser for the inline output panel.
+// A small ANSI SGR parser. Nothing calls it now: the inline output panel
+// renders each run into a real xterm.js terminal (inlineTerm.ts), which
+// handles the full stream. The parser dates from the panel that stripped
+// escapes instead.
 //
-// Block output comes from a real pty (openpty), so colour-aware tools like ls,
-// git, and grep emit SGR escape sequences. The panel used to strip them; this
-// turns the common ones (16/256/truecolour foreground and background, bold, dim,
-// italic, underline, inverse) into styled spans. Cursor-movement and other CSI
-// sequences, plus OSC strings, are recognised and skipped rather than printed.
-// This is deliberately not a terminal emulator: the terminal drawer (xterm.js)
-// handles the full stream; here we only need legible colour on mostly-linear
-// output.
+// Block output comes from a real pty (openpty), so colour-aware tools like
+// ls, git, and grep emit SGR escape sequences. parseAnsi turns the common
+// ones (16/256/truecolour foreground and background, bold, dim, italic,
+// underline, inverse) into styled spans. It recognises cursor-movement and
+// other CSI sequences, plus OSC strings, and skips them rather than printing
+// them. It is not a terminal emulator: it handles only legible colour on
+// mostly-linear output.
 
 export interface AnsiChunk {
   text: string;
@@ -28,9 +30,9 @@ function freshState(): SgrState {
   return { fg: null, bg: null, bold: false, dim: false, italic: false, underline: false, inverse: false };
 }
 
-// Mid-tone 16-colour palette chosen to stay legible on both the light and dark
-// panel backgrounds (pure black/white foregrounds are the usual casualty of a
-// theme-following panel, so 0 and 7 are nudged toward the middle).
+// Mid-tone 16-colour palette, legible on both the light and the dark panel
+// background. Colours 0 and 7 sit in the grey range: a pure black or pure
+// white foreground disappears against a panel that follows the theme.
 const ANSI16 = [
   "#3b3b3b", "#d0453b", "#2ea043", "#c69a2d", "#3b82f6", "#b25fd0", "#279b9b", "#b8b8b8",
   "#6e6e6e", "#f0605a", "#46c46a", "#e0b23c", "#5ca0fb", "#cf7fe6", "#3ec9c9", "#eeeeee",
@@ -50,8 +52,9 @@ function color256(n: number): string {
   return `rgb(${scale(r)},${scale(g)},${scale(b)})`;
 }
 
-// Consume an extended-colour argument (38/48 …) starting just after the 38/48,
-// returning the CSS colour and how many params it used.
+// Read an extended-colour argument. `at` is the index of the 38/48 param,
+// and the mode and its numbers follow it. Returns the CSS colour (null for a
+// mode other than 5 or 2) and how many further params the colour used.
 function extendedColor(params: number[], at: number): { color: string | null; used: number } {
   const mode = params[at + 1];
   if (mode === 5) return { color: color256(params[at + 2] ?? 0), used: 2 };
@@ -99,7 +102,7 @@ function styleFor(s: SgrState): string {
   let fg = s.fg;
   let bg = s.bg;
   if (s.inverse) {
-    // Swap, filling in defaults so inverted text stays visible on the panel.
+    // Swap fg and bg, filling in defaults so inverted text stays visible.
     const nf = bg ?? "var(--panel-bg)";
     const nb = fg ?? "var(--fg)";
     fg = nf;
@@ -117,9 +120,10 @@ function styleFor(s: SgrState): string {
 
 const ESC = "\x1b";
 
-// Parse `input` into styled chunks. State carries across chunks, so passing the
-// full accumulated output each render is correct (streamed output re-parses from
-// the top, which keeps colour spans that opened in an earlier write).
+// Parse `input` into styled chunks. SGR state starts fresh on every call and
+// carries only across the chunks of one parse. A caller showing streamed
+// output should pass the whole accumulated text each time, not the latest
+// write: parsing from the top keeps the colour spans an earlier write opened.
 export function parseAnsi(input: string): AnsiChunk[] {
   const text = input.replace(/\r\n/g, "\n").replace(/\r/g, "");
   const chunks: AnsiChunk[] = [];

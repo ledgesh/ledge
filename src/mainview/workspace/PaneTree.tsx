@@ -18,8 +18,8 @@ import { leafIds, type LeafNode, type PaneNode, type SplitNode, type TabState } 
 import { clippedEdges, wheelTravel } from "./tabStrip";
 
 // The tab being dragged, shared across every tab bar so a drop can name its
-// source pane. Kept outside React state because it only ever needs to be read
-// synchronously inside drag handlers; a re-render on drag start would be wasted.
+// source pane. Not React state: only the drag handlers read it, and nothing
+// rendered does, so a re-render on drag start would change nothing on screen.
 let dragging: { fromPaneId: string; tabId: string } | null = null;
 
 // Recursive renderer: a split node draws two children and a draggable divider; a
@@ -88,26 +88,26 @@ function PaneBody({ leaf, focused }: { leaf: LeafNode; focused: boolean }) {
   const [menu, setMenu] = useState<EditorMenuAnchor | null>(null);
   const active = leaf.tabs.find((t) => t.id === leaf.activeTabId) ?? null;
   const docId = active?.docId ?? null;
-  // PaneTree only ever renders the selected workspace, so the selected
-  // workspace's folder IS this tab's folder — and it never changes for a
-  // given docId (tabs stay in their workspace).
+  // PaneTree only ever renders the selected workspace (WorkspaceView.tsx), so
+  // the selected workspace's folder is this tab's folder. It never changes for
+  // a given docId, because tabs stay in their workspace.
   const folder = selected.folder;
 
   useLayoutEffect(() => {
     const container = hostRef.current;
     if (!container || !active) return;
     attachEditor(container, active, folder, {
-      // The note's file appeared (first save) or moved to follow its H1. Both reach
-      // the tab the same way; only which action carries it differs, since a create
-      // is identified by the docId that owns it and a move by the path it left.
+      // The note's file appeared (first save) or moved to follow its H1. Both
+      // reach the tab the same way. Only the action differs: a create names the
+      // docId that owns it, a move names the path the file left.
       onFile: (note, prevPath) =>
         dispatch(
           prevPath === null
             ? { type: "noteCreated", docId: active.docId, folder, note }
             : { type: "noteRenamed", path: prevPath, note },
         ),
-      // The heading changed. Not the same event as the file moving: a heading can
-      // change without the slug doing so, and then only the label moves.
+      // The heading changed. Not the same event as the file moving: a heading
+      // can change without the slug doing so, and then only the label moves.
       onTitle: (label) => dispatch({ type: "noteTitled", docId: active.docId, label }),
     });
     return () => detachEditor(active.docId);
@@ -115,21 +115,20 @@ function PaneBody({ leaf, focused }: { leaf: LeafNode; focused: boolean }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docId]);
 
-  // The editor's own context menu (interactions.md §11). On the WINDOW, not on
-  // the host: the hotspots over rendered links and checkboxes are parented to
-  // the body (editor/livePreview.ts), so a right-click on one never passes
-  // through this subtree at all and a React handler here would never see it —
-  // which is the half of the editor the menu has the most to say about. Each
-  // pane hears every right-click and answers only its own (editorMenuAt's
-  // host check), and the pane takes focus first, because that same body-
-  // parented target means LeafView's onMouseDownCapture did not fire either
-  // and the menu's verbs act on the FOCUSED pane's note.
+  // The editor's own context menu (interactions.md §11). The listener is on
+  // the window, not the host: the hotspots over rendered links and checkboxes
+  // are parented to the body (editor/livePreview.ts), out of this subtree, and
+  // they are the clicks link.open and task.toggle answer. editorMenuAt's host
+  // check keeps each pane to its own right-clicks. The dispatch below focuses
+  // the pane: that same target skipped LeafView's onMouseDownCapture, and the
+  // menu's verbs act on the focused pane's note.
   useEffect(() => {
     const onCtx = (e: MouseEvent) => {
       const at = editorMenuAt(e, hostRef.current, docId, workspaceKind(folder) === "docs");
       if (!at) return;
-      // App.tsx suppresses the WebView's own menu window-wide; this handler is
-      // the one consuming the gesture, and a consumer says so (§7).
+      // App.tsx suppresses the WebView's own menu window-wide. This handler is
+      // the one consuming the gesture, and a consumer says so
+      // (interactions.md §7).
       e.preventDefault();
       dispatch({ type: "focusPane", paneId: leaf.id });
       setMenu(at);
@@ -138,13 +137,11 @@ function PaneBody({ leaf, focused }: { leaf: LeafNode; focused: boolean }) {
     return () => window.removeEventListener("contextmenu", onCtx);
   }, [dispatch, docId, folder, leaf.id]);
 
-  // Put the caret in this editor when its pane gains focus or its tab changes.
-  //
-  // Unless a list row is driving: opening a note from the sidebar changes this
-  // pane's active tab, and yanking focus into the editor would take it right
-  // back off the row the user is working — which is what the row verbs act on
-  // (interactions.md §1 R5). Clicking a note shows it; clicking the
-  // editor is what says you want to type in it.
+  // Put the caret in this editor when its pane gains focus or its tab changes,
+  // unless a list row holds focus. Opening a note from the sidebar changes
+  // this pane's active tab, and taking focus would pull it off the row the row
+  // verbs act on (interactions.md §1 R5). Clicking a note shows it; clicking
+  // the editor is what asks to type in it.
   useLayoutEffect(() => {
     if (!focused || !docId) return;
     if (document.activeElement?.closest("[data-list-row]")) return;
@@ -155,8 +152,8 @@ function PaneBody({ leaf, focused }: { leaf: LeafNode; focused: boolean }) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 text-muted-foreground">
         <span className="text-sm">No open notes</span>
-        {/* Not in the docs workspace: nothing creates there, and a button
-            whose command is gated would be a dead affordance. */}
+        {/* Not in the docs workspace: nothing creates there, and note.new is
+            gated off (commands/registry.ts), so the button would do nothing. */}
         {workspaceKind(folder) !== "docs" && (
           <button
             className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs hover:bg-accent"
@@ -182,9 +179,10 @@ function PaneBody({ leaf, focused }: { leaf: LeafNode; focused: boolean }) {
 function TabBar({ leaf, focused }: { leaf: LeafNode; focused: boolean }) {
   const { dispatch, selected } = useWorkspace();
   const { exec } = useCommands();
-  // Tab quick-jump is Ctrl+number, but cmux shows the badge on either modifier.
-  // Ctrl+number targets the FOCUSED pane, so only its tab bar gets badges (with
-  // multiple tab groups, badging the others would be misleading).
+  // Tab quick-jump is ⌃1…9 (commands/keys.ts tabSelectKey), and the badges
+  // show while either Command or Control is held. The jump acts on the focused
+  // pane, so only its tab bar badges: badging another pane's tabs would show
+  // numbers that do not switch to them.
   const cmdHeld = useCmdHeld();
   const ctrlHeld = useCtrlHeld();
   const badges = focused && (cmdHeld || ctrlHeld);
@@ -207,8 +205,8 @@ function TabBar({ leaf, focused }: { leaf: LeafNode; focused: boolean }) {
     setClipped((prev) => (prev.left === next.left && prev.right === next.right ? prev : next));
   };
 
-  // Re-measure when the tab list changes and whenever the strip is resized —
-  // the strip resizes with its pane, so one observer covers split drags and
+  // Re-measure when the tab list changes and whenever the strip is resized.
+  // The strip resizes with its pane, so one observer covers split drags and
   // window resizes both. Scrolling is handled by onScroll on the strip.
   useLayoutEffect(() => {
     syncClipped();
@@ -264,14 +262,12 @@ function TabBar({ leaf, focused }: { leaf: LeafNode; focused: boolean }) {
   };
 
   return (
-    // 44 points on touch, and the tabs inherit it from `items-stretch`: they
-    // are adjacent alternatives with no gap at all between them, which is the
-    // shape §1a's rule was written for, and switching notes is what the strip
-    // is for.
-    //
-    // 45 and not 44, because the box is a border box and `items-stretch` fills
-    // the CONTENT box: at 44 the bottom rule eats a point and every tab
-    // measured 43. The one point is the border's, not a margin of comfort.
+    // 44 points of tab height on touch, which the tabs inherit through
+    // `items-stretch`. They are adjacent alternatives with no gap between
+    // them, the shape interactions.md §1a's 44-point rule is written for.
+    // The class says 45 because this is a border box: at 44 the `border-b`
+    // took a point and every tab measured 43. The point is the border's, not
+    // a margin of comfort.
     <div className="flex h-8 shrink-0 items-stretch border-b bg-muted/30 touch:h-[45px]">
       <div
         ref={stripRef}
@@ -313,21 +309,17 @@ function TabBar({ leaf, focused }: { leaf: LeafNode; focused: boolean }) {
           </button>
         )}
       </div>
-      {/* The two SPLITS are absent on touch, which is §1a's other answer and the
-          one they earn: three 21-point buttons half a point apart were the
-          densest thing in the app, and growing them would spend 132 of a
-          phone's 390 points on a pane arrangement it cannot use — a split at
-          this width is two 195-point editors. Both stay in the palette and in a
-          tab's menu, so a split someone asks for by name is a split they get.
+      {/* The two split buttons are absent on touch (interactions.md §1a).
+          They were three 21-point buttons half a point apart, the densest
+          thing in the app. Growing them to 44 would spend 132 of a phone's 390
+          points on an arrangement it cannot use. Both splits stay in the
+          palette and in a tab's menu.
 
-          Close Pane is not that verb and does not take that answer. It is the
-          way OUT of the arrangement, and hiding it beside the two that make one
-          left a phone in a split it could not leave except by knowing to type
-          ">close pane". Its cost in the state a phone actually lives in is
-          zero, because canClosePane withholds it until a second pane exists; in
-          the state that traps you, 44 points for the exit is the trade. The
-          group goes with it on touch, or its border would hang off the end of
-          the strip with nothing inside. */}
+          Close Pane stays, at 44 points on touch (the ✕ below). It is the exit
+          from a split, which a phone can otherwise leave only by typing
+          ">close pane" (§1a). canClosePane withholds it until a second pane
+          exists, and on touch the group hides with it: an empty group would
+          hang its border off the end of the strip. */}
       <div
         className={cn(
           "flex shrink-0 items-center gap-0.5 border-l px-1",
@@ -381,12 +373,12 @@ function TabBar({ leaf, focused }: { leaf: LeafNode; focused: boolean }) {
             target={{ kind: "pane", paneId: leaf.id }}
             onClose={() => setMenu(null)}
           />
-          {/* Beside the two verbs that put you in a split, the one that takes
-              you out. This menu is where a touch client makes a split — it has
-              no ⌘D and, until the strip's ✕ came back above, no way to unmake
-              one either. Disabled rather than missing while a workspace has a
-              single pane: R6 menus advertise the pane's verbs, and a verb that
-              vanishes teaches nothing about why. */}
+          {/* Close Pane, beside the two splits that make one. A touch client
+              has no ⌘D, so this menu is where it splits a pane. Until the
+              strip's ✕ came back above, it had no way to unmake a split. With
+              one pane the item is disabled rather than absent. CommandMenuItem
+              renders every command's `when` as enablement, and pane.close's
+              asks for a second pane (commands/registry.ts). */}
           <CommandMenuItem
             id="pane.close"
             target={{ kind: "pane", paneId: leaf.id }}
@@ -446,27 +438,30 @@ function TabItem({
   const active = leaf.activeTabId === tab.id;
   const [dragged, setDragged] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  // Whether this note's text is on disk, and whether there is currently a disk
-  // to put it on. Two subscriptions rather than one because they are two facts
-  // that change on their own schedules; both only ever bump this one tab.
+  // Redraw this tab when either fact behind its dot changes: whether the note
+  // is saved (onDirtyChange) and whether its server is reachable
+  // (subscribeConnections). Two subscriptions, because the two change on their
+  // own schedules. Both bump only this tab.
   const [, bumpDirty] = useState(0);
   useEffect(() => onDirtyChange(() => bumpDirty((n) => n + 1)), []);
   useEffect(() => subscribeConnections(() => bumpDirty((n) => n + 1)), []);
   const unsaved = isNoteDirty(tab.docId);
-  // A dot on its own reads as "saving in a moment", which is true almost
-  // always and false in the one case worth drawing attention to. A lost wire
-  // makes it a warning and gives it words (remote.md §7).
+  // A plain dot reads as "saving in a moment", which is true unless the note's
+  // server cannot be reached. A lost link colours the dot as a warning and
+  // says so in its tooltip (remote.md §7).
   const stranded = unsaved && linkState().state === "lost";
-  // A tab is a row for menu purposes (R6): right-click, or a finger held on
-  // it, opens the same menu. That menu is where Close Tab and Close Others
-  // live for anyone without ⌘W, which is every touch client.
+  // A tab is a row for menu purposes (interactions.md §1 R6): a right-click,
+  // or a finger held on it, opens the same menu. That menu is where Close Tab
+  // and Close Others live for a client with no ⌘W, which is every touch
+  // client.
   const press = useRowMenu(
     onContextMenu,
     () => dispatch({ type: "selectTab", paneId: leaf.id, tabId: tab.id }),
   );
 
   // Keep the active tab on screen. With the strip's scrollbar hidden, a ⌃Tab
-  // or ⌃N jump to a clipped tab would otherwise switch to something invisible.
+  // or ⌃1…9 jump to a clipped tab would otherwise switch to a tab nothing on
+  // screen shows.
   useLayoutEffect(() => {
     if (active) ref.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [active]);
@@ -478,9 +473,9 @@ function TabItem({
       {...press}
       draggable
       className={cn(
-        // Wider on touch as well as taller: the strip's height comes from the
-        // row above, but a tab is only as wide as its title, and "Beta" came to
-        // 41 points against a neighbour with no gap in between.
+        // Wider on touch as well as taller. The strip sets the height, but a
+        // tab is only as wide as its title: "Beta" measured 41 points, against
+        // a neighbour with no gap in between.
         "group relative flex min-w-0 max-w-[180px] shrink-0 cursor-default items-center gap-1.5 border-r px-2.5 text-xs touch:px-[14px]",
         active
           ? cn("bg-background", paneFocused ? "text-foreground" : "text-muted-foreground")
@@ -502,7 +497,8 @@ function TabItem({
       <span className="truncate">{tab.title}</span>
       {unsaved && (
         // Before the close button, so it does not move when the button appears
-        // on hover, and present on touch where that button is not (§1a).
+        // on hover. It is present on touch, where that button is not
+        // (interactions.md §1a).
         <span
           data-unsaved={stranded ? "stranded" : "pending"}
           title={stranded ? "Not saved: this note's server cannot be reached." : "Not saved yet."}
@@ -511,10 +507,10 @@ function TabItem({
       )}
       {/* `hidden hoverable:flex`, not `flex`: on a client with no hover this
           button can never be revealed, and an invisible one still takes the
-          taps that land on it — a 16-point close target at the end of every
-          tab, on the strip's own tap surface. Absent there instead; Close Tab
-          is in the menu a long press opens, which is where §1a puts every
-          hover-revealed verb. */}
+          taps that land on it (a 16-point close target at the end of every
+          tab, on the strip's own tap surface). A touch client gets no button
+          at all. Close Tab is in the menu a long press opens, where
+          interactions.md §1a puts every hover-revealed verb. */}
       <button
         className="hidden size-4 shrink-0 items-center justify-center rounded opacity-0 hover:bg-accent group-hover:opacity-100 hoverable:flex"
         title={tooltip("tab.close")}

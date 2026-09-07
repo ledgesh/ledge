@@ -1,43 +1,47 @@
 // Which folders the note browser has open, per workspace.
 //
-// A mirrored module rather than component `useState` (architecture.md §5),
-// because more than the browser reacts to it: Move to Folder…, New Note in
-// Folder and a drag onto a folder row all have to REVEAL where the note
-// landed, and the folder.toggle command has to read the state to say whether
-// its menu item is Expand or Collapse. State several commands act on is not
-// ephemeral chrome, and vault/channel.ts is the same shape for the same
-// reason.
+// A module-level mirror rather than component `useState` (architecture.md §5).
+// That section leaves state in a component only when nothing outside it
+// reacts. Here more than the browser's rows react:
 //
-// Not in the reducer, and not persisted BY this module: `.layout.json` carries
-// each workspace's open folders beside its pane tree, so a relaunch finds the
-// tree the way it was left (workspace/persist.ts, which reads the live set out
-// of here on its way to the file and seeds it on the way back). Which folders
-// are open is arrangement, the same kind of fact as which tabs are, so it is
-// kept in the same place. Nothing here knows there is a file.
+//   - Move to Folder… and a drag onto a folder row expand the destination
+//     through NoteBrowser.tsx's `file`, not through the note.move command.
+//   - New Note in Folder expands it from the command itself
+//     (commands/registry.ts note.newInFolder).
+//   - folder.toggle reads it to decide whether its menu item says Expand or
+//     Collapse (commands/registry.ts).
+//   - The layout save subscribes to it (App.tsx).
 //
-// What holds either way is that this is a view of a folder list itself DERIVED
-// from the notes (notes/folders.ts), and that is what makes saving it cheap:
-// there is nothing to reconcile with the disk, because an entry naming a folder
-// that no longer exists simply never matches a row. Restore prunes those
-// entries anyway, on the same authority that prunes a restored tab — the boot
-// note list — so a folder deleted from a shell while Ledge was closed does not
-// sit in the file forever.
+// vault/channel.ts is a module-level mirror for the same reason.
 //
-// The one thing that DOES have to be told is a rename made in the app
-// (folderRenamed below) — there the folder is the same folder and only its
-// name changed, so letting the entry stop matching would collapse a subtree
-// nobody closed.
+// Not in the reducer, and not persisted here. `.layout.json` carries each
+// workspace's open folders beside its pane tree. workspace/persist.ts reads
+// the live set out of here on its way to the file and seeds it on the way
+// back, so a relaunch finds the tree as it was left. Which folders are open is
+// arrangement, the same kind of fact as which tabs are. Nothing here knows
+// there is a file.
 //
-// A DELETE is told nothing, and that is the same rule rather than an omission:
-// the folder is gone, so its entry matches no row, and the next restore prunes
-// it. Leaving it is what makes Undo put the tree back the way it was — the
-// folder returns already open, because nobody ever closed it.
+// This is a view of a folder list that notes/folders.ts derives from the
+// notes, so saving it is cheap: an entry naming a folder that no longer exists
+// matches no row, and there is nothing to reconcile with the disk. Restore
+// prunes those entries anyway, on the same authority that prunes a restored
+// tab: the boot note list. A folder deleted from a shell while Ledge was
+// closed does not sit in the file forever.
+//
+// This module has to be told about a rename made in the app (folderRenamed
+// below). The folder is the same folder under a new name, so letting its entry
+// stop matching would collapse a subtree nobody closed.
+//
+// Nothing tells it about a delete, and that is the same rule rather than an
+// omission. The folder is gone, its entry matches no row, and the next restore
+// prunes it. Leaving the entry is what brings the folder back open when Undo
+// restores its notes.
 import { useSyncExternalStore } from "react";
 import { expandedRenamed, expandedWith, expandedWithout } from "./folders";
 
-// Keyed by workspace ROOT, so switching workspaces and switching back finds
-// the tree the way it was left, and two workspaces cannot share an answer for
-// the folder name they happen to have in common.
+// Keyed by workspace root, so switching workspaces and switching back reopens
+// the same folders. Two workspaces cannot share an answer for a folder name
+// they happen to have in common.
 const open = new Map<string, ReadonlySet<string>>();
 const subs = new Set<() => void>();
 const EMPTY: ReadonlySet<string> = new Set();
@@ -56,30 +60,31 @@ export function isExpanded(root: string, folder: string): boolean {
   return expandedIn(root).has(folder);
 }
 
-/** Open a folder AND its ancestors — revealing a row inside a closed folder is
- * what every caller actually wants (folders.ts expandedWith). */
+/** Open a folder and its ancestors (folders.ts expandedWith). Every caller
+ * wants the row revealed, and a row inside a closed folder is not on screen. */
 export function expandFolder(root: string, folder: string): void {
   if (folder === "") return; // the top level is always shown; it has no row
   publish(root, expandedWith(expandedIn(root), folder));
 }
 
-/** Close a folder and everything under it, so reopening it does not spill a
- * subtree you closed a while ago. */
+/** Close a folder and everything under it, so reopening it does not show a
+ * subtree that was closed a while ago. */
 export function collapseFolder(root: string, folder: string): void {
   publish(root, expandedWithout(expandedIn(root), folder));
 }
 
 /** A folder was renamed: the rows under it are the same rows under new names,
- * so the open ones stay open (folders.ts expandedRenamed). Called by the
- * rename itself rather than derived, because an entry naming a folder that no
- * longer exists never matches a row again — the tree would simply collapse. */
+ * so the open ones stay open (folders.ts expandedRenamed). The rename calls
+ * this (notes/actions.ts); the set is never recomputed from the live folder
+ * list. Without the call, the entries under the old name would match no row
+ * and the subtree would collapse. */
 export function folderRenamed(root: string, from: string, to: string): void {
   publish(root, expandedRenamed(expandedIn(root), from, to));
 }
 
 /** Boot only: the open folders one workspace's saved layout restored
- * (workspace/persist.ts). A set, not a merge — the file is the whole answer
- * for that root, and at boot there is nothing yet to merge it with. */
+ * (workspace/persist.ts). A set, not a merge: the file is the whole answer for
+ * that root, and at boot there is nothing yet to merge it with. */
 export function seedExpansion(root: string, folders: Iterable<string>): void {
   publish(root, new Set(folders));
 }

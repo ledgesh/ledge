@@ -1,32 +1,8 @@
-// The Swift shell, from the page's side (ios.md §2).
-//
-// WKWebView gives a page exactly two one-way channels: a message handler it
-// posts JSON into, and `evaluateJavaScript` coming back. Everything the iOS
-// client does across that boundary is the small protocol below — a byte
-// stream in both directions, and a request/response channel for the handful
-// of things only the device can answer.
-//
-// Two rules decide what goes where, and both are ios.md §2's.
-//
-// **Frames are bytes and stay bytes.** The page runs the whole protocol stack
-// (`shared/transport.ts`): the handshake, the op ids, the reconnect ladder,
-// the held requests. Swift owns the socket and nothing above it, so a frame
-// crosses this bridge as an opaque base64 string that no Swift code parses.
-// Base64 costs a third of a memcpy inside one device, which is the trade
-// `WKScriptMessage.body` forces (it carries JSON-compatible types only, so a
-// Uint8Array does not survive the trip).
-//
-// **The native calls are their own vocabulary, not the schema's.** They are
-// named `clipboard.read`, not `clipboardRead`, because they are not the
-// schema's methods and pretending otherwise would invite Swift to grow a
-// second, partial implementation of it. `clipboard.image` is the sharpest
-// case: the schema's `assetPaste` reads a pasteboard AND names a file in a
-// workspace, which are two machines' jobs (remote.md §5). Swift answers the
-// first half; the overlay below sends the bytes to the server for the second,
-// so the client still never names a file.
-//
-// Nothing in this file touches WebKit. `attachShell` at the bottom is the
-// three lines that do, and everything above it is testable in Bun.
+// The Swift shell, from the page's side (ios.md §2). WKWebView gives a page two
+// one-way channels: a message handler it posts JSON into, and
+// `evaluateJavaScript` coming back. This file carries a byte stream over both,
+// plus a request/response channel for what only the device can answer. Only
+// `attachShell` at the bottom touches WebKit; the rest is testable in Bun.
 import { hostPart, validateConnection, validatePassword, type AuthMode } from "../../shared/connections";
 import { fedDuplex, type ClientConnection, type Duplex } from "../../shared/transport";
 import {
@@ -37,13 +13,16 @@ import {
   type RequestClient,
 } from "../../shared/wire";
 
-/** What Swift implements: eighteen strings and a flat switch. */
+/** What Swift implements: eighteen strings and a flat switch. The calls are
+ * their own vocabulary, `clipboard.read` and not `clipboardRead`: they are not
+ * the schema's methods, and naming them as if they were is the invitation to
+ * implement half the schema in Swift (ios.md §2). `clipboard.image` is the case
+ * that shows it, and `assetPaste` below is where the other half lands. */
 export const SHELL_CALLS = [
-  // The bridge's own verbs, `@`-prefixed because no schema method can ever
-  // collide with them. `@hello` is asked once, before any socket exists: the
-  // client id keys the saved layout (remote.md §5) and so is needed before the
-  // first dial, and it is a fact about the DEVICE rather than about a
-  // connection to it.
+  // The bridge's own verbs, `@`-prefixed so no schema method can collide with
+  // them. `@hello` is asked once, before any socket exists: the client id keys
+  // the saved layout (remote.md §5), so it is needed before the first dial. It
+  // is a fact about the device rather than about a connection to it.
   "@hello",
   "@open",
   "@close",
@@ -51,54 +30,50 @@ export const SHELL_CALLS = [
   // default, and the window this matters most in is the one before a server is
   // reachable, when nothing can be written to its log either.
   "@log",
-  // Which keyboard the keyboard is over. One private content view is the first
-  // responder for every field in the page, so the shell cannot tell a note from
-  // a search box by itself, and the accessory bar it hangs off that responder
-  // would otherwise offer Bold over a passphrase prompt (ios.md §7).
-  //
-  // Three answers rather than two, because a note and a RUNNING BLOCK want
-  // different keys and the panel a run draws lives inside the editor's own
-  // content: Bold over a program waiting for a `[y/N]` is the same wrong answer
-  // as Bold over a passphrase, one layer in.
+  // Which surface the keyboard is over (ios.md §7). One private content view is
+  // the first responder for every field in the page, so the shell cannot tell a
+  // note from a search box. The accessory bar hangs off that responder, and
+  // without this call it would offer Bold over a passphrase prompt. Three
+  // answers, not two: a running block wants keys of its own (`barFaceOf` below).
   "@focus",
-  // The device's five answers. `menu.set` is a no-op on a phone (ios.md §11)
-  // and is here anyway, because a shell that silently lacked a method would
-  // be a hang rather than an error.
+  // The device's four clipboard answers. `menu.set` below does nothing on a
+  // phone (ios.md §11) and is on the list anyway: the page answers it without
+  // asking, and Swift's case is there so a page that does ask gets a reply
+  // (ios/Sources/WebHost.swift).
   "clipboard.read",
   "clipboard.write",
   "clipboard.readRich",
   "clipboard.image",
-  // The photo library, as PNG bytes (ios.md §11). Slow by the standards of
-  // everything else here — it puts a whole system picker on the screen and
-  // waits for a person — and answers "" for a cancel, which is the common case.
+  // The photo library, as JPEG bytes (ios.md §11). Slow by the standards of
+  // everything else here: it puts a whole system picker on the screen and waits
+  // for a person. Answers "" for a cancel, which is the common case.
   "photos.pick",
   "link.open",
   // The device's own share sheet, for the one string a phone has to get onto
   // another machine: its `authorized_keys` line (ios.md §4). The clipboard ends
-  // at the device holding it, so a copy button on a phone is a line that leaves
-  // by retyping; this is the call that lets it leave by AirDrop instead.
+  // at the device holding it, so a copy button would leave that line to be
+  // retyped. This call lets it leave by AirDrop instead.
   "share.text",
   "menu.set",
   // Which servers this phone knows (remote.md §8). Swift holds the bytes and
-  // dials the selection; every rule about what may be added, renamed or removed
-  // is `clientSeams` below, beside the Mac's in bun/connectionManager.ts —
-  // there is one right answer to "can this be deleted" and it should not be
-  // written twice in two languages.
+  // dials the selection. Every rule about what may be added, renamed or removed
+  // is in `clientSeams` below, beside the Mac's in bun/connectionManager.ts, so
+  // "can this be deleted" has one answer rather than one per language.
   "servers.list",
   "servers.save",
   // Store or forget one server's password (remote.md §4). Its own call rather
   // than a field on `servers.save`, which carries the whole list on every
-  // rename: a secret should cross this bridge when it changes and never
-  // otherwise. Nothing reads one back — the page has no call for it, and Swift
-  // has no reply that carries one.
+  // rename: a secret crosses this bridge when it changes and never otherwise.
+  // Nothing reads one back. The page has no call for it, and Swift has no reply
+  // that carries one.
   "servers.password",
-  // A dial as far as key exchange, which is where the host key is offered. What
-  // `ssh-keyscan` is on a Mac: a fingerprint, before this phone's key goes on
-  // the wire and before the server has been asked to accept it (ios.md §3).
+  // A dial as far as key exchange, which is where the host key is offered. The
+  // job `ssh-keyscan` does on a Mac: a fingerprint, before this phone's key goes
+  // on the wire and before the server has been asked to accept it (ios.md §3).
   "servers.probe",
   // Hand the window back to the shell's own server screens, with the reason to
   // show on them. The list above is managed from the connection dialog, which
-  // is React and so needs a connection: the one state it cannot cover is a boot
+  // is React and so needs a connection. The state it cannot cover is a boot
   // that never reached a server, and this is the page in that state asking for
   // the native list instead (mainview/ios.tsx, ios.md §4).
   "servers.choose",
@@ -109,20 +84,24 @@ export type ShellCall = (typeof SHELL_CALLS)[number];
 /**
  * What the keyboard is over, and therefore which face the accessory bar wears
  * (ios.md §7): the note's own Markdown verbs, the keys a running block needs
- * (editor/inlineTerm.ts RUN_KEYS), or no bar at all — which is every other
+ * (editor/inlineTerm.ts RUN_KEYS), or no bar at all. "none" covers every other
  * field on the page, where the note's verbs would act on the note behind.
  */
 export type BarFace = "none" | "note" | "run";
 
-/** Page to shell. */
+/** Page to shell. A frame crosses as an opaque base64 string that no Swift code
+ * parses: the page runs the whole protocol stack (shared/transport.ts), and
+ * Swift owns the socket and nothing above it (ios.md §2). `WKScriptMessage.body`
+ * carries JSON-compatible types only, so a Uint8Array does not survive the trip,
+ * and base64 costs a third of a memcpy inside one device. */
 export type ToShell = { t: "frame"; b: string } | { t: "call"; id: number; m: ShellCall; p: unknown };
 
 /**
  * Shell to page.
  *
- * `gen` numbers the socket a message belongs to. A reconnect opens a new one
- * while the old one's close is still in flight, and without this the new
- * connection would be torn down by the previous connection's obituary.
+ * `gen` numbers the socket a message belongs to. A reconnect opens a new socket
+ * while the old one's close is still in flight. Without the number, the old
+ * socket's close would tear down the new connection.
  */
 export type ToPage =
   | { t: "frame"; gen: number; b: string }
@@ -134,29 +113,26 @@ export type ToPage =
   // wire that died while the app was away (ios.md §5).
   | { t: "resumed" }
   // A button on the keyboard accessory bar (ios.md §7). The payload is a
-  // command id and nothing else: the bar is a native surface naming a verb,
-  // exactly as the Mac's menu bar is, and the registry is the one place that
-  // knows what any of them mean. Swift holds the strings and no behavior, so
-  // a command that is renamed or withdrawn cannot leave a button that does
-  // something subtly different — it leaves one that does nothing, and says so
-  // in the console.
+  // command id and nothing else: the bar names a verb the way the Mac's menu
+  // bar does, and the command registry knows what any of them mean. Swift holds
+  // the strings and no behavior, so a renamed or withdrawn command leaves a
+  // button that does nothing and logs it (commands/CommandProvider.tsx).
   | { t: "verb"; id: string }
-  // A button on the bar's OTHER face, over a running block. The same shape and
-  // the same rule one domain along: the name of a key, and what a key means is
-  // the page's (editor/inlineTerm.ts RUN_KEYS). Swift never learns that Ctrl-C
-  // is one byte — which is the difference between a bar and a terminal
-  // emulator, and this end is not the one holding the emulator.
+  // A button on the bar's other face, over a running block. The same shape and
+  // the same rule one domain along: the payload is the name of a key, and the
+  // page turns that name into bytes (editor/inlineTerm.ts RUN_KEYS). Swift
+  // never learns that Ctrl-C is one byte.
   | { t: "key"; k: string };
 
 /** What `@hello` answers: who this client is (remote.md §5), what to call the
- * machine it is pointed at (§8 wants the indicator to name one), and the
- * `authorized_keys` line a server has to trust before this phone can reach it
- * (ios.md §4) — a fact about the device, like the client id, asked once. */
+ * machine it is pointed at (remote.md §8, so the indicator can name one), and
+ * the `authorized_keys` line a server has to trust before this phone can reach
+ * it (ios.md §4). All of them are facts about the device, asked once. */
 export interface ShellHello {
   client: string;
   /** What this phone calls itself, for the other clients on the same server
-   * (wire.ts `Hello.label`). Swift's, because the device name is UIKit's to
-   * answer; the page only forwards it into the handshake. */
+   * (wire.ts `Hello.label`). Swift's answer, because the device name is UIKit's
+   * to give. The page only forwards it into the handshake. */
   label: string;
   destination: string;
   key: string;
@@ -165,7 +141,8 @@ export interface ShellHello {
 export interface Shell {
   /** One native call. Rejects with the shell's own words when it refuses. */
   call(m: ShellCall, p: unknown): Promise<unknown>;
-  /** Ask who we are and where we are pointed. Once, before the first dial. */
+  /** Ask who this client is and where it is pointed. Once, before the first
+   * dial. */
   hello(): Promise<ShellHello>;
   /** Open a socket and take the byte stream over it. What `reconnectingClient`
    * dials; a new one supersedes whatever was open. */
@@ -175,8 +152,8 @@ export interface Shell {
   /** A line on the shell's console, for the window where nothing else can
    * carry one. Never rejects: a log line is not worth a failure. */
   log(text: string): void;
-  /** Say what has focus, so the shell knows which bar the keyboard it is about
-   * to show should carry. Idempotent and cheap: only transitions are sent. */
+  /** Say what has focus, so the shell knows which bar to put on the keyboard it
+   * is about to show. Idempotent and cheap: only transitions are sent. */
   focus(over: BarFace): void;
   /** Told when the app comes back to the foreground. */
   onResume(fn: () => void): void;
@@ -191,8 +168,8 @@ export interface Shell {
 /**
  * The page's end of the bridge, over a `post` that reaches Swift.
  *
- * Pure: `post` is the only way out and `deliver` the only way in, which is
- * what lets the whole thing be driven from a test with two functions.
+ * Pure: `post` is the only way out and `deliver` the only way in, so a test can
+ * drive the whole thing with two functions.
  */
 export function nativeShell(post: (msg: ToShell) => void): Shell {
   const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
@@ -261,8 +238,8 @@ export function nativeShell(post: (msg: ToShell) => void): Shell {
     deliver(msg) {
       switch (msg.t) {
         case "frame":
-          // A frame from a superseded socket is bytes from a conversation this
-          // client has already stopped having. Feeding them to the current
+          // A frame from a superseded socket carries bytes from a connection
+          // this client has already dropped. Feeding them to the current
           // connection would put another server's answers in its decoder.
           if (live && msg.gen === live.gen) live.io.feed(fromBase64(msg.b));
           return;
@@ -298,16 +275,15 @@ export function nativeShell(post: (msg: ToShell) => void): Shell {
 /**
  * Which face `el` having focus calls for (ios.md §7).
  *
- * The run is tested FIRST because it is inside the editor: a run's output panel
- * is a CodeMirror block widget, so it sits in `.cm-content` and answers the
- * note's own test. Asking in the other order is the phase 6 defect one layer in
- * — a formatting bar over a program waiting for a password, whose Bold would
- * act on the note behind it.
+ * The run is tested before the note because a run's output panel is a
+ * CodeMirror block widget: it sits in `.cm-content` and answers the note's own
+ * test. The other order is the phase 6 defect one layer in, a formatting bar
+ * over a program waiting for a password, whose Bold acts on the note behind it.
  *
- * Pure, and by class rather than by anything either surface exports: those two
- * classes are what CodeMirror and `editor/blocks.ts` put in the DOM, and what
- * every spec in `e2e/` already reaches for. Needs a document, so it is proved
- * in the harness (e2e/phone.spec.ts) rather than in Bun.
+ * Pure, and by class rather than by anything either surface exports:
+ * `.cm-content` and `.ledge-output` are what CodeMirror and
+ * `editor/inlineTerm.ts` put in the DOM, and what every spec in `e2e/` reaches
+ * for. Needs a document, so it is proved in e2e/phone.spec.ts rather than Bun.
  */
 export function barFaceOf(el: Element | null): BarFace {
   if (el?.closest(".ledge-output")) return "run";
@@ -315,18 +291,15 @@ export function barFaceOf(el: Element | null): BarFace {
 }
 
 /**
- * The transition filter in front of `@focus`: pass it what has focus now, it
- * calls `tell` only when the answer changed.
- *
- * Pure, and separate from the listener that feeds it, because the listener is
- * three lines of DOM and this is the part with state. Focus events arrive in
- * pairs — a focusout and a focusin per move — and the editor keeps focus across
- * most of them, so an unfiltered reporter would cross the bridge on every
- * caret move inside one note.
+ * The transition filter in front of `@focus`: pass it what has focus now, and
+ * it calls `tell` only when the answer changed. Focus events arrive in pairs (a
+ * focusout and a focusin per move) and the editor keeps focus across most of
+ * them, so an unfiltered reporter would cross the bridge on every caret move
+ * inside one note. Pure, and separate from the DOM listener that feeds it.
  */
 export function focusReporter(tell: (over: BarFace) => void): (over: BarFace) => void {
-  // Not the first report: the shell's own default is "none", and starting in
-  // step with it means the first call is sent only if it says something.
+  // Not the first report. The shell's own default is "none", so starting at
+  // the same value means the first call is sent only when it says something.
   let last: BarFace = "none";
   return (over) => {
     if (over === last) return;
@@ -336,12 +309,11 @@ export function focusReporter(tell: (over: BarFace) => void): (over: BarFace) =>
 }
 
 /**
- * The server's handlers with the client's own laid over the top: the same
- * overlay bun/clientSeams.ts applies on a Mac, for a shell whose natives are
- * Swift's.
+ * The server's handlers with the client's own laid over the top: the overlay
+ * bun/clientSeams.ts applies on a Mac, for a shell whose natives are Swift's.
  *
- * `build` is the server's, from its handshake, because the connection chrome
- * shows what it is connected TO (remote.md §11).
+ * `build` is the server's, read off its handshake (remote.md §11), rather than
+ * this client's own version: the connection chrome reports what it reached.
  */
 export function nativeOverlay(
   wire: Pick<ClientConnection, "requests" | "recheck">,
@@ -372,10 +344,10 @@ interface ShellServer {
 }
 
 const NO_SUCH = "There is no such connection.";
-// A pin is the key of one machine, and this one carries no hostname to check
-// it against — so an address that moved to another host has to be asked for a
-// fingerprint again (remote.md §4). The dialog's own form sends one, so this
-// is the backstop rather than the path.
+// A pin is one machine's key, and this pin carries no hostname to check it
+// against (`hostKey` above). An address that moved to another host has to be
+// asked for a fingerprint again (remote.md §4). The dialog's own form sends
+// one, so this is the backstop rather than the path.
 const PIN_MOVED = "That pinned key belongs to another host. Check the new host's fingerprint first.";
 const KEYCHAIN_REFUSED = "This device's keychain would not store that password.";
 
@@ -393,13 +365,11 @@ function newServerId(): string {
 }
 
 /**
- * The sixteen a client shell answers itself (wire.ts CLIENT_METHODS), for iOS.
- *
- * Typed as the whole list rather than as a partial map, so a name added to
+ * The seventeen a client shell answers itself (wire.ts CLIENT_METHODS), for
+ * iOS. Typed as the whole list rather than as a partial map, so a name added to
  * CLIENT_METHODS fails to compile here until this shell answers it too. The
- * alternative is a method that quietly reaches the wire and is refused by the
- * server, which is remote.md §10's exact failure with an extra round trip
- * attached.
+ * alternative is a method that quietly reaches the wire, where the server
+ * refuses it (remote.md §10) and the refusal costs a round trip.
  */
 function clientSeams(
   wire: Pick<ClientConnection, "requests" | "recheck">,
@@ -413,8 +383,8 @@ function clientSeams(
     await shell.call("servers.save", { servers, selected });
   };
   // A string stores, null forgets. Swift sweeps the keychain on every save, so
-  // a removal needs nothing here: what this exists for is the two changes a
-  // list cannot express, setting a password and moving off the password door.
+  // a removal needs nothing here. This call exists for the two changes a list
+  // cannot express: setting a password, and moving off the password door.
   const keepPassword = async (id: string, password: string | null): Promise<boolean> =>
     ((await shell.call("servers.password", { id, password })) as { ok: boolean }).ok;
   return {
@@ -424,59 +394,59 @@ function clientSeams(
     },
     clipboardRead: async () => ({ text: (await shell.call("clipboard.read", {})) as string }),
     clipboardReadRich: async () => (await shell.call("clipboard.readRich", {})) as { text: string; html: string },
-    // The pasteboard is this device's; the file is the server's. Swift answers
-    // with the image's bytes or "" for no image, and the NAME comes back from
-    // the machine that holds the notes — so the view still never names a file
-    // and neither does the shell (remote.md §2).
+    // The pasteboard is this device's and the file is the server's, which are
+    // two machines' jobs the schema gives one method (remote.md §5). Swift
+    // answers with the image's bytes or "" for no image, and the name comes
+    // back from the machine that holds the notes. Neither the view nor the
+    // shell ever names a file (remote.md §2).
     assetPaste: async ({ root, notePath }) => {
       const dataB64 = (await shell.call("clipboard.image", {})) as string;
       if (!dataB64) return { src: null };
       return requests.assetWrite({ root, notePath, dataB64 });
     },
-    // The one above with a photo library where the pasteboard was, which is
-    // §11's sentence made literal. It is also the only one of the two that
-    // matters here: a phone has a pasteboard, but nothing on it got there by
-    // being copied out of a browser, and the picture worth inserting is the one
-    // the camera took.
+    // The one above with a photo library where the pasteboard was (ios.md §11).
+    // It is also the only one of the two that matters on a phone: a phone has a
+    // pasteboard, but nothing on it got there by being copied out of a browser,
+    // and the picture worth inserting is the one the camera took.
     assetPick: async ({ root, notePath }) => {
       const dataB64 = (await shell.call("photos.pick", {})) as string;
       if (!dataB64) return { src: null };
       return requests.assetWrite({ root, notePath, dataB64 });
     },
     linkOpen: async ({ url }) => (await shell.call("link.open", { url })) as { ok: boolean },
-    // There is no menu bar on a phone (ios.md §11). The view builds one anyway
-    // — the registry is the menu's source and knows nothing about shells — and
-    // this is where it stops.
+    // There is no menu bar on a phone (ios.md §11). The view builds one anyway.
+    // The command registry is the menu's source and knows nothing about shells,
+    // so this is where the menu stops.
     menuSet: async () => ({ ok: true }),
-    // And no second window (ios.md §4): a phone shows one app at a time, so the
+    // And no second window (ios.md §11): a phone shows one app at a time, so the
     // client and the window are the same thing here in a way they stopped being
     // on the Mac (remote.md §8a). False rather than a no-op, so the verb is
     // absent from the palette instead of present and silent.
     windowNew: async () => ({ ok: false }),
     // And so no window for the manual to have of its own: it opens in the one
     // window there is, which is what `multiWindow` already tells the view
-    // before it asks. False here is the answer to anything that asks anyway.
+    // before it asks (lib/shell.ts). False here answers anything that asks
+    // anyway.
     windowDocs: async () => ({ ok: false }),
-    // The one window a phone has is never the manual's — the manual is a
+    // The one window a phone has is never the manual's. The manual is a
     // workspace inside it (mainview/workspace/actions.ts openDocs).
     windowRole: async () => ({ docs: false, page: "" }),
 
-    // The connection list, which is the phone's own and not a server's — the
-    // same claim remote.md §8 makes about a Mac's. Swift holds the file; every
-    // rule below is this file's, so that "can this be deleted" has one answer
-    // rather than one per client.
+    // The phone's own list and not a server's, the same claim remote.md §8
+    // makes about a Mac's. Swift holds the file; the rules are all in this
+    // file (`servers.list` above).
     //
-    // `active` is the selection and cannot be anything else: Swift dials
-    // whatever is selected at launch, and every change to the selection is
-    // followed by a reload (ios.md §5, "foregrounding is a boot"). A phone that
-    // could not reach its server never renders this at all — it shows the
+    // `active` is the selection and cannot be anything else. Swift dials
+    // whatever is selected at launch, and a reload follows every change to the
+    // selection (ios.md §5, "foregrounding is a boot"). Where the Mac reports
+    // its local server as a boot-time fallback, a phone has none: one that
+    // could not reach its server never renders this at all, and shows the
     // sentence in ios.tsx, whose way out is `servers.choose` and the native
-    // list — so there is no boot-time fallback to report the way the Mac's
-    // local server is.
+    // list.
     //
     // `keyPath` is empty on every row, and that is a fact rather than a
-    // placeholder: this client's key is in the Secure Enclave and cannot be
-    // read out of it, let alone named by a file (ios.md §4).
+    // placeholder to fill in later. This client's key is in the Secure Enclave
+    // and cannot be read out of it, let alone named by a file (ios.md §4).
     connectionList: async () => {
       const { servers, selected } = await stored();
       return {
@@ -497,21 +467,20 @@ function clientSeams(
       };
     },
 
-    // Switching is storing the selection; the reload that rebuilds the session
-    // is the caller's, after it has flushed (lib/connections.ts). Choosing the
-    // one already selected is not a no-op here and must not become one: it is
-    // how a phone reconnects after the ladder has given up, which on a phone is
-    // the ordinary path rather than the exception (ios.md §5).
     // The phone's half of the same verb (rpc-schema.ts connectionReconnect). It
     // reaches the same `recheck` the Mac's does, because the transport under
-    // both is literally the same module (ios.md §2) — a phone that has just come
-    // back to the foreground on a different network is the case it was written
-    // for.
+    // both is the same module (ios.md §2). The case it was written for is a
+    // phone that has just come back to the foreground on a different network.
     connectionReconnect: async () => {
       wire.recheck();
       return { ok: true };
     },
 
+    // Switching is storing the selection. The reload that rebuilds the session
+    // is the caller's, after it has flushed (lib/connections.ts). Choosing the
+    // one already selected is not a no-op here and must not become one: it
+    // reports ok and the caller reloads. That is the ordinary way a phone
+    // reconnects after the ladder has given up (ios.md §5).
     connectionSelect: async ({ id }) => {
       const { servers, selected } = await stored();
       if (!servers.some((s) => s.id === id)) return { ok: false, error: NO_SUCH };
@@ -536,7 +505,7 @@ function clientSeams(
         auth,
       };
       // The secret before the record, so a saved list never names a password
-      // door with nothing behind it — the Mac's order, for the Mac's reason
+      // door with nothing behind it. The Mac's order, for the Mac's reason
       // (bun/connectionStore.ts).
       if (auth === "password" && !(await keepPassword(server.id, password))) {
         return { id: "", error: KEYCHAIN_REFUSED };
@@ -553,10 +522,9 @@ function clientSeams(
       if (!before) return { ok: false, error: NO_SUCH };
       if (auth === "password") {
         // Null means keep the stored one, which is only an answer for a record
-        // that was already on this door. There is no call that reads a password
-        // back, so "is there one" is answered by the record and not the
-        // keychain — which is the same answer, since the two are written
-        // together.
+        // that was already on this door. No call reads a password back, so "is
+        // there one" is answered by the record rather than by the keychain. The
+        // two are written together, so the answer is the same.
         if (password === null && before.auth !== "password") {
           return { ok: false, error: "That connection has no password stored. Enter one." };
         }
@@ -565,9 +533,9 @@ function clientSeams(
           if (unusable) return { ok: false, error: unusable };
         }
       }
-      // By the HOST half, because the user half is not what a host key belongs
-      // to: `dev@box` to `ledge@box` is the same machine and the same key. The
-      // PORT is part of it though: two sshd instances on one machine really can
+      // Compared by the host half, because a host key does not belong to the
+      // user half: `dev@box` to `ledge@box` is the same machine and the same
+      // key. The port is part of it: two sshd instances on one machine can
       // offer different keys (shared/connections.ts).
       const moved = hostPart(destination.trim()) !== hostPart(before.destination) || port !== before.port;
       if (moved && hostKey === null) return { ok: false, error: PIN_MOVED };
@@ -581,8 +549,8 @@ function clientSeams(
       };
       // A new password, or a move off the password door that takes the stored
       // one with it. Neither is expressible in the list, which is why the
-      // credential is its own call — and neither is a rename, which is why
-      // this is not one call on every edit.
+      // credential is its own call. A rename is neither of them, which is why
+      // this call is not made on every edit.
       if (auth === "key") {
         if (before.auth === "password") await keepPassword(id, null);
       } else if (password !== null && !(await keepPassword(id, password))) {
@@ -595,9 +563,9 @@ function clientSeams(
       return { ok: true, error: "" };
     },
 
-    // The Mac refuses to remove the connection being served because it always
-    // has somewhere else to be — the server in its own process. A phone has
-    // none, so the last one CAN go, and doing so is how a phone forgets a
+    // The Mac refuses to remove the connection being served, because it always
+    // has somewhere else to be: the server in its own process. A phone has no
+    // such fallback, so the last one can go. That is how a phone forgets a
     // server it typed wrong: Swift has nothing left to dial and shows the
     // pairing screen (ios/Sources/WebHost.swift).
     connectionRemove: async ({ id }) => {
@@ -647,9 +615,9 @@ export const SHELL_HANDLER = "ledge";
 /**
  * Bind a shell to the real WKWebView bridge.
  *
- * The only WebKit in this file. Throws where there is no bridge at all, which
- * is the honest answer: the iOS entry point has nothing to fall back to, and
- * a page that silently ran with no server would look like a hung app.
+ * The only WebKit in this file. Throws where there is no bridge at all: the iOS
+ * entry point has nothing to fall back to, and a page that carried on with no
+ * server would look like a hung app.
  */
 export function attachShell(): Shell {
   const handler = window.webkit?.messageHandlers?.[SHELL_HANDLER];

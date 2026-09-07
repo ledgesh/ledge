@@ -34,9 +34,8 @@ describe("folder paths", () => {
 
 describe("folderList", () => {
   test("every ancestor is a folder, even one holding no note of its own", () => {
-    // The reason this exists: a note at a/b/c.md needs an `a` row to hang `a/b`
-    // off, or the tree draws `b` at the top level and says the note is
-    // somewhere it is not.
+    // A note at a/b/c.md needs an `a` row to hang `a/b` off. Without it the
+    // tree draws `b` at the top level, showing the note in the wrong place.
     const notes = [note("/r/a/b/c.md", "C", "a/b")];
     expect(folderList(notes)).toEqual(["a", "a/b"]);
   });
@@ -57,7 +56,7 @@ describe("folderList", () => {
 
 describe("countIn", () => {
   test("a folder counts the notes below it, not only its own", () => {
-    // What the collapsed row is hiding — which is the number worth showing.
+    // A collapsed row shows how many notes are at or below the folder.
     const notes = [
       note("/r/p/one.md", "One", "p"),
       note("/r/p/api/two.md", "Two", "p/api"),
@@ -68,8 +67,9 @@ describe("countIn", () => {
   });
 
   test("a folder whose name prefixes another's does not borrow its notes", () => {
-    // "p" must not count "planning/"'s notes: the separator is what makes a
-    // prefix a path, and startsWith without it is the classic version of this bug.
+    // "p" must not count "planning/"'s notes. `folderContains` matches the
+    // folder itself, or a path with a "/" after the prefix
+    // (shared/folders.ts). A plain startsWith would match here.
     const notes = [note("/r/planning/one.md", "One", "planning")];
     expect(countIn(notes, "p")).toBe(0);
   });
@@ -102,8 +102,8 @@ describe("browserRows", () => {
   });
 
   test("collapsing a parent hides an expanded child's rows too", () => {
-    // The child stays expanded in the set; what decides is whether the walk
-    // ever reaches it.
+    // The child stays in the expanded set. Its rows are gone because the walk
+    // stops at the collapsed parent and never reaches it.
     const rows = browserRows(notes, new Set(["projects/deep"]), byTitle);
     expect(titles(rows)).toEqual(["admin/", "projects/", "Top"]);
   });
@@ -115,16 +115,19 @@ describe("browserRows", () => {
   });
 
   test("row ids are unique across the two kinds", () => {
-    // Folder ids are prefixed because a note's id is its absolute path, and
-    // useListNav moves focus by id: two rows answering to one id is a
-    // keystroke landing on the wrong note.
+    // Folder ids carry a `dir:` prefix because a note's id is its absolute
+    // path. NoteBrowser hands the id to useListNav as the row key
+    // (lib/useListNav.ts). NoteBrowser also finds a renamed row again by
+    // looking its id up in the DOM. A folder row and a note row sharing an
+    // id would send a row verb's keystroke to the wrong note.
     const rows = browserRows(notes, new Set(["projects", "projects/deep", "admin"]), byTitle);
     expect(new Set(rows.map((r) => r.id)).size).toBe(rows.length);
     expect(folderRowId("projects")).toBe("dir:projects");
   });
 
   test("the sort applies within a folder, never across the tree", () => {
-    // A global sort is the one thing that would lift a note out of its group.
+    // The sort runs inside each folder. Sorting across the whole list would
+    // move a note's row into another folder's group.
     const rows = browserRows(
       [note("/r/zzz.md", "Zzz"), note("/r/p/aaa.md", "Aaa", "p")],
       new Set(["p"]),
@@ -136,7 +139,8 @@ describe("browserRows", () => {
 
 describe("expansion", () => {
   test("expanding a folder expands its ancestors", () => {
-    // A row you cannot see is not revealed by expanding it.
+    // `expandedWith` opens the ancestors along with the folder. A folder
+    // whose ancestors stayed collapsed would have its row hidden.
     expect([...expandedWith(new Set(), "a/b/c")].sort()).toEqual(["a", "a/b", "a/b/c"]);
   });
 
@@ -150,10 +154,11 @@ describe("expansion", () => {
   });
 
   test("renaming a folder renames what is open under it, and opens nothing new", () => {
-    // A rename changes what folders are CALLED and not which are open, so the
-    // tree must look exactly the same afterwards. Keyed by path, so without
-    // this every open row under the folder would simply stop matching and the
-    // subtree would collapse itself.
+    // A rename changes what a folder is called, not which folders are open.
+    // The tree looks the same afterwards. The open set is keyed by path, so
+    // `expandedRenamed` rewrites the paths under the old name. Without that
+    // rewrite every open path under the folder would stop matching and the
+    // subtree would collapse.
     const next = expandedRenamed(new Set(["projcts", "projcts/api", "admin"]), "projcts", "projects");
     expect([...next].sort()).toEqual(["admin", "projects", "projects/api"]);
   });

@@ -1,17 +1,14 @@
-// Which machine you are typing into, and how to change it (remote.md §8).
+// Which machine holds the notes, and how to change it (remote.md §8; the
+// interaction grammar is interactions.md §4-1).
 //
 // A dialog rather than an anchored menu, because most of what it does is
-// deliberate rather than quick: switching tears the session down and rebuilds
-// it, and adding or re-addressing a server means reading a host-key fingerprint
-// and deciding whether it is the right one. The list itself stays keyboard-first
-// like every other list in the app — arrows move, Enter switches, ⌫ removes.
+// deliberate rather than quick. Switching tears the session down and rebuilds
+// it. Adding or re-addressing a server means reading a host-key fingerprint
+// and deciding whether it is the right one. The list is keyboard-first:
+// arrows move, Enter switches, ⌫ removes.
 //
-// Pinning is two steps on purpose. Ledge asks the host for its key, shows the
-// fingerprint, and pins only after someone says that is the key they expected;
-// there is no "connect anyway" that remembers, because that is the thing
-// host-key pinning exists to prevent (§4). Editing an address onto a different
-// host asks the same question again, for the same reason: a pin is a claim
-// about one machine and does not follow a connection to another.
+// Pinning takes two steps (remote.md §4). There is no "connect anyway" that
+// remembers, because that button is what pinning exists to prevent.
 import { useEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { Check, Laptop, Loader2, Pencil, Server, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -31,26 +28,26 @@ import { deviceKeyLine, shareSheet } from "@/lib/shell";
 import { hostPart, parsePort, type AuthMode } from "../../shared/connections";
 import type { ConnectionInfo } from "../../shared/rpc-schema";
 
-// A thrown thing, as a sentence. Every action in this dialog is an RPC, and an
-// RPC can reject as well as refuse — Bun taking longer than the view's
-// maxRequestTime is the ordinary way (main.tsx). Both have to reach the same
-// line of red text, because the state that gates these buttons is cleared on
-// the way there.
+// Turns a thrown value into a sentence to show. Every action here is an RPC,
+// and an RPC can reject as well as refuse: the ordinary rejection is Bun taking
+// longer than the view's maxRequestTime (main.tsx). The busy flag gates every
+// control, so a rejection nothing catches hangs the dialog. Both paths clear it
+// and write to the same line of red text (interactions.md §4-1).
 function reasonOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-// What a host answered, waiting to be confirmed. Held rather than pinned: the
-// whole point of the step is that a person looks at `fingerprint` first.
+// What a host answered, waiting to be confirmed. Held rather than pinned. The
+// step exists so a person looks at `fingerprint` first.
 interface Probed {
   hostKey: string;
   fingerprint: string;
   keyType: string;
 }
 
-// What a switch says when it will not go: how much writing is at stake and
-// where it was headed. Named rather than counted vaguely, because "some notes"
-// is not something anyone can act on.
+// The sentence a refused switch shows. It gives the count of unsaved notes and
+// names the machine they could not reach, because "some notes" is not something
+// anyone can act on.
 function unsavedRefusal(unsaved: number, machine: string): string {
   const what = unsaved === 1 ? "One note has unsaved changes" : `${unsaved} notes have unsaved changes`;
   return `${what} that could not reach ${machine}. Switching would lose them, so wait for the connection to come back, or copy them out first.`;
@@ -65,7 +62,7 @@ export function ConnectionPicker({ onClose }: { onClose: () => void }) {
 
   useEffect(() => pushLayer("dialog", onClose), [onClose]);
 
-  // The machine the unsaved text belongs to, which is the one being LEFT.
+  // The machine the unsaved text belongs to, which is the one being left.
   const activeName = status.connections.find((c) => c.id === status.active)?.name ?? "the server";
 
   const switchTo = async (id: string) => {
@@ -73,17 +70,12 @@ export function ConnectionPicker({ onClose }: { onClose: () => void }) {
     setBusy(true);
     setError("");
     try {
-      // Before anything is torn down. A switch reloads the page, and text that
-      // could not reach the server it belongs to is in no file anywhere: not on
-      // that machine, and not in a trash we could point at (remote.md §7). So
-      // this is §4's irreversible destruction, and the app does not offer a
-      // one-click path to it.
-      //
-      // A refusal rather than a confirmation, though the policy allows either,
-      // because the confirmation would be the wrong shape here: there is
-      // nothing about the switch worth deciding, and everything about the
-      // unsaved text worth handling first. It is also the third of §4-1's
-      // refusals that keep the app somewhere it can work from.
+      // Flush before anything is torn down. A switch reloads the page, so text
+      // that could not reach the server it belongs to is in no file anywhere:
+      // not on that machine, and not in a trash to point at (remote.md §7).
+      // Interactions.md §4 calls that irreversible destruction. §4-1 refuses
+      // the switch rather than confirming it, and counts this refusal as the
+      // third of its three.
       const unsaved = await flushAllNow();
       if (unsaved > 0) {
         setError(unsavedRefusal(unsaved, activeName));
@@ -91,21 +83,19 @@ export function ConnectionPicker({ onClose }: { onClose: () => void }) {
         return;
       }
       // On success this never returns: selectConnection reloads the page, which
-      // is how everything server-scoped gets rebuilt. Staying busy through it
-      // is deliberate — the list must not become clickable again in the moment
-      // between the switch landing and the page going away. The flush passed in
-      // is the one above, run again: it wrote everything the first time, so the
-      // second is a no-op that keeps selectConnection's contract intact.
+      // is how everything server-scoped gets rebuilt. `busy` stays set through
+      // it, so the list cannot become clickable between the switch landing and
+      // the page going away. The flush argument is the one above run a second
+      // time, a no-op that keeps selectConnection's contract.
       const refusal = await selectConnection(id, async () => void (await flushAllNow()));
       if (!refusal) return;
       setError(refusal);
     } catch (err) {
-      // A rejected RPC rather than a refusal — Bun took longer than the view's
-      // maxRequestTime, or died. It has to reach the same line a refusal does,
-      // because the alternative is this dialog going quiet: `busy` gates every
-      // row AND the guard at the top of this function, so one swallowed
-      // rejection disables the whole list permanently and eats every click
-      // after it without ever saying why.
+      // A rejected RPC rather than a refusal: Bun took longer than the view's
+      // maxRequestTime, or died. It reaches the same red line a refusal does,
+      // because `busy` gates every row and the guard at the top of this
+      // function. A swallowed rejection would skip the `setBusy(false)` below
+      // and disable the list for good, dropping every click without saying why.
       setError(reasonOf(err));
     }
     setBusy(false);
@@ -135,9 +125,10 @@ export function ConnectionPicker({ onClose }: { onClose: () => void }) {
         {form ? (
           <ConnectionForm
             existing={form === "new" ? null : form}
-            // Editing the machine being served re-opens it, so the page has to
-            // start over on the other side of it — the same rebuild a switch
-            // gets, and for the same reason (lib/connections.ts).
+            // True when the form is editing the connection this window is on.
+            // An edit that also changes how that connection is made re-opens
+            // the wire, and `save` below turns the pair into the `reconnected`
+            // flag that reloads the page (lib/connections.ts updateConnection).
             serving={form !== "new" && form.id === status.active}
             onCancel={() => setForm(null)}
             onDone={() => {
@@ -190,24 +181,23 @@ function ConnectionList({
 }) {
   const listRef = useRef<HTMLDivElement>(null);
 
-  // Opens on the connection in use, so Enter is "stay here" and moving costs a
-  // deliberate arrow — the same stance the host picker takes about running a
-  // block on the wrong machine.
+  // Focus opens on the connection in use, so Enter means stay here and moving
+  // somewhere else costs an arrow (interactions.md §4-1).
   useEffect(() => {
     listRef.current?.querySelector<HTMLButtonElement>("[data-active=true]")?.focus();
   }, []);
 
-  // Roving focus by hand rather than through useListNav: that hook marks rows
+  // Roving focus by hand rather than through useListNav. That hook marks rows
   // `data-list-row`, which puts the command dispatcher into its list domain
-  // and would arm every bare row verb in the app (⌫ closes a workspace) inside
-  // a modal about something else entirely.
+  // (commands/CommandProvider.tsx) and would arm every bare row verb in the
+  // app, such as ⌫ closing a workspace, inside this dialog.
   const onKeyDown = (e: KeyboardEvent) => {
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
     e.preventDefault();
     const rows = Array.from(listRef.current?.querySelectorAll<HTMLButtonElement>("[role=option]") ?? []);
-    // By the row a focused control BELONGS to, not by the focused element: the
-    // edit and remove buttons are in the tab order beside their row, and an
-    // arrow pressed from one of them means the row it is part of.
+    // The index is of the row a focused control belongs to, not of the focused
+    // element itself. The edit and remove buttons sit in the tab order beside
+    // their row. An arrow pressed from one of them moves from that row.
     const at = rows.findIndex((row) => row.parentElement?.contains(document.activeElement));
     const next = e.key === "ArrowDown" ? at + 1 : at - 1;
     rows[(next + rows.length) % rows.length]?.focus();
@@ -226,9 +216,9 @@ function ConnectionList({
           key={conn.id}
           conn={conn}
           active={conn.id === status.active}
-          // The one the user chose, when that is not the one they got: a boot
-          // that fell back has to say so on the row it fell back FROM, or the
-          // indicator is the only place the failure exists.
+          // The connection the user chose, when it is not the one they got. A
+          // boot that fell back says so on the row it fell back from. Without
+          // it, the chrome's indicator is the only place the failure appears.
           failed={conn.id === status.wanted && status.wanted !== status.active ? status.error : ""}
           busy={busy}
           onPick={() => onPick(conn.id)}
@@ -260,9 +250,9 @@ function ConnectionRow({
   const local = conn.destination === "";
   const Icon = local ? Laptop : Server;
   return (
-    // Presentational, so the listbox's children are still options: the two
-    // controls are siblings of the row rather than inside it, because a button
-    // in a button is not markup a browser agrees to render.
+    // Presentational, so the listbox's children are still options. The edit and
+    // remove buttons are siblings of the row rather than inside it, because a
+    // browser will not render a button inside a button.
     <div role="presentation" className="flex items-center gap-0.5">
       <button
         type="button"
@@ -286,10 +276,9 @@ function ConnectionRow({
             <span className="block truncate font-mono text-[11px] text-muted-foreground">
               {conn.destination}
               {conn.pinned ? " · pinned" : ""}
-              {/* Which door, on the row, because it is the thing about a
-                  connection that is otherwise invisible until it fails: a
-                  password connection whose secret is gone looks exactly like a
-                  key connection until it is dialled. */}
+              {/* The row names the door when it is the password one. A
+                  password connection whose secret is gone looks like a key
+                  connection until it is dialled. */}
               {conn.auth === "password" ? " · password" : ""}
             </span>
           )}
@@ -297,11 +286,10 @@ function ConnectionRow({
         </span>
         {active && <Check className="size-3.5 shrink-0" />}
       </button>
-      {/* Always there, never revealed by a hover: a control a pointer has to
-          summon is a control a phone cannot reach at all, and the row verb it
-          mirrors (⌫) has no touch form either (interactions.md §1a). The local
-          server has neither, because it is not a record — it is the server in
-          this process, and there is nothing about it to change. */}
+      {/* Always drawn, never revealed by a hover. A touch client has no hover,
+          and the row verb these mirror (⌫) has no touch form either
+          (interactions.md §1a). The local row has neither button, because there
+          is nothing about the server in this process to change. */}
       {!local && (
         <>
           <RowButton label={`Edit ${conn.name}`} disabled={busy} onClick={onEdit}>
@@ -336,10 +324,10 @@ function RowButton({
       aria-label={label}
       disabled={disabled}
       onClick={onClick}
-      // 44 on touch, and Remove is why: this row is three adjacent
-      // alternatives half a point apart — switch machine, edit it, delete it —
-      // and the third is destructive (§1a orders a group by what a miss
-      // costs; here Edit is what sits between the other two).
+      // 44 points on touch, and Remove is why. The row is three adjacent
+      // alternatives half a point apart: switch to the machine, edit it, remove
+      // it. Interactions.md §1a orders such a group by what a miss costs, so
+      // Edit sits between the switch and the destructive one.
       className={`flex shrink-0 items-center justify-center rounded-md p-1.5 text-muted-foreground hover:bg-accent focus:bg-accent focus:outline-none disabled:opacity-60 touch:size-[44px] ${
         destructive ? "hover:text-destructive focus:text-destructive" : "hover:text-foreground focus:text-foreground"
       }`}
@@ -352,11 +340,11 @@ function RowButton({
 /**
  * One server's fields, for adding a new one or changing an existing one.
  *
- * The same form both ways because the second step is the same question: what
- * gets pinned is decided by whether the ADDRESS names a host this connection
- * has no pin for, which is true of every new connection and of an edit that
- * moved one. A rename or a re-account (`dev@box` to `ledge@box`) touches no
- * host and saves in one step.
+ * The same form both ways, because the second step asks the same question:
+ * whether the address names a host this connection has no pin for. That holds
+ * for every new connection and for an edit that moved one. A rename, or a
+ * change of account on the same host (`dev@box` to `ledge@box`), saves in one
+ * step.
  */
 function ConnectionForm({
   existing,
@@ -376,9 +364,9 @@ function ConnectionForm({
   const [portText, setPortText] = useState(existing?.port ? String(existing.port) : "");
   const [keyPath, setKeyPath] = useState(existing?.keyPath ?? "");
   const [auth, setAuth] = useState<AuthMode>(existing?.auth ?? "key");
-  // Never filled in from the record, because a stored password cannot be read
-  // back and should not be (lib/connections.ts). Empty on an edit means "keep
-  // the one that is stored", which is what every rename sends.
+  // Never filled in from the record: a stored password cannot be read back
+  // (lib/connections.ts). An empty field on an edit means keep the stored
+  // password, which is what every rename sends.
   const [password, setPassword] = useState("");
   const [probed, setProbed] = useState<Probed | null>(null);
   const [error, setError] = useState("");
@@ -394,15 +382,16 @@ function ConnectionForm({
   useEffect(() => firstRef.current?.focus(), []);
 
   // Null while the field holds something that is not a port. Every action below
-  // refuses on it rather than falling back to 22, because a typo that silently
-  // becomes the default connects to the wrong sshd and says nothing.
+  // refuses on it rather than falling back to 22: a typo that silently became
+  // the default would connect to the wrong sshd without saying so.
   const port = parsePort(portText);
   const BAD_PORT = "A port is a whole number from 1 to 65535.";
 
   // A pin belongs to one machine, and known_hosts counts a non-default port as
-  // part of which machine (shared/connections.ts). Moving an address or a port
-  // leaves nothing to keep, so the fingerprint step comes back; staying put
-  // keeps whatever was pinned, which is what `hostKey: null` says below.
+  // part of which machine (shared/connections.ts). Moving the address or the
+  // port leaves nothing to keep, so the fingerprint step comes back. Staying
+  // put keeps whatever was pinned, which is the `hostKey: null` that
+  // `save(null)` below sends.
   const moved =
     existing !== null &&
     (hostPart(destination.trim()) !== hostPart(existing.destination) || (port !== null && port !== existing.port));
@@ -429,13 +418,13 @@ function ConnectionForm({
 
   // Never trimmed: a leading or trailing space is a legal part of a password,
   // and "" has to keep meaning the field was left alone. Null on the key door
-  // says "there is nothing to store", which is also what forgets a password
-  // when a connection moves off it (bun/connectionStore.ts).
+  // says there is nothing to store, which is also what forgets a password when
+  // a connection moves off that door (bun/connectionStore.ts swapPassword).
   const typedPassword = auth === "password" && password !== "" ? password : null;
 
-  // Whether leaving the field blank has anything to fall back on. Only true for
-  // a connection that was ALREADY on the password door: switching one onto it
-  // has nothing stored yet, and so has to be told a password now.
+  // Whether leaving the field blank has anything to fall back on. True only for
+  // a connection already on the password door: one being switched onto it has
+  // nothing stored yet, so it has to be given a password now.
   const storedPassword = existing?.auth === "password";
   const needsPassword = auth === "password" && !storedPassword && password === "";
 
@@ -448,11 +437,11 @@ function ConnectionForm({
       refusal = existing
         ? await updateConnection(
             { id: existing.id, name, destination, port, keyPath, auth, password: typedPassword, hostKey },
-            // A changed address means the shell re-opened the wire, so this page
-            // is now looking at the previous machine's session. Every other way
-            // of changing HOW the connection is made re-opens it too, and the
-            // list has to be the same one bun/connectionManager.ts re-attaches
-            // on: a port, a key, a door, or a new password.
+            // A changed address means the wire was re-opened, so this page is
+            // now looking at the previous machine's session. Changing the port,
+            // the key, the door, or the password re-opens it too, so this list
+            // is the same one bun/connectionManager.ts re-dials on
+            // (`readdressed` in connectionUpdate).
             {
               reconnected:
                 serving &&
@@ -477,8 +466,8 @@ function ConnectionForm({
           ).error || null;
     } catch (err) {
       // Same rule as switchTo: a rejection has to end up on screen. An edit
-      // that re-dials reaches all the way to ssh, so this is the button most
-      // able to outlive the view's patience for an answer.
+      // that re-dials reaches all the way to ssh, so this is the action most
+      // likely to take longer than maxRequestTime allows.
       setError(reasonOf(err));
       return;
     } finally {
@@ -517,22 +506,17 @@ function ConnectionForm({
   return (
     <div className="mt-3 flex flex-col gap-2">
       {/* Only on the key door. The line installs a key, and a password
-          connection offers none: ssh is sent with PubkeyAuthentication=no, so
-          showing it here would be asking the user to prepare their server for
-          a credential this connection will never present. */}
+          connection offers none: ssh is sent `PubkeyAuthentication=no`
+          (bun/connections.ts). Showing it here would ask the user to prepare
+          their server for a credential this connection never presents. */}
       {ownKey && auth === "key" && (
         <div className="flex flex-col gap-1">
-          {/* What the line IS comes first: a reader who does not know it carries
-              this device's public key cannot tell why the server needs it, and
-              a sentence that opens on hardening explains the option before the
-              thing it is an option on.
-
-              What the prefix narrows is ssh's feature set around the protocol,
-              not the protocol: what rides the forced command is terminalAttach
-              and runBlock, which is arbitrary code execution as that user by
-              design (remote.md §4a). So the second sentence says what the
-              restriction is good for and stops short of "cannot open a shell",
-              which reads as a guarantee this design does not make. */}
+          {/* The copy says what the line is before what the prefix does. A
+              sentence that opens on hardening explains the option before the
+              thing it is an option on, and a reader who does not know the line
+              carries this device's public key cannot tell why the server needs
+              it. The third sentence, on `restrict`, stops short of "cannot
+              open a shell" (remote.md §4a). */}
           <span className="text-[11px] text-muted-foreground">
             Add this line to <code className="font-mono">~/.ssh/authorized_keys</code> on the server. It is this
             device's public key, which is how that server knows to let this device in. The{" "}
@@ -552,11 +536,11 @@ function ConnectionForm({
             >
               {copied ? "Copied" : "Copy Line"}
             </Button>
-            {/* Beside the copy rather than instead of it, and absent on a client
-                with no sheet to open (lib/shell.ts). A copy is the right verb
-                when the server is a window away; on a phone the pasteboard ends
-                at the phone, and this is the button that gets the line to the
-                machine it has to be pasted on. */}
+            {/* Beside Copy rather than instead of it, and absent on a client
+                with no share sheet (lib/shell.ts). Copy suits a server that is
+                a window away. A phone's pasteboard ends at the phone, so the
+                sheet is how the line reaches the machine it is pasted on
+                (ios.md §4). */}
             {share && (
               <Button size="sm" variant="ghost" onClick={() => share(ownKey)}>
                 Share Line
@@ -567,9 +551,9 @@ function ConnectionForm({
       )}
       <Field label="Name" value={name} onChange={setName} placeholder="Laptop" inputRef={firstRef} />
       <Field label="SSH destination" value={destination} onChange={setDestination} placeholder="dev@laptop" mono />
-      {/* Its own field rather than a `host:port` destination, because that is
-          what ssh takes and what every other client's form asks for. Empty is
-          the ordinary answer and means ssh decides. */}
+      {/* Its own field rather than a `host:port` destination: ssh takes the
+          port separately, and every other client's form asks for it that way.
+          Empty is the ordinary answer and means ssh decides. */}
       <Field label="Port (optional)" value={portText} onChange={setPortText} placeholder="22" mono />
       <AuthChoice auth={auth} onChange={setAuth} />
       {auth === "password" ? (
@@ -585,22 +569,19 @@ function ConnectionForm({
            read out of the enclave, let alone named by a file (ios.md §4). */
         !ownKey && <Field label="Key (optional)" value={keyPath} onChange={setKeyPath} placeholder="~/.ssh/ledge" mono />
       )}
-      {/* No prose under the fields. What it used to say — which addresses ssh
-          takes, that a blank port means 22, that the far machine needs
-          ledge-server on its PATH, where a password is kept — was read by
-          everyone every time to be useful to somebody once. The first two the
-          labels already carry; the third is a failure the connection now
-          reports in the words of the machine that refused it (connections.ts
-          explainDial), which is where it is actually wanted; the fourth is
-          docs/user/18. */}
+      {/* No prose under the fields: a paragraph here is read by everyone every
+          time to be useful to somebody once (interactions.md §4-1). A missing
+          ledge-server on the far machine is reported instead by the connection
+          that failed, in the words of the machine that refused it
+          (bun/connections.ts explainDial). */}
       {error && <p className="text-[12px] leading-snug text-destructive">{error}</p>}
       <div className="mt-1 flex justify-end gap-2">
         <Button size="sm" variant="ghost" onClick={onCancel}>
           Cancel
         </Button>
-        {/* A host that rotated its key legitimately would otherwise cost a
-            delete and a re-add: the connection is right, the pin is stale, and
-            this is the step that reads the new one. */}
+        {/* This button reads the fingerprint again after a host rotated its
+            key: the connection is right and only the pin is stale. Without it
+            that costs a delete and a re-add (interactions.md §4-1). */}
         {existing && !mustPin && (
           <Button size="sm" variant="ghost" disabled={busy} onClick={() => void probe()}>
             Check Key Again
@@ -622,10 +603,10 @@ function ConnectionForm({
 /**
  * Which door this connection goes through (remote.md §4).
  *
- * Radios rather than a segmented control or a select: it is a two-way exclusive
- * choice that changes which field comes next, and radios are the one control
- * that arrows between its options and reads as a choice to a screen reader
- * without any of it being written here.
+ * Radios rather than a segmented control or a select. The choice is exclusive
+ * and changes which field comes next. Radios are the one control that arrows
+ * between its options and reads as a choice to a screen reader without any of
+ * that being written here.
  */
 function AuthChoice({ auth, onChange }: { auth: AuthMode; onChange: (a: AuthMode) => void }) {
   return (
@@ -680,9 +661,9 @@ function Field({
       <input
         ref={inputRef}
         type={secret ? "password" : "text"}
-        // Off rather than "current-password": this is a field for somebody
-        // else's machine, and offering the keychain's saved logins for this app
-        // would be offering the wrong secret from the right-looking list.
+        // Off rather than "current-password": the field holds the password for
+        // somebody else's machine, so the keychain's saved logins for this app
+        // would offer the wrong secret from a right-looking list.
         autoComplete={secret ? "off" : undefined}
         value={value}
         placeholder={placeholder}

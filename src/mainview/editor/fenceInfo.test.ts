@@ -24,7 +24,8 @@ describe("parseFenceInfo", () => {
       confirm: "Wipe the build cache?",
     });
     expect(attrsOf("```sh confirm='Drop the table?'")).toEqual({ confirm: "Drop the table?" });
-    // An unterminated quote costs the quote, not the attribute.
+    // A missing closing quote costs the quote, not the attribute. tokenize
+    // drops the quote and keeps the rest of the line as the value.
     expect(attrsOf('```sh confirm="Are you sure')).toEqual({ confirm: "Are you sure" });
     expect(attrsOf('```js title=""')).toEqual({ title: "" });
   });
@@ -44,8 +45,9 @@ describe("parseFenceInfo", () => {
   });
 
   test("a fence whose first word is an attribute names no language", () => {
-    // ```confirm=yes declares nothing runnable; calling "confirm=yes" a
-    // language would invent a fence word out of a marker.
+    // ```confirm=yes declares nothing runnable: a null lang matches nothing
+    // in blocks.runnable, so the block gets no run pair. Taking the first
+    // token as the language would invent a fence word out of a marker.
     expect(parseFenceInfo("```confirm=yes").lang).toBeNull();
     expect(attrsOf("```confirm=yes")).toEqual({ confirm: "yes" });
   });
@@ -93,7 +95,8 @@ describe("noRun", () => {
   test("an off-word is the escape hatch, and any other value keeps the mark", () => {
     expect(of("```sh norun=no")).toBe(false);
     expect(of("```sh norun=off")).toBe(false);
-    // A word that is there is a typo'd yes before it is a no.
+    // `maybe` is more likely a misspelled `yes` than a `no`, so the mark
+    // stands.
     expect(of("```sh norun=maybe")).toBe(true);
   });
 

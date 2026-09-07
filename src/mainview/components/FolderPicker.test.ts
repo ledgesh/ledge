@@ -10,8 +10,12 @@ describe("usableFolderName", () => {
   });
 
   test("refuses what folderPathOf would refuse", () => {
-    // Not the guard — Bun's is — but a row that could only end in a refusal
-    // should not be offered in the first place.
+    // usableFolderName repeats the shape rules in shared/folders.ts
+    // folderNameProblem, so a name of the wrong shape gets no create row. Bun
+    // refuses more than shape: folderPathOf rejects a name that resolves
+    // outside the root, ensureFolder one that .ledgeignore hides
+    // (bun/notes.ts). Those refusals reach the user through the error branch
+    // in NoteBrowser's picked().
     expect(usableFolderName("")).toBe(false);
     expect(usableFolderName("   ")).toBe(false);
     expect(usableFolderName("/absolute")).toBe(false);
@@ -22,7 +26,9 @@ describe("usableFolderName", () => {
   });
 
   test("a trailing slash is trimmed rather than refused", () => {
-    // Typing "projects/" on the way to a subfolder is how people type paths.
+    // usableFolderName strips a trailing slash before checking the shape.
+    // Typing "projects/" on the way to a subfolder is how people type a path,
+    // not a malformed name, so it passes.
     expect(usableFolderName("projects/")).toBe(true);
   });
 });
@@ -35,13 +41,18 @@ describe("folderChoices", () => {
   });
 
   test("the top level is withheld where it is not a destination", () => {
-    // New Folder… is not offering to make the workspace folder again.
+    // The New Folder request gets allowRoot false, from the
+    // `allowRoot={picking.kind === "move"}` in notes/NoteBrowser.tsx. The
+    // workspace's top level already exists, so New Folder has nothing to
+    // create there.
     expect(folderChoices(FOLDERS, "", false).map((r) => r.folder)).toEqual(FOLDERS);
   });
 
   test("matching is a substring over the whole path, case-insensitively", () => {
-    // The create row rides along because "API" is not itself a folder here:
-    // a top-level API beside projects/api is a thing someone may mean.
+    // The create row is offered too. It is suppressed only when a folder's
+    // whole path equals the query, lowercased, and no folder here is called
+    // "api". A top-level API beside projects/api is a folder someone may mean
+    // to make.
     const rows = folderChoices(FOLDERS, "API", true);
     expect(rows.map((r) => r.folder)).toEqual(["projects/api", "API"]);
     expect(rows[0]?.create).toBeUndefined();
@@ -54,15 +65,17 @@ describe("folderChoices", () => {
   });
 
   test("a query naming an existing folder exactly offers no create row", () => {
-    // Two rows for one outcome, and the create-looking one would be wrong.
+    // The existing folder is already a row. A create row for the same name
+    // would be a second row for one outcome, and it would read "New folder"
+    // under a FolderPlus icon when nothing new is made.
     const rows = folderChoices(FOLDERS, "admin", true);
     expect(rows.map((r) => r.folder)).toEqual(["admin"]);
     expect(rows.some((r) => r.create)).toBe(false);
   });
 
   test("a partial match still offers the create row for what was typed", () => {
-    // "proj" matches projects and projects/api, and is also a folder you could
-    // mean to make; both are offered, with create last.
+    // "proj" matches projects and projects/api, and no folder has that name.
+    // Both matches are listed, then the create row.
     const rows = folderChoices(FOLDERS, "proj", true);
     expect(rows.map((r) => r.folder)).toEqual(["projects", "projects/api", "proj"]);
     expect(rows.at(-1)?.create).toBe(true);

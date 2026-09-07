@@ -1,13 +1,13 @@
 // The CodeMirror half of tags: the `#tag` parse node, the caret/click lookup,
-// and the `#` completion. The grammar itself lives in shared/tags.ts (and
-// isTagToken in shared/frontmatter.ts) — this module teaches the editor's
-// markdown parser the same rule so a tag that styles here is exactly one the
-// Bun-side scan would count: `#` at start-of-line or after whitespace, then
-// tag characters, at least one letter or `_`. A real parse node rather than a
-// decoration-time scan for the wikilink reasons: it composes with the tested
-// concealments core, it is selection-aware, it never fires inside code
-// (inline parsers do not run there), and it gives tagAt for the click and
-// command paths — the wikiTargetAt seams exactly.
+// and the `#` completion. The grammar lives in shared/tags.ts, its
+// letter-or-underscore rule in isTagToken (shared/frontmatter.ts). The parse
+// node below repeats that rule. A tag the editor styles is exactly one the
+// Bun-side scan counts: `#` at start of line or after whitespace, then tag
+// characters, at least one letter or `_`.
+// The tag is a parse node, not a decoration-time scan. It composes with the
+// tested concealments core in livePreview.ts, and it is selection-aware.
+// Inline parsers do not run inside code, so it never fires there. tagAt reads
+// the node for the click and command paths, as wikiTargetAt reads a wikilink.
 import type { MarkdownConfig } from "@lezer/markdown";
 import type { SyntaxNode, Tree } from "@lezer/common";
 import { syntaxTree } from "@codemirror/language";
@@ -20,17 +20,19 @@ export const HASHTAG_NODE = "HashTag";
 
 const HASH = 35; // "#"
 
-// The token, shared/tags.ts INLINE_TAG's charset — the letter-or-underscore
-// requirement is isTagToken's, applied after, so the grammars cannot drift.
+// The token, over the same charset as INLINE_TAG in shared/tags.ts. isTagToken
+// applies the letter-or-underscore requirement afterwards, so the two grammars
+// cannot drift.
 const TAG_TOKEN = /^#([\p{L}\p{N}_/-]+)/u;
 
 /**
  * The `#tag` inline syntax as a real markdown parse node. The boundary rule
- * is positional (start of the inline content, or after whitespace), which is
- * what kills URL fragments and `##tag`; `# Title` never reaches here as a
- * tag because a space is not a tag character. No `style:` — the conceal
- * pipeline's mark is the one styling authority, and tags are emitted always
- * (nothing conceals), so a highlight color would just double up.
+ * is positional: the `#` starts the inline content or follows whitespace,
+ * which excludes URL fragments and `##tag`. A heading's `#` never reaches
+ * this parser at all, since @lezer/markdown takes it at block level, so
+ * `# Title` stays a heading. No `style:` here: livePreview.ts emits the tag
+ * span whether or not the selection touches it, conceals no tag, and marks
+ * every span it emits, so a color set here would double up with that mark.
  */
 export const hashtagExtension: MarkdownConfig = {
   defineNodes: [{ name: HASHTAG_NODE }],
@@ -41,8 +43,8 @@ export const hashtagExtension: MarkdownConfig = {
         if (next !== HASH) return -1;
         if (pos > cx.offset) {
           const prev = cx.char(pos - 1);
-          // A surrogate half fails the test too, correctly: an astral glyph
-          // before the # is a glued word, not a boundary.
+          // A lone surrogate half is not whitespace, so an astral character
+          // before the `#` blocks the tag like any other non-space character.
           if (!/\s/.test(String.fromCharCode(prev))) return -1;
         }
         const m = TAG_TOKEN.exec(cx.slice(pos, cx.end));
@@ -54,9 +56,9 @@ export const hashtagExtension: MarkdownConfig = {
 };
 
 /**
- * The tag a gesture at `pos` addresses — its span and the tag text (no `#`)
- * — or null. Mirrors wikiTargetAt: resolved from both sides so a caret at
- * either edge counts.
+ * The tag a gesture at `pos` addresses, or null. Returns the span and the tag
+ * text without the leading `#`. Resolves from both sides, so a caret at
+ * either edge of the tag counts, as wikiTargetAt does.
  */
 export function tagAt(
   doc: { sliceString(from: number, to: number): string },
@@ -74,11 +76,12 @@ export function tagAt(
 }
 
 /**
- * Completion source for `#`: the workspace's own tags (the same directory
- * the Tags panel lists, via the bridge). Implicit only once a tag character
- * follows the `#` — a bare `#` is how headings start, and popping there
- * would harass every heading typed. Inactive inside code, and inactive off a
- * tag boundary, by the parse node's own rules.
+ * Completion source for `#`: the workspace's own tags, the same directory the
+ * Tags panel lists, read through the bridge. A bare `#` returns null unless
+ * completion was asked for explicitly. `#` also starts a heading, and the list
+ * would otherwise pop on every heading typed. It returns null inside a node
+ * whose name contains "Code" too, and when the character before the `#` is
+ * neither whitespace nor the start of the document.
  */
 export function tagCompletionSource(context: CompletionContext): CompletionResult | null {
   const m = context.matchBefore(/#[\p{L}\p{N}_/-]*/u);

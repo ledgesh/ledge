@@ -1,21 +1,20 @@
-// GFM tables, rendered: a pipe table draws as a real <table> whenever the
-// selection starts outside it, and reverts to raw pipes the moment the caret
-// lands on it — the block-level half of livePreview.ts's reveal rule.
-// Clicking a rendered cell places the caret at that cell's text (which
-// reveals the raw table right where you aimed); ⌘-clicking a link inside a
-// cell opens it, same grammar as everywhere else.
+// GFM tables, rendered. A pipe table draws as a real <table> while the
+// selection's anchor sits outside it. Raw pipes come back once the anchor
+// lands on it: the block-level half of livePreview.ts's reveal rule. A click
+// on a link opens it when its URL is openableUrl-approved. Every other click
+// in a cell moves the caret to that cell's text and reveals the raw table.
 //
-// This lives in its own StateField, not livePreview's ViewPlugin, because a
-// table spans line breaks and CodeMirror only accepts block replace
-// decorations from a field. Only top-level tables render: a table inside a
-// blockquote has QuoteMarks interleaved through its range, and swallowing
-// those into a widget would hide quote structure the quote rules rely on —
-// quoted (or listed) tables stay raw.
+// The decorations come from a StateField, not from livePreview's ViewPlugin,
+// because a table spans line breaks and CodeMirror only accepts block replace
+// decorations from a field. Only top-level tables render. A table inside a
+// blockquote has QuoteMarks threaded through its range. A widget that
+// swallowed those would hide the quote structure the quote rules rely on, so
+// quoted (and listed) tables stay raw.
 //
-// Split per testing.md §2: `tableModels` is the pure core (doc + tree in,
-// cell/segment model out — inline syntax inside cells is delegated to the
-// already-tested concealments core); the widget and field below are the thin
-// wrappers.
+// Split per testing.md §2: `tableModels` is the pure core, taking a doc and a
+// tree and returning cells and segments. Inline syntax inside cells goes to
+// the concealments core, which has its own tests. The widget and the field
+// below are the thin wrappers.
 import type { SyntaxNode, Tree } from "@lezer/common";
 import { ensureSyntaxTree, syntaxTree } from "@codemirror/language";
 import {
@@ -50,7 +49,7 @@ export interface Cell {
 export interface TableModel {
   from: number;
   to: number;
-  /** Raw source of the table — the widget's identity for redraw checks. */
+  /** Raw source of the table, part of the widget's identity in `eq`. */
   src: string;
   align: Align[];
   header: Cell[];
@@ -117,7 +116,7 @@ function cellsOf(doc: DocSlice, row: SyntaxNode, conceals: Conceal[]): Cell[] {
     .map((cell) => ({ pos: cell.from, segs: cellSegs(doc, cell, conceals) }));
 }
 
-// A cell's text, cut at every conceal and style boundary: hidden syntax
+// A cell's text, cut at every conceal and style boundary. Hidden syntax
 // drops, entities decode, links carry their URL, and emphasis/strong/strike/
 // inline-code stack as styles. Same result as the editor's own inline
 // rendering, minus the DOM.
@@ -181,13 +180,11 @@ class TableWidget extends WidgetType {
   constructor(readonly model: TableModel) {
     super();
   }
-  /** Position is part of the identity on purpose: the cell offsets this
-   * widget bakes into `data-pos` are absolute, so a table that has shifted
-   * must be redrawn rather than reused, or its click handler would aim the
-   * caret at the line the table used to occupy. Cheap here — a table draws
-   * from the document alone. images.ts cannot afford the same redraw (it
-   * would re-fetch the bytes) and reads its position back from the DOM
-   * instead. */
+  /** Position is part of the identity. The cell offsets baked into
+   * `data-pos` are absolute, so a shifted table must be redrawn, or a click
+   * would aim the caret where the table used to sit. The redraw is cheap: a
+   * table draws from the document alone. A redraw in images.ts would re-run
+   * the asset fetch, so that widget reads its position from the DOM instead. */
   eq(other: TableWidget) {
     return other.model.src === this.model.src && other.model.from === this.model.from;
   }
@@ -213,12 +210,11 @@ class TableWidget extends WidgetType {
     const tbody = table.appendChild(document.createElement("tbody"));
     for (const row of m.rows) addRow(tbody, row, "td");
 
-    // A click on a link in a cell opens it — the whole rendered table is a
-    // widget, not editable text, so plain click may act (livePreview.ts
-    // clickToOpen has the full grammar). A click anywhere else in a cell is
-    // a caret move to that cell's text, which reveals the raw table right
-    // where the user aimed. ignoreEvent() keeps CodeMirror from also
-    // treating this as a click into the (replaced) text.
+    // A click on a link in a cell opens the link. A click anywhere else in a
+    // cell moves the caret into that cell, revealing the raw table there.
+    // The table is a widget rather than editable text, so a plain click may
+    // act (livePreview.ts clickToOpen has the grammar). ignoreEvent() keeps
+    // CodeMirror from also treating this as a click into the replaced text.
     table.addEventListener("mousedown", (event) => {
       event.preventDefault();
       const target = event.target instanceof HTMLElement ? event.target : null;
@@ -260,8 +256,9 @@ function renderSeg(seg: Seg): HTMLElement {
 function buildTables(state: EditorState): DecorationSet {
   // ensureSyntaxTree, not syntaxTree, for the same reason as quotes.ts: this
   // rebuild runs right after an edit, and a stale incremental parse would
-  // flicker the table back to pipes. Notes are small; the budget is a bound,
-  // not a cost.
+  // flicker the table back to pipes. Parsing a whole note is cheap, and the
+  // 20ms budget caps how long that parse waits. A note too big for the
+  // budget falls back to syntaxTree, stale tree and all.
   const tree = ensureSyntaxTree(state, state.doc.length, 20) ?? syntaxTree(state);
   const models = tableModels(state.doc, tree);
   if (models.length === 0) return Decoration.none;
@@ -269,9 +266,10 @@ function buildTables(state: EditorState): DecorationSet {
   const exclude = frontmatterRange(state);
   const ranges: Range<Decoration>[] = [];
   for (const m of models) {
-    // A selection ANCHORED on the table (endpoints inclusive) shows the raw
-    // pipes; one merely sweeping across leaves the table drawn, so dragging
-    // past it cannot flap a widget this tall. blockRevealed has the why.
+    // A selection whose anchor sits on the table (endpoints inclusive) shows
+    // the raw pipes. A selection that only sweeps across leaves the table
+    // drawn, so dragging past it does not flicker a widget this tall.
+    // blockRevealed in livePreview.ts has the why.
     if (exclude !== null && m.from <= exclude.to && m.to >= exclude.from) continue;
     if (blockRevealed(m, state.selection.ranges)) continue;
     // Block replace ranges must cover whole lines.

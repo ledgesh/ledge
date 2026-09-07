@@ -1,6 +1,6 @@
 // The image model core, tested against @lezer/markdown + GFM directly, like
 // tables.test.ts: text in, render-ready models out, no DOM. imagePasteInsert
-// is here too — it is the pure half of the ⌘V image path.
+// is here too, the pure half of the ⌘V image path.
 import { describe, expect, test } from "bun:test";
 import { GFM, parser } from "@lezer/markdown";
 import {
@@ -47,8 +47,9 @@ describe("imageSrcOf", () => {
   });
 
   test("a note-relative image path is an asset", () => {
-    // The app's own dir (what assetPaste returns) — the one accepted dot-entry —
-    // and any plain relative path, e.g. an attached folder's own images.
+    // The app's own assets dir (what assetPaste returns) is the one accepted
+    // dot-entry. A plain relative path is an asset too, such as an image in
+    // an attached folder.
     expect(imageSrcOf(".ledge-assets/pasted-2026-07-17.png")).toEqual({
       kind: "asset",
       path: ".ledge-assets/pasted-2026-07-17.png",
@@ -67,20 +68,20 @@ describe("imageSrcOf", () => {
     expect(imageSrcOf("assets/../../x.png")).toBeNull();
     expect(imageSrcOf(".ledge-trash/x.png")).toBeNull();
     expect(imageSrcOf("../.ledge-trash/x.png")).toBeNull();
-    // The assets-dir exception is first-segment only, matching assetPathOf —
-    // first past the leading ../ run, which is spent before anything is judged.
+    // The assets-dir exception is first-segment only, matching assetPathOf.
+    // The leading ../ run is consumed first, so the segment checked is the
+    // first one after it.
     expect(imageSrcOf(".ledge-assets/.hidden.png")).toBeNull();
     expect(imageSrcOf("sub/.ledge-assets/x.png")).toBeNull();
     expect(imageSrcOf("../sub/.ledge-assets/x.png")).toBeNull();
   });
 
-  // A LEADING ../ run is how a note in a folder reaches the workspace's shared
-  // .ledge-assets, so it is attempted rather than refused. Where it lands is
-  // not this function's call: the note's depth is not in its hands, so
-  // `../outside.png` is an in-root image from `a/b/note.md` and an escape from
-  // a note at the root. assetPathOf resolves against the note and refuses what
-  // climbs out; the widget draws that as broken, the same face as a missing
-  // file, which is the same split links.ts takes.
+  // A leading ../ run is how a subfolder note reaches the workspace's shared
+  // .ledge-assets, so imageSrcOf attempts one instead of refusing it as a
+  // traversal. Where it lands is not imageSrcOf's call: the note's depth is
+  // not an input, so `../outside.png` is in-root from `a/b/note.md` and an
+  // escape from a note at the root. Bun's assetPathOf resolves against the
+  // note and refuses what climbs out. A refused path draws as a broken image.
   test("a leading ../ run is attempted, and Bun rules on where it lands", () => {
     expect(imageSrcOf("../.ledge-assets/x.png")).toEqual({ kind: "asset", path: "../.ledge-assets/x.png" });
     expect(imageSrcOf("../../img/logo.png")).toEqual({ kind: "asset", path: "../../img/logo.png" });
@@ -153,9 +154,10 @@ describe("imagePasteInsert", () => {
   const at = (text: string, pos: number, src = ".ledge-assets/p.png") =>
     imagePasteInsert(doc(text), { from: pos, to: pos }, src);
 
-  // The trailing newline and the caret-after-it are the rule everywhere: the
-  // caret must land BELOW the image's line so the paste renders immediately
-  // instead of sitting revealed as raw markdown.
+  // imagePasteInsert always ends the insert with a newline and puts the caret
+  // after it, in the cases below and in any case added later. The caret lands
+  // below the image's line, off its reveal unit, so the paste shows the image
+  // immediately instead of raw markdown.
 
   test("on a blank line: bare markdown plus the trailing break, caret below", () => {
     const { insert, cursor } = at("abc\n\n", 4);

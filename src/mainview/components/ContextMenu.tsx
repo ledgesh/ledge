@@ -1,9 +1,8 @@
-// A small floating menu anchored at (x, y). Closes on any outside pointer press,
-// Escape (via the modal layer stack), scroll, or window blur. We render our own
-// instead of the native WebView menu (which offers only debug items like
-// Reload / Inspect Element, suppressed app-wide in App.tsx). Items are usually
-// CommandMenuItem (commands/CommandMenuItem.tsx), which renders straight from
-// the command registry.
+// A small floating menu anchored at (x, y). It closes on an outside pointer
+// press, Escape (via the modal layer stack), scroll, or window blur. It
+// replaces the native WebView menu of debug items (Reload, Inspect Element),
+// which App.tsx suppresses app-wide. Items are usually CommandMenuItem
+// (commands/CommandMenuItem.tsx), which renders from the command registry.
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { placeMenu } from "@/lib/menuPlacement";
@@ -19,17 +18,19 @@ export function ContextMenu({
   x: number;
   y: number;
   onClose: () => void;
-  // Wider for menus whose items are values rather than verbs (the host
-  // picker's ssh destinations); the default fits every command menu.
+  // Menu width in pixels. Two menus pass more because their labels are
+  // longer: the editor's context menu passes 224 (workspace/EditorMenu.tsx),
+  // and the host picker's menu of ssh destinations passes 280
+  // (components/HostPicker.tsx).
   width?: number;
   children: ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
-  // Where it actually goes, once its height is known. The first render places
-  // it naively at the anchor and the layout effect corrects before paint, so
-  // nothing flashes; height cannot be guessed, because a note's menu and a
-  // trashed note's are different lengths and a phone's bottom row is where
-  // that difference shows.
+  // Where the menu ends up once its height has been measured. The layout
+  // effect below corrects the first render's anchor position before paint, so
+  // nothing flashes. The height is not known until then: a note's menu and a
+  // trashed note's hold different numbers of items. The height decides
+  // placement at a screen edge, such as a long press on a phone's last row.
   const [at, setAt] = useState({ x, y });
   useLayoutEffect(() => {
     const el = ref.current;
@@ -47,9 +48,9 @@ export function ContextMenu({
     const onDown = (e: PointerEvent) => {
       if (!ref.current?.contains(e.target as Node | null)) onClose();
     };
-    // Escape goes through the shared layer stack, so a menu above a dialog
-    // above the palette closes strictly top-first; while the menu is open the
-    // window command dispatcher is suppressed.
+    // Escape goes through the shared layer stack (commands/layers.ts), so a
+    // menu above a dialog above the palette closes top first. While any layer
+    // is open, the window command dispatcher is suppressed.
     const offLayer = pushLayer("menu", onClose);
     // Capture so a press anywhere (including inside other handlers) closes first.
     window.addEventListener("pointerdown", onDown, true);
@@ -75,12 +76,13 @@ export function ContextMenu({
   );
 }
 
-/** A group break. Only the editor's menu has groups so far (its verbs come
- * from three different places — what you clicked on, the clipboard, the
- * writing verbs); the spec that decides where these fall is
- * commands/editorMenu.ts, and it never emits a leading, trailing or doubled
- * one. Negative margins because the menu's own `p-1` would otherwise leave
- * the rule floating short of both edges. */
+/** A horizontal rule between groups of items. The editor's menu groups its
+ * verbs by the click target, the clipboard, and the writing commands.
+ * commands/editorMenu.ts places those breaks and drops an empty group's
+ * divider, so that menu never leads, ends, or doubles one. A divider written
+ * by hand carries no such guarantee: notes/NoteBrowser.tsx places one above
+ * its Delete Folder… row. The negative margins let the rule reach both edges,
+ * past the menu's `p-1`. */
 export function MenuDivider() {
   return <div role="separator" className="-mx-1 my-1 h-px bg-border" />;
 }
@@ -96,7 +98,9 @@ export function MenuItem({
   onSelect: () => void;
   destructive?: boolean;
   disabled?: boolean;
-  // Right-aligned key chip ("⌘W"); derive it from the registry, never hand-write.
+  // Right-aligned key chip ("⌘W"). Take it from the command registry
+  // (commands/CommandMenuItem.tsx), never hand-write one: a hand-written chip
+  // drifts from the keymap.
   shortcut?: string;
   title?: string;
   children: ReactNode;
@@ -107,19 +111,12 @@ export function MenuItem({
       title={title}
       disabled={disabled}
       className={cn(
-        // 44 points on a client with no pointer: the smallest thing a finger
-        // hits reliably. Written here rather than on any one menu because a menu
-        // row is a tap target wherever it appears — the same move
-        // `hoverOnlyWhenSupported` makes, fixing the rule at the control instead
-        // of at the sites someone remembered. The row it was written for is the
-        // host picker's (interactions.md §4a): `staging` and `prod` are adjacent
-        // items in one list, and 30 points of row is how a finger runs a command
-        // on the wrong machine.
-        //
-        // `[44px]` and not `min-h-11`, which is 2.75rem: this document's root is
-        // `font: 14px` (index.css), so every rem in the app is 0.875 of its
-        // nominal pixel and the utility would have quietly given 38.5. A touch
-        // target is a physical size and must not ride the typographic scale.
+        // At least 44 points on a touch client, the floor for adjacent
+        // choices (interactions.md §1a; the host picker is why, §4a). The
+        // rule sits on this shared control rather than on remembered call
+        // sites, as `hoverOnlyWhenSupported` does in tailwind.config.js.
+        // `[44px]`, not `min-h-11`: the root font is 14px (index.css), so
+        // 2.75rem is 38.5px here. A touch target must not be written in rem.
         "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm touch:min-h-[44px]",
         destructive
           ? "text-destructive hover:bg-destructive/10"

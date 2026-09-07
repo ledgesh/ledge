@@ -1,16 +1,18 @@
-// The Tags panel: the right panel's third face. Two levels in one slot —
-// the selected workspace's tag directory (every tag its notes carry, with
-// per-note counts), and the drill-in listing one tag's occurrences across
-// the workspace. Which tag is drilled lives in Shell (tagShown), not here:
-// clicks elsewhere route INTO that selection through ui.showTag — a rendered
-// #tag in the editor, a tag row in the overlay, and a directory row below
-// all converge on the one tag.open verb.
+// The Tags panel is the third of three faces that share the right panel's
+// one slot. Its directory lists every tag the selected workspace's notes
+// carry and how many notes bear each. Drilling into a tag lists that tag's
+// occurrences across the workspace.
 //
-// The lists are Bun's answers over the tagList/tagNotes RPCs (the same scan
-// the MCP `tags` tool runs); the view never holds note bodies. Rows are the
-// standard keyboard-navigable kind (useListNav + targets, commands/
-// target.ts): a directory row's Enter drills in; an occurrence row's Enter
-// runs tag.openNote, backlink.open's open-at-the-place with a tag target.
+// Shell (App.tsx) holds the drilled tag in tagShown, not this file. Tag
+// clicks converge on its ui.showTag hook: the tag.open command runs the hook
+// for a directory row below and for an overlay tag row, and the editor's
+// rendered #tag reaches it through the bridge (editor/bridge.ts).
+//
+// Both levels are answered over the tagList and tagNotes RPCs, the scan
+// behind the MCP `tags` tool. No note bodies reach the view. Rows are
+// keyboard navigable (useListNav, with `tag` and `tagnote` targets from
+// commands/target.ts). Enter drills into a directory row. Enter on an
+// occurrence row runs tag.openNote, backlink.open's body with a tag target.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, FileText, Hash, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -39,19 +41,21 @@ export function TagsPanel({ tag, onBack }: { tag: string | null; onBack: () => v
   const { state, selected } = useWorkspace();
   const { exec } = useCommands();
   const nav = useListNav();
-  // null is "no answer yet" — quiet, not a flashed empty state, the
-  // BacklinksPanel stance.
+  // null means no answer yet. The panel stays quiet during the first fetch
+  // rather than flashing the empty state.
   const [tags, setTags] = useState<TagInfo[] | null>(null);
   const [hits, setHits] = useState<TagHit[] | null>(null);
-  // Locked notes still show their frontmatter tags (plaintext head); this
-  // counts their unscanned BODIES for the footer (locking.md §4).
+  // How many of the scanned notes are locked, for the footer below. A locked
+  // note's body is never scanned (locking.md §4). Its frontmatter tags still
+  // count: those sit in the plaintext head (locking.md §6).
   const [lockedSkipped, setLockedSkipped] = useState(0);
   const [menu, setMenu] = useState<{ hit: TagHit; x: number; y: number } | null>(null);
 
-  // Refetch when the drill level changes and when the folder's files do —
-  // the BacklinksPanel arrangement: folderNotes covers the store-refresh
-  // route, the direct onNotesChanged subscription is the low-latency half,
-  // and the generation counter drops answers that arrive out of turn.
+  // Refetch when the drill level changes and when the folder's files do, the
+  // same arrangement as BacklinksPanel. The folderNotes dependency covers the
+  // store refresh. The onNotesChanged subscription below refetches without
+  // waiting for that re-list. The generation counter drops answers that
+  // arrive out of turn.
   const folderNotes = notesOf(state, selected.folder);
   // Where each bearing note lives: a hit carries a path and a title, not a
   // placement (notes/FolderLabel.tsx).
@@ -68,8 +72,9 @@ export function TagsPanel({ tag, onBack }: { tag: string | null; onBack: () => v
             setLockedSkipped(t.lockedSkipped);
           },
           (err) => {
-            // A failed scan costs the list, not the app (unmounted volume
-            // mid-session, say); empty beats lying with stale rows.
+            // A failed scan (an unmounted volume mid-session, say) empties
+            // the list instead of leaving stale rows on screen. The rejection
+            // is logged and stops here, so it costs the list, not the app.
             console.error("[tags] scan failed for", selected.folder, err);
             if (generation.current !== gen) return;
             setTags([]);
@@ -151,7 +156,7 @@ export function TagsPanel({ tag, onBack }: { tag: string | null; onBack: () => v
             ))
           )
         ) : hits && hits.length === 0 ? (
-          // Reachable: the drilled tag's last bearer was just edited away.
+          // Reachable when the drilled tag's last bearer was just edited away.
           <Hint>No notes carry #{tag} anymore.</Hint>
         ) : (
           (hits ?? []).map((hit, i) => (
@@ -179,7 +184,7 @@ export function TagsPanel({ tag, onBack }: { tag: string | null; onBack: () => v
       {menu && (
         <ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)}>
           <CommandMenuItem id="tag.openNote" target={hitTarget(menu.hit)} onClose={() => setMenu(null)} />
-          {/* The bearing note is an ordinary note; Copy Path is the note-row
+          {/* The bearing note is an ordinary note. Copy Path is the note-row
               command with a note target, not a second implementation. */}
           <CommandMenuItem
             id="note.copyPath"
@@ -222,8 +227,9 @@ function TagRow({
 }
 
 // One occurrence of the drilled tag: the bearing note's title, with the line
-// the tag sits on beneath it. Per OCCURRENCE, not per note — BacklinkRow's
-// reasoning: the same note tagged three times is three places to jump to.
+// the tag sits on beneath it. One row per occurrence, not per note, so a note
+// tagged three times gets three rows. BacklinkRow (BacklinksPanel.tsx) is the
+// same row under the same rule.
 function HitRow({
   hit,
   folder,
@@ -232,7 +238,7 @@ function HitRow({
   onContextMenu,
 }: {
   hit: TagHit;
-  // Where the BEARING note lives, or undefined at the top level.
+  // Where the bearing note lives, or undefined at the top level.
   folder: string | undefined;
   rowProps: ReturnType<ReturnType<typeof useListNav>["rowProps"]>;
   onOpen: () => void;

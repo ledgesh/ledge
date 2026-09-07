@@ -1,12 +1,8 @@
-// The note editor's context menu (interactions.md §11) — the surface every
-// other object in the app has had and the one the user spends all day in did
-// not.
-//
-// It makes no decisions: editor/rightClick.ts places the caret and says what
-// the pointer landed on, commands/editorMenu.ts says which verbs that calls
-// for, and this renders them through the same CommandMenuItem every other menu
-// uses, so titles, icons, key chips and enablement all still come from the
-// registry.
+// The note editor's context menu (interactions.md §11). It makes no decisions.
+// editor/rightClick.ts places the caret and reports what the pointer landed on.
+// commands/editorMenu.ts decides which commands the click calls for. This
+// renders the result through the same CommandMenuItem every other menu uses, so
+// titles, icons, key chips and enablement come from the registry.
 import { ContextMenu, MenuDivider } from "@/components/ContextMenu";
 import { CommandMenuItem } from "@/commands/CommandMenuItem";
 import { editorMenu, type EditorClickContext } from "@/commands/editorMenu";
@@ -20,19 +16,17 @@ export interface EditorMenuAnchor extends EditorClickContext {
 }
 
 /**
- * Answer a right-click for the pane whose editor host is `host`, or null when
- * there is no menu to open: another pane's editor, a dialog over this one, an
- * empty pane, a locked note's placeholder, a run panel.
+ * Builds the anchor for a right-click in the pane whose editor host is `host`.
+ * Null means no menu: another pane's editor, a dialog over this one, an empty
+ * pane, a locked note's placeholder, a run panel.
  *
- * The event is a native one from a window listener rather than React's, and
- * that is forced: the hotspots over rendered links sit in the body, outside
- * the React tree entirely (editor/rightClick.ts targetUnder), so an
- * onContextMenu on the host would never hear the clicks this menu most wants.
- * Hence `host.contains` — with the listener on the window, the pane has to
- * decide for itself whether the gesture was its own.
- *
- * The caret moves as a side effect. That is the platform's rule and it has to
- * happen before the menu reads the selection, not when an item is picked.
+ * `e` is a native event from a window listener, not React's synthetic one, and
+ * that is forced: link hotspots sit in the body, outside the React tree
+ * (editor/livePreview.ts), so an onContextMenu on the host would never see
+ * those clicks. Every pane hears every right-click, so each pane checks
+ * `host.contains` and ignores clicks outside its own host.
+ * `prepareEditorMenu` moves the caret as the menu opens, unless the click
+ * lands inside the selection. Both rules come from interactions.md §11.
  */
 export function editorMenuAt(
   e: MouseEvent,

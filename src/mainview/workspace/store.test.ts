@@ -4,13 +4,13 @@ import { firstLeaf, leafIds, findLeaf, countTabs, focusedTab, type SplitNode } f
 import { DEFAULT_ICON } from "./icons";
 import type { NoteMeta, TrashMeta } from "../../shared/rpc-schema";
 
-// The folder every fresh test state's first workspace owns. Notes are local
-// to a workspace folder now, so states are seeded per folder.
+// Every fresh test state starts with one workspace on this folder. Notes are
+// local to a workspace folder now, so test states are seeded per folder.
 const FOLDER = "/ws/notes";
 
-// An addWorkspace with a distinct folder per index: two adds with the SAME
-// folder would select the existing workspace instead of appending (the
-// one-workspace-per-folder rule, tested below).
+// An addWorkspace action with a distinct folder per index. Two adds with the
+// same folder would select the existing workspace instead of appending, under
+// the one-workspace-per-folder rule tested below.
 const addWs = (n: number): Action => ({
   type: "addWorkspace",
   name: `Workspace ${n}`,
@@ -37,9 +37,9 @@ describe("initialState", () => {
   });
 });
 
-// The manual window's launch state (remote.md §8a). The pages are numbered so
-// that path order is reading order, and the titles are their H1s — which is
-// what a page is asked for by, since the numbers move as the corpus grows.
+// The manual window's launch state (remote.md §8a). The page files are
+// numbered, so path order is reading order. A page is asked for by title (its
+// H1) rather than by number, since the numbers move as the corpus grows.
 describe("docsState", () => {
   const DOCS = "/ws/.ledge-docs";
   const PAGES: NoteMeta[] = [
@@ -64,15 +64,15 @@ describe("docsState", () => {
     );
   });
 
-  // A corpus that renamed the landing page under a stale docs root. The window
-  // still opens on something readable rather than on nothing.
+  // A corpus whose landing page was renamed under a stale docs root. The
+  // window still opens on a readable page rather than on nothing.
   test("a page that is not there falls back to the first in path order", () => {
     const without = PAGES.filter((p) => p.title !== "Getting Started");
     expect(focusedTab(selected(docsState(DOCS, without, "No Such Page")))?.title).toBe("About Panes");
   });
 
-  // Never a scratch tab: in a folder that refuses writes it is an Untitled
-  // that can never save (the same rule splitPane and the restore path keep).
+  // Never a scratch tab. The docs folder refuses writes, so an Untitled note
+  // there could never save. splitPane and the restore path keep the same rule.
   test("an empty corpus opens an empty pane, not an untitled note", () => {
     const ws = selected(docsState(DOCS, []));
     expect(countTabs(ws.root)).toBe(0);
@@ -221,14 +221,16 @@ describe("workspaces", () => {
     expect(s.workspaces).toHaveLength(2);
     expect(s.selectedId).toBe(s.workspaces[1].id);
     expect(s.workspaces[1].folder).toBe("/ws/extra-2");
-    // The new folder's lists exist, empty, so selectors and counts are total.
+    // The new folder gets its own lists, empty. An attached folder's real
+    // list arrives right after, from workspace/actions.ts.
     expect(notesOf(s, "/ws/extra-2")).toEqual([]);
     expect(trashOf(s, "/ws/extra-2")).toEqual([]);
   });
 
   test("addWorkspace can seed its first tab with an existing note", () => {
-    // The docs open's move: landing on Getting Started, not an
-    // editable-looking scratch tab in a folder that refuses writes.
+    // The move openDocs makes when it attaches the manual (actions.ts): land
+    // on Getting Started, not on an editable-looking scratch tab in a folder
+    // that refuses writes.
     const s = run({
       type: "addWorkspace",
       name: "Documentation",
@@ -244,8 +246,10 @@ describe("workspaces", () => {
   });
 
   test("addWorkspace on a folder that already has a workspace selects it instead", () => {
-    // One workspace per folder: attaching an already-attached folder must not
-    // grow a twin (two views of one folder would be two lists disagreeing).
+    // One workspace per folder. Attaching an already-attached folder selects
+    // the existing workspace rather than adding a twin. Twins would share one
+    // note list, keyed by folder, and closing either would drop that list out
+    // from under the other (closeWorkspace, below).
     const s1 = run(addWs(2));
     const s2 = reducer(s1, { type: "selectWorkspace", id: s1.workspaces[0].id });
     const s3 = reducer(s2, { type: "addWorkspace", name: "Twin", folder: "/ws/extra-2" });
@@ -260,8 +264,8 @@ describe("workspaces", () => {
     expect(s2.workspaces).toHaveLength(1);
     expect(s2.workspaces.some((w) => w.id === newId)).toBe(false);
     expect(s2.selectedId).toBe(s2.workspaces[0].id);
-    // The folder's lists went with it (nothing else reads them; the files on
-    // disk are untouched — only the view forgets).
+    // The folder's lists went with it, and nothing else reads them. The files
+    // on disk are untouched: only this state forgets them.
     expect(s2.notes["/ws/extra-2"]).toBeUndefined();
     expect(s2.trash["/ws/extra-2"]).toBeUndefined();
   });
@@ -281,14 +285,14 @@ describe("workspaces", () => {
     expect(openDocs.length).toBeGreaterThan(0);
     const s2 = reducer(s1, { type: "workspaceFolderMoved", id: before.id, folder: "/synced/notes" });
     const after = selected(s2);
-    // Same workspace — id, name, icon — over the new folder…
+    // Same workspace (id, name, icon) over the new folder.
     expect(after.id).toBe(before.id);
     expect(after.name).toBe(before.name);
     expect(after.folder).toBe("/synced/notes");
-    // …with a fresh pane tree: the old docIds are gone, which is what App's
-    // reconciliation effect turns into editor teardown + closeSession.
+    // The pane tree is fresh, so the old docIds are gone. App's reconciliation
+    // effect turns that into releaseEditor and closeSession (App.tsx).
     for (const id of openDocs) expect(allDocIds(s2)).not.toContain(id);
-    // Old folder's lists dropped, new folder's seeded total.
+    // The old folder's lists are dropped and the new folder gets empty ones.
     expect(s2.notes[FOLDER]).toBeUndefined();
     expect(s2.trash[FOLDER]).toBeUndefined();
     expect(notesOf(s2, "/synced/notes")).toEqual([]);
@@ -312,16 +316,17 @@ describe("workspaces", () => {
   });
 
   test("renaming a workspace does not touch its folder", () => {
-    // Display-only by design: the folder was slugged once at creation, and a
-    // rename must not invalidate every path handle under it.
+    // The name is display-only. The folder was slugged once at creation, and a
+    // rename must not invalidate every path under it.
     const s0 = initialState(FOLDER);
     const s = reducer(s0, { type: "renameWorkspace", id: s0.selectedId, name: "Brand New Name" });
     expect(selected(s).folder).toBe(FOLDER);
   });
 
   test("every workspace starts on the default icon, whatever its position", () => {
-    // Icons used to be handed out by index, which made the strip look like the
-    // app knew something about a workspace when it only knew its birth order.
+    // Icons used to be assigned by index. An index is only the order a
+    // workspace was added in, so the varied icons implied a meaning the app
+    // did not have.
     const s = run(addWs(2), addWs(3));
     expect(s.workspaces.map((w) => w.symbol)).toEqual([DEFAULT_ICON, DEFAULT_ICON, DEFAULT_ICON]);
   });
@@ -333,8 +338,8 @@ describe("workspaces", () => {
   });
 
   test("setWorkspaceIcon ignores a key the catalog doesn't have", () => {
-    // iconFor would render the default for it, so storing it would pretend the
-    // choice took.
+    // An unknown key renders as the default anyway (icons.ts iconFor), so
+    // storing one would show a choice that did not take.
     const s0 = initialState(FOLDER);
     expect(reducer(s0, { type: "setWorkspaceIcon", id: s0.selectedId, symbol: "aardvark" })).toBe(s0);
   });
@@ -390,7 +395,8 @@ describe("moveWorkspace", () => {
 describe("notes", () => {
   const note = (title: string): NoteMeta => ({ path: `${FOLDER}/${title}.md`, title, mtimeMs: 1 });
 
-  // A state seeded from two notes on disk: `a` is the newest, so boot opens it.
+  // A state seeded from two notes on disk, in listNotes order (newest first).
+  // Boot opens the first one, `a`.
   const withNotes = (...actions: Action[]): AppState =>
     actions.reduce(reducer, initialState(FOLDER, [note("a"), note("b")]));
 
@@ -414,7 +420,8 @@ describe("notes", () => {
 
   test("openNote on an already-open note focuses that tab, never opening it twice", () => {
     // Two tabs on one path would mean two docIds and two autosaves racing to
-    // write the same file, so this is the rule the whole browser rests on.
+    // write the same file. openNote keeps one tab per path across every
+    // workspace, not just the focused one (the next test).
     let s = withNotes({ type: "openNote", note: note("b") }); // a and b now open
     const before = countTabs(selected(s).root);
     const bTabId = focusedTab(selected(s))!.id;
@@ -502,8 +509,8 @@ describe("rename and delete", () => {
 
     expect(tab.path).toBe(`${FOLDER}/renamed.md`);
     expect(tab.title).toBe("renamed");
-    // The point of the whole path/docId split: the editor and the note's shells
-    // are keyed by docId, so renaming the file must not disturb them.
+    // The editor and the note's shells are keyed by docId, not by path, so a
+    // rename leaves them alone.
     expect(tab.docId).toBe(docId);
     expect(allDocIds(s)).toEqual(allDocIds(before));
   });
@@ -525,7 +532,7 @@ describe("rename and delete", () => {
   });
 
   test("a rename reaches the note wherever its tab was dragged to", () => {
-    // The note opens in workspace 1; a second workspace is added and selected, so
+    // The note opens in workspace 1. Adding a second workspace selects it, so
     // the tab holding a.md is no longer in the selected workspace.
     const s = withNotes(addWs(2), {
       type: "noteRenamed",
@@ -544,8 +551,8 @@ describe("rename and delete", () => {
 
     expect(notesOf(s, FOLDER).map((n) => n.title)).toEqual(["b"]);
     expect(countTabs(selected(s).root)).toBe(0);
-    // The docId leaving the live set is what makes App tear the editor down and
-    // close the note's shells; nothing else does it.
+    // App tears the editor down and closes the note's shells when the docId
+    // drops out of the live set. Nothing else does it.
     expect(allDocIds(s)).not.toContain(docId);
   });
 
@@ -561,7 +568,8 @@ describe("rename and delete", () => {
   });
 
   test("deleting the active tab falls to a neighbour, as closing it would", () => {
-    // b opens second and is active; deleting it should leave a active, not empty.
+    // b opens second and is active. Deleting it leaves a active, not an empty
+    // pane.
     const before = withNotes({ type: "openNote", note: note("b") });
     const s = reducer(before, { type: "noteDeleted", path: `${FOLDER}/b.md` });
     expect(focusedTab(selected(s))!.path).toBe(`${FOLDER}/a.md`);
@@ -601,8 +609,10 @@ describe("labels", () => {
   });
 
   test("a heading edit relabels the browser row too, not just the tab", () => {
-    // Otherwise the list would sit on the stale heading until the next folder
-    // refresh (window focus), which is a long time to look wrong.
+    // Relabelling the tab alone would leave the browser row on the old
+    // heading until the folder is next re-listed (App.tsx re-lists on window
+    // focus, on the notesChanged push, and on relink). Until then the browser
+    // names the note something it is no longer called.
     const before = withNotes();
     const docId = focusedTab(selected(before))!.docId;
 
@@ -675,8 +685,9 @@ describe("trash", () => {
   });
 
   test("a restored note lands in mtime order, not at the front", () => {
-    // It keeps its real last-edited time (the trash records the deletion in
-    // ctime and leaves mtime alone), so an old note restored today is still old.
+    // A restored note keeps its real last-edited time. The trash records the
+    // deletion in the file's ctime and leaves mtime alone (bun/notes.ts
+    // listTrash). An old note restored today still sorts as old.
     const s = reducer(initialState(FOLDER, [note("recent", 100), note("older", 10)]), {
       type: "noteAppeared",
       folder: FOLDER,
@@ -691,7 +702,7 @@ describe("trash", () => {
   });
 
   test("noteAppeared does not reopen the note's tab", () => {
-    // Restore puts a file back; it does not decide you want to look at it.
+    // Restore puts the file back in the folder. It does not open a tab for it.
     const before = initialState(FOLDER);
     const s = reducer(before, { type: "noteAppeared", folder: FOLDER, note: note("a") });
     expect(countTabs(selected(s).root)).toBe(countTabs(selected(before).root));

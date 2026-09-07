@@ -7,9 +7,10 @@ import {
   type PasteNode,
 } from "./htmlPaste";
 
-// The pure core takes a node tree, not HTML — DOMParser builds the real one
-// (testing.md §2: no fake browser in this repo), so trees here are hand-built.
-// `el`/`t` keep them readable enough to state a rule per test.
+// The pure core takes a node tree, not HTML. At runtime `parsePasteHtml`
+// parses the pasteboard HTML with DOMParser and `nodeOf` walks the result into
+// that tree. This repo has no fake browser (testing.md §2), so the trees here
+// are hand-built. `el` and `t` keep them readable.
 const el = (tag: string, attrs: Record<string, string>, ...children: PasteNode[]): PasteNode => ({
   tag,
   attrs,

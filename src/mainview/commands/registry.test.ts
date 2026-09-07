@@ -8,11 +8,11 @@ import type { Command, CommandCtx, RegistryDeps } from "./types";
 import { configureShell, recordServerCaps } from "@/lib/shell";
 import { recordWindowRole } from "@/lib/windows";
 
-// Stub deps: the registry never touches the editor stack or the clipboard in
-// tests; we only record that the right edge was invoked. `noteHead` is what a
-// focused note's editor would hold — settable so the frontmatter-driven
-// commands (profile.open) can be steered per test. `dailyRoot` is the
-// boot-resolved daily.workspace mirror the Edit/New Daily Template faces read.
+// Stub deps. The registry never touches the editor stack or the clipboard in
+// tests, so these only record which edge was invoked. `noteHead` is what a
+// focused note's editor would hold, settable per test to steer the
+// frontmatter-driven commands (profile.open). `dailyRoot` mirrors the
+// boot-resolved daily.workspace that the Edit/New Daily Template faces read.
 function stubDeps(
   calls: string[] = [],
   noteHead: string | null = null,
@@ -65,8 +65,8 @@ function stubDeps(
       return { path: `${folder}/untitled-template.md`, title: "Untitled Template", mtimeMs: 0 };
     },
     dailyRoot: () => dailyRoot,
-    // The vault stub: state is "unlocked" so the lock verbs run their direct
-    // path in tests (the dialog path is component-owned and e2e's business).
+    // The vault stub reports "unlocked", so the lock verbs run their direct
+    // path in tests. The dialog path belongs to the components and to e2e.
     vaultState: () => "unlocked",
     lockVaultNow: () => {
       calls.push("lockVaultNow");
@@ -125,8 +125,8 @@ function apply(state: AppState, ...actions: Action[]): AppState {
   return actions.reduce(reducer, state);
 }
 
-// Notes are per workspace folder now; every test state's first workspace sits
-// on FOLDER, and a second workspace (where needed) on its own folder.
+// Notes are per workspace folder. Every test state's first workspace sits on
+// FOLDER, and a second workspace, where needed, on its own folder.
 const FOLDER = "/ws/notes";
 const secondWs: Action = { type: "addWorkspace", name: "Workspace 2", folder: "/ws/two" };
 
@@ -158,9 +158,9 @@ describe("registry", () => {
   });
 
   test("no two commands claim the same row verb on the same row kind", () => {
-    // `r` may mean Rename on a workspace and Restore on a trashed note; it may
-    // not mean two things on one row. This is the check that keeps the bare
-    // keys unambiguous as commands are added (interactions.md §2).
+    // `r` may mean Rename on a workspace and Restore on a trashed note. It may
+    // not mean two things on one row. This check keeps the bare keys
+    // unambiguous as commands are added (interactions.md §2).
     const seen = new Map<string, string>();
     for (const c of commands) {
       for (const key of c.listKeys ?? []) {
@@ -172,8 +172,8 @@ describe("registry", () => {
   });
 
   test("every row verb declares the row kind it acts on", () => {
-    // Without a targetKind a bare key would fire on any focused row, which is
-    // how `d` on a workspace ends up deleting a note.
+    // Without a targetKind a bare key fires on any focused row. That is how
+    // `d` on a workspace ends up deleting a note.
     for (const c of commands) {
       if (c.listKeys?.length) expect({ id: c.id, targetKind: c.targetKind }).toMatchObject({
         targetKind: expect.any(String),
@@ -181,15 +181,11 @@ describe("registry", () => {
     }
   });
 
-  // interactions.md §1a, made a test rather than a paragraph (testing.md §3).
-  // A touch client has exactly two general surfaces — the palette, reached
-  // from the chrome control, and the row menus, reached by a long press — so a
-  // command that is in neither has to be reachable by tapping something, and
-  // if it is not, it does not exist on a phone at all.
-  //
-  // The exceptions are listed rather than inferred: a `palette: false` command
-  // with no menu item and no tap is exactly the bug this catches, and a
-  // regex over ids would hide it.
+  // interactions.md §1a as a test rather than a paragraph (testing.md §3). A
+  // touch client has two general surfaces: the palette, reached from the chrome
+  // control, and the row menus, reached by a long press. A command in neither
+  // needs something to tap, or it cannot be run on a phone at all. TAPPED names
+  // those one by one; a regex over ids would hide a command with no tap.
   const TAPPED: Record<string, string> = {
     "palette.commands":
       "the overlay's `>` crossing, inside the overlay the chrome's own control opens",
@@ -197,16 +193,16 @@ describe("registry", () => {
     "terminal.close": "the drawer's ✕, plus Toggle Terminal in the palette",
     "tag.open": "tapping a tag row drills into it",
   };
-  // ⌃1…9 by tab index: the tab itself is the affordance and the chord is only
-  // its accelerator, so there are nine of these and one reason.
+  // ⌃1…9 select a tab by index. The tab itself is the affordance and the
+  // chord only an accelerator, so all nine are exempt for one reason.
   const TAB_INDEX = /^tab\.select\.[1-9]$/;
 
   test("every command is reachable without a keyboard", () => {
-    // Which commands a menu carries, read off the components that render them
-    // — the registry cannot know, since a menu is JSX. Except the editor's,
-    // which is decided per click and so is data (commands/editorMenu.ts): its
-    // ids come from the spec itself, where a regex over JSX would find only
-    // the `{item}` the component maps over.
+    // The registry cannot know which commands a menu carries, because a menu
+    // is JSX, so this reads the ids off the components that render them. The
+    // exception is the editor's menu, which is decided per click and so is
+    // data (commands/editorMenu.ts): its ids come from the spec itself, where
+    // a regex over JSX would find only the `{item}` the component maps over.
     const inAMenu = new Set<string>(EDITOR_MENU_COMMANDS);
     for (const file of readdirSync("src/mainview", { recursive: true })) {
       if (typeof file !== "string" || !file.endsWith(".tsx")) continue;
@@ -221,8 +217,8 @@ describe("registry", () => {
       .filter((id) => !(id in TAPPED));
     expect(unreachable).toEqual([]);
 
-    // And the list stays honest: an entry that a menu item has since made
-    // unnecessary is removed, not left to accumulate.
+    // The TAPPED list stays current. An entry that a menu item has since made
+    // unnecessary is removed rather than left to accumulate.
     const covered = Object.keys(TAPPED).filter(
       (id) => !commands.some((c) => c.id === id) || inAMenu.has(id),
     );
@@ -326,7 +322,7 @@ describe("registry", () => {
     const ctx = makeCtx(initialState(FOLDER, []));
     ctx.ui.showNotice = (m) => notices.push(m);
     find(cmds, "cli.install").run(ctx);
-    await Bun.sleep(0); // the run fires and forgets; the surface lands a microtask later
+    await Bun.sleep(0); // the run does not await. Success or failure surfaces a microtask later
     expect(calls).toEqual(["installCli"]);
     expect(notices).toEqual(["installed"]);
   });
@@ -347,9 +343,9 @@ describe("registry", () => {
       openOverlay: (mode: string, opts?: { query?: string }) => overlays.push(`${mode}:${opts?.query ?? ""}`),
     };
     const parent = find(commands, "note.fromTemplate");
-    // Visible in every ordinary workspace, templates or none: discoverability
-    // is the point of the empty state. (The one gate is the read-only docs
-    // workspace, pinned in the docs suite below.)
+    // Visible in every ordinary workspace, templates or none, so the empty
+    // state is where a user finds the feature. The one gate is the read-only
+    // docs workspace, pinned in the docs suite below.
     expect(parent.when!(makeCtx(initialState(FOLDER, [])))).toBe(true);
     parent.run({ ...makeCtx(initialState(FOLDER, [marked])), ui });
     parent.run({ ...makeCtx(initialState(FOLDER, [note(`${FOLDER}/a.md`, "A")])), ui });
@@ -360,8 +356,8 @@ describe("registry", () => {
   });
 
   test("the template entries are LIVE state, not a boot snapshot", async () => {
-    // The same built commands see different rows as the note lists change —
-    // that is what makes "mark a note, use it" work without a relaunch.
+    // The same built commands see different rows as the note lists change, so
+    // marking a note and then using it works without a relaunch.
     const calls: string[] = [];
     const cmds = buildCommands(stubDeps(calls));
     const entry = find(cmds, "note.fromTemplate.0");
@@ -375,8 +371,9 @@ describe("registry", () => {
     expect((entry.title as (c: CommandCtx) => string)(ctx)).toBe("New Note from Template: Meeting");
     entry.run(ctx);
     await Bun.sleep(0);
-    // The pick hands over the PATH — the concrete note, not a re-resolvable name.
-    // The caret is queued before the open: a created note opens in its title.
+    // The pick hands over the path: the concrete note, not a re-resolvable
+    // name. The reveal is queued before the open, so a created note opens
+    // with its placeholder title selected.
     expect(calls).toEqual([
       `newNoteFromTemplate:${FOLDER}:${marked.path}`,
       `revealTitle:${FOLDER}/untitled.md`,
@@ -394,8 +391,9 @@ describe("registry", () => {
       folder: "/ws/two",
       notes: [theirs],
     });
-    // Selected is workspace 2 after addWorkspace; its own Meeting leads,
-    // the first workspace's Zeta trails with the workspace name attached.
+    // addWorkspace selects what it adds, so workspace 2 is the selected one.
+    // Its own Meeting leads. The first workspace's Zeta trails, with the
+    // workspace name attached.
     const ctx = makeCtx(state);
     const titleOfSlot = (i: number) =>
       (find(commands, `note.fromTemplate.${i}`).title as (c: CommandCtx) => string)(ctx);
@@ -410,14 +408,15 @@ describe("registry", () => {
     const dispatched: Action[] = [];
     find(cmds, "template.starter").run(makeCtx(initialState(FOLDER, []), dispatched));
     await Bun.sleep(0);
-    // Born marked: the starter must appear in the picker it teaches about.
+    // The starter carries `template: true` already, so it appears in the
+    // picker it teaches about.
     expect(calls).toEqual([
       `createNote:${FOLDER}:---|template: true|---|# Untitled Template`,
       `revealTitle:${FOLDER}/untitled-template.md`,
     ]);
-    // Into the list AND into a tab: the watcher's refresh would bring the row a
-    // moment later, and a row arriving after the note it names is already open
-    // reads as a glitch.
+    // template.starter dispatches into the note list and into a tab. The
+    // watcher's refresh would bring the row a moment later, and a row that
+    // arrives after the note it names is already open reads as a glitch.
     const note = { path: `${FOLDER}/untitled-template.md`, title: "Untitled Template", mtimeMs: 0 };
     expect(dispatched).toEqual([
       { type: "noteAppeared", folder: FOLDER, note },
@@ -426,8 +425,8 @@ describe("registry", () => {
   });
 
   test("note.move asks the browser for a destination, on the row or on the focused note", () => {
-    // Delete's target grammar: the row menu points at a row, the palette at
-    // the note in the focused tab.
+    // note.move follows Delete's target grammar: the row menu points at a
+    // row, the palette at the note in the focused tab.
     const state = initialState(FOLDER, [{ path: `${FOLDER}/a.md`, title: "A", mtimeMs: 1 }]);
     const asked: unknown[] = [];
     const ctx = { ...makeCtx(state), ui: { pickFolder: (r: unknown) => asked.push(r) } };
@@ -441,7 +440,7 @@ describe("registry", () => {
     const ctx = { ...makeCtx(state), ui: { pickFolder: (r: unknown) => asked.push(r) } };
     find(commands, "folder.new").run(ctx);
     find(commands, "folder.new").run({ ...ctx, target: { kind: "folder", folder: "projects" } });
-    // The trailing slash is what makes the next thing typed a CHILD.
+    // The trailing slash makes what the user types next a child folder.
     expect(asked).toEqual([{ kind: "new", parent: "" }, { kind: "new", parent: "projects/" }]);
   });
 
@@ -454,8 +453,8 @@ describe("registry", () => {
       target: { kind: "folder", folder: "projects" },
     });
     await Bun.sleep(0);
-    // Expanded BEFORE the create: the row has to be open for the note to
-    // arrive somewhere on screen.
+    // The folder is expanded before the create: the row has to be open for
+    // the new note to land somewhere on screen.
     expect(calls).toEqual([
       `expandFolder:${FOLDER}:projects`,
       `createNote:${FOLDER}:# Untitled||`,
@@ -465,8 +464,9 @@ describe("registry", () => {
   });
 
   test("folder.toggle's title is the direction it will go", () => {
-    // A live title rather than a two-faces pair: it holds a bare key, and two
-    // commands may not claim one bare key on one row kind.
+    // folder.toggle is one command with a live title, not a pair of faces. It
+    // holds a bare key, and two commands may not claim one bare key on one
+    // row kind.
     const state = initialState(FOLDER, []);
     const target = { kind: "folder", folder: "projects" } as const;
     const ctx = { ...makeCtx(state), target };
@@ -491,7 +491,7 @@ describe("registry", () => {
     expect(find(marked, "note.templateOn").when!(ctx)).toBe(false);
     expect(find(marked, "note.templateOff").when!(ctx)).toBe(true);
 
-    // No live editor for the doc: neither verb shows.
+    // With no live editor for the doc, neither verb shows.
     const noEditor = buildCommands(stubDeps([], null));
     expect(find(noEditor, "note.templateOn").when!(ctx)).toBe(false);
     expect(find(noEditor, "note.templateOff").when!(ctx)).toBe(false);
@@ -500,9 +500,9 @@ describe("registry", () => {
   test("the daily-template verbs: one face at a time, acting in the selected workspace by default", async () => {
     const calls: string[] = [];
     const cmds = buildCommands(stubDeps(calls));
-    // No claimant anywhere: only New shows, and it creates the pre-marked
-    // starter in the selected workspace, opening it through the external-open
-    // edge (the daily workspace need not be the selected one in general).
+    // With no claimant anywhere, only New shows. It creates the pre-marked
+    // starter in the selected workspace and opens it through the external-open
+    // edge, since the daily workspace need not be the selected one.
     const bare = makeCtx(initialState(FOLDER, [note(`${FOLDER}/plain.md`, "Plain")]));
     expect(find(cmds, "daily.templateEdit").when!(bare)).toBe(false);
     expect(find(cmds, "daily.templateNew").when!(bare)).toBe(true);
@@ -514,7 +514,7 @@ describe("registry", () => {
       `openNoteIn:${FOLDER}:${FOLDER}/untitled-template.md`,
     ]);
 
-    // A claimant flips the faces; a plain template: true note does not.
+    // A claimant flips the faces. A plain `template: true` note does not.
     calls.length = 0;
     const daily = { ...note(`${FOLDER}/daily.md`, "Daily Template"), template: "daily" as const };
     const plain = { ...note(`${FOLDER}/meeting.md`, "Meeting"), template: true as const };
@@ -526,8 +526,8 @@ describe("registry", () => {
   });
 
   test("the daily-template verbs follow a pinned daily.workspace, not the selection", () => {
-    // daily.workspace resolved to the FIRST workspace at boot; workspace 2 is
-    // selected. The verbs must look (and act) where ⌘J will: the pinned root.
+    // daily.workspace resolved to the first workspace at boot, and workspace 2
+    // is selected. The verbs look and act where ⌘J will: the pinned root.
     const calls: string[] = [];
     const pinned = buildCommands(stubDeps(calls, null, FOLDER));
     const daily = { ...note(`${FOLDER}/daily.md`, "Daily Template"), template: "daily" as const };
@@ -554,8 +554,8 @@ describe("registry", () => {
   });
 
   test("run: workspace commands route through the action deps, not the reducer", () => {
-    // Creating and attaching need a Bun round trip (folder, native dialog);
-    // closing must detach the folder after the reducer closes the view. All
+    // Creating and attaching need a Bun round trip (folder, native dialog).
+    // Closing must detach the folder after the reducer closes the view. All
     // three go through deps so the registry stays pure.
     const calls: string[] = [];
     const cmds = buildCommands(stubDeps(calls));
@@ -567,10 +567,11 @@ describe("registry", () => {
   });
 
   test("workspace.move forks on kind: managed goes straight to the move action, external stops at the chooser", async () => {
-    // A managed folder's only destination question is "where?", which the
-    // native picker answers; an external folder gets the in-app chooser first
-    // (its natural destination, back under hidden ~/.ledge, is one the native
-    // dialog cannot offer), and the dialog owns whatever happens next.
+    // A managed folder goes straight to the native picker, which answers its
+    // only question, "where?". An external folder stops at the in-app chooser
+    // first. Its natural destination is back under the hidden ~/.ledge, and
+    // the native dialog cannot offer that. The chooser owns whatever happens
+    // next.
     const managedCalls: string[] = [];
     const state = initialState(FOLDER, []);
     const managed = buildCommands({ ...stubDeps(managedCalls), workspaceKind: () => "managed" });
@@ -589,10 +590,10 @@ describe("registry", () => {
   });
 
   test("profile.open follows the current note's frontmatter, and only that", () => {
-    // The command is the editing arm of `profile: name`: with a profile named
-    // it opens the editor dialog on exactly that one, and with none it is
-    // hidden — prompting for a name here would invent a second way to say
-    // what the frontmatter already says.
+    // profile.open edits the profile that `profile: name` names. With a name
+    // it opens the editor dialog on exactly that one. With none it is hidden:
+    // prompting for a name here would invent a second way to say what the
+    // frontmatter already says.
     const opened: string[] = [];
     const withProfile = buildCommands(stubDeps([], "---\nprofile: petstore\n---\n# T\n"));
     const ctx = { ...makeCtx(initialState(FOLDER, [])), ui: { openProfileEditor: (n: string) => opened.push(n) } };
@@ -608,9 +609,9 @@ describe("registry", () => {
   });
 
   test("frontmatter.edit: the title says what will happen, the run routes the focused doc", () => {
-    // One command with a live title (not the two-faces move): it holds a
-    // chord, and the dispatcher ignores `when`, so a second command on ⌥⌘,
-    // could never fire.
+    // frontmatter.edit is one command with a live title, not a pair of faces.
+    // It holds a chord. The dispatcher ignores `when`, so a second command on
+    // ⌥⌘, would never fire.
     const state = initialState(FOLDER, []);
     const docId = state.workspaces[0]!.root.kind === "leaf" ? state.workspaces[0]!.root.tabs[0]!.docId : "";
     const ctx = makeCtx(state);
@@ -626,7 +627,8 @@ describe("registry", () => {
     const withBlock = buildCommands(stubDeps([], "---\ncwd: /x\n---\n# T\n"));
     expect(title(withBlock)).toBe("Edit Frontmatter");
 
-    // No live editor for the doc: hidden, like the other frontmatter verbs.
+    // With no live editor for the doc, frontmatter.edit does not show, like
+    // the other frontmatter verbs.
     const noEditor = buildCommands(stubDeps([], null));
     expect(find(noEditor, "frontmatter.edit").when!(ctx)).toBe(false);
   });
@@ -675,7 +677,7 @@ describe("registry", () => {
       target: { kind: "tagnote", path: n.path, line: 4, raw: "#work" },
     };
     find(cmds, "tag.openNote").run(ctx);
-    // backlink.open's contract: the reveal is registered BEFORE the open.
+    // backlink.open's contract: the reveal is registered before the open.
     expect(calls).toEqual([`revealBacklink:${n.path}:4:#work`]);
     expect(dispatched).toEqual([{ type: "openNote", note: n }]);
 
@@ -687,10 +689,9 @@ describe("registry", () => {
   });
 
   test("run: outline.copyLink copies [[Title#Heading]] — plain [[Title]] for the H1 itself", () => {
-    // The focused tab is the initial demo tab, titled "Welcome"; a subheading
-    // gets the anchored form, the H1 (its text IS the title) gets the plain
-    // link — [[Welcome#Welcome]] would be a strange spelling of the note
-    // itself.
+    // The focused tab is the initial demo tab, and this reads its title. A
+    // subheading gets the anchored form. The H1, whose text is the title, gets
+    // the plain link: [[Title#Title]] would name the note twice.
     const calls: string[] = [];
     const cmds = buildCommands(stubDeps(calls));
     const ctx = makeCtx(initialState(FOLDER, []));
@@ -707,9 +708,9 @@ describe("registry", () => {
   });
 
   test("run: row verbs act on their row, not on the current note", () => {
-    // The note open in the editor is A; the focused row is B. `d` on B must
-    // trash B — a row verb that quietly acted on the current note would be a
-    // data-loss bug, not a UX one.
+    // The note open in the editor is A and the focused row is B. `d` on B
+    // trashes B. A row verb that acted on the current note instead would
+    // delete the wrong note.
     const a = note("/n/a.md", "A");
     const b = note("/n/b.md", "B");
     const state = apply(initialState(FOLDER, [a, b]), { type: "openNote", note: a });
@@ -725,9 +726,10 @@ describe("registry", () => {
   });
 
   test("run: the lock faces act on their row, not on the current note", () => {
-    // Same stance as the row verbs above: the sidebar menu's Lock This Note…
-    // must lock the row's note even while a different note is focused — and
-    // which face shows follows the TARGET's locked flag, not the focused one's.
+    // Same target grammar as the row verbs above. The sidebar menu's Lock This
+    // Note… locks the row's note even while a different note is focused, and
+    // which face shows follows the target's locked flag, not the focused
+    // note's.
     const a = note("/n/a.md", "A");
     const b = note("/n/b.md", "B");
     const sealed = { ...note("/n/s.md", "S"), locked: true };
@@ -783,7 +785,8 @@ describe("registry", () => {
   });
 
   test("note verbs refuse a trash target", () => {
-    // Both kinds carry a path; only the kind keeps Delete off a trashed note.
+    // A trash target carries a path like a note target does. The kind is what
+    // keeps Delete off a trashed note: `targetNote` returns null for it.
     const ctx: CommandCtx = {
       ...makeCtx(initialState(FOLDER, [], [{ path: "/t/a.md", title: "A", deletedAt: 0 }])),
       target: { kind: "trash", path: "/t/a.md" },
@@ -870,14 +873,16 @@ describe("registry", () => {
       docsFolder: () => DOCS,
     };
   }
-  // A state with the ordinary first workspace plus the docs one, SELECTED —
-  // addWorkspace selects what it adds, which is exactly what openDocs does.
+  // A state with the ordinary first workspace plus the docs one, selected.
+  // addWorkspace selects what it adds, so this is where openDocs leaves the
+  // app.
   const docsSelectedState = () =>
     apply(initialState(FOLDER, []), { type: "addWorkspace", name: "Documentation", folder: DOCS });
 
-  // A client with one window and no way to have two (a phone, ios.md §4),
-  // where the manual is a workspace rather than a window. Module state, put
-  // back after: every other test in this file expects a Mac's answers.
+  // Run `check` on a client with one window and no way to have two (a phone,
+  // ios.md §4), where the manual is a workspace rather than a window.
+  // configureShell is module state, so it is put back after: every other test
+  // in this file expects a Mac's answers.
   function oneWindow(check: () => void): void {
     configureShell({ multiWindow: false });
     try {
@@ -888,21 +893,22 @@ describe("registry", () => {
   }
 
   test("docs.toggle shows only when a docs root exists, and asks for the manual's window", () => {
-    // The base stub reports no docs root: hidden (a harness or failed boot).
+    // The base stub reports no docs root, so the command is hidden (a harness
+    // or a failed boot).
     expect(find(commands, "docs.toggle").when!(makeCtx(initialState(FOLDER, [])))).toBe(false);
     const calls: string[] = [];
     const cmds = buildCommands(docsDeps(calls));
     const ctx = makeCtx(initialState(FOLDER, []));
     expect(find(cmds, "docs.toggle").when!(ctx)).toBe(true);
     find(cmds, "docs.toggle").run(ctx);
-    // The window, not this one: the workspace in front of the user is left
-    // exactly where it was (remote.md §8a).
+    // The manual gets a window of its own, so the workspace in front of the
+    // user stays where it was (remote.md §8a).
     expect(calls).toEqual(["openDocsWindow"]);
   });
 
-  // The single-window path, and the reason the command is a toggle there at
-  // all: the docs workspace is no strip row and no ⌘1…9 slot, so the surface
-  // that would otherwise be the way back is one the manual itself is covering.
+  // The single-window path, where the command stays a toggle. The docs
+  // workspace has no strip row and no ⌘1…9 slot, so running docs.toggle again
+  // is the way back to the notes.
   test("on a client with one window it is the old toggle: open, then close", () => {
     oneWindow(() => {
       const calls: string[] = [];
@@ -914,8 +920,8 @@ describe("registry", () => {
   });
 
   // The licenses have to be reachable in the shipped app, not only in the
-  // repository: the title it asks for is the H1 of the generated page
-  // (bun/licenses.ts), and a rename on either side breaks the landing.
+  // repository. The title asked for here is the H1 of the generated page
+  // (bun/licenses.ts), so a rename on either side breaks the landing.
   test("docs.licenses names the page, whichever path the manual takes", () => {
     const calls: string[] = [];
     const cmds = buildCommands(docsDeps(calls));
@@ -932,31 +938,32 @@ describe("registry", () => {
     expect(find(commands, "docs.licenses").when!(makeCtx(initialState(FOLDER, [])))).toBe(false);
   });
 
-  // Inside the manual's own window (lib/windows.ts windowRole). What goes is
-  // everything that would act on a workspace this window does not have, or on
-  // a machine it cannot be pointed at; what stays is the page verbs and the
-  // one that turns to another page.
+  // Inside the manual's own window (lib/windows.ts windowRole). The verbs that
+  // go are the ones that would act on a workspace this window does not hold,
+  // or on a machine it cannot be pointed at. The page verbs stay, including
+  // the one that turns to another page.
   test("the manual's window drops the verbs that have nothing to act on", () => {
     recordWindowRole({ docs: true });
     try {
       const calls: string[] = [];
-      // With a daily workspace pinned, which is the one configuration where
-      // ⌘J would otherwise still be offered in a docs workspace.
+      // With a daily workspace pinned, the one configuration where ⌘J would
+      // otherwise still be offered in a docs workspace.
       const cmds = buildCommands({ ...docsDeps(calls), dailyRoot: () => "/ws/daily" });
       const ctx = makeCtx(docsSelectedState());
       const visible = (id: string) => find(cmds, id).when?.(ctx) ?? true;
-      // The button that opens this window has nothing to say inside it, and
-      // neither has a workspace nor a machine switch.
+      // The button that opens this window has nothing to do inside it.
+      // Creating a folder, attaching one, switching machines, and ⌘J all need
+      // a workspace or a machine this window does not have.
       for (const id of ["docs.toggle", "workspace.new", "workspace.attach", "connection.switch", "daily.open"]) {
         expect(`${id}:${visible(id)}`).toBe(`${id}:false`);
       }
-      // Turning to the licences page is the one docs verb that still means
-      // something here, and it turns to it IN this window.
+      // Turning to the licences page is the one docs verb that still applies
+      // here, and it opens the page in this window.
       expect(visible("docs.licenses")).toBe(true);
       find(cmds, "docs.licenses").run(ctx);
       expect(calls).toEqual(["openDocs:Third-Party Licenses"]);
-      // Another ordinary window is still on offer: the manual's window is a
-      // dead end for workspaces, not for the app.
+      // New Window is still offered here: this window drops the workspace
+      // verbs, not the verb that opens another ordinary window.
       expect(visible("window.new")).toBe(true);
     } finally {
       recordWindowRole({ docs: false });
@@ -966,7 +973,7 @@ describe("registry", () => {
   test("⌘N indexing skips the docs workspace", () => {
     const cmds = buildCommands(docsDeps());
     const ctx = makeCtx(docsSelectedState());
-    // Slot 1 is the real workspace; there is no slot 2 — docs never counts.
+    // Slot 1 is the real workspace, and there is no slot 2: docs never counts.
     expect((find(cmds, "workspace.select.1").title as (c: CommandCtx) => string)(ctx)).toBe(
       `Switch to Workspace: ${ctx.state.workspaces[0]!.name}`,
     );
@@ -996,7 +1003,7 @@ describe("registry", () => {
     ]) {
       expect({ id, when: find(cmds, id).when!(ctx) }).toEqual({ id, when: false });
     }
-    // Reading stays whole: the page opens like any note row.
+    // Reading is not gated: the page opens like any note row.
     expect(find(cmds, "note.open").when!(ctx)).toBe(true);
   });
 
@@ -1009,8 +1016,8 @@ describe("registry", () => {
 
   test("splitting in the docs workspace opens an empty pane, not an unsavable scratch tab", () => {
     const cmds = buildCommands(docsDeps());
-    // Splitting stays enabled there — reading two pages side by side is the
-    // point of a second pane.
+    // Splitting stays enabled there, so a reader can put two pages side by
+    // side.
     for (const id of ["pane.splitRight", "pane.splitDown"]) {
       const docs: Action[] = [];
       find(cmds, id).run(makeCtx(docsSelectedState(), docs));
@@ -1031,24 +1038,20 @@ describe("registry", () => {
     const realWs = state.workspaces.find((w) => w.folder === FOLDER)!;
     const on = (id: string): CommandCtx => ({ ...makeCtx(state), target: { kind: "workspace", id } });
     expect(find(cmds, "workspace.close").when!(on(docsWs.id))).toBe(true);
-    // The real workspace is the last visible one: closing it would strand the
-    // user in a workspace with no strip row.
+    // The real workspace is the last one with a strip row, so closing it would
+    // leave the user in a workspace the strip never shows.
     expect(find(cmds, "workspace.close").when!(on(realWs.id))).toBe(false);
   });
 });
 
-// Two facts about the CLIENT rather than the target (lib/shell.ts), and the
-// thing worth pinning is that they are two: the phase after v1 runs blocks on a
-// phone that still has no terminal drawer (ios.md §14), and one boolean could
-// not describe that client without either offering it a drawer it does not have
-// or withholding the runs it does.
-//
-// Only `when` is read here. Nothing is deleted to achieve a cut — every command
-// is still built and `run` still works — so a test that invoked them would be
-// asking the wrong question.
+// Two facts about the client in front of the user, not about the machine
+// holding the notes, and these tests pin that they are two. lib/shell.ts owns
+// why: the phase after v1 runs blocks on a phone that still has no terminal
+// drawer (ios.md §14). Only `when` is read here. A cut hides a command rather
+// than deleting it, so a test that invoked one would ask the wrong question.
 describe("what this client has a surface for", () => {
-  // Module state, so it is set for the `when` calls and put back after: every
-  // other test in this file expects the desktop's answers.
+  // configureShell is module state, set for the `when` calls and put back
+  // after: every other test in this file expects the desktop's answers.
   function shell(
     next: { runsBlocks: boolean; hasTerminal: boolean },
     check: (visible: (id: string) => boolean) => void,
@@ -1083,22 +1086,22 @@ describe("what this client has a surface for", () => {
   });
 
   test("blocks without a drawer: the inline half stays, the drawer half goes", () => {
-    // The configuration the split exists for. "Run Block in Terminal" is the
-    // one verb that needs both answers — it takes a block out of the note and
-    // puts it in a drawer — so it goes with the drawer, not with the runs.
+    // The configuration the split exists for. "Run Block in Terminal" needs
+    // both answers, since it takes a block out of the note and puts it in a
+    // drawer, so it goes with the drawer rather than with the runs.
     shell({ runsBlocks: true, hasTerminal: false }, (visible) => {
       for (const id of RUNNING) shows(visible, id, true);
       for (const id of DRAWER) shows(visible, id, false);
-      // A note that runs blocks has a shell of its own, and this is the verb
-      // that kills it.
+      // A note that runs blocks has a shell of its own, and Restart Note Shell
+      // is the verb that ends it.
       shows(visible, "session.restart", true);
     });
   });
 
-  // The same cut one machine out: not what this client has a surface for but
-  // what the machine holding the notes has at all. Both answers arrive together
-  // on the boot handshake (workspaceList), and both are false on a headless
-  // server whether a Mac or a phone is looking at it.
+  // The same cut, one machine out: not what this client has a surface for but
+  // what the machine holding the notes has at all. Both answers arrive on the
+  // boot handshake (workspaceList), and both are false on a headless server
+  // whether a Mac or a phone is looking at it.
   function serverCaps(next: { folderDialog: boolean; cliShim: boolean }, check: (visible: (id: string) => boolean) => void): void {
     recordServerCaps(next);
     try {
@@ -1122,9 +1125,9 @@ describe("what this client has a surface for", () => {
     });
   });
 
-  // Two facts, not one: a machine can have a person at it and still have
-  // nothing to install, which is what a `bun src/bun/serve.ts` in a checkout is
-  // (serve.fs.test.ts).
+  // Two facts, not one: a machine can have a person at it to answer a folder
+  // dialog and still have no CLI to install. The notes machine refuses each of
+  // the two separately (serve.fs.test.ts).
   test("the two server facts are independent", () => {
     serverCaps({ folderDialog: true, cliShim: false }, (visible) => {
       shows(visible, "workspace.attach", true);

@@ -1,17 +1,14 @@
-// The native menu bar's bridge, wired by main.tsx (configureMenu) the way
-// configureClipboard wires the clipboard: the menu is built from the command
-// registry view-side, but only Bun can hand it to AppKit.
+// The bridge to the native menu bar, configured by boot.tsx (configureMenu)
+// the way configureClipboard wires the clipboard. CommandProvider builds the
+// menu from the command registry and calls setAppMenu, but only Bun can hand
+// the items to AppKit. Both directions live here so CommandProvider never
+// imports the RPC. setAppMenu drops the items until configureMenu runs, and
+// the e2e harness never calls configureMenu or sends a command back.
 //
-// Both directions live here so CommandProvider — which owns the build and the
-// exec — never imports the RPC, and so the whole thing is inert in a plain
-// browser (the Vite dev server, the e2e harness), where there is no menu bar
-// to install and no clicks to receive.
-//
-// The inbound half has two callers now and is named for neither: the Mac's
-// menu bar and the phone's keyboard accessory bar (ios.md §7) are both native
-// chrome that knows a command id and nothing else about what it does. Adding
-// a second identical channel for the second surface would have meant two ways
-// for native code to run a verb, which is one more than there should be.
+// The inbound half is named for neither surface. Its two callers are the Mac's
+// menu bar and the phone's keyboard accessory bar (ios.md §7), each native
+// chrome that passes a command id and knows nothing else about the command.
+// One seam serves both, rather than a channel per surface.
 import type { AppMenuItem } from "../../shared/rpc-schema";
 
 let nativeSet: ((items: AppMenuItem[]) => void) | null = null;
@@ -35,13 +32,11 @@ export function onNativeCommand(fn: (action: string) => void): () => void {
 }
 
 /**
- * Run a command some native chrome named: a menu item on the Mac, an accessory
- * bar button on a phone.
- *
- * A silent no-op before CommandProvider mounts, and after it unmounts. That is
- * the honest behavior for both callers — a tap on a bar whose registry is not
- * there yet has nothing it could mean — and it is why neither surface needs to
- * know whether the view is ready.
+ * Run a command some native chrome named: a menu item on the Mac, an
+ * accessory bar button on a phone. The call is dropped until CommandProvider
+ * mounts, and again once it unmounts. A click with no registry mounted names
+ * a command nothing can run, so neither surface has to check whether the view
+ * is ready.
  */
 export function dispatchNativeCommand(action: string): void {
   onCommand?.(action);

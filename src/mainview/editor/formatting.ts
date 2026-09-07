@@ -2,11 +2,11 @@
 // [text](url) link. The decisions are pure TransactionSpec builders over
 // EditorState (formatting.test.ts); the keymap below is the thin wrapper.
 //
-// Toggling is run-based rather than a literal marker match so the two chords
-// compose: the `*` run adjacent to the content decides state — bold is on when
-// both sides carry ≥2 stars, italic when both carry an odd count — which is
-// what makes ⌘I on **bold** yield ***both*** and ⌘I again peel only the
-// italic star back off. Emitted markers are always `*`, never `_`.
+// Toggling reads the `*` run next to the content instead of matching a
+// literal marker, so the two chords compose. Bold is on when both sides carry
+// two or more stars, italic when both carry an odd count. ⌘I on **bold**
+// yields ***bold***, and ⌘I again removes only the italic star. Emitted
+// markers are always `*`, never `_`.
 import { EditorSelection, Prec, type EditorState, type TransactionSpec } from "@codemirror/state";
 import { keymap, type Command } from "@codemirror/view";
 import { keyOf } from "../commands/keys";
@@ -37,10 +37,11 @@ function starsAfter(state: EditorState, pos: number): number {
   return n;
 }
 
-// One spec per selection range (multi-cursor rides changeByRange). An empty
-// range expands to the word at the caret and the caret stays put (mapped
-// through the edit); a bare caret with no word gets an empty marker pair to
-// type into.
+// changeByRange calls this callback once per selection range, and each call
+// returns one spec, so multi-cursor works. An empty range expands to the word
+// at the caret; the caret keeps its place in that word, shifting forward by
+// the length of `marker` when wrapping and back by it when unwrapping. A
+// caret with no word around it gets an empty marker pair to type into.
 export function toggleInline(state: EditorState, marker: "**" | "*"): TransactionSpec {
   const len = marker.length;
   return state.changeByRange((range) => {
@@ -58,7 +59,8 @@ export function toggleInline(state: EditorState, marker: "**" | "*"): Transactio
       ({ from, to } = word);
     }
     // A selection that grabbed the markers themselves toggles the same as one
-    // on the content: shrink to the content and let the runs decide.
+    // on the content: the loops below trim the stars off both ends, so the
+    // state comes from the runs outside the trimmed range.
     while (from < to && state.sliceDoc(from, from + 1) === "*") from += 1;
     while (to > from && state.sliceDoc(to - 1, to) === "*") to -= 1;
     const before = starsBefore(state, from);
@@ -90,9 +92,9 @@ export function toggleInline(state: EditorState, marker: "**" | "*"): Transactio
   });
 }
 
-// A selection that is already a URL becomes the destination with the caret in
-// the empty label; any other selection becomes the label with the caret in the
-// empty destination — either way the caret lands where the missing half goes.
+// URL_RE matches a selection that is already a URL. insertLinkSpec makes such
+// a selection the destination and puts the caret in the empty label. Any
+// other selection becomes the label, with the caret in the empty destination.
 const URL_RE = /^(?:https?:\/\/|www\.)\S+$/i;
 
 export function insertLinkSpec(state: EditorState): TransactionSpec {
@@ -137,9 +139,11 @@ export const insertLink: Command = (view) => {
   return true;
 };
 
-// Highest precedence like the other app chords in setup.ts: WebKit's own
-// contenteditable ⌘B/⌘I must never fire, and returning true keeps the chord
-// from reaching AppKit's key-equivalent path (the ⌘-beep class of bug).
+// Highest precedence, like the other app chords in setup.ts, so this keymap
+// runs ahead of CodeMirror's own extensions. Each command returns true, which
+// makes CodeMirror preventDefault the key. That stops WebKit's contenteditable
+// ⌘B/⌘I, and it keeps the chord off AppKit's key-equivalent path, where an
+// unhandled ⌘ key rings the alert.
 export function formatting() {
   return Prec.highest(
     keymap.of([

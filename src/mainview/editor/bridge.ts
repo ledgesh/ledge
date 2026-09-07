@@ -1,9 +1,8 @@
-// The editor <-> Bun bridge for the Electrobun build.
-//
-// In the Swift build this went through window.webkit.messageHandlers; here it
-// rides the typed Electrobun RPC. blocks.ts and setup.ts still call the same
-// `toNative(...)` they always did, so the editor code is unchanged. main.tsx
-// wires the two ends once the Electroview RPC exists.
+// The editor <-> Bun bridge for the Electrobun build. The Swift build went
+// through window.webkit.messageHandlers; this one rides the typed Electrobun
+// RPC. blocks.ts and setup.ts call `toNative(...)` either way, so the port
+// needed no editor changes. bootView wires the two ends to the Electroview RPC
+// main.tsx hands it (mainview/boot.tsx `configureBridge`).
 import type { NoteMeta, RunEvent } from "../../shared/rpc-schema";
 import type { TagInfo } from "../../shared/tags";
 import type { ConfirmSpec } from "./fenceInfo";
@@ -14,8 +13,8 @@ export type RunDestination = "inline" | "terminal";
 /** One request to choose a target machine, anchored near what asked for it. */
 export interface HostPickRequest {
   hosts: string[];
-  // The session's last-picked host, preselected so a repeat run on the same
-  // machine is Enter; running on a DIFFERENT machine takes a deliberate move.
+  // The session's last-picked host, preselected: a repeat run on the same
+  // machine is Enter, and another machine has to be chosen from the list.
   preferred: string | null;
   anchor: { x: number; y: number };
   onPick: (host: string) => void;
@@ -24,16 +23,15 @@ export interface HostPickRequest {
 /**
  * One request to confirm a run before it happens: the block carried `confirm`
  * on its fence, or its note declared `confirm: true` (interactions.md §4b).
- * Always-ask, like the host picker and for the same reason — a remembered yes
- * is exactly the state the marker exists to prevent — so nothing here is
- * cached and there is no "don't ask again".
+ * Every run asks, like the host picker. Nothing here is cached and there is no
+ * "don't ask again".
  */
 export interface RunConfirmRequest {
   // The question from `confirm="…"`, or null for the default one.
   message: string | null;
   // What is about to run and where, so the dialog can show the code and name
-  // the machine. `host` null means this machine (or, for the drawer's live
-  // shell, wherever it already is: the badge says).
+  // the machine. `host` null means this machine, or, for the drawer's live
+  // shell, wherever that shell already is (the drawer's badge names it).
   code: string;
   lang: string | null;
   host: string | null;
@@ -42,16 +40,17 @@ export interface RunConfirmRequest {
 }
 
 /**
- * Ask before running. Fails CLOSED: with no handler wired (an editor outside
- * the app), a marked block does not run. App always wires it.
+ * Ask before running. Fails closed: with no handler wired (an editor outside
+ * the app) a marked block does not run. App always wires it.
  */
 export function requestRunConfirm(req: RunConfirmRequest): void {
   handlers.confirmRun?.(req);
 }
 
-// The last host picked per session, view-side only and never persisted: it is
-// a convenience default for the picker, not state Bun acts on — every actual
-// run still names its host explicitly and is validated Bun-side.
+// The last host picked per session, view-side only and never persisted. It is
+// a default for the picker, not state Bun acts on. A run names a host only
+// when the view picked one, and Bun checks that name against the note's
+// declared list (bun/server.ts resolveHost).
 const lastHost = new Map<string, string>();
 
 export function lastHostFor(sessionId: string): string | null {
@@ -84,23 +83,25 @@ type NativeMessage =
       // single declared host), null for local/undeclared. Bun re-validates it
       // against the note's declared list either way.
       host?: string | null;
-      // The note's declared host list, for the TERMINAL destination: the
-      // drawer's shell has one host for its whole life, so whether to ask is
-      // decided where the drawer lives (App), not per block here. `anchor` is
-      // where the asking block sits, so the picker App may open lands beside
-      // the click instead of across the window.
+      // The note's declared host list, for the terminal destination. The
+      // drawer's shell keeps one host for its whole life, so App decides
+      // whether to ask once for the drawer, rather than each block deciding
+      // here. `anchor` is where the asking block sits, so a picker that App
+      // opens lands beside the click rather than across the window.
       hosts?: string[];
       anchor?: { x: number; y: number };
-      // The block's confirm marker, for the TERMINAL destination only: the
-      // machine is chosen where the drawer lives (App), and the dialog must
-      // come AFTER that choice so it can name the machine. Inline runs resolve
-      // their host in blocks.ts and open the dialog there.
+      // The block's confirm marker, for the terminal destination only. App
+      // chooses the machine for the drawer, and the dialog comes after that
+      // choice and never before it, so the question can name the machine
+      // (interactions.md §4b). Inline runs resolve their host in blocks.ts and
+      // open the dialog there.
       confirm?: ConfirmSpec | null;
     };
 
-// Handlers are set from two places: main.tsx wires runInline (needs the RPC),
-// and App wires the terminal-drawer callbacks (need React state). configureBridge
-// merges, so either can set its own fields without clobbering the other.
+// Handlers are set from two places: bootView wires the ones that go straight
+// to the RPC, such as runInline (mainview/boot.tsx), and App wires the
+// terminal-drawer callbacks (they need React state). configureBridge merges,
+// so either can set its own fields without clobbering the other.
 interface BridgeHandlers {
   runInline: (sessionId: string, id: string, code: string, language: string | null, host: string | null) => void;
   toggleTerminal: () => void;
@@ -126,34 +127,35 @@ interface BridgeHandlers {
   claimRuns: (ids: string[]) => Promise<string[]>;
   resizeInline: (sessionId: string, id: string, cols: number, rows: number) => void;
   inputInline: (sessionId: string, id: string, data: string) => void;
-  // Open the profile editor dialog (App owns it). The editor calls this when
-  // the ⌘-clicked frontmatter profile name asks for the same dialog the
-  // "Edit Note Profile…" command opens.
+  // Open the profile editor dialog (App owns it). editor/frontmatter.ts calls
+  // this on a ⌘-clicked frontmatter profile name, and it opens the same dialog
+  // as the "Edit Note Profile…" command.
   openProfileEditor: (name: string) => void;
-  // Open a URL in the OS default handler (browser, mail). main.tsx wires it
+  // Open a URL in the OS default handler (browser, mail). boot.tsx wires it
   // to the linkOpen RPC; Bun re-validates the scheme (shared/links.ts) before
   // anything reaches `open`.
   openLink: (url: string) => void;
-  // The notes of the workspace folder the given doc belongs to — what a
-  // wikilink resolves against (editor/wikilinks.ts) and what the `[[` picker
-  // lists. App wires it (the store owns the lists); a synchronous snapshot,
-  // because decoration passes cannot await.
+  // The notes of the workspace folder the given doc belongs to. A wikilink
+  // resolves against this list (editor/wikilinks.ts) and the `[[` picker shows
+  // it. App wires it, since the store owns the lists. The snapshot is
+  // synchronous because decoration passes cannot await.
   wikiNotes: (docId: string) => NoteMeta[];
   // Follow a wikilink: resolve `target` in the doc's own workspace and open
-  // the note it names (App wires it — dispatching openNote needs the store).
-  // A dangling target is a no-op, never an error.
+  // the note it names. App wires it, since dispatching openNote needs the
+  // store. A dangling target is a no-op, never an error.
   openWikiNote: (docId: string, target: string) => void;
-  // The doc's workspace tag directory — the `#` completion's vocabulary
-  // (editor/tags.ts). App wires it to a per-folder snapshot it keeps fresh;
-  // synchronous for wikiNotes' reason: completion sources cannot await a
-  // scan, and a slightly stale vocabulary beats a popup that stalls.
+  // The doc's workspace tag directory, which is the `#` completion's
+  // vocabulary (editor/tags.ts). App wires it to a per-folder snapshot it
+  // keeps fresh. Synchronous for wikiNotes' reason: a completion source cannot
+  // await a scan, and a slightly stale vocabulary is better than a popup that
+  // stalls waiting for one.
   workspaceTags: (docId: string) => TagInfo[];
-  // Follow a #tag: open the Tags panel drilled into it (App wires it to
-  // ui.showTag — the same tag.open verb every other tag surface runs).
+  // Follow a #tag: open the Tags panel drilled into it. App wires it to
+  // ui.showTag, the same `tag.open` verb every other tag surface runs.
   openTag: (docId: string, tag: string) => void;
-  // Surface a neutral one-liner (App wires it to ui.showNotice — the
-  // browser's notice strip). The editor's refusals speak through this: a
-  // swallowed chord diagnoses nothing (locking.md §7).
+  // Surface a neutral one-liner (App wires it to ui.showNotice, the browser's
+  // notice strip). The editor's refusals answer through this rather than
+  // dropping the chord in silence (locking.md §7).
   notice: (message: string) => void;
 }
 const handlers: Partial<BridgeHandlers> = {};
@@ -163,8 +165,8 @@ export function configureBridge(fns: Partial<BridgeHandlers>): void {
 }
 
 // Interrupt one inline run (Ctrl-C to its shell's foreground job). Runs can be
-// concurrent, each on its own shell, so the run id names which one dies. Called
-// when a still-running block's output panel is dismissed.
+// concurrent, each on its own shell, so the run id names which one is
+// interrupted. Called when a still-running block's output panel is dismissed.
 export function cancelRun(sessionId: string, id: string): void {
   handlers.cancelRun?.(sessionId, id);
 }
@@ -223,7 +225,8 @@ export function openTag(docId: string, tag: string): void {
 }
 
 // Web -> Bun. Note edits do not come through here: persistence is a direct
-// call from the editor into notes/store.ts, which owns its own RPC (notes/channel).
+// call from the editor into notes/store.ts, which owns its own RPC
+// (notes/channel.ts).
 export function toNative(message: unknown): void {
   const m = message as NativeMessage;
   if (m.type === "toggleTerminal") {
@@ -238,29 +241,25 @@ export function toNative(message: unknown): void {
   if (m.id) handlers.runInline?.(m.sessionId, m.id, m.code, m.language, m.host ?? null);
 }
 
-// Bun -> web run events. Every mounted editor registers a sink bound to its own
-// EditorView; a run event carries a globally-unique block id, and handleRunEvent
-// drops ids the view doesn't own, so broadcasting to all sinks is safe and lets
-// several editor tabs/panes coexist without routing bookkeeping. That check is
-// what makes the broadcast safe rather than merely convenient: without it every
-// open note re-writes the same output into the one panel that shows it.
+// Bun -> web run events. Every mounted editor registers a sink bound to its
+// own EditorView, and every event goes to every sink. handleRunEvent drops ids
+// the view does not own (blocks.ts). Without that check one run's output would
+// be written into a panel once per open note. Run ids are globally unique, so
+// tabs and panes need no routing bookkeeping.
 
 /**
  * One mounted editor's end of the run channel: where a run event goes, and
- * which of its runs are still going.
- *
- * The second half is the same fact from the other side, and it is here rather
- * than in its own registry because the two are the same lifetime exactly: an
- * editor that has stopped receiving events is an editor whose runs nobody can
- * see, which is precisely what reconcileRuns must not claim.
+ * which of its runs are still going. `live` sits here rather than in a
+ * registry of its own because an editor that no longer receives events has no
+ * panel showing its runs, and those are the runs reconcileRuns must not claim.
  */
 export interface RunSink {
   apply(ev: RunEvent): void;
   live(): string[];
-  /** The wire to the machine these runs are on went, or came back
-   * (blocks.ts setRunsLink). Third here for the same reason the second is:
-   * an editor's runs, what it still claims of them, and what it can still
-   * be told about them are one lifetime. */
+  /** The wire to the machine these runs are on dropped, or came back
+   * (blocks.ts setRunsLink). Here for the same reason as `live`: an editor's
+   * runs, what it claims of them, and what it can be told about them share a
+   * lifetime. */
   link(up: boolean): void;
 }
 
@@ -278,16 +277,14 @@ export function dispatchRunEvent(ev: RunEvent): void {
 }
 
 /**
- * Tell every panel that the connection went or came back (mainview/boot.tsx).
+ * Tell every panel that the connection dropped or came back
+ * (mainview/boot.tsx). Every sink hears it, not only the note in front,
+ * because a run outlives the tab showing it: a background note running a
+ * deploy would otherwise sit on "Running" for the whole outage.
  *
- * Sent to all of them rather than to the note in front, because a run outlives
- * the tab it is looked at in: a background note with a deploy in it is exactly
- * the panel somebody comes back to, and it must not have spent the outage
- * claiming to be fine.
- *
- * Paired with reconcileRuns and ordered before it on the way up, though the
- * order is not what makes it correct — runningRunIds counts unknown runs too,
- * so a claim sent from either side of this names the same ids.
+ * Paired with reconcileRuns and called before it on the way up. The order is
+ * not what makes it correct: runningRunIds counts unknown runs alongside
+ * running ones, so a claim from either side of this names the same ids.
  */
 export function dispatchRunLink(up: boolean): void {
   for (const sink of runEventSinks) sink.link(up);
@@ -295,30 +292,21 @@ export function dispatchRunLink(up: boolean): void {
 
 /**
  * Line this client's inline runs up with the server's. Called once at boot and
- * again on every reconnect (mainview/boot.tsx), which are the two moments the
- * two ends can have drifted apart.
+ * again on every reconnect (mainview/boot.tsx), which are the moments the two
+ * ends can have drifted apart. They drift in both directions, and one half of
+ * this exchange fixes each (remote.md §7).
  *
- * Both directions drift, and each is fixed by one half of the answer:
+ * Naming the runs that still have panels lets the server interrupt the rest.
+ * A reload takes every panel with it, and those runs would otherwise keep
+ * executing with no id left anywhere to stop them by.
  *
- * A run the client can no longer show — a page that reloaded and lost every
- * panel it had — is one the server would otherwise keep executing invisibly,
- * with no id left anywhere to stop it by. Naming what we still have lets the
- * server interrupt the rest.
- *
- * A run the CLIENT still shows and the server has already finished is the
- * mirror image, and it is what a dropped connection can leave behind. Run
- * output IS held for an absent client and released by this very call
- * (bun/server.ts `missed`), so the ordinary outage now returns the ending
- * rather than losing it — but the hold only starts once the server knows the
- * client has gone, and the seconds before a silently dead wire is noticed are
- * written to a socket nobody reads. A run whose ending fell in there is closed
- * out here with no exit status, the same shape a shell dying under a run
- * produces, which is honest: what happened to it is exactly what we could not
- * see.
- *
- * The release lands ahead of the answer, so anything it already closed out is
- * gone from the panels by the time the answer is read. That is why what is
- * still live is asked for a second time below rather than reused.
+ * The other half is the answer itself. A dropped connection can leave this
+ * client showing a run the server has already finished. This call closes such
+ * a run out with no exit status, the same shape as a run whose shell exits
+ * under it (bun/inlinePool.ts). The server holds run output for an absent
+ * client and releases it ahead of the answer (bun/server.ts `missed`), so an
+ * ordinary outage returns the real ending instead. An ending sent before the
+ * server noticed the wire was dead is lost.
  */
 export async function reconcileRuns(): Promise<void> {
   const claim = handlers.claimRuns;
@@ -328,16 +316,16 @@ export async function reconcileRuns(): Promise<void> {
   try {
     running = await claim(ids);
   } catch {
-    // The wire went again mid-question. The connection that replaces this one
-    // asks it again, and until then nothing has been claimed or closed out.
+    // The wire dropped again mid-question. The connection that replaces this
+    // one asks again, and until then nothing is claimed or closed out.
     return;
   }
   const alive = new Set(running);
-  // Asked again rather than reusing `ids`, because the answer may have arrived
-  // BEHIND output the server had been holding for this client, including the
+  // Asked again rather than reusing `ids`, because the answer may arrive
+  // behind output the server was holding for this client, including the
   // `ended` that closed a run out properly (remote.md §7). Such a run is gone
-  // from this set, and ending it a second time would replace its real exit code
-  // with the blank "Session ended".
+  // from this set, and ending it a second time would replace its real exit
+  // code with the blank "Session ended".
   const still = new Set([...runEventSinks].flatMap((sink) => sink.live()));
   for (const id of ids) {
     if (!alive.has(id) && still.has(id)) dispatchRunEvent({ id, kind: "ended", exitCode: null });
@@ -346,13 +334,13 @@ export async function reconcileRuns(): Promise<void> {
 
 // --- terminal-shell busy state ----------------------------------------------
 //
-// Which notes' terminal shells are mid-job, pushed from Bun (see terminalBusy in
+// Which notes' terminal shells are mid-job, pushed from Bun (terminalBusy in
 // rpc-schema.ts). The block chrome reads this to gray out its terminal button:
-// a block sent to a busy shell waits in a queue, and a queue nobody can see is
-// what makes people click the button again.
+// a block sent to a busy shell is queued rather than run, the queue shows
+// nowhere else, and an ungrayed button gets pressed a second time.
 //
-// Absent means free, so a note whose shell has never been opened, or whose shell
-// is gone, reads as ready without needing an entry.
+// Absent means free, so a note whose shell has never been opened, or whose
+// shell is gone, reads as ready without needing an entry.
 const termBusy = new Set<string>();
 const busySinks = new Set<() => void>();
 
@@ -367,7 +355,8 @@ export function isTerminalBusy(sessionId: string): boolean {
   return termBusy.has(sessionId);
 }
 
-// Ping me when any shell's busy state changes, so the chrome can re-render.
+// Run `sink` whenever any shell's busy state changes, so the chrome can
+// re-render.
 export function onTerminalBusyChange(sink: () => void): () => void {
   busySinks.add(sink);
   return () => {

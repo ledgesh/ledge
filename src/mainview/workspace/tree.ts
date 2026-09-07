@@ -6,15 +6,14 @@
 
 export type SplitDir = "row" | "col"; // row: children sit left|right; col: top|bottom
 
-// One tab in a pane. `docId` is the stable key into the editor pool
-// (editorPool.ts): it outlives tab moves and re-parenting, which is what keeps a
-// CodeMirror instance (and its undo/scroll/inline output) alive across switches.
-//
-// `path` is the note's file, and is null until the note's first edit allocates
-// one (notes/store.ts). It is kept apart from docId on purpose: docId identifies
-// the live session (the pooled editor and the note's two shells), path identifies
-// the bytes on disk. `seed` supplies the starting text and only means anything
-// while `path` is null; a tab with a path loads its content from the file.
+// One tab in a pane. The editor pool keys its editors by `docId`
+// (editorPool.ts), so a tab keeps its CodeMirror instance, undo history,
+// scroll position and inline output across tab switches and pane moves.
+// `docId` names the live session (the pooled editor and the note's two
+// shells) while `path` names the bytes on disk, two keys with two lifetimes
+// (architecture.md §4). `path` is null until the note's first save allocates
+// one (notes/store.ts). `seed` supplies the starting text. It matters only
+// while `path` is null. A tab with a path loads its content from the file.
 export interface TabState {
   id: string;
   title: string;
@@ -46,9 +45,9 @@ export interface Workspace {
   symbol: string; // lucide icon key (see Sidebar.tsx)
   // The workspace's notes folder on disk: an opaque root handle from Bun
   // (workspace/channel.ts), never a path the view built. Named `folder`
-  // because `root` here is the PANE tree's root. Every tab's note lives under
-  // its own workspace's folder (persist.ts enforces it on restore), and the
-  // browser/quick-open/search are scoped to the selected workspace's.
+  // because `root` here is the pane tree's root. Every tab's note lives under
+  // its own workspace's folder, which persist.ts enforces on restore. The
+  // note browser, quick-open, and search are scoped to it.
   folder: string;
   root: PaneNode;
   focusedPaneId: string;
@@ -69,17 +68,17 @@ export function makeTab(seed: "demo" | "scratch", title = "Untitled"): TabState 
   return { id: uid("tab"), title, docId: uid("doc"), path: null, seed };
 }
 
-// A tab onto a note that already exists on disk. Its seed is never used (the
-// content comes from the file), and its docId is fresh: opening the same note
-// twice would give two independent sessions, which is why path and docId are
+// A tab onto a note that already exists on disk. Its seed is never used: the
+// content comes from the file. Its docId is fresh, so opening the same note
+// twice would give two independent sessions. That is why path and docId are
 // separate keys.
 export function makeNoteTab(path: string, title: string): TabState {
   return { id: uid("tab"), title, docId: uid("doc"), path, seed: "scratch" };
 }
 
-// A pane holding one tab, or — with no argument — none at all. A tabless leaf
-// is the same shape a pane reaches by closing its last tab: LeafView renders
-// the "No open notes" empty state over it.
+// A pane holding one tab, or (with no argument) none at all. A tabless leaf is
+// the same shape a pane reaches by closing its last tab. LeafView renders the
+// "No open notes" empty state over it (PaneTree.tsx).
 export function makeLeaf(tab?: TabState): LeafNode {
   return { kind: "leaf", id: uid("pane"), tabs: tab ? [tab] : [], activeTabId: tab ? tab.id : "" };
 }
@@ -112,9 +111,10 @@ export function tabPaths(node: PaneNode): string[] {
   return [...tabPaths(node.children[0]), ...tabPaths(node.children[1])];
 }
 
-// Locate the first tab matching `pred`, with the pane holding it. Used to answer
-// "is this note already open?": a note must never be opened twice, since the two
-// tabs would get separate docIds and their autosaves would clobber one another.
+// Locate the first tab matching `pred`, with the pane holding it. Used to
+// answer "is this note already open?". A note must never be opened twice: the
+// two tabs would get separate docIds, and their autosaves would clobber one
+// another.
 export function findTabBy(
   node: PaneNode,
   pred: (tab: TabState) => boolean,
@@ -133,11 +133,11 @@ export function tabsBy(node: PaneNode, pred: (tab: TabState) => boolean): TabSta
   return [...tabsBy(node.children[0], pred), ...tabsBy(node.children[1], pred)];
 }
 
-// Drop every tab matching `pred`, fixing up each affected pane's active tab the
-// same way closeTab does: fall to the neighbour that slid into the slot, else the
-// new last, else empty. A pane emptied this way is left standing rather than
-// collapsed; that is what closing a pane's last tab already does, and a note being
-// deleted is not a reason to rearrange the user's layout.
+// Drop every tab matching `pred`, fixing up each affected pane's active tab
+// the same way closeTab does (store.tsx): fall to the neighbour that slid into
+// the slot, else the new last, else empty. A pane emptied this way is left
+// standing rather than collapsed, matching what closing a pane's last tab
+// already does. Deleting a note does not rearrange the layout.
 export function removeTabsBy(node: PaneNode, pred: (tab: TabState) => boolean): PaneNode {
   if (node.kind === "leaf") {
     if (!node.tabs.some(pred)) return node;
@@ -188,9 +188,9 @@ export function updateLeaf(node: PaneNode, paneId: string, fn: (leaf: LeafNode) 
 }
 
 // Rewrite every tab in the tree through `fn`, rebuilding only the branches that
-// actually changed (so panes whose tabs are untouched keep their identity and
-// React skips them). Used to bind a note's freshly-allocated file to its tab,
-// which can be in any pane of any workspace by the time the save lands.
+// changed. Panes whose tabs are untouched keep their identity, so React skips
+// them. Used to bind a note's freshly allocated file to its tab. That tab can
+// be in any pane of any workspace by the time the save lands.
 export function mapTabs(node: PaneNode, fn: (tab: TabState) => TabState): PaneNode {
   if (node.kind === "leaf") {
     let changed = false;
@@ -246,16 +246,15 @@ function clampIndex(i: number, len: number): number {
 }
 
 // Move `tabId` out of `fromPaneId` and drop it into `toPaneId` at `toIndex`.
-// Within one pane this is a reorder; across panes it detaches from the source and
-// inserts into the destination. The docId travels with the tab, so the pooled
-// editor (undo/scroll/inline output) survives the move untouched.
-//
-// `toIndex` counts the destination pane's tabs *as displayed at drop time*: when
-// reordering within a pane that array still contains the dragged tab, so an index
-// past the tab's own slot is shifted down by one after removal. The moved tab
-// becomes active in the destination; if it was the active tab in a *different*
-// source pane, that pane falls to the neighbour that slid into its slot (the same
-// rule closeTab uses), or empties if it was the last tab.
+// Within one pane this is a reorder. Across panes it detaches from the source
+// and inserts into the destination. The docId travels with the tab, so the
+// pooled editor (undo, scroll, inline output) survives the move untouched.
+// `toIndex` counts the destination pane's tabs as displayed at drop time. A
+// within-pane drop counts the dragged tab itself, so an index past its own
+// slot shifts down by one once the tab is removed. The moved tab becomes
+// active in the destination. If it was the active tab of a different source
+// pane, that pane falls to the neighbour that slid into its slot, the same
+// rule closeTab uses (store.tsx), or empties if that was its last tab.
 export function moveTab(
   root: PaneNode,
   fromPaneId: string,

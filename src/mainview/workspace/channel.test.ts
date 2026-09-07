@@ -1,6 +1,9 @@
-// The kind map behind the per-workspace default cwd: roots are recorded as
-// their handles come through this module (list / create / attach — the one
-// place roots enter the view), and only an external root yields a default.
+// The kind map behind the per-workspace default cwd: this module is the one
+// place roots enter the view, so it records a root's kind as the handle
+// passes through listWorkspaceRoots, createWorkspaceFolder,
+// attachWorkspaceFolder or moveWorkspaceFolder. boot.tsx and the harness
+// fetch the registry directly and record with recordWorkspaceKinds. Only an
+// external root yields a default cwd.
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   attachWorkspaceFolder,

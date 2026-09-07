@@ -1,13 +1,12 @@
-// The e2e harness entrypoint: the whole app, with the Bun process replaced by
-// an in-memory fake at the same seams main.tsx wires (testing.md §5).
+// The e2e harness entry point: the whole app, with the Bun process replaced by
+// an in-memory fake at the same seams (testing.md §5). boot.tsx binds
+// configureNotes, configureTerminal, configureBridge and configureClipboard to
+// the live Electrobun RPC. This file binds them to a Map, and the app cannot
+// tell the difference. Everything above the seams runs for real in a real
+// WebKit, driven headlessly by Playwright (e2e/*.spec.ts): the command
+// registry, focus behavior, the lists, the dialogs.
 //
-// main.tsx binds configureNotes/configureTerminal/configureBridge/
-// configureClipboard to the live Electrobun RPC; this binds them to a Map. The
-// app cannot tell the difference — which is the point: everything above the
-// seams (the command registry, focus behavior, the lists, the dialogs) runs
-// for real in a real WebKit, driven headlessly by Playwright (e2e/*.spec.ts).
-//
-// Vite serves this at /harness.html in dev only; the production build's input
+// Vite serves this at /harness.html in dev only. The production build's input
 // is index.html, so none of this ships.
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
@@ -50,36 +49,37 @@ import { holdSaves } from "./notes/store";
 import { resolveStrandedNotes } from "./workspace/editorPool";
 import { docsState } from "./workspace/store";
 
-// Which shell to be. Two clients bind these seams for real — Electrobun on the
-// Mac and Swift on iOS (ios.md §1) — and they differ in what the DEVICE can do,
-// not in what the notes are. `?shell=ios` is how a spec asks for the second
-// one; anything else is the desktop app, which is what every spec written
-// before this got and still gets.
+// Which shell to be. Two clients bind these seams for real: Electrobun on the
+// Mac and Swift on iOS (ios.md §1). They differ in what the device can do, not
+// in what the notes are. `?shell=ios` is how a spec asks for the phone.
+// Anything else is the desktop app, and every spec written before this one
+// still gets that.
 //
-// Not derived from the viewport: a Mac window dragged to 390 points is still a
-// Mac, keeps its terminal, and §9 is careful that the only thing width decides
-// is the chrome's arrangement.
+// Not derived from the viewport. A Mac window dragged to 390 points is still a
+// Mac and keeps its terminal: width decides the chrome's arrangement alone
+// (ios.md §9).
 //
-// One phone shell and not two. §8's cut lifted in two steps and there was a
-// `?shell=ios-runs` beside this one while the second step was ahead of the
-// client (ios.md §14); now `ios.tsx` says `runsBlocks: true`, so that middle
-// configuration is what a phone IS and there is nothing left for the pair to
-// tell apart. What a phone still says no to is the drawer, and it says it here.
+// One phone shell, not two. `?shell=ios-runs` sat beside this one while the
+// second step of §8's cut was ahead of the client (ios.md §14). ios.tsx now
+// says `runsBlocks: true`, so that middle configuration is what a phone is and
+// nothing is left to tell the pair apart. A phone still has no terminal
+// drawer, which is what `hasTerminal` below sets.
 const SHELL = new URLSearchParams(window.location.search).get("shell") ?? "";
 const FAKING_IOS = SHELL === "ios";
 configureShell({
-  // `runsBlocks` is not in this list because it is true of every shell the
-  // harness can be — a phone runs a note's blocks inline exactly as a Mac does,
-  // and the two differ over the drawer alone (lib/shell.ts).
+  // `runsBlocks` is absent from this list because it is true of every shell the
+  // harness can be. A phone runs a note's blocks inline as a Mac does, and the
+  // two differ over the drawer alone (lib/shell.ts).
   hasTerminal: !FAKING_IOS,
-  // The whole set ios.tsx sets, because two of them decide what a spec can
-  // see: whether the connection form asks for a key file or shows the one this
-  // client already has, and whether the read-only editor is a text field the
-  // software keyboard would rise over.
+  // The whole set ios.tsx sets, because two of them decide what a spec can see.
+  // `deviceKey` decides whether the connection form asks for a key file or
+  // shows the line this client already has (components/ConnectionPicker.tsx).
+  // `softKeyboard` decides whether the read-only editor is a text field the
+  // software keyboard would rise over (editor/setup.ts).
   deviceKey: FAKING_IOS ? 'restrict,command="ledge-server serve" ecdsa-sha2-nistp256 AAAAharness ledge-iphone-abc123' : "",
   // The sheet is UIKit's and there is none here, so the fake records the ask on
-  // the window instead: a spec can see that the button is offered and that it
-  // hands over the line, which is the whole of the view's half.
+  // the window instead. A spec can then see that the button is offered and that
+  // it hands over the line. The view's half of this seam is all this can show.
   shareSheet: FAKING_IOS
     ? (text: string) => {
         (window as unknown as { harnessShared: string[] }).harnessShared = [
@@ -90,38 +90,38 @@ configureShell({
     : null,
   softKeyboard: FAKING_IOS,
   // A phone shows one app at a time, so a window and a client are the same
-  // thing there in a way they stopped being on the Mac (remote.md §8a).
+  // thing there. On the Mac they stopped being the same (remote.md §8a).
   multiWindow: !FAKING_IOS,
 });
 // Which window this page stands in for. A shell with windows gives the manual
 // one of its own (remote.md §8a), and that window is another webview running
-// this same view — so a spec reaches it the way the shell does: by loading the
-// page as it, rather than by clicking the button that would open it. The
-// ordinary harness page is an ordinary window, where the button is the ask
-// (`docsOpens` above).
+// this same view. A spec reaches it the way the shell does, by loading the page
+// as that window rather than by clicking the button that opens it. The ordinary
+// harness page is an ordinary window, where the button is the ask (`docsOpens`
+// below).
 const DOCS_WINDOW = new URLSearchParams(window.location.search).get("docs") === "1";
 recordWindowRole({ docs: DOCS_WINDOW });
-// The SERVER's half of the same picture, and a different question: what the
-// machine holding the notes can do for itself. Set here rather than arriving
-// with workspaceList because this harness renders without boot.tsx's boot(),
-// which is what records it in the real shells. Both answers follow the faked
-// shell: the ios one stands in for a phone against a headless server, which has
-// no dialog to open and no CLI to hand over.
+// The server's half of the same picture: what the machine holding the notes can
+// do for itself. Set here rather than arriving with workspaceList, because this
+// harness renders without boot.tsx's bootView(), which is where the real shells
+// record it. Both answers follow the faked shell. The ios one stands in for a
+// phone against a headless server, which has no dialog to open and no CLI to
+// hand over.
 recordServerCaps({ folderDialog: !FAKING_IOS, cliShim: !FAKING_IOS });
 import "./index.css";
 import App from "./App";
 
 // Paths and roots are opaque handles the view passes back unmodified
 // (architecture.md §2), so fake ones only need to be distinct and stable.
-// SCRATCH is the attached-at-boot workspace folder; EXTERNAL starts seeded
-// but UNATTACHED — the fake workspaceAttach returns it, which is what makes
-// the whole attach flow spec-able without the native dialog.
+// SCRATCH is the attached-at-boot workspace folder. EXTERNAL starts seeded but
+// unattached, and the fake workspaceAttach returns it. That is what makes the
+// whole attach flow spec-able without the native dialog.
 const SCRATCH = "/harness/scratch";
 const EXTERNAL = "/harness/external";
 // The built-in documentation root, attached at boot like the real one
-// (bun/workspaces.ts registers it at every load): kind "docs", hidden from
-// the strip, and every fake write below refuses it — the same read-only
-// contract the real store enforces (assertWritableRoot).
+// (bun/workspaces.ts registers it at every load): kind "docs", hidden from the
+// strip. Every fake write below refuses it, the same read-only contract the
+// real store enforces (bun/workspaces.ts assertWritableRoot).
 const DOCS = "/harness/.ledge-docs";
 
 interface RootData {
@@ -129,14 +129,14 @@ interface RootData {
   trash: Map<string, { text: string; deletedAt: number }>;
 }
 
-// bun/notes.ts + bun/workspaces.ts, condensed to Maps: same naming-by-heading,
-// same enumeration on collision, same move-don't-unlink trash, same
-// detach-keeps-the-folder registry. Behavior the specs assert on (which name
-// a restore lands on, that a detached folder's notes survive) mirrors the
-// real store; consult it before changing anything here.
+// bun/notes.ts and bun/workspaces.ts, condensed to Maps: same naming by
+// heading, same enumeration on collision, same move-don't-unlink trash, same
+// detach-keeps-the-folder registry. Behavior the specs assert on mirrors the
+// real store, down to which name a restore lands on and that a detached
+// folder's notes survive. Read the real store before changing anything here.
 class FakeStore {
-  // Every folder that EXISTS (data survives detach); `attached` is the
-  // registry — the subset the app may see.
+  // `roots` holds every folder that exists, since the data survives a detach.
+  // `attached` is the registry: the subset the app may see.
   roots = new Map<string, RootData>();
   attached: string[] = [];
   private clock = 1_700_000_000_000;
@@ -166,11 +166,11 @@ class FakeStore {
     return true; // the data stays: detach never deletes
   }
 
-  // The fake workspaceMove: rename(2) in Map form. The root key and every
-  // path under it are rekeyed to the destination — data travels whole, and
-  // the registry line is replaced in place, mirroring moveRoot's contract —
-  // including the own-parent no-op (the real one answers the same root back,
-  // and the view's leave-tabs-alone branch keys off exactly that).
+  // The fake workspaceMove: rename(2) in Map form. The root key and every path
+  // under it are rekeyed to the destination, so the data travels whole, and the
+  // registry line is replaced in place. That mirrors moveRoot's contract
+  // (bun/workspaces.ts), including the own-parent no-op: the real one answers
+  // the same root back, and the view's leave-tabs-alone branch keys off that.
   move(root: string, destParent: string): string {
     const data = this.roots.get(root);
     if (!data) throw new Error(`harness: move of unknown root ${root}`);
@@ -200,9 +200,9 @@ class FakeStore {
     }));
   }
 
-  // The real store's read-only gate (assertWritableRoot), fake edition: every
-  // mutating path below calls this, so a spec that reaches a docs write by
-  // any route gets the same refusal the app would.
+  // The real store's read-only gate (assertWritableRoot) in fake form. Every
+  // mutating path below calls this, so a spec that reaches a docs write by any
+  // route gets the same refusal the app would.
   private assertWritable(rootOrPath: string): void {
     if (rootOrPath === DOCS || rootOrPath.startsWith(`${DOCS}/`)) {
       throw new Error("the built-in documentation is read-only");
@@ -217,8 +217,8 @@ class FakeStore {
     return root;
   }
 
-  // The folder a path belongs to. Every path the view sends came from here,
-  // so an unknown one is a spec bug worth throwing on.
+  // The folder a path belongs to. Every path the view sends came from here, so
+  // an unknown one is a spec bug and throws.
   private rootOf(path: string): { root: string; data: RootData } {
     for (const [root, data] of this.roots) {
       if (path.startsWith(`${root}/`)) return { root, data };
@@ -226,9 +226,9 @@ class FakeStore {
     throw new Error(`harness: path outside every root: ${path}`);
   }
 
-  // The names of one directory's own files, which is what the real allocator
-  // reads (readdir of the destination, not a walk): a note in `projects` does
-  // not make its name taken at the top level.
+  // The names of one directory's own files. The real allocator reads the same
+  // thing, a readdir of the destination rather than a walk, so a note in
+  // `projects` does not make its name taken at the top level.
   private namesIn(data: RootData, dir: string): Set<string> {
     const names = new Set<string>();
     for (const path of data.notes.keys()) {
@@ -247,8 +247,8 @@ class FakeStore {
     return name;
   }
 
-  // `folder` seeds the note inside a subfolder of the root (root-relative,
-  // "" for the top level), which is the only way a spec gets a tree to look at.
+  // `folder` places the note in a subfolder of the root, root-relative and ""
+  // for the top level. It is the only way a spec gets a tree to look at.
   seed(root: string, text: string, folder = ""): void {
     const data = this.ensureRoot(root);
     const dir = folder ? `${root}/${folder}` : root;
@@ -256,16 +256,16 @@ class FakeStore {
     data.notes.set(path, { text, mtimeMs: this.tick() });
   }
 
-  // Seed under a stated filename rather than the H1's slug: the docs pages'
-  // names are manifest artifacts (numbered for reading order, like the real
-  // bun/docsContent.ts), not derived from their titles.
+  // Seed under a stated filename rather than the H1's slug. The docs pages'
+  // names are manifest artifacts, numbered for reading order as in the real
+  // bun/docsContent.ts, rather than derived from their titles.
   seedAt(root: string, name: string, text: string): void {
     const data = this.ensureRoot(root);
     data.notes.set(`${root}/${name}`, { text, mtimeMs: this.tick() });
   }
 
-  // A folder with nothing in it: `?fresh` (below) is a first launch, and a
-  // first launch is a store the seeds never reached.
+  // Empties a root's notes, leaving its trash alone. `?fresh` (below) uses it
+  // to stand in for a first launch.
   wipe(root: string): void {
     this.ensureRoot(root).notes.clear();
   }
@@ -278,13 +278,13 @@ class FakeStore {
 
   private meta(data: RootData, path: string): NoteMeta {
     const n = data.notes.get(path)!;
-    // The real metaFor's flags, from the same shared parser: `template:`
-    // frontmatter is what puts a note in the ⌥⌘N picker (the `daily` role
-    // rides the value), and a `locked:` value marks the note locked.
+    // The real metaFor's flags, from the same shared parser. A `template:`
+    // frontmatter line puts a note in the ⌥⌘N picker, and the `daily` role
+    // rides its value. A `locked:` value marks the note locked.
     const p = parseFrontmatter(n.text).params;
     // The real metaAt's folder: root-relative, absent at the top level. The
-    // fake derives it the same way (from the path), which is what keeps a
-    // harness tree and a real one the same shape.
+    // fake derives it from the path the same way, which keeps a harness tree
+    // and a real one the same shape.
     const folder = this.folderOf(path);
     return {
       path,
@@ -305,10 +305,10 @@ class FakeStore {
   }
 
   // --- the vault fake --------------------------------------------------------
-  // bun/vault.ts condensed: state + a remembered passphrase; no crypto — the
-  // fake stores plaintext and WITHHOLDS it while locked, which is the exact
-  // behavior surface the specs assert on (placeholder faces, held reads,
-  // skip counts). The `locked:` value is an inert marker string here.
+  // bun/vault.ts condensed to a state and a remembered passphrase, with no
+  // crypto. The fake stores plaintext and withholds it while locked, which is
+  // the behavior surface the specs assert on: placeholder faces, held reads,
+  // skip counts. The `locked:` value is an inert marker string here.
   vault: { state: "none" | "locked" | "unlocked"; pass: string | null } = { state: "none", pass: null };
 
   vaultCreate(pass: string): boolean {
@@ -328,8 +328,9 @@ class FakeStore {
     if (this.vault.state === "unlocked") this.vault.state = "locked";
   }
 
-  // The plaintext head, the real splitHead's answer: frontmatter block plus
-  // the H1 line (with the blank run between, when a block precedes it).
+  // The plaintext head, the answer the real splitHead gives (bun/vault.ts):
+  // the frontmatter block plus the H1 line, and the blank run between them
+  // when a block precedes it.
   private headOf(text: string): string {
     const end = frontmatterEnd(text);
     let pos = end;
@@ -344,9 +345,11 @@ class FakeStore {
     return parseFrontmatter(text).params.locked !== null;
   }
 
-  // The marker surgery, bun/vault.ts's stampLockedLine/stripLockedLine in
-  // fake form (the value is inert here — "harness-v1" — but the LINE rules
-  // are the real ones: Bun-owned, disk decides, an emptied block goes).
+  // The marker surgery: bun/vault.ts's stampLockedLine and stripLockedLine in
+  // fake form. The value is inert here ("harness-v1"), but the line rules are
+  // the real ones: the line is Bun-owned and the disk text decides it
+  // (locking.md §2). stripMarker also drops a frontmatter block once nothing
+  // but blank lines is left in it.
   private stripMarker(text: string): string {
     const end = frontmatterEnd(text);
     if (end === 0) return text;
@@ -365,8 +368,8 @@ class FakeStore {
       : `---\n${line}\n---\n${stripped}`;
   }
 
-  // The Bun-owned-line rule (locking.md §2), fake edition: the marker is
-  // decided by the DISK text, not the buffer — a save re-stamps or strips.
+  // The disk text decides the marker, not the buffer: a save re-stamps it or
+  // strips it. That is the Bun-owned-line rule (locking.md §2) in fake form.
   private stampLike(diskText: string, incoming: string): string {
     return this.lockedOf(diskText) ? this.stampMarker(incoming) : this.stripMarker(incoming);
   }
@@ -404,10 +407,10 @@ class FakeStore {
     return this.rootOf(path).data.notes.get(path)?.text ?? null;
   }
 
-  // The read the channel handler serves: text plus disk version, like the real
-  // readNote — the store echoes the mtime into write's baseMtimeMs. A locked
-  // note reads whole only while the fake vault is unlocked; otherwise the
-  // body is WITHHELD and `held` says so (the real seam's exact shape).
+  // The read the channel handler serves: text plus disk mtime, like the real
+  // readNote. The store echoes that mtime back into write's baseMtimeMs. A
+  // locked note reads whole only while the fake vault is unlocked. Otherwise
+  // the body is withheld and `held` says so, the shape of the real seam.
   readFile(path: string): NoteFile | null {
     const n = this.rootOf(path).data.notes.get(path);
     if (!n) return null;
@@ -416,8 +419,8 @@ class FakeStore {
     return { text: n.text, mtimeMs: n.mtimeMs, locked: true };
   }
 
-  // Test seam (window.__harness): an "agent" rewriting a note behind the app's
-  // back — a fresh mtime, exactly what an external temp+rename write looks like.
+  // Test seam (window.__harness): an agent rewriting a note behind the app's
+  // back. The fresh mtime is what an external temp-plus-rename write leaves.
   writeExternal(path: string, text: string): void {
     this.rootOf(path).data.notes.set(path, { text, mtimeMs: this.tick() });
   }
@@ -432,8 +435,8 @@ class FakeStore {
   }
 
   // The real moveNote in Map form: rekey the entry under the destination
-  // folder, keeping its name unless that name is taken there. The note's
-  // mtime survives, as rename(2)'s does — a move is not an edit.
+  // folder, keeping its name unless that name is taken there. The note's mtime
+  // survives, the way rename(2) preserves it.
   moveNote(path: string, folder: string | null): NoteMeta {
     this.assertWritable(path);
     const { root, data } = this.rootOf(path);
@@ -456,8 +459,8 @@ class FakeStore {
 
   // The real renameFolder in Map form: rekey every note whose path sits under
   // the folder, leaving its name, its text and its mtime alone. No lock check
-  // and no body read, which is the real one's point — a rename does not change
-  // any note's depth, so nothing inside a body is about to become wrong.
+  // and no body read, like the real one: a rename changes no note's depth, so
+  // nothing inside a body becomes wrong.
   renameFolder(root: string, folder: string, name: string): FolderRenamed {
     this.assertWritable(root);
     const data = this.ensureRoot(root);
@@ -482,16 +485,16 @@ class FakeStore {
 
   // The real deleteFolder in Map form: every note under the folder, each
   // through the same `remove` a single delete goes through, so the fake gets
-  // the trash entries and the undo handles for free. No directories to prune —
-  // there are none here, only paths, which is precisely the sense in which an
-  // emptied folder stops existing.
+  // the trash entries and the undo handles for free. Nothing prunes empty
+  // directories here, since the fake holds paths and no directories. The real
+  // one prunes them (bun/notes.ts pruneEmptyDirs).
   deleteFolder(root: string, folder: string): FolderDeleted {
     this.assertWritable(root);
     const data = this.ensureRoot(root);
     const scope = folderScopeOf(folder);
-    // The real one's refusal, carried because the harness is what the specs
-    // drive: folderContains("") is true of every note, so without this the
-    // workspace's own row would empty it.
+    // The real one's refusal, carried because the specs drive the harness:
+    // folderContains("") is true of every note, so without this the workspace's
+    // own row would empty it.
     if (scope === "") throw new Error("a workspace is closed from the workspace strip, not deleted here");
     const trashed: FolderDeleted["trashed"] = [];
     for (const path of [...data.notes.keys()]) {
@@ -502,17 +505,17 @@ class FakeStore {
     return { trashed };
   }
 
-  // Mirrors the real writeNote's guard (bun/notes.ts): a mismatched base with
-  // genuinely different bytes moves the disk version into the trash and the
-  // incoming text wins the live path; identical bytes just adopt the disk
-  // mtime. The fake must carry the semantics or the harness specs would
-  // green-light a view that never handles divergence.
+  // Mirrors the real writeNote's guard (bun/notes.ts). A mismatched base with
+  // different bytes moves the disk version into the trash, and the incoming
+  // text wins the live path. Identical bytes adopt the disk mtime instead. The
+  // fake must carry those semantics: simplify them away and the harness specs
+  // would green-light a view that never handles divergence.
   write(path: string, text: string, baseMtimeMs: number | null): { mtimeMs: number; divergedTo: string | null } {
     this.assertWritable(path);
     const { root, data } = this.rootOf(path);
     const cur = data.notes.get(path);
     // The disk decides the lock marker, never the buffer (the real
-    // writeNote's rule); a locked save needs the vault open.
+    // writeNote's rule). A locked save needs the vault open.
     if (cur) {
       if (this.lockedOf(cur.text) && this.vault.state !== "unlocked") throw new Error("the vault is locked");
       text = this.stampLike(cur.text, text);
@@ -560,7 +563,7 @@ class FakeStore {
     const n = data.notes.get(path);
     if (!n) return null;
     data.notes.delete(path);
-    // Into the note's OWN root's trash, like the real deleteNote.
+    // Into the note's own root's trash, like the real deleteNote.
     const dest = `${root}/.ledge-trash/${this.allocate(n.text, data.trash.keys())}`;
     data.trash.set(dest, { text: n.text, deletedAt: this.tick() });
     return dest;
@@ -579,10 +582,10 @@ class FakeStore {
     return this.rootOf(path).data.trash.delete(path);
   }
 
-  // The real searchNotes is listNotes + the shared matcher; the fake composes
-  // the same two pieces (scoped to one root), so the semantics cannot drift —
-  // including the locked skip: bodies of locked notes are never scanned,
-  // vault state irrelevant, and the count rides back (locking.md §4).
+  // The real searchNotes is listNotes plus the shared matcher. The fake
+  // composes the same two pieces, scoped to one root, so the semantics cannot
+  // drift. That includes the locked skip: a locked note's body is never
+  // scanned whatever the vault state, and the count rides back (locking.md §4).
   async search(root: string, query: string, scope = ""): Promise<{ hits: SearchHit[]; lockedSkipped: number }> {
     const metas = notesUnder(this.list(root), scope);
     const open = metas.filter((m) => !m.locked);
@@ -590,8 +593,8 @@ class FakeStore {
     return { hits, lockedSkipped: metas.length - open.length };
   }
 
-  // The real backlinksTo is listNotes + the shared wikilink scan; same
-  // composition here, for the same cannot-drift reason as search above.
+  // The real backlinksTo is listNotes plus the shared wikilink scan. The fake
+  // composes the same pieces, for the same cannot-drift reason as search above.
   backlinks(path: string): { backlinks: BacklinkHit[]; lockedSkipped: number } {
     const { root } = this.rootOf(path);
     const metas = this.list(root);
@@ -614,9 +617,9 @@ class FakeStore {
     return { backlinks: out, lockedSkipped };
   }
 
-  // A locked note contributes its plaintext HEAD's tags only (the
-  // frontmatter line stays visible; body hashtags are sealed) — the real
-  // tagsIn's rule, from the same shared pieces.
+  // A locked note contributes the tags in its plaintext head only: the
+  // frontmatter line stays visible and body hashtags are sealed. That is the
+  // real tagSourceOf's rule (bun/notes.ts), from the same shared pieces.
   private tagSource(meta: NoteMeta): string | null {
     const text = this.readNote(meta.path);
     if (text === null) return null;
@@ -658,25 +661,26 @@ class FakeStore {
   }
 
   // Mirrors bun/daily.ts createFromTemplatePath: the picker picked a concrete
-  // note, so the fake takes its path too; a vanished template throws.
-  // Instantiation is the SAME shared instantiateTemplate.
+  // note, so the fake takes its path too, and a vanished template throws.
+  // Instantiation goes through the same shared instantiateTemplate.
   createFromTemplatePath(root: string, templatePath: string, title: string | null): NoteMeta {
     const text = this.readNote(templatePath);
     if (text === null) throw new Error(`the template note is gone (${templatePath}); pick again`);
     return this.create(root, instantiateTemplate(text, title ?? "Untitled", new Date()));
   }
 
-  // The real findDailyTemplate (bun/daily.ts): the note IN THIS ROOT marked
-  // `template: daily` — strictly per-workspace, no borrowing from other
-  // attached roots. The meta flag comes from the same shared parser, so
-  // which note the role means cannot drift between harness and store.
+  // The real findDailyTemplate (bun/daily.ts): the note in this root marked
+  // `template: daily`. Resolution is strictly per-workspace, with no borrowing
+  // from other attached roots. The meta flag comes from the same shared
+  // parser, so which note holds the role cannot drift from the store.
   private findDailyTemplate(root: string): string | null {
     const local = this.list(root).find((n) => n.template === "daily");
     return local ? this.readNote(local.path) : null;
   }
 
-  // Mirrors bun/daily.ts openDaily: local-date title, resolve-else-create,
-  // instantiating the `template: daily` note when one exists — no settings.
+  // Mirrors bun/daily.ts openDaily: local-date title, resolve else create,
+  // instantiating the `template: daily` note when one exists. No settings are
+  // read.
   openDaily(root: string): { open: ExternalOpenInfo; created: boolean } {
     const title = isoDateOf(new Date());
     const existing = resolveWikiTitle(title, this.list(root));
@@ -696,14 +700,15 @@ store.seedTrash(SCRATCH, "# Older\n\nonce deleted\n");
 // Unattached, waiting for the fake workspaceAttach below.
 store.seed(EXTERNAL, "# Delta\n\ndelta body, external needle\n");
 store.seed(EXTERNAL, "# Epsilon\n\nepsilon body\n");
-// A locked note, sealed at boot: the vault exists and is LOCKED, passphrase
-// "letmein" (e2e/locked-notes.spec.ts). Seeded with the marker in place —
-// the fake's read withholds the body below the head while locked. The body
-// carries a needle no search may surface and a prompt fence for the
-// run-affordance spec. Titled to sort INSIDE the alpha…gamma fixture range
-// (the sidebar is alphabetical, and list-verbs.spec.ts pins the edges) and
-// deliberately tagless: tags-panel.spec.ts pins the workspace's tagless
-// empty state, and the head-tags-stay-visible rule is notes.fs.test.ts's.
+// A locked note, sealed at boot: the vault exists, is locked, and its
+// passphrase is "letmein" (e2e/locked-notes.spec.ts). The marker is seeded in
+// place, so the fake's read withholds everything below the head. The body
+// carries a needle no search may surface, and a prompt fence for the
+// run-affordance spec. The title sorts inside the alpha to gamma fixture
+// range, because the sidebar is alphabetical and list-verbs.spec.ts pins the
+// edges. The note contributes no tags, since its one hashtag sits in the
+// sealed body: tags-panel.spec.ts pins the workspace's tagless empty state,
+// and notes.fs.test.ts covers head tags staying visible.
 store.seed(
   SCRATCH,
   [
@@ -725,17 +730,19 @@ store.seed(
   ].join("\n"),
 );
 store.vault = { state: "locked", pass: "letmein" };
-// The built-in docs, attached at boot like the real registry does. Four
-// pages: Getting Started (with an UNMARKED runnable block, unlike the real
-// corpus: docs.spec.ts checks the read-only editor itself does not withhold
-// a run, `norun` does), a second page so the docs browser is a real list, a
-// third whose TITLE sorts before the others while its numbered filename
-// sorts last, so a spec can tell path order from title order, and the
-// licenses page the Help command lands on by name. Filenames are
-// numbered like the real manifest's (bun/docsContent.ts): the browser sorts
-// the docs workspace by path. Seeded LAST so the older specs' per-workspace
-// counts (scratch's rows, quick-open's scoped lists) see exactly what they
-// always saw.
+// The built-in docs, attached at boot the way the real registry attaches them.
+// Four pages:
+// - Getting Started, whose runnable block is unmarked unlike the real corpus.
+//   docs.spec.ts checks that the read-only editor does not withhold a run,
+//   `norun` does.
+// - A second page, so the docs browser is a real list.
+// - A third whose title sorts before every other page while its numbered
+//   filename does not, so a spec can tell path order from title order.
+// - The licenses page the Help command lands on by name.
+// The filenames are numbered like the real manifest's (bun/docsContent.ts)
+// because the browser sorts the docs workspace by path. Seeded last, so the
+// older specs' per-workspace counts (scratch's rows, quick-open's scoped
+// lists) see what they always saw.
 store.attach(DOCS);
 store.seedAt(
   DOCS,
@@ -753,9 +760,9 @@ store.seedAt(
 );
 store.seedAt(DOCS, "02-workspaces-guide.md", "# Workspaces Guide\n\nfolders all the way down\n");
 store.seedAt(DOCS, "03-about-panes.md", "# About Panes\n\nsplits and tabs\n");
-// The generated notices page, last in the manifest as in the real one. Its
-// title is what docs.licenses lands on (registry.ts), so the spec for that
-// command needs a page wearing exactly this H1.
+// The generated notices page, last in the manifest as in the real one. The
+// docs.licenses command opens a page by title (commands/registry.ts), so the
+// spec for that command needs a page with exactly this H1.
 store.seedAt(DOCS, "04-third-party-licenses.md", "# Third-Party Licenses\n\nMIT, and company\n");
 
 configureNotes({
@@ -777,19 +784,19 @@ configureNotes({
   restore: async (path) => store.restore(path),
   removeTrashed: async (path) => store.removeTrashed(path),
   empty: async (folder) => store.empty(folder),
-  // No shells here (see configureBridge below), so params have nothing to
-  // configure; the send is simply absorbed.
+  // No shells here (see configureBridge below), so there is nothing for a
+  // note's spawn params to configure. The call does nothing.
   configureSession: () => {},
-  // Nothing pending at harness boot; specs drive the live-push path instead,
-  // through window.__harness.externalOpen below.
+  // No open request is pending at harness boot. Specs drive the live-push
+  // path instead, through window.__harness.externalOpen below.
   takeOpenRequest: async () => null,
   openDaily: async (folder) => store.openDaily(folder),
   createFromTemplate: async (folder, templatePath, title) => store.createFromTemplatePath(folder, templatePath, title),
 });
 
-// The vault fake at the same seam main.tsx wires. State transitions echo
-// through recordVaultState exactly as the real vaultChanged push would —
-// the app's eviction/reload paths must not care which end drove the change.
+// The vault fake, at the same seam the app wires (boot.tsx). State changes echo
+// through recordVaultState the way the real vaultChanged push does. The app's
+// eviction and reload paths must not care which end drove the change.
 configureVault({
   state: async () => store.vault.state,
   create: async (pass) => {
@@ -816,15 +823,16 @@ configureVault({
 });
 recordVaultState(store.vault.state);
 
-// The registry fake: attach always offers EXTERNAL — the folder the "native
-// dialog" picks — so the attach flow (and close → re-attach, proving nothing
-// was deleted) runs in specs without any dialog. create mirrors
+// The registry fake. attach always offers EXTERNAL, the folder the "native
+// dialog" picks, so the attach flow runs in specs with no dialog, including
+// close then re-attach, which proves nothing was deleted. create mirrors
 // createManaged's slug-and-enumerate.
 configureWorkspaces({
-  // Both server facts follow the faked shell: the harness's "native dialog" is
-  // a function that always picks /external, which is a Mac with somebody at it,
-  // and its CLI is the app's. The ios shell is the headless case and gets the
-  // refusals the real one does.
+  // folderDialog and cliShim follow the faked shell. The harness's "native
+  // dialog" is a function that always picks /external, the way a Mac with
+  // somebody at it answers, and its CLI is the app's. The ios shell is the
+  // headless case: both report false, and specs see the refusals the real one
+  // gives.
   list: async () => ({
     workspaces: store.workspaceList(),
     dailyRoot: null,
@@ -837,10 +845,11 @@ configureWorkspaces({
     return { root: EXTERNAL, kind: "external", error: null };
   },
   detach: async (root) => store.detach(root),
-  // The "native destination picker" always picks /synced — the cloud-folder
-  // stand-in — so the move flow (folder relocated, notes intact, kind flipped
-  // external) runs in specs without a dialog, attach's move. The home face
-  // targets /harness, the fake app home, and flips the kind back.
+  // The "native destination picker" always picks /synced, the cloud-folder
+  // stand-in, so the move flow runs in specs with no dialog, the same trick
+  // attach uses above: the folder relocates, the notes stay, and the kind
+  // flips to external. The home face targets /harness, the fake app home, and
+  // flips the kind back.
   move: async (root, home) => ({
     root: store.move(root, home ? "/harness" : "/synced"),
     kind: home ? "managed" : "external",
@@ -848,27 +857,27 @@ configureWorkspaces({
   }),
 });
 
-// No PTYs here: runs and the terminal are inert. A spec that needs run
-// behavior has outgrown the harness and belongs to the live probe.
-// Link opens are recorded, not performed, like settings opens below:
-// launching a browser is a native seam.
+// No PTYs here: runs and the terminal are inert. A spec that needs real run
+// behavior belongs to the live probe instead (testing.md §6).
+// Link opens are recorded rather than performed, like the settings opens
+// below: launching a browser is a native seam.
 const linkOpens: string[] = [];
-// Runs are inert, but WHICH machine a run names is view-side policy (the
-// host picker's always-ask rule), so the target rides the record for specs.
+// Runs are inert, but which machine a run names is view-side policy (the host
+// picker's always-ask rule), so the record carries the target for specs.
 const inlineRuns: { sessionId: string; id: string; host: string | null }[] = [];
-// Grids reported to the run's shell. Recorded because WHEN the first one goes
-// out is view-side behavior with a real consequence on the other side: a shell
-// that has not been told the panel's width runs the block believing the pty's
-// default, and anything laying out to COLUMNS gets it wrong for that run.
+// Grid sizes reported to the run's shell. Recorded because when the first one
+// goes out is view-side behavior, and it has a consequence on the other side:
+// a shell not yet told the panel's width runs the block at the pty's default,
+// so anything laying out to COLUMNS is wrong for that run.
 const inlineResizes: { id: string; cols: number; rows: number }[] = [];
-// Everything typed AT a run, in order. Recorded because the run's own keyboard
-// is a native bar on the one client that has it (ios.md §7): what a spec can
-// see of Ctrl-C is the byte that left for the shell.
+// Everything typed at a run, in order. Recorded because the run's own keyboard
+// is a native accessory bar on the one client that has it (ios.md §7): all a
+// spec can see of Ctrl-C is the byte that left for the shell.
 const inlineInputs: { id: string; data: string }[] = [];
-// The reconnect reconciliation (bridge.ts reconcileRuns): what the client
-// claimed, and what this fake server says it is still running. Nothing by
-// default, which is the answer a server gives about a page that reloaded and
-// the one with a visible consequence — the panels close out.
+// The reconnect reconciliation (editor/bridge.ts reconcileRuns): what the
+// client claimed, and what this fake server says is still running. Nothing by
+// default, which is what a server answers about a page that reloaded. That
+// answer has a visible consequence: the run panels close out.
 const runClaims: string[][] = [];
 let runsStillRunning: string[] = [];
 configureBridge({
@@ -890,20 +899,20 @@ configureBridge({
     linkOpens.push(url);
   },
 });
-// The terminal stays inert (no PTY output), but WHICH note a paste or attach
-// addresses is view-side routing — the drawer must show the same note's shell
-// the block's run was sent to — so those sessionIds are recorded for specs.
+// The terminal stays inert (no PTY output), but which note a paste or attach
+// addresses is view-side routing: the drawer must show the shell of the same
+// note the block's run was sent to. Those sessionIds are recorded for specs.
 const termAttaches: { sessionId: string; host: string | null }[] = [];
 const termPastes: { sessionId: string; text: string; host: string | null }[] = [];
 const termInputs: { sessionId: string; dataB64: string }[] = [];
-// `afterAttach` is how many attaches had gone out when this resize did, which
-// is the only part of a resize a spec can check: the pty is inert here, but
+// `afterAttach` records how many attaches had gone out when this resize did.
+// It is the only part of a resize a spec can check, since the pty is inert:
 // whether the drawer sized a shell it does not yet own is view-side ordering.
 const termResizes: { sessionId: string; cols: number; rows: number; afterAttach: number }[] = [];
 // Claims sent, and what the fake server answers them with. The default is the
-// ordinary reconnect — the shell is still this client's — with an empty
-// scrollback, which is the inert terminal's version of "nothing was missed"; a
-// spec that wants one of the other two answers sets it before dropping the wire
+// ordinary reconnect: the shell is still this client's, with an empty
+// scrollback, the inert terminal's stand-in for "nothing was missed". A spec
+// that wants one of the other two answers sets it before dropping the wire
 // (window.__harness.shellClaim).
 const termClaims: string[] = [];
 let claimAnswer: TerminalClaim = { state: "attached", dataB64: "", host: "local" };
@@ -932,9 +941,9 @@ configureTerminal({
 });
 
 // In-memory layout file, like the clipboard below: saves are recorded, and a
-// spec can read the latest serialization back via window.__harness. The boot
-// below passes null (a harness run always starts from the seeded notes), so
-// restore behavior itself is covered by persist.test.ts, not specs.
+// spec reads the latest serialization back through window.__harness. The boot
+// below passes null, so a harness run always starts from the seeded notes.
+// Restore behavior is covered by workspace/persist.test.ts instead.
 let layoutText: string | null = null;
 configureLayout({
   save: (text) => {
@@ -942,10 +951,10 @@ configureLayout({
   },
 });
 
-// In-memory clipboard, readable by specs via window.__harness. The HTML flavor
-// has no in-app writer — only another application puts one on the pasteboard —
-// so specs seed it through setClipboardHtml, and a copy made in the app clears
-// it, exactly as pbcopy does.
+// In-memory clipboard, readable by specs through window.__harness. The HTML
+// flavor has no in-app writer: only another application puts one on the
+// pasteboard. Specs seed it through setClipboardHtml, and a copy made in the
+// app clears it, the way pbcopy does.
 let clip = "";
 let clipHtml = "";
 configureClipboard({
@@ -957,30 +966,30 @@ configureClipboard({
   readRich: async () => ({ text: clip, html: clipHtml }),
 });
 
-// In-memory image assets, mirroring bun/assets.ts semantics: read serves a
-// seeded map (missing → null, the broken placeholder), pasteImage allocates a
-// fresh name and returns the markdown reference like the real assetPaste.
-// Keyed folder\0src like lib/assets' cache, so the per-workspace scoping is
-// real: the seeded image belongs to SCRATCH and is a real 1×1 PNG so the
-// rendered <img> actually loads.
+// In-memory image assets, mirroring bun/assets.ts: read serves a seeded map
+// (a missing entry gives null, which draws the broken placeholder), and
+// pasteImage allocates a fresh name and returns a markdown reference like the
+// real assetPaste. Keyed folder\0src like lib/assets' cache, so per-workspace
+// scoping is real. The seeded image is SCRATCH's, and a 1x1 PNG that loads.
 const PIXEL_B64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
 const assets = new Map<string, { dataB64: string; mime: string }>([
   [`${SCRATCH}\0assets/dot.png`, { dataB64: PIXEL_B64, mime: "image/png" }],
 ]);
 let pasteCount = 0;
-// `?pick=cancel` boots with a picker that answers null every time — the other
-// outcome of a dialog, and the one "nothing is inserted" needs.
+// `?pick=cancel` boots with a picker that answers null every time. That is the
+// dialog's other outcome, and the one a "nothing is inserted" spec needs.
 const PICK_CANCELS = new URLSearchParams(window.location.search).get("pick") === "cancel";
 configureAssets({
-  // notePath is accepted and ignored: every harness note lives at its root,
-  // so the reference IS the key. Bun's resolution against the note's folder
-  // is a filesystem behavior, covered where the filesystem is (assets.test.ts).
+  // notePath is accepted and ignored: every harness note sits at its root, so
+  // the reference is the key. Bun's resolution against the note's folder is
+  // filesystem behavior, covered where the filesystem is (bun/assets.test.ts).
   read: async (folder, src, _notePath) => assets.get(`${folder}\0${src}`) ?? null,
-  // notePath is accepted (the real handler seals pastes into locked notes);
-  // the fake stores plaintext either way — sealed READS are the behavior
-  // surface, and no harness spec pastes into a locked note (its editor is
-  // only reachable unlocked, where pastes are plain until the next lock).
+  // notePath is accepted because the real handler seals pastes into locked
+  // notes. The fake stores plaintext either way: sealed reads are the behavior
+  // surface, and no harness spec pastes into a locked note. A locked note's
+  // editor is reachable only unlocked, where pastes stay plain until the next
+  // lock.
   pasteImage: async (folder, _notePath) => {
     pasteCount += 1;
     const src = `.ledge-assets/pasted-${pasteCount}.png`;
@@ -988,10 +997,10 @@ configureAssets({
     return src;
   },
   // The "picker" always picks, so Insert Image… runs end to end in a spec with
-  // no dialog — attach's move, and the same fake file the paste writes. A
-  // cancel is the OTHER outcome and gets its own fake below, because "null does
-  // not insert" is behavior worth a test and cannot be shown by a picker that
-  // never cancels.
+  // no dialog, the same trick attach uses, and it writes the same fake file a
+  // paste does. Cancelling is the other outcome and needs a fake of its own,
+  // since a picker that never cancels cannot show that null inserts nothing.
+  // The `?pick=cancel` boot above is that fake.
   pickImage: async (folder, _notePath) => {
     if (PICK_CANCELS) return null;
     pasteCount += 1;
@@ -1004,13 +1013,13 @@ configureAssets({
 // A non-default editor font size, so a spec can tell "the setting reached the
 // editor" apart from "the old hardcoded 14px is still there".
 // No template configuration: templates are notes carrying `template: true`
-// frontmatter, seeded per spec (a boot-time seed would shift every
-// list-count assertion in the older specs).
+// frontmatter, seeded per spec. A boot-time seed would shift every list-count
+// assertion in the older specs.
 //
 // `?theme=light|dark` overrides the appearance setting for one load. Settings
-// apply at launch and there is no UI for this one (the file IS the UI), so a
-// query param is the only way a spec can boot the harness with an override in
-// place — the same seam a relaunch is for the real app.
+// apply at launch and this one has no control of its own (the settings file is
+// where it is edited), so a query param is the only way a spec can boot the
+// harness with an override in place. It stands in for the real app's relaunch.
 const themeParam = new URLSearchParams(window.location.search).get("theme");
 const HARNESS_SETTINGS = {
   ...DEFAULT_SETTINGS,
@@ -1021,10 +1030,9 @@ const HARNESS_SETTINGS = {
 };
 // The settings file as an in-memory string, seeded like a real first launch
 // (the commented template), so the ⌘, dialog is drivable end to end and a
-// spec can assert what a save wrote.
-// Two of them, because settings have two homes (remote.md §5) and the dialog
-// has a tab per home: a spec that edited one and asserted on the other would
-// pass on a bridge that ignored the argument entirely.
+// spec can assert what a save wrote. Two of them, because settings have two
+// homes (remote.md §5) and the dialog has a tab per home: with one file, a
+// bridge that ignored the home argument would still pass.
 const settingsFiles: Record<SettingsHome, string> = {
   server: settingsTemplate(DEFAULT_SETTINGS.shell.path),
   client: clientSettingsTemplate(HARNESS_SETTINGS),
@@ -1053,13 +1061,13 @@ configureSettings(
   },
 );
 // The connection list, in memory. Two entries so the picker has something to
-// switch BETWEEN, and on the Mac one of them refuses to open: falling back to
+// switch between, and on the Mac one of them refuses to open: falling back to
 // this Mac with the reason showing is a state the chrome has to render, and a
 // fake with only a happy path would never reach it.
 //
-// A phone's list has no local row and cannot have one — there is no server in
-// that process to fall back to (remote.md §8) — and that absence is the whole
-// reason its remove rule differs, so the fake has to have it too.
+// A phone's list has no local row and cannot have one, since there is no
+// server in that process to fall back to (remote.md §8). That absence is why
+// its remove rule differs, so the fake carries it too.
 let connections: ConnectionInfo[] = FAKING_IOS
   ? [
       { id: "vps-1", name: "VPS", destination: "ledge@vps", port: 0, keyPath: "", auth: "key", pinned: true, lastReached: 0 },
@@ -1070,7 +1078,8 @@ let connections: ConnectionInfo[] = FAKING_IOS
         port: 0,
         keyPath: "",
         // One row already on the password door, so a spec can drive the edit
-        // case where the field may be left blank (ConnectionPicker.tsx).
+        // case where the field may be left blank
+        // (components/ConnectionPicker.tsx).
         auth: "password",
         pinned: true,
         lastReached: 0,
@@ -1095,23 +1104,22 @@ const passwords = new Map<string, string>();
 let activeConn = FAKING_IOS ? "vps-1" : "local";
 // Destinations the fake server refuses, so a spec can drive the refusal path.
 const unreachable = FAKING_IOS ? new Set<string>() : new Set(["ledge@vps"]);
-// A destination whose RPC REJECTS rather than refusing, which is a different
-// failure and used to be a much worse one: Bun outliving the view's
-// maxRequestTime, or dying mid-request (mainview/main.tsx). A refusal comes
-// back as a sentence and a rejection comes back as a thrown thing, and the
-// dialog has to survive both — the `busy` flag it sets before either one gates
-// every control in it.
-// Two sentinels, because the dialog has two doors onto the same hazard: the
-// form's Continue button, which probes, and a row in the list, which selects.
-// The message is electrobun's own, verbatim, since it is the one a user
-// actually gets when this happens.
+// A destination whose RPC rejects rather than refusing. That is a different
+// failure: Bun taking longer than the view's maxRequestTime, or dying
+// mid-request (mainview/main.tsx). A refusal comes back as a sentence and a
+// rejection comes back as a thrown error, and the dialog has to survive both.
+// The `busy` flag it sets before either one gates every control in it.
+// Two sentinels, because the dialog reaches this hazard two ways: the form's
+// Continue button, which probes, and a row in the list, which selects. The
+// message is electrobun's own, verbatim, since it is the one a user gets when
+// this happens.
 const WEDGED_PROBE = "ledge@wedged";
 const WEDGED_SELECT = "ledge@wedged-later";
 const RPC_GAVE_UP = "RPC request timed out.";
-// How many times this client has been told to dial NOW rather than at its next
-// beat (rpc-schema connectionReconnect). Counted rather than acted on: the
-// harness has no wire to redial, and what a spec is asking is whether the verb
-// reached the shell at all.
+// How many times this client has been asked to dial now rather than wait for
+// its next retry beat (rpc-schema connectionReconnect). The fake only counts:
+// there is no wire here to redial, and a spec is asking only whether the verb
+// reached the shell.
 let reconnects = 0;
 configureConnections(
   { connections, active: activeConn, wanted: activeConn, error: "", build: "0.1.0-harness" },
@@ -1165,9 +1173,9 @@ configureConnections(
     },
     remove: async (id) => {
       if (id === "local") return { ok: false, error: "This Mac is always here; it cannot be removed." };
-      // A phone can remove the last one, because it has no local server to fall
-      // back to and that would otherwise be a server it could never forget
-      // (lib/nativeBridge.ts).
+      // A phone can remove its last connection. It has no local server to fall
+      // back to, so refusing would leave a server it could never forget
+      // (lib/nativeBridge.ts connectionRemove).
       if (id === activeConn && (!FAKING_IOS || connections.length > 1)) {
         return { ok: false, error: FAKING_IOS ? "Switch to another server before removing this one." : "Switch somewhere else before removing this connection." };
       }
@@ -1195,19 +1203,17 @@ configureConnections(
 // Stamps the resolved appearance on <html>, like main.tsx does after boot.
 applyAppearance();
 
-// The shim write is a native seam; the harness answers with a canned success
+// The shim write is a native seam. The harness answers with a canned success,
 // so the palette command and its notice strip are drivable end to end.
 configureCli({
   install: async () => ({ ok: true, message: "ledge installed: ~/.local/bin/ledge" }),
 });
 
-// New Window is a native seam with no in-page consequence at all — the second
-// window is another client of another server, in another webview (remote.md
-// §8a) — so what a spec can see is that the ask left, and how many times.
-//
-// The manual's window is the same kind of seam and the same kind of evidence:
-// the pages it opens onto are what `?docs=1` below renders, and what a spec
-// driving an ORDINARY window can see is the page it asked the shell for.
+// New Window is a native seam with no in-page consequence: the second window is
+// another client of another server, in another webview (remote.md §8a). A spec
+// can see only that the ask left, and how many times. The manual's window is the
+// same seam. A spec in the ordinary harness window sees which page was asked
+// for; loading the harness with `?docs=1` renders that window itself.
 const windowOpens: number[] = [];
 const docsOpens: string[] = [];
 configureWindows({
@@ -1241,22 +1247,22 @@ declare global {
       layout: () => string | null;
       termAttaches: () => { sessionId: string; host: string | null }[];
       termPastes: () => { sessionId: string; text: string; host: string | null }[];
-      // Every keystroke the drawer sent at its shell, in order. What it is for
-      // is the ABSENCE of them: a drawer another client has taken must stop
-      // typing into a shell it can no longer see.
+      // Every keystroke the drawer sent at its shell, in order. Specs use it to
+      // assert that the keystrokes stop: a drawer another client has taken must
+      // not type into a shell it can no longer see.
       termInputs: () => { sessionId: string; dataB64: string }[];
       // Every grid the drawer reported for its shell, with how many attaches
       // preceded it.
       termResizes: () => { sessionId: string; cols: number; rows: number; afterAttach: number }[];
       // Simulate Bun's terminalDetached push: another client attached to this
-      // note's shell and this one no longer has it. No user action can cause it
-      // here (the other client is the one acting), which is externalOpen's
-      // reason for being on this object too. `by` is that client's id, which
-      // the notice turns into a name through the presence list below.
+      // note's shell, so this one no longer has it. No user action can cause it
+      // here, since the other client is the one acting. externalOpen is on this
+      // object for the same reason. `by` is that client's id, which the notice
+      // turns into a name through the presence list below.
       terminalTaken: (sessionId: string, by?: string) => void;
       // Simulate the presence push: who else is connected to this server
-      // (remote.md §7). Same reason as the one above — the event is another
-      // device arriving or leaving, which nothing in this page can do.
+      // (remote.md §7). Here for the same reason as the one above. The event is
+      // another device arriving or leaving, which nothing in this page can do.
       presence: (others: { client: string; label: string }[]) => void;
       inlineRuns: () => { sessionId: string; id: string; host: string | null }[];
       // Every grid reported to a run's shell, in order.
@@ -1265,42 +1271,40 @@ declare global {
       inlineInputs: () => { id: string; data: string }[];
       // A key on the run's accessory bar, pressed (ios.md §7). The bar is
       // native and its taps arrive over the Swift bridge, so this stands in for
-      // Swift the way runOutput stands in for Bun — the page-side half is the
-      // half with rules in it: which panel the key lands in, and what bytes it
-      // becomes.
+      // Swift the way runOutput stands in for Bun. The rules live on the page
+      // side: which panel the key lands in, and what bytes it becomes.
       runKey: (name: string) => boolean;
       // Which face the bar would wear for whatever has focus right now
-      // (lib/nativeBridge.ts barFaceOf). The ordering it encodes is the whole
-      // point: a run's panel is inside the editor.
+      // (lib/nativeBridge.ts barFaceOf). It looks for the run panel first,
+      // because a run's panel sits inside the editor.
       barFace: () => BarFace;
       // Every set of run ids this client has claimed, in order (one per boot
-      // and per reconnect; bridge.ts reconcileRuns).
+      // and per reconnect; editor/bridge.ts reconcileRuns).
       runClaims: () => string[][];
       // Which runs the fake server admits to still running when claimed. Set
       // before driving linkState("live") to choose which half of the
       // reconciliation a spec is testing.
       holdRuns: (ids: string[]) => void;
-      // Push one output byte-string at a run, the way Bun's runEvent would.
-      // Not the PTY coming back: the inert harness stays inert, and a spec that
-      // wants real run behavior still belongs to the live probe. This drives
-      // the ONE view-side seam a spec cannot otherwise reach — what the panel
-      // does when a run first speaks (on a Mac it takes the keyboard,
-      // blocks.ts; on a phone it asks to be tapped).
+      // Push one output byte-string at a run, the way Bun's runEvent would. Not
+      // the PTY coming back: the harness stays inert, and real run behavior
+      // belongs to the live probe. It drives the one view-side seam a spec
+      // cannot otherwise reach, what the panel does when a run first speaks: on
+      // a Mac it takes the keyboard (blocks.ts), on a phone it asks to be tapped.
       runOutput: (id: string, text: string) => void;
-      // And the run ending, which is the other half of that seam: the panel
-      // freezes, gives the keyboard back if it had it, and stops offering what
-      // only a live run can be offered.
+      // The run ending, the other half of that seam: the panel freezes, gives
+      // the keyboard back if it had it, and drops the controls that only a live
+      // run has.
       runEnd: (id: string, exitCode: number | null) => void;
       // Simulate the CLI's openExternal push (a Bun-side watcher event has no
       // visible surface to drive it from).
       externalOpen: (open: ExternalOpenInfo) => void;
-      // Simulate the watcher's notesChanged push for one root: how a spec
-      // makes a store.seed visible to the app's lists — the same refresh a
-      // real external write triggers.
+      // Simulate the watcher's notesChanged push for one root. This is how a
+      // spec makes a store.seed visible to the app's lists, and it is the same
+      // refresh a real external write triggers.
       notesChanged: (root: string) => void;
-      // The wire dropping (remote.md §7). Pushed by this app's own Bun side in
+      // The wire dropping (remote.md §7). This app's own Bun side pushes it in
       // the real thing, so there is no user action a spec could take to cause
-      // it — the same reason externalOpen is here.
+      // it. Same reason externalOpen is here.
       linkState: (state: "live" | "reconnecting" | "lost", detail: string) => void;
       // How many times the shell has been asked to dial now (see `reconnects`).
       reconnects: () => number;
@@ -1309,14 +1313,13 @@ declare global {
       shellClaims: () => string[];
       // What the fake server says became of a claimed shell. Set before driving
       // linkState("live") to choose which of the three answers a spec is
-      // testing; an "attached" one carries the scrollback to replay.
+      // testing. An "attached" one carries the scrollback to replay.
       shellClaim: (claim: TerminalClaim) => void;
-      // The vault moving on the SERVER with nobody listening: its idle relock
+      // The vault moving on the server with nobody listening: its idle relock
       // firing, or another device unlocking it. The state changes and no
-      // vaultChanged reaches the app, which is exactly what a push at a dropped
-      // wire is (bun/daemon.ts). Deliberately not the store's own vaultLock
-      // paired with recordVaultState — that pair is the CONNECTED path, and the
-      // question here is what the app does when it was never told.
+      // vaultChanged reaches the app, the way a push at a dropped wire is lost
+      // (bun/daemon.ts). Not the store's vaultLock paired with recordVaultState,
+      // which is the connected path: this is the app never being told.
       vaultMoved: (state: VaultState) => void;
       store: FakeStore;
     };
@@ -1360,10 +1363,10 @@ window.__harness = {
   vaultMoved: (state) => {
     store.vault.state = state;
   },
-  // The same things boot.tsx's connectionState push does, because a reconnect
-  // that did not reconcile is not the reconnect the app performs — and the save
-  // hold on the way down, because the stranded-buffer path is only reachable
-  // through it.
+  // linkState below does the same things boot.tsx's connectionState push does,
+  // because a reconnect that did not reconcile is not the reconnect the app
+  // performs. It also holds saves on the way down, because the stranded-buffer
+  // path is only reachable through that hold.
   reconnects: () => reconnects,
   linkState: (state, detail) => {
     recordLinkState(state, detail);
@@ -1383,18 +1386,18 @@ window.__harness = {
   store,
 };
 
-// `?fresh`: the scratch folder boots EMPTY, which is what a first launch on a
+// `?fresh`: the scratch folder boots empty. That is what a first launch on a
 // Mac and a first connection to a server with no notes both are, and the one
-// boot that opens the welcome note (workspace/seeds.ts) rather than a file.
-// Wiped after seeding rather than skipped during it, so the fixtures above stay
-// one list and the other specs see exactly what they always saw.
+// boot that opens the welcome note (workspace/seeds.ts) rather than a file. The
+// wipe runs after the seeding rather than the seeds being skipped, so the
+// fixtures above stay one list and the other specs see what they always saw.
 if (new URLSearchParams(window.location.search).has("fresh")) store.wipe(SCRATCH);
 
-// `?folders`: the scratch workspace with its notes FILED, for the browser
-// tree's specs. Opt-in rather than part of the fixtures above, because folder
-// rows sort before note rows and the flat-list specs pin the first and last
-// row of that list (e2e/list-verbs.spec.ts). One note stays at the top level,
-// so a spec can drag between the two levels in both directions.
+// `?folders`: the scratch workspace with its notes filed into folders, for the
+// browser tree's specs. Opt-in rather than part of the fixtures above, because
+// folder rows sort before note rows and the flat-list specs pin the first and
+// last row of that list (e2e/list-verbs.spec.ts). One note stays at the top
+// level, so a spec can drag between the two levels in both directions.
 if (new URLSearchParams(window.location.search).has("folders")) {
   store.wipe(SCRATCH);
   store.seed(SCRATCH, "# Alpha\n\nalpha body\n");
@@ -1403,13 +1406,11 @@ if (new URLSearchParams(window.location.search).has("folders")) {
   store.seed(SCRATCH, "# Delta\n\ndelta body\n", "admin");
 }
 
-// Same boot shape as main.tsx: the registry first, then per-folder lists.
-// null layout: a harness run always starts from the seeded notes; restore
-// behavior itself is covered by persist.test.ts, not specs.
-//
-// And the same fork at the end of it: the manual's window boots onto the
-// manual, on the page it was opened for (`?page=`, the harness's stand-in for
-// the title the shell passes through windowRole).
+// Same boot shape as main.tsx: the registry first, then per-folder lists. The
+// layout passed below is null, because a harness run always starts from the
+// seeded notes and persist.test.ts covers restore instead. Same fork at the end
+// too: the manual's window boots onto the page it was opened for (`?page=`, the
+// harness's stand-in for the title the shell passes through windowRole).
 const bootRoots = store.workspaceList();
 recordWorkspaceKinds(bootRoots);
 const bootPage = new URLSearchParams(window.location.search).get("page") ?? "";
@@ -1434,23 +1435,23 @@ const render = (): void =>
 
 // The screen a boot shows while it is still waiting on a server (lib/booting.ts).
 //
-// A harness boot waits on a Map and so is never slow, which is exactly why the
-// wait is a knob: `?booting=<ms>` holds the screen up for that long before
-// rendering, in the same shape both real shells raise it — up before the waits,
-// down before the render — so a spec can look at the real element with the real
-// stylesheet in the shipping engine. `?bootingTo=` is the destination, which on
-// a phone is what `@hello` answers with.
+// A harness boot waits on a Map and is never slow, so the wait is a knob.
+// `?booting=<ms>` holds the screen up for that long before rendering, in the
+// shape both real shells raise it (up before the waits, down before the
+// render). A spec then looks at the real element with the real stylesheet, in
+// the shipping engine. `?bootingTo=` is the destination, which on a phone is
+// what `@hello` answers with.
 //
-// Without the knob the render is synchronous, exactly as it was: every other
-// spec's first paint must not move because this one exists.
+// Without the knob the render stays synchronous, so no other spec's first paint
+// moves.
 const bootingFor = Number(new URLSearchParams(window.location.search).get("booting") ?? 0);
 if (bootingFor > 0) {
   showBooting({
     destination: new URLSearchParams(window.location.search).get("bootingTo") ?? "",
     // The harness's stand-in for `servers.choose` (ios.tsx): the real one hands
     // the window back to Swift, which tears this page down. There is no shell
-    // here to hand it to, so the press is recorded and the screen stays — a
-    // spec can see that the button did something, and nothing else pretends.
+    // here to hand it to, so the press is recorded and the screen stays. A spec
+    // can see that the button did something, and nothing more.
     onCancel: () => {
       document.body.dataset["bootingCancelled"] = "1";
     },

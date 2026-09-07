@@ -1,12 +1,13 @@
-// Who edits tells; who derives listens. A tiny broadcast fired on EVERY doc
-// change — user edits AND fromDisk loads/reloads — which is what sets it apart
-// from notes/store's noteChanged, which deliberately skips loads (a load must
-// not arm autosave). The Outline panel re-derives the active note's headings
-// from the live doc on this signal; setup.ts is the one dispatcher.
+// A broadcast fired on every doc change, including the fromDisk loads and
+// reloads that pour a note's text in at open and after an external edit
+// (workspace/editorPool.ts). setup.ts is the only dispatcher. The Outline
+// panel listens and re-derives the active note's headings from the live doc.
+// Autosave takes the other path: setup.ts calls noteChanged (notes/store.ts)
+// only for real edits, because a load must not arm the autosave debounce.
 //
-// Its own module (not editorPool) because setup.ts must import the dispatch
-// half and editorPool imports setup — this stays cycle-free by importing
-// nothing at all.
+// The dispatch half lives here rather than in editorPool. setup.ts imports it
+// and editorPool imports setup, so dispatching from editorPool would make an
+// import cycle. This module imports nothing.
 
 type Listener = (docId: string) => void;
 

@@ -1,40 +1,33 @@
 // The unified quick-open overlay: one component, three modes.
 //
-// ⌘P opens in notes mode (fuzzy-open a note by title, the old QuickOpen);
-// ⇧⌘P opens in commands mode (every palette-visible command with its key
-// chip); ⌥⌘P opens in search mode (full-text over note bodies, via the
-// noteSearch RPC). Notes and search are scoped to the SELECTED WORKSPACE —
-// notes are local to their workspace, and these are that stance's two other
-// surfaces (the browser is the first). Typing ">" as the first character of
-// commands — the VS Code convention — and "#" switches to search; Backspace
-// over the sigil switches back. Only the first typed character triggers a
-// switch, so a note whose title contains either character stays findable, and
-// the direct chords always land in their mode.
+// ⌘P opens notes mode (fuzzy-open a note by title, the old QuickOpen), ⇧⌘P
+// commands mode (every palette-visible command with its key chip), ⌥⌘P search
+// mode (full-text over note bodies, via the noteSearch RPC). Notes and search
+// cover the selected workspace only, the way the note browser does. Notes are
+// local to their workspace. In notes mode a leading ">" switches to commands
+// (the VS Code convention) and a leading "#" to search. Backspace over the
+// sigil returns to notes. Only the first character typed switches the mode, so
+// a note whose title contains either character stays findable and the direct
+// chords always land in their mode.
 //
-// The three are ALSO a row of chips under the field, and on a touch client that
-// row is the only way across. Both sigils live on the iPhone keyboard's third
-// plane (123, then #+=), so crossing cost two plane switches to reach one
-// character and a third tap to get back to letters — for a grammar whose only
-// teacher was a placeholder you erase by typing. A chip carries the query with
-// it, because retyping is the expensive act wherever the keyboard is on screen.
-// The sigils and the chords are untouched: they are the accelerator, and the
-// chip is the discoverable path that interactions.md §1a asks every verb to
-// have.
+// The three modes are also a row of chips under the field. On a touch client
+// that row is the only way across, and it is the discoverable path
+// interactions.md §1a asks every verb to have. The sigils and the chords are
+// the accelerator. A chip carries the query across with it. Retyping is the
+// expensive act wherever the keyboard is on screen.
 //
-// A SCOPE narrows all of that to one folder of the workspace (Search in Folder
-// on a folder row). It belongs to the overlay rather than to a mode, so the
-// chips carry it across the way they carry the query: what you were looking IN
-// is as much a part of the question as what you were looking for. It shows as a
-// removable pill in the field, which is the whole of its state on screen —
-// nothing about a scoped overlay may be invisible, or a search that found
-// nothing would look like a workspace that holds nothing.
+// A scope narrows the note rows and the text hits to one folder of the
+// workspace (Search in Folder on a folder row). Commands are not scoped. The
+// scope belongs to the overlay rather than to a mode, so the chips carry it
+// across the way they carry the query. It shows as a removable pill in the
+// field, and that is its whole state on screen: a scoped search that found
+// nothing must not read as a workspace that holds nothing.
 //
-// A search whose query starts with "#" is also how tags surface here: rows
-// prefix-matching the workspace's tag directory render ABOVE the text hits
-// (a #tag is text too, so the hits below still find its occurrences), and
-// Enter on one routes to the Tags panel drilled into it (tag.open). No
-// fourth mode and no second sigil — the "#" the search sigil already spends
-// is the one tags are written with.
+// A search whose query starts with "#" also lists tags. Rows prefix-matching
+// the workspace's tag directory render above the text hits. A #tag is text too,
+// so the hits below still find its occurrences. Enter on a tag row routes to
+// the Tags panel drilled into it (tag.open). There is no fourth mode and no
+// second sigil: tags are written with the "#" the search sigil already spends.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CalendarDays, Command as CommandIcon, FileText, Folder, Hash, LayoutTemplate, Lock, LockOpen, TextSearch, X, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -53,29 +46,29 @@ import { paletteItems, type PaletteItem } from "./registry";
 
 export type OverlayMode = "notes" | "commands" | "search";
 
-// The chips, and the whole of what a mode is on screen. Each wears the icon its
-// own rows wear below — the picker and the results must agree on what kind of
-// thing is being looked for — and names the character that crosses to it, on
-// the clients where that character is one keystroke.
-//
-// "Text" rather than "Search": all three of these search, and what differs is
-// what they search THROUGH. It is also the shortest of the honest words, and
-// three chips share one 351-point panel on a phone.
+// The chips, and the whole of what a mode is on screen. Each wears the icon
+// its own rows wear below: the picker and the results must agree on what kind
+// of thing is being looked for. Each names the character that crosses to it,
+// on the clients where that character is one keystroke. The search chip reads
+// "Text" rather than "Search" because all three modes search and only the
+// thing searched through differs. "Text" is also short enough for three chips
+// to share one panel about 350 points wide on a phone.
 const MODES: { id: OverlayMode; label: string; sigil: string | null; Icon: LucideIcon }[] = [
   { id: "notes", label: "Notes", sigil: null, Icon: FileText },
   { id: "commands", label: "Commands", sigil: ">", Icon: CommandIcon },
   { id: "search", label: "Text", sigil: "#", Icon: TextSearch },
 ];
 
-// How long a keystroke burst can run before the RPC fires. Short enough that
-// results feel live, long enough that "shipping" is one scan, not eight.
+// How long a keystroke burst runs before the RPC fires. Short enough that
+// results feel live, long enough that typing "shipping" costs one scan rather
+// than eight.
 const SEARCH_DEBOUNCE_MS = 80;
 
 export function Overlay({
   initialMode,
-  // Seeds the input as plain filter text — the sigil branch below never sees
-  // it (sigils are a notes-mode, first-typed-character affair, and the one
-  // seeded open lands in commands mode). note.fromTemplate's pre-filter.
+  // Seeds the input as plain filter text. The sigil branch below never sees it:
+  // sigils fire only on the first character typed in notes mode, and the one
+  // seeded open (note.fromTemplate's pre-filter) lands in commands mode.
   initialQuery = "",
   // The folder the overlay opens narrowed to, "" for the whole workspace.
   initialFolder = "",
@@ -88,7 +81,7 @@ export function Overlay({
 }) {
   const { state, dispatch, selected } = useWorkspace();
   const { exec, commands, ctx } = useCommands();
-  // Locked rows' glyph opens with the vault — the NoteBrowser row rule.
+  // A locked row's glyph opens while the vault is unlocked, as in NoteBrowser.
   const vaultOpen = useVaultState() === "unlocked";
   const [query, setQuery] = useState(initialQuery);
   const [scope, setScope] = useState(initialFolder);
@@ -96,9 +89,9 @@ export function Overlay({
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
-  // Which mode the overlay is IN when nothing is spelling one: what a chord
-  // opened it in, or what a chip last picked. The sigil below still overrides
-  // it, which is what keeps Backspace over the sigil a way back.
+  // The mode when no sigil is spelling one: what a chord opened the overlay in,
+  // or what a chip last picked. The sigil below overrides it, so Backspace over
+  // the sigil comes back here.
   const [base, setBase] = useState(initialMode);
   // The sigils only fire as the first character of notes mode; the direct
   // chords are unconditional.
@@ -106,35 +99,34 @@ export function Overlay({
   const mode: OverlayMode = sigil ?? base;
   const isCommands = mode === "commands";
   const isSearch = mode === "search";
-  // Commands are not in a folder, so the pill is not drawn over a list it does
-  // not narrow — a scope on screen that changed nothing would be a lie about
-  // what the rows below it are. It is not FORGOTTEN, though: crossing back to
-  // Notes or Text brings it and its rows back together.
+  // Commands live in no folder, so the pill is hidden in commands mode rather
+  // than drawn over a list it does not narrow. The scope is kept, not dropped:
+  // crossing back to Notes or Text shows the pill and its narrowed rows again.
   const showScope = scope !== "" && !isCommands;
   // Strip the mode-switch sigil before filtering; a direct chord open has none.
   const q = sigil ? query.slice(1) : query;
 
   const wsNotes = notesOf(state, selected.folder);
-  // What the note rows are drawn from: the workspace, or one folder of it and
-  // the folders inside it. Client-side, unlike the text search below, because
-  // the view already holds every title — the list it would ask Bun for is the
-  // one in its hand.
+  // What the note rows are drawn from: the whole workspace, or one folder of it
+  // and the folders inside it. Filtered in the view rather than by an RPC,
+  // unlike the text search below, because the view already holds every title.
   const folderNotes = useMemo(() => notesUnder(wsNotes, scope), [wsNotes, scope]);
   const notes = useMemo(
     () => (mode === "notes" ? filterNotes(q, folderNotes) : []),
     [mode, q, folderNotes],
   );
   // Where each note lives, for the search rows: a hit carries a path and a
-  // title, not a placement, so the folder is looked up in the list that has it.
-  // Indexed over the WHOLE workspace, not the scope: this answers "where is
-  // this path", which does not change with what is being looked at.
+  // title but no folder, so the folder is looked up in the note list. Indexed
+  // over the whole workspace rather than the scope, since the answer to "where
+  // is this path" does not change with what is being looked at.
   const folders = useMemo(() => folderIndex(wsNotes), [wsNotes]);
 
-  // The tag rows' vocabulary: fetched when search mode is entered (and per
-  // workspace, and per scope), not per keystroke — the directory changes with
-  // the notes, not with the query. Scoped like the hits below it, so every row
-  // the overlay draws comes from the folder it says it is looking in; Enter on
-  // one still lands in the Tags panel, which is a workspace surface of its own.
+  // The tag rows' vocabulary. listTags runs when search mode opens, and again
+  // when the workspace or the scope changes, but not per keystroke: the
+  // directory changes with the notes, not with the query. It takes the scope,
+  // like the search below, so every row comes from the folder the overlay says
+  // it is looking in. Enter on a tag row still lands in the Tags panel, which
+  // is a workspace-wide surface.
   const [tags, setTags] = useState<TagInfo[]>([]);
   useEffect(() => {
     if (!isSearch) return;
@@ -152,9 +144,9 @@ export function Overlay({
     };
   }, [isSearch, selected.folder, scope]);
 
-  // Tag rows show only for a #-leading query — the sigil route's query always
-  // is one; a direct ⌥⌘P query opts in by spelling the tag as written. A bare
-  // "#" lists the whole directory.
+  // Tag rows show only for a query that starts with "#". A query that crossed
+  // by sigil always does. A query typed after a direct ⌥⌘P opts in by spelling
+  // the tag as written, and a bare "#" lists the whole directory.
   const tagPrefix = isSearch && query.startsWith("#") ? query.slice(1) : null;
   const tagRows = useMemo(() => {
     if (tagPrefix === null) return [];
@@ -164,9 +156,8 @@ export function Overlay({
 
   // Search mode asks Bun, debounced, and guards against answers landing out of
   // order: only the reply to the query still on screen may set the list.
-  // lockedSkipped rides each answer: how many locked notes the scan
-  // deliberately never read (locking.md §4) — the footer below makes
-  // the skip visible where the answer would have been.
+  // `lockedSkipped` rides each answer and counts the locked notes the scan did
+  // not read (locking.md §4). The footer below shows that count.
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [lockedSkipped, setLockedSkipped] = useState(0);
   useEffect(() => {
@@ -198,9 +189,9 @@ export function Overlay({
   const items = useMemo<PaletteItem[]>(() => {
     if (!isCommands) return [];
     const visible = paletteItems(commands, ctx());
-    // An empty query shows the registry's own order (semantic grouping); a
-    // query re-ranks by match quality, chorded commands a notch up — the
-    // chord marks the frequent act (CHORD_BOOST's rationale in fuzzy.ts).
+    // An empty query shows the registry's own order (semantic grouping). A
+    // query re-ranks by match quality and lifts chorded commands a notch,
+    // since a chord marks a frequent act (CHORD_BOOST's rationale in fuzzy.ts).
     return q.trim()
       ? fuzzyFilter(q, visible, (i) => i.title, (i) => (i.chorded ? CHORD_BOOST : 0))
       : visible;
@@ -209,17 +200,16 @@ export function Overlay({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isCommands, q, commands, state]);
 
-  // In search mode the keyboard walks ONE list: tag rows first, text hits
-  // after — the index arithmetic in open() and the render agree on that.
+  // In search mode the keyboard walks one list: tag rows first, text hits
+  // after. The index arithmetic in open() and the render below agree on that.
   const count = isCommands ? items.length : isSearch ? tagRows.length + hits.length : notes.length;
   // A stale index from a longer result set would point past the end.
   const active = Math.min(index, Math.max(count - 1, 0));
 
-  // The crossing offered where the want appears. A title search that matched
-  // nothing, with something typed to search FOR, is the exact moment the other
-  // mode becomes the point — and it is the one path across that needs no prior
-  // knowledge of a chip, a sigil or a chord. It stands in for "No notes match",
-  // which said the same thing and offered nothing.
+  // Whether the overlay offers the crossing to search mode. It offers it in
+  // notes mode when something is typed and no title matched. The crossing is
+  // the one path across that needs no prior knowledge of a chip, a sigil or a
+  // chord, and the row it draws below replaces the "No notes match" message.
   const crossing = mode === "notes" && q.trim() !== "" && notes.length === 0;
 
   useEffect(() => {
@@ -237,14 +227,11 @@ export function Overlay({
     listRef.current?.querySelector("[data-active]")?.scrollIntoView({ block: "nearest" });
   }, [active, count]);
 
-  // Cross to another mode, keeping what was typed. The text survives even when
-  // the sigil spelling the crossing does not: what carries is what you were
-  // looking FOR, and on the way back to notes a leading ">" or "#" would be
-  // read as a sigil again and bounce you straight out.
-  //
-  // The focus never leaves the field — the mousedown below is what stops it —
-  // so on a phone the keyboard does not drop and come back, which would make
-  // one gesture look like two.
+  // Cross to another mode, keeping what was typed. Crossing back to notes
+  // strips a leading ">" or "#": the sigil branch above would otherwise read
+  // it as another crossing and bounce straight back out. The focus stays in
+  // the field, so a phone's software keyboard does not drop and rise again
+  // (the chips' onMouseDown below is what holds it).
   const pick = (m: OverlayMode) => {
     if (m === mode) return;
     setBase(m);
@@ -294,17 +281,17 @@ export function Overlay({
       e.preventDefault();
       setIndex(Math.max(active - 1, 0));
     } else if (e.key === "Backspace" && showScope && query === "") {
-      // Backspace out of an empty field drops the scope — the same way it
-      // drops a mode sigil. The pill is the leftmost thing in the field, so
-      // the key that deletes leftwards is the one that should take it.
+      // Backspace in an empty field drops the scope, the same way it drops a
+      // mode sigil. The pill is the leftmost thing in the field, so the key
+      // that deletes leftwards is the one that removes it.
       e.preventDefault();
       setScope("");
       setIndex(0);
     } else if (e.key === "Enter") {
       e.preventDefault();
-      // The crossing row is the only row there is when it shows, and it is
-      // highlighted like one, so Enter has to mean it. Enter on an empty list
-      // used to mean nothing at all.
+      // The crossing row is the only row on screen when it shows, and it is
+      // highlighted, so Enter runs it. Enter on an otherwise empty list does
+      // nothing.
       if (crossing) pick("search");
       else open(active);
     }
@@ -321,27 +308,25 @@ export function Overlay({
         className="flex max-h-[60vh] w-[min(520px,90vw)] flex-col overflow-hidden rounded-lg border bg-card text-card-foreground shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* The field is a ROW once a scope can sit in it: the pill is part of
-            the question being asked, not chrome above or below it, and reading
-            "projects | rate limit" left to right is the sentence the results
-            answer. */}
+        {/* The field is a row once a scope can sit in it. The pill goes inside
+            the field rather than above or below it, so the folder and the
+            query read left to right as one question. */}
         <div className="flex shrink-0 items-center">
           {showScope && (
-            // Its own removal, with no second control: a pill whose ✕ is the
-            // only way out spends 24 points on a target a finger will miss,
-            // and there is nothing else clicking a scope could sensibly mean.
-            // Backspace at an empty field does the same thing (onKeyDown).
+            // The whole pill removes the scope; the ✕ is not a separate
+            // control. A ✕-only target would be about 24 points, which a
+            // finger misses. A click on a scope has no other sensible meaning.
+            // Backspace in an empty field removes it too (onKeyDown above).
             //
-            // 32 points on touch rather than §1a's 44, stated rather than
-            // fudged. This is a token INSIDE a 44-point field, so at 44 it
-            // would be exactly as tall as the field and stop reading as part
-            // of the query; and it is not the only way out, since every
-            // software keyboard has the Backspace that also clears it.
+            // 32 points on touch rather than the 44 of interactions.md §1a.
+            // The pill is a token inside a 44-point field: at 44 it would be
+            // as tall as the field and stop reading as part of the query.
+            // Backspace removes it on every software keyboard.
             <button
               type="button"
               data-testid="overlay-scope"
-              // Take the tap without taking the focus — the mode chips' rule,
-              // for the same reason: the caret belongs in the field.
+              // Take the tap without taking the focus, as the mode chips below
+              // do, for the same reason: the caret belongs in the field.
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => {
                 setScope("");
@@ -359,16 +344,17 @@ export function Overlay({
           <input
             ref={inputRef}
             value={query}
-            // "Search notes  (> commands · # in text)" until the chips existed:
-            // the sigils were taught here because there was nowhere else to teach
-            // them. The chip is the better teacher — it sits on the control it
-            // describes, it is still there after you type, and it does not spend
-            // the field on instructions — so the field says what it is for again.
+            // The placeholder says what the field is for, and no longer
+            // teaches the sigils: it read "Search notes  (> commands · # in
+            // text)" before the chips existed. The chips teach the crossings
+            // instead, each labelling the control that performs one, and they
+            // stay on screen once typing starts.
             placeholder={isCommands ? "Run a command" : isSearch ? "Search inside notes" : "Search notes"}
             spellCheck={false}
-            // WKWebView applies autocorrect/autocapitalize to a bare <input> and
-            // mangles what you type ("sh" becomes "Sh"). `autocorrect` is WebKit-only
-            // with no IDL property, hence setAttribute-style props here.
+            // WKWebView applies autocorrect and autocapitalize to a bare
+            // <input> and mangles typed text ("sh" becomes "Sh"). `autocorrect`
+            // is WebKit-only with no IDL property, hence the attribute-style
+            // props here.
             autoComplete="off"
             autoCapitalize="off"
             autoCorrect="off"
@@ -377,24 +363,26 @@ export function Overlay({
               setIndex(0);
             }}
             onKeyDown={onKeyDown}
-            // `min-w-0 flex-1` where it was `shrink-0`: the pill beside it may
-            // be a long folder name, and a field that cannot shrink would push
-            // itself off the panel rather than let the name truncate.
+            // `min-w-0 flex-1` rather than `shrink-0`: the pill beside the
+            // field may hold a long folder name, and a field that cannot
+            // shrink would push itself off the panel instead of letting the
+            // name truncate.
             className="min-w-0 flex-1 bg-transparent px-3.5 py-2.5 text-sm outline-none placeholder:text-muted-foreground touch:min-h-[44px]"
           />
         </div>
 
-        {/* The three modes, as three controls a finger chooses between — so 44
-            points on touch (§1a), and the row that makes the sigils an
-            accelerator rather than the only grammar. Under the field rather
-            than over it: the field is what the overlay is for, and it keeps the
-            caret at the top of the panel where every client's chord puts it.
+        {/* The three modes as three controls a finger chooses between, so 44
+            points on touch (interactions.md §1a). The row makes the sigils an
+            accelerator rather than the only way across. It sits under the field
+            rather than over it: the field is what the overlay is for, and the
+            caret stays at the top of the panel where every client's chord puts
+            it.
 
-            Tinted, so the strip reads as chrome rather than as the first row of
-            the list: the lit chip and the highlighted row are both a filled box
-            two lines apart, and in this theme `--secondary` and `--accent` are
-            the same value, so the separation has to come from what they sit
-            ON. */}
+            Tinted so the strip reads as chrome rather than as the first row of
+            the list. The lit chip and the highlighted row are both a filled box
+            two lines apart, and `--secondary` and `--accent` hold the same
+            value in this theme, so the separation comes from the background
+            they sit on. */}
         <div className="flex shrink-0 gap-1 border-y bg-muted/50 p-1">
           {MODES.map(({ id, label, sigil: key, Icon }) => (
             <button
@@ -409,22 +397,21 @@ export function Overlay({
               onClick={() => pick(id)}
               className={cn(
                 "flex flex-1 items-center justify-center gap-1.5 rounded px-2 py-1 text-xs text-muted-foreground touch:min-h-[44px] touch:text-sm",
-                // `secondary` and not the `accent` the rows use, though the two
-                // tokens carry the same value today: this is a toggled control
-                // saying which of three it is, which is what the header's lit
-                // buttons already spell that way (App.tsx), and the rows are
-                // saying where the keyboard is. Two different sentences, so two
-                // names — the day one token moves, the right one moves with it.
+                // `secondary`, not the `accent` the rows use, though the two
+                // tokens hold the same value today. A lit chip says which of
+                // three modes is on, the way the header's lit buttons do
+                // (App.tsx); a lit row says where the keyboard is. Naming them
+                // apart keeps each right if one token changes.
                 mode === id && "bg-secondary text-secondary-foreground",
               )}
             >
               <Icon className="size-3.5 shrink-0" />
               {label}
-              {/* The chip's own accelerator, the palette row's key-chip move —
-                  and ABSENT rather than muted where the key is not a keystroke
-                  (§1a). `softKeyboard` is the predicate and not a media query:
-                  the question is what the keyboard costs, and this is the seam
-                  that already answers it (lib/shell.ts). */}
+              {/* The sigil, shown the way a palette row shows its key chip, and
+                  absent rather than muted where the sigil is not one keystroke
+                  (interactions.md §1a). `softKeyboard` rather than a media
+                  query: the question is what the keyboard costs, and
+                  lib/shell.ts already answers it. */}
               {key && !softKeyboard() && (
                 <span className="text-[11px] text-muted-foreground">{key}</span>
               )}
@@ -432,12 +419,13 @@ export function Overlay({
           ))}
         </div>
 
-        {/* Every row below carries `touch:min-h-[44px]` (§1a), and this list is
-            where it matters most: on a client with no chords this overlay is
-            THE surface that carries every command, reached from the header's
-            magnifier because ⌘P is not typeable. Four row kinds, four copies of
-            the size — they are four different shapes (a verb, a tag, a search
-            hit, a note) rather than one component wearing four hats. */}
+        {/* Every row below carries `touch:min-h-[44px]` (interactions.md §1a),
+            and this list is where it matters most: on a client with no chords
+            the overlay carries every command, reached from the header's
+            magnifier since ⌘P is not typeable. The size is repeated in each of
+            the four row kinds, which are four different shapes (a verb, a tag,
+            a search hit, a note) rather than one component wearing four
+            hats. */}
         <div ref={listRef} data-testid="overlay-list" className="min-h-0 flex-1 overflow-y-auto p-1">
           {count === 0 ? (
             crossing ? (
@@ -461,8 +449,8 @@ export function Overlay({
                   ? "No matching commands"
                   : isSearch
                     ? q.trim() === ""
-                      // "every note" is a claim about coverage, and a scoped
-                      // overlay does not have it to make.
+                      // "every note" claims a coverage a scoped overlay
+                      // does not have.
                       ? showScope
                         ? `Type to search the text of the notes in ${scope}`
                         : "Type to search every note's text"
@@ -569,11 +557,11 @@ export function Overlay({
                 onMouseMove={() => setIndex(i)}
                 onClick={() => open(i)}
               >
-                {/* The NoteBrowser row's icon rule: a template note wears
-                    LayoutTemplate, the daily-role note CalendarDays, a locked
-                    note Lock (open while the vault is unlocked) — the browser
-                    and the picker must agree on what kind of thing a note is,
-                    and on whether it is readable right now. */}
+                {/* The NoteBrowser row's icon rule: a daily-role note wears
+                    CalendarDays, any other template note LayoutTemplate, a
+                    locked note Lock (open while the vault is unlocked). The
+                    browser and the picker must agree on what kind a note is,
+                    and on whether it is readable now. */}
                 {note.template === "daily" ? (
                   <CalendarDays className="size-3.5 shrink-0 text-muted-foreground" />
                 ) : note.template ? (
@@ -596,9 +584,10 @@ export function Overlay({
           )}
         </div>
 
-        {/* The skip must be visible where the answer would have been: a
-            search that silently omitted locked notes would read as "they
-            don't mention it". One muted line, only when there was a scan. */}
+        {/* The skipped notes are counted under the results, where their answer
+            would have been: a search that silently omitted locked notes would
+            read as "they don't mention it". One muted line, drawn only after a
+            scan ran. */}
         {isSearch && q.trim() !== "" && lockedSkipped > 0 && (
           <p
             data-testid="search-locked-skipped"

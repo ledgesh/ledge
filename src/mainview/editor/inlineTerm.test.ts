@@ -3,8 +3,9 @@ import { escapeLeaves, isRunKey, liveRows, neededRows, RUN_KEYS, runKeyBytes } f
 
 describe("neededRows", () => {
   test("counts the cursor's blank line, so xterm never has to scroll to keep it", () => {
-    // Three echoes: output on rows 0-2, cursor parked on row 3 by the last
-    // newline. Asking for 3 would make xterm scroll line 1 into scrollback.
+    // Three echoes put output on rows 0 to 2. The last newline leaves the
+    // cursor on row 3. Asking xterm for 3 rows would scroll line 1 into
+    // scrollback instead of dropping the blank row.
     expect(neededRows(3, 3)).toBe(4);
   });
 
@@ -14,8 +15,8 @@ describe("neededRows", () => {
   });
 
   test("a cursor left up inside the output does not shrink the grid", () => {
-    // A program that moved the cursor home (a redraw, a spinner) must not cost
-    // the output below it.
+    // A redraw or a spinner moves the cursor back to the top. The output
+    // below it still counts, so the row count stays 10.
     expect(neededRows(10, 0)).toBe(10);
   });
 
@@ -30,8 +31,9 @@ describe("liveRows", () => {
   });
 
   test("never shrinks a running grid", () => {
-    // A program that cleared the screen: it is drawing into those rows, so the
-    // panel must not collapse around what is on screen this instant.
+    // A program that cleared the screen is still drawing into those rows. The
+    // grid keeps its current height rather than shrinking to what is on
+    // screen right now.
     expect(liveRows(12, 1, false)).toBe(12);
   });
 
@@ -46,8 +48,9 @@ describe("liveRows", () => {
 
 describe("escapeLeaves", () => {
   test("a lone Escape stays with the program", () => {
-    // Long since the last one: this is the first tap, and it belongs to
-    // whatever is running (a shell's vi mode, an agent's interrupt).
+    // The last Escape was long ago (past ESC_EXIT_MS), so this counts as a
+    // first tap and goes to the running program: a shell's vi mode, an
+    // agent's interrupt.
     expect(escapeLeaves({ meta: false, pinned: false, sinceLastEscMs: 5000 })).toBe(false);
   });
 
@@ -60,12 +63,15 @@ describe("escapeLeaves", () => {
   });
 
   test("a full-screen program keeps both taps", () => {
-    // vim's habitual double Escape must not eject the user from vim.
+    // Pressing Escape twice is a habit in vim. Both taps stay with the
+    // program instead of handing the keyboard back to the note.
     expect(escapeLeaves({ meta: false, pinned: true, sinceLastEscMs: 80 })).toBe(false);
   });
 
   test("⌘Escape always leaves, full-screen program or not", () => {
-    // The one form no program can claim, so it is the exit that always exists.
+    // `meta` is checked before `pinned`, so ⌘Escape leaves either way. It is
+    // also the one form a full-screen program cannot swallow, which is why it
+    // is the exit while a program owns the screen.
     expect(escapeLeaves({ meta: true, pinned: true, sinceLastEscMs: 5000 })).toBe(true);
     expect(escapeLeaves({ meta: true, pinned: false, sinceLastEscMs: 5000 })).toBe(true);
   });
@@ -85,8 +91,10 @@ describe("runKeyBytes", () => {
     expect(runKeyBytes("left", false)).toBe("\x1b[D");
   });
 
-  // DECCKM, which every full-screen program turns on: sending the other form
-  // is an arrow that does nothing, in the one place arrows are the interface.
+  // The second argument is application cursor mode (DECCKM), which vim, less
+  // and ncurses programs turn on while they own the screen. An arrow is
+  // `ESC O A` there and `ESC [ A` everywhere else. The wrong form is an arrow
+  // that does nothing, in the one place arrows are the whole interface.
   test("arrows while a program owns the screen", () => {
     expect(runKeyBytes("up", true)).toBe("\x1bOA");
     expect(runKeyBytes("down", true)).toBe("\x1bOB");
@@ -94,7 +102,8 @@ describe("runKeyBytes", () => {
     expect(runKeyBytes("left", true)).toBe("\x1bOD");
   });
 
-  // The mode is a fact about the cursor keys and nothing else.
+  // DECCKM changes the cursor keys only. Ctrl-C and Escape send the same
+  // bytes either way.
   test("the mode leaves the others alone", () => {
     expect(runKeyBytes("ctrlC", true)).toBe("\x03");
     expect(runKeyBytes("escape", true)).toBe("\x1b");
@@ -105,8 +114,9 @@ describe("runKeyBytes", () => {
     expect(runKeyBytes("leave", true)).toBe("");
   });
 
-  // The bar's tap arrives as a bare string, so an id the page does not know
-  // has to be a refusal rather than bytes nobody chose.
+  // A tap on the accessory bar arrives as a bare string, so an id the page
+  // does not know has to be a refusal. `sendRunKey` calls `isRunKey` and
+  // returns false when it says no, rather than turning the name into bytes.
   test("the vocabulary is closed", () => {
     for (const key of RUN_KEYS) expect(isRunKey(key)).toBe(true);
     expect(isRunKey("ctrlZ")).toBe(false);

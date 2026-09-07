@@ -36,8 +36,9 @@ describe("the editor's context menu", () => {
   });
 
   test("what the pointer landed on comes first, and only when it landed on it", () => {
-    // The whole point of the contextual group: a menu that offered Open Link
-    // over every paragraph would be teaching that its items do nothing.
+    // Prose gets neither contextual verb. A menu that offered Open Link over
+    // every paragraph would teach that its items do nothing
+    // (interactions.md §11).
     expect(verbs()).not.toContain("link.open");
     expect(verbs()).not.toContain("task.toggle");
     expect(at({ onLink: true })[0]).toBe("link.open");
@@ -51,15 +52,18 @@ describe("the editor's context menu", () => {
       "block.runInline",
       "block.runInTerminal",
     ]);
-    // §4c: the probe withholds the flag for an unterminated fence, so the pair
-    // is simply absent rather than present and answering with a notice.
+    // An unterminated fence has no agreed body, so runnableBlockAt returns
+    // false (editor/blocks.ts; interactions.md §4c). The menu leaves the pair
+    // out rather than showing it and then answering with a notice.
     expect(verbs()).not.toContain("block.runInline");
   });
 
   test("a read-only page keeps reading and loses writing", () => {
-    // The manual (architecture.md §3b). Copy and Select All survive — copying
-    // a command out of the docs is what the docs are for — and its runnable
-    // demos still run.
+    // Read-only is the built-in manual (architecture.md §3b). Copy and Select
+    // All survive so a command can be copied out of it, and read-only alone
+    // does not remove the run pair. Every fence in the manual carries `norun`
+    // (writing.md §10), so onRunnableBlock is false there and the pair does
+    // not appear on a manual page.
     expect(at({ readOnly: true, onRunnableBlock: true })).toEqual([
       "block.runInline",
       "block.runInTerminal",
@@ -73,9 +77,10 @@ describe("the editor's context menu", () => {
   });
 
   test("no menu opens, closes, or doubles a separator", () => {
-    // A group that came back empty must take its divider with it — the same
-    // rule buildMenu holds the menu bar to, for the same reason: a hidden item
-    // that leaves a visible gap says something is missing.
+    // Every one of the sixteen contexts, not just the interesting ones. A
+    // group that came back empty takes its divider with it, because a gap
+    // where a hidden item was reads as a missing item. buildMenu holds the
+    // menu bar to the same rule (menu.ts).
     for (const onLink of [true, false])
       for (const onTask of [true, false])
         for (const onRunnableBlock of [true, false])
@@ -90,9 +95,11 @@ describe("the editor's context menu", () => {
   });
 
   test("every id it can name is a real command", () => {
-    // menu.test.ts's first check, for the other spec. The registry is asked
-    // the same question in registry.test.ts, which also needs these ids to
-    // count as reachable; here it is enough that the key table knows them.
+    // menu.test.ts opens with the same check for the menu bar. Here it is
+    // asked of the key table (keys.ts) rather than of the registry, and the
+    // key table knowing every id is enough. registry.test.ts imports
+    // EDITOR_MENU_COMMANDS and seeds its inAMenu set with them, so these
+    // commands count as reachable without a keyboard.
     for (const id of EDITOR_MENU_COMMANDS) expect(COMMANDS[id]).toBeDefined();
     expect(EDITOR_MENU_COMMANDS.length).toBeGreaterThan(0);
   });

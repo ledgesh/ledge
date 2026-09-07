@@ -1,9 +1,9 @@
-// The Install Shell Command bridge — the configureX pattern (architecture.md
-// §5): main.tsx binds `install` to the cliInstall RPC, the harness binds a
-// stub, and the command registry reaches it through installCli without
-// importing either. The result is already a finished message: Bun composes
-// it (it alone knows where the shim landed and what PATH says), the view
-// only chooses which strip shows it.
+// The Install Shell Command bridge, one of the configureX bridges
+// (architecture.md §5). boot.tsx binds `install` to the cliInstall RPC and the
+// harness binds a stub. The command registry calls installCli without
+// importing either. Bun composes the finished message: only it knows where the
+// shim landed and whether that folder is on PATH. The view only picks the
+// strip, neutral on success and error on failure.
 export interface CliHandlers {
   install(): Promise<{ ok: boolean; message: string }>;
 }

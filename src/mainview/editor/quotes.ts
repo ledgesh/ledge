@@ -1,46 +1,44 @@
-// Enter on an empty blockquote line exits the quote.
+// Enter on an empty blockquote line exits the quote (interactions.md §3).
 //
-// Upstream (@codemirror/lang-markdown's insertNewlineContinueMarkup, the
-// markdown() Enter binding) gives lists this: Enter on an empty item deletes
-// the marker. Blockquotes never got that path — Enter on an empty `> ` line
-// inserts ANOTHER `> ` (normalizing the current line to a bare `>` on the
-// way, which is the mismatched-markers look), and the only way out is two
-// aligned empty quote lines plus a third Enter that then strips both without
-// even inserting a newline. This binding closes the gap: one Enter on a
-// marker-only quote line clears the line and leaves the caret on it, exactly
-// the list feel. It runs at the same Prec.high as markdown's own keymap and
-// is registered ahead of it (setup.ts), so it wins only the case it handles
-// and falls through (returns false) everywhere else.
+// Upstream does this for lists, not blockquotes. @codemirror/lang-markdown's
+// Enter binding (insertNewlineContinueMarkup) deletes the marker on an empty
+// list item. Enter on an empty `> ` line inserts another `> ` and rewrites
+// the current line to a bare `>`. The markers no longer line up. The only way
+// out upstream is two aligned empty quote lines plus a third Enter. That
+// Enter strips both markers and inserts no newline. This binding clears a
+// marker-only quote line on the first Enter and leaves the caret there, the
+// one press a list already gets. It runs at the same Prec.high as markdown's
+// keymap and is registered ahead of it (setup.ts). It wins only the case it
+// handles and returns false everywhere else.
 import type { SyntaxNode } from "@lezer/common";
 import { Prec, type StateCommand } from "@codemirror/state";
 import { ensureSyntaxTree } from "@codemirror/language";
 import { keymap } from "@codemirror/view";
 
 /**
- * Whether a line is nothing but blockquote markers and whitespace — the
- * "empty quoted line" Enter should exit from. Pure, so the shape of the rule
- * is testable without an editor; the caller still owns asking the parser
- * whether the line really sits in a Blockquote (a `> ` inside a code fence
- * matches this regex but is code, not quote).
+ * Whether a line holds nothing but blockquote markers and whitespace. That is
+ * the empty quoted line that Enter exits from. The function is pure, so the
+ * rule is testable without an editor. The caller still asks the parser
+ * whether the line really sits in a Blockquote: a `> ` inside a code fence
+ * matches this regex but is code, not quote.
  */
 export function isQuoteMarkerOnly(lineText: string): boolean {
   return /^[ \t]*>(?:[ \t]*>)*[ \t]*$/.test(lineText.replace(/\r$/, ""));
 }
 
-// A StateCommand (not an EditorView command) so the whole behavior — not
-// just the line predicate — is testable headlessly (quotes.test.ts).
+// A StateCommand, not an EditorView command, so the whole behavior, not just
+// the line predicate, is testable headlessly (quotes.test.ts).
 export const exitQuote: StateCommand = ({ state, dispatch }) => {
   const clear = new Map<number, { from: number; to: number }>();
   for (const range of state.selection.ranges) {
     if (!range.empty) return false;
     const line = state.doc.lineAt(range.head);
     if (!isQuoteMarkerOnly(line.text)) return false;
-    // ensureSyntaxTree, not syntaxTree: this runs between two fast Enters,
-    // and the incremental parse may not have reached the just-typed line —
-    // a stale tree here reads as "not a quote" and silently falls through to
-    // the upstream behavior this module exists to replace. Forcing the parse
-    // up to the caret's line is trivially cheap at note sizes; a doc so big
-    // the budget fails degrades to upstream, never breaks.
+    // ensureSyntaxTree, not syntaxTree: this runs between two fast Enters and
+    // the incremental parse may not have reached the just-typed line. A stale
+    // tree reads as "not a quote" and falls through silently to the upstream
+    // behavior this module replaces. Parsing up to the caret's line is cheap
+    // at note sizes. A doc too big for the 50ms budget falls through too.
     const tree = ensureSyntaxTree(state, line.to, 50);
     if (!tree) return false;
     let quoted = false;

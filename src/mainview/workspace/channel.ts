@@ -1,16 +1,14 @@
-// The view end of the workspace-registry RPC, mirroring notes/channel.ts:
-// workspace/actions.ts calls these, main.tsx binds them to the Electroview RPC,
+// The view end of the workspace-registry RPC, mirroring notes/channel.ts.
+// workspace/actions.ts calls these, boot.tsx binds them to the server's RPC,
 // the harness binds an in-memory fake. The folder strings crossing here are
-// opaque root handles Bun handed out (workspaceList / create / attach); the
+// opaque root handles Bun handed out (workspaceList, create, attach); the
 // view never constructs one (architecture.md §2).
-//
-// This module also remembers each root's KIND (managed vs external), recorded
-// as the handles come through the wrappers below — the one place every root
-// enters the view. The map exists for exactly one consumer: the per-workspace
-// default cwd (workspaceDefaultCwd; notes/store.ts merges it into the spawn
-// params it sends). It is derived Bun-side truth mirrored for a default, never
-// persisted — layout.json must not store kind (architecture.md §2), and a
-// stale entry after detach costs nothing because its folder has no notes open.
+
+// This module also records each root's kind (managed, external, or docs) as
+// the handles pass through the wrappers below. workspaceDefaultCwd,
+// workspaceKind and docsFolder read the map. It mirrors Bun-side truth and is
+// never persisted: layout.json must not store kind (architecture.md §6a). A
+// stale entry after a detach is harmless: its folder has no notes open.
 import type { WorkspaceRootInfo } from "../../shared/rpc-schema";
 
 export interface AttachResult {
@@ -22,13 +20,15 @@ export interface AttachResult {
 interface WorkspaceHandlers {
   list: () => Promise<{ workspaces: WorkspaceRootInfo[]; dailyRoot: string | null }>;
   create: (name: string) => Promise<string>;
-  // Opens the NATIVE folder picker Bun-side; root null + error null = cancelled.
+  // Opens the native folder picker Bun-side. A null root with a null error
+  // means the user cancelled.
   attach: () => Promise<AttachResult>;
   detach: (root: string) => Promise<boolean>;
-  // The native picker again, choosing the destination PARENT; Bun renames the
-  // root's folder into it. Same result shape as attach: the new root handle,
-  // a refusal, or the cancelled nulls. `home` skips the picker and targets
-  // the app home (the Move Workspace Folder Home face).
+  // Runs the native picker again for the destination parent folder. Bun
+  // renames the root's folder into it. The result has the same shape as
+  // attach's: the new root handle, a refusal, or the cancelled nulls. `home`
+  // skips the picker and targets the app home (the Move Workspace Folder
+  // Home face).
   move: (root: string, home: boolean) => Promise<AttachResult>;
 }
 
@@ -46,21 +46,22 @@ function bridge(): WorkspaceHandlers {
 const kinds = new Map<string, "managed" | "external" | "docs">();
 
 /**
- * Record roots that entered the view outside the wrappers below — the boot
- * fetch in main.tsx (and the harness), which calls the RPC directly.
+ * Record roots that entered the view outside the wrappers below. The boot
+ * fetch in boot.tsx calls the RPC directly; the harness and the tests record
+ * from their own fakes.
  */
 export function recordWorkspaceKinds(infos: WorkspaceRootInfo[]): void {
   for (const info of infos) kinds.set(info.root, info.kind);
 }
 
-// The daily.workspace setting resolved Bun-side to a registered root (null =
-// unset/stale), recorded off the same workspaceList response the kinds come
-// from. One consumer: the Edit/New Daily Template faces, which must point at
-// the workspace ⌘J will actually act in — Bun still re-resolves on every ⌘J,
-// so this mirror is display truth, never authority.
+// The daily.workspace setting resolved Bun-side to a registered root, null
+// when unset or stale. It comes from the same workspaceList response as the
+// kinds. Two consumers: the Edit/New Daily Template faces (they must point
+// where ⌘J acts) and ⌘J's own visibility gate in the docs workspace. Bun
+// re-resolves on every ⌘J, so it never decides where a daily note lands.
 let dailyRoot: string | null = null;
 
-/** The boot fetch's share, recordWorkspaceKinds's sibling. */
+/** The boot fetch records the daily root here, as it does the kinds. */
 export function recordDailyRoot(root: string | null): void {
   dailyRoot = root;
 }
@@ -70,14 +71,13 @@ export function dailyWorkspaceRoot(): string | null {
 }
 
 /**
- * The default working directory for shells of notes in `folder`, or null for
- * "no opinion" ($HOME, Bun's own default). An EXTERNAL workspace anchors its
- * shells to the folder the user attached — that folder being a project
- * directory is the main reason to attach one — while a managed
- * ~/.ledge/<slug>/ stays null: a shell born inside a hidden dotfolder is
- * rarely what anyone wants. A note's own frontmatter `cwd:` beats both
- * (notes/store.ts syncParams), and Bun still validates whatever is sent
- * (bun/spawnParams.ts resolveCwd — a missing dir degrades to $HOME + warning).
+ * The default working directory for shells of notes in `folder`, null for
+ * none (Bun spawns in $HOME). An external workspace anchors its shells to the
+ * folder the user attached, which is mostly why anyone attaches a project
+ * folder. A managed ~/.ledge/<slug>/ gets null: a shell born in a hidden
+ * dotfolder helps nobody. A note's own `cwd:` wins over both (notes/store.ts
+ * syncParams), and Bun validates the cwd it receives (bun/spawnParams.ts
+ * resolveCwd, architecture.md §6a).
  */
 export function workspaceDefaultCwd(folder: string): string | null {
   return kinds.get(folder) === "external" ? folder : null;
@@ -112,16 +112,16 @@ export function attachWorkspaceFolder(): Promise<AttachResult> {
   });
 }
 
-// Deregisters only — the folder and every note in it stay on disk.
+// Deregisters only. The folder and every note in it stay on disk.
 export function detachWorkspaceFolder(root: string): Promise<boolean> {
   return bridge().detach(root);
 }
 
-// Bun runs the destination picker and the rename; the view learns only the
-// new root handle. The kind map is re-recorded under the new handle because a
-// move can flip it (into the app home = managed, out = external) — and the
-// default-cwd consumer must see the flip: a folder moved out of ~/.ledge now
-// anchors its notes' shells. `home` is the pickerless return trip.
+// Bun runs the destination picker and the rename, handing back only the new
+// root handle. A move can flip the kind: into the app home makes it managed,
+// out of it makes it external. The map is re-recorded under the new handle so
+// workspaceDefaultCwd sees the flip, since a folder moved out of ~/.ledge now
+// anchors its notes' shells. `home` skips the picker and targets the app home.
 export function moveWorkspaceFolder(root: string, home = false): Promise<AttachResult> {
   return bridge().move(root, home).then((res) => {
     if (res.root !== null && res.kind !== null) {
@@ -132,19 +132,19 @@ export function moveWorkspaceFolder(root: string, home = false): Promise<AttachR
   });
 }
 
-// The recorded kind of a root, for the surfaces that show or gate per kind
-// (the Move Home face exists only for external workspaces; every read-only
-// gate keys off "docs"). Same mirrored Bun-side truth as workspaceDefaultCwd —
-// display and gating, never a guard: Bun re-derives kind on every move, and
-// every docs write is refused Bun-side whatever this map says.
+// The recorded kind of a root, for the surfaces that show or gate per kind.
+// The Move Home face exists only for external workspaces, and every read-only
+// gate keys off "docs". Like workspaceDefaultCwd, this mirrors Bun-side truth
+// and guards nothing. Bun re-derives the kind on every move, and it refuses
+// every docs write whatever this map says.
 export function workspaceKind(folder: string): "managed" | "external" | "docs" | null {
   return kinds.get(folder) ?? null;
 }
 
-// The one folder whose kind is "docs" — the built-in Documentation
-// workspace's root handle, recorded off the boot workspaceList like the
-// kinds it rides in. Null when Bun never reported one (a harness without
-// docs seeded, or a boot that failed): the Documentation command hides.
+// The root handle of the built-in Documentation workspace, the one folder
+// whose kind is "docs". It is recorded off the boot workspaceList with the
+// other kinds. Null when Bun never reported one (a harness with no docs
+// seeded, or a boot that failed), and the Documentation command then hides.
 export function docsFolder(): string | null {
   for (const [folder, kind] of kinds) if (kind === "docs") return folder;
   return null;

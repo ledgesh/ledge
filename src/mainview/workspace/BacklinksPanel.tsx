@@ -1,13 +1,15 @@
-// The Backlinks panel: which notes [[link]] to the note in the focused pane's
-// active tab. The right-hand mirror of the sidebar — Shell owns its open state
-// and width like the terminal drawer's (ephemeral chrome, architecture.md §5).
+// The Backlinks panel lists the notes that [[link]] to the note in the focused
+// pane's active tab. It is the sidebar's right-hand mirror. Shell (App.tsx)
+// owns the slot's open state and width the way it owns the terminal drawer's
+// (ephemeral chrome, architecture.md §5).
 //
-// The list is Bun's answer over the noteBacklinks RPC (the same scan the MCP
-// `backlinks` tool runs); the view never holds the linking notes' bodies. Rows
-// are the standard keyboard-navigable kind (useListNav + a `backlink` target,
-// commands/target.ts): Enter — or a click, or the context menu — runs
+// Bun owns the scan and answers over the noteBacklinks RPC, the same scan the
+// MCP `backlinks` tool runs. The view never holds the linking notes' bodies.
+// Rows are the standard keyboard-navigable kind (useListNav plus a `backlink`
+// target, commands/target.ts). Enter, a click, or the context menu runs
 // backlink.open, which opens the linking note with its [[link]] line revealed
-// and selected, the search overlay's open-at-the-hit.
+// and selected, the same open-at-the-hit move the search overlay makes
+// (commands/Overlay.tsx).
 import { useEffect, useMemo, useRef, useState } from "react";
 import { FileText, Link2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -34,22 +36,22 @@ export function BacklinksPanel() {
   const nav = useListNav();
   const tab = focusedTab(selected);
   const path = tab?.path ?? null;
-  // null is "no answer yet" — the panel goes quiet rather than flashing the
-  // empty state while the first fetch is in flight.
+  // null means no answer yet. The panel renders nothing during the first
+  // fetch rather than flashing the empty state.
   const [hits, setHits] = useState<BacklinkHit[] | null>(null);
-  // Locked notes' bodies are never scanned (locking.md §4); the footer
-  // says so where the missing rows would have been.
+  // Locked notes' bodies are never scanned (locking.md §4). A footer below
+  // gives the count.
   const [lockedSkipped, setLockedSkipped] = useState(0);
   const [menu, setMenu] = useState<{ hit: BacklinkHit; x: number; y: number } | null>(null);
 
-  // Refetch when the shown note changes and when its folder's files do. The
-  // folder's note list covers both change routes with one dependency: the
-  // watcher push and the focus refresh each land in refreshFolder, whose
-  // dispatch replaces notesOf's array — including for Ledge's own saves,
-  // which the watcher reports unfiltered (rpc notesChanged). The direct
-  // onNotesChanged subscription below is the low-latency half: it fires
-  // before the folder re-list round-trips, so an agent edit shows up here as
-  // fast as it does in the editor.
+  // Refetch when the shown note changes (the `path` dependency below) and when
+  // its folder's files do. Two routes change the folder's files: the watcher
+  // push (rpc notesChanged, which reports Ledge's own saves too) and the
+  // refresh on window focus. Each lands in refreshFolder, whose dispatch
+  // replaces notesOf's array, so the folderNotes dependency covers them. The
+  // onNotesChanged subscription below is the low-latency path: it fires before
+  // the folder re-list round-trips, so an agent edit shows up here as fast as
+  // it does in the editor.
   const folderNotes = notesOf(state, selected.folder);
   // Where each linking note lives: a hit carries a path and a title, not a
   // placement (notes/FolderLabel.tsx).
@@ -70,9 +72,9 @@ export function BacklinksPanel() {
           setLockedSkipped(b.lockedSkipped);
         },
         (err) => {
-          // A failed scan (unmounted volume mid-session, say) costs the list,
-          // not the app; the panel shows the empty state rather than lying
-          // with stale rows.
+          // A failed scan (an unmounted volume mid-session, say) costs this
+          // list and not the app: the rows are emptied instead of left stale
+          // on screen, and the panel shows its empty state.
           console.error("[backlinks] scan failed for", path, err);
           if (generation.current !== gen) return;
           setHits([]);
@@ -89,9 +91,9 @@ export function BacklinksPanel() {
   return (
     <aside className="flex h-full min-h-0 flex-col border-l bg-background">
       {/* 48 and 44 on touch, the same pair the app header takes and for the
-          same reason (§1a). The Outline and Tags panels are the other two faces
-          of this slot and carry it identically — on a phone the panel covers
-          the note, so its ✕ is the only way back. */}
+          same reason (interactions.md §1a). The Outline and Tags panels are
+          the other two faces of this slot and carry it identically. On a phone
+          the panel covers the note, so its ✕ is the only way back. */}
       <div className="flex h-9 shrink-0 items-center gap-1.5 border-b px-3 touch:h-[48px]">
         <Link2 className="size-3.5 shrink-0 text-muted-foreground" />
         <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -149,7 +151,7 @@ export function BacklinksPanel() {
             target={targetOf(menu.hit)}
             onClose={() => setMenu(null)}
           />
-          {/* The linking note is an ordinary note; Copy Path is the note-row
+          {/* The linking note is an ordinary note. Copy Path is the note-row
               command with a note target, not a second implementation. */}
           <CommandMenuItem
             id="note.copyPath"
@@ -167,8 +169,8 @@ function Hint({ children }: { children: React.ReactNode }) {
 }
 
 // One incoming link: the linking note's title, with the line the link sits on
-// beneath it. One row per OCCURRENCE, not per note — the same note linking
-// three times is three places to jump to.
+// beneath it. One row per occurrence, not per note, so a note that links three
+// times produces three rows.
 function BacklinkRow({
   hit,
   folder,
@@ -177,7 +179,7 @@ function BacklinkRow({
   onContextMenu,
 }: {
   hit: BacklinkHit;
-  // Where the LINKING note lives, or undefined at the top level.
+  // Where the linking note lives, or undefined at the top level.
   folder: string | undefined;
   rowProps: ReturnType<ReturnType<typeof useListNav>["rowProps"]>;
   onOpen: () => void;

@@ -2,22 +2,21 @@
 // style, not prefix or plain substring). Every query character must appear in
 // order, but not adjacently: "shnt" finds "shipping-notes".
 //
-// Scoring considers the BEST alignment, not the leftmost one. Greedy matching
-// (walk the text taking the first occurrence of each character) is cheaper, but
-// it cannot rank: for "n" against "shipping-notes" it locks onto the n in
-// "shipping" and never sees the one starting "notes", so a clean word-boundary
-// hit scores identically to a mid-word accident. A small dynamic program over
-// (query char, text position) picks the alignment a human would.
+// Scoring considers every alignment, not just the leftmost. Greedy matching
+// (take the first occurrence of each character) is cheaper but cannot rank:
+// for "n" it stops at the n in "shipping" and scores "shipping-notes" no
+// better than "shipping". The small dynamic program below, over (query char,
+// text position), scores every alignment and keeps the best.
 import type { NoteMeta } from "./channel";
 
-// Characters that start a new "word" in a filename, so a match just after one
-// reads as intentional (the n in shipping-|notes).
+// Characters that start a new word in a filename. A match just after one
+// scores higher, as the n does in shipping-|notes.
 const BOUNDARY = /[-_ /.]/;
 
-const MATCH = 10; // every matched character is worth something
-const AT_BOUNDARY = 8; // ...more if it starts a word
-const ADJACENT = 15; // ...much more if it continues an unbroken run
-const MAX_GAP_PENALTY = 10; // one big skip should not sink an otherwise good match
+const MATCH = 10; // the base score for a matched character
+const AT_BOUNDARY = 8; // added when the match starts a word
+const ADJACENT = 15; // added when the match continues an unbroken run
+const MAX_GAP_PENALTY = 10; // the most one skip can cost, so a good match survives it
 const NONE = -Infinity;
 
 // What a match at `j` is worth on its own, before any link to the previous one.
@@ -26,17 +25,18 @@ function base(t: string, j: number): number {
 }
 
 // Score `text` against `query`, or null if it does not match at all. Higher is
-// better; the scale is arbitrary and only meaningful for ranking one query's
-// results against each other.
+// better. The scale is arbitrary: scores only rank the results of one query
+// against each other.
 export function fuzzyScore(query: string, text: string): number | null {
   if (query === "") return 0;
   const q = query.toLowerCase();
   const t = text.toLowerCase();
   if (q.length > t.length) return null;
 
-  // best[j] = the best score for matching the query so far with its LAST
-  // character landing on text position j. Seeded with the first query character,
-  // penalised by how far into the name it sits.
+  // best[j] = the best score for matching the query so far with its last
+  // character landing on text position j. Seeded at every position holding the
+  // first query character, less how far into the name it sits (capped at
+  // MAX_GAP_PENALTY).
   let best: number[] = new Array(t.length).fill(NONE);
   for (let j = 0; j < t.length; j += 1) {
     if (t[j] === q[0]) best[j] = base(t, j) - Math.min(j, MAX_GAP_PENALTY);
@@ -64,23 +64,20 @@ export function fuzzyScore(query: string, text: string): number | null {
   return top === NONE ? null : top;
 }
 
-// The command palette's boost for chorded commands. A chord is the registry's
-// own frequency claim (interactions.md §2: chords are EARNED by how often
-// an act is reached for), so between comparable matches the palette surfaces
-// the act the user most likely wants — "daily" puts ⌘J's Open Today's Daily
-// Note above the unchorded template verbs, whose match merely starts earlier
-// in the title. Sized between MAX_GAP_PENALTY (so it outweighs where in the
-// title the match happens to sit) and the ~25 a longer unbroken run scores
-// (so it can never beat a genuinely tighter match: "edit daily" still ranks
-// Edit Daily Template first).
+// The command palette's boost for chorded commands. A chord marks a
+// frequent act: chords are scarce and allocated by hand (interactions.md §2).
+// The boost decides which of two comparable matches ranks first. "daily"
+// puts ⌘J's Open Today's Daily Note above Edit Daily Template. It exceeds
+// MAX_GAP_PENALTY, so it outweighs where in a title a match sits. A second
+// adjacent character adds 25, so the boost never beats a tighter match.
 export const CHORD_BOOST = 12;
 
 // Anything matching `query`, best first, labelled by `key`. An empty query
-// keeps every item and sorts by label. Ties break on the label so the order is
-// stable and never depends on the order the items happened to arrive in.
-// `boost` adds a per-item constant AFTER match scoring — item importance, on
-// the same arbitrary scale (the palette passes CHORD_BOOST for chorded
-// commands); it never revives a non-match.
+// keeps every item and sorts by label. Ties break on the label, so the order
+// is stable and never depends on the order the items arrived in. `boost` adds
+// a per-item constant after match scoring: item importance, on the same
+// arbitrary scale (the palette passes CHORD_BOOST for chorded commands only).
+// It never revives a non-match.
 export function fuzzyFilter<T>(
   query: string,
   items: readonly T[],
@@ -98,7 +95,7 @@ export function fuzzyFilter<T>(
   return scored.map((s) => s.item);
 }
 
-// Notes matching `query`, best first — the quick-open palette's filter.
+// Filters `notes` by `query` for the quick-open palette, best match first.
 export function filterNotes(query: string, notes: NoteMeta[]): NoteMeta[] {
   return fuzzyFilter(query, notes, (n) => n.title);
 }

@@ -1,11 +1,8 @@
 // The registry's effectful edges, kept out of registry.ts so its unit tests
-// never import the editor stack or the RPC channel.
-//
-// uiHooks mirrors the editor bridge's configureBridge pattern: each owner
-// registers the capabilities it holds (Shell the chrome toggles, Sidebar the
-// rename field, NoteBrowser the delete-with-undo strip and the empty-trash
-// confirmation), and commands reach them through ctx.ui without the registry
-// importing any component.
+// never import the editor stack or the RPC channel. uiHooks follows the editor
+// bridge's configureBridge pattern: Shell registers the chrome toggles, Sidebar
+// the rename field, NoteBrowser the delete-with-undo strip and the empty-trash
+// confirmation. Commands reach them through ctx.ui, not by importing one.
 import { openSearchPanel } from "@codemirror/search";
 import { startCompletion } from "@codemirror/autocomplete";
 import { indentLess, indentMore, selectAll } from "@codemirror/commands";
@@ -46,9 +43,10 @@ import { attachWorkspace, closeDocs, closeWorkspace, createWorkspace, moveWorksp
 import { dailyWorkspaceRoot, docsFolder, workspaceKind } from "@/workspace/channel";
 import type { RegistryDeps, UiHooks } from "./types";
 
-// Enough of a note to parse its frontmatter — mirrors HEAD_BYTES in
-// bun/notes.ts, and the same accepted edge: a >4KB frontmatter block is
-// somebody's art project, not a params bug.
+// Enough of a note's text to parse its frontmatter. Matches HEAD_BYTES in
+// bun/notes.ts (bytes there, document positions here), and accepts the same
+// edge: a frontmatter block past 4KB is truncated, so the params below that
+// point are never parsed. That is the accepted edge, not a params bug.
 const HEAD_BYTES = 4096;
 
 export const uiHooks: Partial<UiHooks> = {};
@@ -57,9 +55,9 @@ export function configureUi(fns: Partial<UiHooks>): void {
   Object.assign(uiHooks, fns);
 }
 
-// Palette-invoked editor commands land here with focus still in the palette;
-// refocus the note's editor first so the command acts where the user expects
-// and the caret is where the panel/run needs it.
+// Run an editor command against a note's pooled view, focusing that editor
+// first. A palette or menu invocation arrives with the focus elsewhere, and a
+// find panel or a run needs the caret in the editor.
 function withView(docId: string, fn: (view: NonNullable<ReturnType<typeof getEditorView>>) => void) {
   const view = getEditorView(docId);
   if (!view) return;
@@ -82,16 +80,18 @@ export const registryDeps: RegistryDeps = {
   openDocsWindow,
   closeDocs,
   restartSession,
-  // Create-or-open today's note, then feed Bun's ExternalOpenInfo to the
-  // CLI-open subscriber (App.tsx): select-workspace-then-open has ONE
-  // definition, and this path must not grow a second.
+  // Create or open today's note, then feed Bun's ExternalOpenInfo to the
+  // CLI-open subscriber (App.tsx, via notes/channel.ts dispatchExternalOpen).
+  // That subscriber is the one place this path selects the workspace and then
+  // opens the note. Do not grow a second copy of that pair here.
   openDailyNote: async (folder) => {
     try {
       const r = await rpcOpenDaily(folder);
-      // Only when ⌘J actually MADE today's note: revisiting one you have been
-      // writing in all day must leave its caret alone. The caret and never a
-      // selection, because the title IS the date — a first keystroke that
-      // replaced it would rename the day.
+      // Place the title caret only when this call created the note. Reopening
+      // today's note reuses the pooled editor and the caret the user left in
+      // it (workspace/editorPool.ts acquire). The `false` leaves the title
+      // unselected: it is the date, and a keystroke over a selected title
+      // would rename the note (workspace/reveal.ts revealTitle).
       if (r.created) requestTitleCaret(r.open.path, false);
       dispatchExternalOpen(r.open);
       return null;
@@ -104,30 +104,31 @@ export const registryDeps: RegistryDeps = {
   folderExpanded: isExpanded,
   toggleFolder,
   expandFolder,
-  // The boot-recorded resolution of daily.workspace (workspace/channel.ts) —
-  // display truth for the Edit/New Daily Template faces; Bun re-resolves on
-  // every actual ⌘J.
+  // The daily.workspace setting as resolved at boot (workspace/channel.ts).
+  // Used only to label the Edit/New Daily Template faces: Bun re-resolves it
+  // on every ⌘J.
   dailyRoot: dailyWorkspaceRoot,
-  // Open a note that may live outside the selected workspace: the same
-  // external-open subscriber the CLI and ⌘J ride (select-then-open has ONE
-  // definition; selecting the already-selected workspace is a no-op).
+  // Open a note that may live outside the selected workspace, through the
+  // same external-open subscriber the CLI and ⌘J use, rather than a second
+  // select-then-open written here. Selecting the already-selected workspace
+  // is a no-op.
   openNoteIn: (root, note) => dispatchExternalOpen({ ...note, root }),
-  // Open-at-the-link for a Backlinks row: the raw [[...]] text is the reveal
-  // query, re-found on the line (workspace/reveal.ts) so a file that has
-  // moved on still lands on the link.
+  // Open a Backlinks row at its link. The raw [[...]] text is the reveal
+  // query, re-found on the line (workspace/reveal.ts revealSelection), so an
+  // edit that moved the link along its line still lands on it. An edit that
+  // moved the line itself lands on whatever that line number now holds.
   revealBacklink: (path, line, raw) => requestReveal(path, line, raw),
-  // The caret a just-created note opens with: on its H1, which is the rename
-  // UI, with the placeholder title selected so the first keystroke names the
-  // note (workspace/reveal.ts revealTitle). Every caller here made a note
-  // titled "Untitled": ⌘J's date title is the one that goes through
-  // requestTitleCaret unselected, above.
+  // The caret a just-created note opens with: inside its H1, which is the
+  // rename field, with the placeholder title selected so the first keystroke
+  // names the note (workspace/reveal.ts revealTitle). Callers here create a
+  // note titled "Untitled". ⌘J's date title takes requestTitleCaret
+  // unselected, above.
   revealTitle: (path) => requestTitleCaret(path, true),
   // Jump to an Outline row's heading in the note's own live editor. The
-  // heading text is the reveal query (revealSelection re-finds it on the
-  // line, so a doc that shifted still lands right); y "start" rather than the
-  // cross-note reveal's center, because a TOC jump means "show me this
-  // section" and the section is below the heading. withView focuses first —
-  // a jump is "take me there", like every reveal.
+  // heading text is the reveal query, re-found on the line
+  // (workspace/reveal.ts revealSelection). Scrolls with y "start", not the
+  // cross-note reveal's "center", so the section under the heading is what
+  // shows. withView focuses the editor first, as every reveal does.
   jumpToHeading: (docId, line, text) =>
     withView(docId, (view) => {
       const sel = revealSelection(view.state.doc, line, text);
@@ -141,17 +142,19 @@ export const registryDeps: RegistryDeps = {
     if (!view) return null;
     return view.state.sliceDoc(0, Math.min(HEAD_BYTES, view.state.doc.length));
   },
-  // No withView: this only asks a question, and focusing the editor to answer
-  // one would move the caret out of whatever surface is doing the asking.
+  // This one reads the view without going through withView: it only asks a
+  // question, and focusing the editor would take the focus off the menu or
+  // palette that asked.
   hasSelection: (docId) => {
     const view = getEditorView(docId);
     return !!view && hasSelection(view);
   },
   vaultState,
-  // Flush THEN drop, awaited in that order (locking.md §3): a dirty
+  // Flush, then drop the key, awaited in that order (locking.md §3): a dirty
   // locked buffer must reach disk encrypted while Bun still holds the key.
-  // The eviction of decrypted views rides the vaultChanged push this ends in
-  // (editorPool's subscription), not this call.
+  // Evicting the decrypted views is not this call's work: lockVault moves the
+  // vault state to locked, and editorPool's onVaultChanged subscription
+  // evicts on that change.
   lockVaultNow: () => {
     void flushAllNow().then(() => lockVault());
   },
@@ -171,36 +174,38 @@ export const registryDeps: RegistryDeps = {
     bold: (docId) => withView(docId, (view) => toggleBold(view)),
     italic: (docId) => withView(docId, (view) => toggleItalic(view)),
     insertLink: (docId) => withView(docId, (view) => insertLink(view)),
-    // CodeMirror's own, so a bar button and the Tab key are the same act with
-    // the same undo history — not a second implementation of indentation.
+    // CodeMirror's own indent commands, the ones Tab and ⇧Tab run
+    // (editor/setup.ts). The accessory bar's Indent and Outdent buttons and
+    // those two keys therefore make the same edit and share one undo history.
     indent: (docId) => withView(docId, (view) => void indentMore(view)),
     outdent: (docId) => withView(docId, (view) => void indentLess(view)),
-    // Type the `[[` and then ask for the popup. `startCompletion` is needed
-    // because an inserted bracket is not a keystroke: the source matches on
-    // the text before the caret (editor/wikilinks.ts) but nothing would have
+    // Insert the `[[`, then ask for the popup. `startCompletion` is needed
+    // because a dispatched insert is not a keystroke: the source matches on
+    // the text before the caret (editor/wikilinks.ts), but nothing would have
     // asked it to look.
     wikiLink: (docId) =>
       withView(docId, (view) => {
         view.dispatch(view.state.replaceSelection("[["));
         startCompletion(view);
       }),
-    // The fence, planted rather than typed (editor/fences.ts). Nothing is
-    // dispatched where a block cannot go — inside another one, or inside the
-    // frontmatter — which is the same silence Open Link answers a caret that is
-    // not on a link with.
+    // Plant a fenced block rather than type one: the typing path is closeFence
+    // in editor/fences.ts. A selection is wrapped whole, and a bare caret on a
+    // line with text gets the block after that line. insertCodeBlock dispatches
+    // nothing where a block cannot go (inside another block, on a fence line,
+    // in the frontmatter), just as Open Link does nothing off a link.
     codeBlock: (docId) => withView(docId, (view) => void insertCodeBlock(view)),
-    // The same embed the editor's ⌘V does, from the device's picker instead of
-    // its pasteboard (lib/assets.ts pickImageAsset). Fire and forget: the
-    // picker is on screen for as long as a person takes, and a command that
-    // awaited it would hold the dispatcher open for a minute.
+    // The same embed the editor's ⌘V does, from the device's picture picker
+    // instead of its pasteboard (lib/assets.ts pickImageAsset). Not awaited:
+    // the picker stays open until the user answers it, and awaiting would hold
+    // the command dispatcher open that long.
     insertImage: (docId) => withView(docId, (view) => void embedImage(view, pickImageAsset)),
     toggleTemplate: (docId) => withView(docId, (view) => toggleTemplateFlag(view)),
     editFrontmatter: (docId) => withView(docId, (view) => editFrontmatter(view)),
-    // The clipboard: the very commands the chords run (editor/clipboard.ts),
-    // so a menu item and ⌘C cannot come to differ. withView focuses first, as
-    // it does for every editor command — the menu took the focus when its item
-    // was clicked, and an edit that lands in an unfocused editor leaves the
-    // caret invisible.
+    // The same clipboard commands the chords run (editor/clipboard.ts), so a
+    // menu item and ⌘C run the same code. withView focuses first, as it does
+    // for every editor command: the menu took the focus when its item was
+    // clicked, and an edit that lands in an unfocused editor leaves the caret
+    // invisible.
     cut: (docId) => withView(docId, (view) => void cutSelection(view)),
     copy: (docId) => withView(docId, (view) => void copySelection(view)),
     paste: (docId) => withView(docId, (view) => void pasteHere(view)),

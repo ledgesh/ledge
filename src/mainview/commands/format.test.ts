@@ -4,7 +4,8 @@ import { chipOf, formatKey, keyChip, middleEllipsis, tooltip } from "./format";
 describe("formatKey", () => {
   test("letters uppercase with macOS glyph order ⌃⌥⇧⌘", () => {
     expect(formatKey("Mod-Shift-w")).toBe("⇧⌘W");
-    expect(formatKey("Shift-Mod-w")).toBe("⇧⌘W"); // order comes from us, not the spelling
+    // the glyph order comes from formatKey, not from the spelling
+    expect(formatKey("Shift-Mod-w")).toBe("⇧⌘W");
     expect(formatKey("Alt-Mod-b")).toBe("⌥⌘B");
     expect(formatKey("Ctrl-Alt-Shift-Mod-x")).toBe("⌃⌥⇧⌘X");
   });

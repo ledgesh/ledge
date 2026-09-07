@@ -1,24 +1,26 @@
 // What the client in front of the user can do, and what the machine holding
-// the notes can — two different questions, and the view needs both.
-//
+// the notes can do. Two different questions, and the view needs both.
 // Everything else in the app is a fact about the notes and belongs to the
-// server. These are not. Whether a note's blocks run HERE is a decision the
-// SHELL makes about itself (ios.md §8: a phone has no terminal drawer, and cut
-// inline runs as well until the surfaces they need had a touch column), and
-// whether a folder can be picked is a fact about the machine at the other end
-// (a headless server has no dialog to open, which is true of a VPS reached from
-// a Mac exactly as it is of one reached from a phone).
+// server. These are not.
 //
-// All of them exist so that a verb which cannot work is ABSENT rather than
-// present and failing (ios.md §8, interactions.md §4). A palette full of
-// entries that answer with an error strip teaches the user that the palette
-// lies.
+// Whether a note's blocks run here is the shell's answer about itself. A phone
+// has no terminal drawer, and v1 cut inline runs as well until the surfaces
+// they need had a touch column (ios.md §8). Whether a folder can be picked is
+// a fact about the machine at the other end. A headless server has no dialog
+// to open, which is true of a VPS reached from a Mac exactly as it is of one
+// reached from a phone.
 //
-// A configureX seam like the others (architecture.md, "State ownership"): the
-// entry point sets it before bootView, the registry's `when` predicates and the
-// chrome read it, and nothing writes it again. The defaults are the desktop
-// app's, so a shell that says nothing keeps every verb — the failure mode of a
-// forgotten call is a phone with a terminal button, not a Mac without one.
+// Four of the flags here withhold a verb that cannot work on this client, so
+// it is absent rather than present and failing: `runsBlocks`, `hasTerminal`,
+// `canPickFolder` and `canInstallCli` (interactions.md §8). `softKeyboard`
+// changes an editor rather than a verb, and `deviceKey` says which key
+// authenticates (ios.md §8).
+//
+// A configureX seam like the others (architecture.md §5). The entry point sets
+// it before bootView, the registry's `when` predicates and the chrome read it,
+// and nothing writes it again. The defaults are the desktop app's, so a shell
+// that says nothing keeps every verb. A forgotten call gives a phone with a
+// terminal button, not a Mac without one.
 
 interface Shell {
   /** Whether this client offers to run a note's blocks. */
@@ -56,10 +58,10 @@ export function configureShell(next: Partial<Shell>): void {
  * is the environment a block runs in and has nothing to edit for otherwise.
  *
  * Separate from `hasTerminal` because running a block and having a drawer are
- * separate surfaces, and a phone has the first without the second (ios.md §8):
- * an inline run is a panel under the fence, while a drawer is a second
- * arrangement, a second focus domain, and a keyboard grammar (Ctrl-`, Escape) a
- * phone has no way to type. One boolean could not say that; two can.
+ * separate surfaces, and a phone has the first without the second (ios.md §8).
+ * An inline run is a panel under the fence. A drawer is a second arrangement, a
+ * second focus domain, and a keyboard grammar (Ctrl-`, Escape) a phone has no
+ * way to type.
  */
 export function runsBlocks(): boolean {
   return shell.runsBlocks;
@@ -67,35 +69,34 @@ export function runsBlocks(): boolean {
 
 /**
  * Whether this client has a terminal drawer: the chrome's button, the toggle
- * and close verbs, and "Run Block in Terminal", which is the one verb that
- * needs both answers because it takes a block out of the note and puts it in
- * the drawer.
+ * and close verbs, and "Run Block in Terminal". That last verb needs both
+ * answers, because it takes a block out of the note and puts it in the drawer.
  */
 export function hasTerminal(): boolean {
   return shell.hasTerminal;
 }
 
-/** Whether a note on this client can have a shell of its own at all — either
+/** Whether a note on this client can have a shell of its own at all. Either
  * surface spawns one, and Restart Note Shell is the verb that kills it. */
 export function spawnsSessions(): boolean {
   return shell.runsBlocks || shell.hasTerminal;
 }
 
 /**
- * The line this client asks a server to trust, whole, or "" where the question
- * does not arise (remote.md §8, §4).
+ * The whole `authorized_keys` line this client asks a server to trust, or ""
+ * where the question does not arise (remote.md §8, §4).
  *
- * Both clients add, edit and remove servers; what differs is which key
- * authenticates. A Mac offers a key FILE, so its form asks for a path and its
- * user installs whichever public key they already have. A phone has exactly one
- * key, minted in the Secure Enclave, which cannot be read out of it and
- * therefore has no path (ios.md §4) — so its form asks for no path and shows
- * the `authorized_keys` line instead, because installing that line on the new
- * server is the step before a new connection can work at all.
+ * Both clients add, edit and remove servers, and what differs is which key
+ * authenticates. A Mac offers a key file, so its form asks for a path and its
+ * user installs whichever public key they already have. A phone has exactly
+ * one key, minted in the Secure Enclave, and it never leaves there, so there
+ * is no file for a path to name (ios.md §4). Its form asks for no path and
+ * shows this line instead. Installing the line on the new server is the step
+ * before a new connection can work.
  *
- * One string rather than a pair of booleans: "which key" is the whole of the
- * difference, and a client that has one of its own is exactly the client whose
- * form should be showing it.
+ * One string rather than a pair of booleans, because "which key" is the whole
+ * of the difference. A client with a key of its own is the client whose form
+ * shows it.
  */
 export function deviceKeyLine(): string {
   return shell.deviceKey;
@@ -104,36 +105,35 @@ export function deviceKeyLine(): string {
 /**
  * The device's share sheet, or null where there is none (ios.md §4).
  *
- * It exists for one string, which is the one above. A Mac copies that line
- * between two windows on one screen; a phone has the server nowhere on it, so
- * the clipboard ends at the device holding it and the line has to leave by
- * AirDrop, a message or a note to self. The sheet is how a phone hands a
- * string to another machine, and the alternative it replaces is retyping
- * base64.
+ * It exists for one string: the device key line above. A Mac copies that line
+ * between two windows on one screen. A phone's clipboard ends at the phone,
+ * and the server is another machine. The sheet is how a phone hands a string
+ * to another machine, by AirDrop, a message or a note to self. The alternative
+ * it replaces is retyping base64.
  *
- * The callback rather than a boolean, because the only client that has one
+ * A callback rather than a boolean, because the only client with a sheet
  * reaches it across the bridge and nothing else in the view can (ios.tsx). A
  * client that says nothing has none, so the button is absent on a Mac rather
- * than present and failing (interactions.md §4).
+ * than present and failing (interactions.md §8).
  */
 export function shareSheet(): ((text: string) => void) | null {
   return shell.shareSheet;
 }
 
 /**
- * Whether this client's keyboard is on screen, and therefore costs half the
- * page whenever anything takes focus.
+ * Whether this client's keyboard is on screen, and so costs half the page
+ * whenever anything takes focus.
  *
- * It decides two things. The read-only (documentation) editor stays focusable
- * on a Mac on purpose — find, ⌘C and ⌘↩ on the manual's own runnable blocks all
- * need it (editor/setup.ts). On a phone none of those three exist and the focus
- * summons a keyboard over a page nothing can type into, so there the same
+ * It decides two things. The read-only documentation editor stays focusable on
+ * a Mac, where find, ⌘C and ⌘↩ on the manual's own runnable blocks all need the
+ * focus (editor/setup.ts). A phone has none of those three chords, and the
+ * focus raises a keyboard over a page that drops every edit, so there the same
  * editor is not editable at all.
  *
- * And the overlay's mode chips drop the sigil they name (commands/Overlay.tsx).
- * The same question one step along: a soft keyboard is one where punctuation is
- * not a keystroke — both of ours are two plane switches deep on an iPhone — so
- * an accelerator printed there would be advice a phone cannot take.
+ * The overlay's mode chips also drop the sigil they name
+ * (commands/Overlay.tsx). Punctuation is not one keystroke on a soft keyboard.
+ * Both sigils are two plane switches deep on an iPhone, so a printed
+ * accelerator would be advice a phone cannot take.
  */
 export function softKeyboard(): boolean {
   return shell.softKeyboard;
@@ -142,14 +142,14 @@ export function softKeyboard(): boolean {
 /**
  * Whether New Window has anything to open (remote.md §8a).
  *
- * A window on the Mac is a CLIENT — its own connection, its own client id, its
- * own row in presence — which is why the verb exists at all: two machines at
- * once is two windows. A phone shows one app and has one window, so there the
+ * A window on the Mac is a client, with its own connection, its own client id
+ * and its own row in presence. The verb exists because two machines at once
+ * means two windows. A phone shows one app and has one window, so there the
  * verb is absent rather than present and silent.
  *
  * Asked rather than probed. `windowNew` answers false on a shell with no second
- * window to give, but a `when` predicate cannot await, and finding out by
- * calling would mean opening a window to learn whether one can be opened.
+ * window to give, but a `when` predicate cannot await, and calling it would
+ * mean opening a window to learn whether one can be opened.
  */
 export function multiWindow(): boolean {
   return shell.multiWindow;
@@ -157,9 +157,9 @@ export function multiWindow(): boolean {
 
 // The server's half. Not part of `Shell` above because it arrives from a
 // different place at a different time: the shell knows its own answers at boot,
-// and these come back with `workspaceList` on the first round trip, which is
-// also why they default to true — the window between the two is one paint long,
-// and a verb that flickers in is better than one that flickers out.
+// and these come back with `workspaceList` on the first round trip. They
+// default to true, so the desktop's verbs are present during the one paint
+// before `workspaceList` answers.
 //
 // Both are the same question asked about two verbs: does the machine at the
 // other end have the thing this verb needs? A headless server has neither, and
@@ -173,17 +173,18 @@ interface ServerCaps {
 
 let server: ServerCaps = { folderDialog: true, cliShim: true };
 
-/** Record what the machine holding the notes can do. From `workspaceList`, at
- * boot — field by field, so a response carrying more than these two does not
- * leave its extras here. */
+/** Record what the machine holding the notes can do, from `workspaceList` at
+ * boot. Copied field by field, so a response carrying more than these two
+ * leaves no extras here. */
 export function recordServerCaps(caps: ServerCaps): void {
   server = { folderDialog: caps.folderDialog, cliShim: caps.cliShim };
 }
 
 /** Whether the machine holding the notes can ask a person to choose a folder.
- * False on any headless server: `bun/server.ts` answers workspaceAttach and
- * workspaceMove with "attaching a folder needs the app running on the machine
- * that holds the notes", and this is how the verb stops being offered first. */
+ * False on any headless server, where `bun/server.ts` answers workspaceAttach
+ * and workspaceMove with "attaching a folder needs the app running on the
+ * machine that holds the notes". This flag hides the verb, so nobody reaches
+ * that refusal. */
 export function canPickFolder(): boolean {
   return server.folderDialog;
 }
@@ -192,11 +193,10 @@ export function canPickFolder(): boolean {
  * Whether the machine holding the notes can put `ledge` on its own PATH.
  *
  * The server's answer and not this client's, because the install writes a file
- * over there and the CLI it points at reads the notes over there: a `ledge`
- * installed on your Mac reads the notes your Mac holds, which are not the notes
- * on your screen. False on a server, where the shim has nothing to exec — a
- * compiled `ledge-server` is one program and the CLI is not in it
- * (bun/cliShim.ts).
+ * over there and the CLI it points at reads the notes over there
+ * (interactions.md §8). A `ledge` installed on the Mac in front of the user
+ * reads that Mac's notes, not the notes on screen. False on a server, where a
+ * compiled `ledge-server` has no CLI beside it to exec (bun/cliShim.ts).
  */
 export function canInstallCli(): boolean {
   return server.cliShim;

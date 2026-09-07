@@ -8,11 +8,11 @@ import type { Command, CommandCtx, CommandTarget, RegistryDeps } from "./types";
 
 const FOLDER = "/ws/notes";
 
-// The menu never runs a command in these tests — it only reads titles, keys,
-// and `when` — so the stub is inert where registry.test.ts's records calls.
-// The values that steer a `when` (vault state, docs folder, the live note
-// head) are the parameters, since what the menu shows is exactly what they
-// decide.
+// Stub deps for the menu tests. The menu never runs a command here: buildMenu
+// reads each command's title, keys, and `when` only, so these edges stay
+// inert, unlike registry.test.ts's stub, which records the calls it gets.
+// `over` replaces the values a `when` reads (vault state, docs folder, the
+// live note head), which decide what the menu shows.
 function stubDeps(over: Partial<RegistryDeps> = {}): RegistryDeps {
   const noop = () => {};
   return {
@@ -118,9 +118,10 @@ describe("menu spec", () => {
 
   test("no item names a command that needs a focused row", () => {
     // interactions.md §10: the menu bar has no row to point at, so a verb
-    // whose `when` only passes WITH a target (Open, Restore, Copy Path, Close
-    // Other Tabs) could only ever appear greyed. The test is the flip: does
-    // handing the command a target turn its `when` from false to true?
+    // whose `when` passes only with a target (Open, Restore, Copy Path, Close
+    // Other Tabs) could only ever appear greyed. The check below hands each
+    // command a target and asks whether that turns its `when` from false to
+    // true.
     const state = initialState(FOLDER, [{ path: `${FOLDER}/a.md`, title: "A", mtimeMs: 0 }]);
     const ctx = makeCtx(state);
     const leaf = firstLeaf(ctx.selected.root);
@@ -141,8 +142,8 @@ describe("menu spec", () => {
 
   test("no item claims a chord an inner handler already owns", () => {
     // interactions.md §10: AppKit's key-equivalent pass runs before the
-    // WebView, so claiming one of these would take it from CodeMirror or the
-    // shell for good. The item may still exist — it just carries no shortcut.
+    // WebView, so claiming one of these chords would take it from CodeMirror
+    // or the shell for good. The item may still appear, carrying no shortcut.
     const stolen = specCommands()
       .filter((i) => i.accelerator !== false)
       .map((i) => ({ id: i.command, binding: i.key ?? byId.get(i.command)?.keys?.[0] }))
@@ -153,9 +154,9 @@ describe("menu spec", () => {
   });
 
   test("nothing suppresses an accelerator it could safely have claimed", () => {
-    // The other direction: `accelerator: false` is a hazard marker, not a
-    // shrug. A suppression with no owner to protect is a shortcut the menu is
-    // hiding for no reason.
+    // The other direction. `accelerator: false` marks a chord an inner
+    // handler owns. Suppressing one that no handler owns hides a shortcut the
+    // menu could have shown.
     const idle = specCommands()
       .filter((i) => i.accelerator === false)
       .map((i) => ({ id: i.command, binding: i.key ?? byId.get(i.command)?.keys?.[0] }))
@@ -196,10 +197,9 @@ describe("buildMenu", () => {
   });
 
   test("a disabled command greys rather than vanishes, unless it asked to hide", () => {
-    // A fresh state has one pane, so Close Pane is refused — and stays
-    // visible, because a menu that drops what it cannot do right now teaches
-    // nobody it exists. Only the items that opted into hiding disappear
-    // (the workspace slots past the first, checked below).
+    // A fresh state has one pane, so Close Pane is disabled. It stays visible
+    // anyway. Only items marked `hideWhenDisabled` drop out, among them the
+    // workspace slots past the first, checked below (interactions.md §10).
     const closePane = flat.find((i) => !("type" in i) && i.action === "pane.close");
     expect(closePane).toBeDefined();
     expect(closePane && "enabled" in closePane ? closePane.enabled : null).toBe(false);
@@ -239,8 +239,9 @@ describe("buildMenu", () => {
 describe("acceleratorOf", () => {
   test("spells a chord the way the native parser reads it", () => {
     // Modifiers come out in the canonical macOS order (⌃⌥⇧⌘), the same order
-    // format.ts renders glyphs in — the parser ORs them either way, and one
-    // order in the repo is one fewer thing to disagree about.
+    // format.ts renders glyphs in. The native parser accepts any order; the
+    // canonical one makes two spellings of a chord produce one accelerator,
+    // which the duplicate check above depends on (menu.ts, ACCEL_ORDER).
     expect(acceleratorOf("Mod-n")).toBe("command+n");
     expect(acceleratorOf("Mod-Shift-p")).toBe("shift+command+p");
     expect(acceleratorOf("Alt-Mod-b")).toBe("option+command+b");
@@ -259,8 +260,9 @@ describe("acceleratorOf", () => {
   });
 
   test("refuses a chord it cannot spell rather than guessing", () => {
-    // An accelerator the parser does not understand is a key equivalent that
-    // silently never fires; an item with no shortcut at least tells the truth.
+    // An accelerator the parser does not understand becomes a key equivalent
+    // that silently never fires. Returning null instead leaves the item with
+    // no shortcut at all (buildMenu in menu.ts).
     expect(acceleratorOf("Ctrl-Tab")).toBeNull();
     expect(acceleratorOf("F3")).toBeNull();
     expect(acceleratorOf("Shift-F3")).toBeNull();

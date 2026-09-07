@@ -1,18 +1,17 @@
-// The Outline panel: the active note's headings, live. The right-hand
-// panel's other face (Shell shows Backlinks or Outline, one at a time, same
-// slot and width).
+// The Outline panel: the active note's headings, live. The right-hand panel
+// slot shows one face at a time: Backlinks, Outline, or Tags, all at the same
+// width (App.tsx `rightFace`).
 //
-// Headings derive from the LIVE editor doc — not the file — so the outline
-// tracks typing keystroke-for-keystroke and works for an unsaved scratch note
-// that has no file yet. The signal is editor/docEvents.ts: setup.ts
-// broadcasts every doc change (edits and fromDisk loads alike) and the panel
-// re-runs headingsOf, the same fence-aware scan the MCP appender and the
-// heading-reveal anchor already share (shared/wikilinks.ts).
+// Headings come from the live editor doc rather than the file, so the outline
+// tracks typing and works for an unsaved scratch note that has no file yet.
+// The signal is editor/docEvents.ts. setup.ts broadcasts every doc change,
+// edits and fromDisk loads alike, and the panel re-runs headingsOf. That scan
+// is fence-aware, and the MCP appender uses it too (shared/wikilinks.ts).
 //
-// Rows are the standard keyboard list (useListNav + a `heading` target,
-// commands/target.ts): Enter — or a click, or the context menu — runs
-// outline.jump, which moves the caret to the heading in the note's own
-// editor; Copy Link yields the heading's [[Title#Heading]] wikilink.
+// Rows are the standard keyboard list (useListNav plus a `heading` target,
+// commands/target.ts). Enter, a click, or the context menu runs outline.jump,
+// which moves the caret to that heading in the note's own editor. Copy Link
+// yields the heading's [[Title#Heading]] wikilink.
 import { useEffect, useState } from "react";
 import { TableOfContents, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -34,9 +33,10 @@ function targetOf(docId: string, h: NoteHeading): CommandTarget {
   return { kind: "heading", docId, line: h.line, text: h.text };
 }
 
-// Same outline, element for element. The recompute below runs per keystroke,
-// and most keystrokes change no heading — the rows must not re-render (and
-// the focused row must not lose its identity) for them.
+// Reports whether two outlines match element for element. The recompute below
+// runs on every doc change, and most edits change no heading. When the two
+// match, the panel keeps the previous array, so the rows do not re-render and
+// the focused row keeps its identity.
 function sameOutline(a: readonly NoteHeading[], b: readonly NoteHeading[]): boolean {
   return (
     a.length === b.length &&
@@ -53,10 +53,11 @@ export function OutlinePanel() {
   const [headings, setHeadings] = useState<readonly NoteHeading[]>([]);
   const [menu, setMenu] = useState<{ h: NoteHeading; x: number; y: number } | null>(null);
 
-  // Derive on show and on every doc change. The pooled editor exists by the
-  // time this effect runs — the panes render (and attach) before this later
-  // sibling's effects — and a saved note's text landing async (loadNote) is
-  // itself a doc change, so the empty first answer corrects on arrival.
+  // Derive the headings on show and on every doc change. The pooled editor
+  // exists by the time this effect runs: a pane attaches its editor from a
+  // useLayoutEffect (PaneTree.tsx), and layout effects commit before any
+  // passive effect. A saved note's text arrives async (editorPool.loadNote)
+  // and lands as a doc change, so an empty first answer corrects on arrival.
   useEffect(() => {
     if (!docId) {
       setHeadings([]);
@@ -134,8 +135,8 @@ function Hint({ children }: { children: React.ReactNode }) {
   return <p className="px-2 py-1.5 text-[11px] leading-snug text-muted-foreground">{children}</p>;
 }
 
-// One heading: text indented by level, its 1-based line on the right. The H1
-// (usually the title) reads a shade heavier so the levels scan at a glance.
+// One heading row: the text indented by its level, the 1-based line number on
+// the right. The H1, usually the note's title, renders in a heavier weight.
 function HeadingRow({
   h,
   docId,

@@ -1,19 +1,11 @@
 // The view, bound to a server. Everything an entry point does except say which
-// server and how to reach it.
-//
-// There is one view and three shells (ios.md §1): Electrobun on the Mac,
-// Playwright's harness in the e2e suite, and Swift on iOS. The harness binds
-// the `configureX` seams to an in-memory fake and so has nothing to share with
-// the other two. The Mac and the phone both bind them to a real server's
-// handler map, and the ONLY difference between them is how a request becomes
-// bytes: `main.tsx` hands it to Electrobun's RPC, `ios.tsx` writes a frame
-// down a socket Swift is holding. That difference is one argument to this
-// function, and everything downstream of it — the prefetch, the render, which
-// seam gets which method, which push updates which channel — is here once.
-//
-// It was in main.tsx until phase 3 of ios.md, where a second copy of it would
-// have been the third version §1 warns about: two halves of one client that
-// can drift apart and mismatch each other.
+// server and how to reach it: the seams, the boot prefetch, and the render.
+// One view, three shells (ios.md §1). The Mac and the phone both bind the seams
+// to a real server's handler map, and differ only in how a request becomes
+// bytes, which is bootView's `requests` argument. The harness binds them to an
+// in-memory fake instead. This file lived in main.tsx until phase 3 of ios.md.
+// A second copy of it in an entry point would be the third version ios.md §1
+// warns about: two halves of one client that can drift apart and mismatch.
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import type { NoteMeta, TrashMeta, WorkspaceRootInfo } from "../shared/rpc-schema";
@@ -46,23 +38,23 @@ import { applyAppearance } from "./lib/theme";
 import { DEFAULT_SETTINGS, type Settings } from "../shared/settings";
 import { configureLayout, restoredState } from "./workspace/persist";
 import { docsState } from "./workspace/store";
-// Here rather than in an entry point, because this is the file that renders:
-// a shell that forgot the import would build fine and open an unstyled app.
+// Imported here rather than in an entry point, because this is the file that
+// renders. A shell that forgot the import would build fine and open an
+// unstyled app.
 import "./index.css";
 import App from "./App";
 
 /**
  * Every push, dispatched into the channel that owns it.
  *
- * The same object both shells use: Electrobun takes it as its `messages` map,
- * and `clientConnection` takes it as the `push` a frame arriving on the wire
- * is delivered to. Typed as ViewPush rather than ServerPush because it also
- * has to answer `connectionState`, which no server may send and which each
- * shell raises about its own wire (wire.ts CLIENT_PUSHES).
- *
- * Enumerated rather than proxied, for bun/index.ts's reason in the other
- * direction: a message added to the schema fails to compile here until
- * something does it.
+ * Both shells use the same object: Electrobun's `messages` map, and the `push`
+ * `clientConnection` delivers an arriving frame to. It is typed as ViewPush
+ * rather than ServerPush because it also answers `connectionState`, which no
+ * server may send and which each shell raises about its own wire (wire.ts
+ * CLIENT_PUSHES). Enumerated rather than proxied, for bun/index.ts's reason in
+ * the other direction: that file lists the requests coming in and this one the
+ * pushes going out, so a push added to the schema fails to compile until it is
+ * wired.
  */
 export const viewPush: ViewPush = {
   runEvent: (ev) => dispatchRunEvent(ev),
@@ -71,77 +63,72 @@ export const viewPush: ViewPush = {
   terminalExit: ({ sessionId }) => dispatchTerminalExit(sessionId),
   terminalDetached: ({ sessionId, by }) => dispatchTerminalDetached(sessionId, by),
   // Who else is on this server, for the connection bar and for naming the
-  // device in the message above (remote.md §7).
+  // device in the `terminalDetached` notice above (lib/connections.ts labelFor,
+  // remote.md §7).
   presence: ({ others }) => recordPresence(others),
   notesChanged: ({ root }) => dispatchNotesChanged(root),
   openExternal: (open) => dispatchExternalOpen(open),
   // The vault moved without the view driving it (idle auto-relock), or this is
-  // the echo of a transition it did drive — either way the mirrored state
+  // the echo of a transition it did drive. Either way the mirrored state
   // updates and every subscriber (placeholder faces, glyphs, palette faces)
   // re-renders from the one record.
   vaultChanged: ({ state }) => recordVaultState(state),
   menuCommand: ({ action }) => dispatchNativeCommand(action),
-  // Also the shell's own, and only ever sent to the manual's window: somebody
-  // asked for a page while it was already open (remote.md §8a). The shell has
-  // raised the window; this lands it on the page.
+  // Sent by the shell, never by a server, and only to the manual's window:
+  // somebody asked for a page while that window was already open (remote.md
+  // §8a). The shell has raised the window, and this lands it on the page.
   docsShow: ({ page }) => dispatchDocsShow(page),
-  // From the shell holding this end of the wire, never from a server
-  // (remote.md §7).
+  // Raised by the shell holding this end of the wire, never by a server: the
+  // end on the far side of a dropped wire cannot report it (remote.md §10).
   connectionState: ({ state, detail }) => {
     recordLinkState(state, detail);
-    // "live" is only ever announced for a RE-connection (the first one is the
-    // caller's boot, not a state change), which makes it exactly the moment to
-    // ask what became of the runs whose events were pushed at a dead wire.
-    //
-    // And of the drawer's shell, for the same reason and in the same breath.
-    // The machine may not be the same PROCESS it was: a restarted server is
+    // "live" is only announced for a reconnection: the first connection is the
+    // caller's boot, not a state change. It is the moment to ask what became of
+    // everything whose pushes went to a dead wire. A restarted server is
     // reconnected to rather than refused, and announces itself as a loss and
-    // then a connection precisely so that everything below runs
-    // (shared/transport.ts). Which is why all four are questions and none is
-    // an assumption. A server that turned over answers "I have never heard of
-    // that" to every one of them, and that is a fine answer to get.
-    //
-    // The third is the vault, whose `vaultChanged` was dropped with the rest.
-    // Not a rare corner: the idle relock's clock is note-RPC traffic
-    // (bun/vault.ts touchVault), so a client whose wire is down is the one it
-    // fires behind, and the mirrored state is what evicts decrypted buffers
-    // (workspace/editorPool.ts). A client that never asks keeps a locked note's
-    // plaintext on screen for as long as the tab stays open, which is the thing
-    // the relock exists to prevent. Asking costs nothing when nothing moved:
-    // the mirror notifies only on a change.
-    //
-    // And the fourth is the note store, for the plainest version of the same
-    // reason: every `notesChanged` for every root that moved meanwhile was
-    // dropped, and no push names them afterwards, so the answer is to re-read
-    // the lot (notes/channel.ts onNotesRelink).
-    // A connection nothing is coming back from has nowhere to put a save, and
-    // the writes would only fail their way back into the buffer. What the hold
-    // is really for is the instant AFTER it returns: a debounce or a window
-    // blur landing in there would write text typed against a note the server
-    // has since moved past, and the save guard would let it win
-    // (notes/store.ts holdSaves).
+    // then a connection so that both branches below run (shared/transport.ts).
+    // That server may be a different process, so the calls below ask rather
+    // than assume. It answers "never heard of that" to every question, and that
+    // is a fine answer to get.
     if (state === "lost") {
+      // A connection nothing is coming back from has nowhere to put a save, and
+      // the writes would only fail their way back into the buffer. The hold
+      // matters most in the instant after the wire returns: a debounce or a
+      // window blur landing then would write text typed against a note the
+      // server has moved past, and the save guard would let it win
+      // (notes/store.ts holdSaves).
       holdSaves();
-      // And every panel that was mid-run stops claiming to be (blocks.ts
-      // setRunsLink). Here rather than at "reconnecting", to keep it in step
-      // with the hold above and with what the states mean: mid-ladder,
-      // requests wait and are expected to land, and a run whose events are
-      // seconds late is still a run.
+      // Every panel that was mid-run stops claiming to be (blocks.ts
+      // setRunsLink). Here rather than at "reconnecting", to stay in step with
+      // the hold above: mid-ladder a request waits and is expected to land, and
+      // a run whose events are seconds late is still a run.
       dispatchRunLink(false);
     }
     if (state === "live") {
-      // First, and the only one of the five with somebody's writing at stake:
-      // it decides what becomes of every buffer that never reached the server,
-      // and it is what lifts the hold above once it has (editorPool.ts).
+      // First, and the only one of these with somebody's writing at stake. It
+      // decides what becomes of every buffer that never reached the server, and
+      // it releases the hold above once it has (editorPool.ts).
       void resolveStrandedNotes();
-      // Reopened, then asked. reconcileRuns is what actually settles them, and
-      // it is asynchronous: leaving the panels on "Disconnected" until it
-      // answers would put a stale word on screen for a round trip on a wire
+      // The panels are reopened first, then asked about. reconcileRuns settles
+      // them and is asynchronous, so leaving them on "Disconnected" until it
+      // answers would keep a stale word on screen for a round trip on a wire
       // that has just come back.
       dispatchRunLink(true);
       void reconcileRuns();
+      // A mounted drawer claims its shell again, since its pushes went to the
+      // dead wire too (terminal/channel.ts).
       dispatchTerminalRelink();
+      // This asks the vault again, since any `vaultChanged` pushed at the dead
+      // wire was lost. The idle relock's clock is note-RPC traffic
+      // (bun/vault.ts touchVault), so it fires behind a client whose wire is
+      // down. A relock reaches decrypted buffers through the mirrored state,
+      // which evicts them (workspace/editorPool.ts), so a client that never
+      // asks keeps a locked note's plaintext on screen until the tab closes.
+      // Asking costs nothing: the mirror notifies only on a change.
       void refreshVaultState().catch(() => {});
+      // Every `notesChanged` for every root that moved meanwhile was dropped,
+      // and no push names them afterwards, so re-read the lot (notes/channel.ts
+      // onNotesRelink).
       dispatchNotesRelink();
     }
   },
@@ -150,9 +137,9 @@ export const viewPush: ViewPush = {
 /**
  * Wire every seam to `requests`, then boot and render.
  *
- * Call it as early as the shell can: the logging seam is configured on the
- * first line, and a failure while the rest is still wiring itself up is
- * exactly the one worth having on disk.
+ * Call it as early as the shell can. The logging seam is configured on the
+ * first line, so a failure while the rest is still wiring itself up is written
+ * to the log.
  */
 export function bootView(requests: RequestClient): Promise<void> {
   // First, and outside boot(): boot()'s own catch cannot report a throw that
@@ -227,14 +214,13 @@ export function bootView(requests: RequestClient): Promise<void> {
     },
   });
 
-  // Another window, which is another client of another server (remote.md §8a).
-  // Fire-and-forget for the same reason the menu is: the window either appears
-  // or the shell logged why, and there is nothing here that could act on the
-  // answer — a shell with no second window to give is one where the verb was
-  // never offered (lib/shell.ts multiWindow).
+  // Another window is another client (remote.md §8a). Fire-and-forget for the
+  // menu's reason: the window either appears or the shell logged why, and
+  // nothing here could act on the answer. Whether the verb is offered at all is
+  // asked before the call, not learned from it (lib/shell.ts multiWindow).
   //
-  // The manual's window is the same seam with a page on it: the shell opens it
-  // or raises the one already showing the manual, and this end never learns
+  // openDocs is the same seam with a page on it: the shell opens the manual's
+  // window or raises the one already showing it, and this end never learns
   // which (lib/windows.ts).
   configureWindows({
     open: () => {
@@ -245,9 +231,10 @@ export function bootView(requests: RequestClient): Promise<void> {
     },
   });
 
-  // Note images: bytes for `![](.ledge-assets/…)` references, and the pasteboard-image
-  // half of ⌘V. References resolve against the asking note's own folder, inside
-  // its workspace; the server guards all of it and names the pasted file.
+  // Note images: bytes for `![](.ledge-assets/…)` references, plus the two ways
+  // an image is added (the image half of ⌘V, and Insert Image…).
+  // References resolve against the asking note's own folder, inside its
+  // workspace. The server guards all of it and names the added file.
   configureAssets({
     read: (folder, src, notePath) =>
       requests.assetRead({ root: folder, src, notePath }).then((r) => (r.sealed ? { sealed: true as const } : r.image)),
@@ -255,7 +242,7 @@ export function bootView(requests: RequestClient): Promise<void> {
     pickImage: (folder, notePath) => requests.assetPick({ root: folder, notePath }).then((r) => r.src),
   });
 
-  // The server owns the workspace folders; the view only ever holds roots and
+  // The server owns the workspace folders. The view only ever holds roots and
   // paths it got from there.
   configureWorkspaces({
     list: () => requests.workspaceList({}),
@@ -308,22 +295,20 @@ export function bootView(requests: RequestClient): Promise<void> {
   return boot(requests);
 }
 
-// Read the workspace registry, every available workspace's notes, and the
-// saved layout before the first render, so the app opens straight into last
-// session's workspaces and tabs instead of flashing an empty tab and swapping
-// it out. A failure here (the server unreachable) must not leave a blank
-// window: fall through to the empty state, which restoredState turns into a
-// fresh unsaved note.
+// Read the workspace registry, every available workspace's notes, and the saved
+// layout before the first render, so the app opens straight into last session's
+// workspaces and tabs instead of flashing an empty tab and swapping it out. A
+// failure here (the server unreachable) falls through to the empty state rather
+// than a blank window, and restoredState turns that into a fresh unsaved tab.
 async function boot(requests: RequestClient): Promise<void> {
-  // Something on screen for as long as the round trips below take, since until
-  // they land there is nothing else on it (lib/booting.ts). No destination:
-  // which machine this is talking to is `connectionList`, one of the requests
-  // being waited on, and a panel that named it would have to be told twice. No
-  // way out either — the wire is already open by the time a view boots, so the
-  // only thing a button could cancel here is the prefetch, and an app that
-  // opened without its own workspaces is not a state worth offering. The phone
-  // raises this earlier, over the dial, where both of those answers differ
-  // (ios.tsx), and this call is a no-op behind it.
+  // Something on screen while the round trips below run, since until they land
+  // `#root` is empty (lib/booting.ts). No destination, because the machine this
+  // talks to comes back from `connectionList`, one of those round trips. No
+  // cancel button either: the wire is open by the time a view boots, so the
+  // only thing left to cancel is the prefetch, and cancelling it would open the
+  // app with none of its workspaces. On a phone `ios.tsx` raises the panel
+  // before the dial, where it can name the destination and offer the server
+  // list as the way out. showBooting keeps that panel and ignores this call.
   showBooting({ destination: "" });
   let roots: WorkspaceRootInfo[] = [];
   const notesByFolder: Record<string, NoteMeta[]> = {};
@@ -332,23 +317,23 @@ async function boot(requests: RequestClient): Promise<void> {
   let layout: string | null = null;
   // Which window this view is in (remote.md §8a). Asked with the registry
   // rather than after it, because the answer decides which folders are worth
-  // listing at all: the manual's window reads one, and reads no layout.
+  // listing at all: the manual's window lists one folder and uses no layout.
   let role = { docs: false, page: "" };
   // Which machine everything below belongs to (remote.md §8). Fetched before
-  // the first paint like settings and the layout: the indicator is chrome, and
-  // chrome that names the wrong machine for one frame is the one frame where
-  // somebody types a command into it.
+  // the first paint, like settings and the layout: the connection bar names the
+  // machine the notes and commands go to, and must not name the wrong one even
+  // for one frame.
   let connections: ConnectionStatus | null = null;
   try {
-    // The registry first — it names the folders everything else is scoped to —
-    // then one round trip per folder plus settings and layout, in parallel:
-    // the trash counts are part of the first paint (a sidebar section), so
-    // fetching them after mount would flash; settings must beat the first
-    // render because editors and terminals read them at creation and never
-    // again (lib/settings.ts); the layout must beat it because it IS the first
-    // render's shape. Eager per-folder fetch keeps that first paint complete;
-    // fine at human workspace counts (revisit lazily if a huge external folder
-    // ever makes boot crawl). A folder that fails to list costs itself only.
+    // The registry first, since it names the folders everything else is scoped
+    // to. Then one round trip per folder, plus settings and layout, in
+    // parallel. Trash counts are part of the first paint (a sidebar section),
+    // so fetching them after mount would flash. Editors and terminals read
+    // settings at creation and never again (lib/settings.ts), and the layout is
+    // the first render's shape, so both must land before that render. Fetching
+    // every folder eagerly is what makes the first paint complete. It is fine
+    // at ordinary workspace counts, and can go lazy if a huge external folder
+    // makes boot crawl. A folder that fails to list costs itself only.
     const [registry, asked] = await Promise.all([requests.workspaceList({}), requests.windowRole({})]);
     roots = registry.workspaces;
     role = asked;
@@ -367,9 +352,9 @@ async function boot(requests: RequestClient): Promise<void> {
     // wrapper, and it is the first round trip, so the answers are in place
     // before the first palette opens.
     recordServerCaps(registry);
-    // The manual's window lists one folder, its own: it can show nothing else,
-    // and a workspace over a big external folder should not cost a window that
-    // opened to read the manual.
+    // The manual's window lists one folder, its own. It can show nothing else,
+    // and listing a workspace over a big external folder would slow a window
+    // that opened only to read the manual.
     const available = roots
       .filter((w) => w.available && (!role.docs || w.kind === "docs"))
       .map((w) => w.root);
@@ -392,8 +377,8 @@ async function boot(requests: RequestClient): Promise<void> {
   } catch (err) {
     console.error("[notes] could not reach the note store", err);
   }
-  // The save half of session persistence; the restore half is restoredState
-  // below, which prunes anything the noteList no longer vouches for.
+  // The save half of session persistence. The restore half is restoredState
+  // below, which prunes anything the note listings no longer contain.
   configureLayout({
     save: (text) => {
       void requests.layoutSave({ text });
@@ -422,38 +407,38 @@ async function boot(requests: RequestClient): Promise<void> {
       await requests.profileWrite({ name, text });
     },
   });
-  // Straight after the snapshot lands and before the first render: the palette
-  // is a settings override away from what index.html stamped, and every editor
-  // and terminal built below reads the resolved answer (lib/theme.ts).
+  // Straight after the settings snapshot lands and before the first render. A
+  // theme setting can override what index.html stamped, and every editor and
+  // terminal built below reads the resolved appearance (lib/theme.ts).
   applyAppearance();
   configureCli({
     install: () => requests.cliInstall({}),
   });
-  // A fresh page claims nothing, which is the point: whatever this server is
-  // still running was started by the page this one replaced, and no id from it
-  // survived the reload (editor/bridge.ts reconcileRuns). Not awaited — the
-  // window should not wait on it — but sent early, because until it lands those
-  // runs are executing with nothing on screen able to show or stop them.
+  // A fresh page claims nothing: whatever this server is still running was
+  // started by the page this one replaced, and no id survived the reload, so
+  // the server interrupts the rest (editor/bridge.ts reconcileRuns). Not
+  // awaited, since the window should not wait on it, but sent early: until it
+  // lands those runs execute with nothing on screen to show or stop them.
   void reconcileRuns();
-  // After render, not gating it: the mirrored default ("locked") renders
-  // locked notes as placeholders either way, which is correct until — and
-  // almost always after — this lands ("unlocked" cannot survive a relaunch;
-  // the fetch only distinguishes locked from none for the dialog's face).
+  // Not awaited, so it does not gate the render below. The mirrored default
+  // ("locked") already renders locked notes as placeholders, and "unlocked"
+  // cannot survive a relaunch. The fetch only distinguishes a locked vault from
+  // no vault, which is what the dialog's face needs (vault/channel.ts).
   void refreshVaultState().catch(() => {});
-  // The operating system saying an interface came back, which is a better
-  // moment to dial than the beat's own next one: joining a network is exactly
-  // when a connection that has been failing for an hour starts working, and the
-  // beat has no way to know it happened (remote.md §7). Ignored when the link is
-  // fine, and free when it is not — the shell answers this without asking any
-  // server anything (lib/connections.ts reconnectLink).
+  // The operating system says an interface came back. That is a better moment
+  // to dial than the retry beat's next tick: a connection failing for an hour
+  // often works again the moment the machine joins a network, and the beat
+  // cannot know that happened (remote.md §7). A live wire probes and a
+  // reconnecting one dials (shared/transport.ts recheck), asking the client's
+  // own shell rather than a server (lib/connections.ts reconnectLink).
   window.addEventListener("online", () => reconnectLink());
-  // The moment the boot screen becomes a lie: everything it was waiting on has
-  // either landed or failed, and the render below is what replaces it.
+  // Everything the boot screen was waiting on has landed or failed by here, and
+  // the render below replaces it.
   hideBooting();
-  // The manual's window boots onto the manual and nothing else; every other
-  // window boots onto the layout it left (remote.md §8a). A docs root that is
-  // missing — an app whose docs sync failed — falls back to the ordinary boot
-  // rather than opening a window over no folder at all.
+  // The manual's window boots onto the manual and nothing else. Every other
+  // window boots onto the layout it left (remote.md §8a). A missing docs root
+  // (an app whose docs sync failed) falls back to the ordinary boot rather than
+  // opening a window over no folder at all.
   const docsRoot = role.docs ? (roots.find((w) => w.kind === "docs" && w.available)?.root ?? "") : "";
   createRoot(document.getElementById("root")!).render(
     <StrictMode>

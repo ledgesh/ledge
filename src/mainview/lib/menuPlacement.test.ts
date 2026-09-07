@@ -13,18 +13,20 @@ describe("placing a menu", () => {
   });
 
   test("a menu that would run off the bottom flips above the point", () => {
-    // 800 + 180 is past 844, so it opens upward — the platform's own answer,
-    // and the one that leaves the row it is about uncovered.
+    // 800 + 180 comes to 980, past the 844 of the screen, so the menu opens
+    // upward. Flipping is what the platform's own menus do. Sliding it back
+    // onto the screen instead would cover the row it was opened from.
     expect(placeMenu({ x: 20, y: 800 }, MENU, PHONE)).toEqual({ x: 20, y: 620 });
   });
 
   test("a menu that would run off the right slides back, it does not flip", () => {
-    // Flipping would put it under the hand that opened it.
+    // Flipping the menu to the left of the press would put it under the
+    // hand that opened it.
     expect(placeMenu({ x: 380, y: 100 }, MENU, PHONE)).toEqual({ x: 182, y: 100 });
   });
 
   test("the bottom edge is the menu's END, not its start", () => {
-    // The bug this replaces clamped the TOP to a guessed 88px above the
+    // The bug this replaces clamped the top edge to a guessed 88px above the
     // bottom, so a menu of any real height still ran off it.
     const at = placeMenu({ x: 20, y: 843 }, MENU, PHONE);
     expect(at.y + MENU.h).toBeLessThanOrEqual(PHONE.h);
@@ -39,8 +41,9 @@ describe("placing a menu", () => {
   });
 
   test("a menu taller than the screen starts at the top rather than above it", () => {
-    // Clipped at the bottom is recoverable; started off the top is a menu
-    // whose first item cannot be reached at all.
+    // Clipping at the bottom still leaves the menu's first item pressable.
+    // Starting above the top of the screen would put that first item out of
+    // reach altogether, so the clamp starts the menu at the top instead.
     expect(placeMenu({ x: 20, y: 400 }, { w: 200, h: 900 }, PHONE).y).toBe(MENU_MARGIN);
   });
 

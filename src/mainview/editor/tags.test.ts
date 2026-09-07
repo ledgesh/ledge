@@ -1,9 +1,9 @@
-// The tag CodeMirror seams: what parses as a #tag node, what a gesture at a
-// position addresses (tagAt), and what the `#` picker offers. (The pure
-// grammar decisions — charset, validity, fence-awareness for the Bun scan —
-// are tested with their code in shared/tags.test.ts.) Parser assertions run
+// Tests for the tag CodeMirror seams: what parses as a #tag node, which tag
+// tagAt finds under a click or command, and what the `#` picker offers. The
+// pure grammar (charset, validity, fence-awareness for the Bun scan) is
+// tested beside its code in shared/tags.test.ts. Parser assertions run
 // against @lezer/markdown directly; completion assertions build a real
-// EditorState — still no DOM (wikilinks.test.ts's moves throughout).
+// EditorState. Neither needs a DOM, as in wikilinks.test.ts.
 import { describe, expect, test } from "bun:test";
 import { GFM, parser } from "@lezer/markdown";
 import { EditorState } from "@codemirror/state";
@@ -44,8 +44,9 @@ describe("hashtagExtension", () => {
     expect(tagSpans("see https://e.com/page#frag")).toEqual([]);
     expect(tagSpans("a ##tag b")).toEqual([]);
     expect(tagSpans("word#tag")).toEqual([]);
-    // A markdown marker glues too — the boundary is textual whitespace,
-    // matching the shared line scanner exactly.
+    // A markdown marker glues too. The boundary is textual whitespace. The
+    // shared line scanner uses exactly the same rule, and the two must not
+    // diverge (INLINE_TAG in shared/tags.ts).
     expect(tagSpans("**#tag**")).toEqual([]);
   });
 
@@ -80,8 +81,9 @@ describe("tagAt", () => {
 });
 
 describe("tagCompletionSource", () => {
-  // The bridge is module-global; registering workspaceTags here is the same
-  // stubbing-at-the-seam move as the wikiNotes stub beside it.
+  // The bridge holds its handlers in a module-global, so registering
+  // `workspaceTags` once here supplies the tag list to every test below.
+  // Same stubbing at the seam as the wikiNotes stub in wikilinks.test.ts.
   configureBridge({
     workspaceTags: () => [
       { tag: "work", count: 2 },

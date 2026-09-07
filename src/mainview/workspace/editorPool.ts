@@ -1,12 +1,10 @@
-// The keep-alive editor pool.
-//
-// In the Swift build, Bonsplit ran with `contentViewLifecycle: .keepAllAlive`
-// because the editor is expensive to rebuild: throwing it away on a tab switch
-// would lose the caret, scroll, undo stack, and inline run output. React's normal
-// mount/unmount would do exactly that. So editors live here, keyed by a stable
-// `docId`, outside the React tree: switching tabs only re-parents a view's DOM
-// host into the newly-visible pane; it never destroys the view. A view is torn
-// down only when its tab is closed (releaseEditor).
+// The keep-alive editor pool. Editors live here, keyed by a stable `docId` and
+// outside the React tree. Switching tabs re-parents a view's DOM host into the
+// newly visible pane and never destroys the view; only closing a tab tears one
+// down (releaseEditor). An editor is expensive to rebuild, and React's normal
+// mount/unmount would rebuild it on every switch, losing the caret, scroll,
+// undo stack, and inline run output. The Swift build kept editors alive for the
+// same reason, through Bonsplit's `contentViewLifecycle: .keepAllAlive`.
 import { Transaction } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { createEditor } from "../editor/setup";
@@ -46,9 +44,10 @@ function applyRunEvent(view: EditorView, ev: RunEvent): void {
   else handleRunEvent(view, ev.id, "finished", ev.exitCode);
 }
 
-// One editor's end of the run channel (bridge.ts RunSink): events in, and the
-// runs it still shows out. Registered and dropped together, so a view that was
-// replaced cannot go on claiming runs whose panels went with it.
+// One editor's end of the run channel (bridge.ts RunSink): run events go in,
+// and the runs the view still shows come out. The sink is registered and
+// dropped with the view, so a view that was replaced no longer claims runs
+// whose panels went with it.
 function runSink(view: EditorView): RunSink {
   return {
     apply: (ev) => applyRunEvent(view, ev),
@@ -62,23 +61,23 @@ interface Entry {
   view: EditorView;
   offRun: () => void;
   ro: ResizeObserver;
-  // The note is LOCKED (locking.md): true from the moment a read says
-  // so, whether or not the body was withheld. What the vault relock must
-  // evict is exactly the entries wearing this.
+  // Whether the note is locked (locking.md), set from what a read reports,
+  // whether or not that read withheld the body. A vault relock evicts exactly
+  // the entries with this set.
   lockedNote: boolean;
-  // The held placeholder face, present while the body is withheld (vault
-  // locked). The CM view sits empty and hidden beneath it — never holding
-  // ciphertext, never holding plaintext.
+  // The placeholder face, present while the body is withheld (vault locked).
+  // The CodeMirror view sits empty and hidden beneath it, holding neither
+  // ciphertext nor plaintext.
   heldFace: HTMLDivElement | null;
 }
 
 const pool = new Map<string, Entry>();
 
 // --- the locked placeholder face --------------------------------------------
-// Plain DOM like the rest of the pool (the pool lives outside React); the
-// Unlock button reaches the command layer through a configureX seam — the
-// pool cannot import the registry without a cycle, and the button must run
-// the SAME vault.unlock the palette runs.
+// Plain DOM like the rest of the pool, which lives outside React. The Unlock
+// button reaches the command layer through a configureX seam, because the pool
+// cannot import the registry without a cycle and the button has to run the
+// same `vault.unlock` the palette runs (App.tsx wires it).
 
 let lockedUi: { requestUnlock?: () => void } = {};
 
@@ -89,11 +88,11 @@ export function configureLockedUi(fns: { requestUnlock?: () => void }): void {
 function showHeldFace(entry: Entry, damaged: boolean): void {
   entry.view.dom.style.display = "none";
   if (entry.heldFace) entry.heldFace.remove();
-  // An absolute OVERLAY inside the host, never a sibling in flow: the host
-  // already fills the pane, and a stacked face would grow the page past the
-  // viewport — turning the app's fixed layout scrollable, which (beyond
-  // looking broken) reroutes wheel events away from every horizontal
-  // scroller (the tab strip lost its sideways wheel to exactly this).
+  // Position the face as an overlay inside the host, never as a sibling in
+  // flow. The host already fills the pane, so a stacked face would grow the
+  // page past the viewport and make the app's fixed layout scrollable. That
+  // reroutes wheel events away from every horizontal scroller: the tab strip
+  // lost its sideways wheel this way.
   entry.host.style.position = "relative";
   const face = document.createElement("div");
   face.className =
@@ -113,10 +112,10 @@ function showHeldFace(entry: Entry, damaged: boolean): void {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.dataset.testid = "locked-face-unlock";
-    // The lone `touch:` in this file, and it belongs here rather than in the
-    // stylesheet because the class list is the whole styling of a face built by
-    // hand (§1a). It is the only way past a locked note on a client with no ⌘,
-    // and on a phone it stands where the drawer's rows were a moment ago.
+    // This face is built by hand, so the class list is all of its styling,
+    // including the only touch sizing in this file (interactions.md §1a). The
+    // button is the only way past a locked note on a client with no ⌘ key, and
+    // on a phone it sits where the drawer's rows were a moment ago.
     btn.className =
       "rounded-md border bg-background px-3 py-1.5 text-sm shadow-sm hover:bg-accent hover:text-accent-foreground touch:min-h-[44px] touch:px-4";
     btn.textContent = "Unlock Notes…";
@@ -135,12 +134,12 @@ function clearHeldFace(entry: Entry): void {
 
 // --- reveals ----------------------------------------------------------------
 //
-// "Open this note AND show me a place in it" — the matched line from the
-// search overlay, or the `#heading` anchor of a followed wikilink.
-// Keyed by path, not docId: the hit's path is the only handle the overlay
-// holds — the docId does not exist until the tab opens. One-shot: a request is
-// consumed by the first editor that can honor it, so a stale one can never
-// yank the selection around on some later tab switch.
+// A reveal is a request to put the selection somewhere in a note when it
+// opens: the search overlay's matched line, or a wikilink's `#heading` anchor.
+// These functions only park the request; something else opens the note. Keyed
+// by path, because that is what the overlay holds and the docId does not exist
+// until the tab opens. The first editor that can honor a request consumes it,
+// so a stale one cannot move a later tab's selection.
 type RevealRequest =
   | { line: number; query: string }
   | { heading: string }
@@ -158,25 +157,23 @@ export function requestHeadingReveal(path: string, heading: string): void {
 }
 
 /**
- * A note that was just created: put the caret inside its title when it opens,
- * so the first keystroke names the note. `placeholder` says the title is the
- * app's made-up "Untitled" (selected, so typing replaces it) rather than a
- * title the app computed, like a daily note's date (caret only). Queued like
- * the other reveals because the file is read after the tab renders — the
- * caret cannot be placed until the text arrives. Only creation calls this:
- * opening a note that already exists leaves the caret where opening always
- * put it.
+ * Put the caret inside a just-created note's title when it opens, so the first
+ * keystroke names the note. `placeholder` selects the app's made-up "Untitled"
+ * so typing replaces it; a title the app computed, like a daily note's date,
+ * gets the caret alone. Queued like the other reveals because the text arrives
+ * after the tab renders. Only creation calls this. Opening a note that already
+ * exists leaves the caret where opening always put it.
  */
 export function requestTitleCaret(path: string, placeholder: boolean): void {
   queueReveal(path, { title: { placeholder } });
 }
 
 function queueReveal(path: string, req: RevealRequest): void {
-  // A note already open with its text on screen gets the reveal immediately:
-  // its tab may already be the active one, in which case no attach — the
-  // other consumer below — will ever revisit it. A detached (background-tab)
-  // editor waits for its attach instead: CodeMirror measures scroll targets
-  // against live geometry, which a detached host does not have.
+  // An editor whose host is already attached gets the reveal right away: its
+  // tab may already be the active one, and then no attach (the other consumer,
+  // in attachEditor below) would revisit it. A detached background-tab editor
+  // waits for its attach instead, because CodeMirror measures scroll targets
+  // against live geometry that a detached host does not have.
   const docId = docIdAt(path);
   const entry = docId ? pool.get(docId) : undefined;
   if (entry && entry.host.isConnected) {
@@ -204,42 +201,39 @@ function applyReveal(view: EditorView, req: RevealRequest): void {
     selection: { anchor: sel.anchor, head: sel.head },
     effects: EditorView.scrollIntoView(sel.anchor, { y: "center" }),
   });
-  // A reveal is "take me there": the caret belongs on the match. Focus is also
-  // what makes the selection visible — and when the hit's note was already the
-  // active tab, nothing else (PaneTree's focus effect keys on the docId, which
-  // did not change) would put it in the editor.
+  // A reveal puts the caret on the match, and focus is what makes the
+  // selection visible. When the hit's note was already the active tab, nothing
+  // else would put focus in the editor: PaneTree's focus effect keys on the
+  // docId, which did not change.
   view.focus();
 }
 
-// Pour a note's saved text into its (empty, freshly-created) editor. The read is
-// async, so the editor exists first and the content arrives a beat later; the
-// alternative, holding the pane blank until the file lands, would make every tab
-// switch to an unopened note flicker.
-//
-// `fromDisk` keeps the change listener from treating the load as an edit and
-// saving it straight back, and it stays out of the undo history so the first
-// Cmd+Z in a note cannot wipe it back to empty.
+// Pour a note's saved text into its empty, freshly created editor. The read is
+// async, so the editor exists first and the text arrives a beat later: holding
+// the pane blank until the file lands would flicker on every tab switch to an
+// unopened note. `fromDisk` stops the change listener from saving the load
+// back as an edit; staying out of the undo history stops Cmd+Z emptying it.
 async function loadNote(docId: string, path: string): Promise<void> {
   const file = await readNote(path);
   if (file === null) return; // note is gone; leave the editor empty rather than guess
-  // Before the text reaches the editor, tell the save controller which heading this
-  // note ALREADY has. Filenames follow the H1 from here on, and without this the
-  // load itself would look like the heading appearing from nowhere and move the
-  // file. A note only gets renamed by a heading you edit, never by one you open.
-  // The mtime rides along: it is the disk version every later save states as
-  // its expectation (the external-edit guard).
-  // Held notes seed too — from the plaintext head, which carries the same H1
-  // the full text would — so an unlock's re-load is an ordinary reload, not
-  // a first sight that could look like a rename.
+  // Tell the save controller which heading this note already has, before the
+  // text reaches the editor. Filenames follow the H1 from here on. Without
+  // this, the load itself would look like a heading appearing from nowhere and
+  // move the file. Only a heading edited here renames a note, never one that
+  // was merely opened. The mtime rides along as the disk version every later
+  // save states as its expectation (the external-edit guard). A held note
+  // seeds from its plaintext head, which carries the same H1 the full text
+  // would, so an unlock's re-load is an ordinary reload rather than a first
+  // sight that could look like a rename.
   seedSlug(docId, file.text, file.mtimeMs);
   const entry = pool.get(docId);
   if (!entry) return; // the tab closed while the read was in flight
   entry.lockedNote = !!file.locked;
   if (file.held) {
-    // The body was withheld (vault locked, or damage): the tab is a
-    // placeholder, not an editor — nothing pours, nothing reveals
-    // (locking.md §4). The pending reveal, if any, stays queued for the
-    // unlock's re-load.
+    // The body was withheld (the vault is locked, or the envelope is
+    // damaged): the tab shows a placeholder instead of an editor, so no text
+    // pours and no reveal runs (locking.md §4). A pending reveal stays queued
+    // for the unlock's re-load.
     showHeldFace(entry, !!file.damaged);
     return;
   }
@@ -252,26 +246,25 @@ async function loadNote(docId: string, path: string): Promise<void> {
   takeReveal(path, entry.view);
 }
 
-// Re-read every open, UNEDITED note and pour in any text that changed on disk
+// Re-read every open, unedited note and pour in any text that changed on disk
 // (an agent in the note's own terminal, git, a shell edit). Called on the
-// watcher's notesChanged push and on window focus (the belt). The decisions —
-// who is a candidate, whether the adoption still holds after the async read —
-// live in the store (reloadCandidates / reseedDoc); this wrapper only touches
-// CodeMirror. Same annotations as loadNote: a reload is not an edit (nothing
-// to save back) and not undoable (Cmd+Z must not resurrect text the file no
-// longer holds — the buffer was clean, so nothing of the user's is at stake).
-// A note whose file is GONE is left showing what it had: deleting is the
-// delete flow's job (and the note list refresh already dropped the row); a
-// next edit here recreates the file, which is the kinder failure.
+// watcher's notesChanged push, on a relink, and on window focus as the backstop
+// for that push (App.tsx). reloadCandidates picks which notes qualify and
+// reseedDoc decides whether the read still applies afterwards; this wrapper
+// only touches CodeMirror. The annotations match loadNote: a reload is not an
+// edit (nothing to save back), and it stays out of the undo history, so Cmd+Z
+// cannot restore text the file no longer holds. The buffer was clean, so
+// nothing of the user's is at stake. A note whose file is gone keeps showing
+// what it had. Deleting is the delete flow's job, and the note list refresh has
+// already dropped the row. A later edit here recreates the file.
 export async function reloadOpenNotes(): Promise<void> {
-  // Every read at once, then apply. Serially it was one round trip PER OPEN
-  // TAB — free in-process and a third of a second of stalled focus against a
-  // server on the other side of a network (remote.md §12), on a path that
+  // Read every candidate at once, then apply. Serially this was one round trip
+  // per open tab. In-process that is free. Against a server across a network it
+  // is a third of a second of stalled focus (remote.md §12), on a path that
   // fires on every window focus and every watcher push, Ledge's own saves
   // included. The apply loop stays sequential because it touches CodeMirror,
-  // and it re-validates each note anyway: reseedDoc refuses a doc that was
-  // dirtied while the read was out, which is the same guard the serial version
-  // relied on and for the same reason.
+  // and reseedDoc still refuses a doc that was dirtied while the read was out:
+  // the same guard the serial version relied on, for the same reason.
   const candidates = reloadCandidates();
   const files = await Promise.all(candidates.map((c) => readNote(c.path)));
   for (const [i, cand] of candidates.entries()) {
@@ -279,12 +272,11 @@ export async function reloadOpenNotes(): Promise<void> {
     if (file === null || file.mtimeMs === cand.mtimeMs) continue;
     const entry = pool.get(cand.docId);
     if (!entry) continue; // tab closed while the read was in flight
-    // Lock-state transitions arrive through this same path (Lock This Note /
-    // Remove Lock refresh the folder; an external sync can flip a marker
-    // too). The flag must track the disk so a later relock knows what to
-    // evict — and a note that became HELD under us (locked elsewhere while
-    // our vault is locked) swaps to the placeholder instead of pouring its
-    // withheld head into an editor.
+    // Lock-state transitions arrive through this same path: Lock This Note and
+    // Remove Lock refresh the folder, and an external sync can flip a marker.
+    // The flag tracks the disk so a later relock knows what to evict. A note
+    // locked elsewhere while this vault is locked comes back held, and swaps
+    // to the placeholder instead of pouring its withheld head into an editor.
     entry.lockedNote = !!file.locked;
     if (file.held) {
       if (!entry.heldFace && reseedDoc(cand.docId, cand.path, file.text, file.mtimeMs)) {
@@ -293,20 +285,18 @@ export async function reloadOpenNotes(): Promise<void> {
       continue;
     }
     if (entry.heldFace) {
-      // Unlocked content for a tab still wearing the face (an unlock's
-      // re-load raced this reload): the ordinary load path owns that swap.
+      // Unlocked content for a tab that still shows the held face (an
+      // unlock's re-load raced this reload): loadNote owns that swap.
       void loadNote(cand.docId, cand.path);
       continue;
     }
     if (!reseedDoc(cand.docId, cand.path, file.text, file.mtimeMs)) continue; // dirtied meanwhile
     const view = entry.view;
-    // Dispatch the SMALLEST span that changed, never a full-document replace:
-    // a full replace maps every anchored position to the document's edges —
-    // run-output panels (blocks.ts runsField) teleport below appended text,
-    // and the caret ends up clamped instead of mapped. With a minimal span,
-    // positions outside it (usually including the caret — the buffer was
-    // clean, the user was elsewhere) do not move at all; CodeMirror maps the
-    // selection through the change on its own.
+    // Dispatch the smallest span that changed, never a full-document replace.
+    // A full replace maps every anchored position to the document's edges:
+    // run-output panels (blocks.ts runsField) land below appended text and the
+    // caret is clamped rather than mapped. A minimal span leaves positions
+    // outside it alone, and CodeMirror maps the selection through the change.
     const span = changedSpan(view.state.doc.toString(), file.text);
     if (!span) continue; // same bytes, newer mtime: reseed above already recorded it
     view.dispatch({
@@ -317,49 +307,39 @@ export async function reloadOpenNotes(): Promise<void> {
 }
 
 /**
- * Settle every buffer that was typed while the server could not be reached, and
- * then let saving resume (remote.md §7).
+ * Settle every buffer that was typed while the server could not be reached,
+ * then let saving resume. The server's version wins and the buffer is parked in
+ * the trash, where restoring it puts the stashed copy beside the live note.
+ * remote.md §7 owns that rule and why it reverses the ordinary divergence
+ * handling.
  *
- * reloadOpenNotes' mirror image. That one pours the server's text into buffers
- * with nothing at stake; this one handles the buffers it skips, where there IS
- * something at stake on both sides: text somebody typed here, and text the note
- * has acquired elsewhere since.
+ * The mirror of reloadOpenNotes. That one pours the server's text into buffers
+ * with nothing at stake; this one takes the dirty buffers it skips, where both
+ * sides hold text. Called on a relink only, never on window focus and never on
+ * a watcher push. On those two paths a dirty buffer means somebody is
+ * mid-thought, and the next save's own guard arbitrates.
  *
- * Relink only, never window focus and never a watcher push. On those two paths a
- * dirty buffer means the user is mid-thought and the save's own guard is the
- * right arbiter, exactly as it has always been. A relink is the one arrival
- * where the buffer could have been stranded across an outage, which is what
- * makes "somebody is typing" — the whole basis for letting the buffer win —
- * something we can no longer assume.
- *
- * The server's version wins and the buffer goes to the trash, which is the
- * existing divergence handling turned around. It is turned around because the
- * argument for the buffer winning is that its author is present, and after an
- * outage the version with an author present is more likely the other one. What
- * does not change is that neither is destroyed: a restore puts the stashed copy
- * beside the live note, so the merge stays available and stays the user's.
- *
- * Always releases the hold, whatever happened above it. A reconciliation that
- * threw must not leave the app unable to save.
+ * Releases the hold whatever happened above it, so a reconciliation that threw
+ * cannot leave the app unable to save.
  */
 export async function resolveStrandedNotes(): Promise<void> {
   try {
     // Only after an outage that actually suspended saving. A wire that flapped
-    // and came back never did: those writes waited on the ladder and landed, so
-    // a buffer still dirty here is somebody mid-thought, and taking it away
-    // would be the clobber this whole path exists to avoid — every time a phone
-    // changed cell (remote.md §7).
+    // and came back never suspended anything: those writes waited on the
+    // ladder and landed, so a buffer still dirty here is somebody mid-thought.
+    // Taking it away is the clobber this path exists to prevent, and it would
+    // happen every time a phone changed cell (remote.md §7).
     if (!savesHeld()) return;
-    // The writes that were already out have to finish failing before the
-    // buffers can be read for what they are: a save the wire killed puts its
-    // text back on the way out, and a server that restarted announces its two
-    // halves close enough together that it has not done so yet (store.ts
-    // savesSettled). Nothing new can start meanwhile, because the hold is on.
+    // Wait for the writes already out to finish failing before reading the
+    // buffers. A save the wire killed puts its text back in the buffer on the
+    // way out. A restarted server announces `lost` and `live` close enough
+    // together that the dying save has not got that far yet (store.ts
+    // savesSettled). Nothing new starts meanwhile, because the hold is on.
     await savesSettled();
     const stranded = strandedCandidates();
     if (stranded.length === 0) return;
-    // Every read at once, reloadOpenNotes' round-trip stance (remote.md §12):
-    // this runs the moment a wire comes back, which is the worst moment to
+    // Every read at once, the round-trip stance reloadOpenNotes takes
+    // (remote.md §12). This runs the moment a wire comes back, a bad moment to
     // spend one trip per open tab.
     const files = await Promise.all(stranded.map((c) => readNote(c.path).catch(() => null)));
     for (const [i, cand] of stranded.entries()) {
@@ -367,19 +347,20 @@ export async function resolveStrandedNotes(): Promise<void> {
       // Gone, or never seen: nothing to arbitrate against. The buffer keeps
       // what it has and the ordinary save path recreates the file.
       if (file === null || cand.mtimeMs === null) continue;
-      // The note did not move. The buffer is merely unsaved, which the release
-      // below is about to fix.
+      // The note did not move. The buffer is only unsaved, and releaseSaves
+      // below flushes it.
       if (file.mtimeMs === cand.mtimeMs) continue;
-      // Locked with the vault shut: the body on screen is withheld and the
-      // buffer cannot be sealed to park it. The idle relock's own eviction owns
-      // this case (remote.md §7) and it is the one path allowed to drop the
-      // edit, because a locked note's save could not have landed either way.
+      // Locked with the vault shut: the body on screen is withheld, and the
+      // buffer cannot be sealed to park it. The idle relock's own eviction
+      // handles this case (remote.md §7). It is the one path allowed to drop
+      // the edit, because a locked note's save could not have landed either
+      // way.
       if (file.held) continue;
       const entry = pool.get(cand.docId);
       if (!entry) continue; // tab closed while the read was out
       if (file.text === cand.text) {
-        // Somebody else wrote the same thing. Nothing is at stake and nothing
-        // needs parking; just stop being dirty.
+        // Somebody else wrote the same text. Nothing is at stake and nothing
+        // needs parking, so the buffer only has to stop being dirty.
         adoptOverStranded(cand.docId, cand.path, file.text, file.mtimeMs, cand.text, null);
         continue;
       }
@@ -388,8 +369,8 @@ export async function resolveStrandedNotes(): Promise<void> {
         stashedTo = await stashNote(cand.path, cand.text);
       } catch (err) {
         // Nowhere to park it (a relocked vault, a server too old to know the
-        // method, a wire that went again). Keep the buffer: an unresolved
-        // conflict is recoverable and a discarded paragraph is not.
+        // method, a wire that dropped again). Keep the buffer: an unresolved
+        // conflict can still be sorted out, a discarded paragraph cannot.
         console.error("[notes] could not park a stranded edit; keeping it in the buffer", cand.path, err);
         continue;
       }
@@ -398,11 +379,11 @@ export async function resolveStrandedNotes(): Promise<void> {
       if (span) {
         entry.view.dispatch({
           changes: span,
-          // Not undoable, unlike an ordinary edit and for a sharper reason than
-          // reloadOpenNotes has. There the buffer was clean so nothing was at
-          // stake; here a Cmd+Z would put the stranded text back AND mark the
-          // note dirty again, rebuilding the conflict that was just settled.
-          // The copy in the trash is the way back, which is what the notice says.
+          // Not undoable, for a stronger reason than reloadOpenNotes has.
+          // There the buffer was clean; here a Cmd+Z would put the stranded
+          // text back and mark the note dirty again, rebuilding the conflict
+          // that was just settled. The copy in the trash is the way back, and
+          // the notice says so (store.ts strandedNotice).
           annotations: [fromDisk.of(true), Transaction.addToHistory.of(false)],
         });
       }
@@ -419,8 +400,9 @@ export async function resolveStrandedNotes(): Promise<void> {
 // there and asset references resolve against it (notes/store.ts).
 function acquire(tab: TabState, folder: string, handlers: DocHandlers): { entry: Entry; created: boolean } {
   const { docId } = tab;
-  // Rebind on every acquire: the entry may predate this callback's closure, and
-  // an already-open note keeps whatever dirty state, path, and seeded slug it has.
+  // Rebind on every acquire: the entry may predate this callback's closure,
+  // and an already-open note keeps the dirty state, path, and seeded slug it
+  // has.
   bindDoc(docId, tab.path, folder, handlers);
   const existing = pool.get(docId);
   if (existing) return { entry: existing, created: false };
@@ -431,12 +413,11 @@ function acquire(tab: TabState, folder: string, handlers: DocHandlers): { entry:
   // was captured at bind and tabs never change workspace, so the choice is
   // per-editor-lifetime, like every settings read.
   const view = createEditor(host, tab.path ? "" : seedDoc(tab.seed), docId, workspaceKind(folder) === "docs");
-  // A brand-new scratch note is seeded here rather than read from a file, so
-  // its caret is placed here too, and on the same terms requestTitleCaret
-  // gives a note created on disk: on the title, with the placeholder word
-  // selected, so the first keystroke names the note. The welcome note (the
-  // demo seed) is a note to read, not one to name, and keeps the top of the
-  // document.
+  // A new scratch note is seeded here rather than read from a file, so its
+  // caret is placed here too, on the terms requestTitleCaret uses for a note
+  // created on disk: on the title, with the placeholder word selected, so the
+  // first keystroke names the note. The welcome note (the demo seed) is for
+  // reading rather than naming, and keeps the caret at the top of the document.
   if (!tab.path && tab.seed === "scratch") {
     view.dispatch({ selection: revealTitle(view.state.doc, true) });
   }
@@ -453,19 +434,18 @@ function acquire(tab: TabState, folder: string, handlers: DocHandlers): { entry:
 }
 
 // --- vault transitions -------------------------------------------------------
-// One subscription for the whole pool (module-level, like the pool itself):
-// on RELOCK every locked entry is evicted — the view is DESTROYED and rebuilt
-// empty, because a doc replace would leave the plaintext in the undo history,
-// and an eviction that Cmd+Z can reverse is theater — then shown the held
-// face. On UNLOCK every held entry re-loads through the ordinary loadNote,
-// which pours the decrypted text and clears the face. Dirty-buffer safety is
-// upstream: ⌘L flushes before Bun drops keys (glue), and the idle relock
-// proves cleanliness by 15 minutes of silence.
+// One subscription for the whole pool, module-level like the pool itself. A
+// relock evicts every locked entry and shows the held face. An unlock re-loads
+// every held entry through the ordinary loadNote, which pours the decrypted
+// text and clears the face. Dirty buffers are handled upstream: ⌘L flushes
+// before Bun drops the keys (glue), and the idle relock fires only after 15
+// minutes without note traffic (locking.md §3).
+
 // Evict one entry's decrypted state and show the held face. The view is
-// DESTROYED and rebuilt empty, because a doc replace would leave the
-// plaintext in the undo history, and an eviction that Cmd+Z can reverse is
-// theater; run panels die with the view for the same reason. The host (and
-// its ResizeObserver) survive.
+// destroyed and rebuilt empty rather than having its doc replaced, because a
+// replace would leave the plaintext in the undo history for Cmd+Z to bring
+// back; run panels go with the view for the same reason. The host and its
+// ResizeObserver survive.
 function evictToHeldFace(docId: string, entry: Entry, damaged: boolean): void {
   entry.offRun();
   entry.view.destroy();
@@ -490,9 +470,9 @@ onVaultChanged(() => {
     evicted = true;
     evictToHeldFace(docId, entry, false);
   }
-  // The image cache holds decrypted data URLs by the same promise (RAM the
-  // lock must clear); the flag keeps a no-locked-notes relock from churning
-  // innocent bystanders' cached images.
+  // The image cache holds decrypted data URLs: RAM only, but RAM this lock has
+  // to clear as well (locking.md §3). The flag keeps a relock that evicted
+  // nothing from dropping cached images that no lock covers.
   if (evicted) evictAssetCache();
 });
 
@@ -510,9 +490,9 @@ export function attachEditor(
   if (entry.host.parentElement !== container) container.appendChild(entry.host);
   entry.view.requestMeasure();
   pingOverlay(entry.view);
-  // A reveal aimed at a background tab lands on its attach. Only a pre-existing
-  // editor: a freshly created one is still empty (its text arrives async in
-  // loadNote, which consumes the request once there are lines to reveal).
+  // A reveal aimed at a background tab lands on its attach, and only for an
+  // editor that already existed: a freshly created one is still empty, and
+  // loadNote consumes the request once its text arrives.
   if (!created && tab.path) takeReveal(tab.path, entry.view);
   return entry.view;
 }
@@ -526,9 +506,10 @@ export function detachEditor(docId: string): void {
   pingOverlay(entry.view);
 }
 
-// Tear an editor down for good. Called when a tab is closed. releaseDoc first:
-// the view is about to go, and any edit still sitting in the autosave debounce
-// has to reach disk rather than die with it.
+// Tear an editor down for good, when a tab is closed. releaseDoc runs first so
+// that an edit still sitting in the autosave debounce is written out rather
+// than lost with the view. It starts that write without waiting for it, so the
+// write can still be in flight when the view is destroyed below.
 export function releaseEditor(docId: string): void {
   releaseDoc(docId);
   const entry = pool.get(docId);
@@ -551,8 +532,8 @@ export function getEditorView(docId: string): EditorView | null {
 }
 
 // Every pooled view, attached or not. App broadcasts wikilink refreshes over
-// this when the note lists change (livePreview.refreshWikilinks): a detached
-// background editor takes the redraw too, so it comes back correct.
+// this when the note lists change (livePreview.refreshWikilinks), so a
+// detached background editor takes the redraw too and comes back drawn right.
 export function allEditorViews(): EditorView[] {
   return [...pool.values()].map((e) => e.view);
 }

@@ -1,23 +1,25 @@
-// Rendered images: `![alt](src)` standing alone on a line draws as the actual
-// image whenever the selection starts outside that line, and reverts to raw
-// markdown the moment the caret lands on it — the same reveal rule as
-// tables, and in the same shape: a StateField, because an image changes the
-// line's height and CodeMirror only accepts layout-affecting decorations from
-// a field. Clicking the rendered image places the caret at its markdown
-// (revealing it), exactly like clicking a rendered table cell.
+// Rendered images: `![alt](src)` alone on a line draws as the picture when the
+// selection starts outside that line, and shows raw markdown when the caret
+// lands on it. Tables follow the same reveal rule in the same shape, a
+// StateField: an image changes the line's height, and CodeMirror takes
+// layout-affecting decorations only from a field.
 //
-// Only images alone on their line render. An image inline in prose (or inside
-// a list/quote, whose marker shares the line) keeps livePreview.ts's existing
-// treatment — syntax concealed, alt text styled as a link — because replacing
-// mid-paragraph text with an arbitrarily tall widget turns reading prose into
-// dodging reflows.
+// Clicking the picture puts the caret in its markdown, like clicking a
+// rendered table cell.
 //
-// Two source kinds render: http(s) URLs load straight into the <img> (the
-// webview may fetch the web; it may not touch the filesystem), and note-
-// relative paths (`.ledge-assets/x.png`, or any image in the workspace
-// folder) are fetched from Bun as base64 over
-// assetRead (lib/assets.ts) — Bun re-validates the reference; the check here
-// is styling, Bun's is the guard, same split as links.ts. Anything else
+// Only an image alone on its line renders. An image inline in prose, or in a
+// list or quote whose marker shares the line, keeps livePreview.ts's inline
+// treatment: syntax concealed, alt text styled as a link. Replacing
+// mid-paragraph text with an arbitrarily tall widget reflows the paragraph
+// while it is being read.
+//
+// Two kinds of image render. An http(s) URL goes straight into the <img> src:
+// the webview may fetch the web, and it may not touch the filesystem. A
+// note-relative path (`.ledge-assets/x.png`, or any image in the workspace
+// folder) is fetched from Bun as base64 over assetRead (lib/assets.ts).
+//
+// Bun re-validates the reference. The check here only decides what to attempt,
+// and Bun's check is the guard, the same split as links.ts. Anything else
 // (file:, absolute paths, traversals, non-image extensions) does not render.
 //
 // Split per testing.md §2: `imageModels`, `imageSrcOf`, and `imagePasteInsert`
@@ -53,10 +55,10 @@ export interface DocLines extends DocSlice {
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|avif|svg)$/i;
 
 /**
- * Classify an image target, or null when it is not one we render. Mirrors the
- * shape of links.ts's openableUrl: scheme first, then the schemeless forms.
- * The relative-path rules (no absolute, no dot-entries, image extension) are
- * re-checked Bun-side by assetPathOf — this copy only decides what to attempt.
+ * Classify an image target, or null when it does not render. Mirrors the shape
+ * of links.ts's openableUrl: scheme first, then the schemeless forms. The
+ * relative-path rules (no absolute, no dot-entries, image extension) are
+ * re-checked Bun-side by assetPathOf; this copy only decides what to attempt.
  */
 export function imageSrcOf(raw: string): ImageSrc | null {
   const text = raw.trim();
@@ -65,19 +67,19 @@ export function imageSrcOf(raw: string): ImageSrc | null {
   if (m) return /^https?$/i.test(m[1]!) ? { kind: "remote", url: text } : null;
   if (/^www\./i.test(text)) return { kind: "remote", url: `https://${text}` };
   if (text.startsWith("/") || text.includes("\\")) return null;
-  // Leading `../` steps are how a note in a subfolder reaches the workspace's
-  // shared `.ledge-assets`, so they are spent before anything is judged. Where
-  // they land is Bun's ruling, not this one: assetPathOf resolves against the
-  // note and re-checks the result against the root, and a reference that
-  // climbs out draws as broken rather than as anything.
+  // Leading `../` steps let a note in a subfolder reach the workspace's shared
+  // `.ledge-assets`. The loop counts that run off and judges only the segments
+  // after it. Bun decides where the steps land: assetPathOf resolves them
+  // against the note and re-checks the result against the root. A reference
+  // that climbs out of the root draws as broken.
   const parts = text.split("/");
   let up = 0;
   while (parts[up] === "..") up += 1;
   const rest = parts.slice(up);
   // Past that run, the app's own assets dir is the one accepted dot-entry, and
-  // only as the first segment — the same exception assetPathOf carves out
-  // Bun-side, from the same shared constant. Deeper dots (temp files,
-  // .ledge-trash) stay out.
+  // only as the first segment. assetPathOf makes the same exception Bun-side,
+  // from the same shared constant. Other dot-entries (temp files,
+  // .ledge-trash) are rejected.
   if (rest.length === 0) return null;
   if (rest.slice(rest[0] === ASSETS_DIRNAME ? 1 : 0).some((part) => part.startsWith("."))) return null;
   if (!IMAGE_EXT.test(text)) return null;
@@ -97,9 +99,9 @@ export interface ImageModel {
 
 /**
  * Every image standing alone on its line, as render-ready models. "Alone"
- * means the rest of the line is whitespace — which also keeps quoted and
- * listed images raw (their `>` / `-` marker shares the line), the same
- * top-level-only stance tables take.
+ * means the rest of the line is whitespace. That also keeps quoted and listed
+ * images raw, since their `>` or `-` marker shares the line, matching the
+ * top-level-only rule tables follow.
  */
 export function imageModels(doc: DocLines, tree: Tree): ImageModel[] {
   const out: ImageModel[] = [];
@@ -129,12 +131,12 @@ export function imageModels(doc: DocLines, tree: Tree): ImageModel[] {
 }
 
 /**
- * The edit that embeds a pasted image at `sel`: the markdown replaces the
- * selection, nudged onto its own line (a leading newline where the line
- * already has text) so it renders. The trailing newline is unconditional and
- * `cursor` (relative to `sel.from`) lands after it — the caret ends up BELOW
- * the image's line, off its reveal unit, so the paste shows the image
- * immediately rather than the raw markdown you'd have to arrow away from.
+ * The edit that embeds a pasted image at `sel`. The markdown replaces the
+ * selection, with a leading newline when the line already has text, so the
+ * image stands alone and renders. The trailing newline is unconditional, and
+ * `cursor` (relative to `sel.from`) lands past it. The caret then sits below
+ * the image's line, off its reveal unit. The paste shows the picture, not the
+ * raw markdown the caret would otherwise have to be moved off first.
  */
 export function imagePasteInsert(
   doc: DocLines,
@@ -149,18 +151,17 @@ export function imagePasteInsert(
 }
 
 /**
- * Get an image from somewhere and embed it: the whole of what ⌘V-with-a-picture
- * and Insert Image… have in common, which turns out to be everything except
- * `produce`.
+ * Get an image from somewhere and embed it: everything ⌘V-with-a-picture and
+ * Insert Image… have in common, which is everything except `produce`.
  *
- * `produce` is handed the note's workspace folder and its file path, and
- * answers the markdown reference the server chose — `lib/assets.ts`'s two
- * seams, which differ only in whether the bytes came off a pasteboard or out of
- * a picker. Null is "nothing to insert" (an empty pasteboard, a cancelled
- * picker) and is silent: neither is a failure and neither earns an error strip.
+ * `produce` takes the note's workspace folder and its file path, and returns
+ * the markdown reference the server chose. The two implementations are the
+ * pasteboard call and the picker call in `lib/assets.ts`. Null means nothing
+ * to insert (an empty pasteboard, a cancelled picker), not a failure, and
+ * shows no error strip.
  *
- * The selection is re-read after the await rather than captured before it,
- * because a picker is on screen for as long as a person takes to choose and the
+ * The selection is re-read after the await rather than captured before it. A
+ * picker stays on screen for as long as a person takes to choose, and the
  * caret can move under it.
  */
 export async function embedImage(
@@ -170,9 +171,9 @@ export async function embedImage(
   // No folder means an editor outside the pool (a test): nowhere to save.
   const folder = folderOf(view.state.facet(sessionIdFacet));
   if (!folder) return;
-  // The note's own path rides along: the server seals the write at birth when
-  // that note is LOCKED (locking.md §5) — decided from the disk, the path is
-  // only the address.
+  // The note's own path rides along so the server can seal the write at birth
+  // when that note is locked (locking.md §5). The server decides that from the
+  // disk; the path is only the address.
   const src = await produce(folder, pathOf(view.state.facet(sessionIdFacet)));
   if (!src) return;
   const sel = view.state.selection.main;
@@ -187,10 +188,10 @@ export async function embedImage(
 // --- The view wrappers -------------------------------------------------------
 
 class ImageWidget extends WidgetType {
-  /** `selected` is the view's business, not the model's: a selection sweeping
-   * over the image leaves it drawn (blockRevealed), and an opaque image sits
-   * ON TOP of CodeMirror's selection layer, so without a face of its own it
-   * would be the one thing in a selection that looks untouched. */
+  /** `selected` belongs to the view, not the model. A selection sweeping over
+   * the image leaves it drawn (blockRevealed), and an opaque image covers
+   * CodeMirror's selection layer, so without a face of its own it would be the
+   * one thing in a selection that looked untouched. */
   constructor(readonly model: ImageModel, readonly selected: boolean) {
     super();
   }
@@ -202,11 +203,10 @@ class ImageWidget extends WidgetType {
   eq(other: ImageWidget) {
     return this.key() === other.key() && this.selected === other.selected;
   }
-  /** Reached when only `selected` changed: repaint the face in place rather
-   * than let CodeMirror redraw, because a redraw builds a new <img> and
-   * re-runs the asset fetch — a blank frame mid-drag is the very flicker the
-   * anchor rule exists to remove. A different picture returns false and gets
-   * the redraw. */
+  /** Reached when only `selected` changed. Repaints the face in place: a
+   * redraw would build a new <img> and re-run the asset fetch, leaving the
+   * frame blank mid-drag. For a different picture this returns false and
+   * CodeMirror redraws the widget. */
   updateDOM(dom: HTMLElement): boolean {
     if (dom.dataset.key !== this.key()) return false;
     dom.classList.toggle("is-selected", this.selected);
@@ -229,11 +229,12 @@ class ImageWidget extends WidgetType {
       view.requestMeasure();
     };
 
-    // A sealed image (locking.md §5): the file is there, the vault is
-    // locked. Not "broken" — the honest face is a lock, and unlocking is the
-    // fix. The cache eviction on unlock plus the widget's next rebuild (any
-    // doc/selection change) swaps in the bytes; locked NOTES re-pour wholesale
-    // on unlock, which rebuilds their widgets immediately.
+    // A sealed image (locking.md §5): the file is there, the vault is locked.
+    // The placeholder reads locked rather than broken, because unlocking is
+    // the fix. Unlocking reloads the notes held behind the lock and builds
+    // their widgets again (editorPool.ts), so the bytes are fetched once more
+    // and replace this face. The asset cache drops its `sealed` answers when
+    // the vault relocks, not when it unlocks (lib/assets.ts).
     const sealed = () => {
       box.textContent = "";
       const note = box.appendChild(document.createElement("span"));
@@ -244,23 +245,24 @@ class ImageWidget extends WidgetType {
     };
 
     // The frame shrink-wraps the image so the selected tint lands on the
-    // picture and not on the empty row beside it; the box stays full width so
+    // picture, not on the empty row beside it. The box stays full width so
     // clicking anywhere on the line still reveals the markdown.
     const frame = box.appendChild(document.createElement("span"));
     frame.className = "ledge-mdimage-frame";
     const img = frame.appendChild(document.createElement("img"));
     if (m.alt) img.alt = m.alt;
     img.title = m.alt || "Click to edit image markdown";
-    // The widget's height settles when the bytes arrive, in both branches;
-    // tell CodeMirror each time so the lines below sit where they draw.
+    // The widget's height settles when the bytes arrive, in both branches. The
+    // load handler calls requestMeasure to tell CodeMirror the new height, so
+    // CodeMirror positions the lines below where they are actually drawn.
     img.addEventListener("load", () => view.requestMeasure());
     img.addEventListener("error", broken);
     if (m.src.kind === "remote") {
       img.src = m.src.url;
     } else {
-      // The reference resolves against this note's own workspace folder; no
-      // folder (an editor outside the pool, e.g. a test) renders as broken,
-      // the same degradation as an unconfigured asset channel.
+      // The reference resolves against this note's own workspace folder. With
+      // no folder (an editor outside the pool, e.g. a test) the image renders
+      // as broken, the same fallback as an unconfigured asset channel.
       const folder = folderOf(view.state.facet(sessionIdFacet));
       if (!folder) {
         broken();
@@ -273,19 +275,20 @@ class ImageWidget extends WidgetType {
       }
     }
 
-    // A click is a caret move onto the image's line, which reveals its
-    // markdown right where the user aimed — the table-cell grammar.
-    // ignoreEvent() keeps CodeMirror from also treating this as a click into
-    // the replaced text.
+    // A click moves the caret onto the image's line, which reveals its
+    // markdown where the user aimed: the same grammar as a table cell.
+    // ignoreEvent() below keeps CodeMirror from also treating this as a click
+    // into the replaced text.
     //
-    // The position is read off the DOM at click time rather than taken from
-    // the model this widget was built with. `eq` above compares the picture
-    // and not where it sits (comparing position would redraw the widget on
-    // every edit above it, and a redraw re-runs the asset fetch), so
-    // CodeMirror keeps this element — and this listener — when text inserted
-    // higher up shifts the image down the document. A remembered offset would
+    // posAtDOM reads the position at click time rather than using the model
+    // this widget was built with. `eq` above compares the picture and not
+    // where it sits, so CodeMirror keeps this element, and this listener, when
+    // text inserted higher up shifts the image down. The model's offset would
     // by then name some other line, and the click would look like it did
-    // nothing. posAtDOM answers where this element is NOW.
+    // nothing.
+    //
+    // Comparing position in `eq` instead would redraw the widget on every edit
+    // above it, and a redraw re-runs the asset fetch.
     box.addEventListener("mousedown", (event) => {
       event.preventDefault();
       view.dispatch({
@@ -314,12 +317,13 @@ function buildImages(state: EditorState): DecorationSet {
     if (exclude !== null && m.from <= exclude.to && m.to >= exclude.from) continue;
     // The reveal unit is the whole line (endpoints inclusive), like a table's
     // rows: a caret arriving anywhere on it shows the raw markdown. A
-    // selection merely sweeping ACROSS the line leaves the image drawn —
-    // blockRevealed reads the anchor, not the whole range, so dragging a
-    // selection past an image cannot flap it (livePreview.ts).
+    // selection sweeping across the line leaves the image drawn. blockRevealed
+    // reads the anchor and not the whole range, so dragging a selection past
+    // an image cannot flap it (livePreview.ts).
     const unit = { from: m.lineFrom, to: m.lineTo };
     if (blockRevealed(unit, state.selection.ranges)) continue;
-    // Still drawn, but inside the selection: wear the selected face.
+    // Still drawn, but inside the selection: the widget takes the selected
+    // face.
     const selected = state.selection.ranges.some((r) => r.from <= unit.to && r.to >= unit.from);
     ranges.push(
       Decoration.replace({ widget: new ImageWidget(m, selected), block: true }).range(

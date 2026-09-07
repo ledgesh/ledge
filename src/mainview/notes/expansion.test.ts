@@ -17,7 +17,8 @@ afterEach(resetExpansion);
 
 describe("expansion", () => {
   test("a workspace nobody has opened a folder in has none open", () => {
-    // A total selector, like notesOf: callers stay branch-free.
+    // A total selector, like notesOf: expandedIn returns an empty set, never
+    // undefined, so callers stay branch-free.
     expect([...expandedIn(A)]).toEqual([]);
     expect(isExpanded(A, "projects")).toBe(false);
   });
@@ -46,17 +47,21 @@ describe("expansion", () => {
   });
 
   test("seeding replaces a workspace's set: the saved layout is the whole answer for that root", () => {
-    // Boot order in one line — the module can hold something before the file
-    // is read only in a test, but a merge would be the wrong rule either way.
+    // Seeding replaces the set rather than merging into it: the file is the
+    // whole answer for that root (expansion.ts seedExpansion). Only a test
+    // leaves the module holding folders before the saved layout is read, and
+    // at boot there is nothing to merge with.
     expandFolder(A, "stale");
     seedExpansion(A, ["projects", "projects/api"]);
     expect([...expandedIn(A)].sort()).toEqual(["projects", "projects/api"]);
   });
 
   test("a change notifies listeners, which is how the layout save hears about one", () => {
-    // The browser's rows are one listener; App's debounced layout save is the
-    // other, and opening a folder reaches it by no other route (it changes no
-    // AppState). Unsubscribing has to work for the same reason.
+    // Two things subscribe: the browser's rows (useExpanded) and the debounced
+    // layout save (App.tsx). Opening a folder changes no AppState, so the save
+    // hears about it by no other route, and a subscription that cannot be
+    // dropped is the same hazard as one that never fires. Calling off() has to
+    // stop the notifications, which is what the final expand checks.
     let heard = 0;
     const off = subscribeExpansion(() => {
       heard += 1;
@@ -69,8 +74,9 @@ describe("expansion", () => {
   });
 
   test("two workspaces do not share an answer for a folder name they share", () => {
-    // Keyed by root, so switching workspaces and back finds the tree as it was
-    // left rather than as the other workspace left its own.
+    // The open folders are keyed by workspace root (expansion.ts). Switching
+    // workspaces and back finds the tree as that workspace left it, not as the
+    // other workspace left its own tree.
     expandFolder(A, "projects");
     expect(isExpanded(B, "projects")).toBe(false);
     expandFolder(B, "admin");

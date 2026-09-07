@@ -1,12 +1,9 @@
-// Clipboard access for the app's WebView.
-//
-// The view runs under the views:// scheme, which is not a secure context, so
-// navigator.clipboard is unavailable and execCommand / native Cmd+V paste are
-// unreliable. The real path goes through the Bun process (pbcopy/pbpaste), wired
-// here by main.tsx via configureClipboard. The execCommand fallback only matters
-// when running the view in a plain browser (e.g. the Vite dev server) where the
-// native bridge is absent. Shared by the inline output panel (editor/blocks.ts)
-// and the terminal drawer (terminal/TerminalDrawer.tsx).
+// Clipboard access for the app's WebView, used by editor/blocks.ts and
+// terminal/TerminalDrawer.tsx. The views:// scheme is not a secure context, so
+// navigator.clipboard is missing and execCommand and native ⌘V are unreliable
+// (interactions.md §10). boot.tsx wires the real path through the Bun process
+// (pbcopy and pbpaste) with configureClipboard. execCopy below is the fallback
+// for the view in a plain browser (the Vite dev server), which has no bridge.
 
 /** Both pasteboard flavors: `html` is "" unless it carries formatted text. */
 export interface RichClipboard {
@@ -56,18 +53,20 @@ export async function readClipboard(): Promise<string> {
 
 /**
  * The pasteboard with its HTML flavor, for the editor's ⌘V (editor/htmlPaste.ts
- * translates it). Without the native bridge — the view in a plain browser, or a
- * harness that stubs text only — there is no second flavor to have, so this
- * degrades to the text and an empty `html`, which is exactly "paste the text".
+ * translates it). With no `readRich` wired, as when the view runs in a plain
+ * browser, there is no second flavor to read. The result is the text with an
+ * empty `html`, and ⌘V pastes it as plain text.
  */
 export async function readRichClipboard(): Promise<RichClipboard> {
   if (nativeReadRich) return nativeReadRich();
   return { text: await readClipboard(), html: "" };
 }
 
-// execCommand("copy") copies the current selection, so we stage the text in an
-// off-screen textarea, select it, copy, and remove it. This transiently moves
-// focus; we restore it afterward. Browser-only fallback.
+// Browser-only fallback. execCommand("copy") copies the current selection, so
+// execCopy needs the text selected somewhere first. It adds an invisible
+// textarea at the top-left corner, puts the text in it, selects it, and copies.
+// Afterward it removes the textarea and returns focus to the element that had
+// it.
 function execCopy(text: string): void {
   const active = document.activeElement as HTMLElement | null;
   const ta = document.createElement("textarea");
@@ -83,7 +82,8 @@ function execCopy(text: string): void {
   try {
     document.execCommand("copy");
   } catch {
-    // Nothing more we can do; leave the clipboard untouched.
+    // The copy failed, so the clipboard keeps what it held. There is no
+    // other path to it from a plain browser.
   }
   ta.remove();
   active?.focus?.();

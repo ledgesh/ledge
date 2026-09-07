@@ -26,18 +26,18 @@ import {
   type DocHandlers,
 } from "./store";
 
-// A stand-in for the Bun note store. Writes are recorded; each call's promise can
-// be held open (`gate`) so the tests can drive what happens *during* a save, which
-// is where the interesting races live.
-// Every doc in these tests lives in one workspace folder; bind() below bakes
-// it in so the cases read as before the per-workspace split.
+// A stand-in for the Bun note store. It records every write. Each call's
+// promise can be held open (`gate`), so a test can act while a save is still
+// running. The races these tests cover happen inside that window. Every doc
+// here lives in one workspace folder. bind() below supplies that folder, so
+// the cases read as they did before the per-workspace split.
 const FOLDER = "/notes";
 const bind = (docId: string, path: string | null, handlers: DocHandlers) =>
   bindDoc(docId, path, FOLDER, handlers);
 
 function fakeBridge() {
   const writes: Array<{ path: string; text: string }> = [];
-  // The baseMtimeMs each write stated — the external-edit guard's expectation.
+  // The baseMtimeMs each write stated: the external-edit guard's expectation.
   const writeBases: Array<number | null> = [];
   // Every buffer parked in the trash rather than saved (channel stash).
   const stashes: Array<{ path: string; text: string }> = [];
@@ -58,9 +58,10 @@ function fakeBridge() {
     retitles,
     configures,
     failNextRetitle: false,
-    // Where the NEXT write reports it displaced a competing version to, the
+    // Where the next write reports it displaced a competing version to, the
     // way the real noteWrite answers when its baseMtimeMs guard fires. One
-    // write only: divergence is a single event, not a mode.
+    // write only: the write below clears the field as it reads it, so
+    // divergence is a single event rather than a mode.
     divergeNextTo: null as string | null,
     // When set, every write parks on this promise until it is resolved.
     gate: null as { promise: Promise<void>; open: () => void } | null,
@@ -87,8 +88,8 @@ function fakeBridge() {
     tags: async () => ({ tags: [], lockedSkipped: 0 }),
     tagged: async () => ({ hits: [], lockedSkipped: 0 }),
     takeOpenRequest: async () => null,
-    // The store never calls these (they are command-layer capabilities); the
-    // stubs exist to satisfy the handler shape.
+    // The store never calls these two: they are command-layer capabilities.
+    // The stubs exist to satisfy the handler shape.
     openDaily: async () => {
       throw new Error("unused in store tests");
     },
@@ -121,13 +122,13 @@ function fakeBridge() {
       createFolders.push(folder);
       creates.push(text);
       created += 1;
-      // The real createNote names from the H1 too; keep the enumerated shape so
-      // the existing tests still read straight.
+      // The real createNote also names the file from the H1. This stub numbers
+      // the names instead, so the tests can predict the path.
       const path = `/notes/untitled-${created}.md`;
       return { path, title: `untitled-${created}`, mtimeMs: created };
     },
-    // Stands in for Bun's retitleNote: derives the name from the text's H1, the
-    // same rule the real one uses.
+    // Stands in for Bun's retitleNote. It derives the name from the text's H1,
+    // the same rule the real one uses.
     retitle: async (path: string, text: string): Promise<NoteMeta> => {
       retitles.push({ path, text });
       if (state.failNextRetitle) {
@@ -137,13 +138,13 @@ function fakeBridge() {
       const slug = slugOf(text) ?? "untitled";
       return { path: `/notes/${slug}.md`, title: slug, mtimeMs: 0 };
     },
-    // Filing verbs the save controller never reaches, present because the shim
-    // is one interface and it has to be whole.
+    // Filing verbs the save controller never calls. They are here only because
+    // the stub has to implement the whole handler interface.
     move: async (path: string): Promise<NoteMeta> => ({ path, title: "moved", mtimeMs: 0 }),
     renameFolder: async (_root: string, folder: string) => ({ folder, moved: [] }),
     deleteFolder: async () => ({ trashed: [] }),
-    // The trash half of the bridge: nothing in the save controller touches it,
-    // but the shim is one interface and it has to be whole.
+    // The trash half of the bridge. Nothing in the save controller calls it,
+    // and it too is here only to complete the interface.
     remove: async () => null,
     trash: async () => [],
     restore: async (path: string) => ({ path, title: "", mtimeMs: 0 }),
@@ -154,14 +155,15 @@ function fakeBridge() {
     },
   });
 
-  // The store's other seam: App wires this to the browser's notice strip, and
-  // a test reads what it was asked to show.
+  // The store's other seam. App.tsx wires this to the browser's notice strip.
+  // Here a test reads back what the store asked to show.
   configureStoreUi({ notice: (message) => notices.push(message) });
 
   return state;
 }
 
-// Handlers a test does not care about. Spread over to override just the one it does.
+// Handlers a test does not care about. A test spreads over these to override
+// the one it does care about.
 const noop = (): DocHandlers => ({ onFile: () => {}, onTitle: () => {} });
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
@@ -196,9 +198,9 @@ describe("binding", () => {
     noteChanged("doc-1", "one");
     await saveNow("doc-1");
 
-    // A tab re-attach (pane switch) rebinds with the path the TAB knows, which is
-    // still null if the reducer has not caught up. The store must not forget the
-    // file it just allocated and create a second one.
+    // A tab re-attach (pane switch) rebinds with the path the tab knows, which
+    // is still null while the reducer has not caught up. The store must keep
+    // the file it just allocated rather than create a second one.
     bind("doc-1", null, noop());
     noteChanged("doc-1", "two");
     await saveNow("doc-1");
@@ -235,8 +237,8 @@ describe("first save allocates a file", () => {
   });
 
   test("the file is created in the folder the doc was bound with — the tab's workspace", async () => {
-    // The folder captured at bindDoc is what keeps a first save landing in the
-    // note's own workspace, wherever the selection is by the time it fires.
+    // bindDoc captures the folder, so a first save creates the file in the
+    // note's own workspace whatever workspace is selected when it fires.
     const fs = fakeBridge();
     bindDoc("doc-1", null, "/elsewhere", noop());
     noteChanged("doc-1", "first");
@@ -372,10 +374,10 @@ describe("failure", () => {
   });
 });
 
-// The rename/delete flows (notes/actions.ts) drive these three. What they are all
-// guarding is the gap while Bun is moving a file: the note is still being typed
-// into, and a save landing in that gap writes to a path that is about to be, or
-// has just been, wrong.
+// The rename and delete flows in notes/actions.ts drive freezeDoc, retargetDoc
+// and forgetDoc. All three guard the gap while Bun is moving a file: the note
+// is still being typed into, and a save landing in that gap would write to a
+// path that is about to be wrong, or has just become wrong.
 describe("moving and losing a note's file", () => {
   test("a frozen note keeps collecting edits but writes none of them", async () => {
     const fs = fakeBridge();
@@ -396,7 +398,8 @@ describe("moving and losing a note's file", () => {
     retargetDoc("doc-1", "/notes/b.md");
     await tick();
 
-    // The old path is never touched: this is the resurrected-duplicate bug.
+    // The old path is never written. A write there would recreate the file Bun
+    // just renamed away: the resurrected-duplicate bug.
     expect(fs.writes).toEqual([{ path: "/notes/b.md", text: "typed mid-rename" }]);
   });
 
@@ -425,7 +428,7 @@ describe("moving and losing a note's file", () => {
     const fs = fakeBridge();
     bind("doc-1", "/notes/a.md", noop());
 
-    // What actions.ts does when Bun rejects the name: retarget at the old path.
+    // actions.ts retargets at the old path when Bun rejects the rename.
     freezeDoc("doc-1");
     retargetDoc("doc-1", "/notes/a.md");
 
@@ -441,9 +444,10 @@ describe("moving and losing a note's file", () => {
     noteChanged("doc-1", "unsaved words");
     forgetDoc("doc-1");
 
-    // Both the debounce and the teardown path have to come up empty. releaseDoc is
-    // what the editor pool calls moments later as the tab closes; if forgetDoc had
-    // merely deregistered the note, this is where the file would reappear.
+    // Both the debounce and the teardown path have to come up empty. The editor
+    // pool calls releaseDoc moments later as the tab closes. If forgetDoc had
+    // left the entry in the map with its pending text, releaseDoc's flush would
+    // write the file back.
     releaseDoc("doc-1");
     await pastDebounce();
     expect(fs.writes).toEqual([]);
@@ -476,9 +480,9 @@ describe("moving and losing a note's file", () => {
   });
 });
 
-// A note's filename follows its first-line H1. The rule that makes that safe is
-// that only a CHANGE to the heading moves the file, measured against the heading
-// the note already had when it was opened.
+// A note's filename follows its first-line H1. Only a change to the heading
+// moves the file, measured against the heading the note already had when it
+// was opened.
 describe("naming by heading", () => {
   const titled = (h: string, body = "body") => `# ${h}\n\n${body}\n`;
 
@@ -494,9 +498,9 @@ describe("naming by heading", () => {
     expect(fs.retitles).toEqual([]);
   });
 
-  // The migration guard, and the reason seedSlug exists at all. A note that
-  // predates this rule (untitled-2.md holding "# test-123") must not be moved out
-  // from under the user the first time they touch it.
+  // The migration guard, and why seedSlug exists. A note that predates this
+  // rule (untitled-2.md holding "# test-123") keeps its filename when it is
+  // first edited.
   test("a note whose filename disagrees with its heading is left where it is", async () => {
     const fs = fakeBridge();
     bind("doc-1", "/notes/untitled-2.md", noop());
@@ -542,7 +546,7 @@ describe("naming by heading", () => {
     bind("doc-1", "/notes/shipping-notes.md", noop());
     seedSlug("doc-1", titled("Shipping Notes"));
 
-    // Punctuation and case wash out of the slug, so there is no rename to do.
+    // The slug drops punctuation and case, so there is no rename to do.
     noteChanged("doc-1", titled("shipping notes!"));
     await saveNow("doc-1");
 
@@ -554,8 +558,8 @@ describe("naming by heading", () => {
     bind("doc-1", "/notes/shipping-notes.md", noop());
     seedSlug("doc-1", titled("Shipping Notes"));
 
-    // Renaming this back to untitled.md would be a nasty surprise, and would
-    // collide with any real untitled.md besides.
+    // Renaming this back to untitled.md would drop the name the note has, and
+    // would collide with any real untitled.md.
     noteChanged("doc-1", "just prose now\n");
     await saveNow("doc-1");
 
@@ -575,8 +579,8 @@ describe("naming by heading", () => {
   });
 
   test("a note created from titled text is not renamed straight after", async () => {
-    // createNote already names from the H1, so the create IS the naming: a retitle
-    // on top of it would be a pointless second trip to the disk.
+    // createNote names the file from the H1, so the create does the naming. A
+    // retitle on top of it would be a second trip to the disk for nothing.
     const fs = fakeBridge();
     bind("doc-1", null, noop());
 
@@ -588,8 +592,9 @@ describe("naming by heading", () => {
   });
 
   test("an unseeded note records its heading rather than acting on it", async () => {
-    // A note whose load never landed (deleted behind our back). First sight of its
-    // text must not be read as "the heading just changed".
+    // A note whose load never landed, so nothing seeded its slug (the file was
+    // deleted behind the app's back). The first sight of its text must not
+    // count as a heading change.
     const fs = fakeBridge();
     bind("doc-1", "/notes/whatever.md", noop());
 
@@ -597,7 +602,7 @@ describe("naming by heading", () => {
     await saveNow("doc-1");
     expect(fs.retitles).toEqual([]);
 
-    // But a real change after that is honoured.
+    // A real change after that one does rename the file.
     noteChanged("doc-1", titled("Shipping Plans"));
     await saveNow("doc-1");
     expect(fs.retitles).toHaveLength(1);
@@ -613,8 +618,8 @@ describe("naming by heading", () => {
     await saveNow("doc-1");
     expect(fs.retitles).toHaveLength(1);
 
-    // The heading has not been dealt with, so the next save must try again rather
-    // than treat the new slug as already applied.
+    // The rename never landed, so the next save must try again rather than
+    // treat the new slug as already applied.
     await saveNow("doc-1");
     expect(fs.retitles).toHaveLength(2);
   });
@@ -631,9 +636,9 @@ describe("naming by heading", () => {
   });
 });
 
-// The tab and browser show the note's heading, not its filename. That label moves
-// on its own schedule: more often than the file does, and sometimes when the file
-// does not move at all.
+// The tab and browser show the note's heading, not its filename. The label
+// changes more often than the filename does, and a heading edit can relabel
+// the note without moving its file at all.
 describe("labelling", () => {
   const titled = (h: string, body = "body") => `# ${h}\n\n${body}\n`;
   const labelsOf = (): { labels: string[]; handlers: DocHandlers } => {
@@ -652,19 +657,19 @@ describe("labelling", () => {
     expect(labels).toEqual(["Shipping Plans"]);
   });
 
-  // The case that forced the label to be tracked separately from the slug.
+  // Why the label is tracked separately from the slug (store.ts lastHeading).
   test("a heading edit that renames nothing still relabels", async () => {
     const fs = fakeBridge();
     const { labels, handlers } = labelsOf();
     bind("doc-1", "/notes/shipping-notes.md", handlers);
     seedSlug("doc-1", titled("Shipping Notes"));
 
-    // Same slug ("shipping-notes"), so no file moves...
+    // The slug is still "shipping-notes", so no file moves.
     noteChanged("doc-1", titled("shipping notes!"));
     await saveNow("doc-1");
 
     expect(fs.retitles).toEqual([]);
-    expect(labels).toEqual(["shipping notes!"]); // ...but the label is not stale
+    expect(labels).toEqual(["shipping notes!"]); // the label still follows the heading
   });
 
   test("editing the body never relabels", async () => {
@@ -686,7 +691,8 @@ describe("labelling", () => {
 
     noteChanged("doc-1", "just prose now\n");
     await saveNow("doc-1");
-    // Not "Untitled": the file is still shipping-notes.md, and it still says so.
+    // Not "Untitled": the file is still shipping-notes.md, and labelOf falls
+    // back to the filename (shared/slug.ts).
     expect(labels).toEqual(["shipping-notes"]);
   });
 
@@ -696,9 +702,9 @@ describe("labelling", () => {
     bind("doc-1", null, handlers);
     seedSlug("doc-1", titled("Scratch"));
 
-    // The save creates the file before the label is computed, so by then the note
-    // HAS a name to fall back to. "Untitled" is only for a note with neither, which
-    // means a note that has never saved, which never reaches this callback at all.
+    // The save creates the file before syncTitle computes the label, so there
+    // is a filename to fall back to. "Untitled" is only for a note with
+    // neither a heading nor a file, and such a note never reaches onTitle.
     noteChanged("doc-1", "no heading\n");
     await saveNow("doc-1");
     expect(labels).toEqual(["untitled-1"]);
@@ -716,11 +722,11 @@ describe("labelling", () => {
   });
 });
 
-// Spawn params (frontmatter) reaching Bun: sent when a note's saved text lands
-// (seedSlug) and when an edit changes what the frontmatter parses to — and at
-// no other time, because nearly every note has no frontmatter and must cost
-// nothing on this path. (The one addition: a workspace carrying a default cwd
-// sends once at bindDoc — the block after this one.)
+// Spawn params (frontmatter) reach Bun when a note's saved text lands
+// (seedSlug) and when an edit changes what the frontmatter parses to. Nothing
+// else sends: nearly every note has no frontmatter and must cost nothing on
+// this path. A workspace carrying a default cwd sends once more, at bindDoc
+// (the block after this one).
 describe("params syncing", () => {
   const withFm = (inner: string, body = "# Note\n\nbody\n") => `---\n${inner}---\n${body}`;
 
@@ -738,9 +744,9 @@ describe("params syncing", () => {
   });
 
   test("a note with no frontmatter announces its location once, then nothing", async () => {
-    // The pre-facts economy was "no frontmatter, no send"; the location fact
-    // deliberately amends it to one send per on-disk note — a shell must not
-    // be born ignorant of LEDGE_NOTE just because the note has no params.
+    // The rule was "no frontmatter, no send". Carrying the note's location
+    // amends it to one send per on-disk note, so a shell gets LEDGE_NOTE even
+    // when the note has no params.
     const fs = fakeBridge();
     bind("doc-1", "/notes/plain.md", noop());
     seedSlug("doc-1", "# Plain\n\nbody\n");
@@ -782,7 +788,7 @@ describe("params syncing", () => {
     await saveNow("doc-1");
     expect(fs.configures).toHaveLength(1);
     expect(fs.configures[0].params.profile).toBe("petstore");
-    // The first save allocated the file, and the fact rode the same send.
+    // The first save allocated the file, and its path went out with that send.
     expect(fs.configures[0].notePath).toBe("/notes/untitled-1.md");
   });
 
@@ -815,7 +821,8 @@ describe("params syncing", () => {
   });
 
   test("a comment-only frontmatter change re-sends nothing", async () => {
-    // Comparison is on the PARSED params: annotating the block is not a change.
+    // The comparison is on the parsed params, so annotating the block is not
+    // a change.
     const fs = fakeBridge();
     bind("doc-1", "/notes/api-tests.md", noop());
     seedSlug("doc-1", withFm("cwd: /tmp/proj\n"));
@@ -826,10 +833,10 @@ describe("params syncing", () => {
   });
 });
 
-// The per-workspace default cwd: a note with no `cwd:` of its own inherits
-// its EXTERNAL workspace's folder (workspace/channel.ts workspaceDefaultCwd),
-// merged into every params send. Managed workspaces have no default, which is
-// what keeps the frontmatterless-note-sends-nothing economy above intact.
+// The per-workspace default cwd: a note with no `cwd:` of its own inherits its
+// external workspace's folder (workspace/channel.ts workspaceDefaultCwd),
+// merged into every params send. A managed workspace has no default, so a
+// pathless note there still sends nothing at bind.
 describe("workspace default cwd", () => {
   const withFm = (inner: string, body = "# Note\n\nbody\n") => `---\n${inner}---\n${body}`;
   const external = () => recordWorkspaceKinds([{ root: FOLDER, kind: "external", available: true }]);
@@ -837,8 +844,8 @@ describe("workspace default cwd", () => {
   test("binding a note in an external workspace configures its folder as cwd at once", () => {
     const fs = fakeBridge();
     external();
-    // No seedSlug, no edit: a fresh tab's first act may be a Run click, and
-    // the shell it spawns must already be anchored to the workspace.
+    // No seedSlug and no edit. A fresh tab's first act may be a Run click, so
+    // the shell it spawns needs the workspace folder as its cwd already.
     bind("doc-1", null, noop());
     expect(fs.configures).toHaveLength(1);
     expect(fs.configures[0]).toEqual({
@@ -849,8 +856,8 @@ describe("workspace default cwd", () => {
   });
 
   test("a managed workspace's pathless note keeps the old economy: nothing sent", () => {
-    // Only a PATHLESS note now: an on-disk note always announces its
-    // location once (see "announces its location once" above).
+    // Only a pathless note sends nothing. An on-disk note always announces
+    // its location once (see "announces its location once" above).
     const fs = fakeBridge();
     recordWorkspaceKinds([{ root: FOLDER, kind: "managed", available: true }]);
     bind("doc-1", null, noop());
@@ -878,8 +885,8 @@ describe("workspace default cwd", () => {
   });
 
   test("a plain note's load and edits re-send nothing past the bind", async () => {
-    // The merged params are what lastParamsKey tracks, so the folder default
-    // does not turn every body edit into a configure.
+    // lastParamsKey tracks the merged params, so the folder default does not
+    // turn every body edit into a configure.
     const fs = fakeBridge();
     external();
     bind("doc-1", "/notes/plain.md", noop());
@@ -930,10 +937,10 @@ describe("external-edit safety: the save's expectation", () => {
   });
 });
 
-// The other half of that guard, seen from the front: Bun trashing the competing
-// version is only safe to do silently if the user finds out it happened. It was
-// a console line while the other writer had to be a program on this machine;
-// with two clients on one server it is routinely the same person's phone.
+// The user-facing half of that guard. The write moves the competing version to
+// the trash, so the save has to tell the user it happened. This was a console
+// line while the other writer could only be a program on this machine. With two
+// clients on one server it is often the same user's other device.
 describe("external-edit safety: what the user is told", () => {
   test("a save that displaced another version says so, and names the note", async () => {
     const fs = fakeBridge();
@@ -944,11 +951,11 @@ describe("external-edit safety: what the user is told", () => {
     await saveNow("doc-1");
 
     expect(fs.notices).toHaveLength(1);
-    // Named, because the strip is in the sidebar and a blur-driven flushAll can
-    // save a tab the user is not looking at.
+    // The notice names the note. The strip is in the sidebar, and a flushAll
+    // on window blur can save a tab the user is not looking at.
     expect(fs.notices[0]).toContain("Shipping Notes");
-    // And where the other version went, since that is the whole reason this is
-    // an answer rather than a loss.
+    // It also says where the other version went, so the user can recover it
+    // from the Trash.
     expect(fs.notices[0]).toContain("Trash");
   });
 
@@ -1027,8 +1034,8 @@ describe("external-edit safety: reload", () => {
     seedSlug("doc-1", "# Old Title\n\nbody\n", 10);
     expect(reseedDoc("doc-1", "/notes/old-title.md", "# Agent Title\n\nrewritten\n", 20)).toBe(true);
     expect(titles).toEqual(["Agent Title"]);
-    // A body edit after the adoption: the save's expectation is the adopted
-    // version, and the unchanged (new) heading moves no file.
+    // A body edit after the adoption. The save states the adopted version as
+    // its expectation, and the unchanged (new) heading moves no file.
     noteChanged("doc-1", "# Agent Title\n\nrewritten, plus me\n");
     await saveNow("doc-1");
     expect(fs.retitles).toEqual([]);
@@ -1073,8 +1080,8 @@ describe("external-edit safety: reload", () => {
 
 // --- the outage path ---------------------------------------------------------
 // A buffer typed while the server could not be reached, and what becomes of it
-// when the wire returns (remote.md §7). The DOM half is editorPool's; these are
-// the decisions.
+// when the wire returns (remote.md §7). editorPool owns the DOM half. These
+// tests cover the decisions.
 
 describe("the save hold", () => {
   test("a held save does not reach the server and stays pending", async () => {
@@ -1103,12 +1110,11 @@ describe("the save hold", () => {
     expect(fs.writes).toEqual([{ path: "/notes/a.md", text: "v1" }]);
   });
 
-  // The gap between the two halves of a reconnect is now microseconds wide: a
-  // server that restarted announces `lost` and `live` in one breath
-  // (shared/transport.ts). A save that was already out is failed by the
-  // transport and puts its text BACK a moment later, so anyone deciding what a
-  // buffer contains has to wait for that moment or decide against a buffer that
-  // looks clean and is not.
+  // A restarted server announces `lost` and `live` in the same breath
+  // (shared/transport.ts). The transport fails a save that was already out,
+  // and that save puts its text back in the buffer a few microtasks later. A
+  // caller reading buffers in between sees one that looks clean and is not, so
+  // it has to wait for the failure to land.
   test("settling waits for a save that was already out to finish failing", async () => {
     const fs = fakeBridge();
     bind("doc-1", "/notes/a.md", noop());
@@ -1119,7 +1125,7 @@ describe("the save hold", () => {
     void saveNow("doc-1");
     await tick();
 
-    // Mid-write, and the buffer looks clean from outside because the text is in
+    // Mid-write. The buffer looks clean from outside, because its text is in
     // the request rather than in `pending`.
     let landed = false;
     void savesSettled().then(() => (landed = true));
@@ -1128,8 +1134,8 @@ describe("the save hold", () => {
     expect(landed).toBe(false);
     expect(strandedCandidates()).toEqual([]);
 
-    // The wire fails it. The text comes back, and only now is the buffer's true
-    // state readable.
+    // The wire fails the write. The text goes back into `pending`, and only
+    // then does the buffer read as dirty.
     fs.failNextWrite = true;
     release();
     await savesSettled();
@@ -1147,8 +1153,8 @@ describe("the save hold", () => {
     expect(landed).toBe(true);
   });
 
-  // A connection switch is about to reload the page, so a hold must never be
-  // the reason an edit was not even attempted.
+  // A connection switch is about to reload the page. The hold must not stop a
+  // last edit from being attempted.
   test("flushAllNow drops the hold rather than honouring it", async () => {
     const fs = fakeBridge();
     bind("doc-1", "/notes/a.md", noop());
@@ -1202,8 +1208,9 @@ describe("stranded buffers", () => {
     expect(notices[0]).toContain("Plan");
     expect(notices[0]).toContain("Trash");
 
-    // Clean now: releasing must write nothing, and the next save states the
-    // server's version as its base rather than the one it was typed against.
+    // The note is clean now. Releasing writes nothing, and the next save
+    // states the server's version as its base rather than the older one the
+    // buffer was typed against.
     releaseSaves();
     await tick();
     expect(fs.writes).toEqual([]);
@@ -1219,7 +1226,7 @@ describe("stranded buffers", () => {
     seeded("doc-1", "/notes/a.md", "# Plan\n\nfrom disk\n", 1000);
     holdSaves();
     noteChanged("doc-1", "# Plan\n\ntyped here\n");
-    // The stash was a round trip; somebody kept typing across it.
+    // Parking the text took a round trip, and typing continued across it.
     noteChanged("doc-1", "# Plan\n\nstill typing\n");
 
     const ok = adoptOverStranded("doc-1", "/notes/a.md", "# Plan\n\nthe server's\n", 2000, "# Plan\n\ntyped here\n", "/notes/.ledge-trash/plan.md");

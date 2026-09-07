@@ -1,7 +1,8 @@
-// The page's half of the iOS bridge (ios.md §2). Everything here is `post` in
-// and `deliver` out, which is the whole reason the module was written that
-// way: the protocol between a webview and a Swift shell is testable in Bun,
-// and only the three lines that touch WebKit are not.
+// The page's half of the iOS bridge (ios.md §2). `nativeShell` is pure: `post`
+// is its only way out and `deliver` Swift's only way in, a shape chosen so the
+// protocol between a webview and a Swift shell can be tested in Bun. These
+// tests drive all of it with those two functions. `attachShell` is the only
+// part that touches WebKit, and nothing here covers it.
 import { describe, expect, test } from "bun:test";
 import { CLIENT_METHODS, fromBase64, REQUEST_METHODS, toBase64, type RequestClient } from "../../shared/wire";
 import {
@@ -20,10 +21,13 @@ function recorder() {
   // Answer the pending call whose id is `id`, the way Swift does.
   const reply = (id: number, r: unknown) => shell.deliver({ t: "reply", id, r });
   const fail = (id: number, e: string) => shell.deliver({ t: "fail", id, e });
-  // The dial handshake, so a test that only cares about bytes can skip past it.
+  // Reply to a pending call by method name. `greeted` and `opened` below use
+  // it to play out the dial handshake. A test that only cares about bytes can
+  // then skip past that handshake.
   const answer = (m: string, r: unknown) => {
-    // The LAST one: a reconnect dials again, and answering the first @open a
-    // second time would settle nothing and hang the test.
+    // The last call with this name, not the first. A reconnect dials `@open`
+    // again, and replying to the earlier id would settle nothing and hang the
+    // test.
     const call = sent.filter((msg) => msg.t === "call" && msg.m === m).at(-1);
     reply((call as { id: number }).id, r);
   };
@@ -69,10 +73,10 @@ describe("the native call channel", () => {
   test("who we are and where we point is asked once, before any socket", async () => {
     const { sent, shell, greeted } = recorder();
     expect(shell.destination()).toBe("");
-    // The device's four facts together, because all four are needed before a
-    // connection exists: the id keys the layout, the label names this phone on
-    // the other clients' screens, the destination names the machine, and the key
-    // line is what a NEW server has to be given (§4).
+    // `@hello` answers four facts at once, all needed before a connection
+    // exists: the client id keys the saved layout, the label names this phone
+    // on the other clients' screens, the destination names the machine, and
+    // the key line is what a new server has to be given (ios.md §4).
     expect(await greeted("dev@mac.local")).toEqual({
       client: "device-1",
       label: "iPhone",
@@ -92,8 +96,10 @@ describe("the native call channel", () => {
   });
 
   test("every call the overlay makes is a name the shell was told about", () => {
-    // SHELL_CALLS is the Swift switch's cases. A name here that is not there is
-    // a call nothing answers, which is a hang rather than an error.
+    // SHELL_CALLS lists the cases of the Swift switch
+    // (ios/Sources/WebHost.swift). A name here that is missing there falls to
+    // that switch's `default`, and the call comes back rejected with "the
+    // Ledge shell has no <method>".
     expect(new Set(SHELL_CALLS).size).toBe(SHELL_CALLS.length);
     expect([...SHELL_CALLS].every((c) => c.startsWith("@") || c.includes("."))).toBe(true);
   });
@@ -116,8 +122,10 @@ describe("the byte stream", () => {
   test("bytes that beat the reader are held, not dropped", async () => {
     const { shell, opened } = recorder();
     const wire = await opened(1);
-    // Between `dial()` resolving and clientConnection attaching its reader is
-    // two statements, and the server's hello is already on its way.
+    // The server's hello can arrive before anything is reading. `dial()`
+    // resolving and clientConnection attaching its reader are two statements
+    // apart (shared/transport.ts), and fedDuplex holds the early bytes until
+    // `onData` is set.
     shell.deliver({ t: "frame", gen: 1, b: toBase64(new Uint8Array([7])) });
     const seen: Uint8Array[] = [];
     wire.onData = (chunk) => seen.push(chunk);
@@ -144,8 +152,8 @@ describe("the byte stream", () => {
 });
 
 // The accessory bar's half of the bridge (ios.md §7). Swift sends a command
-// id; the page hands it to the registry. Nothing here knows what any of the
-// ids mean, and that is the contract under test.
+// id and the page hands it to the registry. The tests below check that the
+// bridge passes an id through without interpreting it.
 describe("a button on the keyboard bar", () => {
   test("arrives as the command id Swift sent, verbatim", () => {
     const { shell } = recorder();
@@ -157,17 +165,17 @@ describe("a button on the keyboard bar", () => {
   });
 
   test("before anything subscribes, it is dropped rather than thrown", () => {
-    // The window between the page loading and bootView registering the
-    // dispatcher. A tap in it means nothing — there is no editor yet — and a
-    // throw here would land in `deliver`, which Swift calls from
+    // The window between the page loading and ios.tsx registering the
+    // dispatcher. There is no editor yet, so a tap in it means nothing. A
+    // throw would land in `deliver`, which Swift calls from
     // evaluateJavaScript and cannot handle.
     const { shell } = recorder();
     expect(() => shell.deliver({ t: "verb", id: "format.bold" })).not.toThrow();
   });
 
   test("a verb is not a reply, and settles no pending call", async () => {
-    // Both cross the same channel. An id collision between the two would be a
-    // native call resolving with a command name.
+    // A verb and a reply cross the same channel. An id collision between the
+    // two would settle a native call with a command name.
     const { shell, sent } = recorder();
     let settled = false;
     void shell.call("clipboard.read", {}).then(() => (settled = true));
@@ -187,9 +195,9 @@ describe("a button on the keyboard bar", () => {
     expect(sent.at(-1)).toEqual({ t: "call", id: 3, m: "@focus", p: { over: "none" } });
   });
 
-  // The run's face sends key names, not command ids, and lands somewhere else
-  // entirely (editor/inlineTerm.ts). One channel, two vocabularies, and neither
-  // may arrive as the other.
+  // The run's face sends key names rather than command ids, and they land in
+  // editor/inlineTerm.ts rather than the command registry. One channel carries
+  // both vocabularies, so neither may arrive as the other.
   test("a key is not a verb", () => {
     const { shell } = recorder();
     const verbs: string[] = [];
@@ -203,8 +211,9 @@ describe("a button on the keyboard bar", () => {
   });
 });
 
-// The filter in front of that call. Focus events come in pairs and the editor
-// keeps focus across most of them; what the shell needs is the transitions.
+// focusReporter is the filter in front of `@focus`. Focus events arrive in
+// pairs and the editor keeps focus across most of them, so the shell is told
+// only about transitions.
 describe("what the keyboard is over, reported only when it changes", () => {
   test("the steady state costs nothing", () => {
     const told: BarFace[] = [];
@@ -217,8 +226,9 @@ describe("what the keyboard is over, reported only when it changes", () => {
 
   test("a page that has focused nothing yet says nothing", () => {
     // The shell's own state starts at "none" and a reload resets it, so an
-    // opening "none" would be a bridge call that changes nothing — and, worse,
-    // a reloadInputViews on a keyboard that is not up.
+    // opening "none" would be a bridge call that changes nothing. Swift
+    // compares the face it is sent against the one it holds and does nothing
+    // when they match (ios/Sources/WebHost.swift).
     const told: BarFace[] = [];
     const report = focusReporter((over) => told.push(over));
     report("none");
@@ -235,10 +245,10 @@ describe("what the keyboard is over, reported only when it changes", () => {
     expect(told).toEqual(["note", "none", "note"]);
   });
 
-  // The move with no blur in the middle: a run takes the keyboard from the
-  // prose it is running under, and both surfaces are in the same editor. A
-  // filter that only knew "focused or not" would report nothing at all here,
-  // and the bar would keep offering Bold to a program waiting for a password.
+  // A move with no blur in the middle. A run takes the keyboard from the prose
+  // it runs under, and both surfaces sit in the same editor. A filter that only
+  // knew "focused or not" would report nothing here, and the bar would keep
+  // offering Bold to a program waiting for a password.
   test("the note to the run it started, and back", () => {
     const told: BarFace[] = [];
     const report = focusReporter((over) => told.push(over));
@@ -250,9 +260,9 @@ describe("what the keyboard is over, reported only when it changes", () => {
   });
 });
 
-// The reason `gen` exists. A reconnect dials while the previous socket's
-// obituary is still crossing the bridge, and both of these would otherwise
-// land on the connection that just replaced it.
+// Why `gen` exists. A reconnect dials while the previous socket's close is
+// still crossing the bridge. Without the generation number, that close and its
+// late frames would land on the connection that just replaced it.
 describe("a superseded socket cannot speak for the live one", () => {
   test("its bytes are dropped", async () => {
     const { shell, opened } = recorder();
@@ -283,11 +293,11 @@ describe("a superseded socket cannot speak for the live one", () => {
 // --- the overlay -------------------------------------------------------------
 
 /**
- * A server that answers nothing: reaching it is the failure under test.
+ * A server that answers nothing. Reaching it is the failure under test.
  *
- * A real map over every method rather than a Proxy, because the overlay spreads
- * what it is given and a Proxy's methods are not own properties — a fake that
- * disappeared under a spread would fail for a reason the code does not have.
+ * A real object over every method rather than a Proxy: `nativeOverlay` spreads
+ * what it is given, and a Proxy's methods are not own properties. A fake that
+ * vanished under the spread would fail for a reason the code does not have.
  */
 function noServer(extra: Partial<RequestClient> = {}): RequestClient {
   return {
@@ -322,24 +332,22 @@ interface StoredServer {
   /** Where sshd listens, or 0 for the default (shared/connections.ts). */
   port: number;
   hostKey: string;
-  /** Which door (remote.md §4). The password is never in the list: it goes to
+  /** Which door (remote.md §4). The password is not in the list: it goes to
    * the phone's keychain by its own call, which `withServers` records below. */
   auth: "key" | "password";
 }
 
 /**
- * The phone's stored list, driven the way Swift drives it.
- *
- * Three calls are the whole of what that end persists
- * (ios/Sources/ShellConfig.swift), so a fake holding them in a variable
- * exercises every rule there is about adding, renaming and removing — because
- * every one of those rules is in the overlay, on purpose, beside the Mac's in
- * bun/connectionManager.ts rather than a second time in Swift.
+ * The phone's stored server list, driven the way Swift drives it.
+ * `servers.list`, `servers.save` and `servers.password` are all Swift persists
+ * (ios/Sources/ShellConfig.swift, ServerPassword.swift). The rules for adding,
+ * renaming and removing are in this overlay beside the Mac's in
+ * bun/connectionManager.ts (ios.md §2), so this fake exercises all of them.
  */
 function withServers(servers: StoredServer[], selected = servers[0]?.id ?? "") {
-  // `passwords` is the phone's keychain, which no reply ever reads back: what
-  // a test can see is what was PUT there, which is the same thing the page can
-  // see (remote.md §4).
+  // `passwords` stands in for the phone's keychain. No reply reads one back,
+  // so a test sees only what was put there, which is all the page can see too
+  // (remote.md §4).
   const state = { servers, selected, passwords: new Map<string, string>() };
   const probed: string[] = [];
   const o = overlay(async (m, p) => {
@@ -396,7 +404,7 @@ describe("the client overlay", () => {
       return null;
     });
     expect(await o.menuSet({ items: [{ label: "File" }] })).toEqual({ ok: true });
-    // Not even the shell: there is nothing on a phone for it to hand this to.
+    // Not even the shell. There is no menu bar on a phone to hand this to.
     expect(asked).toEqual([]);
   });
 
@@ -405,13 +413,13 @@ describe("the client overlay", () => {
     const wrote: unknown[] = [];
     const o = overlay(async () => png, noServer({ assetWrite: async (p) => (wrote.push(p), { src: ".ledge-assets/1.png" }) }));
     expect(await o.assetPaste({ root: "/notes", notePath: "/notes/a.md" })).toEqual({ src: ".ledge-assets/1.png" });
-    // The bytes cross; the NAME comes back. The client never names a file.
+    // The bytes cross and the name comes back. The client never names a file.
     expect(wrote).toEqual([{ root: "/notes", notePath: "/notes/a.md", dataB64: png }]);
     expect(fromBase64(png)).toEqual(new Uint8Array([137, 80, 78, 71]));
   });
 
   test("no image on the pasteboard costs the server nothing", async () => {
-    // noServer() throws on assetWrite, so this passing IS the assertion.
+    // noServer() throws on assetWrite, so the test passing is the assertion.
     expect(await overlay(async () => "").assetPaste({ root: "/notes", notePath: "/notes/a.md" })).toEqual({ src: null });
   });
 
@@ -421,14 +429,16 @@ describe("the client overlay", () => {
     expect(status.connections.map((c) => c.name)).toEqual(["VPS", "Pi"]);
     expect(status.active).toBe(PI.id);
     expect(status.wanted).toBe(PI.id);
-    // No boot-time fallback to report: a phone with no reachable server never
-    // renders this at all, it shows ios.tsx's sentence instead.
+    // No boot-time fallback to report. A phone with no reachable server never
+    // renders the connection chrome: it shows the refusal page in ios.tsx
+    // instead.
     expect(status.error).toBe("");
-    // Facts about how a phone connects, not placeholders: the host key was
-    // pinned when the server was added, and the client key has no path because
-    // it is in the Secure Enclave (ios.md §4).
+    // Both fields are facts rather than placeholders. The host key was pinned
+    // when the server was added, and the client key has no path because it is
+    // in the Secure Enclave (ios.md §4).
     expect(status.connections[0]).toMatchObject({ pinned: true, keyPath: "" });
-    // The SERVER's build, not the client's: the chrome shows what it reached.
+    // The server's build rather than the client's. The chrome shows what it
+    // reached.
     expect(status.build).toBe("0.1.0-server");
   });
 
@@ -455,8 +465,9 @@ describe("the client overlay", () => {
     expect(id).not.toBe(VPS.id);
   });
 
-  // The same predicate the Mac applies, in the same words: what a text field
-  // becomes is ssh's argv, and a destination starting with "-" is an option.
+  // The same predicate the Mac applies (shared/connections.ts
+  // validateConnection). The field becomes ssh's argv, and a destination
+  // starting with "-" is an option.
   test("what could not be an ssh destination never reaches the store", async () => {
     const { state, o } = withServers([VPS]);
     expect((await o.connectionAdd({ name: "X", destination: "-oProxyCommand=x", port: 0,
@@ -472,10 +483,11 @@ describe("the client overlay", () => {
     const { state, o } = withServers([VPS, PI], VPS.id);
     expect(await o.connectionSelect({ id: PI.id })).toEqual({ ok: true, error: "" });
     expect(state.selected).toBe(PI.id);
-    // The ladder gives up for good when a restarted server answers with a new
-    // instance (shared/transport.ts), and choosing the connection again is what
-    // rebuilds from boot — on a phone the only recovery there is, so a refusal
-    // would be an app that stays dead until it is force-quit.
+    // Selecting the one already selected still reports ok, so the caller goes
+    // on to reload and rebuild the session (lib/connections.ts). That is how a
+    // phone reconnects once its reconnect ladder has given up, and on a phone
+    // it is the only recovery. A refusal here would leave the app disconnected
+    // until it was force-quit.
     expect(await o.connectionSelect({ id: PI.id })).toEqual({ ok: true, error: "" });
     expect((await o.connectionSelect({ id: "elsewhere" })).ok).toBe(false);
   });
@@ -490,7 +502,8 @@ describe("the client overlay", () => {
     expect(state.servers[0]).toEqual({ ...VPS, name: "Frankfurt" });
   });
 
-  // The account is not what a host key belongs to, so this one saves in a step.
+  // A host key belongs to the host, not the account, so changing the user half
+  // of the destination is not a move and needs no new pin.
   test("changing only the account keeps the pin", async () => {
     const { state, o } = withServers([VPS]);
     const res = await o.connectionUpdate({ ...VPS, destination: "dev@vps", port: 0,
@@ -499,9 +512,9 @@ describe("the client overlay", () => {
     expect(state.servers[0]).toMatchObject({ destination: "dev@vps", hostKey: VPS.hostKey });
   });
 
-  // The password door (remote.md §4). The rules are this file's, beside the
-  // Mac's in bun/connectionStore.ts: there is one right answer to "may this be
-  // stored" and it should not be written twice in two languages.
+  // The password door (remote.md §4). The rules live in the overlay beside the
+  // Mac's in bun/connectionStore.ts, so "may this be stored" has one answer
+  // rather than one per client.
   test("a password goes to the keychain by its own call, and never into the list", async () => {
     const { state, o } = withServers([VPS]);
     const { id, error } = await o.connectionAdd({
@@ -515,15 +528,17 @@ describe("the client overlay", () => {
     });
     expect(error).toBe("");
     expect(state.passwords.get(id)).toBe("hunter2");
-    // The record says which door and nothing more: the list is handed back to
-    // Swift on every rename, and a credential in it would cross the bridge
+    // The record names the door and nothing more. The whole list goes back to
+    // Swift on every rename, so a credential in it would cross the bridge
     // every time.
     expect(JSON.stringify(state.servers)).not.toContain("hunter2");
     expect(state.servers.find((server) => server.id === id)).toMatchObject({ auth: "password" });
   });
 
-  // askpass on a Mac and NIOSSH on a phone both take one line, so both refuse
-  // the same passwords.
+  // Both clients check with validatePassword (shared/connections.ts), so both
+  // refuse the same passwords. A Mac delivers one through ssh's askpass
+  // helper, which reads a single line. A phone hands it to NIOSSH instead
+  // (ios/Sources/SSHTransport.swift PasswordAuth).
   test("a password neither client could deliver is refused", async () => {
     const { state, o } = withServers([VPS]);
     for (const password of ["", "two\nlines"]) {
@@ -578,10 +593,10 @@ describe("the client overlay", () => {
     expect(state.servers[0]!.auth).toBe("key");
   });
 
-  // The pin here is a key and no hostname — there is no known_hosts file on a
-  // phone for one to index — so nothing about it says which machine it came
-  // from. Carrying it to another address would fail every later dial with a
-  // message about a CHANGED host key.
+  // The pin is a key with no hostname, because a phone has no known_hosts file
+  // for one to index. Nothing about it says which machine it came from, so
+  // carrying it to another address would fail every later dial with a changed
+  // host key.
   test("an address that moved to another host has to be pinned again", async () => {
     const { state, o } = withServers([VPS]);
     const refused = await o.connectionUpdate({ ...VPS, destination: "ledge@other", port: 0,
@@ -613,9 +628,9 @@ describe("the client overlay", () => {
     expect((await o.connectionRemove({ id: PI.id })).error).toContain("no such connection");
   });
 
-  // A Mac always has somewhere else to be — the server in its own process — so
-  // it refuses this. A phone has none, which is exactly why the last one has to
-  // be removable: it is the only way to forget a server that was typed wrong.
+  // A Mac refuses this, because it always has somewhere else to be: the server
+  // in its own process. A phone has none, so its last server can go. That is
+  // the only way a phone forgets a server that was typed wrong.
   test("removing the last server is how a phone forgets one", async () => {
     const { state, o } = withServers([VPS]);
     expect(await o.connectionRemove({ id: VPS.id })).toEqual({ ok: true, error: "" });
@@ -631,8 +646,8 @@ describe("the client overlay", () => {
       keyType: "ssh-ed25519",
       error: "",
     });
-    // And the port travels, because the line it comes back with is the line
-    // that gets pinned (shared/connections.ts knownHostsHost).
+    // The port travels with the probe, because the line that comes back is the
+    // line that gets pinned (shared/connections.ts knownHostsHost).
     await o.connectionProbe({ destination: "ledge@new", port: 2222 });
     expect(probed).toEqual(["ledge@new", "ledge@new:2222"]);
   });

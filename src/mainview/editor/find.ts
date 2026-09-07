@@ -16,19 +16,20 @@ import {
 } from "@codemirror/search";
 import { COMMANDS, keyOf } from "../commands/keys";
 
-// Find / replace on top of @codemirror/search. The stock panel always shows both
-// a find and a replace row in a loose inline layout; we supply a custom `Panel`
-// instead: a tidy toolbar that opens find-only and expands the replace row on
-// demand (the conventional "find, with replace one click away" shape), themed to
-// the app chrome in setup.ts.
+// Find and replace on top of @codemirror/search. The stock panel always shows
+// both a find row and a replace row in a loose inline layout. SearchPanel
+// replaces it with a toolbar that opens find-only and expands the replace row
+// on demand, the conventional "find, with replace one click away" shape.
+// setup.ts themes it to match the app chrome.
 
-// The live panel for a given view, so the "open with replace" command can reach
-// the instance and expand its replace row. Keyed by view because split panes can
-// each have a panel open at once.
+// The live panel for each view, so openReplace below can reach it and expand
+// its replace row. Keyed by view because split panes can each have a panel
+// open at once.
 const panels = new WeakMap<EditorView, SearchPanel>();
 
-// Terse DOM builder: className + a bag of properties assigned straight onto the
-// node (textContent, value, placeholder, type, checked, title, onclick, ...).
+// DOM builder: a tag and a className, plus properties assigned straight onto
+// the node, such as textContent, value, placeholder, type, checked, title,
+// spellcheck and onclick.
 function make<K extends keyof HTMLElementTagNameMap>(
   tag: K,
   className: string,
@@ -88,7 +89,7 @@ class SearchPanel implements Panel {
     const prev = btn("↑", "ledge-search-btn", "Previous match (⇧Enter)", () => findPrevious(this.view));
     const next = btn("↓", "ledge-search-btn", "Next match (Enter)", () => findNext(this.view));
     this.allBtn = btn("All", "ledge-search-btn", "Select all matches (toggle)", () => this.toggleAll());
-    // The three that step through matches, boxed so they can move as one.
+    // The previous, next and All buttons in one box, so they move as one.
     const steps = make("div", "ledge-search-steps");
     steps.append(prev, next, this.allBtn);
 
@@ -106,16 +107,11 @@ class SearchPanel implements Panel {
       this.view.focus();
     });
 
-    // Everything that is not the field or the way out, in one box.
-    //
-    // On a pointer client the box changes nothing: same order, same gaps, one
-    // flex container inside another. On touch it is what makes the second row a
-    // decision rather than an accident. The first version of the touch layout
-    // let flex wrap wherever the arithmetic landed, which was two tidy rows at
-    // 390 points and, at 430, a × stranded between the field and the arrows
-    // with the checkboxes orphaned below. One element with `flex-basis: 100%`
-    // breaks the line in the same place at every width (setup.ts's
-    // `@media (hover: none)`).
+    // The step buttons and the checkboxes in one box, between the find field
+    // and the close button. On a pointer client the box changes nothing. On
+    // touch one full-width child breaks the line in the same place at every
+    // width, where the earlier layout let flex wrap wherever the arithmetic
+    // landed (setup.ts's `@media (hover: none)`, whose comment has the widths).
     const opts = make("div", "ledge-search-opts");
     opts.append(steps, toggles);
 
@@ -126,11 +122,10 @@ class SearchPanel implements Panel {
     const gutter = make("div", "ledge-search-gutter"); // aligns the field under the find field
     this.replaceField = field("Replace", this.query.replace);
     const repl = btn("Replace", "ledge-search-btn", "Replace next match", () => replaceNext(this.view));
-    // "Replace All" and not "All", which is what it said while the row above it
-    // also said All. The two mean different things — that one selects every
-    // match, this one rewrites every match — and the title that told them apart
-    // is a tooltip, which a touch client has no way to ask for (interactions.md
-    // §1a). The one that changes the note is the one that has to say so.
+    // This button says "Replace All" because the row above already has an All
+    // button. It was labelled "All" as well, and only the tooltips told the two
+    // apart: the one above selects every match, this one rewrites every match.
+    // A touch client cannot ask for a tooltip (interactions.md §1a).
     const replAll = btn("Replace All", "ledge-search-btn", "Replace all matches", () =>
       replaceAll(this.view),
     );
@@ -213,15 +208,15 @@ class SearchPanel implements Panel {
 
   // "All" is a toggle: on selects every match (multi-cursor), off collapses back
   // to a single caret. The lit state tracks whether all matches are currently
-  // selected; update() clears it the moment the selection or query moves out from
-  // under us, so the light never lies.
+  // selected. update() below clears it when a selection or query change comes
+  // from anything but this panel's own select-all.
   private toggleAll() {
     if (this.allActive) {
       this.view.dispatch({ selection: { anchor: this.view.state.selection.main.head } });
       this.setAllActive(false);
     } else {
       selectMatches(this.view);
-      // Only latch on if it actually produced a multi-selection (there were matches).
+      // Latch on only if there were matches.
       this.setAllActive(this.view.state.selection.ranges.length > 1);
     }
     // Focus the editor so the (multi-)selection is visible and typeable, rather
@@ -259,9 +254,9 @@ class SearchPanel implements Panel {
         }
       }
     }
-    // Clear "All" the moment the selection or doc moves under us for any reason
-    // other than our own select-all (a click, a keystroke, an edit), so the lit
-    // state stays truthful.
+    // Clear "All" when the selection or the doc changes for any reason other
+    // than this panel's own select-all (a click, a keystroke, an edit), so the
+    // lit state matches the selection.
     if ((u.selectionSet || u.docChanged) && !u.transactions.some((tr) => tr.isUserEvent("select.search.matches"))) {
       this.setAllActive(false);
     }
@@ -273,32 +268,29 @@ class SearchPanel implements Panel {
   }
 }
 
-// Open the panel (if closed) and expand its replace row. openSearchPanel dispatches
-// synchronously, so by the time it returns the panel is mounted and registered.
-// Exported for the command registry: the palette's "Find and Replace" runs this
-// after refocusing the note's editor (commands/glue.ts).
+// Open the panel (if closed) and expand its replace row. openSearchPanel
+// dispatches synchronously, so the panel is mounted and in the `panels` map
+// above by the time it returns. Exported for the command registry: the
+// palette's "Find and Replace" runs this after refocusing the note's editor
+// (commands/glue.ts).
 export function openReplace(view: EditorView): boolean {
   openSearchPanel(view);
   panels.get(view)?.showReplace();
   return true;
 }
 
-// We bind an explicit subset of bindings rather than the stock `searchKeymap`:
-// that set binds Mod-d to selectNextOccurrence, but Ledge's window-level shortcut
-// handler (App.tsx) owns Cmd-D for "split pane", and CodeMirror does not stop the
-// keydown propagating, so shipping Mod-d here would fire both. These bindings act
-// when focus is in the editor body; the panel handles its own keys once focused.
-// Mod-Alt-f (Cmd-Option-F) is the conventional macOS "find & replace" opener, but
-// cmux registers it as a system-global hotkey, so it never reaches us while cmux
-// runs. Mod-Shift-f is the working fallback; both open the panel with replace
-// expanded, so the correct chord still lights up on machines without cmux.
-//
-// The Shift variant is expressed as the `shift` handler on the Mod-f binding, not
-// a standalone "Mod-Shift-f" key: a shifted letter arrives as key "F", which CM's
-// name matching does not resolve to a "Mod-Shift-f" binding. The `shift` handler
-// is CM's intended mechanism for this (the same pattern as Mod-g's shift below).
+// An explicit list of bindings rather than the stock `searchKeymap`, which
+// binds Mod-d to selectNextOccurrence. ⌘D is Split Right at the window level
+// (commands/CommandProvider.tsx), and CodeMirror does not stop the keydown
+// propagating, so binding Mod-d here would fire both. These bindings act when
+// focus is in the editor body; the panel handles its own keys once focused.
 const findKeymap = Prec.highest(
   keymap.of([
+    // ⇧⌘F expands the replace row through the `shift` handler, not through a
+    // "Mod-Shift-f" key: a shifted letter arrives as key "F", which
+    // CodeMirror's name matching does not resolve to that binding. Mod-g below
+    // takes its shifted variant the same way. ⇧⌘F backs up ⌥⌘F, which cmux
+    // takes as a system-global hotkey (commands/keys.ts, interactions.md §2).
     { key: keyOf("editor.find")!, run: openSearchPanel, shift: openReplace },
     { key: COMMANDS["editor.replace"].keys[0], run: openReplace },
     { key: keyOf("editor.findNext")!, run: findNext, shift: findPrevious, preventDefault: true },
@@ -314,7 +306,8 @@ export function findReplace() {
     // setup.ts, renders the extra cursors).
     EditorState.allowMultipleSelections.of(true),
     search({ createPanel: (view) => new SearchPanel(view) }),
-    // Dim-highlight other occurrences of the current selection as you move around.
+    // Dim-highlight other occurrences of the selected text. An empty selection
+    // highlights nothing, since highlightWordAroundCursor defaults to off.
     highlightSelectionMatches(),
     findKeymap,
   ];

@@ -84,16 +84,17 @@ function cmd(id: CommandId, rest: Omit<Command, "id" | "title" | "keys" | "listK
   return { id, title: titleOf(id), keys: keysOf(id), listKeys: listKeysOf(id), ...rest };
 }
 
-// The generated per-template entries' shared title prefix — and, verbatim,
-// the query note.fromTemplate seeds the palette with: the fuzzy filter then
-// shows exactly these entries (the ":" keeps the parent command's own
-// "…"-titled row from matching itself back into the list).
+// The title prefix on every generated per-template entry. note.fromTemplate
+// seeds the palette with this exact string, so the fuzzy filter shows those
+// entries and nothing else. The ":" is what keeps the parent command's own
+// "…"-titled row from matching itself back into the list.
 const TEMPLATE_PREFIX = "New Note from Template: ";
 
-// Pre-registered entry slots for the picker (commands are data built once;
-// the workspace.select move, sized for a template collection rather than a
-// keyboard row). A choice past the last slot simply has no entry — at that
-// point the collection needs pruning more than the palette needs scrolling.
+// How many picker entries are pre-registered. Commands are plain data built
+// once, the way workspace.select's nine slots are, sized for a template
+// collection rather than for a keyboard row. A template past the last slot
+// gets no entry, at which point the collection needs pruning more than the
+// palette needs scrolling.
 const TEMPLATE_SLOTS = 24;
 
 // One picker row: what its entry says after the prefix, and the concrete note
@@ -103,14 +104,13 @@ interface TemplateChoice {
   path: string;
 }
 
-// The picker's rows, computed from LIVE state on every render/dispatch: every
-// note whose frontmatter declares `template: true` (NoteMeta.template — the
-// store's per-folder lists, refreshed by the watcher, are the registry; no
-// settings, no restart). The selected workspace's own templates lead,
-// unlabeled; other workspaces' follow in strip order, each naming its home,
-// so a title shared across workspaces stays two distinguishable rows.
-// Alphabetical within a workspace — mtime order would reshuffle the picker
-// every time a template is edited.
+// The picker's rows, recomputed on every render and dispatch: every note
+// whose frontmatter declares `template: true` (NoteMeta.template), read from
+// the store's per-folder lists, which the watcher refreshes, so marking a note
+// takes no setting and no restart. The selected workspace's templates lead
+// unlabeled, then the others in strip order, each row naming its workspace, so
+// one title in two workspaces stays two rows. Alphabetical within a workspace,
+// since mtime order would reshuffle the picker on every template edit.
 function templateChoices(ctx: CommandCtx): TemplateChoice[] {
   const out: TemplateChoice[] = [];
   const ordered = [ctx.selected, ...ctx.state.workspaces.filter((w) => w.id !== ctx.selected.id)];
@@ -126,10 +126,11 @@ function templateChoices(ctx: CommandCtx): TemplateChoice[] {
 }
 
 // What "New Template" creates: a note already carrying the marker, whose
-// body is the whole how-to — the {{token}} vocabulary is written out
-// LITERALLY here (createNote, not instantiateTemplate, writes it), so the
-// note teaches the syntax and, once instantiated, demonstrates it. Titled
-// with the app's placeholder word: the H1 is the rename UI.
+// body is the how-to. The {{token}} vocabulary stays literal in the note
+// because template.starter writes these bytes through createNote rather than
+// through instantiateTemplate, so the note teaches the syntax and expands it
+// when a note is made from it. The title is the app's placeholder word, since
+// the H1 is the rename UI.
 const STARTER_TEMPLATE = `---
 template: true
 ---
@@ -159,10 +160,9 @@ this skeleton yours.
 `;
 
 // What "New Daily Template" creates: the daily role's starter, pre-marked so
-// nobody hand-writes the frontmatter. Deliberately spare where
-// STARTER_TEMPLATE is a cheatsheet: every line here lands verbatim in each
-// day's note, so the body must be worth waking up to, not documentation.
-// The H1 is replaced by the date at instantiation.
+// nobody hand-writes the frontmatter. The body is spare where
+// STARTER_TEMPLATE is a cheatsheet, because every line here lands verbatim in
+// each day's note. The H1 is replaced by the date at instantiation.
 const DAILY_STARTER = `---
 template: daily
 ---
@@ -171,12 +171,12 @@ template: daily
 Continued from [[{{yesterday}}]].
 `;
 
-// The workspace ⌘J acts in — daily.workspace as resolved at boot (a dep:
-// that mirror is a setting's, not view state), else the selected one — and
-// its current `template: daily` claimant. The role is per-workspace, so the
-// Edit/New verbs must point exactly where ⌘J will look; the note lists are
-// newest-first, so find() is the same newest-wins Bun applies when several
-// notes claim the role.
+// The workspace ⌘J acts in, and that workspace's `template: daily` claimant.
+// The workspace is daily.workspace as resolved at boot, else the selected one
+// (a dep, because that mirror belongs to a setting rather than to view state).
+// The role is per-workspace, so the Edit and New verbs point where ⌘J will
+// look. The note lists are newest-first, so find() reproduces the newest-wins
+// order Bun applies when several notes claim the role (bun/daily.ts).
 function dailyTemplateTarget(ctx: CommandCtx, deps: RegistryDeps) {
   const pinned = deps.dailyRoot();
   const ws = ctx.state.workspaces.find((w) => w.folder === pinned) ?? ctx.selected;
@@ -197,9 +197,9 @@ function activeLeaf(ctx: CommandCtx) {
 }
 
 // The note a note-scoped command acts on: an explicit row/menu target, else
-// the focused pane's active tab's note. Null for unsaved scratch tabs — there
-// is no file yet, so there is nothing to delete or copy — and for any target
-// that isn't a live note, so a trash row can never be handed to a note verb.
+// the focused pane's active tab's note. Null for an unsaved scratch tab,
+// which has no file yet to delete or copy. Null too for any target that is
+// not a live note, so a trash row can never be handed to a note verb.
 function targetNote(ctx: CommandCtx) {
   const t = ctx.target;
   if (t && t.kind !== "note") return null;
@@ -219,21 +219,17 @@ function targetTrashed(ctx: CommandCtx) {
 }
 
 /**
- * What a command does with a promise that did not resolve.
+ * The rejection handler a command hands to a promise: show the error.
  *
- * Every one of these calls crosses to the machine the notes are on, and a
- * REJECTION means it never got there: a wire that is down (remote.md §7), a
- * server that refused, a disk that is full. The resolved-value paths each
- * report their own refusals already; this is the half that used to be missing,
- * and its absence was a menu item that answered a click with nothing at all —
- * no note, no message, nothing to try instead.
+ * These calls cross to the machine the notes are on, and a rejection means
+ * the call never arrived: a wire that is down (remote.md §7), a server that
+ * refused, a full disk. The resolved-value paths report their own refusals.
+ * Without this half, a menu item answers a click with no note and no message.
  *
- * Not a gate, deliberately. A verb withheld while the wire is down would be a
- * palette that shrinks and regrows on its own (interactions.md §8 is about what
- * this client CANNOT do, which is a different and permanent thing), and the
- * verb is not the problem: an outage that lasts forty seconds wants an answer,
- * not an absence. The exception is a run, which cannot report its own failure
- * and so is gated instead (editor/blocks.ts linkDown).
+ * It is not a gate. Withholding a verb while the wire is down would make the
+ * palette shrink and regrow on its own, where interactions.md §8 is about
+ * what this client cannot do at all. A run is the exception: it cannot report
+ * its own failure, so it is gated instead (editor/blocks.ts linkDown).
  */
 function failed(ctx: CommandCtx): (err: unknown) => void {
   return (err) => ctx.ui.showError?.(err instanceof Error ? err.message : String(err));
@@ -246,19 +242,20 @@ function targetWorkspaceId(ctx: CommandCtx): string {
 }
 
 export function buildCommands(deps: RegistryDeps): Command[] {
-  // The selected workspace is the built-in read-only documentation: every
-  // create/mutate verb gates on this (menus disable, the palette hides, the
-  // dispatcher ignores). Presentation only — Bun refuses every docs write
-  // regardless (bun/workspaces.ts assertWritableRoot).
+  // Whether the selected workspace is the built-in read-only documentation.
+  // Every create and mutate verb gates on this: menus disable, the palette
+  // hides, the dispatcher ignores. Presentation only. Bun refuses every docs
+  // write regardless (bun/workspaces.ts assertWritableRoot).
   const docsSelected = (ctx: CommandCtx) => deps.workspaceKind(ctx.selected.folder) === "docs";
-  // The workspace a workspace-scoped verb would act on is the docs one — the
-  // palette forms fall back to the selected workspace, which can be it.
+  // Whether the workspace a workspace-scoped verb would act on is the docs
+  // one. The palette forms fall back to the selected workspace, which can be
+  // it.
   const docsTargeted = (ctx: CommandCtx) => {
     const ws = ctx.state.workspaces.find((w) => w.id === targetWorkspaceId(ctx));
     return ws !== undefined && deps.workspaceKind(ws.folder) === "docs";
   };
-  // The strip's workspaces: what the sidebar shows and ⌘1…9 index — the docs
-  // workspace deliberately excluded from both (Sidebar filters the same way).
+  // The strip's workspaces: what the sidebar shows and what ⌘1…9 index. The
+  // docs workspace is excluded from both (Sidebar filters the same way).
   const stripWorkspaces = (ctx: CommandCtx) =>
     ctx.state.workspaces.filter((w) => deps.workspaceKind(w.folder) !== "docs");
 
@@ -273,25 +270,16 @@ export function buildCommands(deps: RegistryDeps): Command[] {
           paneId: ctx.target?.kind === "pane" ? ctx.target.paneId : undefined,
         }),
     }),
-    // The built-in documentation — read-only end to end; the header's help
-    // button is the icon surface. Hidden entirely when Bun reported no docs
-    // root (a failed boot, a harness without one).
-    //
-    // On a shell with windows the manual gets one of its own (remote.md §8a),
-    // so this opens or raises that window and the workspace in front of you is
-    // left where it was. Absent from the manual's own window, which is why it
-    // is no longer a toggle there: the way to put a window away is its close
-    // button, and the way back to your notes is the window still sitting behind
-    // this one.
-    //
-    // On a client with one window and no way to have two (a phone, ios.md §4)
-    // it stays the toggle it was: the manual takes over the window, and the
-    // same button — lit, since the manual is the selected workspace — is the
-    // way back, because the strip that would otherwise offer one is inside the
-    // drawer the manual is covering.
+    // Open the built-in documentation, which is read-only end to end. The
+    // header's help button is the icon surface. Hidden when Bun reported no
+    // docs root (a failed boot, a harness without one), and hidden inside the
+    // manual's own window. With windows the manual gets one of its own and the
+    // selected workspace is left alone (remote.md §8a); with one window
+    // (lib/shell.ts multiWindow) it stays a toggle, and the lit button is the
+    // way back. interactions.md §1 (Documentation) states both shapes.
     cmd("docs.toggle", {
-      // A question mark, not a book: on a notes app, a book glyph reads as
-      // "another notebook", while ? is the universal help affordance.
+      // A question mark, not a book: in a notes app a book glyph reads as
+      // "another notebook", and ? is the usual help icon.
       icon: CircleHelp,
       when: () => deps.docsFolder() !== null && !docsWindow(),
       run: (ctx) => {
@@ -300,13 +288,12 @@ export function buildCommands(deps: RegistryDeps): Command[] {
         else void deps.openDocs(ctx.state, ctx.dispatch).catch(failed(ctx));
       },
     }),
-    // The bundled licenses, as the manual's last page. It is a page and not a
-    // file the Finder reveals because the app already knows how to show a
-    // Markdown document, and because a notice reproduced somewhere the user
-    // cannot reach is the same as one that did not ship.
+    // Open the bundled licenses, the manual's last page. A page rather than a
+    // file the Finder reveals: the app already shows Markdown documents, and
+    // the notice has to be reachable from inside the app.
     //
-    // Offered in the manual's window too, unlike the verb above: there it means
-    // "turn to that page", and the page is right here.
+    // Offered in the manual's window too, unlike the verb above. There it
+    // means "turn to that page", and the page is in this window.
     cmd("docs.licenses", {
       icon: Scale,
       when: () => deps.docsFolder() !== null,
@@ -317,18 +304,18 @@ export function buildCommands(deps: RegistryDeps): Command[] {
         else void deps.openDocs(ctx.state, ctx.dispatch, "Third-Party Licenses").catch(failed(ctx));
       },
     }),
-    // Create-or-open today's YYYY-MM-DD note and land in it. The open rides
-    // the external-open subscriber (the CLI-open path), so glue's dep only
-    // resolves to an error to surface — or null, done.
+    // Create or open today's YYYY-MM-DD note and land in it. The open rides
+    // the external-open subscriber (the CLI-open path), so glue's dep
+    // resolves to an error message to show, or to null.
     cmd("daily.open", {
       icon: CalendarDays,
       // In the docs workspace, ⌘J still works when a daily workspace is
-      // pinned (Bun acts there, not here); unpinned it would fall back to the
-      // selected — read-only — folder, so it gates instead of erroring.
-      //
-      // In the manual's WINDOW it is gone either way: that window holds one
-      // workspace and it is the manual, so a daily note opened here would have
-      // no pane to land in (App's external-open subscriber would drop it).
+      // pinned, because Bun acts there rather than here. Unpinned it would
+      // fall back to the selected, read-only folder, so it gates instead of
+      // erroring. In the manual's window it is gone either way: that window
+      // holds one workspace and it is the manual, so a daily note opened here
+      // would have no pane to land in (App's external-open subscriber drops
+      // it).
       when: (ctx) => !docsWindow() && (!docsSelected(ctx) || deps.dailyRoot() !== null),
       run: (ctx) => {
         void deps.openDailyNote(ctx.selected.folder).then((err) => {
@@ -336,11 +323,10 @@ export function buildCommands(deps: RegistryDeps): Command[] {
         }, failed(ctx));
       },
     }),
-    // The palette IS the template picker: pre-filtered to the generated
-    // per-template entries below, rather than growing a dialog of its own.
-    // Always visible — with no template anywhere yet, it pre-filters to
-    // New Template instead, so the empty state is the tutorial rather than
-    // a missing menu item.
+    // The palette is the template picker, pre-filtered to the generated
+    // per-template entries below, so this needs no dialog of its own. Always
+    // visible: with no template anywhere yet it pre-filters to New Template
+    // instead, so the empty state offers a way in rather than nothing.
     cmd("note.fromTemplate", {
       icon: FilePlus,
       when: (ctx) => !docsSelected(ctx), // instantiates into the selected folder
@@ -361,14 +347,16 @@ export function buildCommands(deps: RegistryDeps): Command[] {
         }, failed(ctx));
       },
     }),
-    // The marker's verbs on the current note, exactly one visible at a time
-    // (the `when`s read the live frontmatter, profile.open's move). The edit
-    // happens in the note's own editor — undoable, autosaved, and the saved
-    // file's watcher refresh is what updates the picker's rows.
+    // The template marker's two verbs on the current note. Exactly one shows
+    // at a time: both `when`s parse the live frontmatter, the same read
+    // profile.open does. The edit happens in the note's own editor, so it is
+    // undoable and autosaved, and the watcher refresh after that save is what
+    // updates the picker's rows.
     cmd("note.templateOn", {
       icon: LayoutTemplate,
-      // The marker exclusivity's UI half (Bun refuses too): a locked note's
-      // body exists to stay sealed, a template's to be stamped out.
+      // A locked note gets no template verb: a template's body is copied into
+      // every note made from it. Bun guards the mirror case, refusing to lock
+      // a note that already carries the marker (bun/notes.ts lockNote).
       when: (ctx) =>
         currentTemplateFlag(ctx, deps) === false && currentNoteMeta(ctx)?.locked !== true && !docsSelected(ctx),
       run: (ctx) => {
@@ -378,18 +366,18 @@ export function buildCommands(deps: RegistryDeps): Command[] {
     }),
     cmd("note.templateOff", {
       icon: LayoutTemplate,
-      // Truthy, not === true: a `template: daily` note is a template too,
-      // and this verb is how its marker (role included) comes off.
+      // Truthy, not === true: a `template: daily` note is a template too.
+      // This verb removes its marker, role included.
       when: (ctx) => !!currentTemplateFlag(ctx, deps),
       run: (ctx) => {
         const docId = focusedDocId(ctx.selected);
         if (docId) deps.editor.toggleTemplate(docId);
       },
     }),
-    // The daily role's verb, two faces so the title says what will happen
-    // (keys.ts). Opens ride openNoteIn — the external-open subscriber's
-    // select-then-open — because the daily workspace may not be the selected
-    // one, and the verb must land where ⌘J will look.
+    // The daily template's verb, in two faces so the title says which one
+    // will happen: Edit or New (keys.ts). Both open through openNoteIn, the
+    // external-open subscriber's select-then-open. The daily workspace may
+    // not be the selected one, and the verb has to act where ⌘J will look.
     cmd("daily.templateEdit", {
       icon: CalendarDays,
       when: (ctx) => !!dailyTemplateTarget(ctx, deps).claimant,
@@ -400,8 +388,9 @@ export function buildCommands(deps: RegistryDeps): Command[] {
     }),
     cmd("daily.templateNew", {
       icon: CalendarDays,
-      // Also gated when the workspace it would create INTO is the docs one
-      // (no pinned daily workspace, docs selected): nothing creates there.
+      // Also gated when the workspace it would create in is the docs one,
+      // which happens with no daily workspace pinned and docs selected.
+      // Nothing creates a note there.
       when: (ctx) => {
         const { ws, claimant } = dailyTemplateTarget(ctx, deps);
         return !claimant && deps.workspaceKind(ws.folder) !== "docs";
@@ -450,7 +439,7 @@ export function buildCommands(deps: RegistryDeps): Command[] {
         const { paneId, tabId } = ctx.target;
         const leaf = findLeaf(ctx.selected.root, paneId);
         if (!leaf) return;
-        // Keep the target tab in view, then fold the rest.
+        // Keep the target tab in view, then close the rest.
         ctx.dispatch({ type: "selectTab", paneId, tabId });
         for (const t of leaf.tabs) {
           if (t.id !== tabId) ctx.dispatch({ type: "closeTab", paneId, tabId: t.id });
@@ -471,11 +460,11 @@ export function buildCommands(deps: RegistryDeps): Command[] {
     }),
 
     // --- panes ---------------------------------------------------------------
-    // Splitting stays available in the docs workspace — two pages side by side
-    // is what a second pane is FOR when reading — but the new pane opens empty
-    // there: a seeded scratch tab would be a read-only "Untitled" that can
-    // never be typed in or saved. The empty pane is the existing "No open
-    // notes" state (docs-aware already), and it takes the next page opened.
+    // In the docs workspace the new pane opens empty. Splitting still works
+    // there, so two pages can sit side by side. A seeded scratch tab would be
+    // a read-only "Untitled" that can never be typed in or saved. The empty
+    // pane shows the existing "No open notes" state (PaneTree.tsx), which is
+    // already docs-aware, and it takes the next page opened.
     cmd("pane.splitRight", {
       icon: Columns2,
       run: (ctx) =>
@@ -494,29 +483,32 @@ export function buildCommands(deps: RegistryDeps): Command[] {
 
     // --- workspaces ----------------------------------------------------------
     //
-    // None of the two verbs that ADD one are offered in the manual's window: it
-    // shows one workspace and has no strip to put another in, so a workspace
-    // created there would be invisible and selected — the manual replaced by a
-    // scratch note, in a window with no way back to either (remote.md §8a).
+    // Neither verb that adds a workspace is offered in the manual's window.
+    // That window has no workspace strip (remote.md §8a), so a workspace
+    // created there would be selected and invisible: the manual replaced by a
+    // scratch note, with no way back to either.
     cmd("workspace.new", {
       icon: Plus,
       when: () => !docsWindow(),
       // Async behind a void (deleteNoteWithUndo's pattern): Bun creates the
-      // folder, then the reducer adds the workspace over it.
+      // folder, then the reducer adds the workspace over it. The promise
+      // resolves to an error message to show, or to null (types.ts
+      // createWorkspace).
       run: (ctx) => {
         void deps.createWorkspace(ctx.state, ctx.dispatch).then((err) => {
           if (err) ctx.ui.showError?.(err);
         }, failed(ctx));
       },
     }),
-    // Register an existing directory as a workspace, via the NATIVE folder
-    // picker (the view never names a path). Palette-only: not frequent enough
-    // to spend a chord on.
+    // Register an existing directory as a workspace, through the native
+    // folder picker: the view never names a path. No chord, since attaching
+    // a folder is not frequent enough to earn one.
     cmd("workspace.attach", {
       icon: FolderOpen,
-      // Absent where the picker cannot open, rather than present and answering
-      // with NO_DIALOG: a headless server has nobody at it to choose a folder,
-      // and a phone is permanently that case (ios.md §8, lib/shell.ts).
+      // Absent where the picker cannot open, rather than present and
+      // answering with NO_DIALOG (bun/server.ts). A headless server has
+      // nobody at it to choose a folder, and a phone is that case for good
+      // (ios.md §8, lib/shell.ts canPickFolder).
       when: () => canPickFolder() && !docsWindow(),
       run: (ctx) => {
         void deps.attachWorkspace(ctx.dispatch).then((err) => {
@@ -536,10 +528,10 @@ export function buildCommands(deps: RegistryDeps): Command[] {
           ctx.dispatch({ type: "selectWorkspace", id: ctx.target.id });
       },
     }),
-    // The docs workspace takes none of the object-scoped workspace verbs
-    // below (rename/icon/move): it has no strip row to anchor them, and its
-    // name, icon, and folder are the app's, not the user's. The palette forms
-    // fall back to the selected workspace, which is how a docs target arrives.
+    // Rename, icon, and move are all withheld for the docs workspace. It has
+    // no strip row to anchor them, and its name, icon, and folder belong to
+    // the app rather than the user. A docs target reaches them through the
+    // palette forms, which fall back to the selected workspace.
     cmd("workspace.rename", {
       icon: Pencil,
       targetKind: "workspace",
@@ -552,21 +544,20 @@ export function buildCommands(deps: RegistryDeps): Command[] {
       when: (ctx) => !docsTargeted(ctx),
       run: (ctx) => ctx.ui.pickWorkspaceIcon?.(targetWorkspaceId(ctx)),
     }),
-    // Relocate the workspace's folder on disk (Bun renames; same volume only).
-    // The cloud-backup move: a managed folder under the hidden ~/.ledge, moved
-    // into iCloud Drive or Dropbox, keeps every note and becomes an external
-    // workspace. Open tabs close — arrangement loss, no confirm
-    // (interactions.md §4). A managed folder goes straight to the native
+    // Relocate the workspace's folder on disk: Bun renames it, so the
+    // destination has to be on the same volume and everything inside travels.
+    // Open tabs close, which is arrangement loss and takes no confirm
+    // (interactions.md §4). A managed workspace goes straight to the native
     // destination picker; an external one stops at the in-app chooser first
-    // (Sidebar's MoveWorkspaceDialog), because its natural destination — back
-    // under ~/.ledge — is the one place the native dialog cannot reasonably
-    // navigate to (a hidden folder).
+    // (Sidebar's MoveWorkspaceDialog). interactions.md §3 (Move Workspace
+    // Folder…) has the cloud-backup case and why the return trip to ~/.ledge
+    // asks for no path.
     cmd("workspace.move", {
       icon: FolderInput,
       targetKind: "workspace",
-      // Both faces end at the same native picker — the in-app chooser an
+      // Both faces end at the same native picker: the in-app chooser an
       // external workspace stops at first only offers "back to the app home"
-      // beside it — so workspace.attach's condition governs this one too.
+      // beside it. So workspace.attach's condition gates this verb too.
       when: (ctx) => !docsTargeted(ctx) && canPickFolder(),
       run: (ctx) => {
         const id = targetWorkspaceId(ctx);
@@ -584,15 +575,15 @@ export function buildCommands(deps: RegistryDeps): Command[] {
       icon: Trash2,
       targetKind: "workspace",
       destructive: true,
-      // Closing the docs workspace needs only SOMETHING else to land on;
-      // closing a real one must leave another real one — the docs workspace
-      // does not count as a place to strand the user (no strip row would
-      // show where they are).
+      // Closing the docs workspace needs only some other workspace to land
+      // on. Closing a real one has to leave another real one behind: the docs
+      // workspace has no strip row, so it would not show the user where they
+      // ended up.
       when: (ctx) =>
         docsTargeted(ctx) ? ctx.state.workspaces.length > 1 : stripWorkspaces(ctx).length > 1,
-      // Closes the view AND detaches the folder from the registry — but never
-      // touches the files: the folder stays on disk, re-attachable with
-      // everything in it (hence still no confirmation; interactions.md §4).
+      // Closes the view and detaches the folder from the registry. No file is
+      // touched: the folder stays on disk, re-attachable with everything in
+      // it, so this takes no confirmation (interactions.md §4).
       run: (ctx) => deps.closeWorkspace(targetWorkspaceId(ctx), ctx.state, ctx.dispatch),
     }),
 
@@ -617,15 +608,16 @@ export function buildCommands(deps: RegistryDeps): Command[] {
     }),
     cmd("terminal.toggle", {
       icon: TerminalSquare,
-      // The drawer's own gate, and not the same question as running a block
-      // (lib/shell.ts): a phone runs blocks inline before it has a drawer to
-      // put one in. Not a refusal either way — the daemon at the other end
-      // would spawn the PTY — but a surface that is not built, so the verbs
-      // that reach it are not offered.
+      // hasTerminal gates the drawer, a different question from whether this
+      // client runs blocks (lib/shell.ts): a phone runs blocks inline before
+      // it has a drawer to put one in. Nothing refuses the PTY, since the
+      // daemon at the other end would spawn it. The drawer is not built on
+      // such a client, so the verbs that reach it are withheld.
       when: () => hasTerminal(),
-      // The editor's CodeMirror keymap and the terminal's xterm handler own
-      // Ctrl-` in their domains and route here through exec; the window layer
-      // only fires it from page focus.
+      // The editor's CodeMirror keymap and the terminal's xterm handler both
+      // bind Ctrl-` in their own domain: the editor routes back through the
+      // bridge to this command, the drawer closes itself. The window layer
+      // fires it from page focus only.
       domains: ["page"],
       run: (ctx) => ctx.ui.toggleTerminal?.(),
     }),
@@ -635,35 +627,34 @@ export function buildCommands(deps: RegistryDeps): Command[] {
       palette: false, // Toggle Terminal covers it
       run: (ctx) => ctx.ui.closeTerminal?.(),
     }),
-    // Opens settings.jsonc in Ledge's own editor dialog — the file is the
-    // settings UI (architecture.md "Settings"), its comments the
-    // documentation; changes apply at the next launch.
+    // Opens settings.jsonc in Ledge's own editor dialog. The file is the
+    // settings UI and its comments are the documentation (architecture.md
+    // §6). Changes apply at the next launch.
     // --- note locking (locking.md §7) -----------------------------------
-    // ⌘L relocks NOW — the walking-away gesture. Flush-then-drop lives in the
-    // dep (glue): the view must save dirty locked buffers before Bun forgets
-    // how to encrypt them.
+    // ⌘L relocks the vault right away: the walking-away gesture. The
+    // flush-then-drop order lives in the dep (commands/glue.ts), because a
+    // dirty locked buffer has to reach disk encrypted while Bun still holds
+    // the key (locking.md §3).
     cmd("vault.lock", {
       icon: Lock,
       when: () => deps.vaultState() === "unlocked",
       run: () => deps.lockVaultNow(),
     }),
-    // The proactive unlock. Interposed unlock (opening a locked note) rides
-    // the placeholder's own button; this entry is for unlocking ahead of
-    // need. Visible while there is anything a passphrase would open — a
-    // vault, or (vaultless machine, synced-in locked notes) any locked note.
+    // Unlock ahead of need. Opening a locked note prompts in place instead,
+    // through the placeholder's own button (locking.md §7). Shown whenever a
+    // passphrase would open something: a vault, or, on a machine whose vault
+    // file has not arrived, any locked note that synced in.
     cmd("vault.unlock", {
       icon: LockOpen,
       when: (ctx) => deps.vaultState() === "locked" || (deps.vaultState() === "none" && anyLockedNote(ctx)),
       run: (ctx) => ctx.ui.openVaultDialog?.(),
     }),
-    // The per-note pair: exactly one face shows (the template-marker move),
-    // per the note's LIVE locked flag off the store's lists. Target-scoped
-    // like note.delete — the sidebar row's menu passes its note; the palette
-    // passes none and targetNote falls back to the focused tab. Locking a
-    // note with no vault yet runs first-time setup with the lock as
-    // follow-up; with a locked vault, unlock first, same follow-up — the
-    // dialog carries the intent so the user's act completes instead of
-    // dead-ending.
+    // Lock and Remove Lock, one face at a time, from the note's live locked
+    // flag in the store's lists (the template marker's pattern). Target-scoped
+    // like note.delete: the sidebar row's menu passes its note, the palette
+    // passes none and targetNote falls back to the focused tab. Locking with
+    // no vault runs first-time setup, and locking with a locked vault unlocks
+    // first: the dialog carries the lock as a follow-up so the act finishes.
     cmd("note.lockOn", {
       icon: Lock,
       targetKind: "note",
@@ -684,9 +675,9 @@ export function buildCommands(deps: RegistryDeps): Command[] {
         }, failed(ctx));
       },
     }),
-    // Unlocked only: the rewrap needs the old master key in hand, and asking
-    // for the old passphrase inside the dialog would duplicate what the
-    // unlock flow already proves.
+    // Unlocked only (locking.md §3). The rewrap needs the master key in hand,
+    // and asking for the old passphrase in the dialog would repeat what
+    // unlocking already proved.
     cmd("vault.changePassphrase", {
       icon: KeyRound,
       when: () => deps.vaultState() === "unlocked",
@@ -709,59 +700,48 @@ export function buildCommands(deps: RegistryDeps): Command[] {
       icon: SettingsIcon,
       run: (ctx) => ctx.ui.openSettingsEditor?.(),
     }),
-    // Which machine the notes are on. Everything workspace-scoped is scoped
-    // to a server one level up (remote.md §8), so this is the widest-scope
-    // switch in the app — and the only one that closes every tab.
-    //
-    // Not in the manual's window: the manual is this build's own, read off this
-    // Mac whatever the window that opened it was looking at (remote.md §8a), so
-    // there is no other machine for it to be on.
+    // Switch which machine the notes are on. Everything workspace-scoped is
+    // scoped to a server one level up (remote.md §8), so this is the widest
+    // switch in the app and the only one that closes every tab. Absent in the
+    // manual's window, which is always on this Mac: the manual is this build's
+    // own copy, so there is no other machine for it to be on (remote.md §8a).
     cmd("connection.switch", {
       icon: ServerIcon,
       when: () => !docsWindow(),
       run: (ctx) => ctx.ui.openConnectionPicker?.(),
     }),
-    // Ask the wire to try now rather than at its next beat (remote.md §7). The
-    // app is already trying, so this is never the only thing between a user and
-    // their notes — but a person watching a bar that says "disconnected" while
-    // their wifi visibly came back is holding information the beat does not
-    // have, and there was nothing for them to do with it.
-    //
-    // Offered only while the link is down. A "Reconnect" that is present and
-    // inert on a working connection is a verb that teaches nobody anything
-    // (interactions.md §8), and the indicator it hangs off has no such state.
+    // Ask the wire to dial now rather than at its next beat (remote.md §7).
+    // The app is already retrying, so this never has to be pressed: it is for
+    // the person who can see their wifi came back before the beat does. Shown
+    // only while the link is down, since a Reconnect that is present and inert
+    // teaches nothing (interactions.md §8) and the indicator has no such state.
     cmd("connection.reconnect", {
       icon: PlugZap,
       when: () => !docsWindow() && linkState().state !== "live",
       run: (ctx) => {
         reconnectLink();
-        // The one report there is. Nothing waits on the dial — the answer
-        // arrives as a link state like any other — so without this a press
+        // The only feedback a press gets. Nothing waits on the dial: the
+        // answer arrives later as a link state, so without this a press
         // against a server that is still unreachable looks like a dead button.
         ctx.ui.showNotice?.(`Trying to reach ${activeConnection().name}…`);
       },
     }),
-    // Two machines at once, which switching cannot give you: a window is a
-    // client of one server, so a second server is a second window (remote.md
-    // §8a). It opens on this Mac and is switched from inside itself, which is
-    // why this takes no argument and asks nothing.
-    //
-    // Absent where there is no second window to open, rather than present and
-    // silent: a phone shows one app (lib/shell.ts multiWindow).
+    // Open a second window. Two machines at once is what it is for: a window
+    // is a client of one server, so a second server means a second window
+    // (remote.md §8a). The new window opens on this Mac and is switched from
+    // inside itself, so this verb takes no argument. A client that can have
+    // only one window, such as a phone, does not offer it at all (lib/shell.ts
+    // multiWindow).
     cmd("window.new", {
       icon: AppWindow,
       when: () => multiWindow(),
       run: () => deps.newWindow(),
     }),
-    // Put `ledge` on the PATH. The outcome always surfaces — an install whose
-    // result you have to go hunting for in a bin dir did not finish its job:
-    // success (where it landed, whether PATH sees it) in the neutral strip,
-    // failure (a foreign file squatting the name) in the error strip.
-    //
-    // The PATH is the notes machine's, so the verb belongs to a machine with a
-    // CLI on it: a server has none to install (lib/shell.ts), and offering the
-    // install anyway would answer a hopeful palette entry with a paragraph
-    // about a path inside the server binary.
+    // Put `ledge` on the PATH. The outcome always surfaces, so nobody has to
+    // go hunting in a bin dir: success (where it landed, whether PATH sees it)
+    // in the neutral strip, failure (a foreign file holding the name) in the
+    // error strip. The PATH is the notes machine's, and a compiled server has
+    // no CLI to install, so canInstallCli hides the verb there (lib/shell.ts).
     cmd("cli.install", {
       icon: TerminalSquare,
       when: () => canInstallCli(),
@@ -773,21 +753,22 @@ export function buildCommands(deps: RegistryDeps): Command[] {
       },
     }),
     // The answer to "it crashed, what do I send you". No notice strip on
-    // success: a Finder window opening IS the confirmation, and a toast on
-    // top of it would be the second one.
+    // success: the Finder window that opens is the confirmation (bun/log.ts
+    // revealLog opens the log folder).
     cmd("log.reveal", {
       icon: ScrollText,
       run: () => deps.revealLog(),
     }),
 
     // --- per-note params (frontmatter) ----------------------------------------
-    // Kill the current note's shells; the next run/attach respawns them with
-    // the note's current frontmatter params — the restart-applies escape hatch.
+    // Kill the current note's shells. The next run or attach respawns them
+    // with the note's frontmatter params as they read now, which is how a
+    // frontmatter edit takes effect (architecture.md §6a, restart-applies).
     cmd("session.restart", {
       icon: RefreshCw,
-      // Both surfaces spawn the shells this kills, so either one is reason
-      // enough to offer it — and a client with neither has no shell to restart
-      // and should never have been offering it (lib/shell.ts).
+      // spawnsSessions is true when either surface exists, and both spawn the
+      // shells this kills. A client with neither has no shell to restart, so
+      // the verb is absent there (lib/shell.ts).
       when: (ctx) => spawnsSessions() && focusedDocId(ctx.selected) !== null,
       run: (ctx) => {
         const docId = focusedDocId(ctx.selected);
@@ -795,9 +776,9 @@ export function buildCommands(deps: RegistryDeps): Command[] {
       },
     }),
     // Edit the profile the current note's frontmatter names, in the in-app
-    // dialog (components/ProfileEditor.tsx). Hidden when it names none: with
-    // no name there is nothing to edit, and prompting for one here would
-    // invent a second way to say what the frontmatter already says.
+    // dialog (components/ProfileEditor.tsx). Hidden when the frontmatter names
+    // none: there is nothing to edit, and prompting for a name here would be a
+    // second way to say what the frontmatter already says.
     cmd("profile.open", {
       icon: KeyRound,
       // A profile is the environment a block runs in, so a client that does not
@@ -808,13 +789,12 @@ export function buildCommands(deps: RegistryDeps): Command[] {
         if (name) ctx.ui.openProfileEditor?.(name);
       },
     }),
-    // Put the caret inside the current note's frontmatter, creating the block
-    // when there is none — the front door to the per-note params (editor/
-    // frontmatterEdit.ts does the editing). ONE command with a live title
-    // rather than the templateOn/Off two-faces move, because this one holds a
-    // chord and the dispatcher ignores `when`: two commands on ⌥⌘, would
-    // always fire the first. Built literally (not via cmd()) for exactly that
-    // title; keys.ts still owns the identity.
+    // Put the caret in the note's frontmatter, creating the block when there
+    // is none (editor/frontmatterEdit.ts does the editing). One command with a
+    // live title, not the templateOn/Off pair of faces: it holds a chord and
+    // the dispatcher ignores `when`, so two commands on ⌥⌘, would fire the
+    // first. It is built literally rather than through cmd() so it can carry
+    // that live title, and keys.ts still owns its identity.
     {
       id: "frontmatter.edit",
       title: (ctx) => {
@@ -826,9 +806,10 @@ export function buildCommands(deps: RegistryDeps): Command[] {
       icon: Braces,
       when: (ctx) => {
         const docId = focusedDocId(ctx.selected);
-        // Not in the docs workspace: the Add face would insert fences the
-        // read-only editor drops on the floor — a chord that visibly does
-        // nothing (the editor's transaction filter is the enforcement).
+        // Not in the docs workspace. The Add face would insert fences the
+        // read-only editor discards, so the chord would visibly do nothing.
+        // The editor's transaction filter is what discards them (editor/
+        // setup.ts).
         return docId !== null && deps.noteHead(docId) !== null && !docsSelected(ctx);
       },
       run: (ctx) => {
@@ -862,10 +843,10 @@ export function buildCommands(deps: RegistryDeps): Command[] {
     cmd("note.deleteCurrent", {
       icon: Trash2,
       destructive: true,
-      // Page focus only: in the editor, CodeMirror's Mod-Backspace
-      // (delete-to-line-start) wins by the preventDefault contract. On a
-      // focused note row it acts on that row — ⌘⌫ meaning "delete the note I
-      // am pointing at" is the same promise either way.
+      // Page focus only. In the editor, CodeMirror's Mod-Backspace
+      // (delete-to-line-start) wins by the preventDefault contract
+      // (interactions.md §7). On a focused note row, ⌘⌫ deletes that row's
+      // note, which is what it means in either place.
       domains: ["page"],
       when: (ctx) => (ctx.target?.kind ?? "note") === "note" && !!targetNote(ctx) && !docsSelected(ctx),
       run: (ctx) => {
@@ -873,12 +854,12 @@ export function buildCommands(deps: RegistryDeps): Command[] {
         if (note) ctx.ui.deleteNoteWithUndo?.(note);
       },
     }),
-    // Enter on (or click of, or the menu on) a Backlinks-panel row: open the
-    // linking note with its link line revealed. The reveal is registered
-    // BEFORE the open — the search overlay's pattern (Overlay.tsx): openNote's
-    // render is what attaches the editor the reveal lands in. The meta comes
-    // from the selected workspace's list, where a backlink must live — the
-    // scan is workspace-scoped; a hit whose note vanished since is a no-op.
+    // Enter, a click, or the menu on a Backlinks-panel row opens the linking
+    // note with its link line revealed. The reveal is registered before the
+    // open, as the search overlay does it (Overlay.tsx): openNote's render
+    // attaches the editor the reveal lands in. The meta comes from the selected
+    // workspace's list, where a backlink must live because the scan is
+    // workspace-scoped (bun/notes.ts backlinksTo); a vanished note is a no-op.
     cmd("backlink.open", {
       icon: FileText,
       targetKind: "backlink",
@@ -893,9 +874,9 @@ export function buildCommands(deps: RegistryDeps): Command[] {
         ctx.dispatch({ type: "openNote", note });
       },
     }),
-    // Enter on (or click of) an Outline-panel row: put the caret on that
-    // heading in the active note's own editor. No dispatch at all — the note
-    // is already the shown one; the jump is the whole verb.
+    // Enter or a click on an Outline-panel row puts the caret on that heading
+    // in the active note's own editor. Nothing is dispatched: the note is
+    // already the one on screen, so the jump is the whole verb.
     cmd("outline.jump", {
       icon: TableOfContents,
       targetKind: "heading",
@@ -906,9 +887,9 @@ export function buildCommands(deps: RegistryDeps): Command[] {
         if (t?.kind === "heading") deps.jumpToHeading(t.docId, t.line, t.text);
       },
     }),
-    // The heading's wikilink, ready to paste: [[Title#Heading]] — or plain
-    // [[Title]] when the row IS the H1, whose text is the tab title
-    // (filenames follow the H1), because [[Title#Title]] would be a strange
+    // Copy the heading's wikilink, ready to paste: [[Title#Heading]], or plain
+    // [[Title]] when the row is the H1. The H1's text is the tab title
+    // (filenames follow the H1), and [[Title#Title]] would be a roundabout
     // spelling of the note itself.
     cmd("outline.copyLink", {
       icon: Copy,
@@ -923,10 +904,10 @@ export function buildCommands(deps: RegistryDeps): Command[] {
         deps.copyText(t.text === title ? `[[${title}]]` : `[[${title}#${t.text}]]`);
       },
     }),
-    // Enter on (or click of) a tag anywhere — a Tags-panel directory row, a
-    // tag row in the overlay, a rendered #tag in the editor (via the bridge):
-    // show the notes bearing it, in the panel's drill-in. One verb, three
-    // surfaces, so they cannot diverge.
+    // Show the notes bearing a tag, in the Tags panel's drill-in. Every tag
+    // click lands here: a Tags-panel directory row, a tag row in the overlay,
+    // and a rendered #tag in the editor (which arrives via the bridge). One
+    // verb for the three surfaces, so they cannot diverge.
     cmd("tag.open", {
       icon: Hash,
       targetKind: "tag",
@@ -937,9 +918,9 @@ export function buildCommands(deps: RegistryDeps): Command[] {
         if (t?.kind === "tag") ctx.ui.showTag?.(t.tag);
       },
     }),
-    // Enter on a Tags-panel occurrence row: open the bearing note with the
-    // tag's line revealed — backlink.open's body with a tag target, down to
-    // the reveal-before-open ordering and the vanished-note no-op.
+    // Enter on a Tags-panel occurrence row opens the bearing note with the
+    // tag's line revealed. This is backlink.open's body with a tag target,
+    // including the reveal-before-open ordering and the vanished-note no-op.
     cmd("tag.openNote", {
       icon: FileText,
       targetKind: "tagnote",
@@ -965,10 +946,11 @@ export function buildCommands(deps: RegistryDeps): Command[] {
     }),
 
     // --- folders -------------------------------------------------------------
-    // Filing a note: the row's menu and `m` act on the row, the palette on the
-    // focused tab's note — Delete's target grammar exactly. The destination is
-    // asked for rather than typed into the command, because a folder is the one
-    // name the view chooses and the chooser is where it can also be created.
+    // File a note in a folder. The row's menu and `m` act on the row, the
+    // palette on the focused tab's note, which is Delete's target grammar
+    // exactly. The destination is asked for rather than passed in, because the
+    // chooser is also where a folder that does not exist yet gets created
+    // (components/FolderPicker.tsx).
     cmd("note.move", {
       icon: FolderInput,
       targetKind: "note",
@@ -978,9 +960,9 @@ export function buildCommands(deps: RegistryDeps): Command[] {
         if (note) ctx.ui.pickFolder?.({ kind: "move", note });
       },
     }),
-    // A folder row's own create verb. No dialog: the folder is the row, so the
-    // only thing left to decide is the note's title, and that is the H1 — the
-    // note opens Untitled with the caret on it, like every other create.
+    // A folder row's own create verb. No dialog: the folder is the row, and
+    // the only thing left to decide is the title, which is the H1. The note
+    // opens Untitled with the caret on it, like every other create.
     cmd("note.newInFolder", {
       icon: FilePlus,
       targetKind: "folder",
@@ -989,26 +971,26 @@ export function buildCommands(deps: RegistryDeps): Command[] {
       run: (ctx) => {
         const t = ctx.target;
         if (t?.kind !== "folder") return;
-        // The file is written NOW, unlike ⌘N's tab-that-may-never-be-typed-in:
-        // a folder is only in the browser because a note is in it
+        // The file is written now, unlike ⌘N's tab that may never be typed in.
+        // A folder is in the browser only because a note is in it
         // (notes/folders.ts), so a deferred create would file the note into a
         // row that is not there yet. Untitled with the caret on the title, so
-        // the first keystroke names it — every create-then-open does this.
+        // the first keystroke names it, as every create-then-open does.
         deps.expandFolder(ctx.selected.folder, t.folder);
         void deps.createNote(ctx.selected.folder, SCRATCH_DOC, t.folder).then((note) => {
           deps.revealTitle(note.path);
-          // Into the list AND into a tab: the watcher's refresh would bring
-          // the row a moment later, and a row that arrives after the note it
-          // names is already open reads as a glitch.
+          // Into the list as well as into a tab. The watcher's refresh would
+          // bring the row a moment later, and a row arriving after the note it
+          // names is already open looks like a glitch.
           ctx.dispatch({ type: "noteAppeared", folder: ctx.selected.folder, note });
           ctx.dispatch({ type: "openNote", note });
         }, failed(ctx));
       },
     }),
-    // New Folder… makes a folder AND the first note in it, because the browser
-    // shows the folders its notes are in (notes/folders.ts) — a folder made
-    // empty would be a folder that vanished. On a folder row it seeds the field
-    // with that folder, so nesting one inside it is a name and an Enter.
+    // New Folder… makes a folder and the first note in it. The browser shows
+    // only the folders its notes are in (notes/folders.ts), so a folder made
+    // empty would not appear at all. On a folder row it seeds the field with
+    // that folder, so nesting one inside it is a name and an Enter.
     cmd("folder.new", {
       icon: FolderPlus,
       when: (ctx) => !docsSelected(ctx),
@@ -1018,16 +1000,14 @@ export function buildCommands(deps: RegistryDeps): Command[] {
           parent: ctx.target?.kind === "folder" ? `${ctx.target.folder}/` : "",
         }),
     }),
-    // Searching one folder. The scope belongs to the OVERLAY rather than to one
-    // of its modes, so crossing to Notes with a chip keeps it: what you were
-    // looking IN survives the crossing exactly as what you were looking FOR
-    // does. Opens in text mode because that is the mode a folder row cannot
-    // otherwise get to — quick-open is one chord away and already lists the
-    // whole workspace, while "what does this folder say about X" has had no
-    // answer in the app at all, though `ledge search -f` and the MCP tools'
-    // `folder` have answered it for agents since they got folders.
+    // Search one folder. The scope belongs to the overlay rather than to one of
+    // its modes, so switching to Notes with a chip keeps it. Opens in text
+    // mode, the mode a folder row cannot otherwise reach: quick-open is one
+    // chord away and lists the whole workspace anyway. The app had no
+    // folder-scoped text search before this verb, though `ledge search -f` and
+    // the MCP tools' `folder` had answered it for agents since folders shipped.
     //
-    // A SELECTING folder, not a placing one (architecture.md §3): it narrows
+    // A selecting folder, not a placing one (architecture.md §3): it narrows
     // notes already listed, never becomes a path, and so is refused by nothing.
     cmd("folder.search", {
       icon: TextSearch,
@@ -1038,21 +1018,14 @@ export function buildCommands(deps: RegistryDeps): Command[] {
         if (ctx.target?.kind === "folder") ctx.ui.openOverlay?.("search", { folder: ctx.target.folder });
       },
     }),
-    // Renaming a folder. A field on the row, not a dialog: the folder is the
-    // row and its name is the whole question, which is the workspace strip's
-    // rename gesture one register down (Sidebar.tsx, components/RenameField).
-    //
-    // What it CANNOT do is move the folder. The field takes a name and refuses
-    // a path (shared/folders.ts folderLeafProblem), which is what keeps this to
-    // one atomic rename(2) of the directory: nothing under it changes depth,
-    // so no note's image references are rewritten, no note's body is read, and
-    // a folder full of LOCKED notes renames with the vault shut — where Move
-    // to Folder… has to refuse a single one.
-    //
-    // No double-click, unlike the workspace row. A click on a folder row
-    // toggles it, so a double-click is already two acts of the row's own Enter
-    // verb (R6) and cannot also mean rename. `r` and the menu item are the two
-    // paths, which is what R2 asks for.
+    // Rename a folder in a field on the row, not a dialog: the folder is the
+    // row and its name is the whole question (Sidebar.tsx, components/
+    // RenameField). The field takes a name and refuses a path
+    // (shared/folders.ts folderLeafProblem), so Bun does one rename(2) of the
+    // directory and reads no note's bytes: a folder of locked notes renames
+    // with the vault shut, where Move to Folder… has to refuse a single one.
+    // interactions.md §3 (Rename Folder…) has the rest, including the names
+    // the field also refuses and why this row has no double-click.
     cmd("folder.rename", {
       icon: Pencil,
       targetKind: "folder",
@@ -1062,22 +1035,19 @@ export function buildCommands(deps: RegistryDeps): Command[] {
         if (ctx.target?.kind === "folder") ctx.ui.beginRenameFolder?.(ctx.target.folder);
       },
     }),
-    // Deleting a folder, which means deleting the notes in it: a folder is a
-    // row because notes are in it, so this is a verb on THOSE NOTES spelled as
-    // a verb on the row, the same shape the rename has. Every one of them goes
-    // to the trash, each on its own, and the folder stops being listed because
-    // nothing is in it — which is what losing the last note has always done to
-    // a folder here.
+    // Deleting a folder deletes the notes in it. A folder is a row only
+    // because notes are in it, so this is a verb on those notes spelled as a
+    // verb on the row, the same shape the rename has (interactions.md §1,
+    // folder row). Nothing is unlinked: each note goes to the trash on its own
+    // and is in the Trash section afterwards, and the folder stops being listed
+    // once nothing is in it, as losing its last note always does.
     //
-    // It is confirmed, and NOT for §4's reason: nothing is unlinked, the Undo
-    // strip follows, and every note is in the Trash section afterwards. The
-    // dialog is there because a collapsed row does not say what is under it —
-    // `d` on `projects` can be forty notes across a dozen subfolders, and the
-    // count is the one thing the row cannot show. That is Remove Lock…'s
-    // precedent (interactions.md §4): a confirm for a consequence you cannot
-    // see rather than for one you cannot undo. Which is also why it is a
-    // confirm AND an undo — the dialog answers "how many", the strip answers
-    // "I meant Cancel".
+    // Confirmed for the extent, not for irreversibility: a collapsed row does
+    // not say whether `d` costs one note or forty. That is Remove Lock…'s
+    // precedent (interactions.md §4), a confirm for a consequence that cannot
+    // be seen rather than one that cannot be undone. So there is a dialog and
+    // an Undo strip both: the dialog answers "how many", the strip answers "I
+    // meant Cancel".
     cmd("folder.delete", {
       icon: Trash2,
       targetKind: "folder",
@@ -1088,17 +1058,15 @@ export function buildCommands(deps: RegistryDeps): Command[] {
         if (ctx.target?.kind === "folder") ctx.ui.confirmDeleteFolder?.(ctx.target.folder);
       },
     }),
-    // A folder's Enter (interactions.md R6): its primary action is showing what
-    // is in it. Two faces on the row's live state, the lock pair's move, so the
-    // menu item says which way it will go. The browser owns the expansion, so
-    // this is a hook rather than a dispatch — nothing in the store knows a
-    // folder is open.
-    // A LIVE TITLE rather than the lockOn/lockOff two-faces move, for
-    // frontmatter.edit's reason one register down: this one holds a bare key
-    // (Enter on the row), and two commands may not claim one bare key on one
-    // row kind — registry.test.ts refuses it, because the dispatcher would
-    // always fire the first. Built literally (not via cmd()) for exactly that
-    // title; keys.ts still owns the identity.
+    // Enter on a folder row: its primary action is showing what is in it
+    // (interactions.md R6). The title reads the row's live expanded state, so
+    // the menu item says which way it will go. One command with a live title
+    // rather than a lockOn/lockOff pair, because this one holds a bare key and
+    // two commands may not claim one bare key on one row kind (registry.test.ts
+    // refuses it; the dispatcher would always fire the first). It is built
+    // literally rather than through cmd() to carry that title, and keys.ts
+    // still owns the identity. The browser owns the expansion, so run calls a
+    // deps hook: nothing in the store knows a folder is open.
     {
       id: "folder.toggle",
       title: (ctx) =>
@@ -1145,27 +1113,26 @@ export function buildCommands(deps: RegistryDeps): Command[] {
     }),
 
     // --- editor-internal (keys owned by CodeMirror; palette refocuses) -------
-    // The clipboard trio, its shifted variant, and the selection they act on.
-    // `palette: false` on all five: nobody reaches for Copy by typing its
-    // name, and in a ranked list "copy" has to surface Copy Path and Copy
-    // Link, which people do reach for. The editor's context menu is their home
-    // (interactions.md §11), which is what registry.test.ts checks instead.
+    // The clipboard trio, its shifted variant, and Select All. `palette: false`
+    // on all five: nobody reaches for Copy by typing its name, and a ranked list
+    // for "copy" should surface Copy Path and Copy Link instead. The editor's
+    // context menu is where these five live (interactions.md §11), and
+    // registry.test.ts checks that they are reachable there.
     cmd("editor.cut", menuOnly(needsSelection(deps, editorCommand(deps, Scissors, (ed, docId) => ed.cut(docId))))),
     cmd("editor.copy", menuOnly(needsSelection(deps, editorCommand(deps, Copy, (ed, docId) => ed.copy(docId))))),
-    // Paste is never greyed: whether the pasteboard holds anything is an async
-    // round trip to Bun, and `when` runs on every menu render. A paste with
-    // nothing to paste inserts nothing, which is the cheaper wrong answer.
+    // Paste is never greyed out. Whether the pasteboard holds anything takes an
+    // async round trip to Bun, and `when` runs on every menu render. A paste
+    // with nothing to paste inserts nothing.
     cmd("editor.paste", menuOnly(editorCommand(deps, ClipboardPaste, (ed, docId) => ed.paste(docId)))),
     cmd("editor.pastePlain", menuOnly(editorCommand(deps, ClipboardType, (ed, docId) => ed.pastePlain(docId)))),
     cmd("editor.selectAll", menuOnly(editorCommand(deps, TextSelect, (ed, docId) => ed.selectAll(docId)))),
     cmd("editor.find", editorCommand(deps, Search, (ed, docId) => ed.find(docId))),
     cmd("editor.replace", editorCommand(deps, Replace, (ed, docId) => ed.replace(docId))),
     cmd("editor.save", editorCommand(deps, Save, (ed, docId) => ed.save(docId))),
-    // The two run verbs, and the two client-wide facts they need. Each sits on
-    // top of editorCommand's focused-doc test, and the client-wide half is the
-    // reason a phone's palette has the first of these and not the second
-    // (ios.md §8). They differ because the destination does: inline draws a
-    // panel under the fence, and in-terminal needs a drawer to put it in.
+    // The two run verbs, each gated on a client-wide fact on top of
+    // editorCommand's focused-doc test. A phone's palette has the first and not
+    // the second (ios.md §8): an inline run draws a panel under the fence, and
+    // a run in the terminal needs a drawer to put it in.
     cmd("block.runInline", onClient(runsBlocks, editorCommand(deps, Play, (ed, docId) => ed.runInline(docId)))),
     cmd(
       "block.runInTerminal",
@@ -1174,40 +1141,40 @@ export function buildCommands(deps: RegistryDeps): Command[] {
         editorCommand(deps, TerminalSquare, (ed, docId) => ed.runInTerminal(docId)),
       ),
     ),
-    // Follows the link under the caret; ⌘-click on the link is the
-    // accelerator (editor/livePreview.ts). A caret not on a link makes this a
-    // no-op rather than hiding the entry — `when` cannot see the caret
-    // cheaply, and find/save keep the same always-visible contract.
+    // Follows the link under the caret. ⌘-click on the link is the accelerator
+    // (editor/livePreview.ts). A caret not on a link makes this a no-op rather
+    // than hiding the entry: `when` cannot see the caret cheaply, and find and
+    // save keep the same always-visible contract.
     cmd("link.open", editorCommand(deps, ExternalLink, (ed, docId) => ed.openLink(docId))),
-    // Toggles the checkbox on the caret's line; clicking the rendered box is
-    // the accelerator. Same always-visible, no-op-off-target contract as
-    // link.open above.
+    // Toggles the checkbox on the caret's line. Clicking the rendered box is
+    // the accelerator. Always visible and a no-op off target, the same contract
+    // link.open has above.
     cmd("task.toggle", editorCommand(deps, SquareCheck, (ed, docId) => ed.toggleTask(docId))),
     // Markdown formatting (editor/formatting.ts): the ⌘B/⌘I/⌘K trio, bound in
     // CodeMirror like every editor-internal chord.
     cmd("format.bold", editorCommand(deps, Bold, (ed, docId) => ed.bold(docId))),
     cmd("format.italic", editorCommand(deps, Italic, (ed, docId) => ed.italic(docId))),
     cmd("format.link", editorCommand(deps, Link, (ed, docId) => ed.insertLink(docId))),
-    // The four the keyboard reaches by typing on a desktop and cannot on a
-    // phone: Tab, ⇧Tab, `[[` and ```. Registry commands so the accessory bar can
-    // name them (ios.md §7) — the bar sends a command id and nothing else, the
-    // same contract the menu bar has always had.
+    // Four keystrokes a desktop keyboard makes and a phone's keyboard cannot:
+    // Tab, ⇧Tab, `[[` and ```. They are registry commands so the accessory bar
+    // can name them (ios.md §7). The bar sends a command id and nothing else,
+    // the same contract the menu bar has always had.
     cmd("format.indent", editorCommand(deps, IndentIncrease, (ed, docId) => ed.indent(docId))),
     cmd("format.outdent", editorCommand(deps, IndentDecrease, (ed, docId) => ed.outdent(docId))),
     cmd("format.wikiLink", editorCommand(deps, Brackets, (ed, docId) => ed.wikiLink(docId))),
     cmd("format.codeBlock", editorCommand(deps, Code, (ed, docId) => ed.codeBlock(docId))),
-    // Not gated on anything: every client this runs on has SOME picture store,
-    // and the seam answers null where the user declined (lib/assets.ts).
+    // Not gated on anything. Every client this runs on has some picture store,
+    // and the seam answers null when the user cancels (lib/assets.ts).
     cmd("image.insert", editorCommand(deps, Image, (ed, docId) => ed.insertImage(docId))),
   ];
 
-  // One palette entry per marked note — the workspace.select move: the
-  // palette is the picker, so ⌥⌘N needs no dialog. The slots are fixed but
-  // the rows are not: title and `when` read templateChoices(ctx) live, so
-  // marking a note surfaces its entry on the next palette render, no restart
-  // and no rebuild. The created note opens as "Untitled" in the selected
-  // workspace (wherever the template itself lives), and typing its H1
-  // renames it.
+  // One palette entry per marked note, the same move workspace.select makes:
+  // the palette is the picker, so ⌥⌘N needs no dialog. The slots are fixed but
+  // the rows are not. Title and `when` read templateChoices(ctx) live, so
+  // marking a note surfaces its entry on the next palette render, with no
+  // restart and no rebuild. The new note opens as "Untitled" in the selected
+  // workspace (wherever the template itself lives), and typing its H1 renames
+  // it.
   for (let i = 0; i < TEMPLATE_SLOTS; i += 1) {
     list.push({
       id: `note.fromTemplate.${i}`,
@@ -1226,12 +1193,13 @@ export function buildCommands(deps: RegistryDeps): Command[] {
   }
 
   // Indexed quick-jumps, one command per slot so the dispatcher and the
-  // palette stay plain data. ⌘N switches workspace, ⌃N selects a tab in the
-  // focused pane — exactly what the held-modifier badges advertise.
+  // palette stay plain data. ⌘N switches workspace and ⌃N selects a tab in the
+  // focused pane, which is what the held-modifier badges advertise.
   for (let n = 1; n <= 9; n += 1) {
-    // Indexed over the STRIP's workspaces (docs excluded), so ⌘N matches the
-    // badges on the rows the user can see — and stays the way back out of the
-    // docs workspace, whose own slot would otherwise shift every number.
+    // Indexed over the strip's workspaces, with the docs workspace excluded, so
+    // ⌘N matches the badges on the rows the user can see. It also stays the way
+    // back out of the docs workspace, whose own slot would otherwise shift every
+    // number.
     list.push({
       id: `workspace.select.${n}`,
       title: (ctx) => `Switch to Workspace: ${stripWorkspaces(ctx)[n - 1]?.name ?? n}`,
@@ -1270,9 +1238,9 @@ function currentProfile(ctx: CommandCtx, deps: RegistryDeps): string | null {
   return head === null ? null : parseFrontmatter(head).params.profile;
 }
 
-// The current note's template marker (false, true, or the "daily" role) —
-// same head parse as currentProfile, null when there is no focused live doc
-// to ask (which hides BOTH marker verbs).
+// The current note's template marker: false, true, or the "daily" role. Same
+// head parse as currentProfile. Null when there is no focused live doc to ask,
+// which hides both marker verbs.
 function currentTemplateFlag(ctx: CommandCtx, deps: RegistryDeps): boolean | "daily" | null {
   const docId = focusedDocId(ctx.selected);
   if (!docId) return null;
@@ -1280,22 +1248,23 @@ function currentTemplateFlag(ctx: CommandCtx, deps: RegistryDeps): boolean | "da
   return head === null ? null : parseFrontmatter(head).params.template;
 }
 
-// The focused tab's note as the STORE knows it — the template-marker verb's
-// lock check. The store's meta, not the live doc's frontmatter, deliberately:
-// a held tab has no editor (noteHead is null there), while the
-// watcher-refreshed lists carry the locked flag for every note either way.
-// Null for a tab with no file yet: an unsaved scratch note has nothing on
-// disk to lock. (The lock verbs themselves resolve through targetNote — the
-// same store lookup, but row-target aware for the sidebar menu.)
+// The focused tab's note as the store knows it, for the template-marker verb's
+// lock check. The store's meta rather than the live doc's frontmatter: a held
+// tab has no editor (noteHead is null there), while the watcher-refreshed lists
+// carry the locked flag for every note either way. Null for a tab with no file
+// yet, since an unsaved scratch note has nothing on disk to lock. The lock verbs
+// resolve through targetNote instead: the same store lookup, but row-target
+// aware for the sidebar menu.
 function currentNoteMeta(ctx: CommandCtx): NoteMeta | null {
   const tab = focusedTab(ctx.selected);
   if (!tab?.path) return null;
   return notesOf(ctx.state, ctx.selected.folder).find((n) => n.path === tab.path) ?? null;
 }
 
-// Whether ANY visible workspace holds a locked note — what makes "Unlock
-// Notes…" meaningful on a machine whose vault file has not arrived (state
-// "none" but synced-in locked notes; Bun's probe unlock handles the rest).
+// Whether any visible workspace holds a locked note. This is what makes
+// "Unlock Notes…" meaningful on a machine whose vault file has not arrived:
+// vault state "none", but locked notes synced in. Bun's probe unlock handles
+// the rest.
 function anyLockedNote(ctx: CommandCtx): boolean {
   return ctx.state.workspaces.some((w) => notesOf(ctx.state, w.folder).some((n) => n.locked));
 }
@@ -1317,9 +1286,9 @@ function cycleTab(ctx: CommandCtx, dir: 1 | -1): void {
   if (next) ctx.dispatch({ type: "selectTab", paneId: leaf.id, tabId: next.id });
 }
 
-// An editor-internal command: its keys are bound inside CodeMirror (domains:
-// [] keeps the window dispatcher out entirely); invoking it from the palette
-// refocuses the note's editor first, which deps.editor handles.
+// An editor-internal command: its keys are bound inside CodeMirror, and
+// `domains: []` keeps the window dispatcher out entirely. Invoking it from the
+// palette refocuses the note's editor first, which deps.editor handles.
 /** The same command, additionally withheld where this client says it has no
  * surface for it (lib/shell.ts). Wraps rather than replaces `when`, so the
  * editor's own focused-doc condition is not lost by the gating. */
@@ -1331,8 +1300,9 @@ function onClient(
   return { ...spec, when: (ctx) => can() && (already?.(ctx) ?? true) };
 }
 
-/** The same command, additionally withheld with nothing selected — what greys
- * Cut and Copy. Wraps rather than replaces `when`, like onClient above. */
+/** The same command, additionally withheld with nothing selected, which is what
+ * greys out Cut and Copy. Wraps rather than replaces `when`, like onClient
+ * above. */
 function needsSelection(
   deps: RegistryDeps,
   spec: Omit<Command, "id" | "title" | "keys">,
@@ -1347,8 +1317,9 @@ function needsSelection(
   };
 }
 
-/** Out of the palette, into a menu. The reachability rule still holds — a
- * `palette: false` command needs a menu item, which registry.test.ts checks. */
+/** Out of the palette, into a menu. The reachability rule still holds: a
+ * `palette: false` command needs a menu item, and registry.test.ts checks that
+ * it has one. */
 function menuOnly(spec: Omit<Command, "id" | "title" | "keys">): Omit<Command, "id" | "title" | "keys"> {
   return { ...spec, palette: false };
 }
@@ -1375,10 +1346,10 @@ export interface PaletteItem {
   id: string;
   title: string;
   chip: string | null;
-  // Whether the command holds a real chord (`keys`, not `listKeys` — a row
-  // verb's bare key is a convenience, not a frequency claim). The palette
-  // ranks chorded commands a notch higher on a filtered query (CHORD_BOOST):
-  // a chord marks the act reached for most, per the §2 allocation policy.
+  // Whether the command holds a real chord: `keys`, not `listKeys`. A row
+  // verb's bare key is a convenience, not a claim about frequency. The palette
+  // ranks chorded commands a notch higher on a filtered query (CHORD_BOOST in
+  // notes/fuzzy.ts), since a chord marks a frequent act (interactions.md §2).
   chorded: boolean;
   icon?: Command["icon"];
   destructive?: boolean;

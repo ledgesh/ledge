@@ -5,11 +5,11 @@
 // eventToChord, then resolveChord picks the command whose binding matches and
 // whose domains include where focus currently sits.
 
-// "list" is a focused row in a navigable list (the note list, the trash, the
-// workspace strip) — the one domain where BARE keys dispatch (`d` deletes,
-// Enter opens; interactions.md §2). It sits inside the page chrome, so a
-// page-domain command fires there too (see domainMatches): focusing a note row
-// must not cost you ⌘N.
+// "list" is a focused row in a navigable list: the note list, the trash, the
+// workspace strip. It is the one domain where the resolver dispatches on
+// unmodified keys (`d` deletes, Enter opens; interactions.md §2). A row sits
+// inside the page chrome, so domainMatches below widens "page" to cover it.
+// Focusing a note row does not disable ⌘N.
 export type FocusDomain = "page" | "editor" | "terminal" | "list";
 
 export interface Chord {
@@ -23,9 +23,9 @@ export interface Chord {
 export interface ContextFlags {
   domain: FocusDomain;
   modalOpen: boolean;
-  // The kind of the row focus sits on, in the list domain. Commands declaring
-  // a targetKind only resolve on a matching row, which is what lets `r` mean
-  // Rename on a workspace and Restore on a trashed note without ambiguity.
+  // The kind of the row focus sits on, in the list domain. A command that
+  // declares a targetKind resolves only on a matching row. That is how `r`
+  // means Rename on a workspace row and Restore on a trashed note.
   targetKind?: string;
 }
 
@@ -38,25 +38,27 @@ export interface KeyedCommand {
   targetKind?: string;
 }
 
-// Where the window dispatcher fires a command unless it says otherwise. ⌘
-// chords are app-global (they bubble out of the editor and the terminal, whose
-// handlers consume the ones they own); Ctrl chords must opt out of "terminal"
-// explicitly, because the shell owns Ctrl.
+// A command that names no domains of its own fires in these three. ⌘ chords
+// are app-global: they bubble out of the editor and the terminal, whose
+// handlers consume the ones they own. A Ctrl chord must opt out of "terminal"
+// explicitly. The shell owns Ctrl there (interactions.md §2).
 export const DEFAULT_DOMAINS: readonly FocusDomain[] = ["page", "editor", "terminal"];
 
-// A list row is page chrome that happens to be focusable, so anything bound
-// for "page" also fires there. Nothing widens the other way: a command that
-// only makes sense on a row must say "list" and carry a targetKind.
+// A list row is focusable page chrome, so a command bound for "page" fires
+// there too. Nothing widens the other way: naming "list" in domains does not
+// reach page focus. A row's own verbs are bare keys in listKeys instead
+// (interactions.md §2), each with a targetKind that registry.test.ts checks.
 export function domainMatches(domains: readonly FocusDomain[], domain: FocusDomain): boolean {
   if (domains.includes(domain)) return true;
   return domain === "list" && domains.includes("page");
 }
 
-// With Shift held, punctuation arrives as its shifted character ("}" for
-// Shift-]), and macOS Option can transform it too ("≤" for ⌥-,) — so bindings
-// like Mod-Shift-] or Alt-Mod-, would never match on e.key alone.
-// e.code names the physical key; map the ones we could plausibly bind back to
-// their base character.
+// Base characters for the punctuation keys, keyed by e.code. The table covers
+// the keys a binding could plausibly use, so a new punctuation binding may
+// need a row added. With Shift held, punctuation arrives as its shifted
+// character ("}" for Shift-]), and macOS Option can transform it too ("≤" for
+// ⌥-,). Bindings like Mod-Shift-] and Alt-Mod-, would never match on e.key
+// alone. eventToChord reads e.code (the physical key) and maps it back here.
 const CODE_BASE: Record<string, string> = {
   BracketLeft: "[",
   BracketRight: "]",
@@ -112,8 +114,8 @@ export function matchesKey(binding: string, chord: Chord): boolean {
 }
 
 // The first command whose binding matches the chord and whose domains include
-// the focus domain. Null while a modal layer is open: menus, dialogs, and the
-// palette own the keyboard outright (interactions.md §6).
+// the focus domain. Null while a modal layer is open (a menu, a dialog, or an
+// overlay): the window dispatcher is suppressed there (interactions.md §6).
 export function resolveChord<T extends KeyedCommand>(
   commands: readonly T[],
   chord: Chord,

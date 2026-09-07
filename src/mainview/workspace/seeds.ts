@@ -1,23 +1,17 @@
-// Seed text for a note with no file yet (workspace/tree.ts `seed`).
-//
-// The very first tab shows the welcome note: a fresh start with nothing to
-// open (workspace/store.tsx initialState), which is what a first launch on a
-// Mac, and a first connection to a server with no notes yet, both are. It is
-// the one place a new user can press Run, because the manual's own blocks
-// are marked `norun` (interactions.md §4e): a manual page's shell could be on
-// either machine, while this note's shell is the same one every other note
-// in the workspace gets. So its examples are the manual's, live. Every other
-// new tab opens as a near-empty scratch note. A tab whose note is already on
-// disk ignores these and loads the file instead.
-//
-// The welcome note is unsaved like any other new note, so a first launch you
-// do not type in still leaves the folder empty. Built from lines so the ```
-// fences do not collide with JS backticks. docs/user/ mechanics apply
-// (writing.md: one line per paragraph, no em dashes), and every fence is in a
-// runnable language with no `norun` (seeds.test.ts holds it there): the point
-// of the note is that it runs.
+// Seed text for a note with no file yet (workspace/tree.ts `seed`). The
+// welcome note fills the first tab when there is nothing else to open
+// (workspace/store.tsx initialState). That is a first launch on a Mac, or a
+// first connection to a server with no notes. Every other new tab opens on the
+// near-empty scratch note. A tab whose note is on disk loads the file.
 export const WELCOME_TITLE = "Welcome to Ledge";
 
+// The welcome note's text. Every fence is in a runnable language and carries
+// no `norun`, so a new user can press Run here. In the manual every
+// runnable-language fence is marked instead (interactions.md §4e). writing.md
+// §10 has the reason, and the docs/user/ prose mechanics this note follows.
+// seeds.test.ts checks both. Built from lines so the ``` fences do not
+// collide with JS backticks. The note is unsaved like any other new note.
+// Close it without typing and the folder stays empty.
 export const WELCOME_DOC = [
   `# ${WELCOME_TITLE}`,
   "",
@@ -66,8 +60,10 @@ export const WELCOME_DOC = [
   "",
 ].join("\n");
 
-// Just the H1: the rename UI and the note's identity, nothing else. A new
-// note is the user's blank page, with no sample block to delete first.
+// The H1 and nothing else. Typing over the heading is how a note is renamed:
+// the first line names the file (notes/store.ts syncTitle), and there is no
+// rename command for notes. Nothing else is seeded, so a new note opens as a
+// blank page with no sample block to delete first.
 export const SCRATCH_DOC = ["# Untitled", "", ""].join("\n");
 
 export function seedDoc(seed: "demo" | "scratch"): string {

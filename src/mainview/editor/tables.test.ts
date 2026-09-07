@@ -1,5 +1,8 @@
-// The table model core, tested against @lezer/markdown + GFM directly, like
-// livePreview.test.ts: values in, render-ready cells out, no DOM.
+// Tests for the table model core, run against @lezer/markdown + GFM
+// directly, like livePreview.test.ts. No DOM or editor is involved.
+// `tableModels` takes something that can slice the doc plus a parse tree, and
+// returns one render-ready model per top-level table: its span in the doc,
+// its per-column alignment, its header and its rows.
 import { describe, expect, test } from "bun:test";
 import { GFM, parser } from "@lezer/markdown";
 import { tableModels, type TableModel } from "./tables";
@@ -14,7 +17,7 @@ function models(text: string): TableModel[] {
   return tableModels(doc(text), md.parse(text));
 }
 
-// A cell's plain reading: every segment's text joined.
+// Joins a cell's segments into its plain text.
 function cellText(m: TableModel, row: number, col: number): string {
   const cells = row < 0 ? m.header : m.rows[row]!;
   return cells[col]!.segs.map((s) => s.text).join("");
