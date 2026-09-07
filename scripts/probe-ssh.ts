@@ -1,18 +1,18 @@
 #!/usr/bin/env bun
 // The ssh hop, against a real sshd, with a real forced-command key.
 //
-// This is the debt phases 2, 3 and 4 of docs/contributor/remote.md all
-// recorded: everything up to here ran over pipes and a unix socket, which are
-// real process boundaries and not a network. What was unproven was ssh itself
-// — the argv `bun/connections.ts` builds, the `authorized_keys` restriction
-// §4 describes, the host-key pin, and a length-prefixed protocol surviving a
+// This is the debt phases 2, 3 and 4 of remote.md all recorded: everything up
+// to here ran over pipes and a unix socket, which are real process boundaries
+// and not a network. What was unproven was ssh itself: the argv
+// `bun/connections.ts` builds, the `authorized_keys` restriction remote.md §4
+// describes, the host-key pin, and a length-prefixed protocol surviving a
 // transport that was designed for terminals.
 //
-// It uses Ledge's OWN modules for everything it is testing: sshDial builds the
+// It uses Ledge's own modules for everything it is testing. sshDial builds the
 // argv and the environment, secrets.ts writes the keychain item and the askpass
-// helper, pickHostKey chooses what to pin, knownHostsText writes the file,
+// helper, pickHostKey chooses what to pin, knownHostsText writes the file, and
 // clientConnection speaks the protocol. A probe that hand-wrote an ssh command
-// line would prove that ssh works, which was never in doubt.
+// line would prove only that ssh works, which was never in doubt.
 //
 // Run it: `bun run probe:ssh`. It builds two images, holds 127.0.0.1:22 for a
 // few seconds, and removes everything it made.
@@ -85,12 +85,12 @@ async function teardown() {
 /**
  * A wire that stops carrying bytes, and the same wire again.
  *
- * The instrument is an iptables rule inside the container, on the way OUT.
- * From a client's end that is a severed wire exactly: nothing arrives, and
- * nothing says why — no FIN, no RST, no exit. What it buys over cutting both
- * directions is that a request still REACHES the far machine and is executed,
- * and only its answer is lost, which is the one condition bun/opLog.ts was
- * written for.
+ * The instrument is an iptables rule inside the container, on outbound traffic
+ * only. From a client's end that is a severed wire exactly: nothing arrives,
+ * and nothing says why, with no FIN, no RST and no exit. Cutting one direction
+ * rather than both leaves a request still reaching the far machine and being
+ * executed, with only its answer lost, which is the one condition bun/opLog.ts
+ * was written for.
  *
  * Not `docker pause` and not `docker kill`. Both take the far end down with the
  * wire, and half of what is being claimed is that the daemon and its shells
@@ -134,10 +134,10 @@ const cutWire = () => {
  * an sshd and switches back to run it. The [container] step reads `/data`
  * instead, and that is the same difference from the other side.
  *
- * A failed signal throws rather than passing quietly. Silence here does not
- * fail the step, it EMPTIES it: the server goes on answering and the claim
- * below reads as a client that noticed nothing, which is indistinguishable
- * from the bug it is looking for.
+ * A failed signal throws rather than passing quietly. Silence here would not
+ * fail the step, it would empty it: the server goes on answering and the claim
+ * below reads as a client that noticed nothing, which is indistinguishable from
+ * the bug it is looking for.
  */
 const PID_FILE = "/home/ledge/.ledge/.server.pid";
 const daemonPid = () => run(["docker", "exec", NAME, "sh", "-c", `cat ${PID_FILE}`], { quiet: true }).out.trim();
@@ -150,9 +150,9 @@ try {
   // Port 22 and not a high one for the key fixture: it predates the port field
   // and the [password] step below is what exercises a high one. An ssh
   // destination has no port in it (the same constraint testing.md §6 records
-  // for `host:` shells). Loopback only, and gone at teardown — except under
-  // --serve, where the whole point is a client that is not on this machine, so
-  // the check widens to every interface along with the binding.
+  // for `host:` shells). Loopback only, and gone at teardown. Under --serve the
+  // client is on another machine, so both the binding and this check widen to
+  // every interface.
   const where = SERVE ? "" : "@127.0.0.1";
   const held = run(["sh", "-c", `lsof -nP -iTCP${where}:22 -sTCP:LISTEN 2>/dev/null | tail -n +2`], { quiet: true });
   if (held.out) throw new Error(`something already listens on port 22:\n${held.out}\nStop it, or run this elsewhere.`);
@@ -245,15 +245,15 @@ try {
         // The wire, by hand. A phone cannot be driven from here, so the half of
         // the claim a harness can supply is the cut itself: the server keeps
         // running while the client cannot see it, and the requests made in the
-        // gap are held. The other half — noticing — is not testable through a
-        // published port at all (ios.md §13).
+        // gap are held. The other half, whether the phone notices, is not
+        // testable through a published port at all (ios.md §13).
         if (text === "cut" || text === "mend") {
           const cut = text === "cut";
           (cut ? cutWire : mendWire)();
           console.log(cut ? "  cut: replies dropped, and nothing tells the phone" : "  mended: replies are getting out again");
           continue;
         }
-        // The half a harness CAN supply for a phone, and the one the cut above
+        // The half a harness can supply for a phone, and the one the cut above
         // cannot: everything between the two ends stays healthy and the server
         // stops answering, so what the bar reports is the heartbeat and nothing
         // else (`signalDaemon`).
@@ -296,10 +296,10 @@ try {
   const conn: Connection = {
     id: "probe",
     name: "Probe",
-    // user@host, because a bare host makes ssh offer the LOCAL username and
-    // the account on the other side is the one that owns the notes. Getting
-    // this wrong is a plain "Permission denied (publickey)", which is also
-    // what a wrong key looks like — worth knowing before it happens to a user.
+    // user@host, because a bare host makes ssh offer the local username and the
+    // account on the other side is the one that owns the notes. Getting this
+    // wrong reads as a plain "Permission denied (publickey)", which is what a
+    // wrong key looks like too, so the message does not say which it was.
     destination: "ledge@127.0.0.1",
     port: PORT_UNSET,
     keyPath,
@@ -317,13 +317,13 @@ try {
 
   step("[forced command] the key cannot ask for anything else");
   // Same argv, different remote command. sshd runs what authorized_keys says
-  // regardless, so `whoami` never executes — §4's "that key cannot open a
-  // shell", as a thing that either happens or does not.
+  // regardless, so `whoami` never executes. That is remote.md §4's "that key
+  // cannot open a shell", measured rather than described.
   //
   // Both halves have to be asserted. That `ledge` is absent from the output
   // would also be true if authentication had simply failed, which is how this
-  // check first passed for the wrong reason; the server's own handshake in
-  // that same output is what says the session opened AND was redirected.
+  // check first passed for the wrong reason. The server's own handshake in that
+  // same output is what says the session opened and was then redirected.
   const asked = run([...argv.slice(0, -2), "whoami"], { quiet: true });
   check("the session opened", asked.out.includes(BUILD_VERSION), asked.err.split("\n")[0]?.slice(0, 60));
   check("but ran the forced command, not the one asked for", !/^ledge$/m.test(asked.out));
@@ -346,7 +346,7 @@ try {
   check("with nothing offering to continue anyway", !/yes\/no|continue connecting/i.test(refused.err));
 
   step("[connect] the protocol over ssh");
-  // One record of pushes PER CONNECTION, because what a client was told is now
+  // One record of pushes per connection, because what a client was told is now
   // half of what is being proven (remote.md §7): a shared record cannot tell
   // "the phone was not told" from "nobody was".
   const ears = () => {
@@ -411,11 +411,10 @@ try {
       .filter(([m]) => m === "terminalOutput")
       .map(([, p]) => atob((p as { dataB64: string }).dataB64))
       .join("");
-  // Typed more than once on purpose. zsh's line editor resets the terminal as
-  // it comes up and discards whatever was pending, so a command sent the
-  // instant terminalAttach returns can be swallowed whole — which is exactly
-  // why the app waits for its marker hook rather than typing into a shell it
-  // has not heard from.
+  // Typed more than once. zsh's line editor resets the terminal as it comes up
+  // and discards whatever was pending, so a command sent the instant
+  // terminalAttach returns can be swallowed whole. That is why the app waits
+  // for its marker hook rather than typing into a shell it has not heard from.
   const deadline = Date.now() + 15_000;
   let seen = "";
   while (Date.now() < deadline && !/Linux[\s\S]*PTY-42/.test(seen)) {
@@ -429,9 +428,9 @@ try {
   check("and it is a Linux one", /Linux[\s\S]*PTY-42/.test(seen), JSON.stringify(seen.slice(-120)));
 
   // The other half of a drawer: its window's grid, which reaches the pty as an
-  // ioctl and nothing else can be checked from. It is the owner's call now, and
-  // the drawer sends it only after the attach that makes it one — so a shell
-  // that answers with the pty's own 120x30 means the resize never landed.
+  // ioctl and can be checked no other way. The size is the owner's to set, and
+  // the drawer sends it only after the attach that makes it the owner, so a
+  // shell answering with the pty's own 120x30 means the resize never landed.
   await client.requests.terminalResize({ sessionId: "s1", cols: 100, rows: 20 });
   const SIZED = /SIZE-20-100/;
   let winsize = "";
@@ -471,7 +470,7 @@ try {
 
   // Presence, over the hop the labels had to cross (remote.md §7). The Mac was
   // told it was alone when it arrived, and is told again the moment the phone
-  // does — which is what saves both of them a round trip asking.
+  // arrives, which saves both of them a round trip asking.
   const listFor = (heard: Array<[string, unknown]>): PeerInfo[] | null =>
     heard
       .filter(([m]) => m === "presence")
@@ -519,10 +518,10 @@ try {
     macHeard("notesChanged") > before,
     `${macHeard("notesChanged") - before} notesChanged`,
   );
-  // Deliberately NOT called "the reload that answers the push": this is a read,
-  // and it passes with the watcher torn out, which is how the wording was
-  // caught. Being TOLD is the check above; this is what is there to be read
-  // once you are, down to the version an unedited buffer adopts as its own.
+  // Not called "the reload that answers the push", because this is a read and
+  // it passes with the watcher torn out, which is how the earlier wording was
+  // caught. Being told is the check above. This one is what a client finds when
+  // it looks, down to the version an unedited buffer adopts as its own.
   const reload = await client.requests.noteRead({ path: typed.path });
   check(
     "and the Mac reads back the phone's text, at the phone's own mtime",
@@ -532,8 +531,8 @@ try {
 
   // The one case that push cannot settle: both of them editing it, so neither
   // buffer may be reloaded and the second save arbitrates instead. Over ssh
-  // because `divergedTo` is an answer the far client has to RECEIVE — one that
-  // never crosses is a notice the sidebar never shows (mainview/notes/store.ts).
+  // because `divergedTo` is an answer the far client has to receive, and one
+  // that never crosses is a notice the sidebar never shows (notes/store.ts).
   const base = typed.mtimeMs;
   // Before the write that has to differ from `base`, not after: a filesystem
   // whose mtimes are coarse would otherwise hand back the same number and the
@@ -593,10 +592,10 @@ try {
   );
 
   // The drawer is the one thing the two cannot both have, so it changes hands
-  // rather than being shared: the phone attaches, and what has to be true is
-  // all three of the Mac being TOLD, the Mac's keystrokes being refused, and
-  // the phone's reaching the shell. Against a real pty, because the refusal
-  // that matters is the one where the bytes would otherwise have been written.
+  // rather than being shared. The phone attaches, and three things have to hold:
+  // the Mac is told, the Mac's keystrokes are refused, and the phone's reach
+  // the shell. Against a real pty, because the refusal that matters is the one
+  // where the bytes would otherwise have been written.
   await phone.requests.terminalAttach({ sessionId: "s1", host: null });
   check(
     "the Mac is told when the phone takes its drawer, and by whom",
@@ -744,19 +743,19 @@ try {
   took.close();
 
   step("[drop] a wire that stops carrying bytes, and the ladder that climbs back");
-  // The debt phase 5 recorded. Everything above proves a connection that ENDED
-  // — a close, or a process killed — and both of those shut a pipe, which tells
-  // this end immediately. A network that goes away does neither. It stops
-  // carrying bytes and says nothing: no FIN, no RST, no exit. Until this step
-  // nothing here had ever met one, and the first thing meeting one found was
-  // that the client did not notice for two hours (connections.ts, the three
+  // The debt phase 5 recorded. Everything above proves a connection that ended,
+  // by a close or by a killed process, and both of those shut a pipe, which
+  // tells this end immediately. A network that goes away does neither: it stops
+  // carrying bytes and says nothing, with no FIN, no RST and no exit. Until this
+  // step nothing here had ever met one, and the first thing meeting one found
+  // was that the client did not notice for two hours (connections.ts, the three
   // options above BatchMode).
   //
   // The instrument is `cutWire` above, which drops the fixture's replies and
-  // nothing else — so the write below REACHES the far machine and is executed,
-  // and only its answer is lost. That is the one condition bun/opLog.ts was
-  // written for and the one the dedupe has never been asked about anywhere but
-  // on a connection that was working perfectly.
+  // nothing else, so the write below reaches the far machine and is executed and
+  // only its answer is lost. That is the one condition bun/opLog.ts was written
+  // for, and until now the dedupe had only ever been asked about on a connection
+  // that was working perfectly.
   //
   // It is also the first thing here to drive reconnectingClient rather than one
   // connection. The ladder, the held requests, the replay under the same op and
@@ -787,17 +786,16 @@ try {
   }
   check("a third drawer answered on the far machine", inTheDark().includes("THIRD-READY"));
 
-  // On a clock, and sent BEFORE the cut on purpose. What this line has to prove
-  // is the far machine going on RUNNING while the network is gone, which is the
-  // whole difference between losing a wire and losing a server; typing it into
-  // a wire that was already cut would prove the replay instead.
+  // On a clock, and sent before the cut rather than after it. What this line
+  // has to prove is the far machine still running while the network is gone,
+  // which is the difference between losing a wire and losing a server. Typing it
+  // into a wire that was already cut would prove the replay instead.
   //
-  // Arithmetic rather than a literal, for the [terminal] step's reason turned
-  // to a new use: a pty ECHOES what is typed into it, so a token that appears in
-  // the command appears in the output twice over — once before the cut, from the
-  // echo. Both checks below passed on that echo the first time they were run,
-  // which is a test proving the shell can repeat itself. Only the shell can say
-  // 42.
+  // Arithmetic rather than a literal, for the [terminal] step's reason turned to
+  // a new use: a pty echoes what is typed into it, so a token that appears in
+  // the command appears in the output twice, once before the cut from the echo.
+  // Both checks below passed on that echo the first time they were run. Only the
+  // shell can say 42.
   const DARK = "PRINTED-INTO-THE-42";
   await ladder.requests.terminalInput({ sessionId: "s3", dataB64: btoa("sleep 5; echo PRINTED-INTO-THE-$((6*7))\n") });
 
@@ -887,15 +885,15 @@ try {
 
   step("[stall] a server that stops answering with nothing wrong below the protocol");
   // The cut above proves a client notices a wire that went away. This proves
-  // the other half, and it is the half the phone had no answer to at all: a
-  // wire that is fine and a SERVER that is not. `signalDaemon` says why nothing
+  // the other half, and it is the half the phone had no answer to at all: a wire
+  // that is fine and a server that is not. `signalDaemon` says why nothing
   // underneath can see it.
   //
   // One connection rather than the ladder, because what is being read here is
-  // the VERDICT and not the recovery. A held request never surfaces a reason
-  // (that is the point of holding it), so the ladder can only ever show that
-  // something happened; a plain connection fails its requests with the words
-  // that say what.
+  // the verdict and not the recovery. A held request never surfaces a reason,
+  // which is what holding it is for, so the ladder can only show that something
+  // happened. A plain connection fails its requests with the words that say
+  // what.
   const pid = daemonPid();
   check("the far machine's daemon names its own pid beside its socket", /^\d+$/.test(pid), `pid ${pid || "none"}`);
   const stallEars = ears();
@@ -936,16 +934,16 @@ try {
   resumed.close();
 
   step("[beat] an outage longer than the ladder, which used to be permanent");
-  // The ladder ending used to BE the ending, so every outage longer than half a
-  // minute cost the session and needed a person to notice and choose the same
-  // server again (remote.md §7). What this reads is the half nothing above the
-  // transport can fake: a wire that is genuinely gone, a client that genuinely
-  // gives up on it, and a recovery that nobody asks for.
+  // The end of the ladder used to be the end of the session, so every outage
+  // longer than half a minute cost it and needed a person to notice and choose
+  // the same server again (remote.md §7). What this reads is the half nothing
+  // above the transport can fake: a wire that is genuinely gone, a client that
+  // genuinely gives up on it, and a recovery that nobody asks for.
   //
   // The ladder and the beat are both shortened, because what is under test is
-  // the SHAPE — that there is something after the ladder, and that it lands —
-  // and waiting out the shipped numbers would put a minute of sleeping in a
-  // probe for no claim it does not already make.
+  // the shape, that there is something after the ladder and that it lands.
+  // Waiting out the shipped numbers would add a minute of sleeping to the probe
+  // and no claim it does not already make.
   const beatStates: string[] = [];
   const beating = await reconnectingClient({
     dial: () => spawnDuplex(argv),
@@ -967,9 +965,9 @@ try {
     beatStates.at(-1) === "lost",
     `${((Date.now() - gaveUpAt) / 1000).toFixed(1)}s after the cut`,
   );
-  // The half that must NOT change with the beat, and the reason the beat is not
+  // The half that must not change with the beat, and the reason the beat is not
   // reported as `reconnecting`: a request held on a wire that is dialled twice a
-  // minute is the hang being `lost` exists to prevent.
+  // minute is the hang that being `lost` exists to prevent.
   const whileLost = await beating.requests.noteList({ root }).then(
     () => "answered",
     (err: Error) => err.message,
@@ -989,9 +987,9 @@ try {
 
   step("[restart] the daemon a sleeping laptop actually wakes up to");
   // The case the instance check is for, run for real rather than against a
-  // fixture's fake nonce. It is also the ORDINARY overnight case rather than a
-  // rare one: the daemon idles out a minute after its last client leaves, so a
-  // laptop that slept always wakes to a different process than the one it left
+  // fixture's fake nonce. It is the ordinary overnight case rather than a rare
+  // one: the daemon idles out a minute after its last client leaves, so a laptop
+  // that slept always wakes to a different process than the one it left
   // (remote.md §7). Refusing to talk to it was the old answer, and it made that
   // case unrecoverable without a person.
   const wasPid = daemonPid();
@@ -1012,7 +1010,7 @@ try {
   // Hard, and with nothing sent on the way out: a crash, a machine rebooting, an
   // idle exit that happened while nobody was watching. `serve` loses its socket
   // and exits, ssh follows it out, and the client meets the end of a wire with
-  // no `bye` on it — which is the only shape the ladder is for.
+  // no `bye` on it, which is the shape the ladder is for.
   run(["docker", "exec", NAME, "sh", "-c", `kill -9 ${wasPid}`]);
   const killedAt = Date.now();
   for (let i = 0; i < 600 && restartStates.at(-1) !== "live"; i++) await Bun.sleep(100);
@@ -1042,20 +1040,20 @@ try {
   // The other way a server goes away, and the one a person is most likely to
   // cause: `pkill ledge-server`, `systemctl restart`, or the daemon's own idle
   // exit. Unlike the kill above it says goodbye on the way out, and a goodbye
-  // used to be the end of the client — so a server stopped POLITELY was
-  // unrecoverable in that window while a server killed outright came back by
-  // itself, which is exactly backwards (remote.md §7).
+  // used to end the client, so a server stopped politely was unrecoverable in
+  // that window while a server killed outright came back by itself (remote.md
+  // §7).
   //
-  // The beat is left at the shipped half-minute on purpose: this step finishes
-  // in seconds, so a recovery here is the LADDER dialling past the goodbye and
-  // cannot be the beat quietly making up for it.
+  // The beat is left at the shipped half-minute: this step finishes in seconds,
+  // so a recovery here is the ladder dialling past the goodbye and cannot be the
+  // beat quietly making up for it.
   const stopStates: string[] = [];
   const stopping = await reconnectingClient({
     dial: () => spawnDuplex(argv),
     push: ears().push,
     build: BUILD_VERSION,
     client: "probe-mac",
-    // Two rungs, because the cut below has to reach the END of the ladder and
+    // Two rungs, because the cut below has to reach the end of the ladder and
     // every failed dial costs ssh's own ConnectTimeout on the way (about twenty
     // seconds a rung against a wire that swallows packets).
     delaysMs: [250, 250],
@@ -1093,11 +1091,10 @@ try {
   // waiting out a beat half a minute wide (interactions.md §4-1).
   //
   // Its own client, with no ladder at all. The rungs are what [beat] above
-  // measures, and leaving them in here would put the moment this client gives
-  // up in a race with a rung landing — twenty-five seconds to notice the cut
-  // and ten per dial, twice over if one gets through. Without them the cut is
-  // followed by `lost` and nothing else, and what the press is measured
-  // against is the beat alone.
+  // measures, and leaving them in here would race the moment this client gives
+  // up against a rung landing: twenty-five seconds to notice the cut and ten per
+  // dial, twice over if one gets through. Without them the cut is followed by
+  // `lost` and nothing else, and the press is measured against the beat alone.
   const pressStates: string[] = [];
   const pressing = await reconnectingClient({
     dial: () => spawnDuplex(argv),
@@ -1134,11 +1131,11 @@ try {
    *
    * This is the step the section was rewritten for. Everything else about the
    * door is a string comparison in connections.test.ts, and one clause of §4
-   * was a string comparison that agreed with itself and was WRONG about
+   * was a string comparison that agreed with itself and was wrong about
    * OpenSSH: `BatchMode=yes` suppresses `SSH_ASKPASS` entirely, `force`
    * included, so the helper is never spawned and no password is ever offered.
    * The claim can only be settled here, so it is asserted here in both
-   * directions — the argv the app builds connects, and the same argv with
+   * directions: the argv the app builds connects, and the same argv with
    * BatchMode back on does not.
    *
    * Two sshd instances, because a password reaches OpenSSH by two different
@@ -1204,9 +1201,9 @@ try {
     console.log(`  ${method}: ${dialed.argv.join(" ")}`);
 
     // The whole claim, in one handshake: askpass was spawned, it read the
-    // keychain, the password crossed, sshd took it, and the command the CLIENT
-    // asked for ran — there is no forced command on this door to run it for us
-    // (§4a).
+    // keychain, the password crossed, sshd took it, and the command the client
+    // asked for ran. This door has no forced command to run one on the client's
+    // behalf (remote.md §4a).
     const pwEars = ears();
     const viaPassword = clientConnection(spawnDuplex(dialed.argv, { env: dialed.env }), {
       push: pwEars.push,

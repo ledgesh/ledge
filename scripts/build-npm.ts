@@ -5,13 +5,12 @@
 //   bun run build:npm -- --targets=darwin-arm64    one, for a fast local loop
 //
 // The shape of the package and the rules about what makes one complete live in
-// src/bun/npmPackage.ts, where `bun test` can reach them; this file is the part
+// src/bun/npmPackage.ts, where `bun test` can reach them. This file is the part
 // that spawns compilers and writes to disk.
 //
-// Publishing is deliberately NOT here. `npm publish` from a script is a
-// one-way action with no undo, and the release runbook (docs/contributor/
-// releasing.md) is where irreversible steps belong, next to the signing
-// credentials and with a human reading them.
+// Publishing is not here. `npm publish` has no undo, so it stays in the release
+// runbook (releasing.md §6), next to the signing credentials and read by a
+// person.
 import { chmodSync, copyFileSync, existsSync, mkdirSync, openSync, readSync, closeSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import {
@@ -68,20 +67,20 @@ function head(path: string, n: number): Uint8Array {
 
 // --- start clean -------------------------------------------------------------
 //
-// A stale tree is the failure this removes: a native directory left by an
-// earlier run makes the completeness check below pass while shipping the
-// previous build's trampolines.
+// The output directory is removed rather than overwritten. A native directory
+// left by an earlier run would make the completeness check below pass while the
+// package shipped the previous build's trampolines.
 rmSync(OUT, { recursive: true, force: true });
 mkdirSync(join(OUT, "bin"), { recursive: true });
 mkdirSync(join(OUT, "lib"), { recursive: true });
 
 // --- the server, as one file -------------------------------------------------
 //
-// `--target=bun` and not `--compile`: the point of the package is that npm
-// carries every architecture in one tarball, and a compiled binary is one
-// architecture by construction. What ships is the bundle plus a trampoline per
-// target, which is also why `import.meta.dir` matters — pty.ts resolves native/
-// against this file's directory at runtime (bun/pty.ts, libCandidates).
+// `--target=bun` and not `--compile`: one npm tarball carries every
+// architecture, and a compiled binary is one architecture by construction. What
+// ships is the bundle plus a trampoline per target, so `import.meta.dir` has to
+// stay meaningful: pty.ts resolves native/ against this file's directory at
+// runtime (bun/pty.ts, libCandidates).
 run(
   [process.execPath, "build", "src/bun/serve.ts", "--target=bun", "--outfile", join(OUT, "lib", "serve.js")],
   "bundling src/bun/serve.ts",
@@ -143,7 +142,7 @@ for (const t of targets.filter((x) => x.platform === "linux")) {
   );
 
   // Docker answers `--platform` with the host's architecture when it has no
-  // emulator for the one asked for, and says so in a warning nobody reads.
+  // emulator for the one asked for, and reports that only as a warning.
   const lib = join(OUT, nativePath(t));
   if (!existsSync(lib)) {
     console.error(`[npm] docker produced no ${nativePath(t)}`);

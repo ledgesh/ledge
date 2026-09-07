@@ -6,31 +6,29 @@
 //   bun run ios -- --server ledge@10.0.0.4
 //   bun run ios -- --device "iPhone 16 Pro"
 //
-// **A package manifest and a directory, not an Xcode project.** The app is a
-// binary, a plist and the built view in a folder — which is what `swift build`
-// and `cp` produce, and what `simctl` installs. A project file would be a
+// A package manifest and a directory, not an Xcode project. The app is a
+// binary, a plist and the built view in a folder, which is what `swift build`
+// and `cp` produce and what `simctl` installs. A project file would be a
 // second, generated description of the same three facts, unreadable in a diff
-// and unverifiable except by opening Xcode. Phase 3 got away with a bare
-// `swiftc` over a glob; phase 4 has a dependency to resolve (ios/Package.swift),
-// which is the one thing a glob cannot do, and SwiftPM is the smaller of the
-// two answers to that.
+// and unverifiable except by opening Xcode. SwiftPM is here because
+// ios/Package.swift has a dependency to resolve, which the bare `swiftc` over a
+// glob that preceded it could not do.
 //
 // Cross-compiled, and that is why the flags are doubled. SwiftPM builds for its
 // host unless told otherwise and has no first-class iOS destination, so the
-// target and the SDK are pushed through to both compilers; the last `-target`
+// target and the SDK are pushed through to both compilers. The last `-target`
 // wins, which is why the output lands in a directory named for macOS and is an
 // iOS Simulator binary (`vtool -show-build` says `IOSSIMULATOR`).
 //
 // Two destinations, and `--phone` is the whole difference. The Simulator build
 // needs no signing identity, because the Simulator checks none; a device checks
-// everything, so the same bundle assembled eight ways differently is a
-// different SDK, a different triple, different back-deployment shims, a real
-// identity instead of an ad hoc one, entitlements in the signature instead of a
-// Mach-O section, a provisioning profile inside the bundle, an icon catalog
-// compiled for the other platform, and `devicectl` instead of `simctl`. Every
-// one of them is a `phone ?` below and each is commented where it sits, because
-// each announced itself as a launch failure with no obvious cause (ios.md §12).
-// All but the icon, which announced itself as a grey square.
+// everything. Eight things change between them: the SDK, the triple, the
+// back-deployment shims, a real identity instead of an ad hoc one, entitlements
+// in the signature instead of a Mach-O section, a provisioning profile inside
+// the bundle, an icon catalog compiled for the other platform, and `devicectl`
+// instead of `simctl`. Each is a `phone ?` below and each is commented where it
+// sits, because each first appeared as a launch failure with no stated cause
+// (ios.md §12). All but the icon, which appeared as a grey square.
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -39,7 +37,7 @@ const REPO = join(import.meta.dir, "..");
 const OUT = join(REPO, "build", "ios");
 const APP = join(OUT, "Ledge.app");
 const BUNDLE_ID = "dev.ledge.ios";
-// The runtime installed on this Mac decides the ceiling; the floor is ours.
+// The runtime installed on this Mac decides the ceiling; this is the floor.
 // Compiled against whatever SDK Xcode has, deployed back to here.
 const DEPLOYMENT = "17.0";
 
@@ -60,10 +58,10 @@ const phoneArg = flag("phone");
 const phone = phoneArg !== null;
 const phoneName = phoneArg && !phoneArg.startsWith("--") ? phoneArg : null;
 
-// Outside the checkout, like the release credentials (releasing.md §3). It is
-// not a secret — public certificates and a device UDID — but it belongs to one
-// Apple team and one phone and it expires in a year, so it is this Mac's and
-// not the repository's.
+// Outside the checkout, like the release credentials (releasing.md §3). It
+// holds no secret, only public certificates and a device UDID, but it belongs
+// to one Apple team and one phone and it expires in a year, so it is this
+// Mac's and not the repository's.
 const PROFILE =
   flag("profile") ??
   process.env.LEDGE_IOS_PROFILE ??
@@ -138,8 +136,8 @@ async function readProfile(path: string): Promise<Profile> {
     throw new Error(`the profile "${name}" expired on ${expires}; download a new one`);
   }
 
-  // A distribution profile has no device list at all, which is the loudest way
-  // to have brought the wrong file.
+  // A distribution profile has no device list at all, so an empty one means the
+  // wrong file was brought.
   const devices = readFileSync(plist, "utf8").includes("<key>ProvisionedDevices</key>")
     ? (JSON.parse(await at("ProvisionedDevices", "json")) as string[])
     : [];
@@ -226,8 +224,7 @@ const swiftpm = [
   "-Xcc",
   TRIPLE,
   // And once more for the clang that drives the link, which otherwise takes
-  // the host's sysroot and warns on every build. A warning that is always
-  // there is a warning nobody reads.
+  // the host's sysroot and warns on every build.
   "-Xswiftc",
   "-Xclang-linker",
   "-Xswiftc",
@@ -243,14 +240,13 @@ const swiftpm = [
   "-Xlinker",
   "@executable_path/Frameworks",
 ];
-// Entitlements at LINK time and as a Mach-O section, and only for the
-// Simulator. This is the part of simulator code signing that is not like the
-// device's: simulated processes read their entitlements from
-// `__TEXT,__entitlements` in the binary, and a signature carrying them instead
-// is rejected at launch with a POSIX 153 and no explanation. A device reads the
-// signature and nothing else, so the device build puts them there (below) and
-// omits the section rather than shipping a second, stale copy of the same
-// claims under an identifier with no team prefix.
+// Entitlements at link time and as a Mach-O section, for the Simulator only.
+// Simulated processes read their entitlements from `__TEXT,__entitlements` in
+// the binary, and a signature carrying them instead is rejected at launch with
+// a POSIX 153 and no explanation. A device reads the signature and nothing
+// else, so the device build puts them there (below) and omits the section,
+// rather than shipping a second, stale copy of the same claims under an
+// identifier with no team prefix.
 if (!phone) {
   swiftpm.push(
     "-Xlinker",
@@ -264,9 +260,9 @@ if (!phone) {
   );
 }
 await run(swiftpm);
-// Asked rather than assumed: the directory is named for the HOST triple even
-// though the bytes in it are the simulator's, which is a thing to read out of
-// SwiftPM rather than to hardcode.
+// Asked rather than assumed: the directory is named for the host triple even
+// though the bytes in it are the simulator's, so the path is read out of
+// SwiftPM rather than hardcoded.
 const binDir = (await run([...swiftpm, "--show-bin-path"], { quiet: true })).trim();
 await run(["cp", join(binDir, "Ledge"), join(APP, "Ledge")]);
 
@@ -279,7 +275,7 @@ await run(["cp", join(binDir, "Ledge"), join(APP, "Ledge")]);
 //
 // Which ones are needed is read out of the binary rather than listed here: the
 // list belongs to the toolchain and changes with it. The copies come from the
-// DESTINATION's directory, because the link picked them up from the host's, and
+// destination's directory, because the link picked them up from the host's, and
 // a simulator dylib inside a device bundle is the same abort by another route.
 const needed = (await run(["otool", "-L", join(APP, "Ledge")], { quiet: true }))
   .split("\n")
@@ -332,19 +328,18 @@ if (phone) {
 // The Mac app's icon, compiled again for this platform. `assets/Ledge.icon` is
 // an Icon Composer bundle (electrobun.config.ts, `bun run icon`) and it already
 // names iOS among its square platforms, so none of the artwork is specific to
-// the phone. What is specific is that an `.icon` is a SOURCE: iOS reads a
+// the phone. What is specific is that an `.icon` is source: iOS reads a
 // compiled `Assets.car`, Xcode would have run `actool` over the catalog to
-// produce one, and a bundle assembled by hand has to run it by hand. Skipped,
-// the app installs and launches perfectly and sits on the home screen as the
-// grey placeholder, because a missing icon is not an error to iOS — it is an
-// icon it could not find.
+// produce one, and a bundle assembled by hand has to run it by hand. Skip this
+// step and the app still installs and launches, and sits on the home screen as
+// the grey placeholder, because iOS treats a missing icon as an icon it could
+// not find rather than as an error.
 //
 // Compiled per destination like everything else here, but on weaker grounds
 // than the SDK and the triple above. The two catalogs are not the same bytes,
-// and `--platform` is the honest input to give; a device catalog installed on
-// the Simulator nonetheless rendered fine when it was tried, so nothing here
-// has been shown to break when they disagree. Matched because it is correct,
-// not because the mismatch is known to cost anything.
+// and `--platform` is the accurate input to give. A device catalog installed on
+// the Simulator nonetheless rendered fine when it was tried, so nothing here is
+// known to break when the two disagree.
 //
 // The two PNGs that land beside the `.car` are the flat fallback actool emits
 // anyway, for the places that still read `CFBundleIconFiles` rather than the
@@ -397,11 +392,11 @@ await run(["cp", "-R", join(REPO, "dist-ios"), join(APP, "view")]);
 // architecture.md §8: every dependency is an attribution, and a notice the
 // user's copy does not carry is a notice that did not ship. The Mac app's
 // THIRD-PARTY-NOTICES.md is generated from npm and committed, which is why a
-// test has to catch it going stale; this one is generated from the resolved
-// checkouts straight into the bundle, so there is no committed copy that can
-// drift. Apache-2.0 §4 asks for the license AND any NOTICE file, so both
-// travel. What is still owed is a way to READ it on the phone: the manual the
-// app shows is the server's (ios.md §12).
+// test has to catch it going stale. This one is generated from the resolved
+// checkouts straight into the bundle, so there is no committed copy to drift.
+// Apache-2.0 §4 asks for the license and any NOTICE file, so both travel. What
+// is still owed is a way to read it on the phone: the manual the app shows is
+// the server's (ios.md §12).
 const NOTICE_FILE = /^(LICEN[CS]E|COPYING|NOTICE)([-.].*)?$/i;
 interface Pin {
   location: string;
@@ -445,18 +440,18 @@ await Bun.write(join(APP, "THIRD-PARTY-NOTICES.md"), `${notices.join("\n")}\n`);
 // decides what the identifier really is (ios.md §4), and a checked-in copy of a
 // team-prefixed identifier is a copy that can disagree with it.
 //
-// Three claims, and deliberately not a fourth. `keychain-access-groups` is
-// absent: DeviceKey.swift never names an access group, so its items land in the
-// app's default one, which `application-identifier` grants on its own. Claiming
-// the group as well would put Keychain Sharing on the App ID for nothing.
+// Three claims and not a fourth. `keychain-access-groups` is absent because
+// DeviceKey.swift never names an access group, so its items land in the app's
+// default one, which `application-identifier` grants on its own. Claiming the
+// group as well would put Keychain Sharing on the App ID for nothing.
 const signature: string[] = [];
 let identity = "-";
 if (phone && profile) {
   identity = profile.identity;
-  // The CONCRETE identifier, assembled from the team rather than copied out of
+  // A concrete identifier, assembled from the team rather than copied out of
   // the profile, because a wildcard profile says `TEAM.*` and a signature may
-  // not: what is claimed here has to be an app, and what the profile grants has
-  // to be a superset of it.
+  // not: what is claimed here has to name one app, and what the profile grants
+  // has to be a superset of it.
   const team = String(profile.entitlements["com.apple.developer.team-identifier"] ?? "");
   const ent = join(OUT, "Ledge.device.entitlements");
   await Bun.write(
@@ -492,8 +487,8 @@ if (buildOnly) process.exit(0);
 // --- the phone ----------------------------------------------------------------
 //
 // `devicectl` where the Simulator has `simctl`, and the three steps line up one
-// for one: list, install, launch with the console attached. What it has no need
-// of is a boot step, because a phone is either there or it is not.
+// for one: list, install, launch with the console attached. There is no boot
+// step, since a phone is either paired and awake or it is not.
 //
 // Every devicectl command on some Macs prints "Failed to load provisioning
 // paramter list" (Apple's typo) to stderr and then works. It is about a
@@ -588,8 +583,8 @@ const listed = JSON.parse(await run(["xcrun", "simctl", "list", "devices", "avai
   devices: Record<string, SimDevice[]>;
 };
 const all = Object.values(listed.devices).flat();
-// A booted one of the right name first: booting a second device when one is
-// already up is how you end up watching the wrong screen.
+// A booted one of the right name first. Booting a second device while one is
+// already up leaves two on screen and the app on the wrong one.
 const target =
   all.find((d) => d.name === device && d.state === "Booted") ??
   all.find((d) => d.name === device) ??
@@ -605,13 +600,14 @@ if (target.state !== "Booted") {
 
 console.log(`[ios] installing on ${target.name} (${target.udid})`);
 await run(["xcrun", "simctl", "install", target.udid, APP]);
-// A relaunch onto a running instance would leave the old process holding the
-// socket and the new one failing to bind nothing in particular.
+// Terminated first, because `simctl launch` attaches to an instance that is
+// already running rather than restarting it, so a relaunch would leave the
+// previous build on screen. `--terminate-existing` above does this for a phone.
 await run(["xcrun", "simctl", "terminate", target.udid, BUNDLE_ID], { quiet: true }).catch(() => {});
 
-// --console-pty is the whole reason `@log` exists: the shell's print() lines
-// and every boot measurement the view reports come out here (ios.tsx). Ctrl-C
-// detaches and leaves the app running.
+// --console-pty is what makes `@log` visible: the shell's print() lines and
+// every boot measurement the view sends over the bridge come out here
+// (WebHost.swift, ios.tsx). Ctrl-C detaches and leaves the app running.
 console.log(`[ios] launching; Ctrl-C detaches\n`);
 const launch = ["xcrun", "simctl", "launch", "--console-pty", target.udid, BUNDLE_ID];
 if (server !== null) launch.push("-LedgeServer", server);

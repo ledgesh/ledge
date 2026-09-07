@@ -1,15 +1,13 @@
 #!/usr/bin/env bun
 // Everything `bun run release` needs, checked before it starts. A signed and
-// notarized build takes minutes and asks Apple's servers for two round trips;
-// discovering a missing environment variable at the end of that is the kind of
-// thing that turns a release into an evening. Each failure below names the
-// thing to do about it, because a release is run rarely and usually by someone
-// who last did it months ago.
+// notarized build takes minutes and two round trips to Apple's servers, so a
+// missing environment variable found at the end of that costs the whole run.
+// Each failure below names what to do about it, because a release is cut rarely
+// and usually by someone who last did it months ago.
 //
-// This checks the inputs. It cannot check the output: whether the signed app
-// actually runs under the hardened runtime is a live question that only the
-// signed build can answer, and docs/contributor/releasing.md carries that
-// checklist.
+// This checks the inputs only. Whether the signed app runs under the hardened
+// runtime is a question only the signed build answers, and releasing.md §5
+// carries that checklist.
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import config from "../electrobun.config";
@@ -29,8 +27,9 @@ function bad(line: string, fix: string): void {
 console.log("release preflight");
 
 // --- the version --------------------------------------------------------------
-// Two files carry it and only one reaches the bundle, so they are checked
-// together here and in src/bun/release.test.ts.
+// package.json and electrobun.config.ts must agree, and the config is the copy
+// that reaches the bundle. src/bun/release.test.ts pins the same pair, plus the
+// third copy in src/shared/version.ts (releasing.md §2).
 const pkg = JSON.parse(readFileSync(resolve(ROOT, "package.json"), "utf8")) as { version: string };
 if (pkg.version === config.app.version) {
   ok(`version ${config.app.version}`);
@@ -57,8 +56,8 @@ if (process.arch === "arm64") {
 }
 
 // A dirty tree is not fatal: a release is sometimes cut with a local tweak in
-// hand. It is worth saying out loud, because the artifact is about to be
-// stamped with a commit that does not describe it.
+// hand. It is reported anyway, because the artifact is about to be stamped with
+// a commit that does not describe it.
 const status = Bun.spawnSync(["git", "status", "--porcelain"], { cwd: ROOT, stdout: "pipe", stderr: "pipe" });
 if (status.stdout.toString().trim().length > 0) {
   notes.push("The working tree has uncommitted changes; the build will include them.");
@@ -97,8 +96,8 @@ if (process.env["LEDGE_UNSIGNED"] === "1") {
     }
   }
 
-  // Before the credentials, because the check below is made THROUGH this tool.
-  // notarytool ships with Xcode, not with the Command Line Tools alone.
+  // Checked before the credentials, because the credential check runs through
+  // this tool. notarytool ships with Xcode, not with the Command Line Tools.
   const notarytool = Bun.spawnSync(["xcrun", "--find", "notarytool"], { stdout: "pipe", stderr: "pipe" });
   if (notarytool.exitCode === 0) ok("xcrun notarytool");
   else bad("xcrun cannot find notarytool", "Install Xcode (the Command Line Tools alone do not carry it) and run `sudo xcode-select -s /Applications/Xcode.app`.");

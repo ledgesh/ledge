@@ -18,8 +18,8 @@ if [ -n "$LEDGE_PUBKEY" ]; then
 fi
 
 # The other door (remote.md §4). A password has no `authorized_keys` entry, so
-# it carries no forced command and no `restrict` — which is §4a's point made
-# literal: what runs is the command the CLIENT asked for, and the protocol comes
+# it carries no forced command and no `restrict`, which is remote.md §4a made
+# literal: what runs is the command the client asked for, and the protocol comes
 # up either way.
 #
 # One method at a time, chosen by `LEDGE_AUTH`, because the two are not the same
@@ -44,6 +44,6 @@ fi
 
 ssh-keygen -A >/dev/null
 
-# Unquoted on purpose: $OPTS is a list of arguments, and there is nothing in it
-# from outside this script but a method name matched by the case above.
+# Unquoted, because $OPTS is a list of arguments and there is nothing in it from
+# outside this script but a method name the case above matched.
 exec /usr/sbin/sshd -D -e $OPTS

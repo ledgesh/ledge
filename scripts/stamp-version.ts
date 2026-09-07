@@ -1,21 +1,14 @@
 #!/usr/bin/env bun
 // Add CFBundleShortVersionString to the built app bundle's Info.plist.
-// Electrobun's template writes CFBundleVersion and stops there, and the two
-// keys are not interchangeable: the short string is the RELEASE version, and
-// it is what macOS shows in the About panel (the first item in the app menu)
-// and in Finder's Get Info. Without it the About box can only show a build
-// number, and an app that cannot name its own version is a poor thing to hand
-// someone who is about to file a bug.
+// Electrobun writes only CFBundleVersion, and without the short string the
+// About panel and Finder's Get Info have no version to show (releasing.md §2).
 //
-// Runs as BOTH `postBuild` and `postWrap`, because a stable build produces two
-// bundles and each gets its own generated Info.plist: the app itself, and the
-// self-extracting wrapper that carries it inside the DMG. The wrapper is what
-// a user downloads and what Finder describes until the first launch replaces
-// it, so a version on one and not the other is only half an answer. Both hooks
-// land after their plist is written and before it is signed, and that order is
-// the whole reason for the choice: a plist edited after signing breaks the
-// signature, and the break only shows up as Gatekeeper refusing the app on
-// someone else's Mac.
+// Runs as both `postBuild` and `postWrap`: a stable build produces two bundles
+// with their own generated plists, the app and the self-extracting wrapper that
+// carries it inside the DMG, and Finder describes the wrapper until the first
+// launch replaces it. Both hooks land after their plist is written and before
+// it is signed. A plist edited after signing breaks the signature, which
+// surfaces as Gatekeeper refusing the app on someone else's Mac.
 import { readdirSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 

@@ -1,13 +1,10 @@
 #!/usr/bin/env bun
-// Render THIRD-PARTY-NOTICES.md from the installed production tree. Run it
-// after adding, removing, or bumping a dependency:
-//
-//   bun run licenses
-//
-// The walk and the rendering live in src/bun/licenses.ts, where `bun test` can
-// reach them (bunfig.toml roots the runner at src/) — this file is the part
-// that touches the working copy. licenses.test.ts re-renders and compares, so
-// forgetting to run this is a red suite rather than an unattributed release.
+// Render THIRD-PARTY-NOTICES.md from the installed production tree. Run
+// `bun run licenses` after adding, removing, or bumping a dependency. The walk
+// and the rendering live in src/bun/licenses.ts, where `bun test` can reach
+// them (bunfig.toml roots the runner at src/). licenses.test.ts renders again
+// and compares against the committed file, so forgetting to run this fails the
+// suite rather than shipping an unattributed release.
 import { writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { collectPackages, renderNotices } from "../src/bun/licenses";

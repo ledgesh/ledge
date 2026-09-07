@@ -1,13 +1,10 @@
 /**
  * Regenerates assets/Ledge.icon/Assets/mark.svg from assets/logo.svg.
  *
- * The brand mark is drawn on its own small viewBox and inherits `currentColor`,
- * neither of which suits an app icon: Icon Composer wants a 1024-unit canvas
- * with the glyph centred on the icon grid and an explicit fill. This re-frames
- * and colours it.
- *
- * The mark carries the brand accent and sits on the near-black field declared
- * in icon.json.
+ * The brand mark is drawn on its own small viewBox and inherits
+ * `currentColor`. Icon Composer wants a 1024-unit canvas with the glyph centred
+ * on the icon grid and an explicit fill, so this re-frames the mark and colours
+ * it with the brand accent, over the near-black field icon.json declares.
  */
 
 const CANVAS = 1024;

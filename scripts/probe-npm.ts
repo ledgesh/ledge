@@ -2,18 +2,17 @@
 // The published package, on a machine that could not have built it.
 //
 // This is the claim `scripts/build-npm.ts` exists to make and the one no unit
-// test can reach: that the two commands the README gives, run on a bare Linux
-// box, produce a server an incoming ssh can start, PTY trampolines included.
-// The container is chosen for what it does NOT have — no compiler, no libc
-// headers, and no Bun — because that is what makes the result unambiguous. pty.ts has two ways to get its trampolines (a prebuilt
-// library, or compiling the same source in-process with TinyCC), and only the
-// first can possibly work here. A shell that gets a controlling terminal in
-// this container therefore proves the packaged library loaded, which is exactly
-// what `bun test` cannot say from a checkout that has Xcode.
+// test can reach: the two commands the README gives, run on a bare Linux box,
+// produce a server an incoming ssh can start, PTY trampolines included. The
+// container has no compiler, no libc headers and no Bun, so of pty.ts's two
+// ways to get its trampolines only the prebuilt library can work. The resize
+// claim below is the one that discriminates: TIOCSWINSZ is variadic, so nothing
+// but the trampoline reaches it, and a checkout with Xcode can never prove
+// that.
 //
 // It uses Ledge's own client to talk to it (`clientConnection` over
 // `docker exec -i ... ledge-server serve`), for probe-ssh.ts's reason: a probe
-// that hand-rolled the protocol would prove that Docker works.
+// that hand-rolled the protocol would only prove that Docker works.
 //
 // Run it: `bun run probe:npm`, after `bun run build:npm`.
 import { mkdtemp, rm } from "node:fs/promises";
@@ -76,7 +75,7 @@ try {
     console.error(`no package in dist-npm/. Run \`bun run build:npm\` first.`);
     process.exit(2);
   }
-  // npm pack rather than a tar of our own: what ships is whatever npm decides
+  // npm pack rather than a hand-rolled tar: what ships is whatever npm decides
   // to include, so the thing under test has to be npm's output.
   const packed = run(["npm", "pack", OUT, "--pack-destination", SCRATCH]).out.split("\n").pop()!.trim();
   const tarball = join(SCRATCH, packed);
@@ -101,10 +100,10 @@ try {
   const preexisting = inside("sh", "-c", "command -v bun").out;
   check("and no bun on it yet, which is what the install line is for", preexisting === "", preexisting || "none");
 
-  // Asserted rather than assumed, and asserted AFTER the apt-get above so it
-  // is the fixture's real final state. If a compiler or the headers were
-  // present, every claim below could be satisfied by the in-process fallback
-  // and the probe would prove nothing about the package.
+  // Asserted rather than assumed, and asserted after the apt-get above so it
+  // is the fixture's real final state. With a compiler or the headers present,
+  // the in-process fallback could satisfy the claims below and the probe would
+  // prove nothing about the package.
   const cc = inside("sh", "-c", "command -v cc; command -v gcc; command -v tcc");
   check("no C compiler on PATH", cc.out === "", cc.out || "none");
   const hdr = inside("sh", "-c", "test -e /usr/include/sys/ioctl.h && echo present || echo absent");
@@ -146,13 +145,13 @@ try {
     withoutVar.split("\n")[0]?.slice(0, 90) ?? "nothing",
   );
 
-  // THE condition the manual states, checked the way the manual says to check
-  // it: an ssh command runs with a minimal PATH and no profile, so both names
-  // have to resolve there or the client cannot start a server at all.
+  // The condition the manual states, checked the way the manual says to check
+  // it (remote.md §11): an ssh command runs with a minimal PATH and no profile,
+  // so both names have to resolve there or the client cannot start a server.
   //
-  // One name per call, because `command -v` takes one — a two-name call
-  // reports the first and says nothing about the second, which is a check that
-  // passes while half of what it claims is untrue.
+  // One name per call, because `command -v` takes one. A two-name call reports
+  // the first and says nothing about the second, so it would pass while half of
+  // what it claims was untrue.
   const SSH_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
   const onSshPath = (name: string) =>
     inside("env", "-i", `PATH=${SSH_PATH}`, "sh", "-c", `command -v ${name}`).out;
@@ -219,31 +218,28 @@ try {
   const ran = await type("echo PTY-$((6*7))\n", /PTY-42/);
   check("a shell spawned and answered", /PTY-42/.test(ran));
 
-  // ledge_set_winsize, and THE discriminator: TIOCSWINSZ is variadic, so the
-  // trampoline is the only way to reach it and nothing else in the fallback
-  // substitutes. This claim failing is what a package missing its library for
-  // this architecture looks like from the user's side.
+  // ledge_set_winsize, and the discriminator: TIOCSWINSZ is variadic, so the
+  // trampoline is the only way to reach it and the fallback substitutes
+  // nothing. A package missing its library for this architecture fails here,
+  // and this is what that failure looks like from a user's side.
   await client.requests.terminalResize({ sessionId: "s1", cols: 100, rows: 20 });
   const sized = await type('echo SIZE-$(stty size | tr " " "-")\n', /SIZE-20-100/);
   check("a resize reached the pty's winsize", /SIZE-20-100/.test(sized), JSON.stringify(sized.slice(-60)));
 
-  // Job control end to end. This one is NOT a discriminator and is labelled so
-  // it cannot be read as one: running this probe with the library removed
-  // showed ^C still working, because the fallback spawn is a session leader
-  // that opens the slave without O_NOCTTY and therefore acquires a controlling
-  // terminal anyway (bun/pty.ts says so now; it used to claim the opposite).
-  // It stays because a terminal that cannot be interrupted is worth catching
-  // whatever the cause.
+  // Job control end to end, and not a discriminator. Running this probe with
+  // the library removed showed ^C still working: the fallback spawn is a
+  // session leader that opens the slave without O_NOCTTY, so it acquires a
+  // controlling terminal anyway (bun/pty.ts). It stays because a terminal that
+  // cannot be interrupted is worth catching whatever the cause.
   //
-  // Two things have to be established, and the first one is why this is not
-  // three lines. A `sleep` that never started would make the ^C check pass
-  // having tested nothing, and a keystroke lost to zsh's line editor is exactly
-  // how that happens — so the job is first PROVEN to be holding the foreground.
+  // The foreground job is established first. A `sleep` that never started would
+  // make the ^C check pass having tested nothing, and a keystroke lost to zsh's
+  // line editor is how that happens.
   //
   // Every marker is arithmetic for the same reason: the line discipline echoes
   // what is typed whether or not the shell is running it, so a literal string
-  // would appear in the output either way. `$((11*9))` reaches the transcript
-  // as itself, and `99` only if a shell evaluated it.
+  // would appear either way. `$((11*9))` reaches the transcript as itself, and
+  // `99` only if a shell evaluated it.
   await client.requests.terminalInput({ sessionId: "s1", dataB64: btoa("sleep 300\n") });
   await Bun.sleep(1000);
   await client.requests.terminalInput({ sessionId: "s1", dataB64: btoa("echo NOPE-$((11*9))\n") });
