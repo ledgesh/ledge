@@ -345,11 +345,12 @@ section.
   selectors is what produced the four-group list above. What it does not do is
   find the states: it measures the ones someone thought to open, and the find
   panel is one the registry could produce all along and no test had opened, which
-  is how a 26-point row survived an audit that measured everything else. Two
-  exemptions, both properties of the box rather than of the control: a zero-sized
-  element is not a small target but no target, and a control its own `<label>`
-  wraps is not a target either, because the tap lands on the label — the panel's
-  checkboxes are 12 points inside a 44-point pill. The one control it would have
+  is how a 26-point row survived an audit that measured everything else. Three
+  exemptions, all properties of the box rather than of the control: a zero-sized
+  element is not a small target but no target, a hidden one (`visibility:
+  hidden` or `opacity: 0`) is not one either, and a control its own `<label>`
+  wraps is not a target because the tap lands on the label. The panel's
+  checkboxes are 16 points inside a 44-point label. The one control it would have
   caught unfairly is the inline rename field, which covers its whole row and has
   no neighbour to miss onto; it takes the 44 anyway rather than earn an
   exception, and its row grows to hold it.
