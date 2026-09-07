@@ -1186,9 +1186,10 @@ pressed the button.
 **A `bye` still stops for good unless it says otherwise, and that is the whole
 of the split.** A wire that broke cannot say anything, so a reason means the
 server decided, and no amount of beating improves on an answer. Displacement is
-what makes it matter rather than merely tidy: the daemon serves one client and
-gives the session to whoever dialled last, so two beating clients would kick
-each other off twice a minute forever, at an ssh handshake and a server process
+what makes it matter rather than merely tidy: a later connection from the same
+client replaces the earlier one (§1). A replaced connection that kept beating
+would take the session back from the one that replaced it, and the two would
+trade it twice a minute forever, at an ssh handshake and a server process
 apiece.
 
 The exception is the one decision that undoes itself. A daemon that is STOPPING
