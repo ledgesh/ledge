@@ -1,42 +1,37 @@
 // Light/dark appearance: the OS by default, pinned by `appearance.theme`.
-// The palette is keyed off `data-theme` on <html> (index.css), resolved by
-// lib/theme.ts from the setting plus prefers-color-scheme, so these specs
-// drive the two inputs (Playwright's emulated color scheme, the harness's
-// ?theme= boot override) and assert the one output plus a pixel that proves
-// the variables actually followed it.
+// lib/theme.ts resolves that plus prefers-color-scheme into `data-theme` on
+// <html>, and index.css keys the palette off it. The first describe measures
+// error-colour contrast in each palette. The rest drive both inputs (emulated
+// color scheme, ?theme=) and assert the attribute plus the background colour.
 import { expect, test, type Page } from "@playwright/test";
-// The real variant strings, so the contrast spec below measures the button the
-// app renders rather than a list of class names retyped in a test.
+// `buttonVariants` produces the real variant class strings. The contrast spec
+// below measures the button the app renders rather than a list of class names
+// retyped in a test.
 import { buttonVariants } from "../src/mainview/components/ui/button";
 
 const theme = (page: Page) => page.locator("html");
-// The body background comes from --background, the token both palettes set:
-// asserting it is how "the attribute flipped" is distinguished from "the
+// The body background comes from --background, the token both palettes set
+// (index.css). Asserting it separates "the attribute flipped" from "the
 // attribute flipped and the whole stylesheet came with it".
 const bodyBg = (page: Page) =>
   page.evaluate(() => getComputedStyle(document.body).backgroundColor);
 
 /**
- * What a set of classes actually resolves to, as a WCAG contrast ratio between
- * its own text colour and whatever is behind it, measured by the engine rather
- * than read off the stylesheet.
+ * Returns the WCAG contrast ratio between the text colour these classes
+ * produce and the background behind it. The numbers come from
+ * getComputedStyle, so they are what the browser painted, not what the
+ * stylesheet says. The span is injected rather than found in the page because
+ * the subject is the token: `text-destructive` is the colour of error prose
+ * all over the app, and driving the connection dialog to produce one message
+ * would measure that dialog.
  *
- * The element is injected rather than found, because the thing under test is
- * the token and not any one message: every error surface in the app is a
- * `text-destructive` line, and a spec that drove the connection dialog to make
- * one appear would be asserting this about that dialog. `getComputedStyle` is
- * what makes it a measurement — it resolves the variable, the hsl(), and the
- * palette the `data-theme` attribute selected — so a token pointed at a colour
- * that does not exist fails here rather than passing on the text of the rule.
- *
- * `paintsItsOwn` is the difference between prose and a button, and it has to be
- * declared rather than detected. An element with no background of its own
- * computes to transparent, which for prose is correct — the page is what it
- * sits on — and for a filled control means the utility naming that fill was
- * never generated. Both look identical from in here, so treating the second as
- * the first measures white against the page, gets a magnificent ratio, and
- * reports a button that has stopped painting itself as legible. It did exactly
- * that once, which is why this is a parameter and not a fallback.
+ * Pass `paintsItsOwn` for a filled control; `contrast` cannot tell one from
+ * prose. An element with no background computes to transparent. That is right
+ * for prose, because the page is what it sits on. For a filled control it means
+ * the utility naming that fill was never generated. The flag makes transparent
+ * throw rather than fall back to the body background. Without it a broken
+ * button is measured as prose, near-white text against the page returns a high
+ * ratio, and the button passes. This spec passed a broken button once.
  */
 async function contrast(
   page: Page,
@@ -47,14 +42,11 @@ async function contrast(
     ([cls, paintsItsOwn]) => {
       const lin = (v: number) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
       const luminance = (color: string): number => {
-        // Opaque `rgb(r, g, b)` only, and the refusal is the point. A palette
-        // built on color-mix() or carrying an alpha computes to
-        // `color(srgb 0.98 0.37 0.34 / 0.88)` instead — channels 0-1 rather
-        // than 0-255, and a translucent colour that has to be composited over
-        // what is behind it before it means anything. Reading those numbers as
-        // 0-255 yields a ratio that is wrong by a factor of ten and looks
-        // entirely plausible, so this refuses to guess rather than reporting
-        // fiction about whether an error message can be read.
+        // Opaque `rgb(r, g, b)` only; anything else throws. A color-mix()
+        // or alpha palette computes to `color(srgb 0.98 0.37 0.34 / 0.88)`
+        // instead: channels run 0-1, not 0-255, and a translucent colour
+        // means nothing until composited over what is behind it. Those
+        // channels parsed as 0-255 yield a wrong ratio that looks plausible.
         const m = /^rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*1)?\)$/.exec(color.trim());
         if (!m) throw new Error(`cannot measure "${color}": this helper reads opaque rgb() only.`);
         const [r, g, b] = m.slice(1, 4).map((n) => Number(n) / 255);
@@ -83,17 +75,16 @@ async function contrast(
   );
 }
 
-// The floor is WCAG AA for body text, and it is the right floor rather than a
-// strict one: these messages ship at 11 and 12 pixels, which is under every
-// definition of "large", and they are read exactly once — at the moment
-// something failed — by someone who is not going to lean in.
+// WCAG AA for body text, not the 3:1 large-text floor. These messages ship at
+// 11 and 12 pixels, under every definition of "large" (index.css, the
+// `--destructive` comment).
 const AA = 4.5;
 
 test.describe("error text is legible in both palettes", () => {
-  // The regression this holds: shadcn's stock dark `--destructive` is red-900,
-  // a FILL meant to carry near-white text, and the app writes prose in it.
-  // Dark error messages sat at 1.99:1 — under even the 3:1 large-text floor —
-  // and a dial that failed reported itself in dark red on near black.
+  // The regression these tests hold: shadcn's stock dark `--destructive` is
+  // red-900, a fill meant to carry near-white text. The app writes prose in it,
+  // so dark error messages sat at 1.99:1, under even the 3:1 large-text floor.
+  // A failed connection showed as dark red on near black.
   test("a failure reads on the dark background", async ({ page }) => {
     await page.goto("/harness.html?theme=dark");
     expect(await contrast(page, "text-destructive")).toBeGreaterThanOrEqual(AA);
@@ -104,16 +95,15 @@ test.describe("error text is legible in both palettes", () => {
     expect(await contrast(page, "text-destructive")).toBeGreaterThanOrEqual(AA);
   });
 
-  // The other half of the split, and the reason the token divided in two: the
-  // one control that FILLS with the colour needs its label to survive on it,
-  // and the value that does that is not the value prose needs. Asserting both
-  // is what stops the next edit from fixing one by breaking the other.
+  // There are two destructive tokens. Prose uses `--destructive`. The one
+  // destructive button paints `--destructive-fill` under its label. Once the
+  // background stops being white, the value that keeps that label legible is
+  // not the value prose needs (index.css). Measuring both stops an edit to one
+  // from breaking the other.
   //
-  // The classes come from `buttonVariants` rather than from a list written
-  // here, so this measures the button the app renders. Naming them by hand
-  // tests the pairing of two tokens and calls it a button: a variant that
-  // stopped using the fill would keep this green, which is the state this spec
-  // was in until a deliberately broken variant failed to turn it red.
+  // The classes come from `buttonVariants`, so this measures the button the app
+  // renders. A hand-written class list would stay green after a variant stopped
+  // using the fill.
   for (const theme of ["dark", "light"] as const) {
     test(`a destructive button's label reads on its fill (${theme})`, async ({ page }) => {
       await page.goto(`/harness.html?theme=${theme}`);

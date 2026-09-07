@@ -1,21 +1,14 @@
-// The screen a boot shows while it is still waiting on a server
-// (mainview/lib/booting.ts).
-//
-// The failure it exists to prevent is a black rectangle: both shells start on
-// an empty `#root`, and filling it costs a phone a dial that can run to fifteen
-// seconds. What is under test here is that the wait says something, that what
-// it says names the machine, and that the two reveals are timed so the ordinary
-// boot — a server in this process, answering in milliseconds — paints none of
-// it. The last of those is asserted on the delays rather than by racing them:
-// a spec that tried to catch the panel before it faded in would be asserting
-// its own scheduling.
-//
-// `?booting=<ms>` is the harness holding the screen up (harness.tsx); the real
-// shells raise it in the same shape, before the waits and down before the
-// render.
+// The app shows the boot screen while it waits for a server
+// (mainview/lib/booting.ts). On a phone that wait can last a fifteen-second
+// dial timeout, and interactions.md §4-1 says why the screen covers it. The
+// harness raises the screen with `?booting=<ms>`, the way both real shells do:
+// up before the waits, down before the first render (harness.tsx). Two specs
+// read the reveal delays off the stylesheet; two wait one out in real time.
 import { expect, test, type Page } from "@playwright/test";
 
 const screen = (page: Page) => page.locator(".ledge-booting");
+// The panel's "Choose a Different Server" button (mainview/lib/booting.ts),
+// which the second reveal brings up 4s in.
 const wayOut = (page: Page) => page.locator(".ledge-booting-cancel");
 
 test("a boot that is waiting says so, and says which machine", async ({ page }) => {
@@ -37,8 +30,9 @@ test("the screen is announced, not asserted over what the reader is doing", asyn
 
 test("nothing is painted for the first half second, so a local boot never flashes it", async ({ page }) => {
   await page.goto("/harness.html?booting=9000&bootingTo=vps");
-  // The delay, not a race against it: the panel is transparent until its
-  // animation starts, and the animation is what the delay is in front of.
+  // The assertion reads the delay out of the stylesheet rather than waiting for
+  // it. The panel sits at opacity 0 until its fade-in animation starts, and the
+  // animation-delay holds that animation off (index.css `.ledge-booting`).
   await expect(screen(page)).toHaveCSS("animation-delay", "0.6s");
 });
 
@@ -46,8 +40,11 @@ test("the way out arrives later than the screen does, and is out of reach until 
   await page.goto("/harness.html?booting=9000&bootingTo=vps");
   await expect(wayOut(page)).toHaveCSS("animation-delay", "4s");
   await expect(page.locator(".ledge-booting-slow")).toHaveCSS("animation-delay", "4s");
-  // Hidden rather than merely transparent, so a Tab before it appears cannot
-  // land on it.
+  // The button is `visibility: hidden` rather than transparent until its delay
+  // is up, so a Tab before the reveal cannot land on it (index.css
+  // `.ledge-booting-cancel`). This assertion has to run inside the 4s window
+  // the goto above opened, so it fails on a machine slow enough to spend four
+  // seconds on the lines before it.
   await expect(wayOut(page)).toBeHidden();
   await expect(wayOut(page)).toBeVisible({ timeout: 8000 });
 });

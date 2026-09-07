@@ -1,8 +1,9 @@
-// A bullet list opened under a paragraph (editor/setext.ts). `-` on the line
+// A bullet list opened under a paragraph does not restyle the prose above
+// while the caret sits on the dash (editor/setext.ts). A `-` on the line
 // below prose is a real Setext underline, so CommonMark reads the pair as an
-// H2 — and the prose above jumps to heading size the moment you start a list
-// under it. The suppression is view-time and caret-scoped, so this is real
-// WebKit or nothing: computed styles are the whole assertion.
+// H2 and both lines draw at heading size. Nothing in the document changes,
+// only the drawing. Computed styles are the whole assertion, so this needs
+// real WebKit (testing.md §5).
 import { expect, test, type Page } from "@playwright/test";
 
 test.beforeEach(async ({ page }) => {
@@ -12,7 +13,8 @@ test.beforeEach(async ({ page }) => {
   await page.keyboard.press("Meta+a");
 });
 
-// How each line actually draws: the first styled span, or the line itself.
+// Reads how each line draws: the size and weight of its first styled span, or
+// of the line element when it has no span.
 const drawn = (page: Page) =>
   page.evaluate(() =>
     [...document.querySelectorAll(".cm-content .cm-line")].map((line) => {
@@ -63,8 +65,9 @@ test("the caret leaving a lone dash lets the heading draw", async ({ page }) => 
   await page.keyboard.type("-");
   expect((await drawn(page))[0]).toBe("18px/400");
 
-  // Moving off it stops being a list mid-birth and starts being what the file
-  // says — the same honesty as live preview revealing syntax under the caret.
+  // Moving the caret off the dash lets the heading draw. The styling is not a
+  // stale artifact. With the caret off the underline, the file really does
+  // hold an H2 (interactions.md §3, the "Pending Setext" row).
   await page.keyboard.press("Meta+ArrowUp");
   expect((await drawn(page))[0]).toBe("23.4px/700");
 });

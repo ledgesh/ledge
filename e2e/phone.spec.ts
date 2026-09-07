@@ -1,12 +1,11 @@
-// The phone: the same view at 390x844, with touch and no chords (ios.md §6,
-// §13). Two claims are under test. The first is reachability — a phone-sized
-// client can reach every verb — spelled out on the two surfaces that carry it:
-// the menu a long press opens on any row, and the overlay the chrome's own
-// control opens. The second is the arrangement (ios.md §9, phase 5): one pane
-// at a time, with the tree covering the editor rather than taking a third of
-// its width. Everything the desktop suite asserts about the verbs themselves
-// still holds; what a phone changes is how you get to them and what you see
-// while you do.
+// This file asserts how the same view behaves on a phone: 390x844, with touch
+// and no chords (ios.md §6, §13). Two claims are under test. Reachability: a
+// phone-sized client reaches every verb, through the menu a long press opens
+// on a row and through the overlay the chrome's own control opens. Arrangement
+// (ios.md §9, phase 5): one pane at a time, with the tree covering the editor
+// rather than taking 224 of the 390 points and leaving it 161. The desktop
+// suite asserts what the verbs do, and this file asserts how a phone reaches
+// them and what it shows while it does.
 //
 // The project is `phone` in playwright.config.ts, and it runs this file only.
 import { expect, test, type Locator, type Page } from "@playwright/test";
@@ -16,36 +15,39 @@ const noteRow = (page: Page, title: string) =>
 
 // One of the overlay's three mode chips, scoped to the overlay so a command
 // named the same thing in a list below cannot answer for it. A prefix match,
-// because on a pointer client the chip also prints its sigil.
+// because the chip prints its sigil unless the shell reports a soft keyboard
+// (commands/Overlay.tsx). The harness's default shell reports none; the
+// `?shell=ios` describes below report one.
 const chip = (page: Page, name: string) =>
   page.locator("div.fixed.inset-0.z-50").getByRole("button", { name: new RegExp(`^${name}`) });
 
-// The drawer itself: the <aside> App renders in place of the sidebar pane.
+// Matches any drawer: the <aside class="absolute"> that App's Drawer renders in
+// place of a pane. The sidebar and the right-hand panel both use it (App.tsx),
+// so this matches whichever one is up, and the count assertions below rely on
+// that. The panels' own <aside> elements are not `absolute`.
 const drawer = (page: Page) => page.locator("aside.absolute");
 const scrim = (page: Page) => page.locator("div.z-30.inset-0");
 
-// The tree is a drawer here and it starts shut, so the header's control is the
-// way in — and on a phone it is the ONLY way in, ⌥⌘B being a chord.
+// The tree is a drawer here and it starts shut, so the header's control is
+// the way in. On a phone it is the only way in, since ⌥⌘B is a chord.
 async function openSidebar(page: Page): Promise<void> {
   await page.getByRole("button", { name: /Toggle Sidebar/ }).tap();
   await expect(noteRow(page, "Alpha")).toBeVisible();
 }
 
-// Polled, not measured once. A width is the one thing here that changes a
-// render behind Playwright's back — a viewport change lands in the browser
-// before React has re-rendered against it, and a bare `expect(await width)`
-// reads the old arrangement and calls it the answer. `expect.poll` retries on
-// the suite's own timeout, which is what every other assertion in this file
-// already does.
+// Polled, not measured once. A viewport change lands in the browser before
+// React has re-rendered against it, so a bare `expect(await width)` reads the
+// old arrangement. `expect.poll` retries until the suite's own timeout, the
+// way every other assertion in this file does.
 const expectWidth = (locator: Locator, px: number) =>
   expect
     .poll(() => locator.evaluate((el) => el.getBoundingClientRect().width))
     .toBe(px);
 
-// A finger held on a row. Playwright's touchscreen can tap and nothing else,
-// so the press is dispatched: pointerdown at the row's middle, then — once the
-// menu has had its 500ms to appear — the pointerup and the click WebKit sends
-// after every touch, which is the click the row must NOT act on.
+// Presses and holds a row. Playwright's touchscreen can only tap, so the press
+// is dispatched: pointerdown at the row's middle, then the pointerup and the
+// click WebKit sends after every touch, once the menu has had its 500ms to
+// appear (`PRESS_MS` in lib/useRowMenu.ts). The row must not act on that click.
 async function pressAndHold(row: Locator): Promise<void> {
   const box = await row.boundingBox();
   if (!box) throw new Error("no box to press");
@@ -64,8 +66,8 @@ async function pressAndHold(row: Locator): Promise<void> {
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/harness.html");
-  // Not a note row: at this size there are none on screen yet. The chrome is
-  // what has loaded, and the toggle below is what puts the tree on screen.
+  // Waits on the chrome, not a note row: at this size no rows are on screen
+  // yet. The toggle below puts the tree on screen.
   await expect(
     page.getByRole("button", { name: /Toggle Sidebar/ }),
   ).toBeVisible();
@@ -86,10 +88,10 @@ test("the tree covers the editor instead of taking its width", async ({
   page,
 }) => {
   await openSidebar(page);
-  // 280 of 390, so 110 points of the note stay visible under the scrim — the
-  // drawer says what it is covering. And the editor is still the full width,
-  // which is the whole difference from the pane: nothing reflowed to make room,
-  // so putting the drawer away costs no relayout.
+  // 280 of 390 rather than the full width, so 110 points of the note stay
+  // visible under the scrim and the drawer shows what it is covering. The
+  // editor keeps the full width, unlike the pane arrangement: nothing reflows
+  // to make room, so putting the drawer away costs no relayout.
   await expectWidth(drawer(page), 280);
   await expectWidth(page.locator("main"), 390);
   await expect(scrim(page)).toBeVisible();
@@ -98,7 +100,7 @@ test("the tree covers the editor instead of taking its width", async ({
 test("a tap on what it covers puts it away", async ({ page }) => {
   await openSidebar(page);
   // Far enough right to land on the scrim rather than the drawer, and low
-  // enough to be over the editor: the tap must dismiss and must NOT also land
+  // enough to be over the editor: the tap must dismiss and must not also land
   // in the note behind it (the click-after-touch trap phase 2 found).
   await page.touchscreen.tap(345, 500);
   await expect(drawer(page)).toHaveCount(0);
@@ -108,8 +110,8 @@ test("a tap on what it covers puts it away", async ({ page }) => {
 test("picking a note puts the drawer away with it", async ({ page }) => {
   await openSidebar(page);
   await noteRow(page, "Beta").tap();
-  // The drawer's job ended when it was picked from; leaving it up would cover
-  // the note it just opened.
+  // Picking from the drawer closes it. Leaving it up would cover the note it
+  // just opened.
   await expect(drawer(page)).toHaveCount(0);
   await expect(page.locator(".cm-content").first()).toContainText("beta body");
 });
@@ -117,8 +119,8 @@ test("picking a note puts the drawer away with it", async ({ page }) => {
 test("two drawers never stack", async ({ page }) => {
   await page.getByRole("button", { name: /Outline/ }).tap();
   await expect(drawer(page)).toHaveCount(1);
-  // Single-PANE: opening the tree closes the panel rather than laying a second
-  // scrim over the first on a 390-point screen.
+  // Single pane, literally: opening the tree closes the panel rather than
+  // laying a second scrim over the first on a 390-point screen.
   await page.getByRole("button", { name: /Toggle Sidebar/ }).tap();
   await expect(drawer(page)).toHaveCount(1);
   await expect(noteRow(page, "Alpha")).toBeVisible();
@@ -126,11 +128,10 @@ test("two drawers never stack", async ({ page }) => {
 });
 
 test("the breakpoint is a width, not a device", async ({ page }) => {
-  // lib/viewport.ts subscribes to a media query, so this has to survive the
-  // window moving across it — the case a Mac reaches by being dragged narrow
-  // and a phone reaches by being turned over. Asserting it here rather than by
-  // hand because a viewport change is one of the few things a harness can
-  // dispatch and a screenshot cannot.
+  // lib/viewport.ts subscribes to a media query, so the layout has to survive
+  // the window crossing the breakpoint: a Mac dragged narrow, a phone turned
+  // over. This is asserted here rather than by hand because a harness can
+  // dispatch a viewport change and a screenshot cannot.
   await openSidebar(page);
   await expectWidth(drawer(page), 280);
 
@@ -142,8 +143,8 @@ test("the breakpoint is a width, not a device", async ({ page }) => {
   await expect(scrim(page)).toHaveCount(0);
 
   await page.setViewportSize({ width: 390, height: 844 });
-  // Narrow again: crossing IN closes what was open, so the editor is not left
-  // behind a scrim the user never asked for.
+  // Narrow again: crossing back in closes what was open, so the editor is not
+  // left behind a scrim.
   await expect(drawer(page)).toHaveCount(0);
   await expectWidth(page.locator("main"), 390);
 });
@@ -151,25 +152,24 @@ test("the breakpoint is a width, not a device", async ({ page }) => {
 // --- nothing appears under a finger (interactions.md §1a) --------------------
 //
 // iOS sends a synthetic mousemove ahead of the click of every tap, and WebKit
-// WITHHOLDS that click if the mousemove changed the rendering: the tap is spent
-// painting a hover nobody can see the point of, and it takes a second one to
-// act. Switching notes on a phone cost two taps for exactly this reason — the
-// tab strip's close ✕ fades in on `group-hover`.
+// withholds that click when the mousemove changed the rendering. The tap
+// paints a hover instead of acting, and it takes a second tap to act.
+// Switching notes on a phone cost two taps for this reason: the tab strip's
+// close ✕ fades in on `group-hover`.
 //
-// So the claim under test is not "the tap works" (it does here either way:
-// Playwright's WebKit is the engine, not iOS's UI process, and nothing
-// withholds anything). It is the CAUSE: on a client that reports `hover: none`,
-// no hover style may apply and no hover-revealed control may exist. This
-// project reports it — the iPhone 14 descriptor carries the coarse pointer —
-// which is what lets a harness stand in for the behavior it cannot reproduce.
+// The tap works here either way, since Playwright's WebKit is the engine
+// rather than iOS's UI process and nothing withholds anything. So these tests
+// assert the cause instead: on a client reporting `hover: none`, no hover
+// style may apply and no hover-revealed control may exist. This project
+// reports it, because the iPhone 14 descriptor carries a coarse pointer.
 test.describe("a tap changes nothing but what it acts on", () => {
   test("hover styles do not apply where there is no hover", async ({ page }) => {
     expect(
       await page.evaluate(() => matchMedia("(hover: none)").matches),
     ).toBe(true);
-    // The tab strip's ✕ is the one that cost the taps. Absent, not transparent:
-    // an invisible button still takes every tap that lands on it, which on a
-    // 390-point strip is a close target at the end of every tab.
+    // The tab strip's ✕ cost those taps. Absent, not transparent: an invisible
+    // button still takes every tap that lands on it, which on a 390-point strip
+    // is a close target at the end of every tab.
     const tab = page.locator("[data-tab]").first();
     await expect(tab).toBeVisible();
     await expect(tab.getByRole("button")).toHaveCount(0);
@@ -180,14 +180,13 @@ test.describe("a tap changes nothing but what it acts on", () => {
   });
 
   test("the hover WebKit sends ahead of the click paints nothing", async ({ page }) => {
-    // The mechanism, driven for real: `hover()` moves the mouse, which is what
-    // sets `:hover` — a dispatched mouseover would not, and a spec that faked
-    // one would pass whether or not the gate existed. Under
-    // `hoverOnlyWhenSupported` every `hover:` rule sits inside
+    // `hover()` moves the mouse, which sets `:hover`. A dispatched mouseover
+    // would not, so a spec that faked one would pass whether or not the gate
+    // existed. Under `hoverOnlyWhenSupported` every `hover:` rule sits inside
     // `@media (hover: hover)`, so on this client there is nothing for WebKit's
-    // observer to notice and the click that follows lands.
-    // An INACTIVE tab: `hover:bg-background/60` is on that branch only, and the
-    // active one has a background of its own with no hover rule to gate.
+    // observer to notice and the click that follows lands. The tab asserted on
+    // is inactive: `hover:bg-background/60` is on that branch only, and the
+    // active branch has a background of its own with no hover rule to gate.
     await openSidebar(page);
     await noteRow(page, "Beta").tap();
     const tab = page.locator("[data-tab]").first();
@@ -213,8 +212,8 @@ test.describe("a tap changes nothing but what it acts on", () => {
 
 test("the editor refuses iOS's corrections", async ({ page }) => {
   // ios.md §7: an autocorrected fence is a broken one. CodeMirror sets all
-  // three on its contentDOM and Ledge adds no contentAttributes entry, so
-  // this passes today — it is here to fail the day one is added.
+  // three on its contentDOM and Ledge adds no contentAttributes entry, so this
+  // passes today. It is here to fail the day one is added.
   const content = page.locator(".cm-content").first();
   await expect(content).toHaveAttribute("spellcheck", "false");
   await expect(content).toHaveAttribute("autocorrect", "off");
@@ -231,25 +230,25 @@ test.describe("with the tree on screen", () => {
   test("a tap focuses the row it lands on: the verbs have a subject again", async ({
     page,
   }) => {
-    // R5's roving focus is what every row verb addresses, and a phone has no
-    // hover to hint at it beforehand. The tapped row is the focused row.
+    // Every row verb addresses R5's roving focus, and a phone has no hover to
+    // hint at it beforehand. The tapped row is the focused row.
     await noteRow(page, "Beta").tap();
     await expect(page.locator(".cm-content").first()).toContainText(
       "beta body",
     );
-    // Shown on a second tap rather than the first, because the first also
-    // navigated and took the drawer — and the row — off the screen with it.
-    // Tapping the note that is already open moves nothing, so the ring stays
-    // where it can be seen.
+    // Asserted on a second tap rather than the first, because the first also
+    // navigated and took the drawer (and the row) off the screen. Tapping the
+    // note that is already open moves nothing, so the ring stays where it can
+    // be seen.
     await openSidebar(page);
     await noteRow(page, "Beta").tap();
     await expect(drawer(page)).toHaveCount(1);
     await expect(noteRow(page, "Beta")).toBeFocused();
-    // And it stayed on the row: opening a note from a list shows it, while
-    // clicking the editor is what says you want to type in it
-    // (workspace/PaneTree.tsx). The drawer does not change that rule — which
-    // is why a tap that DOES navigate leaves focus on no row at all rather
-    // than summoning the software keyboard over the note it just opened.
+    // Focus stayed on the row: opening a note from a list shows it, and
+    // clicking the editor asks to type in it (workspace/PaneTree.tsx). The
+    // drawer keeps that rule, so a tap that does navigate leaves focus on no
+    // row rather than raising the software keyboard over the note it just
+    // opened.
     await expect(page.locator(".cm-content").first()).not.toBeFocused();
   });
 
@@ -265,8 +264,8 @@ test.describe("with the tree on screen", () => {
     const menu = page.getByRole("menu");
     await expect(menu.getByRole("menuitem", { name: "Open" })).toBeVisible();
     await expect(menu.getByRole("menuitem", { name: /Delete/ })).toBeVisible();
-    // The press was a question about Gamma, not an instruction to open it: the
-    // click that follows a touch is swallowed, so Alpha is still the note.
+    // The press opens Gamma's menu and does not open Gamma: the click that
+    // follows a touch is swallowed, so Alpha is still the note.
     await expect(page.locator("[data-tab]")).toHaveCount(tabs);
     await expect(page.locator(".cm-content").first()).toContainText(
       "alpha body",
@@ -278,9 +277,9 @@ test.describe("with the tree on screen", () => {
   test("the long press is the only way to Copy Path, and it works", async ({
     page,
   }) => {
-    // Copy Path has no chord and no palette entry — it acts on a specific row,
-    // so the row's menu is its whole home (R2/R6). On a phone that means it
-    // exists if and only if the long press does.
+    // Copy Path has no chord and no palette entry. It acts on a specific row,
+    // so the row's menu is its only home (interactions.md R2/R6). On a phone
+    // that leaves the long press as the one way to reach it.
     await pressAndHold(noteRow(page, "Beta"));
     await page.getByRole("menuitem", { name: "Copy Path" }).tap();
     expect(await page.evaluate(() => window.__harness.clipboard())).toContain(
@@ -318,10 +317,10 @@ test.describe("with the tree on screen", () => {
   test("a menu opened at the bottom of the screen opens entirely on it", async ({
     page,
   }) => {
-    // ios.md §13's second failure: "a row menu that opens off screen". It needs
-    // a list long enough to reach the bottom of the phone, which the seeded four
-    // notes are not — so seed a screenful and press the last one, where a menu
-    // that hangs downward has nowhere to hang.
+    // ios.md §13's second failure: "a row menu that opens off screen". The
+    // case needs a list that reaches the bottom of the phone, and the four
+    // seeded notes do not. So this seeds a screenful and presses the last row,
+    // where a menu drawn downward would run off the bottom.
     await page.evaluate(() => {
       for (let i = 1; i <= 30; i++)
         window.__harness.store.seed("/harness/scratch", `# Zeta ${i}\n`);
@@ -359,8 +358,8 @@ test.describe("with the tree on screen", () => {
     await expect(
       menu.getByRole("menuitem", { name: "Close Workspace" }),
     ).toBeVisible();
-    // Double-click is the desktop accelerator for a rename; the menu item is the
-    // path R3 already called the discoverable one, and the only one here.
+    // Double-click is the desktop accelerator for a rename. R3 calls the menu
+    // item the discoverable path, and on a phone it is the only path.
     await menu.getByRole("menuitem", { name: "Rename Workspace…" }).tap();
     // The inline field, not the editor's contenteditable: an <input> in the row.
     await expect(
@@ -394,12 +393,9 @@ test.describe("with the tree on screen", () => {
   });
 
   test("and a chip inside it is the way to every command", async ({ page }) => {
-    // The chord ⇧⌘P does not exist here, and neither does the `>` that used to
-    // be the only other way across: both sigils are on the iPhone keyboard's
-    // THIRD plane (123, then #+=), so crossing cost two plane switches to reach
-    // one character and a third tap to get back to letters — to run a verb whose
-    // only other home is a chord. One button opens the overlay and three chips
-    // are what make it all three modes.
+    // The chord ⇧⌘P does not exist here, and typing `>` costs two switches of
+    // the iPhone keyboard's planes (chrome.spec.ts). One button opens the
+    // overlay and the three chips select its three modes.
     await page.getByRole("button", { name: /Go to Note/ }).tap();
     await chip(page, "Commands").tap();
     await page.keyboard.type("toggle sidebar");
@@ -419,8 +415,8 @@ test.describe("with the tree on screen", () => {
   test("a title search that finds nothing offers the text search, in one tap", async ({
     page,
   }) => {
-    // The one crossing that needs no prior knowledge of a chip, a sigil or a
-    // chord: it appears in the list, where the answer was expected to be.
+    // This crossing appears as a row in the list, where the answer was
+    // expected, so it needs no knowledge of a chip, a sigil or a chord.
     await page.getByRole("button", { name: /Go to Note/ }).tap();
     await page.keyboard.type("beta body");
     await page.locator("[data-crossing]").tap();
@@ -436,10 +432,10 @@ test.describe("with the tree on screen", () => {
     await page.getByRole("button", { name: /Go to Note/ }).tap();
     await page.keyboard.type(">split right");
     await page.keyboard.press("Enter");
-    // Two panes on a 390pt screen is a bad idea and a reachable one; what this
-    // asserts is the reachability. §9's single-pane rule is about the CHROME —
-    // the tree and the panels — and deliberately takes nothing off the registry:
-    // a split the user asked for by name is a split they get.
+    // Two panes on a 390pt screen is a bad arrangement, but a phone can still
+    // ask for one. This checks that it can. ios.md §9's single-pane rule covers
+    // the chrome (the tree and the panels) and takes nothing off the command
+    // registry, so a split asked for by name still happens.
     await expect(page.locator(".cm-editor")).toHaveCount(2);
   });
 
@@ -459,17 +455,14 @@ test.describe("with the tree on screen", () => {
 
 // --- a split is a place you can leave (interactions.md §1a) ------------------
 //
-// A phone can make a split three ways: `>split right` in the palette, and Split
-// Right or Split Down in a tab's menu. For a while it could make one and not
-// unmake it. The strip's ✕ was hidden along with the two split buttons beside
-// it, on the argument that a phone cannot use a pane arrangement — which is an
-// argument for not OFFERING one, and it took the exit away with the entrance.
-// Nothing withdrew the two ways in, so the only way out was knowing to type
-// ">close pane" into an overlay meant for finding notes.
+// A phone can make a split three ways (`>split right` in the palette, and
+// Split Right or Split Down in a tab's menu), so it must be able to close one.
+// For a while it could not: the strip's ✕ was hidden along with the two split
+// buttons beside it, leaving ">close pane" in the overlay as the only way out.
 //
-// The drawer stays shut for all of these: it is 280 of 390 points with a scrim
-// over the rest, so an open tree covers both strips and every tap would land on
-// the scrim instead of the control it names.
+// The drawer stays shut for all of these. It is 280 of 390 points with a scrim
+// over the rest, so an open tree covers both strips and every tap would land
+// on the scrim instead of the control it names.
 test.describe("a split this client can make, it can leave", () => {
   const editors = (page: Page) => page.locator(".cm-editor");
   const closePane = (page: Page) => page.getByRole("button", { name: /Close Pane/ });
@@ -477,10 +470,10 @@ test.describe("a split this client can make, it can leave", () => {
   test("with one pane there is no exit, because there is nothing to leave", async ({
     page,
   }) => {
-    // What keeps the control free: canClosePane withholds it until a second
-    // pane exists, so the state a phone actually lives in pays nothing for it.
-    // Its two neighbours are gone at every width — they are the arrangement,
-    // not the way back from it.
+    // canClosePane withholds the ✕ until a second pane exists, so the one-pane
+    // state a phone lives in spends no width on it. The two split buttons
+    // beside it are absent on touch at every width, because they open a split
+    // rather than close one (workspace/PaneTree.tsx).
     await expect(editors(page)).toHaveCount(1);
     await expect(closePane(page)).toHaveCount(0);
     await expect(page.getByRole("button", { name: /Split Right/ })).toHaveCount(0);
@@ -492,9 +485,9 @@ test.describe("a split this client can make, it can leave", () => {
     await page.keyboard.type(">split right");
     await page.keyboard.press("Enter");
     await expect(editors(page)).toHaveCount(2);
-    // One per pane, in the strip of the pane it closes, so nothing has to be
-    // focused or pointed at first — the same property that let the palette
-    // carry the other two.
+    // One ✕ per pane, in the strip of the pane it closes, so nothing has to be
+    // focused or pointed at first. That is the same property that lets the
+    // palette carry the other two verbs.
     await expect(closePane(page)).toHaveCount(2);
     await closePane(page).first().tap();
     await expect(editors(page)).toHaveCount(1);
@@ -504,7 +497,8 @@ test.describe("a split this client can make, it can leave", () => {
   test("and it is a target a finger can hit", async ({ page }) => {
     // The sweep below walks the states a phone can reach, and a two-pane
     // arrangement is not one of them: it walks the chrome, not every layout the
-    // registry can produce. So this control asserts its own 44.
+    // registry can produce. So this test measures the ✕ against the 44-point
+    // minimum itself.
     await page.getByRole("button", { name: /Go to Note/ }).tap();
     await page.keyboard.type(">split right");
     await page.keyboard.press("Enter");
@@ -530,23 +524,21 @@ test.describe("a split this client can make, it can leave", () => {
 
 // --- so is the find panel (interactions.md §1a) ------------------------------
 //
-// The same defect one layer down, and not one the sweep could have found: the
-// find toolbar is built by hand in editor/find.ts and themed in a JS style
-// object in editor/setup.ts, so no `touch:` rule has ever reached it. It stayed
-// a 26-point row at every width. At 390 the row measured 508, which put the ×
-// that closes it 118 points past the right edge of a container that does not
-// scroll, and the panel's other exit is Escape.
+// The find panel lost its exit the same way the split above did, and the sweep
+// below could not find this one. The toolbar is built by hand in editor/find.ts
+// and themed in a JS style object in editor/setup.ts, so no `touch:` rule
+// reached it. It stayed a 26-point row at every width. At 390 the row measured
+// 508, which put the × that closes it 118 points past the right edge of a
+// container that does not scroll, and the panel's other exit is Escape.
 //
-// These measure rather than read the stylesheet back. The bug was arithmetic —
-// a row of fixed widths adding up to more than the screen — so the assertion
-// has to be arithmetic too, and it fails again the day a fourth button joins
-// the row.
+// These measure rather than read the stylesheet back. The bug was arithmetic
+// (a row of fixed widths adding up to more than the screen), so the assertion
+// is arithmetic too, and it fails again the day a fourth button joins the row.
 //
-// At two widths, because the first fix was tuned to one. It let flex wrap where
+// Two widths, because the first fix was tuned to one. It let flex wrap where
 // the sum said, which was two tidy rows at 390 and, at a 430-point Pro Max, an
 // × stranded between the field and the arrows with the checkboxes orphaned on
-// the row below. A layout that only holds at the width someone tested is the
-// same class of bug as the one above, and 390 alone cannot see it.
+// the row below. A run at 390 alone would have passed that fix.
 for (const width of [390, 430]) {
   test.describe(`the find panel a finger opens, a finger can close (${width}pt)`, () => {
     const panel = (page: Page) => page.locator(".ledge-search");
@@ -579,20 +571,21 @@ for (const width of [390, 430]) {
       expect(box.x + box.width).toBeLessThanOrEqual(width);
       expect(box.x + box.width).toBeGreaterThanOrEqual(width - 16);
       // And the field has the rest of the row: the width minus two 44-point
-      // controls, their gaps and the panel's padding. This is what the second
-      // row is FOR, and it is the assertion the 430 case failed at 160 points.
+      // controls, their gaps and the panel's padding. The second row exists so
+      // the field gets that much. The 430 case failed this assertion at 160
+      // points.
       expect(query.width).toBeGreaterThanOrEqual(width - 120);
-      // The tap, not Escape: Escape is the exit this client cannot press, and
-      // a spec that closed the panel with it would pass on the broken layout.
+      // The tap, not Escape: this client cannot press Escape. A spec that
+      // closed the panel with Escape would pass on the broken layout.
       await close(page).tap();
       await expect(panel(page)).toHaveCount(0);
     });
 
     test("the options are all on the row under it", async ({ page }) => {
       await openFind(page);
-      // Counted first, because "none of them are above the line" is a claim
-      // about six controls and passes vacuously about none — which is exactly
-      // what it did against the version that had no such box.
+      // Counted first: "none of them are above the line" is a claim about six
+      // controls, and it passes vacuously when there are none. That is how it
+      // passed against the version that had no such box.
       await expect(
         page.locator(".ledge-search-opts .ledge-search-btn, .ledge-search-opts .ledge-search-check"),
       ).toHaveCount(6);
@@ -623,12 +616,11 @@ for (const width of [390, 430]) {
     });
 
     test("every control in it has a box at rest", async ({ page }) => {
-      // The other half of gating the hovers. Four of these controls said where
-      // they were only when a pointer was over them — the chevron, the × and
-      // the three checkboxes are borderless on a Mac — and a client that cannot
-      // hover has the resting state and nothing else. Computed style rather
-      // than a screenshot, because what is being asserted is that a box exists
-      // at all, and a border width is the honest measurement of that.
+      // The other half of gating the hovers. The chevron, the × and the three
+      // checkboxes are borderless on a Mac (editor/setup.ts), so their box
+      // showed only under a pointer, and a phone cannot hover. This reads
+      // computed style rather than a screenshot: the claim is that a box
+      // exists at all, and a border width measures that.
       await openFind(page);
       const bare = await page.evaluate(() =>
         [...document.querySelectorAll(".ledge-search-btn, .ledge-search-check")]
@@ -652,11 +644,10 @@ for (const width of [390, 430]) {
 // --- the rest of v1, on a phone (ios.md §8, phase 6) -------------------------
 //
 // Search, tags, backlinks, the outline, daily notes and unlocking all existed
-// before this phase; what did not exist was any proof they are REACHABLE with a
-// finger. The desktop suite drives every one of them from a chord, and the
-// phone specs above drive the palette with `page.keyboard` — which is a
-// keyboard, and the one thing an iPhone does not have while a note is open.
-// These tap.
+// before this phase. What was missing is proof that a finger can reach them.
+// The desktop suite drives every one of them from a chord, and the phone specs
+// above drive the palette with `page.keyboard`, which an iPhone does not have
+// while a note is open. The specs below tap instead.
 
 test.describe("the v1 features, by tap", () => {
   // Every panel is the right-hand drawer here (§9), so they take turns rather
@@ -667,11 +658,11 @@ test.describe("the v1 features, by tap", () => {
   test("a search result opens the note it names, at its line", async ({
     page,
   }) => {
-    // The tap that matters. Enter picks the ACTIVE row and would pass even if
-    // nothing were clickable; a phone has no Enter, so the row itself has to be
-    // a target. It regressed once for a reason no unit test could see: the
-    // software keyboard scrolled the whole page between the touch and the
-    // click, so the click landed on whatever slid under the finger (ios.md §7).
+    // Taps the row instead of pressing Enter. Enter picks the active row and
+    // would pass even if nothing were clickable, and a phone has no Enter, so
+    // the row itself has to be a target. This regressed once: the software
+    // keyboard scrolled the whole page between the touch and the click, so the
+    // click landed on whatever slid under the finger (ios.md §7).
     await page.getByRole("button", { name: /Go to Note/ }).tap();
     await page.keyboard.type("#gamma body");
     await page.getByText("gamma body").last().tap();
@@ -684,25 +675,26 @@ test.describe("the v1 features, by tap", () => {
     page,
   }) => {
     // A tagged note, made the way a phone makes one: the tree's own New Note
-    // button, since ⌘N is a chord. The harness's only tagged fixture is the
-    // LOCKED one, whose body is withheld — the rule working, not a gap
-    // (locking.md §8) — so the tag has to be written here. Waiting for the row
-    // is waiting for the SAVE: the directory is a scan of what is on disk.
+    // button, since ⌘N is a chord. The tag is typed here because the harness's
+    // only tagged fixture is the locked note, whose hashtag sits in the sealed
+    // body: the rule working, not a gap (locking.md §4; a tag in the plaintext
+    // head would still show, §6). Waiting for the row is waiting for the save,
+    // because the tag directory scans what is on disk.
     await openSidebar(page);
     // The tree's own, not the pane's: both say New Note, and the pane's is the
     // one a phone cannot see while the drawer is over it.
     await drawer(page).getByRole("button", { name: /New Note/ }).tap();
     await page.keyboard.type("# Shipping\n\nrolling out #canary today");
-    // Reopened, because New Note put the drawer away with it (§9) — and the row
-    // is what says the note reached disk, which is what the directory scans.
+    // Reopened, because New Note put the drawer away with it (§9). The row
+    // says the note reached disk, and the tag directory scans disk.
     await openSidebar(page);
     await expect(noteRow(page, "Shipping")).toBeVisible();
     await face(page, /Toggle Tags/);
     await expect(drawer(page)).toBeVisible();
     await page.locator('[data-target-kind="tag"]', { hasText: "canary" }).tap();
-    // The drill-in replaces the directory in the same drawer: still one panel,
-    // which is what §9's "two drawers never stack" means for a panel with two
-    // faces of its own.
+    // The drill-in replaces the directory in the same drawer, so there is
+    // still one panel. That is what §9's "two drawers never stack" asks of a
+    // panel with two faces of its own.
     await expect(drawer(page)).toHaveCount(1);
     await expect(page.locator('[data-target-kind="tagnote"]')).toHaveCount(1);
   });
@@ -729,13 +721,11 @@ test.describe("the v1 features, by tap", () => {
   test("a locked note unlocks from its own placeholder, with no chord in reach", async ({
     page,
   }) => {
-    // ⌘L is the desktop's way in and the placeholder's button is the phone's.
-    // The passphrase field is the other thing this proves: it is the one input
-    // on a phone that the accessory bar must NOT decorate, which the shell
-    // enforces (ios.md §7) and which only the device can show.
-    // No navigation needed: the harness opens on the locked note, which is also
-    // the phone's own first-run shape — a client that restores last session's
-    // tab can restore a sealed one (ios.md §10).
+    // Unlock has no chord on any client (commands/keys.ts), so the placeholder's
+    // button is the way in. The passphrase field is the one input the accessory
+    // bar must not decorate; the shell enforces that (ios.md §7), and only a
+    // device shows it. The harness opens on the locked note, a first-run shape
+    // a phone can reach too, since a restored tab can be sealed (§10).
     await page.getByRole("button", { name: /Unlock Notes/ }).tap();
     const dialog = page.locator('[data-testid="vault-dialog"]');
     await expect(dialog).toBeVisible();
@@ -750,15 +740,14 @@ test.describe("the v1 features, by tap", () => {
   test("Insert Image… embeds what the device's picker answered", async ({
     page,
   }) => {
-    // The phone has no ⌘V and nothing on its pasteboard: the picker is the only
-    // way a picture gets into a note there (ios.md §11), so this is not a
-    // convenience but the whole of the feature.
+    // The phone has no ⌘V and nothing on its pasteboard. The picker is the
+    // only way a picture gets into a note there (ios.md §11).
     await page.getByRole("button", { name: /Go to Note/ }).tap();
     await page.keyboard.type(">insert image");
     await page.keyboard.press("Enter");
-    // The rendered widget, not the markdown: the insert parks the caret BELOW
-    // the image's line precisely so it renders straight away (editor/images.ts),
-    // which means the reference is concealed by the time this looks.
+    // Asserts the rendered widget, not the markdown. The insert parks the
+    // caret below the image's line so the image renders straight away
+    // (editor/images.ts), so the reference is concealed by the time this looks.
     await expect(page.locator(".ledge-mdimage img")).toHaveCount(1);
   });
 
@@ -774,16 +763,15 @@ test.describe("the v1 features, by tap", () => {
   });
 });
 
-// --- what a phone does NOT have (ios.md §8) ----------------------------------
+// --- what a phone does not have (ios.md §8) ----------------------------------
 //
-// The cut is only real if the verbs are ABSENT. A palette that lists Toggle
-// Terminal and answers with an error strip teaches the user that the palette
-// lies, and §8 says so in as many words about Attach Folder.
+// These rows have to be missing from the palette, not merely disabled. A
+// palette that lists Toggle Terminal and then answers with an error strip is
+// worse than one that omits it (§8 makes the same case for Attach Folder).
 //
-// `?shell=ios` is the harness pretending to be the Swift shell rather than the
-// Electrobun one (harness.tsx): same view, same notes, a different answer to
-// what this DEVICE can do. Without it these same rows are present, which is the
-// point — the desktop keeps every one of them.
+// `?shell=ios` makes the harness answer as the Swift shell rather than the
+// Electrobun one (harness.tsx). Without it these same rows are present,
+// because the desktop keeps every one of them.
 
 test.describe("the iOS client, and what it does not have", () => {
   const palette = async (page: Page, query: string) => {
@@ -811,8 +799,8 @@ test.describe("the iOS client, and what it does not have", () => {
   test("no folder verbs, because the server has nobody at it to pick one", async ({
     page,
   }) => {
-    // A different reason from the terminal's and a different flag: this one is
-    // the SERVER saying it is headless (workspaceList folderDialog), so a Mac
+    // A different reason from the terminal's, and a different flag: here the
+    // server says it is headless (workspaceList folderDialog), so a Mac
     // pointed at a VPS loses these two as well.
     await palette(page, "folder");
     await expect(page.getByText("Attach Folder as Workspace…")).toHaveCount(0);
@@ -820,9 +808,9 @@ test.describe("the iOS client, and what it does not have", () => {
   });
 
   test("a phone keeps its own list of servers, and adds to it here", async ({ page }) => {
-    // The native pairing screen is how the FIRST server gets a pin (ios.md §4),
-    // and every one after it is added from this dialog like a Mac's. What
-    // differs is which key authenticates: a phone has exactly one, in the
+    // The native pairing screen is how the first server gets a pin (ios.md §4).
+    // Every server after it is added from this dialog, the way a Mac adds one.
+    // The key that authenticates differs: a phone has exactly one, in the
     // Secure Enclave, so the form shows the line to install on the new server
     // rather than asking for a path to a file that cannot exist.
     await palette(page, "notes on");
@@ -833,9 +821,9 @@ test.describe("the iOS client, and what it does not have", () => {
 
     await dialog.getByRole("button", { name: "Add Server…" }).tap();
     await expect(dialog).toContainText("authorized_keys");
-    // What the line is, before what the prefix on it narrows. And no claim that
-    // the key cannot open a shell: the protocol behind the forced command runs
-    // code by design (remote.md §4a).
+    // The copy says what the line is before what the `restrict` prefix
+    // narrows. It makes no claim that the key cannot open a shell: the
+    // protocol behind the forced command runs arbitrary code (remote.md §4a).
     await expect(dialog).toContainText("this device's public key");
     await expect(dialog).toContainText("keeps the key from forwarding ports or copying files");
     await expect(dialog).not.toContainText("opening a shell");
@@ -843,9 +831,9 @@ test.describe("the iOS client, and what it does not have", () => {
     await expect(dialog.getByText(/^restrict,command=/)).toBeVisible();
     await expect(dialog.getByLabel(/^Key/)).toHaveCount(0);
 
-    // The pasteboard ends at the phone and the server is elsewhere, so the line
-    // leaves by the device's share sheet as well (ios.md §4). The sheet itself
-    // is UIKit's; what the view owns is offering it and handing over the line.
+    // Share Line hands the line to the device's share sheet (ios.md §4). A
+    // phone's pasteboard ends at the phone, and the server is another machine.
+    // The sheet is UIKit's. The view offers the button and hands over the line.
     await dialog.getByRole("button", { name: "Share Line" }).tap();
     expect(await page.evaluate(() => (window as unknown as { harnessShared?: string[] }).harnessShared ?? [])).toEqual([
       'restrict,command="ledge-server serve" ecdsa-sha2-nistp256 AAAAharness ledge-iphone-abc123',
@@ -878,26 +866,27 @@ test.describe("the iOS client, and what it does not have", () => {
   test("no accelerator this keyboard cannot press: the chips drop their sigils", async ({
     page,
   }) => {
-    // Absent rather than muted, which is §1a's rule for a control a client
-    // cannot use — and what is absent here is the ADVICE, not the crossing: the
-    // chip beside it still does what the character would have. `>` and `#` are
-    // both on the third plane of an iPhone keyboard (123, then #+=), so printing
-    // them would be telling this client about someone else's keys.
+    // The chips drop the sigil rather than showing it muted, which is §1a's
+    // rule for a control a client cannot use. Only the advice is dropped: the
+    // chip still does what the character would have. `>` and `#` both sit on
+    // the third plane of an iPhone keyboard (123, then #+=), so printing them
+    // would name keys this client has no cheap way to press.
     await page.getByRole("button", { name: /Go to Note/ }).tap();
     await expect(chip(page, "Commands")).not.toContainText(">");
     await expect(chip(page, "Text")).not.toContainText("#");
-    // And the field is back to saying what it is for. It used to spend itself
-    // teaching the same two characters.
+    // The field says what it is for. It used to read "(> commands · # in
+    // text)", teaching the same two characters (interactions.md §1a).
     await expect(page.getByPlaceholder("Search notes")).toBeVisible();
   });
 
   test("the manual is not a text field: tapping it raises no keyboard", async ({
     page,
   }) => {
-    // The read-only editor stays focusable on a Mac on purpose — find, ⌘C and
-    // ⌘↩ on the manual's own runnable blocks all need it. A phone has none of
-    // those chords and does have a keyboard that would cover half the page it
-    // just opened, so there the contentDOM stops being editable at all.
+    // The read-only editor stays focusable on a Mac, where find, ⌘C and ⌘↩ on
+    // the manual's own runnable blocks all need it. A phone has none of those
+    // chords, and the focus costs half the page to a keyboard that can type
+    // nothing. So `softKeyboard` turns `EditorView.editable` off there
+    // (ios.md §8), and the contentDOM stops being editable at all.
     await page.getByRole("button", { name: "Documentation", exact: true }).tap();
     const content = page.locator(".cm-content").first();
     await expect(content).toHaveAttribute("contenteditable", "false");
@@ -911,27 +900,30 @@ test.describe("the iOS client, and what it does not have", () => {
   test("the help button closes the manual, which on a phone is the only way out", async ({
     page,
   }) => {
-    // The strip is the documented way back and it lives inside the drawer the
-    // manual is covering; ⌘1 is a chord. So the button that opened it has to
-    // close it, or the manual is a room with no door (interactions.md §1a).
+    // The workspace strip is the usual way back, and it sits inside the drawer
+    // the manual is covering (workspace/actions.ts closeDocs). ⌘1…9 is a chord
+    // this client cannot press, and it does not index the docs workspace
+    // anyway. So the button that opened the manual has to close it
+    // (interactions.md §1a).
     const help = page.getByRole("button", { name: "Documentation", exact: true });
     await help.tap();
     await expect(page.locator("[data-tab]", { hasText: "Getting Started" })).toBeVisible();
     await help.tap();
-    // Back on the notes, and nothing was closed: the manual keeps its tabs, so
-    // the tap that brings it back lands where it was left.
+    // The notes are back and nothing was closed: the docs workspace keeps its
+    // tabs, so the tap that brings the manual back lands where it was left.
     await expect(page.locator("[data-tab]", { hasText: "Getting Started" })).toHaveCount(0);
-    // Back on the workspace it opened from, which the harness starts on: the
-    // locked note and its placeholder.
+    // The workspace the manual opened from is selected again. The harness
+    // starts on it, with the locked note and its placeholder.
     await expect(page.locator('[data-testid="locked-face"]')).toBeVisible();
   });
 
   test("the verbs a phone does have are all still there", async ({ page }) => {
-    // The other half of the claim, and the one that catches a gate written too
-    // wide: cutting the terminal must not cut the editor with it.
+    // The other half of the claim (ios.md §8): every verb a phone does have is
+    // still there. It catches a gate written too wide, where cutting the
+    // terminal cuts the editor with it.
     await palette(page, "");
-    // Scoped to the overlay: two of these titles are also live buttons on the
-    // screen behind it, and what is under test is what the PALETTE offers.
+    // Scoped to the overlay because two of these titles are also live buttons
+    // on the screen behind it. This tests what the palette offers.
     const list = page.locator("div.fixed.inset-0.z-50");
     for (const title of [
       "Insert Image…",
@@ -949,14 +941,12 @@ test.describe("the iOS client, and what it does not have", () => {
 
 // --- the phone runs blocks, and still has no drawer --------------------------
 //
-// §8's cut lifted in two steps (ios.md §14), and this is where it stopped: a
-// client that runs blocks inline and has no terminal. Not a transitional state
-// to be tolerated but where a phone stays — inline output is a panel under the
-// fence, and a drawer is a second arrangement with a keyboard grammar (Ctrl-`,
+// A phone runs blocks inline and has no terminal drawer (ios.md §8): the cut
+// lifted that far, in two steps, and stopped there (§14). Inline output is a
+// panel under the fence, and a drawer needs a keyboard grammar (Ctrl-`,
 // Escape) a phone cannot type.
 //
-// The same `?shell=ios` as the describe above, which is the point: one client,
-// asserted from both directions.
+// The same `?shell=ios` as the describe above.
 test.describe("the phone runs blocks, without a terminal", () => {
   const palette = async (page: Page, query: string) => {
     await page.getByRole("button", { name: /Go to Note/ }).tap();
@@ -974,9 +964,9 @@ test.describe("the phone runs blocks, without a terminal", () => {
   test("a runnable fence keeps the ▶ and loses the terminal beside it", async ({
     page,
   }) => {
-    // The pair is two controls, not one widget: this is the assertion that
-    // stops a client which runs blocks from drawing the button that fills a
-    // drawer it does not have.
+    // The ▶ and the terminal button are two controls, not one widget. This
+    // stops a client that runs blocks from also drawing the button that sends
+    // a block to a drawer it does not have.
     await page.keyboard.press("Meta+n");
     await expect(page.locator(".cm-line").first()).toHaveText("# Untitled");
     await page.keyboard.press("Meta+a");
@@ -994,7 +984,8 @@ test.describe("the phone runs blocks, without a terminal", () => {
       overlay(page).getByText("Run Block in Terminal", { exact: true }),
     ).toHaveCount(0);
     await page.keyboard.press("Escape");
-    // Back with the runs, because an inline run spawns the shell this kills.
+    // Restart Note Shell stays, because an inline run spawns the shell it
+    // kills.
     await palette(page, "restart");
     await expect(overlay(page).getByText("Restart Note Shell", { exact: true })).toHaveCount(1);
   });
@@ -1012,21 +1003,16 @@ test.describe("the phone runs blocks, without a terminal", () => {
 
 // --- the two questions asked before a command runs --------------------------
 //
-// interactions.md §4a and §4b, on a client with no keyboard. Both were designed
-// around one: the picker is "⌘↩ then Enter to repeat, an arrow to go elsewhere",
-// and both dismiss on an Escape a software keyboard does not have. A finger
-// keeps the ordering and loses the whole economy — every row is one tap, so the
-// preselection stops being cheaper than the alternative and the only things left
-// holding the answer apart are how big the targets are and what they say.
-//
-// So these specs assert three things the desktop suite cannot: that a finger can
-// open both, that the targets are 44 points, and that the last pick is marked
-// rather than merely focused. What each dialog MEANS is host-picker.spec.ts's
-// and run-confirm.spec.ts's, and is not restated here.
+// The host picker and the run confirmation (interactions.md §4a, §4b) on a
+// client with no keyboard. Both were designed around one: Escape dismisses
+// them, and the picker opens with the last machine focused. A phone has no
+// Escape, and every row costs it the same one tap, so the 44-point targets and
+// the labels tell the answers apart. host-picker.spec.ts and
+// run-confirm.spec.ts cover what each dialog means.
 test.describe("choosing a machine, and confirming a run, by finger", () => {
-  // A note with a runnable block, written with the keyboard: composing a note is
-  // setup, and every VERB below is a tap. `uptime` because the confirmation
-  // shows the code, and a spec should be able to point at the line it shows.
+  // A note with a runnable block, typed with the keyboard: composing the note
+  // is setup, and every verb under test below is a tap. The body is `uptime` so
+  // a spec can point at the line the confirmation shows (§4b).
   const NOTE = (frontmatter: string) =>
     `---\n${frontmatter}\n---\n# Untitled\n\n\`\`\`sh\nuptime\n\`\`\`\n`;
 
@@ -1038,9 +1024,9 @@ test.describe("choosing a machine, and confirming a run, by finger", () => {
     await expect(page.locator(".cm-line", { hasText: "uptime" })).toBeVisible();
   }
 
-  // How a finger asks for a run: one tap on the ▶, which is lit without being
-  // asked on a client with no hover to ask with (index.css, §1a). Writing these
-  // specs is what found it costing two.
+  // A finger asks for a run with one tap on the ▶, which is visible at rest on
+  // a client with no hover to reveal it (index.css, interactions.md §1a).
+  // Writing these specs found it costing two taps.
   async function tapRun(page: Page): Promise<void> {
     await page.locator('[data-act="run"]').tap();
   }
@@ -1058,8 +1044,8 @@ test.describe("choosing a machine, and confirming a run, by finger", () => {
     await blockNote(page, "host: web1 db2");
     await tapRun(page);
 
-    // The dialog RENDERS, which is the assumption this file exists to stop
-    // making, and nothing has run behind it.
+    // The dialog renders, and nothing has run behind it. This file checks
+    // whether a surface renders at this size rather than assuming it.
     await expect(page.getByRole("menu")).toBeVisible();
     expect(await page.evaluate(() => window.__harness.inlineRuns())).toHaveLength(0);
 
@@ -1076,10 +1062,10 @@ test.describe("choosing a machine, and confirming a run, by finger", () => {
     await tapRun(page);
     const rows = page.getByRole("menuitem");
     await expect(rows).toHaveCount(2);
-    // The number is the platform's floor for a finger. It matters more here than
-    // in any other menu in the app: the two rows are `staging` and `prod`, they
-    // sit against each other, and the cost of hitting the wrong one is a command
-    // on the wrong machine.
+    // 44 points is the platform's floor for a finger (interactions.md §1a). It
+    // matters more in this menu than in any other: the rows are machine names
+    // like `staging` and `prod` (§4a), they sit against each other, and hitting
+    // the wrong one runs the command on the wrong machine.
     for (const h of await rows.evaluateAll((els) =>
       els.map((el) => el.getBoundingClientRect().height),
     )) {
@@ -1126,8 +1112,7 @@ test.describe("choosing a machine, and confirming a run, by finger", () => {
     await tapRun(page);
     const dialog = page.getByRole("alertdialog");
     await expect(dialog).toBeVisible();
-    // §4b: the code is shown, because the fence body is the truth about what is
-    // about to run.
+    // §4b: the dialog shows the fence body, which is what will run.
     await expect(dialog).toContainText("uptime");
 
     const boxes = await dialog.getByRole("button").evaluateAll((els) =>
@@ -1138,8 +1123,9 @@ test.describe("choosing a machine, and confirming a run, by finger", () => {
     );
     expect(boxes).toHaveLength(2);
     for (const b of boxes) expect(b.height).toBeGreaterThanOrEqual(44);
-    // Cancel and the button that runs `rm -rf` are the pair on screen; a
-    // desktop's 8 points between them is a comfortable click and a bad tap.
+    // Cancel sits beside the button that runs the block, so a mis-tap runs what
+    // the dialog exists to prevent. A desktop's nominal 8 points between them
+    // is comfortable to click and cramped to tap (ConfirmDialog.tsx).
     const [cancel, run] = boxes as [(typeof boxes)[0], (typeof boxes)[0]];
     expect(run.left - cancel.right).toBeGreaterThanOrEqual(16);
   });
@@ -1182,26 +1168,24 @@ test.describe("choosing a machine, and confirming a run, by finger", () => {
 
 // --- getting the keyboard back off a run ------------------------------------
 //
-// interactions.md §6a: on a Mac a run takes the keyboard when it first speaks,
-// so a `sudo` password goes to sudo instead of into the note, and the way back
-// is ⌘Escape or two Escapes. A phone has no ⌘ and its software keyboard has no
-// Escape at all, which leaves one exit inherited by accident — tapping the
-// prose — and a full-screen program is exactly what takes that away: it pins
-// the panel to 24 rows, and 24 rows with the keyboard up is the whole screen.
+// interactions.md §6a: on a Mac a run takes the keyboard when it first prints,
+// so a `sudo` password goes to sudo instead of into the note, and ⌘Escape or
+// two Escapes gives it back. A phone has neither key. Tapping the prose is the
+// only exit it inherits, and a full-screen program takes that one away: it pins
+// the panel to 24 rows, which with the keyboard up is the whole screen.
 //
-// So the panel carries the exit as a control on this client, and the run does
-// not take the keyboard here at all: taking it means RAISING one over half the
-// screen, and the claim's test cannot tell a phone that is being typed into
-// from one that merely left focus in an editor. The desktop half (who claims
-// the keyboard, and when the claim lapses) is inline-focus.spec.ts's and is not
-// restated here.
+// So the panel carries the exit as a control on this client, and a run here
+// does not take the keyboard at all. Taking it raises the software keyboard
+// over half the screen, and the claim's test cannot tell a phone that is being
+// typed into from one that merely left focus in an editor. inline-focus.spec.ts
+// covers the desktop half: who claims the keyboard, and when the claim lapses.
 const IN_TERMINAL = () => !!document.activeElement?.closest(".xterm");
 const IN_EDITOR = () => !!document.activeElement?.classList.contains("cm-content");
 
-// A block run by finger, then made to speak, and the id of the run. PTYs are
-// inert in the harness, so `runOutput` pushes the first byte the way Bun's
-// runEvent would — which on a Mac is the moment the run claims the keyboard,
-// and here is the moment the panel starts inviting a tap.
+// Runs a block by finger, pushes a first byte of output, and returns the run's
+// id. PTYs are inert in the harness, so `runOutput` supplies that byte the way
+// Bun's runEvent would. That byte is where a Mac claims the keyboard, and where
+// this client shows the tap hint instead.
 async function speakingRun(page: Page): Promise<string> {
   await page.keyboard.press("Meta+n");
   await expect(page.locator(".cm-line").first()).toHaveText("# Untitled");
@@ -1215,9 +1199,9 @@ async function speakingRun(page: Page): Promise<string> {
   return id;
 }
 
-// The same, with the tap that answers it: everything below about giving the
-// keyboard BACK needs the panel to have it first, and on this client that is
-// something the user does rather than something the run does.
+// The same run, plus the tap that answers it. The specs below need the panel to
+// hold the keyboard before it can give it back, and on this client the tap
+// puts it there, not the run.
 async function talkingRun(page: Page): Promise<string> {
   const id = await speakingRun(page);
   await page.locator(".xterm-screen").tap();
@@ -1234,24 +1218,23 @@ test.describe("giving the keyboard back, with no key to press", () => {
   });
 
   test("a run does not raise the keyboard: it waits to be tapped", async ({ page }) => {
-    // The whole reason the claim is off here. `view.hasFocus` is what a claim
-    // is tested against, and on this client it is true from the moment a pane
-    // opens and again after every run hands focus back — so honoring it moved
-    // the keyboard into a text field nobody asked to type in, which on iOS is
-    // how the software keyboard is raised. The output a finger just asked to
-    // see went behind it.
+    // Why the claim is off here. A claim is tested against `view.hasFocus`
+    // (blocks.ts), which on this client is true from the moment a pane opens
+    // and again after every run hands focus back. Honoring it focused a text
+    // field nobody asked to type in. That is how iOS raises the software
+    // keyboard, and the keyboard covered the output the tap asked for.
     await speakingRun(page);
     expect(await page.evaluate(IN_TERMINAL)).toBe(false);
     expect(await page.evaluate(IN_EDITOR)).toBe(true);
-    // And the panel says how to get in, because nothing else would: a program
-    // waiting on a password is waiting on a tap.
+    // And the panel says how to get in. Nothing else on this client announces
+    // that a run is waiting on an answer.
     await expect(page.locator(".ledge-tap-hint")).toBeVisible();
   });
 
   test("the invitation is itself a target, and the output stays one", async ({ page }) => {
     await speakingRun(page);
-    // Words that say "tap to type" beside a terminal get aimed at, not just
-    // read, so they are a button and it does what it says.
+    // The hint is a button, not a line of text. People tap words that tell
+    // them to tap (interactions.md §6a).
     await page.locator(".ledge-tap-hint").tap();
     await expect.poll(() => page.evaluate(IN_TERMINAL)).toBe(true);
 
@@ -1263,11 +1246,10 @@ test.describe("giving the keyboard back, with no key to press", () => {
     await expect.poll(() => page.evaluate(IN_TERMINAL)).toBe(true);
   });
 
-  // The invitation is the only thing on this client that asks for a keystroke,
-  // so it is the only thing that can ask for one nothing can carry. A tap here
-  // would put the keyboard in a panel whose program is out of reach
-  // (inlineTerm.ts accepts), which is the silent drop the header just stopped
-  // telling: the two have to agree.
+  // The tap hint (`.ledge-tap-hint`) is the only thing on this client that
+  // asks for a keystroke, so it is hidden once a keystroke cannot arrive.
+  // `accepts` in inlineTerm.ts refuses input to a run whose machine went away,
+  // and the header says Disconnected. The hint has to agree with both.
   test("the invitation goes while the machine is out of reach", async ({ page }) => {
     await speakingRun(page);
     await expect(page.locator(".ledge-tap-hint")).toBeVisible();
@@ -1284,8 +1266,8 @@ test.describe("giving the keyboard back, with no key to press", () => {
     page,
   }) => {
     const id = await talkingRun(page);
-    // Answered: the panel has the keyboard, and the line that says so is the
-    // other one.
+    // Answered: the panel has the keyboard, so the invitation gives way to the
+    // control that hands it back.
     await expect(page.locator(".ledge-tap-hint")).toBeHidden();
     await expect(page.locator(".ledge-term-leave")).toBeVisible();
 
@@ -1293,8 +1275,8 @@ test.describe("giving the keyboard back, with no key to press", () => {
     await expect.poll(() => page.evaluate(IN_EDITOR)).toBe(true);
     await expect(page.locator(".ledge-tap-hint")).toBeVisible();
 
-    // A frozen panel is output, not a program: typing into it would be typing
-    // at nothing, so it stops asking.
+    // A finished run leaves output rather than a program, so the panel stops
+    // asking to be typed into (interactions.md §6a).
     await page.evaluate((runId) => window.__harness.runEnd(runId, 0), id);
     await expect(page.locator(".ledge-status")).toHaveText("Done");
     await expect(page.locator(".ledge-tap-hint")).toBeHidden();
@@ -1304,8 +1286,9 @@ test.describe("giving the keyboard back, with no key to press", () => {
     await talkingRun(page);
     // The disclosure is the button, not a line of text beside one: "Back to
     // note" only means anything to someone who is not in the note, and it is
-    // also the way back. The header has room for one of the two at 390 points,
-    // and the pair that interrupts the run has to fit beside it.
+    // also the way back. Touch gets the button and a pointer client gets the
+    // sentence, never both (interactions.md §6a). At 390 points the header has
+    // room for one of the two, beside the pair that copies and interrupts.
     await expect(page.locator(".ledge-focus-hint")).toBeHidden();
     await expect(page.locator(".ledge-focus-key")).toBeHidden();
     await expect(page.locator(".ledge-term-leave")).toBeVisible();
@@ -1323,7 +1306,7 @@ test.describe("giving the keyboard back, with no key to press", () => {
     // interrupts.
     await expect(page.locator(".ledge-output")).toBeVisible();
     await expect(page.locator(".ledge-status")).toHaveText("Running");
-    // And with the keyboard back in the note, it goes in the note.
+    // And with the keyboard back in the note, typed text lands in the note.
     await page.keyboard.type("still writing");
     await expect(page.locator(".cm-line", { hasText: "still writing" })).toBeVisible();
   });
@@ -1332,22 +1315,22 @@ test.describe("giving the keyboard back, with no key to press", () => {
     await talkingRun(page);
     await expect(page.locator(".ledge-term-leave")).toBeVisible();
     await page.locator(".ledge-term-leave").tap();
-    // Nothing to give back, so nothing offering to: the control follows focus
-    // rather than the run, which is what makes it impossible to leave stale.
+    // With focus back in the note there is nothing to give back, so the control
+    // hides. It follows focus rather than the run, so it cannot go stale.
     await expect(page.locator(".ledge-term-leave")).toBeHidden();
   });
 
   test("the panel it sits in fits the screen", async ({ page }) => {
     await talkingRun(page);
-    // A control off the right edge is not a control, and the panel had no width
-    // of its own to keep it on: it fills the editor's content, the content is as
-    // wide as its widest thing, and an xterm opening at 80 columns WAS that
-    // thing — 605 points inside a 370-point editor, with the re-fit measuring
-    // the overflow it caused and agreeing with it. Harmless on a Mac, where 605
-    // fits; here it put the whole header off the screen.
+    // The panel has no width of its own: it fills the editor's content, and the
+    // content is as wide as its widest thing. An xterm opening at 80 columns
+    // was that thing, 605 points inside a 370-point editor, and the re-fit
+    // measured the overflow it had caused and agreed with it. On a Mac 605
+    // points fit; here it put the whole header off the screen.
     const panel = (await page.locator(".ledge-output").boundingBox())!;
     expect(panel.x + panel.width).toBeLessThanOrEqual(page.viewportSize()!.width);
-    // Sideways scroll is the symptom, and the note is what does it.
+    // Sideways scroll is the symptom, and the note's scroller is where it
+    // shows.
     const scroll = await page.locator(".cm-scroller").evaluate((el) => ({
       w: el.clientWidth,
       s: el.scrollWidth,
@@ -1360,11 +1343,11 @@ test.describe("giving the keyboard back, with no key to press", () => {
     const leave = (await page.locator(".ledge-term-leave").boundingBox())!;
     expect(leave.height).toBeGreaterThanOrEqual(44);
 
-    // Its neighbour is the pair drawn in the body overlay, and the FAR one of
+    // Its neighbour is the pair drawn in the body overlay, and the far one of
     // the two dismisses a still-running block by interrupting it. Same argument
     // as the confirmation's Cancel/Run pair above: adjacent alternatives where
-    // the miss does not land on nothing (interactions.md §1a). Copy is what
-    // sits between, so the miss that costs anything needs two of them.
+    // a miss lands on the other one (interactions.md §1a). Copy sits between,
+    // so reaching the interrupt by accident means missing twice.
     const pair = page.locator(".ledge-close-wrap button");
     const copy = (await pair.first().boundingBox())!;
     const dismiss = (await pair.last().boundingBox())!;
@@ -1375,8 +1358,9 @@ test.describe("giving the keyboard back, with no key to press", () => {
     expect(copy.x - (leave.x + leave.width)).toBeGreaterThanOrEqual(16);
     expect(dismiss.x - (copy.x + copy.width)).toBeGreaterThanOrEqual(8);
 
-    // And the header holds them: the reserved width in it does not shrink, or
-    // the pair ends up drawn over the button that gives the keyboard back.
+    // And the header holds them: it reserves the width (`.ledge-term-gap` in
+    // index.css), and if that reserve shrinks the pair is drawn over the button
+    // that gives the keyboard back.
     expect(leave.x + leave.width).toBeLessThanOrEqual(copy.x);
   });
 
@@ -1385,7 +1369,7 @@ test.describe("giving the keyboard back, with no key to press", () => {
     await page.locator(".ledge-term-leave").tap();
     await expect.poll(() => page.evaluate(IN_EDITOR)).toBe(true);
 
-    // The exit has to be reversible or it is a trap: the run is still asking
+    // A tap on the terminal takes the keyboard back. The run is still asking
     // for a password, and answering it must not need the block re-run.
     await page.locator(".xterm-screen").tap();
     await expect.poll(() => page.evaluate(IN_TERMINAL)).toBe(true);
@@ -1395,16 +1379,15 @@ test.describe("giving the keyboard back, with no key to press", () => {
 
 // --- the keys a running block needs -----------------------------------------
 //
-// The other half of the same problem (ios.md §7, §14). A phone can ANSWER a run
-// by typing — a password, a `[y/N]`, a pager's q — and had no key at all for
-// the program that wants Ctrl-C, Ctrl-D, Escape or an arrow: a software
-// keyboard has none of them, and the accessory bar carried the note's Markdown
-// verbs over every field in the page, this panel included.
+// A software keyboard types a run's answers (a password, a `[y/N]`, a pager's
+// q) but has no Ctrl-C, Ctrl-D, Escape or arrows, and the accessory bar carried
+// the note's Markdown verbs over every field in the page, this panel included
+// (ios.md §7, §14).
 //
-// So the bar has a second face over a running block. The face itself is Swift
-// and only the Simulator can show it; what is asserted here is the half with
-// rules in it — which panel a key lands in, what bytes it becomes, and that the
-// page can tell a run apart from the note it is running inside.
+// So the bar has a second face over a running block. That face is Swift and
+// only the Simulator shows it. These specs cover the page side: which panel a
+// key lands in, what bytes it becomes, and that the page can tell a run apart
+// from the note it is running inside.
 test.describe("the run's own keyboard", () => {
   const inputs = (page: Page, id: string) =>
     page.evaluate(
@@ -1441,8 +1424,8 @@ test.describe("the run's own keyboard", () => {
     ]);
   });
 
-  // Typing still works and is unchanged: the bar is what the keyboard cannot
-  // type, not a replacement for it.
+  // Typing still works and is unchanged: the bar carries what the keyboard
+  // cannot type, and does not replace it.
   test("beside what is typed, in the order it happened", async ({ page }) => {
     const id = await talkingRun(page);
     await page.keyboard.type("hunter2");
@@ -1487,10 +1470,10 @@ test.describe("the run's own keyboard", () => {
     page,
   }) => {
     await talkingRun(page);
-    // The reason the order inside barFaceOf matters, asserted rather than
-    // asserted about: the panel a run draws IS inside the editor's content, so
-    // "is this the note?" is true of it too, and the bar would offer Bold to a
-    // program waiting for a password.
+    // Why barFaceOf tests the run panel before the note (lib/nativeBridge.ts):
+    // the panel a run draws sits inside the editor's content, so the note's own
+    // test matches it too. The other order would offer Bold to a program
+    // waiting for a password.
     expect(
       await page.locator(".ledge-output").evaluate((el) => !!el.closest(".cm-content")),
     ).toBe(true);
@@ -1500,10 +1483,10 @@ test.describe("the run's own keyboard", () => {
     await expect.poll(() => page.evaluate(IN_EDITOR)).toBe(true);
     expect(await page.evaluate(() => window.__harness.barFace())).toBe("note");
 
-    // And neither face over the search box: the note's verbs would act on the
-    // note behind it. What the shell puts there instead is one button that is
-    // never wrong to offer — the one that puts the keyboard away, since nothing
-    // else on this screen can (ios/Sources/AccessoryBar.swift).
+    // Neither face over the search box: the note's verbs would act on the note
+    // behind it. The shell puts one button there instead, the one that puts the
+    // keyboard away, since nothing else on this screen can
+    // (ios/Sources/AccessoryBar.swift).
     await page.getByRole("button", { name: /Go to Note/ }).tap();
     await expect(page.getByPlaceholder(/Search notes/)).toBeVisible();
     expect(await page.evaluate(() => window.__harness.barFace())).toBe("none");
@@ -1512,10 +1495,10 @@ test.describe("the run's own keyboard", () => {
 
 // --- the block a finger can make ---------------------------------------------
 //
-// ``` is three trips through the iPhone keyboard's numeric page with a long
-// press each, for the one construct this app is for. Code Block is that act as
-// a verb: on the accessory bar (Swift, so the Simulator shows it) and in the
-// palette, which is what a spec can drive.
+// Typing ``` costs three trips through the iPhone keyboard's numeric page with
+// a long press each. Code Block does the same thing as a command: on the
+// accessory bar (Swift, so only the Simulator shows it) and in the palette.
+// These specs drive the palette.
 test.describe("making a code block without typing a backtick", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/harness.html?shell=ios");
@@ -1538,8 +1521,9 @@ test.describe("making a code block without typing a backtick", () => {
   test("the palette makes the block, and it is one the ▶ will run", async ({ page }) => {
     await emptyNote(page);
     await codeBlock(page);
-    // A language, not a bare fence: the ▶ comes from the info string's first
-    // word, so a block without one is the block a phone cannot use.
+    // A language, not a bare fence: `isRunnable` in editor/blocks.ts is asked
+    // about the info string's first word (editor/fenceInfo.ts), and a bare
+    // fence leaves that word null, so no ▶ would be drawn.
     await expect(page.locator(".cm-line", { hasText: "```sh" })).toHaveCount(1);
     await expect(page.locator('[data-act="run"]')).toHaveCount(1);
   });
@@ -1550,7 +1534,7 @@ test.describe("making a code block without typing a backtick", () => {
     await emptyNote(page);
     await codeBlock(page);
     await page.keyboard.type("git status");
-    // Inside the fences, which is the whole claim: one verb and the command.
+    // The typed text lands inside the fences: one verb, then the command.
     const lines = await page.locator(".cm-line").allInnerTexts();
     const at = lines.findIndex((l) => l.includes("git status"));
     expect(lines[at - 1]).toContain("```sh");
@@ -1564,8 +1548,8 @@ test.describe("making a code block without typing a backtick", () => {
     await page.keyboard.insertText("SELECT 1");
     await page.keyboard.press("Shift+Home");
     await codeBlock(page);
-    // The code was already written and the language is the guess: typing over
-    // the selection is the one gesture that fixes it.
+    // The code was already written and the language is a guess about it, so
+    // the wrap leaves the language selected. Typing replaces it.
     await page.keyboard.type("sql");
     await expect(page.locator(".cm-line", { hasText: "```sql" })).toHaveCount(1);
     await expect(page.locator(".cm-line", { hasText: "SELECT 1" })).toHaveCount(1);
@@ -1574,16 +1558,15 @@ test.describe("making a code block without typing a backtick", () => {
 
 // --- the block's own chrome, for a finger ------------------------------------
 //
-// Every runnable fence carries the pair that runs and copies it, and on a
-// pointer client the pair is hover-revealed: `opacity: 0` until the pointer or
-// the caret is in the block. A phone has neither half of that. What it had
-// instead was two taps — one in the block to light the ▶, one on the ▶ — and a
-// 22-point target with its neighbour one pixel away.
+// Every runnable fence carries a pair of controls that run and copy it. A
+// pointer client reveals them on hover: `opacity: 0` until the pointer or the
+// caret is in the block. A phone has neither, so it spent one tap lighting the
+// ▶ and a second pressing a 22-point target with its neighbour one pixel away.
 //
-// So on touch the controls are always lit and 44 points, and the card grows a
-// lane at its top to hold them. The one control that goes the other way is the
-// frontmatter profile chip: it is absent, because its verb is in the palette
-// and is note-scoped, which the ▶'s is not (interactions.md §1a).
+// On touch the controls are always lit and 44 points, and the card grows a lane
+// at its top to hold them. The frontmatter profile chip goes the other way and
+// is absent: its verb is in the palette and note-scoped, which the ▶'s is not
+// (interactions.md §1a).
 test.describe("running a block by finger", () => {
   const palette = async (page: Page, query: string) => {
     await page.getByRole("button", { name: /Go to Note/ }).tap();
@@ -1595,8 +1578,8 @@ test.describe("running a block by finger", () => {
     await expect(page.getByRole("button", { name: /Toggle Sidebar/ })).toBeVisible();
   });
 
-  // A note whose caret ends up AFTER the block, which is the state a pointer
-  // client draws no controls in: the block is neither hovered nor holding it.
+  // A note whose caret ends up after the block. A pointer client draws no
+  // controls in that state: the block is neither hovered nor holding the caret.
   async function noteWithBlock(page: Page): Promise<void> {
     await page.keyboard.press("Meta+n");
     await expect(page.locator(".cm-line").first()).toHaveText("# Untitled");
@@ -1608,10 +1591,10 @@ test.describe("running a block by finger", () => {
   test("one tap runs it, with no tap to summon the button first", async ({ page }) => {
     await noteWithBlock(page);
     // Lit without being asked. The class the pointer toggles is still toggled
-    // here — WebKit sends a synthetic mousemove ahead of every tap — but it
-    // decides nothing on this client, which is the point: nothing about the
-    // rendering changes when that mousemove arrives, so WebKit does not
-    // withhold the click behind it (interactions.md §1a).
+    // here, since WebKit sends a synthetic mousemove ahead of every tap, but it
+    // decides nothing on this client. The rendering does not change when that
+    // mousemove arrives, so WebKit does not withhold the click behind it
+    // (interactions.md §1a).
     await expect(page.locator(".ledge-ctl-group")).toHaveCSS("opacity", "1");
 
     await page.locator('[data-act="run"]').tap();
@@ -1631,10 +1614,10 @@ test.describe("running a block by finger", () => {
     }
     expect(copy.x - (run.x + run.width)).toBeGreaterThanOrEqual(8);
 
-    // The card grew a lane for them rather than the group growing over the
-    // code: 22 more points of top padding, which is exactly what the group
-    // gained, and the group lifted by the same 22. So it still ends where the
-    // small one did, at the opening fence.
+    // The card grew a lane rather than the group growing over the code. The
+    // group is 22 points taller, the card's top padding is 22 points deeper,
+    // and a -22 margin lifts the group by the same amount (index.css). So the
+    // group still ends where the small one did, at the opening fence.
     const groupEl = page.locator(".ledge-ctl-group");
     const group = (await groupEl.boundingBox())!;
     const card = (await page.locator(".cm-line.ledge-code-top").boundingBox())!;
@@ -1642,10 +1625,11 @@ test.describe("running a block by finger", () => {
     expect(group.y).toBeGreaterThanOrEqual(card.y);
     expect(group.y + group.height).toBeLessThanOrEqual(code.y + 4);
 
-    // And the box a pointer client draws around the pair is not drawn around
-    // this one. It is there to separate two small glyphs from the code they
-    // float over; here the lane above does that, and the same fill and border
-    // around 44-point buttons is a 50-point empty panel with a speck in it.
+    // Transparent, not removed: the padding and border still place the glyph
+    // column, and only the paint is dropped (interactions.md §1a). On a pointer
+    // client the fill and border separate two small glyphs from the code they
+    // float over. Here the lane above does that, and the same box around
+    // 44-point buttons would be a 50-point empty panel with a speck in it.
     await expect(groupEl).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
     await expect(groupEl).toHaveCSS("border-top-color", "rgba(0, 0, 0, 0)");
   });
@@ -1675,9 +1659,10 @@ test.describe("running a block by finger", () => {
     // lands on it, and this one sits in the middle of editable text.
     await expect(page.locator('.ledge-ctl-group[data-block="fm"]')).toBeHidden();
 
-    // Both of its desktop paths are a pointer's — the chip, and ⌘-clicking the
-    // name — so the palette is the whole of this verb here. It is note-scoped,
-    // which is why that is no loss: nothing has to be pointed at first.
+    // Both of the chip's desktop paths are a pointer's (the chip itself, and
+    // ⌘-clicking the name), so the palette is the whole of this verb here.
+    // Nothing is left behind: the command is note-scoped, so it needs nothing
+    // pointed at first (interactions.md §1a).
     await palette(page, "edit note profile");
     const overlay = page.locator("div.fixed.inset-0.z-50");
     await expect(overlay.getByText("Edit Note Profile…", { exact: true })).toHaveCount(1);
@@ -1688,22 +1673,20 @@ test.describe("running a block by finger", () => {
 
 // --- every target, measured (interactions.md §1a) ----------------------------
 //
-// The rule is "a control a finger chooses BETWEEN is at least 44 points", and
-// the specs above assert it one named control at a time — the fence's ▶, the
-// run panel's Back to note. Naming them is how the app ended up with a 38-point
-// header of 25-point buttons, a 13-point Trash disclosure and a 21-point
-// machine switcher: nobody wrote a spec for the control they did not think of.
+// The rule is that controls a finger chooses between are at least 44 points.
+// The specs above assert it one named control at a time: the fence's ▶, the
+// run panel's Back to note. Naming controls one at a time leaves out the one
+// nobody thought of.
 //
-// So this one names nothing. It walks the states a phone can reach, asks the
-// DOM for every interactive element in each, and fails on any that is under 44
-// in either direction. A control added at 25 points fails here without anyone
-// having to remember it exists, which is the whole difference between a spec
-// that measures and a spec that remembers.
+// These specs name nothing. Each walks the states a phone can reach, asks the
+// DOM for every interactive element in each state, and fails on any element
+// under 44 points in either direction. A control added later at 25 points
+// fails here without anyone having to remember it exists.
 test.describe("every target a finger chooses between", () => {
   // Interactive by the browser's reckoning, plus the two kinds this app makes
-  // out of divs: a tab and a row. `[tabindex="-1"]` is excluded because it is
-  // how a roving list parks the rows it is NOT on — they are still tap targets,
-  // and they match `[data-target-kind]` above, so nothing is lost.
+  // out of divs: a tab and a row. `[tabindex="-1"]` is excluded because that is
+  // how a roving list parks the rows it is not on. Those rows are still tap
+  // targets, and they match `[data-target-kind]` above, so nothing is lost.
   const SWEEP = `(() => {
     const sel = [
       'button', '[role=menuitem]', '[role=option]', '[role=button]', 'a[href]',
@@ -1747,12 +1730,13 @@ test.describe("every target a finger chooses between", () => {
   });
 
   test("the chrome, the tree and the strip", async ({ page }) => {
-    // The header at rest: seven lit buttons that do seven unrelated things,
-    // and the densest row of adjacent alternatives in the app.
+    // The header at rest: six lit buttons that do six unrelated things, this
+    // client having no terminal drawer and so no terminal button (App.tsx,
+    // lib/shell.ts). It is the densest row of adjacent alternatives in the app.
     expect(await sweep(page)).toEqual([]);
 
     await openSidebar(page);
-    // The drawer is a phone's ONLY way to another note, so its rows, the
+    // The drawer is a phone's only way to another note, so its rows, the
     // machine switcher above them and the Trash disclosure below all count.
     expect(await sweep(page)).toEqual([]);
 
@@ -1782,9 +1766,9 @@ test.describe("every target a finger chooses between", () => {
     expect(await sweep(page)).toEqual([]);
     await page.keyboard.press("Escape");
 
-    // Rename is where a row stops being a row and becomes a text field, and
-    // the field is the only thing in the app that grows its own row to obey
-    // the rule (components/RenameField.tsx).
+    // Rename replaces the row with a text field. The field is the only thing
+    // in the app that grows its own row to reach 44 points
+    // (components/RenameField.tsx).
     await pressAndHold(page.locator('[data-target-kind="workspace"]').first());
     await page
       .getByRole("menu")
@@ -1814,10 +1798,10 @@ test.describe("every target a finger chooses between", () => {
 
   test("the boot screen's way out, which is on screen before the app is", async ({ page }) => {
     // The one control that exists before there is a React tree to put it in
-    // (mainview/lib/booting.ts), and so the one the `touch:` variant cannot
-    // reach: it has no class list for Tailwind to compile a rule onto, and its
-    // 44 points are written out in index.css. Which is exactly why it is swept
-    // here rather than trusted — a hand-written rule is the kind that drifts.
+    // (mainview/lib/booting.ts). The `touch:` variant cannot reach it: it has
+    // no class list for Tailwind to compile a rule onto, so its 44 points are
+    // written out by hand in index.css. The sweep measures that rule rather
+    // than trusting it.
     await page.goto("/harness.html?shell=ios&booting=9000&bootingTo=dan%40vps");
     await expect(page.locator(".ledge-booting-cancel")).toBeVisible({ timeout: 8000 });
     expect(await sweep(page)).toEqual([]);
@@ -1826,8 +1810,8 @@ test.describe("every target a finger chooses between", () => {
   test("the find panel, which no `touch:` rule reaches", async ({ page }) => {
     // The one surface in the app that Tailwind does not style: CodeMirror's
     // panel slot, filled by editor/find.ts and sized by a JS style object
-    // (editor/setup.ts). The sweep does not care where a rule comes from, which
-    // is the point of sweeping the rendered boxes instead of the sources.
+    // (editor/setup.ts). The sweep measures rendered boxes rather than sources,
+    // so it does not care where a rule comes from.
     await page.getByRole("button", { name: /Go to Note/ }).tap();
     await page.keyboard.type(">find and replace");
     await page.keyboard.press("Enter");
@@ -1842,7 +1826,7 @@ test.describe("every target a finger chooses between", () => {
     await openSidebar(page);
     await page.locator("[data-connection]").tap();
     await expect(page.getByRole("dialog", { name: "Connections" })).toBeVisible();
-    // Three adjacent alternatives per row — switch, edit, remove — and the
+    // Three adjacent alternatives per row (switch, edit, remove), and the
     // third is destructive (§4-1).
     expect(await sweep(page)).toEqual([]);
   });
@@ -1859,18 +1843,13 @@ test.describe("every target a finger chooses between", () => {
 
 // --- the stacking ladder (index.css) -----------------------------------------
 //
-// A block's controls are drawn in a layer parented to <body> rather than to the
-// pane whose editor they cover, so their z-index competes with the whole app's
-// instead of with the note's. They sat at 100, above every dialog, drawer and
-// menu the app can put on screen. On a pointer client that was a ▶ painted over
-// an open dialog and nothing worse. Here the same buttons are 44 points square
-// and take pointer events, so a tap aimed at the dialog ran the block behind it.
+// A block's controls are drawn in a layer parented to <body> rather than to
+// the pane whose editor they cover, so their z-index competes with the app's
+// dialogs, drawers and menus instead of with the note's. On touch those
+// buttons are 44 points square and take pointer events, so a layer left above
+// the dialogs turns a tap aimed at a dialog into a run of the block behind it.
 //
-// What these assert is what a tap lands on, not what the stylesheet says. A
-// spec that read the two z-indexes back and compared them would still pass the
-// day a third layer arrives between them, and these two are declared in a
-// different file from the rest of the ladder, so declaration order is not
-// evidence either.
+// These specs assert what a tap lands on, not what the stylesheet says.
 test.describe("what covers the note covers its block controls", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/harness.html?shell=ios");
@@ -1885,12 +1864,11 @@ test.describe("what covers the note covers its block controls", () => {
     await expect(page.locator(".ledge-hotspot")).toHaveCount(1);
   });
 
-  // Everything in the two body-parented layers that still takes its own taps:
-  // the block's buttons, and the invisible hotspot a rendered link is clicked
-  // through. Both layers pass pointer events except at those, and both were
-  // above the modal layer. elementFromPoint at the middle asks what WebKit asks
-  // when a finger lands there, which is the question the bug was about, and it
-  // honours `pointer-events`, so the layers themselves stay transparent to it.
+  // Everything in the two body-parented layers that takes its own taps: the
+  // block's buttons, and the invisible hotspot a rendered link is clicked
+  // through. Both layers were above the modal layer, and both pass pointer
+  // events except at those children. elementFromPoint at a box's middle asks
+  // what WebKit asks when a finger lands there, and it honours `pointer-events`.
   const takingTaps = (page: Page) =>
     page.evaluate(`(() => {
       const taken = [];
@@ -1905,10 +1883,10 @@ test.describe("what covers the note covers its block controls", () => {
     })()`);
 
   test("with nothing over the note, they take their own taps", async ({ page }) => {
-    // The control for the three below. A probe that found nothing — wrong
-    // selector, controls not drawn yet, a layer that had gone — would pass
-    // every "covered" assertion without the ladder existing at all.
-    // ▶ and Copy (no terminal drawer on this client), and the link's hotspot.
+    // The control for the three specs below. A probe that found nothing (wrong
+    // selector, controls not drawn yet, a layer that had gone) would pass every
+    // "covered" assertion whether or not the ladder existed. The three are ▶
+    // and Copy (no terminal drawer on this client) and the link's hotspot.
     expect(await takingTaps(page)).toHaveLength(3);
   });
 

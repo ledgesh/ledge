@@ -1,15 +1,16 @@
-// App-level chrome: the three overlay modes (⌘P notes, ⇧⌘P commands, ⌥⌘P
-// full-text search, `>`/`#` to cross between them), ⌘⌫ as the chord form of
-// delete, Empty Trash's confirmation, and the modal-suppression rule (§6:
-// while a layer is open, the window dispatcher is silent).
+// App-level chrome: the three overlay modes (⌘P notes, ⇧⌘P commands, ⌥⌘P text
+// search, crossed with `>`/`#` or the mode chips), ⌘⌫ as the chord form of
+// delete, Empty Trash's confirmation, the settings dialog (two files, live
+// validation, byte-for-byte saves, caret, clipboard), and modal suppression:
+// while a layer is open, the window dispatcher is silent (interactions.md §6).
 import { expect, test, type Page } from "@playwright/test";
 
 const noteRow = (page: Page, title: string) =>
   page.locator('[data-target-kind="note"]', { hasText: title });
 
-// What the editor's selection says, read off the Range: WebKit's
+// Reads the editor's selected text off the Range. WebKit's
 // Selection.toString() can be empty for a selection CodeMirror set
-// programmatically, while the Range itself always knows its text.
+// programmatically, while the Range always reports the text.
 const selectedText = (page: Page) =>
   page.evaluate(() => {
     const s = window.getSelection();
@@ -45,8 +46,10 @@ test("`>` as the first character crosses from notes to commands", async ({ page 
 test("`#` searches note bodies; Enter opens the hit with the match selected", async ({ page }) => {
   await page.keyboard.press("Meta+p");
   await page.keyboard.type("#beta body");
-  // Wait for the hit row (results arrive debounced): [data-active] is the
-  // overlay's highlighted row, and nothing outside the overlay carries it.
+  // Wait for the hit row, because the results arrive debounced. [data-active]
+  // is the overlay's highlighted row. The folder and connection pickers put
+  // the attribute on every row of their own, so an unscoped locator works here
+  // only because neither picker is open.
   await expect(page.locator("[data-active]")).toContainText("beta body");
   await page.keyboard.press("Enter");
   await expect(page.locator(".cm-content").first()).toContainText("beta body");
@@ -67,12 +70,11 @@ test("⌥⌘P is the direct route to search mode, and Backspace over `#` returns
 
 // --- the three modes as three controls --------------------------------------
 //
-// The sigils were the only way across that did not need a chord, and both of
-// them are on the third plane of an iPhone keyboard (123, then #+=). The chips
-// are the crossing a client with no keys can make, and they are here as well as
-// there for a reason a Mac cares about too: the mode used to be invisible state
-// (Overlay.tsx derived it and showed nothing), and the query used to be lost at
-// every crossing.
+// The chips cross between modes on a client with no keyboard. The sigils were
+// the only chordless crossing before them, and both `>` and `#` sit on the
+// iPhone keyboard's third plane (123, then #+=): two plane switches to type
+// one character, and a third tap back to letters. The chips help on a Mac too:
+// a lit chip shows which mode is current, and crossing by chip keeps the query.
 const chip = (page: Page, name: string) =>
   page.locator("div.fixed.inset-0.z-50").getByRole("button", { name: new RegExp(`^${name}`) });
 
@@ -83,8 +85,8 @@ test("a chip crosses modes and carries the query with it", async ({ page }) => {
   const field = page.getByPlaceholder("Search inside notes");
   await expect(field).toBeVisible();
   await expect(field).toHaveValue("gam");
-  // And back, with the field still holding it — and still focused, so the next
-  // keystroke lands where the caret looks like it is.
+  // Crossing back keeps the query in the field, and keeps the field focused
+  // for the next keystroke.
   await chip(page, "Notes").click();
   await expect(page.getByPlaceholder("Search notes")).toHaveValue("gam");
   await expect(page.getByPlaceholder("Search notes")).toBeFocused();
@@ -100,8 +102,9 @@ test("a title search that matches nothing offers the text search, and Enter take
   page,
 }) => {
   await page.keyboard.press("Meta+p");
-  // A phrase no note is TITLED and one note contains: the empty state used to
-  // say "No notes match", which is true and is not where the answer was.
+  // A phrase that no note has in its title and one note has in its body.
+  // "No notes match" would be true and would not help, so the overlay
+  // replaces that message with a row offering the text search (Overlay.tsx).
   await page.keyboard.type("beta body");
   await expect(page.locator("[data-crossing]")).toContainText("Search “beta body” in note text");
   await page.keyboard.press("Enter");
@@ -112,9 +115,9 @@ test("a title search that matches nothing offers the text search, and Enter take
 });
 
 test("a search hit on an already-open note focuses its tab and reveals the line", async ({ page }) => {
-  // Open Beta first, then search for its body text: openNote must reuse the
-  // tab (no second tab on one path) and the reveal must still land, even
-  // though no fresh editor attach happens.
+  // Open Beta first, then search for its body text. openNote must reuse the
+  // tab rather than open one path twice, and the reveal must still land even
+  // though the editor is not attached afresh.
   await page.keyboard.press("Meta+p");
   await page.keyboard.type("beta");
   await page.keyboard.press("Enter");
@@ -162,8 +165,8 @@ test("⌘, opens the settings editor on the commented file; Escape closes withou
   await page.keyboard.press("Meta+,");
   const dialog = page.getByRole("dialog", { name: "Settings" });
   await expect(dialog).toBeVisible();
-  // A fresh install opens on the seeded template — the comments ARE the
-  // documentation, so their presence is the point.
+  // A fresh install opens on the seeded template. Its comments are the
+  // settings documentation, so this checks the dialog shows them.
   await expect(dialog.locator(".cm-content")).toContainText("Ledge settings");
   const before = await page.evaluate(() => window.__harness.settingsText("server"));
   await page.keyboard.press("Escape");
@@ -191,8 +194,9 @@ test("a settings edit warns live on a bad value and saves byte-for-byte", async 
 
 // Settings have two homes (remote.md §5) and the dialog has a tab per home.
 // Three things have to hold at once, and each has its own way of going wrong:
-// the tabs address different files, an untouched file is not rewritten just
-// for being looked at, and switching tabs does not throw away typing.
+// the tabs address different files, an untouched file is not rewritten for
+// being opened, and switching tabs keeps what was typed. The test below covers
+// the first and the third; the untouched-file rule is the test after it.
 test("the settings dialog edits both files, and switching tabs keeps what was typed", async ({ page }) => {
   await page.keyboard.press("Meta+,");
   const dialog = page.getByRole("dialog", { name: "Settings" });
@@ -211,8 +215,9 @@ test("the settings dialog edits both files, and switching tabs keeps what was ty
   await page.keyboard.press("Meta+a");
   await page.keyboard.type('{ "appearance": { "theme": "dark" } }');
 
-  // Back, and the unsaved edit is still there: a tab is a view onto a file,
-  // not a reload of it.
+  // The unsaved edit survives the trip to the other tab and back. Switching
+  // tabs changes which held text the editor shows, and does not re-read the
+  // file (SettingsEditor.tsx).
   await dialog.getByRole("tab", { name: "Notes machine" }).click();
   await expect(dialog.locator(".cm-content")).toContainText('"ttlDays": 5');
 
@@ -237,8 +242,8 @@ test("a tab that was only looked at is not rewritten", async ({ page }) => {
   await page.keyboard.type('{ "trash": { "ttlDays": 8 } }');
   await dialog.getByRole("button", { name: "Save" }).click();
   await expect(dialog).toHaveCount(0);
-  // Byte-for-byte, comments and all: an install that deleted the template's
-  // comments must not have them written back by a visit to the tab.
+  // Byte-for-byte, comments and all. If someone deleted the template's
+  // comments from this file, opening its tab must not write them back.
   expect(await page.evaluate(() => window.__harness.settingsText("client"))).toBe(clientBefore);
 });
 
@@ -246,8 +251,9 @@ test("settings dialog: the caret is drawn, and ⌘C/⌘X/⌘V go through the cli
   await page.keyboard.press("Meta+,");
   const dialog = page.getByRole("dialog", { name: "Settings" });
   await dialog.locator(".cm-content").click();
-  // drawSelection paints the caret (the native one is invisible on the dark
-  // surface); the element existing is what "you can see where you type" means.
+  // The dialog draws its own caret with drawSelection rather than relying on
+  // the native one, which CodeMirror's base theme styles for a light surface
+  // (SettingsEditor.tsx). The .cm-cursor element is what drawSelection draws.
   await expect(dialog.locator(".cm-cursor")).toHaveCount(1);
 
   const doc = '{ "trash": { "ttlDays": 9 } }';
@@ -256,7 +262,7 @@ test("settings dialog: the caret is drawn, and ⌘C/⌘X/⌘V go through the cli
   await page.keyboard.press("Meta+a");
   await page.keyboard.press("Meta+c");
   expect(await page.evaluate(() => window.__harness.clipboard())).toBe(doc);
-  // Cut empties the doc; paste brings it back — the full round trip.
+  // Cut empties the doc and paste brings it back, covering the round trip.
   await page.keyboard.press("Meta+x");
   await expect(dialog.locator(".cm-content")).not.toContainText("ttlDays");
   await page.keyboard.press("Meta+v");

@@ -1,16 +1,16 @@
-// The host picker (components/HostPicker.tsx): a note declaring more than one
-// `host:` must never execute a block until the user names the machine — every
-// run, deliberately, with the session's last pick merely preselected. One
-// declared host (or none) runs silently with that answer. PTYs are inert in
-// the harness; what these specs assert is the POLICY: when the picker
-// interposes, what it preselects, and which host the eventual run names.
+// The host picker (components/HostPicker.tsx, interactions.md §4a). A block
+// on a note declaring more than one `host:` does not run until the user names
+// a machine. PTYs are inert here, so these specs assert policy: when the
+// picker opens, what it preselects, and which host the run names.
 import { expect, test } from "@playwright/test";
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/harness.html");
   await expect(page.locator('[data-target-kind="note"]', { hasText: "Alpha" })).toBeVisible();
-  // A fresh scratch note is header-only; give it a ```sh block to run, then
-  // prepend frontmatter above it (the fence must open on its own line).
+  // A new note is just an H1. This replaces the whole document with one that
+  // has an ```sh block to run; typeFrontmatter below prepends the `host:`
+  // lines above it. insertText, not typed keys: a typed third backtick plants
+  // a closing fence of its own (editor/fences.ts).
   await page.keyboard.press("Meta+n");
   await expect(page.locator(".cm-line").first()).toHaveText("# Untitled");
   await page.keyboard.press("Meta+a");
@@ -32,13 +32,14 @@ test("two declared hosts: nothing runs until one is chosen; Enter takes the focu
   await page.locator(".cm-line", { hasText: "echo" }).click();
   await page.keyboard.press("Meta+Enter");
 
-  // The picker is up, and NO run was dispatched by the keypress itself.
+  // The picker is up, and the keypress itself dispatched no run.
   await expect(page.getByRole("menu")).toBeVisible();
   await expect(page.getByRole("menuitem", { name: "web1" })).toBeVisible();
   await expect(page.getByRole("menuitem", { name: "db2" })).toBeVisible();
   expect(await page.evaluate(() => window.__harness.inlineRuns())).toHaveLength(0);
 
-  // First item is focused (no prior pick), so Enter runs on it.
+  // With no prior pick this session, the first item is focused. Enter
+  // activates that row, and its pick starts the run.
   await page.keyboard.press("Enter");
   await expect(page.getByRole("menu")).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => window.__harness.inlineRuns())).toHaveLength(1);
@@ -55,12 +56,14 @@ test("the picker preselects the session's last pick; arrows move it", async ({ p
   await page.keyboard.press("Enter");
   await expect.poll(() => page.evaluate(() => window.__harness.inlineRuns())).toHaveLength(1);
 
-  // Dismiss the (forever-running: PTYs are inert here) panel so the block is
-  // free to run again — one live run per block gates re-running.
+  // The run never finishes here, because PTYs are inert, so its panel stays
+  // up. editor/blocks.ts allows one live run per block, so a second ⌘↵ on
+  // this block would start nothing. Dismissing the panel removes the run and
+  // frees the block.
   await page.getByTitle("Dismiss").click();
   await page.locator(".cm-line", { hasText: "echo" }).click();
 
-  // Second run: db2 is the preselection now — Enter alone repeats it.
+  // Second run: db2 is the preselection now, so Enter alone repeats it.
   await page.keyboard.press("Meta+Enter");
   await expect(page.getByRole("menu")).toBeVisible();
   await expect(page.getByRole("menuitem", { name: "db2" })).toBeFocused();
@@ -101,11 +104,12 @@ test("run-in-terminal on a multi-host note asks before the shell spawns, and spa
   await page.locator(".cm-line", { hasText: "echo" }).click();
   await page.keyboard.press("Meta+Shift+Enter");
 
-  // The drawer did not open yet: the spawn is what the choice gates.
+  // The picker opens first. The shell is not spawned until a host is chosen.
   await expect(page.getByRole("menu")).toBeVisible();
   await page.getByRole("menuitem", { name: "db2" }).click();
 
-  // Drawer up, attach carried the pick, and the paste went to that session.
+  // The drawer is up. The last attach names db2, so the shell was spawned on
+  // the machine that was chosen, and the paste went to that same session.
   await expect(page.locator(".xterm")).toBeVisible();
   await expect.poll(() => page.evaluate(() => window.__harness.termPastes())).toHaveLength(1);
   const { paste, attaches } = await page.evaluate(() => ({
@@ -113,6 +117,9 @@ test("run-in-terminal on a multi-host note asks before the shell spawns, and spa
     attaches: window.__harness.termAttaches(),
   }));
   expect(attaches[attaches.length - 1]).toEqual({ sessionId: paste.sessionId, host: "db2" });
-  // The badge says where the drawer's shell lives.
+  // The drawer's own title row carries a host badge naming db2 (App.tsx). It
+  // sits outside <header>, which is why the selector reaches header's
+  // siblings. `.first()` lands on the editor's `host: web1 db2` span, which
+  // comes earlier in the DOM, so this checks the note text, not the badge.
   await expect(page.locator("header ~ * span", { hasText: "db2" }).first()).toBeVisible();
 });

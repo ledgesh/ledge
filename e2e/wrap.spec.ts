@@ -1,8 +1,8 @@
-// Hanging indent (editor/wrap.ts). The column arithmetic is pure
-// (wrap.test.ts); what only real WebKit can answer is whether the decoration
-// lands where it should — the inline style composes with CodeMirror's own
-// .cm-line padding rather than replacing it, which is exactly what an inline
-// `padding-left` got wrong (list lines drew a marker's worth left of prose).
+// Hanging indent (editor/wrap.ts). The column arithmetic is pure and covered
+// by wrap.test.ts. Measuring where the decoration lands takes a layout
+// engine: the decoration's `margin-left` composes with CodeMirror's base
+// .cm-line padding instead of replacing it. An inline `padding-left` replaced
+// that padding, so list lines drew their marker left of where prose starts.
 import { expect, test, type Page } from "@playwright/test";
 
 test.beforeEach(async ({ page }) => {
@@ -12,7 +12,10 @@ test.beforeEach(async ({ page }) => {
   await page.keyboard.press("Meta+a");
 });
 
-// The x of each line's first visible glyph, in absolute pixels.
+// The x of each line's first non-whitespace glyph, in viewport pixels rounded
+// to a whole one. A line with no such glyph reports null. Rounding is safe
+// here because the test below compares two x's that should be identical, not
+// two that differ by a subpixel gap.
 const glyphLefts = (page: Page) =>
   page.evaluate(() =>
     [...document.querySelectorAll(".cm-content .cm-line")].map((line) => {
@@ -37,7 +40,9 @@ const glyphLefts = (page: Page) =>
 test("a bullet's marker starts at the same x as plain prose", async ({ page }) => {
   await page.keyboard.type("Non bulleted");
   await page.keyboard.press("Enter");
-  await page.keyboard.press("Enter"); // out of the list-continuation path
+  // A blank line between the paragraph and the bullet. glyphLefts reports
+  // null for it, the hole in the destructure below.
+  await page.keyboard.press("Enter");
   await page.keyboard.type("- bulleted");
   await page.keyboard.press("Meta+ArrowUp");
 
@@ -52,10 +57,10 @@ test("wrapped rows still hang under the content column", async ({ page }) => {
   const rows = await page.evaluate(() => {
     const content = document.querySelector(".cm-content")!;
 
-    // One column's width, averaged over ten of them. Measured as a whole
-    // hidden span: WebKit inflates the client rects of a range that starts or
-    // ends part-way through a text node by about a pixel, so slicing glyphs
-    // out of the line itself would measure ink the layout never used.
+    // One column's width, averaged over ten of them in a hidden span. WebKit
+    // inflates the client rects of a range that starts or ends part-way
+    // through a text node by about a pixel, so slicing glyphs out of the line
+    // itself would measure a width the layout never used (testing.md §5).
     const probe = document.createElement("span");
     probe.textContent = "0".repeat(10);
     probe.style.cssText = "position:absolute;visibility:hidden";
@@ -63,10 +68,10 @@ test("wrapped rows still hang under the content column", async ({ page }) => {
     const ch = probe.getBoundingClientRect().width / 10;
     probe.remove();
 
-    // The x each visual row of the line begins at. getClientRects yields one
-    // rect per row per text run — highlighting splits the marker off from the
-    // prose — so group by row and keep the leftmost, rather than taking the
-    // extremes over every run.
+    // The leftmost x of each visual row of the line. getClientRects yields one
+    // rect per row per text run, and highlighting splits the marker off from
+    // the prose, so the loop groups the rects by row and keeps the leftmost
+    // rather than reading the whole line's bounding box.
     const r = new Range();
     r.selectNodeContents(content.querySelector(".cm-line")!);
     const leftOf = new Map<number, number>();
@@ -78,16 +83,11 @@ test("wrapped rows still hang under the content column", async ({ page }) => {
     return { lefts, ch };
   });
 
-  // The line wrapped, and every row after the first sits exactly one marker
-  // ("- ", two columns) in.
-  //
-  // Compared as real numbers, to half a pixel. The two sides come from
-  // different machinery — the hang is a `2ch` margin resolved against the
-  // font, the rows' x's are glyph positions — and they agree to about a
-  // thousandth of a pixel. Rounding each to an integer first threw that
-  // agreement away: `round(x + 22.254) - round(x)` is 23, not 22, for a
-  // quarter of the subpixel positions the line can land on, so the test
-  // failed on where the editor happened to sit rather than on the rule.
+  // The line wrapped, and every row after the first hangs exactly one marker
+  // in: the two columns of "- ". The two sides come from different machinery.
+  // The hang is a `2ch` margin resolved against the font. The rows' x's are
+  // glyph positions. They agree to about a thousandth of a pixel, so the
+  // assertion compares them without rounding, to half a pixel (testing.md §5).
   expect(rows.lefts.length).toBeGreaterThan(1);
   for (const left of rows.lefts.slice(1)) {
     expect(left - rows.lefts[0]!).toBeCloseTo(2 * rows.ch, 0);

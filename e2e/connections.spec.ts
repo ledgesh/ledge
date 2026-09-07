@@ -1,12 +1,9 @@
-// Which machine you are typing into (remote.md §8).
-//
-// The failure this whole surface exists to prevent is running a command on the
-// wrong box, so the properties under test are about legibility and about
-// refusals: the name is always on screen, a connection that will not open
-// costs nothing, and the local server can never be removed out from under the
-// app. The switch itself reloads the page — everything workspace-scoped is
-// scoped to a server, and the view's boot is the rebuild — so what a spec can
-// assert is that the reload happens, not what survives it.
+// These specs cover the connection bar and its chooser: which machine the
+// notes are on (remote.md §8). The hazard is running a command on the wrong
+// machine. They check legibility and refusals: the name stays on screen, a
+// connection that will not open costs nothing, and the local server cannot be
+// removed. A successful switch reloads the page (lib/connections.ts
+// selectConnection), so no spec here takes one.
 import { expect, test, type Page } from "@playwright/test";
 
 const bar = (page: Page) => page.locator("[data-connection]");
@@ -43,15 +40,15 @@ test("the chooser lists every configured machine and marks the one in use", asyn
   await expect(options.first()).toHaveText(/This Mac/);
   await expect(options.nth(1)).toHaveText(/VPS/);
   await expect(options.nth(1)).toHaveText(/ledge@vps/);
-  // It opens on the connection in use, so Enter is "stay here" and moving
-  // somewhere else costs a deliberate arrow.
+  // The dialog opens focused on the connection in use, so Enter stays here and
+  // moving somewhere else takes an arrow key first.
   await expect(options.first()).toBeFocused();
   await expect(options.first()).toHaveAttribute("aria-selected", "true");
 });
 
-// Losing a working session to a machine that is asleep would be the worse
-// failure by far, so the refusal is the whole behavior here: the dialog stays,
-// the reason shows, and the notes on screen are untouched.
+// A machine that is asleep must not end the session already open. This checks
+// the refusal: the dialog stays open, the reason shows, and the notes on
+// screen are untouched.
 test("a machine that will not answer costs nothing", async ({ page }) => {
   await bar(page).click();
   await dialog(page).getByRole("option", { name: /VPS/ }).click();
@@ -62,9 +59,8 @@ test("a machine that will not answer costs nothing", async ({ page }) => {
   await expect(page.locator('[data-target-kind="note"]', { hasText: "Alpha" })).toBeVisible();
 });
 
-// Adding is two steps because the second one is the security of the whole
-// transport: Ledge pins a host key only after a person has read its
-// fingerprint and said it is the one they expected (remote.md §4).
+// Adding takes two steps. Ledge pins a host key only after a person has read
+// its fingerprint and confirmed it is the one they expected (remote.md §4).
 test("adding a server shows the host key's fingerprint before anything is pinned", async ({ page }) => {
   await bar(page).click();
   await dialog(page).getByRole("button", { name: "Add Server…" }).click();
@@ -73,7 +69,8 @@ test("adding a server shows the host key's fingerprint before anything is pinned
   await dialog(page).getByRole("button", { name: "Continue" }).click();
 
   await expect(dialog(page).getByText("SHA256:harness+fake+key")).toBeVisible();
-  // No "connect anyway": the only way forward says what it is agreeing to.
+  // No "connect anyway" button. The button that continues says what accepting
+  // the key means.
   await expect(dialog(page).getByRole("button", { name: "It Matches, Add" })).toBeVisible();
   await dialog(page).getByRole("button", { name: "It Matches, Add" }).click();
 
@@ -84,9 +81,9 @@ test("adding a server shows the host key's fingerprint before anything is pinned
   await expect(options.nth(2)).toHaveText(/pinned/);
 });
 
-// The password door (remote.md §4). The form's job is to ask for the secret
-// once: a stored password cannot be read back on either client, so everything
-// after the first save has to work with a field that is empty on purpose.
+// Adds a server on the password door (remote.md §4). The form asks for the
+// password once. A stored password cannot be read back on either client, so
+// every edit after the first save works with an empty field.
 async function addWithPassword(page: Page, name = "Box") {
   await dialog(page).getByRole("button", { name: "Add Server…" }).click();
   await dialog(page).getByLabel("Name").fill(name);
@@ -103,13 +100,13 @@ test("a server can be added with a password instead of a key", async ({ page }) 
   await dialog(page).getByLabel("Name").fill("Box");
   await dialog(page).getByLabel("SSH destination").fill("ledge@box");
 
-  // One door's field at a time: no key is offered on a password connection, so
-  // asking for a path would be asking for something with no effect.
+  // One door's fields at a time. A password connection uses no key, so the key
+  // path field is hidden rather than asking for something with no effect.
   await expect(dialog(page).getByLabel("Key (optional)")).toBeVisible();
   await dialog(page).getByRole("radio", { name: "A password" }).check();
   await expect(dialog(page).getByLabel("Key (optional)")).toBeHidden();
 
-  // Nothing to go on with until there is one, since a new connection has
+  // Continue stays disabled until a password is typed. A new connection has
   // nothing stored to fall back to.
   await expect(dialog(page).getByRole("button", { name: "Continue" })).toBeDisabled();
   await dialog(page).getByLabel("Password", { exact: true }).fill("hunter2");
@@ -123,12 +120,14 @@ test("a server can be added with a password instead of a key", async ({ page }) 
   const options = dialog(page).getByRole("option");
   await expect(options).toHaveCount(3);
   await expect(options.nth(2)).toHaveText(/Box/);
-  // Which door, on the row: it is otherwise invisible until a dial fails.
+  // The row names the password door. A password connection whose stored secret
+  // is gone looks like a key connection until it is dialled
+  // (ConnectionPicker.tsx).
   await expect(options.nth(2)).toHaveText(/password/);
 });
 
-// Typed once. The field comes back empty and says what empty means, because
-// the alternative is a form that cannot tell "leave it alone" from "erase it".
+// The password is typed once. The field comes back empty, and its label says
+// that blank keeps the stored password (ConnectionPicker.tsx typedPassword).
 test("editing a password server does not ask for the password again", async ({ page }) => {
   await bar(page).click();
   await addWithPassword(page);
@@ -144,8 +143,8 @@ test("editing a password server does not ask for the password again", async ({ p
   await expect(options.nth(2)).toHaveText(/password/);
 });
 
-// A connection that has never had one has nothing to keep, so the blank field
-// is not an answer here and the form says so by refusing to save.
+// A connection moved onto the password door has no stored password to keep, so
+// a blank field is not an answer here and Save stays disabled.
 test("moving a server onto the password door has to be given a password", async ({ page }) => {
   await bar(page).click();
   await dialog(page).getByRole("button", { name: "Edit VPS" }).click();
@@ -157,8 +156,8 @@ test("moving a server onto the password door has to be given a password", async 
   await expect(dialog(page).getByRole("option").nth(1)).toHaveText(/password/);
 });
 
-// A rename touches nothing about how the connection is made, so it saves in
-// one step and the pin it already has stays its own.
+// A rename changes nothing about how the connection is made, so it saves in
+// one step and keeps the pin it already has.
 test("a server can be renamed without being asked about its key again", async ({ page }) => {
   await bar(page).click();
   await dialog(page).getByRole("button", { name: "Edit VPS" }).click();
@@ -173,8 +172,8 @@ test("a server can be renamed without being asked about its key again", async ({
 });
 
 // A pin is a claim about one machine, so an address that moved to another one
-// asks the same question adding did. The button says which of the two this is
-// before it is pressed.
+// asks the same question adding did. The button reads Continue when the pin has
+// to be taken again, and Save when it does not.
 test("re-addressing a server onto another host asks for its fingerprint", async ({ page }) => {
   await bar(page).click();
   await dialog(page).getByRole("button", { name: "Edit VPS" }).click();
@@ -191,9 +190,10 @@ test("re-addressing a server onto another host asks for its fingerprint", async 
   await expect(dialog(page).getByRole("option").nth(1)).toHaveText(/ledge@frankfurt/);
 });
 
-// The port is its own field, not part of the address, and it is part of what
-// gets pinned: known_hosts indexes a non-default port as `[host]:port`
-// (shared/connections.ts).
+// The port is a field of its own, not part of the address. A non-default port
+// gets its own known_hosts entry, `[host]:port` (shared/connections.ts
+// knownHostsHost), so it travels into the pin. This spec checks only that the
+// port is accepted and the server is added; nothing here reads the pin back.
 test("a port is a field of its own, and it travels into the pin", async ({ page }) => {
   await bar(page).click();
   await dialog(page).getByRole("button", { name: "Add Server…" }).click();
@@ -250,8 +250,11 @@ test("a host that does not answer is a sentence, not a spinner", async ({ page }
   await expect(dialog(page).getByRole("button", { name: "It Matches, Add" })).toHaveCount(0);
 });
 
-// ⌫ on a focused row, the same remove verb the workspace strip uses — and the
-// same refusal shape: the app must always have somewhere to work from.
+// ⌫ on a focused row, the same remove verb the workspace strip uses. The local
+// row has no such verb at all: its onKeyDown returns on `local`, and neither
+// row button is rendered (ConnectionPicker.tsx). interactions.md §4-1 counts
+// the local server among the three refusals that keep the app somewhere it can
+// work from.
 test("⌫ removes a configured server, and the local one has no such verb", async ({ page }) => {
   await bar(page).click();
   const options = dialog(page).getByRole("option");
@@ -268,8 +271,8 @@ test("⌫ removes a configured server, and the local one has no such verb", asyn
 });
 
 // The row verb has no touch form (interactions.md §1a), so the same two verbs
-// are controls on the row — present at rest rather than revealed by a hover a
-// phone cannot perform.
+// are also buttons on the row. They are drawn at rest rather than revealed by
+// a hover, which a phone cannot perform.
 test("a server is removable without a keyboard", async ({ page }) => {
   await bar(page).click();
   const options = dialog(page).getByRole("option");
@@ -278,9 +281,9 @@ test("a server is removable without a keyboard", async ({ page }) => {
   await expect(options.first()).toHaveText(/This Mac/);
 });
 
-// A wire that dropped (remote.md §7). The name in the bar is still the right
-// machine; what changed is whether it can be reached, and an app that keeps
-// taking keystrokes for a server it cannot reach looks like it is working.
+// A wire that dropped (remote.md §7). The bar still names the right machine.
+// Only whether it can be reached has changed. An app that keeps taking
+// keystrokes for a server it cannot reach looks like it is working.
 test("a dropped connection says so, and says so again when it comes back", async ({ page }) => {
   await expect(bar(page)).toHaveAttribute("data-link", "live");
   await expect(bar(page)).not.toHaveText(/reconnecting/);
@@ -303,15 +306,10 @@ test("a connection that will not come back is disconnected, not reconnecting", a
   await expect(bar(page)).toHaveAttribute("title", /host is down/);
 });
 
-// The bar has two verbs under it and the link decides which one the wide half
-// is. Switching machines is the everyday one and the wrong one to lead with at
-// the moment the machine you are on cannot be reached: the switch reloads the
-// page, so it is refused outright while anything is unsaved, and a chooser that
-// opens only to say no would be the app's entire visible answer to being
-// disconnected.
-//
-// The app dials on its own either way (remote.md §7), so this is never the only
-// way back. It is for the person who can see their wifi return.
+// The bar's wide button is Reconnect while the machine cannot be reached, and
+// Switch while it can (interactions.md §4-1). After a goodbye the server did
+// not expect to take back, nothing dials on its own and the press is the only
+// thing that will (shared/transport.ts give).
 test("the bar reconnects while the link is down, and switches while it is up", async ({ page }) => {
   await bar(page).click();
   await expect(dialog(page)).toBeVisible();
@@ -323,17 +321,17 @@ test("the bar reconnects while the link is down, and switches while it is up", a
   await bar(page).click();
   await expect(dialog(page)).toHaveCount(0);
   expect(await page.evaluate(() => window.__harness.reconnects())).toBe(1);
-  // A press with nothing to await must still answer for itself: the dial's
-  // outcome arrives later as a link state, and without this the button reads as
-  // dead every time the server is still unreachable.
+  // The press shows a notice because nothing waits on the dial: its outcome
+  // arrives later as a link state. Without the notice the button reads as dead
+  // every time the server is still unreachable.
   await expect(page.getByText(/Trying to reach This Mac/)).toBeVisible();
 });
 
-// The other half of that split. Leading with Reconnect is not the same as
-// removing the switcher, and it used to be: one button, one verb, so a window
-// on a server that had not come back could neither reconnect nor leave, and the
-// only route to the chooser was a palette entry nobody looks for while staring
-// at a bar that says "disconnected".
+// Reconnect takes the wide half, and the switcher stays beside it as the
+// narrow half (ConnectionBar.tsx). It did not, once: one button held one verb,
+// so a window that could not reconnect could not leave either, and the only
+// route to the chooser was the palette and the File menu (interactions.md
+// §4-1).
 test("and the switcher is still reachable from the bar while the link is down", async ({ page }) => {
   await expect(switcher(page)).toHaveCount(0);
 
@@ -348,8 +346,8 @@ test("and the switcher is still reachable from the bar while the link is down", 
   await expect(switcher(page)).toHaveCount(0);
 });
 
-// And it is offered nowhere while the link is fine. A "Reconnect" that is
-// present and inert on a working connection teaches nobody anything
+// Reconnect is offered nowhere while the link is fine. A Reconnect that is
+// present and inert on a working connection teaches nothing
 // (interactions.md §8).
 test("reconnect is absent from the palette until there is something to reconnect", async ({ page }) => {
   await page.keyboard.press("Shift+Meta+p");
@@ -363,20 +361,19 @@ test("reconnect is absent from the palette until there is something to reconnect
   await expect(page.getByText("Reconnect", { exact: true })).toBeVisible();
 });
 
-// Who else is on the machine (remote.md §7). It is in this bar because it is
-// the same question one step further in — which machine, whether it can be
-// reached, and who else is on it — and because the device named here is the one
-// that can take a shell out from under you.
+// Who else is on the machine (remote.md §7), the bar's third question after
+// which machine and whether it can be reached. Any device on that list can
+// take a note's shell from this one (interactions.md §4-2).
 test("the bar names the other device on the server, and stops when it leaves", async ({ page }) => {
-  // Nothing at all while you are alone, which is nearly always: a strip that
-  // said "1 device" every time you opened the app would be noise in the one
-  // place that has to stay readable at a glance.
+  // Nothing is drawn while nobody else is connected, which is nearly always.
+  // "1 device" on every launch would be noise in a strip that has to stay
+  // readable at a glance.
   await expect(bar(page).locator("[data-presence]")).toHaveCount(0);
 
   await page.evaluate(() => window.__harness.presence([{ client: "phone-1", label: "iPhone" }]));
   await expect(bar(page).locator("[data-presence]")).toHaveText("iPhone");
   await expect(bar(page).locator("[data-presence]")).toHaveAttribute("title", /Also on this server: iPhone/);
-  // Still the machine it always was: company is not a switch.
+  // Another device arriving does not change which machine the notes are on.
   await expect(bar(page)).toHaveText(/This Mac/);
 
   await page.evaluate(() => window.__harness.presence([]));
@@ -388,8 +385,9 @@ test("past one other device the bar counts, and the names are a hover away", asy
     window.__harness.presence([
       { client: "phone-1", label: "iPhone" },
       { client: "mac-2", label: "Studio" },
-      // A client that gave no name is still company: a script on the wire, or a
-      // shell pumping frames. It is counted, and named as best it can be.
+      // A shell with no name to give sends an empty label (shared/wire.ts). It
+      // still counts toward the number, and shows in the hover list as "an
+      // unnamed device" rather than being left out.
       { client: "script-1", label: "" },
     ]),
   );
@@ -398,9 +396,9 @@ test("past one other device the bar counts, and the names are a hover away", asy
 });
 
 // A wire that is down cannot report who else is up. Keeping the last list would
-// mean naming a device that may have left while we were not connected to hear
-// it; the server announces to everybody on the next arrival, which is this
-// client's own reconnect.
+// name a device that may have left while this client was disconnected. The list
+// comes back on the next reconnect. A reconnect is an arrival, and a server
+// announces presence on every arrival (remote.md §7).
 test("a dropped connection stops claiming to know who else is here", async ({ page }) => {
   await page.evaluate(() => window.__harness.presence([{ client: "phone-1", label: "iPhone" }]));
   await expect(bar(page).locator("[data-presence]")).toHaveText("iPhone");
@@ -410,9 +408,9 @@ test("a dropped connection stops claiming to know who else is here", async ({ pa
 });
 
 // New Window (remote.md §8a). The second window is another client in another
-// webview, so nothing about it is visible from inside this page: what a spec
-// can assert is that the verb is offered, that it asks the shell, and that
-// asking twice asks twice — the rest belongs to the live probe (testing.md §6).
+// webview, so nothing about it is visible from inside this page. A spec can
+// assert only that the verb is offered, that it asks the shell, and that asking
+// twice asks twice. The rest belongs to the live probe (testing.md §6).
 test("New Window asks the shell, once per invocation", async ({ page }) => {
   expect(await page.evaluate(() => window.__harness.windowOpens())).toBe(0);
 
@@ -437,9 +435,9 @@ test("New Window takes no chord", async ({ page }) => {
 });
 
 // A phone shows one app at a time, so the verb is absent rather than present
-// and silent (ios.md §4, lib/shell.ts multiWindow). Both halves in one case:
-// the desktop assertion is what stops the phone one from passing because the
-// palette never had the row under any shell.
+// and silent (ios.md §11, lib/shell.ts multiWindow). The desktop half is
+// asserted in the same test: a palette missing New Window under every shell
+// would satisfy the ios assertion on its own.
 test("a shell with one window does not offer it, and one with two does", async ({ page }) => {
   await page.keyboard.press("Meta+Shift+p");
   await page.keyboard.type("New Window");
@@ -452,15 +450,12 @@ test("a shell with one window does not offer it, and one with two does", async (
   await expect(page.getByText("New Window")).toHaveCount(0);
 });
 
-// The freeze this dialog used to have, from both doors onto it.
-//
-// A refusal and a rejection are different failures: Bun answering "no" is a
-// sentence, and Bun not answering at all — outliving the view's
-// maxRequestTime, or dying — is a thrown thing. Every action here sets `busy`
-// before it asks and used to clear it only on the way back from an answer, so
-// a rejection left the flag set forever. That disabled every control in the
-// dialog AND the guard at the top of switchTo, which swallows further clicks
-// without a trace: from the outside, an app that hung on this window.
+// This dialog used to freeze, and two things could freeze it: the form's
+// Continue button, and a click on a row. An RPC can refuse with a sentence or
+// reject, and a rejection is Bun taking longer than the view's maxRequestTime
+// or dying. Every action sets `busy` before it asks and used to clear it only
+// on an answer, so a rejection left `busy` set: every control here disabled,
+// and the guard at the top of switchTo dropping clicks without a trace.
 test("a request that never comes back is a sentence too, and the dialog stays usable", async ({ page }) => {
   await bar(page).click();
   await dialog(page).getByRole("button", { name: "Add Server…" }).click();
@@ -468,8 +463,8 @@ test("a request that never comes back is a sentence too, and the dialog stays us
   await dialog(page).getByLabel("SSH destination").fill("ledge@wedged");
   await dialog(page).getByRole("button", { name: "Continue" }).click();
   await expect(dialog(page).getByText(/RPC request timed out/)).toBeVisible();
-  // The whole claim: the button that started it is live again, so this is
-  // recoverable by the person looking at it rather than by relaunching.
+  // The button that started it is enabled again, so the dialog recovers where
+  // it stands rather than by relaunching the app.
   await expect(dialog(page).getByRole("button", { name: "Continue" })).toBeEnabled();
 });
 
@@ -485,9 +480,9 @@ test("a switch whose answer never arrives leaves the list clickable", async ({ p
   await row.click();
   await expect(dialog(page).getByText(/RPC request timed out/)).toBeVisible();
   await expect(row).toBeEnabled();
-  // And the guard clears with it: a second click is dispatched rather than
-  // dropped, which is what "usable" has to mean for a row whose whole verb is
-  // being clicked.
+  // The guard at the top of switchTo clears with `busy`, so a second click is
+  // dispatched rather than dropped. Clicking is the row's only verb, so an
+  // enabled row that swallowed clicks would still be stuck.
   await row.click();
   await expect(dialog(page).getByText(/RPC request timed out/)).toBeVisible();
 });

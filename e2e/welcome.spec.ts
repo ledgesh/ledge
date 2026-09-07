@@ -1,15 +1,13 @@
-// A fresh start opens the welcome note, and the welcome note runs.
-//
-// A first launch on a Mac and a first connection to a server with no notes
-// yet both boot with nothing to open, and what opens instead is the seeded
-// welcome note (workspace/seeds.ts). The manual's own blocks are marked
-// `norun` (fences.spec.ts, docs.spec.ts), so this note is the one place a new
-// user is invited to press Run: every block in it must wear the pair, and
-// pressing it must reach the shell.
+// A fresh start opens the welcome note, and every block in it draws a run
+// pair. The welcome note fills the first tab when there is nothing else to
+// open: a first launch on a Mac, or a first connection to a server with no
+// notes (workspace/seeds.ts). The manual marks every runnable-language
+// fence `norun` (bun/docsContent.test.ts). This note leaves its fences live.
 import { expect, test } from "@playwright/test";
 
-// Tall enough to hold the whole note: CodeMirror renders only the viewport,
-// and a block scrolled off the bottom has no buttons in the DOM to count.
+// The viewport is tall enough to hold the whole note. CodeMirror renders only
+// what is in view, so a block scrolled off the bottom has no buttons in the
+// DOM to count.
 test.use({ viewport: { width: 1200, height: 1800 } });
 
 test("a fresh start opens the welcome note with every block runnable", async ({ page }) => {
@@ -17,11 +15,14 @@ test("a fresh start opens the welcome note with every block runnable", async ({ 
   await expect(page.locator(".cm-line").first()).toHaveText("# Welcome to Ledge");
   await expect(page.locator("[data-tab]", { hasText: "Welcome to Ledge" })).toBeVisible();
 
-  // Four fences, four run pairs: nothing in the note is marked norun.
+  // Each of the note's four fences draws a Run button and a Terminal button.
+  // None of them is marked `norun`.
   await expect(page.locator('[data-act="run"]')).toHaveCount(4);
   await expect(page.locator('[data-act="term"]')).toHaveCount(4);
 
-  // The first block, run by the chord from inside it, reaches the shell.
+  // ⌘↩ runs the block holding the caret, so the click lands the caret in the
+  // first fence. The harness has no PTY, so `inlineRuns` records that the view
+  // asked for a run, not that a shell received it (harness.tsx, testing.md §6).
   await page.locator(".cm-line", { hasText: "api.github.com/zen" }).click();
   await page.keyboard.press("Meta+Enter");
   await expect.poll(() => page.evaluate(() => window.__harness.inlineRuns().length)).toBe(1);

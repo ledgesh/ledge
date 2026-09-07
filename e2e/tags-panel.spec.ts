@@ -1,11 +1,8 @@
-// The Tags panel (workspace/TagsPanel.tsx): ⌥⌘T toggles the right panel's
-// third face, typed #tags and frontmatter tags: lines merge into one
-// directory with per-note counts, a directory row drills into occurrences,
-// and opening one lands in the bearing note AT the tag — backlink.open's
-// open-at-the-place with a tag target. The overlay's #-query surfaces the
-// same tags above its text hits and routes into the same drill-in. Run in
-// real WebKit because panel focus, row focus, and the reveal are exactly
-// what unit tests cannot see (testing.md §5).
+// The Tags panel (workspace/TagsPanel.tsx) and the overlay's #-query, which
+// routes into the same drill-in. Opening an occurrence runs tag.openNote,
+// which is backlink.open's body with a tag target: it lands in the bearing
+// note at the tag. Runs in real WebKit because unit tests cannot see row
+// focus, the reveal, or where focus lands afterwards (testing.md §5).
 import { expect, test, type Page } from "@playwright/test";
 
 const noteRow = (page: Page, title: string) =>
@@ -17,8 +14,10 @@ const hitRow = (page: Page, title: string) =>
 const panel = (page: Page) => page.locator("aside", { hasText: "Tags" });
 const drilled = (page: Page, tag: string) => page.locator("aside", { hasText: `#${tag}` });
 
-// A note carrying #ledge twice, created through the editor like a person
-// would — two occurrences, ONE bearing note for the directory's count.
+// Creates a note carrying #ledge twice, typed through the editor the way a
+// person would rather than seeded into the harness store, so the tag scan
+// reads what the editor path wrote. Two occurrences in one note, so the
+// directory counts it once.
 async function createTagged(page: Page): Promise<void> {
   await page.keyboard.press("Meta+n");
   await page.keyboard.press("Meta+a");
@@ -36,16 +35,19 @@ test("⌥⌘T toggles the panel; a tagless workspace shows the empty state", asy
   await expect(panel(page)).toBeVisible();
   await expect(panel(page)).toContainText("No tags yet");
 
-  // Toggle is a toggle, from the same key.
+  // The same key closes it.
   await page.keyboard.press("Alt+Meta+t");
   await expect(panel(page)).toHaveCount(0);
 });
 
 test("typed and frontmatter tags merge; counts are notes, not occurrences", async ({ page }) => {
   await createTagged(page);
-  // A second bearer, declared in frontmatter — the other tag source.
+  // A second bearer, declaring the tag in frontmatter rather than in the body.
   await page.keyboard.press("Meta+n");
-  await page.keyboard.press("Meta+ArrowUp"); // the caret opens IN the title; this note is typed from the top
+  // A new note opens with the caret in its seeded "# Untitled" heading. ⌘↑
+  // moves it to the very start of the document, ahead of the "# ", because a
+  // frontmatter block counts only when it opens the file.
+  await page.keyboard.press("Meta+ArrowUp");
   for (const line of ["---", "tags: ledge", "---", "# Front", "", "body"]) {
     await page.keyboard.type(line);
     await page.keyboard.press("Enter");
@@ -65,16 +67,16 @@ test("a directory row drills into occurrences; opening one reveals the line", as
   await page.keyboard.press("Alt+Meta+t");
   await tagRow(page, "ledge").click();
 
-  // The drill-in: header names the tag; one row per occurrence, with the
-  // line's text as written and its 1-based number.
+  // The panel is showing #ledge, with one row per occurrence. A row carries
+  // the trimmed text of the line and the line's 1-based number.
   await expect(drilled(page, "ledge")).toBeVisible();
   await expect(hitRow(page, "Tagged")).toHaveCount(2);
   await expect(hitRow(page, "Tagged").first()).toContainText("work on #ledge today");
   await expect(hitRow(page, "Tagged").first()).toContainText("3");
 
   await hitRow(page, "Tagged").first().click();
-  // The bearing note's tab is up, the tag's line is on screen, and focus
-  // landed in the editor — a reveal is "take me there".
+  // The bearing note has a tab in the strip, its editor is showing the tag's
+  // line, and focus is in the editor.
   await expect(page.locator("[data-tab]", { hasText: "Tagged" })).toBeVisible();
   await expect(page.locator(".cm-line", { hasText: "work on #ledge today" })).toBeVisible();
   const focusInEditor = await page.evaluate(() => !!document.activeElement?.closest(".cm-editor"));
@@ -120,8 +122,8 @@ test("a #query in the overlay surfaces tag rows; Enter lands in the drill-in", a
   const input = page.getByPlaceholder("Search notes");
   await input.fill("#led");
 
-  // The tag row renders ABOVE the text hits and starts active; the hits below
-  // are the ordinary full-text ones (a #tag is text too).
+  // The tag row renders above the text hits and starts active. The hits below
+  // are the ordinary full-text ones, since a #tag is text too.
   await expect(page.locator("[data-active]")).toContainText("#ledge");
   await expect(page.locator("[data-active]")).toContainText("1 note");
 

@@ -1,28 +1,35 @@
-// Live preview in the editor (editor/livePreview.ts): markdown syntax
-// conceals where the caret is not, reveals where it is, links follow on
-// ⌘-click, and none of it changes the document — copy still yields raw
-// markdown. These are the user-observable halves of the pure core's rules
-// (livePreview.test.ts), run in real WebKit because concealment is exactly
-// the kind of DOM behavior a unit test cannot see.
+// Live preview in the editor (editor/livePreview.ts): syntax conceals where
+// the caret is not, a rendered link opens on a plain click (a revealed one
+// needs ⌘), and copy yields raw markdown because the document never changes.
+// Its neighbours are here too: the table widget (editor/tables.ts) and Enter
+// out of a quote (editor/quotes.ts). livePreview.test.ts has the pure rules.
+// Concealment is DOM behavior, so these run in real WebKit (testing.md §5).
 import { expect, test } from "@playwright/test";
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/harness.html");
   await expect(page.locator('[data-target-kind="note"]', { hasText: "Alpha" })).toBeVisible();
-  await page.keyboard.press("Meta+n"); // a fresh scratch note, editor focused
+  // A fresh scratch note. The editor takes focus and the H1's placeholder
+  // "Untitled" opens selected, so a test that types straight away replaces it
+  // and writes into the title (e2e/new-note-caret.spec.ts).
+  await page.keyboard.press("Meta+n");
 });
 
 test("syntax conceals when the caret leaves, reveals as it moves back in", async ({ page }) => {
-  await page.keyboard.press("Meta+ArrowUp"); // the caret opens IN the title; this note is typed from the top
+  // A new note opens with the caret on the title, so move to the very top of
+  // the document and type there instead.
+  await page.keyboard.press("Meta+ArrowUp");
   await page.keyboard.type("## Hello **world** yes");
   await page.keyboard.press("Enter"); // caret leaves the heading line
 
-  // Concealed: no ## and no ** — just the text, styled.
+  // Concealed: no ## and no **, just the styled text.
   const line = page.locator(".cm-line").first();
   await expect(line).toHaveText("Hello world yes");
 
-  // Caret onto the line reveals the heading marks (the line is the heading's
-  // element), but not the strong marks — their element is the word.
+  // Marks reveal when the selection touches the element that owns them. The
+  // heading's element is the whole line, so the caret anywhere on it brings
+  // the `##` back. The strong marks belong to `**world**`, which the caret at
+  // the line start does not touch, so they stay concealed.
   await page.keyboard.press("ArrowUp");
   await expect(line).toHaveText("## Hello world yes");
 
@@ -39,14 +46,15 @@ test("a rendered link opens on plain click; a revealed one is caret territory", 
   const line = page.locator(".cm-line").first();
   await expect(line).toHaveText("see Ledge docs ok");
 
-  // The rendered link gets a cursor hotspot in the body-parented layer — the
-  // WKWebView-proof hand (in-editor `cursor` is unreliable there).
+  // The rendered link gets a hotspot in the body-parented layer. That layer
+  // supplies the hand cursor: WKWebView does not honour in-editor `cursor`
+  // reliably (index.css, .ledge-mdlink-live).
   await expect(page.locator(".ledge-hotspot")).toHaveCount(1);
 
-  // Plain click on the RENDERED link opens it through the bridge (recorded
-  // by the harness — launching a browser is a native seam) and does NOT move
-  // the caret into it: the link stays concealed. The hotspot IS the click
-  // surface — it sits over the link and owns the gesture.
+  // A plain click on the rendered link opens it through the bridge (a native
+  // seam, so the harness records the call). The click lands on the hotspot
+  // sitting over the link, and does not move the caret into the link, so the
+  // link stays concealed.
   const link = page.locator(".ledge-mdlink");
   const hotspot = page.locator(".ledge-hotspot");
   await hotspot.click();
@@ -56,12 +64,13 @@ test("a rendered link opens on plain click; a revealed one is caret territory", 
   await expect(line).toHaveText("see Ledge docs ok");
 
   // Arrow the caret onto the link: it reveals, and a plain click on the line
-  // is a caret move that opens nothing.
+  // moves the caret and does not open the link.
   await page.keyboard.press("ArrowUp");
   for (let i = 0; i < 4; i += 1) await page.keyboard.press("ArrowRight");
   await expect(line).toContainText("](https://example.com/docs)");
-  // Revealed raw text has no hotspot — the hand (and the click-to-open)
-  // withdraw together.
+  // Revealed raw text gets no hotspot, so the hand cursor is gone and a plain
+  // click no longer opens. ⌘-click on it still does, through the in-editor
+  // handler (livePreview.ts clickToOpen).
   await expect(page.locator(".ledge-hotspot")).toHaveCount(0);
   await line.click();
   expect(await page.evaluate(() => window.__harness.linkOpens())).toHaveLength(1);
@@ -74,8 +83,10 @@ test("a rendered link opens on plain click; a revealed one is caret territory", 
     .poll(() => page.evaluate(() => window.__harness.linkOpens()))
     .toHaveLength(2);
 
-  // The cursor follows the gesture: a rendered link asks for the hand (it
-  // acts on click), and so does a checkbox — each also gets its hotspot.
+  // The in-editor `cursor: pointer` rules for a rendered link and a task
+  // checkbox (index.css). WKWebView ignores them inside the editor, so the
+  // hand a user sees comes from the hotspot layer, which covers rendered
+  // links, wikilinks, tags and checkboxes: two hotspots here.
   await expect(link).toHaveCSS("cursor", "pointer");
   await page.keyboard.press("Enter");
   await page.keyboard.type("- [ ] task");
@@ -93,33 +104,35 @@ test("fence marks conceal outside the block; the language and code stay", async 
   await expect(page.locator(".cm-line.ledge-code-bottom")).toHaveText("");
   await expect(page.locator(".cm-line", { hasText: 'echo "ready"' })).toBeVisible();
 
-  // Caret into the block reveals both fences...
+  // The caret in the block reveals both fences.
   await page.locator(".cm-line", { hasText: 'echo "ready"' }).click();
   await expect(page.locator(".cm-line.ledge-code-top")).toHaveText("```sh");
   await expect(page.locator(".cm-line.ledge-code-bottom")).toHaveText("```");
 
-  // ...and the block chrome (blocks.ts overlay) still finds its anchors: the
-  // caret-in-block state is exactly what lights the control group.
+  // The block chrome (blocks.ts overlay) still finds its anchors. Its control
+  // group carries `caret` while the caret is in the block, and
+  // `.ledge-ctl-group.caret` sets opacity to 1 (index.css).
   await expect(page.locator(".ledge-ctl-group.caret")).toHaveCount(1);
 });
 
 test("a task renders a checkbox; clicking it toggles the [x] in the text", async ({ page }) => {
-  // Replace the scratch seed wholesale: typed-at-caret content would merge
-  // into its "# Untitled" line and the task's label would swallow it.
+  // ⌘A selects the whole scratch seed, so the typing replaces it. Typing at
+  // the fresh caret instead would land in the selected placeholder title and
+  // give the line "# - [ ] buy milk", a heading with no checkbox in it.
   await page.keyboard.press("Meta+a");
   await page.keyboard.type("- [ ] buy milk");
 
-  // The caret sits in the label, which must NOT reveal the marker: it is a
-  // real checkbox, unchecked, and the raw [ ] is gone — and so is the `- `
-  // bullet, because the checkbox IS the bullet.
+  // The caret is in the label, not on the marker, so the marker stays
+  // concealed. The checkbox is real and unchecked, the raw [ ] is gone, and
+  // so is the `- ` bullet: the widget stands in for both.
   const box = page.locator("input.ledge-task");
   await expect(box).toBeVisible();
   await expect(box).not.toBeChecked();
   await expect(page.locator(".cm-line").first()).not.toContainText("[ ]");
   await expect(page.locator(".cm-line").first()).toHaveText(" buy milk");
 
-  // Clicking it checks the box by editing the DOCUMENT: the text now carries
-  // [x], the widget re-renders checked, and the label styles done.
+  // Clicking it checks the box by editing the document: the text now carries
+  // [x], the widget re-renders checked, and the label gets the done styling.
   await box.dispatchEvent("mousedown", { button: 0 });
   await expect(page.locator("input.ledge-task")).toBeChecked();
   await expect(page.locator(".ledge-task-done")).toHaveText(" buy milk");
@@ -131,21 +144,19 @@ test("a task renders a checkbox; clicking it toggles the [x] in the text", async
   await expect(page.locator(".cm-line").first()).toContainText("[x]");
 });
 
-// A few characters selected on a task line draw as a few characters, not as
-// the whole line. The selection is PAINTED by CodeMirror (drawSelection), and
-// to place each end of a range it asks posAtCoords for the position at the far
-// left of that end's row. On a line whose first thing is a replaced range —
-// a task's hidden `- ` and its checkbox widget, and equally a heading's `## `
-// — that question came back at random as either the line start or the far
+// The regression: a few characters selected on a task line drew as the whole
+// line, about half the time. CodeMirror paints the selection (drawSelection),
+// and to place each end of a range it asks posAtCoords for the position at
+// the far left of that end's row. On a line that starts with a replaced range
+// (a task's hidden `- ` plus its checkbox widget, and equally a heading's
+// `## `) that answer came back at random as either the line start or the far
 // side of the widget, so the two ends of one selection disagreed about which
 // visual row they were on. drawSelection then drew the between-rows shape:
 // from the first end to the right margin, and from the left margin to the
-// second. Two characters, painted as the entire line, about half the time.
-//
-// The randomness was upstream (a tie-break in the tile scan) and is fixed in
-// @codemirror/view 6.43.8, which is the floor package.json now pins. This test
-// is here rather than in a unit file because only a real layout can be asked
-// where a selection was drawn.
+// second. The randomness was upstream, a tie-break in the tile scan, fixed in
+// @codemirror/view 6.43.8; package.json pins ^6.43.9. Only a real layout can
+// be asked where a selection was drawn, so this test is here rather than in a
+// unit file (testing.md §2).
 test("a few characters selected on a task line draw a few characters wide", async ({ page }) => {
   await page.keyboard.press("Meta+a");
   await page.keyboard.type("- [x] other test");
@@ -156,8 +167,8 @@ test("a few characters selected on a task line draw a few characters wide", asyn
       .locator(".cm-selectionBackground")
       .evaluateAll((els) => els.reduce((w, el) => w + el.getBoundingClientRect().width, 0));
 
-  // Six presses: the old failure was a coin flip per measure, so one press
-  // would have passed half the time and six catch it 63 times in 64.
+  // Six presses. The old failure was a coin flip per measure: one press would
+  // pass half the time, and six presses catch it 63 times in 64.
   for (let i = 0; i < 6; i += 1) {
     await page.keyboard.press("Shift+ArrowLeft");
     await expect.poll(drawnWidth).toBeLessThan(lineWidth / 4);
@@ -168,7 +179,7 @@ test("Enter on an empty quote line exits the quote in one press", async ({ page 
   await page.keyboard.press("Meta+a");
   await page.keyboard.type("> 432");
   await page.keyboard.press("Enter"); // upstream continues the quote: "> "
-  await page.keyboard.press("Enter"); // ours: exit — clear the marker line
+  await page.keyboard.press("Enter"); // quotes.ts: clears the marker line
 
   const lines = page.locator(".cm-line");
   // Caret sits on the emptied line 2: no stray ">", no mismatched markers.
@@ -190,8 +201,8 @@ test("a pipe table renders as a real table; clicking a cell reveals the pipes th
   await expect(table.locator("td")).toHaveText(["1", "2"]);
   await expect(page.locator(".cm-line", { hasText: "---" })).toHaveCount(0);
 
-  // A click on a cell is a caret move to that cell's text, which reveals the
-  // raw table — typing lands exactly where the click aimed.
+  // A click on a cell moves the caret to that cell's text, which reveals the
+  // raw table. Typing lands where the click aimed.
   await table.locator("td", { hasText: "2" }).click();
   await expect(page.locator(".ledge-mdtable")).toHaveCount(0);
   await expect(page.locator(".cm-line").nth(1)).toHaveText("| --- | --- |");
@@ -200,9 +211,11 @@ test("a pipe table renders as a real table; clicking a cell reveals the pipes th
 });
 
 test("clicking a cell still lands there after edits above shift the table down", async ({ page }) => {
-  // The counterpart to the image case (e2e/images.spec.ts): a table bakes
-  // absolute cell offsets into its DOM, so a shifted table has to be redrawn
-  // rather than reused — TableWidget.eq compares position for exactly this.
+  // A table bakes absolute cell offsets into its DOM, so a shifted table has
+  // to be redrawn rather than reused: TableWidget.eq compares position as
+  // well as source (editor/tables.ts). e2e/images.spec.ts covers the same
+  // shift for a rendered image, which reads its position from the DOM
+  // instead.
   await page.keyboard.press("Meta+a");
   await page.keyboard.type("x\n| a | b |\n| --- | --- |\n| 1 | 2 |\n");
   await expect(page.locator(".ledge-mdtable")).toBeVisible();
@@ -242,7 +255,9 @@ test("inline code keeps a chip of its own once the backticks conceal", async ({ 
   // The whole editor is monospace and live preview takes the backticks away,
   // so the chip (editor/setup.ts's inlineCodeTag -> .ledge-inline-code) is the
   // only thing separating code from the prose it sits in.
-  await page.keyboard.press("Meta+a"); // over the title a new note opens with
+  // ⌘A selects the whole seed: the "# Untitled" title and the two empty lines
+  // under it. The typing replaces all of it.
+  await page.keyboard.press("Meta+a");
   await page.keyboard.type("run `bun test` now");
   await page.keyboard.press("Enter");
 
@@ -250,7 +265,7 @@ test("inline code keeps a chip of its own once the backticks conceal", async ({ 
   await expect(line).toHaveText("run bun test now");
   const chip = page.locator(".ledge-inline-code");
   await expect(chip).toHaveText("bun test");
-  // A visible background is the point; the default is transparent.
+  // The chip needs a visible background; the default is transparent.
   await expect
     .poll(() => chip.evaluate((el) => getComputedStyle(el).backgroundColor))
     .not.toBe("rgba(0, 0, 0, 0)");
@@ -262,8 +277,8 @@ test("inline code keeps a chip of its own once the backticks conceal", async ({ 
   await expect(line).toHaveText("run `bun test` now");
   await expect(chip).toHaveText("bun test");
 
-  // A fenced block shares the parser's tag with inline code upstream; it must
-  // not share the chip — it has the code-block card instead.
+  // A fenced block shares the parser's tag with inline code upstream. It must
+  // not share the chip: it has the code-block card instead.
   await page.keyboard.press("Meta+a");
   await page.keyboard.type("```\nfenced text\n");
   await expect(page.locator(".cm-line.ledge-code")).not.toHaveCount(0);

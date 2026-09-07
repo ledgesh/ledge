@@ -1,12 +1,9 @@
-// Move Workspace Folder…: the workspace row's menu (and the palette) relocate
-// the folder on disk. A managed workspace goes straight to the harness's fake
-// destination picker (always /synced — the cloud-folder stand-in); an
-// external one stops at the in-app chooser first, whose "Move to ~/.ledge"
-// option is the pickerless return trip. The contract these specs hold: the
-// workspace keeps its identity in the strip, every note travels to the new
-// root, open tabs close (arrangement loss, not data loss — interactions.md
-// §4), and work continues against the new handles: a reopened note edits and
-// saves under the moved root.
+// Move Workspace Folder…, from the workspace row's menu and from the palette.
+// It relocates the folder on disk. A managed workspace goes straight to the
+// harness's fake destination picker, which always answers /synced (the
+// cloud-folder stand-in). An external one stops at the in-app chooser first,
+// whose "Move to ~/.ledge" option needs no picker. The tabs the move closes
+// lose an arrangement and not data (interactions.md §4).
 import { expect, test, type Page } from "@playwright/test";
 
 const wsRow = (page: Page, name: string) =>
@@ -27,7 +24,8 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("the row menu's Move relocates the folder: notes travel, tabs close, the workspace stays itself", async ({ page }) => {
-  // A note open in a tab, so the close-on-move is observable.
+  // The spec opens a note in a tab first, so the tab closing after the move is
+  // visible.
   await noteRow(page, "Alpha").click();
   await page.keyboard.press("Enter");
   await expect(tab(page, "Alpha")).toBeVisible();
@@ -35,14 +33,18 @@ test("the row menu's Move relocates the folder: notes travel, tabs close, the wo
   await wsRow(page, "Scratch").click({ button: "right" });
   await page.getByRole("menu").getByRole("menuitem", { name: /Move Workspace Folder/ }).click();
 
-  // The workspace kept its name and selection; the note tab is gone — its
-  // path named the old folder — and the pane holds a fresh scratch tab.
+  // The workspace row is still there under its name. /bg-accent/ is a loose
+  // check: an unselected row carries hover:bg-accent/50, which matches it too
+  // (workspace-rows.spec.ts anchors the pattern). The note tab is gone and the
+  // pane holds a fresh scratch tab. workspaceFolderMoved swaps the whole pane
+  // tree, so every tab in the workspace closes (workspace/store.tsx).
   await expect(wsRow(page, "Scratch")).toHaveClass(/bg-accent/);
   await expect(tab(page, "Alpha")).toHaveCount(0);
   await expect(tab(page, "Untitled")).toBeVisible();
 
-  // Every note travelled: the browser lists them from the new root, and a
-  // reopened one carries its text.
+  // Alpha travelled: the browser lists it from the new root, and reopening it
+  // shows its text. Beta and Gamma move with the folder too, but this spec does
+  // not look for them.
   await expect(noteRow(page, "Alpha")).toBeVisible();
   await noteRow(page, "Alpha").click();
   await page.keyboard.press("Enter");
@@ -55,9 +57,11 @@ test("the palette route moves the selected workspace, and editing continues on t
   await expect(tab(page, "Untitled")).toBeVisible();
   await expect(noteRow(page, "Alpha")).toBeVisible();
 
-  // Work continues against the moved folder's handles: reopen, type, and the
-  // save lands without complaint (the harness throws on any path outside its
-  // roots, so a stale old-root path here would fail the spec loudly).
+  // The note reopens and takes an edit. The assertion reads the editor buffer,
+  // not the store: the save waits out SAVE_DELAY_MS (notes/store.ts) and the
+  // test ends as soon as the text appears. A write under a stale old-root path
+  // would be rejected by the harness and logged rather than failed, so nothing
+  // here proves the save landed on the new root.
   await noteRow(page, "Alpha").click();
   await page.keyboard.press("Enter");
   await page.locator(".cm-content").first().click();
@@ -69,21 +73,25 @@ test("the palette route moves the selected workspace, and editing continues on t
 test("an external workspace's Move stops at the chooser: Escape cancels, ~/.ledge is the return trip", async ({ page }) => {
   const dialog = page.getByRole("dialog", { name: "Move Workspace Folder" });
 
-  // Managed: straight to the (fake) picker — the move lands with no chooser
-  // ever appearing.
+  // The workspace is managed here, so the command goes straight to the fake
+  // picker and no chooser appears. Neither assertion below shows the move
+  // landing: Alpha is visible either way, and the dialog never exists on the
+  // managed path. The chooser in the next block is what proves this move ran,
+  // since only an external workspace gets one.
   await runFromPalette(page, "Move Workspace Folder…");
   await expect(noteRow(page, "Alpha")).toBeVisible();
   await expect(dialog).toHaveCount(0);
 
-  // External now: the same command opens the chooser instead, and Escape
-  // walks away without moving anything.
+  // The workspace is external after that move, so the same command opens the
+  // chooser instead. Escape cancels it without moving anything.
   await runFromPalette(page, "Move Workspace Folder…");
   await expect(dialog).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(dialog).toHaveCount(0);
 
-  // The return trip: the row menu's Move, then the ~/.ledge option. Every
-  // note lands back, the workspace still itself.
+  // The folder moves back under ~/.ledge, through the row menu's Move and the
+  // chooser's ~/.ledge option. Alpha is listed again and the strip still holds
+  // one Scratch row.
   await wsRow(page, "Scratch").click({ button: "right" });
   await page.getByRole("menu").getByRole("menuitem", { name: /Move Workspace Folder/ }).click();
   await dialog.getByRole("button", { name: "Move to ~/.ledge" }).click();
@@ -94,7 +102,8 @@ test("an external workspace's Move stops at the chooser: Escape cancels, ~/.ledg
   await page.keyboard.press("Enter");
   await expect(tab(page, "Alpha")).toBeVisible();
 
-  // Managed again: the command goes straight to the picker once more.
+  // The workspace is managed again, so the command goes straight to the picker
+  // once more.
   await runFromPalette(page, "Move Workspace Folder…");
   await expect(dialog).toHaveCount(0);
   await expect(noteRow(page, "Alpha")).toBeVisible();
@@ -102,10 +111,10 @@ test("an external workspace's Move stops at the chooser: Escape cancels, ~/.ledg
 
 test("moving to where the folder already lives is a no-op: nothing closes", async ({ page }) => {
   // The fake picker always answers /synced, so a second move through the
-  // chooser's picker option targets the folder's own parent. Bun's contract
-  // for that is "same root back, nothing renamed" — and the view's side of
-  // the bargain is that open tabs survive, since nothing moved out from
-  // under them.
+  // chooser's picker option targets the folder's own parent. The harness's
+  // move() answers the same root back and rekeys nothing, mirroring moveRoot's
+  // own-parent no-op (bun/workspaces.ts). The view leaves open tabs alone when
+  // the root comes back unchanged (workspace/actions.ts).
   await runFromPalette(page, "Move Workspace Folder…");
   await expect(noteRow(page, "Alpha")).toBeVisible();
   await noteRow(page, "Alpha").click();
@@ -116,7 +125,11 @@ test("moving to where the folder already lives is a no-op: nothing closes", asyn
     .getByRole("dialog", { name: "Move Workspace Folder" })
     .getByRole("button", { name: "Choose Another Location…" })
     .click();
-  // Given a beat to (not) act: the tab is still here, the strip unchanged.
+  // Nothing closed: the tab is still open and the strip is unchanged. Both
+  // assertions pass as soon as they run and nothing sleeps first, so they catch
+  // only a close that has already happened. There is nothing here to wait on.
+  // The check is a weak one, and a wait added to strengthen it would be a
+  // guess at how long.
   await expect(tab(page, "Alpha")).toBeVisible();
   await expect(wsRow(page, "Scratch")).toHaveCount(1);
 });

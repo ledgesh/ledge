@@ -1,25 +1,31 @@
 // Rich-text paste (editor/htmlPaste.ts): a pasteboard carrying formatted HTML
-// beside its plain text pastes as Markdown. Run in real WebKit because the
-// parse is DOMParser's — the unit tests cover the conversion over hand-built
-// trees (testing.md §2), and what only this layer can prove is that the real
-// parser feeds it the same shape, that the chord reaches it, and that ⇧⌘V opts
-// out.
+// beside its plain text pastes as Markdown. These specs run in real WebKit
+// because DOMParser does the parsing. The unit tests cover the conversion over
+// hand-built PasteNode trees (testing.md §2); only this layer shows that the
+// real parser builds the same trees, that ⌘V reaches the conversion, and that
+// ⇧⌘V opts out.
 import { expect, test } from "@playwright/test";
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/harness.html");
   await expect(page.locator('[data-target-kind="note"]', { hasText: "Alpha" })).toBeVisible();
   await page.keyboard.press("Meta+n"); // a fresh scratch note, editor focused
+  // ⌘N opens "# Untitled" with the placeholder word selected
+  // (new-note-caret.spec.ts). Selecting all replaces the heading, so the
+  // pasted Markdown does not land inside the H1.
   await page.keyboard.press("Meta+a");
 });
 
-// Both flavors up, the way another application's copy leaves the pasteboard.
+// Seeds both pasteboard flavors, plain text and HTML, the way another
+// application's copy leaves them.
 async function seed(page: import("@playwright/test").Page, text: string, html: string) {
   await page.evaluate(([t, h]) => window.__harness.setClipboard(t!, h!), [text, html]);
 }
 
-// The document as written, read back through the clipboard seam (the sanctioned
-// window.__harness surface — formatting.spec.ts's move).
+// Returns the document as written. Live preview conceals the Markdown
+// markers, so the DOM does not show them: select all, copy, then read
+// window.__harness.clipboard(), which hands back the raw text ⌘C copied, the
+// way formatting.spec.ts does.
 async function doc(page: import("@playwright/test").Page): Promise<string> {
   await page.keyboard.press("Meta+a");
   await page.keyboard.press("Meta+c");
@@ -78,8 +84,11 @@ test("a paste inside a fenced block stays verbatim — the bytes there are the c
   await page.keyboard.type("```sh\n");
   await seed(page, "echo hi", "<ul><li>echo hi</li></ul>");
   await page.keyboard.press("Meta+v");
-  // The fence auto-closed on the third backtick (editor/fences.ts), so the
-  // caret is on the body line between the pair.
+  // The third backtick planted the closing fence on the next line and left
+  // the caret on the opener, where "sh" gets typed (editor/fences.ts
+  // typedFence). The trailing \n is then an ordinary newline: closeFence sees
+  // that closer already below and declines, so the caret ends on a blank line
+  // between the two fence lines, which is where the paste lands.
   expect(await doc(page)).toBe("```sh\necho hi\n```");
 });
 

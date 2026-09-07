@@ -1,15 +1,12 @@
-// The built-in documentation. On a shell with windows the manual gets one of
-// its own (remote.md §8a): the help button asks the shell for it and the
-// workspace in front of you is left alone. That window is another webview
-// running this same view, which a spec reaches the way the shell does — by
-// loading the harness as it (`?docs=1`) — and inside it the manual is a
-// read-only workspace whose pages open, search, and RUN like ordinary notes,
-// while nothing edits, creates, or deletes: the affordances hide, the editor
-// drops keystrokes, and the harness store (like the real one) refuses any
-// write that slips past.
+// The built-in documentation. On a shell with windows the manual opens in a
+// window of its own (remote.md §8a), another webview running this same view.
+// A spec reaches that window the way the shell does, by loading the harness
+// page with `?docs=1` rather than by clicking the help button. Inside it the
+// manual is a read-only workspace, and the harness store enforces that the
+// way the real store does.
 //
-// A client with one window and no way to have two (a phone, ios.md §4) keeps
-// the old behavior, and the last cases here are its.
+// A phone has one window and no way to open a second (ios.md §11). There the
+// manual takes over the window it has, and the last cases here cover that.
 import { expect, test, type Page } from "@playwright/test";
 
 const wsRow = (page: Page, name: string) =>
@@ -18,8 +15,8 @@ const noteRow = (page: Page, title: string) =>
   page.locator('[data-target-kind="note"]', { hasText: title });
 const docsButton = (page: Page) => page.getByTitle("Documentation", { exact: true });
 
-// The manual's window, as the shell opens it: `page` is the title it was asked
-// for, "" its landing page.
+// The manual's window, as the shell opens it. `title` is the page the window
+// was opened for, and "" opens it on the landing page.
 async function openDocsWindow(page: Page, title = ""): Promise<void> {
   await page.goto(`/harness.html?docs=1${title ? `&page=${encodeURIComponent(title)}` : ""}`);
   await expect(page.locator("[data-tab]")).toHaveCount(1);
@@ -31,9 +28,9 @@ test.describe("an ordinary window", () => {
     await expect(noteRow(page, "Alpha")).toBeVisible();
   });
 
-  // The change this window makes: the manual no longer takes the workspace
-  // over. The button asks the shell for the manual's window and nothing here
-  // moves — same workspace, same tabs, same notes in the browser.
+  // The button asks the shell for the manual's window, and this window keeps
+  // what it had: same workspace, same tabs, same notes in the browser. The
+  // manual does not take the workspace over here.
   test("the help button asks the shell for the manual's window, and changes nothing here", async ({ page }) => {
     await docsButton(page).click();
     await expect.poll(() => page.evaluate(() => window.__harness.docsOpens())).toEqual([""]);
@@ -42,19 +39,20 @@ test.describe("an ordinary window", () => {
     await expect(wsRow(page, "Documentation")).toHaveCount(0);
   });
 
-  // Asking again raises the window that is already open — the shell's job, and
-  // from here indistinguishable from opening one. What matters is that the ask
-  // leaves every time: a button that stops working the second time is the dead
-  // end the old toggle existed to avoid.
+  // Asking again raises the window that is already open. Raising it is the
+  // shell's job, and from here it looks the same as opening one. Every press
+  // sends the ask, because a button that does nothing on its second press is
+  // a dead end. On a client with one window the second press puts the manual
+  // away instead (registry.ts docs.toggle, and the last describe here).
   test("the button asks every time it is pressed", async ({ page }) => {
     await docsButton(page).click();
     await docsButton(page).click();
     await expect.poll(() => page.evaluate(() => window.__harness.docsOpens())).toEqual(["", ""]);
   });
 
-  // Help > Third-Party Licenses means one page rather than the manual, and the
-  // page rides the same ask (the shell shows it whether it opens the window or
-  // raises one that was already up).
+  // Help > Third-Party Licenses asks for one page rather than the manual, and
+  // the page title is passed with the same ask. The shell shows that page
+  // whether it opens the window or raises one already up.
   test("Third-Party Licenses names the page in the ask", async ({ page }) => {
     await page.keyboard.press("Meta+Shift+P");
     await page.getByPlaceholder("Run a command").fill("Third-Party");
@@ -87,10 +85,10 @@ test.describe("the manual's window", () => {
     await expect(noteRow(page, "Alpha")).toHaveCount(0);
   });
 
-  // The window holds one workspace and it is the manual, so the surfaces that
-  // switch between workspaces or between machines have nothing to say: the
-  // strip would be an empty list under a heading, and the connection bar would
-  // name a machine this window cannot be pointed off.
+  // The window holds one workspace, the manual, so the surfaces that switch
+  // between workspaces or between machines have nothing to show: the strip
+  // would be an empty list under a heading, and the connection bar would name
+  // a machine this window cannot be switched away from.
   test("no workspace strip, no connection bar, and no help button", async ({ page }) => {
     await expect(page.getByText("Workspaces", { exact: true })).toHaveCount(0);
     await expect(page.locator("[data-connection]")).toHaveCount(0);
@@ -100,7 +98,7 @@ test.describe("the manual's window", () => {
 
   // The verbs that would act on a workspace this window does not have, or on a
   // machine it cannot reach, are absent from the palette rather than present
-  // and failing (interactions.md §4).
+  // and failing (interactions.md §8).
   test("the palette drops the workspace and machine verbs", async ({ page }) => {
     await page.keyboard.press("Meta+Shift+P");
     const palette = page.getByPlaceholder("Run a command");
@@ -128,9 +126,10 @@ test.describe("the manual's window", () => {
   });
 
   test("read-only is no bar to running: an unmarked block on a page still runs", async ({ page }) => {
-    // The real manual marks every block `norun` (bun/docsContent.test.ts);
-    // this fixture leaves one unmarked so the read-only editor's own stance is
-    // what is tested — the mark, not the read-only page, withholds a run.
+    // The real manual marks every fence in a runnable language `norun`
+    // (bun/docsContent.test.ts). This fixture leaves one unmarked, so what is
+    // tested here is the read-only editor alone: `norun` withholds a run, and
+    // being read-only does not.
     await page.locator(".cm-line", { hasText: "echo hello from the docs" }).click();
     await page.keyboard.press("Meta+Enter");
     await expect.poll(() => page.evaluate(() => window.__harness.inlineRuns())).toHaveLength(1);
@@ -140,7 +139,8 @@ test.describe("the manual's window", () => {
     // The browser's New Note footer and the tab strip's + are gone.
     await expect(page.getByRole("button", { name: "New Note" })).toHaveCount(0);
     await expect(page.getByTitle(/New Note/)).toHaveCount(0);
-    // The row menu carries Open and Copy Path — no Delete, no lock faces.
+    // The row menu carries Open and Copy Path, with no Delete and no lock
+    // faces.
     await noteRow(page, "Getting Started").click({ button: "right" });
     const menu = page.getByRole("menu");
     await expect(menu.getByRole("menuitem", { name: "Open" })).toBeVisible();
@@ -154,9 +154,9 @@ test.describe("the manual's window", () => {
   });
 
   test("splitting opens an empty pane, and the next page opened fills it", async ({ page }) => {
-    // Splitting is a READING move here (two pages side by side), so it stays
-    // enabled — but the seeded scratch tab every other workspace gets would be
-    // an Untitled that the read-only editor never lets you type in or save.
+    // Splitting is a reading move here (two pages side by side), so it stays
+    // enabled. The scratch tab every other workspace seeds into the new pane
+    // would be an Untitled the read-only editor refuses to type into or save.
     await page.keyboard.press("Meta+d");
     await expect(page.locator("[data-tab]", { hasText: "Untitled" })).toHaveCount(0);
     // The new pane shows the empty state, and even there nothing offers to create.
@@ -170,8 +170,9 @@ test.describe("the manual's window", () => {
   });
 
   test("pages list in manifest order (numbered paths), not alphabetically by title", async ({ page }) => {
-    // About Panes sorts FIRST by title but its filename (03-) sorts last: the
-    // browser must show the manifest's reading order, Getting Started on top.
+    // About Panes sorts first by title but third by filename (03-), so the
+    // browser must show the manifest's reading order rather than the titles:
+    // Getting Started on top.
     const titles = page.locator('[data-target-kind="note"]');
     await expect(titles).toHaveText([
       /Getting Started/,
@@ -192,10 +193,10 @@ test.describe("the manual's window", () => {
     await expect(page.locator("[data-active]")).toContainText("Getting Started");
   });
 
-  // The notices ship inside the app because their licenses ask to travel with
-  // the binary, so the one thing this must do is land on that page — including
-  // when the manual is open on some other page, which is the case the shell
-  // routes here rather than opening a second window for (rpc docsShow).
+  // The notices ship with the app because their licenses ask to travel with
+  // the binary. A request for that page lands on it even when the manual is
+  // open on another page: the shell routes such a request into this window
+  // rather than opening a second one (rpc docsShow).
   test("a page asked for while this window is open lands on it", async ({ page }) => {
     await expect(page.locator(".cm-line").first()).toHaveText("# Getting Started");
     await page.evaluate(() => window.__harness.showDocs("Third-Party Licenses"));
@@ -203,16 +204,17 @@ test.describe("the manual's window", () => {
     await expect(page.locator(".cm-line").first()).toHaveText("# Third-Party Licenses");
   });
 
-  // Opened FOR a page: the window boots straight onto it, which is what
+  // Opened for a page: the window boots straight onto it. That is what
   // Help > Third-Party Licenses does when the manual was not already up.
   test("a window opened for a page opens on that page", async ({ page }) => {
     await openDocsWindow(page, "Third-Party Licenses");
     await expect(page.locator(".cm-line").first()).toHaveText("# Third-Party Licenses");
   });
 
-  // The help button pressed again asks for the manual with no page: the shell
-  // raises this window, and raising it is all that was asked for. Losing the
-  // reader's place would be a worse answer than doing nothing.
+  // The help button pressed again asks for the manual with no page. The shell
+  // raises this window, and the view leaves the page being read alone: with a
+  // tab open, a bare ask opens nothing (App.tsx onDocsShow). Turning to the
+  // landing page would lose the reader's place.
   test("the bare ask raises the window without moving off the page being read", async ({ page }) => {
     await noteRow(page, "About Panes").click();
     await expect(page.locator(".cm-line").first()).toHaveText("# About Panes");
@@ -221,8 +223,8 @@ test.describe("the manual's window", () => {
     await expect(page.locator("[data-tab]", { hasText: "Getting Started" })).toHaveCount(1);
   });
 
-  // The exception, and the reason the bare ask is not simply ignored: a window
-  // raised onto an empty pane looks like a dead button.
+  // With no tab open, the bare ask does open the landing page. A window raised
+  // onto an empty pane would look like a dead button.
   test("with nothing open, the bare ask lands on Getting Started", async ({ page }) => {
     await page.keyboard.press("Meta+w");
     await expect(page.locator("[data-tab]")).toHaveCount(0);
@@ -230,8 +232,8 @@ test.describe("the manual's window", () => {
     await expect(page.locator("[data-tab]", { hasText: "Getting Started" })).toBeVisible();
   });
 
-  // Turning to the licences page from inside the manual is the one docs verb
-  // this window keeps, and it acts here rather than asking for a window.
+  // This window keeps one docs verb: turning to the licences page. It acts
+  // here rather than asking the shell for a window.
   test("Third-Party Licenses turns to the page in this window", async ({ page }) => {
     await page.keyboard.press("Meta+Shift+P");
     await page.getByPlaceholder("Run a command").fill("Third-Party");
@@ -241,10 +243,11 @@ test.describe("the manual's window", () => {
   });
 });
 
-// A client with one window and no way to have two: the manual takes the window
-// over, and the same button — lit, since the manual is now the selected
-// workspace — is the way back. The strip that would otherwise offer one is
-// inside the drawer the manual is covering (ios.md §9).
+// A client with one window and no way to open a second. The manual takes the
+// window over, and the same button is the way back (lit, since the manual is
+// now the selected workspace). No strip row leads back: the docs workspace is
+// filtered out of the strip on every client (registry.ts stripWorkspaces,
+// Sidebar.tsx).
 test.describe("a client with one window", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/harness.html?shell=ios");
@@ -257,7 +260,7 @@ test.describe("a client with one window", () => {
     await expect(page.locator("[data-tab]", { hasText: "Getting Started" })).toBeVisible();
     // No window was asked for: there is none to ask for.
     expect(await page.evaluate(() => window.__harness.docsOpens())).toEqual([]);
-    // Still no strip row — the way back is this button.
+    // Still no strip row: the way back is this button.
     await expect(wsRow(page, "Documentation")).toHaveCount(0);
 
     await docsButton(page).click();
@@ -269,10 +272,10 @@ test.describe("a client with one window", () => {
     await expect(page.locator("[data-tab]", { hasText: "Getting Started" })).toHaveCount(1);
   });
 
-  // The regression the landing rule exists for: a docs workspace with every
-  // page closed (an empty pane — closeTab does not reseed) has no strip row and
-  // nothing on screen, so a click that merely re-selects it looks like a dead
-  // button. It must open the landing page.
+  // A docs workspace with every page closed has an empty pane (closeTab does
+  // not reseed) and no strip row, so a click that only re-selected it would
+  // show nothing and look like a dead button. The click opens the landing page
+  // instead, and this is the regression that rule exists for.
   test("reopening after closing every docs tab lands back on Getting Started", async ({ page }) => {
     await docsButton(page).click();
     await expect(noteRow(page, "Getting Started")).toBeVisible();
@@ -286,8 +289,8 @@ test.describe("a client with one window", () => {
   });
 
   // Third-Party Licenses has to land on the notices page here too, including
-  // from another docs page, where "the docs are already open" would otherwise
-  // be answered by leaving you where you are.
+  // from another docs page. Treating the manual as already open would leave
+  // the reader on the page they were on.
   test("Third-Party Licenses lands on the notices page, even from another docs page", async ({ page }) => {
     await docsButton(page).click();
     await expect(page.locator(".cm-line").first()).toHaveText("# Getting Started");

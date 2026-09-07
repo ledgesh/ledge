@@ -1,11 +1,8 @@
-// Where the caret lands in a note that was just created: on the H1, after
-// the "# ", so the first keystroke names the note instead of pushing text in
-// front of the hash that makes the line a heading (the H1 is the rename UI —
-// a keystroke landing before it would unmake the title). A title the app made
-// up ("Untitled") is SELECTED, so one keystroke replaces it; ⌘J's date title
-// is one the app computed and only gets the caret, because a stray keystroke
-// must not rename the day. Typing is the proof: a spec reading the selection
-// out of CodeMirror would pass on a caret nobody can type at.
+// Where the caret lands in a just-created note: on the H1, after the "# "
+// (workspace/reveal.ts revealTitle). A note titled "Untitled" opens with the
+// title selected, so one keystroke replaces it. A new daily note opens with
+// its date unselected, so a keystroke adds to the date. The specs type and
+// check the text: typing can land elsewhere while the selection looks right.
 import { expect, test, type Page } from "@playwright/test";
 
 const SCRATCH = "/harness/scratch";
@@ -13,8 +10,9 @@ const SCRATCH = "/harness/scratch";
 const noteRow = (page: Page, title: string) =>
   page.locator('[data-target-kind="note"]', { hasText: title });
 const tab = (page: Page, title: string) => page.locator("[data-tab]", { hasText: title });
-// The caret's own line, which is the only one showing its raw "# " (live
-// preview conceals the marker everywhere else).
+// The editor's first line, which holds the H1 in every fixture here. The raw
+// "# " is in its text because live preview shows the marker on the heading
+// the selection touches, and conceals it on every other heading.
 const titleLine = (page: Page) => page.locator(".cm-editor .cm-line").first();
 
 function today(): string {
@@ -33,7 +31,8 @@ test("⌘N opens on the title with the placeholder selected", async ({ page }) =
   await expect(tab(page, "Untitled")).toBeVisible();
   await page.keyboard.type("Ship It");
   await expect(titleLine(page)).toHaveText("# Ship It");
-  // Named in one keystroke run: the tab (and the file behind it) follow the H1.
+  // The tab label follows the H1, and so does the file's name. Typing a title
+  // names the note.
   await expect(tab(page, "Ship It")).toBeVisible();
 });
 

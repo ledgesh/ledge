@@ -1,23 +1,21 @@
 // The note editor's context menu (interactions.md §11), driven end to end in
-// headless WebKit.
-//
-// The unit tests own which verbs a click calls for (commands/editorMenu.
-// test.ts); everything here is the half they cannot see — that the gesture
-// arrives at all (the window listener, and the hotspots over rendered links
-// that would otherwise eat it), that the caret lands where the pointer did,
-// and that an item picked from the menu does the same thing its chord does.
+// headless WebKit. commands/editorMenu.test.ts covers which verbs a click
+// calls for. These cases cover the rest: a right-click on a hotspot over a
+// rendered link still reaches the window listener, the caret moves to the
+// pointer, and a menu item does what its chord does.
 import { expect, test, type Page } from "@playwright/test";
 
 const noteRow = (page: Page, title: string) =>
   page.locator('[data-target-kind="note"]', { hasText: title });
 const menu = (page: Page) => page.getByRole("menu");
-// The invisible hotspots the link layer floats over a rendered checkbox and a
-// rendered wikilink (editor/livePreview.ts), by the tooltip each carries.
+// Find the invisible hotspots over a rendered checkbox and a rendered
+// wikilink by the tooltip each carries. The link layer floats them over the
+// editor (editor/livePreview.ts).
 const taskHotspot = (page: Page) => page.locator(".ledge-hotspot[title='Toggle Checkbox']");
 const wikiHotspot = (page: Page) => page.locator(".ledge-hotspot[title='Click to open note']");
 
-// Every item the open menu carries, in order — the label alone, without the
-// key chip beside it (the label is the first child of the row's button).
+// Every item the open menu carries, in order, label only. The key chip is
+// the button's second child (components/ContextMenu.tsx), so read the first.
 const labels = (page: Page): Promise<string[]> =>
   menu(page)
     .getByRole("menuitem")
@@ -33,13 +31,14 @@ async function pick(page: Page, label: string): Promise<void> {
 }
 
 // Replace the note with `body`, written whole so fences and brackets land
-// exactly as spelled (autoclose and the `[[` picker would answer typing).
+// exactly as spelled. Typing it would trigger autoclose and open the `[[`
+// picker.
 async function write(page: Page, body: string): Promise<void> {
   await page.keyboard.press("Meta+a");
   await page.keyboard.insertText(body);
 }
 
-// The document as written, read back through the clipboard seam — the
+// The document as written, read back through the clipboard seam. That is the
 // sanctioned way to see raw markers under live preview (formatting.spec.ts).
 async function raw(page: Page): Promise<string> {
   await page.keyboard.press("Meta+a");
@@ -73,7 +72,8 @@ test("right-clicking a note opens a menu: the clipboard, then the writing verbs"
     "Code Block",
     "Insert Image…",
   ]);
-  // A menu is a modal layer like any other: Escape closes it and nothing else.
+  // The menu is a modal layer, so Escape closes it (commands/layers.ts).
+  // Escape changes nothing else: the note still reads as it was written.
   await page.keyboard.press("Escape");
   await expect(menu(page)).toHaveCount(0);
   expect(await raw(page)).toBe("hello world");
@@ -113,11 +113,14 @@ test("the click moves the caret, unless it lands in the selection", async ({ pag
   const at = async (label: string) => items.nth((await labels(page)).indexOf(label));
   await expect(await at("Cut")).toBeDisabled();
   await expect(await at("Copy")).toBeDisabled();
-  await expect(await at("Paste")).toBeEnabled(); // the pasteboard is Bun's answer, not ours
+  // Paste is never greyed: `when` runs synchronously on every menu render,
+  // and reading the pasteboard takes an async round trip to Bun
+  // (commands/registry.ts).
+  await expect(await at("Paste")).toBeEnabled();
   await page.keyboard.press("Escape");
 
-  // Select line one and right-click INSIDE it: the selection survives, which
-  // is the whole reason the menu was opened there.
+  // Select line one and right-click inside it: the selection survives, so
+  // Copy still has something to copy.
   await page.locator(".cm-line", { hasText: "one" }).click();
   await page.keyboard.press("Home");
   await page.keyboard.press("Shift+End");
@@ -135,18 +138,18 @@ test("what the pointer landed on leads the menu, and only then", async ({ page }
   expect(await labels(page)).not.toContain("Toggle Checkbox");
   await page.keyboard.press("Escape");
 
-  // A rendered checkbox and a rendered wikilink are both covered by an
-  // invisible body-parented hotspot (editor/livePreview.ts) — the pointer hits
-  // the hotspot, never the editor, which is why these two clicks are the ones
-  // a handler on the editor's own subtree would never hear. Clicking the
-  // hotspot is not a contrivance: it is what the pointer does.
+  // An invisible hotspot parented to the body covers each rendered checkbox
+  // and rendered wikilink (editor/livePreview.ts). The pointer hits the
+  // hotspot, not the editor. A handler on the editor's own subtree would
+  // never hear these two clicks, so the spec clicks the hotspot, where a
+  // real pointer lands.
   await taskHotspot(page).click({ button: "right" });
   expect(await first()).toBe("Toggle Checkbox");
   await page.keyboard.press("Escape");
 
   await wikiHotspot(page).click({ button: "right" });
   expect(await first()).toBe("Open Link");
-  // And the right-click did not FOLLOW the link: still this note, menu open.
+  // The right-click did not follow the link: still this note, menu open.
   await expect(page.locator("[data-tab]", { hasText: "Alpha" })).toHaveCount(0);
   await page.keyboard.press("Escape");
 });
@@ -155,9 +158,10 @@ test("Toggle Checkbox from the menu ticks the box under the pointer", async ({ p
   await write(page, "- [ ] buy milk\n");
   await taskHotspot(page).click({ button: "right" });
   await pick(page, "Toggle Checkbox");
-  // Read the text, not the widget: the right-click left the caret on that
-  // line, and live preview reveals the markers the caret is on — so the box is
-  // raw `[x]` here, exactly as it is after the palette's Toggle Checkbox.
+  // Assert on the text, not on the rendered checkbox. raw() copies the
+  // document source through the clipboard seam, so the box reads as raw
+  // `[x]` whatever live preview draws. The menu runs the same task.toggle
+  // command the palette does (commands/registry.ts).
   expect(await raw(page)).toBe("- [x] buy milk\n");
 });
 
@@ -167,8 +171,8 @@ test("a runnable block offers both runs; prose and an unterminated fence do not"
   expect((await labels(page)).slice(0, 2)).toEqual(["Run Block Inline", "Run Block in Terminal"]);
   await page.keyboard.press("Escape");
 
-  // §4c: an unterminated fence has no agreed body, draws no run pair, and is
-  // not offered one here either.
+  // An unterminated fence has no agreed body and draws no run pair
+  // (interactions.md §4c). The menu offers it no run either.
   await write(page, "```sh\npwd\n");
   await page.locator(".cm-line", { hasText: "pwd" }).click({ button: "right" });
   expect(await labels(page)).not.toContain("Run Block Inline");
@@ -185,12 +189,13 @@ test("a run panel keeps its own gesture: no note menu over a block's output", as
 });
 
 test("the manual keeps reading and loses writing", async ({ page }) => {
-  // The manual has a window of its own (remote.md §8a), which a spec reaches
-  // the way the shell opens it: as that window (docs.spec.ts).
+  // The manual opens in a window of its own (remote.md §8a). Loading
+  // /harness.html?docs=1 makes this page that window, the route docs.spec.ts
+  // takes too.
   await page.goto("/harness.html?docs=1");
   await expect(noteRow(page, "Getting Started")).toBeVisible();
   await page.locator(".cm-line").first().click({ button: "right" });
-  // Copy and Select All survive — copying a command out of the docs is what
-  // the docs are for. Everything that would write is absent, not greyed.
+  // Copy and Select All survive, so a reader can copy a command out of the
+  // manual. Everything that would write is absent, not greyed.
   expect(await labels(page)).toEqual(["Copy", "Select All"]);
 });

@@ -1,9 +1,10 @@
 // List continuation (editor/lists.ts): Shift+Enter inside a list item opens a
-// line indented under the item's TEXT, and the next Enter keeps the list —
-// the ordered-item case used to delete the typed line outright. The column
-// arithmetic lives in the pure core (lists.test.ts); these are the
-// user-observable halves, read back through the clipboard seam because
-// indentation has no visible raw form under live preview.
+// line indented under the item's text, and the next Enter keeps the list. On
+// an ordered item that Enter used to delete the line just typed. The pure
+// core covers the column arithmetic (lists.test.ts), so these specs cover
+// what a user can see. Most read the document back through the clipboard,
+// since live preview conceals markers and the DOM holds no markdown. The last
+// test measures the rendering instead.
 import { expect, test } from "@playwright/test";
 
 test.beforeEach(async ({ page }) => {
@@ -75,8 +76,8 @@ test("Enter on the empty marker leaves the list, with no blank line behind", asy
 });
 
 test("a list started under an earlier one does not inherit double spacing", async ({ page }) => {
-  // The blank line that separates them makes ONE loose list, since both use
-  // `-`; upstream would prefix every item below it with a blank of its own.
+  // The blank line between them makes one loose list, since both use `-`.
+  // Upstream would then prefix every item below it with a blank of its own.
   await page.keyboard.type("- [ ] Security questionnaire");
   await page.keyboard.press("Enter"); // opens "- [ ] "
   await page.keyboard.press("Enter"); // and leaves the list
@@ -97,18 +98,21 @@ test("a fence typed inside a list item closes at the item's indent", async ({ pa
 test("a fence opener inside a list item is still the fence's Enter", async ({ page }) => {
   await page.keyboard.type("- item");
   await page.keyboard.press("Shift+Enter");
-  // Written, not typed: an opener that arrived by paste is the one Enter has
-  // left to answer, and inside an item that Enter must be the fence's, not the
-  // list's (the extension order in editor/setup.ts).
+  // insertText rather than typing. Typing the third backtick already plants
+  // the closer (editor/fences.ts), so a typed opener leaves Enter nothing to
+  // close. A pasted one arrives unclosed. Inside a list item that Enter must
+  // be the fence's, not the list's (the extension order in editor/setup.ts).
   await page.keyboard.insertText("```sh");
   await page.keyboard.press("Enter");
   expect(await raw(page)).toBe("- item\n  ```sh\n\n  ```");
 });
 
-// The continuation indent is 2 columns of TEXT; whether it LOOKS right under
-// live preview is the checkbox widget's advance (index.css .ledge-task, pinned
-// to 1ch so `- [ ]` renders exactly as wide as the `- ` it stands in for).
-// Only real WebKit can answer that, and only by measuring.
+// The continuation indent is 2 columns of text. Whether that lines up under
+// live preview depends on how wide `- [ ]` renders: live preview hides the
+// `- ` and draws `[ ]` as a checkbox 1ch wide (index.css .ledge-task, box
+// plus margins). The space after `[ ]` is not concealed, so the label starts
+// at column 2. This test measures the rendering, since only a real browser
+// has those widths.
 test("a task's label, a bullet's, and both continuations share one column", async ({ page }) => {
   await page.keyboard.type("- bullet");
   await page.keyboard.press("Shift+Enter");
@@ -118,12 +122,17 @@ test("a task's label, a bullet's, and both continuations share one column", asyn
   await page.keyboard.type("- [ ] task");
   await page.keyboard.press("Shift+Enter");
   await page.keyboard.type("under");
-  await page.keyboard.press("Meta+ArrowUp"); // caret off the lines: nothing revealed
+  // ⌘↑ puts the caret at the document start. Nothing on that bullet line
+  // conceals, so the measurement below sees every line rendered. A caret on
+  // the task marker would reveal it as raw `- [ ]`, starting that line at
+  // column 0 instead of 2.
+  await page.keyboard.press("Meta+ArrowUp");
 
-  // The x of each line's first non-blank glyph, in character widths past the
-  // FIRST line's — the bullet's own dash, which is column 0 by construction.
-  // Measured against a fixed origin rather than each line's own box: a list
-  // line's box is offset by its hanging indent (editor/wrap.ts).
+  // This measures the x of each line's first non-blank glyph, in character
+  // widths past the first line's glyph. That one is the bullet's own dash, at
+  // column 0. The origin stays fixed rather than following each line's own
+  // box, because a list line's box is offset by its hanging indent
+  // (editor/wrap.ts).
   const columns = await page.evaluate(() => {
     const content = document.querySelector(".cm-content")!;
     const probe = document.createElement("span");
@@ -154,9 +163,9 @@ test("a task's label, a bullet's, and both continuations share one column", asyn
     });
   });
 
-  // The bullet's own line starts at its dash (column 0); every other line —
-  // its continuation, the task's LABEL past the rendered box, and the task's
-  // continuation — starts at column 2.
+  // The bullet's own line starts at its dash, column 0. The other three start
+  // at column 2: its continuation, the task's label past the rendered box, and
+  // the task's continuation.
   expect(columns).toEqual([0, 2, 2, 2]);
 });
 

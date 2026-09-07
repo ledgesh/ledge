@@ -1,15 +1,14 @@
-// The run's shell is told the panel's width before its command runs.
+// The run's shell is told the panel's width before its command runs. The view
+// does not send them in that order: the run message goes out first
+// (editor/blocks.ts startInlineRun), and the resize only once the output panel
+// exists and its ResizeObserver fires. Bun stashes a resize that arrives
+// before its runBlock and applies it before writing the runner line
+// (InlinePool.pendingResize). A resize that landed after the first output
+// would run the command at the pty's default width, and anything that lays out
+// to COLUMNS would be wrong for that run.
 //
-// It used to be told afterwards. The terminal host was `display: none` until the
-// first byte, so it had no laid-out width, the fit bailed, and the first winsize
-// went out only once output had already arrived — by which point the command had
-// run against the pty's default width. Everything that lays out to COLUMNS was
-// wrong for exactly one run: zsh's own prompt padding (which is how this was
-// found — a stray `%` under every block's output), a progress bar, `ls` picking
-// its columns.
-//
-// The bytes on the other side belong to a live probe; what a spec can hold is
-// the ordering, which is the whole of the view's half.
+// Whether a shell then lays its output out at the reported width needs a live
+// probe (testing.md §6).
 import { expect, test } from "@playwright/test";
 
 async function runBlock(page: import("@playwright/test").Page) {
@@ -38,15 +37,18 @@ test("the panel reports its grid before the run has said anything", async ({ pag
     (r) => window.__harness.inlineResizes().find((x) => x.id === r)!,
     id,
   );
-  // A real measurement, not the fallback: the panel spans the editor's content
-  // width, which is far more than a couple of columns.
+  // The reported width is a measurement, not xterm's starting grid. xterm
+  // opens at 2 columns (editor/inlineTerm.ts) and the fit grows it to the
+  // editor's content width.
   expect(first.cols).toBeGreaterThan(20);
 });
 
 test("the terminal is measurable before it is visible, and takes no height", async ({ page }) => {
-  // The mechanism the ordering above rests on. `display: none` would restore the
-  // bug silently — the panel would still look right, and the winsize would just
-  // go out late again.
+  // The ordering above rests on the host staying laid out before the first
+  // byte: `.ledge-term-unshown` gives it zero height instead of hiding it.
+  // With `display: none` the host has no width, so the fit bails and the
+  // winsize goes out late while the panel still looks right
+  // (editor/inlineTerm.ts).
   const id = await runBlock(page);
   const before = await page.evaluate(() => {
     const host = document.querySelector<HTMLElement>(".ledge-term-host")!;
@@ -56,7 +58,8 @@ test("the terminal is measurable before it is visible, and takes no height", asy
   expect(before.width).toBeGreaterThan(0);
   expect(before.height).toBe(0);
 
-  // The first byte reveals it, and the placeholder goes with it.
+  // The first byte shows the terminal: the placeholder is removed and the host
+  // takes height.
   await page.evaluate((r) => window.__harness.runOutput(r, "hi\r\n"), id);
   await expect(page.locator(".ledge-term-waiting")).toHaveCount(0);
   await expect

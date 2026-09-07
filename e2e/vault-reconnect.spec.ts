@@ -1,22 +1,17 @@
 // What a reconnect does to a vault that moved while the wire was down
 // (locking.md §3, remote.md §7).
 //
-// The vault is the SERVER's: it holds the key, and it relocks itself after
-// fifteen idle minutes. That relock is announced with a `vaultChanged` push,
-// and a push with nowhere to go is dropped rather than queued (bun/daemon.ts).
-// Idleness is measured in note-RPC traffic (bun/vault.ts touchVault), so a
-// client whose wire is down is exactly the one the timer fires behind: it is
-// the likeliest reader of that push and the one certain to miss it. Coming back
-// is therefore when it asks.
+// The server holds the key and relocks the vault after fifteen idle minutes.
+// Idleness is note-RPC traffic (bun/vault.ts touchVault), so the timer runs
+// out during an outage and the `vaultChanged` push announcing the relock is
+// dropped rather than queued (remote.md §7). The client asks again on
+// reconnect: the answer goes into the mirrored state (vault/channel.ts), and
+// editorPool evicts decrypted buffers off that mirror
+// (workspace/editorPool.ts). A client that never asks keeps a locked note's
+// plaintext on screen until the tab closes.
 //
-// What hangs on the answer is not a glyph. The mirrored state is what evicts
-// decrypted buffers (workspace/editorPool.ts), so a client that never asks goes
-// on showing a locked note's plaintext for as long as the tab stays open.
-//
-// The sibling of inline-reconnect.spec.ts and terminal-reconnect.spec.ts, which
-// do the same for run panels and for the drawer. `__harness.vaultMoved` is the
-// server changing its mind with nobody listening; `__harness.linkState` is the
-// wire coming back.
+// `__harness.vaultMoved` moves the server's vault state with nobody
+// listening. `__harness.linkState` brings the wire back.
 import { expect, test } from "@playwright/test";
 
 type Page = import("@playwright/test").Page;
@@ -47,9 +42,8 @@ async function unlock(page: Page) {
   await expect(page.locator(".cm-line", { hasText: NEEDLE })).toBeVisible();
 }
 
-// The whole point of the fix. Walking away is what relocks the vault, and
-// walking away with a laptop is also what drops the wire, so the two arrive
-// together far more often than either arrives alone.
+// The common case: walking away lets the vault go idle until it relocks, and
+// taking the laptop along drops the wire.
 test("a relock that happened while the wire was down evicts the body on reconnect", async ({ page }) => {
   await openCodebook(page);
   await unlock(page);
@@ -57,19 +51,21 @@ test("a relock that happened while the wire was down evicts the body on reconnec
   await page.evaluate(() => window.__harness.vaultMoved("locked"));
   await reconnect(page);
 
-  // Back to the placeholder, and the plaintext is out of the DOM rather than
-  // merely covered: the eviction destroys the view (editorPool), because a
-  // relock that Cmd+Z could reverse would not be one.
+  // The tab is back at the placeholder, with the plaintext out of the DOM
+  // rather than covered. The eviction destroys the view (editorPool
+  // evictToHeldFace), because replacing the doc instead would leave the
+  // plaintext in the undo history for Cmd+Z.
   await expect(page.locator('[data-testid="locked-face"]')).toBeVisible();
   await expect(page.getByText(NEEDLE)).toHaveCount(0);
   // And the row says so too, from the same mirrored state.
   await expect(page.locator('[data-testid="note-locked-glyph"]')).toBeVisible();
 });
 
-// The other direction, and what makes this a refresh rather than a
-// relock-shaped special case: a vault another device opened while this one was
-// unreachable pours the body in, through the same subscription (editorPool
-// reloads every held face when the state arrives unlocked).
+// Now the same case in reverse: another device unlocked the vault while this
+// client was away. The client re-asks `vaultState` and takes whatever answer
+// comes back, so a reconnect is a refresh and not a relock check. The body
+// fills in through the same subscription: editorPool reloads every held face
+// when the state arrives unlocked.
 test("an unlock that happened while the wire was down fills the held face in", async ({ page }) => {
   await openCodebook(page);
 
@@ -80,10 +76,9 @@ test("an unlock that happened while the wire was down fills the held face in", a
   await expect(page.locator('[data-testid="note-unlocked-glyph"]')).toBeVisible();
 });
 
-// A reconnect is not a reason to throw the note away. Evicting on every wire
-// event would be the cheap way to be safe and the wrong one: a train tunnel
-// would close the note somebody was reading, and it would do it to notes the
-// vault never stopped holding the key for.
+// A reconnect on its own is not a reason to evict. Evicting on every wire
+// event would drop the open note back to the placeholder after any brief
+// outage, including notes the vault never relocked.
 test("a reconnect with the vault where it was leaves the open note alone", async ({ page }) => {
   await openCodebook(page);
   await unlock(page);

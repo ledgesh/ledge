@@ -1,8 +1,8 @@
 // The run confirmation (interactions.md §4b): a fence marked `confirm`, or any
 // block in a `confirm: true` note, opens a modal before anything executes.
-// PTYs are inert in the harness; what these specs assert is the POLICY: that
-// nothing is dispatched while the dialog is up, that Cancel and Escape run
-// nothing and remember nothing, and that the marker's absence changes nothing.
+// The harness leaves the pty inert, so no spec here can watch a shell. They
+// check what the app dispatched instead: no run while the dialog is up, none
+// after Cancel or Escape, and a straight run for an unmarked fence.
 import { expect, test } from "@playwright/test";
 
 test.beforeEach(async ({ page }) => {
@@ -12,9 +12,11 @@ test.beforeEach(async ({ page }) => {
   await expect(page.locator(".cm-line").first()).toHaveText("# Untitled");
 });
 
-// Replace the scratch note with `body`. Written whole rather than typed so the
-// fence's info string lands exactly as spelled (autoclose would otherwise
-// answer the opener).
+// Replace the scratch note with `body`, then click the block's code line so
+// that `Meta+Enter` has a block at the caret. Inserted whole rather than
+// typed: typing the third backtick makes the editor plant a closing fence of
+// its own (src/mainview/editor/fences.ts `typedFence`), and the closer in
+// `body` would then land after the block as a stray fence line.
 async function write(page: import("@playwright/test").Page, body: string) {
   await page.keyboard.press("Meta+a");
   await page.keyboard.insertText(body);
@@ -31,7 +33,7 @@ test("a marked fence asks first, and nothing runs until Run is clicked", async (
   const dialog = page.getByRole("alertdialog");
   await expect(dialog).toBeVisible();
   await expect(dialog).toContainText("Run this sh block?");
-  // The code is shown: the fence body is the truth about what is about to run.
+  // The dialog shows the block's code, not only the question.
   await expect(dialog).toContainText("rm -rf ./cache");
   expect(await page.evaluate(() => window.__harness.inlineRuns())).toHaveLength(0);
 
@@ -48,8 +50,7 @@ test("Cancel runs nothing, and the next chord asks again", async ({ page }) => {
   await expect(page.getByRole("alertdialog")).toHaveCount(0);
   expect(await page.evaluate(() => window.__harness.inlineRuns())).toHaveLength(0);
 
-  // No memory of the answer: a cancelled yes would be the state the marker
-  // exists to prevent.
+  // Cancelling remembers nothing. The next chord on the same block asks again.
   await page.locator(".cm-line", { hasText: "rm -rf" }).click();
   await page.keyboard.press("Meta+Enter");
   await expect(page.getByRole("alertdialog")).toBeVisible();
@@ -116,8 +117,8 @@ test("on a multi-host note the machine is chosen first, then named in the questi
   await page.locator(".cm-line", { hasText: "rm -rf ./cache" }).click();
   await page.keyboard.press("Meta+Enter");
 
-  // Picker first: on a multi-host note, WHICH MACHINE is the frightening part,
-  // so the question has to be able to name it.
+  // The host picker opens before the dialog, so the question can name the
+  // machine the block will run on (interactions.md §4b).
   await expect(page.getByRole("menu")).toBeVisible();
   await page.getByRole("menuitem", { name: "db2" }).click();
   await expect(page.getByRole("alertdialog")).toContainText("db2");

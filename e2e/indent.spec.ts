@@ -1,9 +1,8 @@
-// Tab indentation in the editor (setup.ts's indentKeymap). Ledge claims Tab
-// because WKWebView's default for an unclaimed one is to move focus OUT of the
-// editor, which in a notebook you type Markdown into is never what it meant.
-// On a list item indenting the line is what nests it; in prose it is the
-// ordinary indent. Real WebKit because the thing being fixed IS the browser's
-// default handling of the key.
+// Tab indentation in the editor (setup.ts's indentKeymap). Ledge binds Tab
+// because WKWebView moves focus out of the editor when nothing claims the key.
+// Indenting a list item carries its marker along, which nests the item; in
+// prose Tab is the ordinary indent. Runs in real WebKit: a fake DOM has no
+// default focus move for Tab to override (testing.md §5).
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
 test.beforeEach(async ({ page }) => {
@@ -13,17 +12,20 @@ test.beforeEach(async ({ page }) => {
   await page.keyboard.press("Meta+a");
 });
 
-// The document as written: select all, copy through the harness clipboard.
+// Returns the note's Markdown source: select all, copy, read the harness
+// clipboard. ⌘C slices the document, so this is the text as typed, not what
+// live preview draws on screen.
 async function raw(page: Page): Promise<string> {
   await page.keyboard.press("Meta+a");
   await page.keyboard.press("Meta+c");
   const text = await page.evaluate(() => window.__harness.clipboard());
-  await page.keyboard.press("ArrowRight"); // collapse to the end, ready to type on
+  await page.keyboard.press("ArrowRight"); // collapse the selection so the next keystroke appends
   return text;
 }
 
-// wikilinks.spec.ts's guard, verbatim: the popup ignores its accept key while
-// young and while the -disabled class is up.
+// The guard wikilinks.spec.ts explains above its own completionAcceptReady.
+// Tab is bound twice here (editor/setup.ts), so a declined acceptCompletion
+// falls through to indentMore and indents the line instead of taking the row.
 const completionAcceptReady = async (page: Page, popup: Locator) => {
   await expect(popup).not.toHaveClass(/cm-tooltip-autocomplete-disabled/);
   await page.waitForTimeout(100);

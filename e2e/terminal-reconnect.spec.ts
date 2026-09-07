@@ -1,23 +1,14 @@
-// What a reconnect does to a drawer that is already open (rpc-schema
+// What a reconnect does to a terminal drawer that is already open (rpc-schema
 // terminalClaim, remote.md §7).
 //
-// The wire dropping does not stop the shell: it keeps printing on the server,
-// at a connection that is gone, and a push with nowhere to go is dropped rather
-// than queued (bun/daemon.ts). So a client that comes back is holding a
-// terminal with a hole in it — and it may also be holding one whose shell has
-// since moved to another device, or ended, because those two pushes were
-// dropped as well. Coming back is therefore when the drawer asks, and these
-// state all three answers.
+// The shell keeps running while the wire is down, printing into a connection
+// that is gone. A push with nowhere to go is dropped rather than queued
+// (bun/audience.ts, remote.md §7), so the drawer claims its session on
+// reconnect. The server answers with the output that was missed, with the
+// device that took the shell, or with the news that the shell ended.
 //
-// And what the outage ITSELF does to one, which is the other half. A terminal
-// is the one piece of chrome that looks identical whether it is waiting on the
-// shell or unable to reach it: no echo comes back either way. So a drawer that
-// went on accepting keystrokes while the wire was down would be swallowing
-// them, and these state that it stops and says so.
-//
-// The sibling of inline-reconnect.spec.ts, which does the same for run panels.
-// PTYs are inert here; `__harness.shellClaim` is the fake server's side of the
-// question and `__harness.linkState` is the wire going and coming back.
+// PTYs are inert here. `__harness.shellClaim` is the fake server's answer, and
+// `__harness.linkState` takes the wire down and back up.
 import { expect, test } from "@playwright/test";
 
 type Page = import("@playwright/test").Page;
@@ -25,14 +16,12 @@ type Page = import("@playwright/test").Page;
 const claims = (page: Page) => page.evaluate(() => window.__harness.shellClaims());
 const typed = (page: Page) => page.evaluate(() => window.__harness.termInputs().length);
 
-// `others` is who the server says is here, announced as part of coming back.
-// Faithful ordering rather than a convenience: a dropped wire clears the
-// presence list (lib/connections.ts, since a wire that is down cannot say who
-// left), and the daemon announces the list again when a connection registers —
-// which is written to the wire before any answer to a request this client sends
-// afterwards. So a claim answered "held" always resolves its name against a
-// refilled list, and a spec that set presence later would be testing an order
-// the app never sees.
+// `others` is who the server says is connected, pushed as part of coming back.
+// A dropped wire clears the presence list (lib/connections.ts). The daemon
+// pushes it again when a connection registers (bun/daemon.ts
+// announcePresence), before the answer to any request that connection sends
+// afterwards. Setting presence before "live" stands in for that, so a claim
+// answered "held" has a name to resolve.
 async function reconnect(page: Page, others: { client: string; label: string }[] = []) {
   await page.evaluate(() => window.__harness.linkState("reconnecting", "The connection dropped. Reconnecting…"));
   await page.evaluate((list) => window.__harness.presence(list), others);
@@ -53,9 +42,9 @@ async function sessionId(page: Page) {
 test.beforeEach(async ({ page }) => {
   await page.goto("/harness.html");
   await expect(page.locator('[data-target-kind="note"]', { hasText: "Alpha" })).toBeVisible();
-  // A scratch note rather than a seeded one, because this file clicks into the
-  // editor to say where the keyboard is and one of the seeded notes opens
-  // behind its lock face.
+  // A scratch note rather than a seeded one. The note that opens at boot is the
+  // locked "Codebook" fixture, which shows a lock face rather than an editable
+  // document, and one test below clicks into the editor and types there.
   await page.keyboard.press("Meta+n");
   await expect(page.locator(".cm-line").first()).toHaveText("# Untitled");
   await page.getByTitle("Toggle Terminal", { exact: false }).click();
@@ -63,10 +52,9 @@ test.beforeEach(async ({ page }) => {
   await expect.poll(async () => (await page.evaluate(() => window.__harness.termAttaches())).length).toBeGreaterThan(0);
 });
 
-// The promise the user is given: a build carries on while you are on a train,
-// and its output is waiting when you come back
-// (docs/user/09-keep-notes-on-a-remote-server.md). What makes it true is that the
-// bytes were kept in the server's ring and the drawer asks for them.
+// A build keeps running while the client is away, and its output is waiting on
+// reconnect (docs/user/09-keep-notes-on-a-remote-server.md). The server's ring
+// kept the bytes, and the drawer asks for them.
 test("an open drawer replays what its shell printed while the wire was down", async ({ page }) => {
   await page.evaluate(() =>
     window.__harness.shellClaim({ state: "attached", dataB64: btoa("while-you-were-out"), host: "local" }),
@@ -76,15 +64,17 @@ test("an open drawer replays what its shell printed while the wire was down", as
 
   await expect.poll(() => claims(page)).toHaveLength(1);
   expect(await claims(page)).toEqual([await sessionId(page)]);
-  // On the screen, not merely fetched. The whole scrollback comes back and is
-  // written over a reset terminal, so this is the shell's history rather than
-  // an update appended to a stale one.
+  // The check below reads the terminal screen, not just the claim's response.
+  // The claim's snapshot is the whole scrollback and it is written over a reset
+  // terminal, so this is the shell's history rather than an update appended to
+  // a stale one.
   await expect(page.locator(".xterm-rows")).toContainText("while-you-were-out");
 });
 
-// A reconnect is not a person asking for anything, so it must not move the
-// keyboard. The take-back button focuses the terminal because somebody pressed
-// it; a wire coming back while the caret is in the note has to leave it there.
+// A reconnect is not a user action, so it must not move the keyboard. The
+// take-back button focuses the terminal because somebody pressed it. A wire
+// coming back while the caret is in the note leaves it there
+// (terminal/TerminalDrawer.tsx).
 test("a replay does not take the keyboard out of the note", async ({ page }) => {
   await page.locator(".cm-line").first().click();
   await page.evaluate(() =>
@@ -96,14 +86,14 @@ test("a replay does not take the keyboard out of the note", async ({ page }) => 
 
   const before = await typed(page);
   await page.keyboard.type("xy");
-  // Into the note, which now reads it back; the shell was sent nothing.
+  // The typing lands in the note and shows there. The shell was sent nothing.
   await expect(page.locator(".cm-line").first()).toContainText("xy");
   expect(await typed(page)).toBe(before);
 });
 
-// The `terminalDetached` that would have said so was dropped with everything
-// else, so without the claim this drawer would sit looking like it still had a
-// shell, swallowing keystrokes the server refuses.
+// The `terminalDetached` push that announces the takeover was dropped with
+// everything else while the wire was down. Without the claim, the drawer would
+// still look like it had the shell, sending keystrokes the server refuses.
 test("a shell another device took while the wire was down explains itself on reconnect", async ({ page }) => {
   await page.evaluate(() => window.__harness.shellClaim({ state: "held", by: "phone-1" }));
 
@@ -111,16 +101,17 @@ test("a shell another device took while the wire was down explains itself on rec
 
   await expect(page.getByTestId("terminal-taken")).toBeVisible();
   await expect(page.getByText("iPhone took this shell.")).toBeVisible();
-  // And inert, exactly as a drawer that was told at the time would be.
+  // It also sends nothing, the same as a drawer that got the
+  // `terminalDetached` push when the takeover happened.
   const before = await typed(page);
   await page.keyboard.type("rm -rf /");
   expect(await typed(page)).toBe(before);
 });
 
-// Once the notice is up this client knows the shell is elsewhere, and a wire
-// coming back is not a reason to want it back. Taking it is the button's job:
-// claiming here would pull the shell off a device somebody deliberately moved
-// it to, and the person on that device never touched anything.
+// Once the notice is up, this client knows the shell is elsewhere, and the
+// relink handler skips the claim (TerminalDrawer.tsx claims only while `mine`).
+// Taking the shell back is the button's job. Claiming on reconnect would pull
+// the shell off the device it was moved to, with no warning there.
 test("a drawer that already lost its shell claims nothing", async ({ page }) => {
   await page.evaluate((sid) => window.__harness.terminalTaken(sid, "phone-1"), await sessionId(page));
   await expect(page.getByTestId("terminal-taken")).toBeVisible();
@@ -130,10 +121,10 @@ test("a drawer that already lost its shell claims nothing", async ({ page }) => 
   await expect(page.getByTestId("terminal-taken")).toBeVisible();
   expect(await claims(page)).toEqual([]);
 
-  // Silence proves nothing on its own — a drawer that never claims at all would
-  // also say nothing here. So take the shell back and drop the wire again: the
-  // claim that follows is what shows the first reconnect was declining rather
-  // than failing to ask.
+  // Silence proves nothing on its own: a drawer that never claims at all would
+  // also say nothing here. Taking the shell back and reconnecting again
+  // produces a claim, which shows the first reconnect declined rather than
+  // failed to ask.
   await page.getByRole("button", { name: "Take This Shell" }).click();
   await expect(page.getByTestId("terminal-taken")).toHaveCount(0);
 
@@ -142,10 +133,10 @@ test("a drawer that already lost its shell claims nothing", async ({ page }) => 
 });
 
 // A shell can end while its client is unreachable: it exited, or another device
-// restarted it to apply edited frontmatter. Attaching would lazily spawn a
-// REPLACEMENT and answer with its empty scrollback, which reads as a terminal
-// that wiped itself; the drawer closes instead, exactly as it does for the
-// `terminalExit` that was dropped.
+// restarted it to apply edited frontmatter. Attaching spawns a replacement
+// shell and answers with its empty scrollback (bun/server.ts terminalAttach),
+// which reads as a terminal that wiped itself. The drawer closes instead, the
+// same as it does for the `terminalExit` push that was dropped.
 test("a shell that ended while the wire was down closes the drawer", async ({ page }) => {
   await page.evaluate(() => window.__harness.shellClaim({ state: "gone" }));
 
@@ -156,11 +147,11 @@ test("a shell that ended while the wire was down closes the drawer", async ({ pa
 
 // --- the outage itself ------------------------------------------------------
 
-// The keystrokes go through a `void` request whose rejection nothing reads
-// (boot.tsx terminalInput), so a drawer that kept sending them would be
-// dropping every one without a word — and a terminal that does not echo is
-// what waiting on a slow shell looks like too. Refusing at the source is what
-// makes the two distinguishable, and the notice is what says which this is.
+// Keystrokes go out through a `void` request whose rejection nothing reads
+// (boot.tsx terminalInput), so a drawer that kept sending them would lose every
+// one silently. A terminal that does not echo also looks like one waiting on a
+// slow shell. The drawer stops sending while the wire is down, and the notice
+// says which of the two this is.
 test("a drawer whose wire is down takes nothing, and says why", async ({ page }) => {
   await drop(page);
 
@@ -172,9 +163,9 @@ test("a drawer whose wire is down takes nothing, and says why", async ({ page })
   expect(await typed(page)).toBe(before);
 });
 
-// The whole state has to be temporary, or it is just a broken drawer: nothing
-// is torn down on the way out, so the shell is typed into again the moment the
-// wire is back — without a take-back, because this client never lost the shell.
+// The offline state is temporary. Leaving it tears nothing down, so the drawer
+// sends keystrokes to the shell again as soon as the wire is back. No take-back
+// is needed, because this client never lost the shell.
 test("the drawer takes keystrokes again when the wire comes back", async ({ page }) => {
   await drop(page);
   await expect(page.getByTestId("terminal-offline")).toBeVisible();
@@ -188,12 +179,11 @@ test("the drawer takes keystrokes again when the wire comes back", async ({ page
   await expect.poll(() => typed(page)).toBeGreaterThan(before);
 });
 
-// The regression guard for the obvious over-correction, and the same one
-// inline-reconnect.spec.ts keeps for the run gate. A request made while the
-// ladder is still running is HELD and replayed (shared/transport.ts), so these
-// keystrokes are going to arrive: refusing them here would throw away typing
-// over a wire that was merely slow, which is the failure being fixed and not a
-// milder version of it.
+// The same guard against over-correcting that the run gate keeps in
+// inline-reconnect.spec.ts. A request made while the reconnect ladder runs is
+// held, then issued once the wire is back (shared/transport.ts), so these
+// keystrokes arrive. Refusing them here would throw away typing over a wire
+// that was only slow.
 test("a wire still being re-dialled does not gate the drawer", async ({ page }) => {
   await page.evaluate(() =>
     window.__harness.linkState("reconnecting", "The connection dropped. Reconnecting…"),
@@ -205,10 +195,10 @@ test("a wire still being re-dialled does not gate the drawer", async ({ page }) 
   await expect.poll(() => typed(page)).toBeGreaterThan(before);
 });
 
-// Both notices at once, which is a real state: a device took the shell, and
-// then the wire went. The outage wins because it outranks in both directions —
-// whether that device still has the shell is not knowable from here, and the
-// button that would take it back is a request that cannot be sent.
+// A device took the shell, then the wire went, so both notices apply at once.
+// The outage notice wins. This client cannot tell from here whether that device
+// still has the shell, and the take-back button would send a request that
+// cannot go out.
 test("the outage outranks a shell another device is holding", async ({ page }) => {
   await page.evaluate((sid) => window.__harness.terminalTaken(sid, "phone-1"), await sessionId(page));
   await expect(page.getByTestId("terminal-taken")).toBeVisible();
@@ -218,8 +208,8 @@ test("the outage outranks a shell another device is holding", async ({ page }) =
   await expect(page.getByTestId("terminal-offline")).toBeVisible();
   await expect(page.getByTestId("terminal-taken")).toHaveCount(0);
 
-  // And the fact underneath survived being covered: the shell is still
-  // somewhere else, so what comes back is the notice that says so.
+  // The state underneath survived being covered: the shell is still elsewhere,
+  // so the taken notice comes back with the wire.
   await reconnect(page);
   await expect(page.getByTestId("terminal-taken")).toBeVisible();
 });

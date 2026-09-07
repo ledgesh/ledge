@@ -1,8 +1,9 @@
-// The view's share of `ledge <title>`: an openExternal push (driven through
-// window.__harness.externalOpen — the Bun watcher behind the real one has no
-// browser surface) selects the workspace that shows the note's root and opens
-// the note's tab. The Bun half — resolving the title, guarding the path,
-// consuming the request file — is openRequest.fs.test.ts's subject.
+// The view's half of `ledge <title>`: an openExternal push selects the
+// workspace showing the note's root, then opens the note's tab. Specs send
+// that push through window.__harness.externalOpen, since nothing on the page
+// can trigger the Bun-side watcher behind the real one. Bun's half (writing
+// and taking the request file, guarding its path) is openRequest.fs.test.ts's
+// subject; the CLI resolves the title, which cli.fs.test.ts covers.
 import { expect, test, type Page } from "@playwright/test";
 
 const SCRATCH = "/harness/scratch";
@@ -33,7 +34,8 @@ test("an external open lands as a tab in the note's own workspace", async ({ pag
 });
 
 test("from another workspace, the note's workspace is selected first — then the tab", async ({ page }) => {
-  await page.keyboard.press("Meta+Shift+N"); // workspace 2, now selected, empty
+  // ⇧⌘N makes a second workspace and selects it. It has no notes of its own.
+  await page.keyboard.press("Meta+Shift+N");
   await expect(noteRow(page, "Alpha")).toHaveCount(0);
   await externalOpen(page, SCRATCH, "Beta");
   // Back in workspace 1: its browser lists Alpha again, and Beta's tab is up.

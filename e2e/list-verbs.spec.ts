@@ -1,9 +1,8 @@
-// The list-row grammar (interactions.md §1 R5/R6, §2 bare keys), driven
-// end-to-end in headless WebKit: click focuses a row, bare keys act on the
-// focused row and ONLY there, destructive-irreversible actions confirm with
-// focus on Cancel. This is the layer the unit tests cannot see — the
-// click-focus bug lived exactly here — so these specs assert on real focus
-// and real DOM, never on internals.
+// These specs drive the list-row grammar in headless WebKit (interactions.md
+// §1 R5/R6, §2 bare keys). A click focuses a row. Bare keys act on the focused
+// row and nowhere else. Destructive-irreversible actions confirm with focus on
+// Cancel. Unit tests cannot see this layer, which is where the click-focus bug
+// was. These specs assert on real focus and real DOM, not on internals.
 import { expect, test, type Page } from "@playwright/test";
 
 const noteRow = (page: Page, title: string) =>
@@ -11,8 +10,8 @@ const noteRow = (page: Page, title: string) =>
 const trashRow = (page: Page, title: string) =>
   page.locator('[data-target-kind="trash"]', { hasText: title });
 
-// Which row holds focus, by its data-list-row key (null when focus is
-// elsewhere) — the ground truth the row verbs dispatch on.
+// The focused row's data-list-row key, or null when focus is elsewhere. The
+// row verbs act on whichever row holds focus.
 const focusedRowKey = (page: Page) =>
   page.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset?.["listRow"] ?? null);
 
@@ -25,8 +24,8 @@ test.describe("note rows", () => {
   test("clicking a row focuses it, opens the note, and does NOT hand focus to the editor", async ({ page }) => {
     await noteRow(page, "Beta").click();
     await expect(page.locator(".cm-content").first()).toContainText("beta body");
-    // Focus must survive the note opening: opening shows the note, clicking
-    // the editor is the gesture that says you want to type (R5).
+    // Opening the note leaves focus on the row. Clicking the editor moves
+    // focus into it (interactions.md §1 R5).
     expect(await focusedRowKey(page)).toContain("beta.md");
   });
 
@@ -89,7 +88,8 @@ test.describe("trash rows", () => {
     await page.keyboard.press("d");
     const dialog = page.getByRole("alertdialog");
     await expect(dialog).toContainText("Delete “Older” permanently?");
-    // Irreversible, so the safe answer is the default (interactions.md §4).
+    // The dialog opens with Cancel focused, not Delete Permanently, because
+    // the delete is irreversible (interactions.md §4).
     await expect(dialog.getByRole("button", { name: "Cancel" })).toBeFocused();
     await page.keyboard.press("Escape");
     await expect(dialog).toHaveCount(0);
@@ -100,11 +100,12 @@ test.describe("trash rows", () => {
     await expand(page);
     await trashRow(page, "Older").click();
     await page.keyboard.press("d");
-    // Scoped to the dialog: the hover trash-can advertises the same name.
+    // Scoped to the dialog. Playwright matches an accessible name by
+    // case-insensitive substring, and the hover trash-can's name
+    // ("Delete Permanently… (D)") contains this one too.
     await page.getByRole("alertdialog").getByRole("button", { name: "Delete Permanently" }).click();
     await expect(trashRow(page, "Older")).toHaveCount(0);
-    // The last item is gone, so the whole section hides: an empty trash has
-    // nothing to discover.
+    // The last item is gone, so the whole Trash section stops rendering.
     await expect(page.getByRole("button", { name: /^Trash/ })).toHaveCount(0);
   });
 

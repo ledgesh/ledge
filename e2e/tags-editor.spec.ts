@@ -1,19 +1,18 @@
-// Tags in the editor (editor/tags.ts + livePreview.ts + frontmatter.ts):
-// inline #tags render as pills always (nothing conceals), a fenced one stays
-// plain text, clicking a rendered tag lands in the Tags panel drilled into
-// it, the `#` picker offers the workspace's own tags, and the frontmatter
-// tags: line's tokens style like the profile name. Real WebKit because the
-// pill styling, the hotspot click, and the popup are exactly what unit tests
-// cannot see (testing.md §5).
+// Tags in the editor (editor/tags.ts, livePreview.ts, frontmatter.ts). An
+// inline #tag renders as a pill, and a fenced one stays plain. Clicking a pill
+// opens the Tags panel drilled in. `#` completes the workspace's tags, and
+// frontmatter `tags:` tokens style like the profile name. Runs in real WebKit:
+// unit tests cannot see pills, hotspot clicks, or the popup (testing.md §5).
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
 const noteRow = (page: Page, title: string) =>
   page.locator('[data-target-kind="note"]', { hasText: title });
 
-// A visible completion popup is not yet an accepting one — the wikilinks
-// spec's guard, for the same two Enter-swallowing windows (the disabled
-// re-query state, and interactionDelay after opening). See wikilinks.spec.ts
-// for the full story.
+// A visible completion popup does not always accept Enter, which then inserts
+// a newline. Two windows do that: a keystroke's re-query is in flight (the
+// popup carries the cm-tooltip-autocomplete-disabled class), or the popup
+// opened less than 75ms ago (interactionDelay). Waiting out the class and then
+// 100ms clears both, and wikilinks.spec.ts works through the timing.
 const completionAcceptReady = async (page: Page, popup: Locator) => {
   await expect(popup).not.toHaveClass(/cm-tooltip-autocomplete-disabled/);
   await page.waitForTimeout(100);
@@ -29,8 +28,9 @@ test("an inline #tag styles as a pill; a fenced one stays plain", async ({ page 
   await page.keyboard.press("Meta+a");
   await page.keyboard.type("# Pills\n\nreal #work here\n```\n#fenced\n```\n");
 
-  // The tag pill is there even while the caret shares the note — emitted
-  // always; only its clickability varies with touch.
+  // livePreview.ts always emits the .ledge-hashtag span. A selection touching
+  // the tag only drops the live class, the title, and the data-tag the
+  // hotspot layer clicks through (liveTag vs TAG_PLAIN).
   const pill = page.locator(".ledge-hashtag", { hasText: "#work" });
   await expect(pill).toBeVisible();
   await expect(page.locator(".ledge-hashtag", { hasText: "#fenced" })).toHaveCount(0);
@@ -40,11 +40,15 @@ test("clicking a rendered #tag lands in the Tags panel, drilled in", async ({ pa
   await page.keyboard.press("Meta+n");
   await page.keyboard.press("Meta+a");
   await page.keyboard.type("# Clicky\n\nsee #roadmap soon\nlast line");
-  // Park the caret away from the tag so it renders live (untouched).
+  // The trailing "last line" leaves the caret below the tag, so the selection
+  // does not touch it and livePreview.ts renders the live, clickable span.
+  // Meta+ArrowDown is cursorDocEnd, where the caret already is.
   await page.keyboard.press("Meta+ArrowDown");
 
-  // The rendered tag gets the same WKWebView-proof hotspot as a rendered
-  // link — the hotspot owns the click (the wikilinks spec's move).
+  // The rendered tag gets the same WKWebView-proof hotspot as a rendered link
+  // (wikilinks.spec.ts). The WebView does not reliably honour `cursor` inside
+  // the editor, so livePreview.ts floats an invisible div over each rendered
+  // mark, and that div takes the click.
   const hotspot = page.locator('.ledge-hotspot[title="Click to show tagged notes"]');
   await expect(hotspot).toHaveCount(1);
   await hotspot.click();
@@ -56,8 +60,9 @@ test("clicking a rendered #tag lands in the Tags panel, drilled in", async ({ pa
 });
 
 test("# pops the tag picker with the workspace's tags; accepting completes", async ({ page }) => {
-  // Seed the vocabulary: a note bearing #ledge, saved so the directory scan
-  // (and the App-side vocabulary refresh) sees it.
+  // Seed the vocabulary with a note carrying #ledge. Waiting for its row waits
+  // out the save and the note-list update, and App.tsx refetches the tag scan
+  // the picker reads whenever that list changes.
   await page.keyboard.press("Meta+n");
   await page.keyboard.press("Meta+a");
   await page.keyboard.type("# Seed\n\ncarry #ledge here");
@@ -77,7 +82,10 @@ test("# pops the tag picker with the workspace's tags; accepting completes", asy
 
 test("frontmatter tags: tokens style like the profile name", async ({ page }) => {
   await page.keyboard.press("Meta+n");
-  await page.keyboard.press("Meta+ArrowUp"); // the caret opens IN the title; this note is typed from the top
+  // A new note opens with the caret on its title and "Untitled" selected
+  // (editorPool.ts). Meta+ArrowUp is cursorDocStart, so the frontmatter is
+  // typed above the title instead of replacing it.
+  await page.keyboard.press("Meta+ArrowUp");
   for (const line of ["---", "tags: work, home", "---", "# Declared"]) {
     await page.keyboard.type(line);
     await page.keyboard.press("Enter");

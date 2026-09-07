@@ -1,13 +1,13 @@
-// A fenced block gets an end, and only a block WITH an end offers to run.
+// What closes a fenced block, and which blocks draw no run pair.
 //
-// Two halves of one story. Enter on an opener closes the fence even when
-// another block already sits below it (editor/fences.ts): without that, the
-// closer down there pairs with the new opener instead and swallows the block
-// between them. And a block left unterminated draws no run pair and refuses
-// the chord (editor/blocks.ts): Lezer ends an unclosed node on the last BODY
-// line, so what used to reach the shell was a body one line short — an empty
-// one, for a one-line block, which `source`d cleanly and reported exit 0
-// having run nothing at all.
+// An opener closes its own fence, on the third mark and on Enter, even when
+// another block already sits below it (editor/fences.ts). Without that, the
+// closer below pairs with the new opener and swallows the block between them.
+// An unterminated block draws no run pair and refuses the chord
+// (editor/blocks.ts, interactions.md §4c): Lezer ends an unclosed node on the
+// last body line, so the body read from it used to be one line short. A
+// one-line block gave the shell an empty file, so the run printed nothing and
+// reported exit 0.
 import { expect, test } from "@playwright/test";
 
 type Page = import("@playwright/test").Page;
@@ -41,14 +41,15 @@ test("a fence typed above an existing block closes there and then", async ({ pag
   await page.keyboard.type("```");
 
   // The closer arrives with the third backtick, so the block below is never
-  // swallowed — it is still its own block, and still offers to run.
+  // swallowed. It is still its own block, and still offers to run.
   await expect(page.locator('[data-act="run"]')).toHaveCount(1);
   expect(await raw(page)).toBe("```\n```\n```sh\npwd\n```\n");
 });
 
 test("Enter closes an opener that arrived some other way", async ({ page }) => {
-  // Written whole, the way a paste (or a note already saved mid-block) arrives:
-  // nothing was typed, so the merged state is what opens.
+  // The body is written whole, the way a paste or a note saved mid-block
+  // arrives. Nothing is typed, so the note opens with the two blocks merged
+  // into one.
   await write(page, "```\n\n```sh\npwd\n```\n");
   await expect(page.locator('[data-act="run"]')).toHaveCount(0);
 
@@ -60,19 +61,20 @@ test("Enter closes an opener that arrived some other way", async ({ page }) => {
 });
 
 test("an unterminated fence draws no run pair, and its copy button still copies the body", async ({ page }) => {
-  // No trailing newline: the note stops mid-block, which is the shape that
+  // No trailing newline: the note stops mid-block. That is the shape that
   // used to hand `source` an empty file.
   await write(page, "# Untitled\n\n```sh\npwd\n```\n\n```sh\nls");
 
-  // One closed block, one open: only the closed one is offered.
+  // Two blocks, one closed and one open. Only the closed one gets a run pair.
   await expect(page.locator('[data-act="run"]')).toHaveCount(1);
   await expect(page.locator('[data-act="term"]')).toHaveCount(1);
   const groups = page.locator(".ledge-ctl-group");
   await expect(groups).toHaveCount(2);
   await expect(groups.nth(1).locator("button")).toHaveCount(1); // copy alone
 
-  // Copy reads the same body the runner would have, and an unclosed block's
-  // body is every line after the opener: the last one is content, not a fence.
+  // Copy and the runner read the same body (`block.code`, editor/blocks.ts).
+  // An unclosed block's body is every line after the opener: the last line is
+  // content, not a fence.
   await groups.nth(1).locator("button").dispatchEvent("mousedown", { button: 0 });
   await expect.poll(() => page.evaluate(() => window.__harness.clipboard())).toBe("ls");
 });
@@ -104,10 +106,10 @@ test("typing the closing fence brings the run pair with it", async ({ page }) =>
   await expect.poll(() => page.evaluate(() => window.__harness.inlineRuns())).toHaveLength(1);
 });
 
-// The other fence that declines to run (interactions.md §4e): one marked
-// `norun`. The manual's recipes are the reason — an install command aimed at
-// a server is a live button on the machine reading the page — but the mark is
-// any note's to use.
+// The other way a block draws no run pair: `norun` in the info string
+// (interactions.md §4e). Without the mark, a command quoted for some other
+// machine is a live button on whichever machine shows the note. Every fence
+// in a runnable language in docs/user/ carries it, and any note can use it.
 test("a fence marked norun draws copy alone, and the chord says why", async ({ page }) => {
   await write(page, "# Untitled\n\n```sh\npwd\n```\n\n```sh norun\nsudo apt-get install -y restic\n```\n");
 
@@ -133,8 +135,10 @@ test("typing norun onto a fence takes the pair away, and deleting it brings it b
   await write(page, "# Untitled\n\n```sh\npwd\n```\n");
   await expect(page.locator('[data-act="run"]')).toHaveCount(1);
 
-  // Up from the body: the opener's marks are concealed until the caret is on
-  // the line, so its text is not there to click.
+  // The opener is reached from the body line below it. Clicking `pwd` puts
+  // the selection inside the block, which reveals the fence marks concealed
+  // while the selection is off it (editor/livePreview.ts reveals the whole
+  // FencedCode node). ArrowUp then End lands after `sh` on the opener line.
   await page.locator(".cm-line", { hasText: "pwd" }).click();
   await page.keyboard.press("ArrowUp");
   await page.keyboard.press("End");

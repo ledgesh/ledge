@@ -1,21 +1,19 @@
 // Who owns the keyboard while an inline run is live.
 //
-// A run that asks something ("Password:", "[y/N]") used to be unanswerable
-// without a click: focus stayed in the prose, so the answer was typed into the
-// note (a password written to disk, in the worst case). A run now claims the
-// keyboard when it first speaks — but only if the user is still sitting where
-// they pressed ⌘↩, because the other half of the trade is that ⌘↩-then-keep-
-// writing must not lose the sentence. These specs state both halves, plus the
-// way back out.
+// A run claims the keyboard when it first prints. The claim lapses if the
+// editor has lost focus or the caret has moved since ⌘↩ (editor/blocks.ts,
+// interactions.md §6a), so ⌘↩ followed by more writing keeps the keyboard in
+// the note.
 //
-// PTYs are inert here; `__harness.runOutput` pushes the first byte the way
-// Bun's runEvent would, which is the only thing a run's focus behavior needs.
+// PTYs are inert here (testing.md §5). `__harness.runOutput` pushes the first
+// byte the way Bun's runEvent would, and the claim is honored on that byte.
 import { expect, test } from "@playwright/test";
 
 const IN_TERMINAL = () => !!document.activeElement?.closest(".xterm");
 const IN_EDITOR = () => !!document.activeElement?.classList.contains("cm-content");
 
-// A scratch note holding one runnable block, run inline with the caret in it.
+// Makes a scratch note with one runnable block, puts the caret in the block,
+// runs it with ⌘↩, and returns the run's id.
 async function runBlock(page: import("@playwright/test").Page) {
   await page.goto("/harness.html");
   await expect(page.locator('[data-target-kind="note"]', { hasText: "Alpha" })).toBeVisible();
@@ -33,28 +31,29 @@ async function runBlock(page: import("@playwright/test").Page) {
 test("a run takes the keyboard when it first speaks, and says so", async ({ page }) => {
   const id = await runBlock(page);
   // Nothing has been printed yet: the caret is still in the note, where the
-  // user left it. A silent run must not move focus preemptively.
+  // user left it. A run that has not printed anything must not move the focus
+  // yet.
   expect(await page.evaluate(IN_EDITOR)).toBe(true);
 
   await page.evaluate((runId) => window.__harness.runOutput(runId, "Password:"), id);
 
   await expect.poll(() => page.evaluate(IN_TERMINAL)).toBe(true);
-  // And the panel says whose keys these are, with the way out. Two elements,
-  // because the way out is not the same sentence on a client with no keys: the
-  // touch half of this is phone.spec.ts's.
+  // The panel names the state and the way out, in two elements. A touch
+  // client hides both and shows a button in their place. phone.spec.ts covers
+  // that side.
   await expect(page.locator(".ledge-focus-hint")).toHaveText("typing here");
   await expect(page.locator(".ledge-focus-key")).toHaveText("· esc esc to exit");
-  // And the control that stands in for those keys is not on a Mac, which has
-  // them.
+  // The button that stands in for that pair shows on a touch client while the
+  // panel holds focus (index.css, `@media (hover: none)`).
   await expect(page.locator(".ledge-term-leave")).toBeHidden();
 });
 
 test("a user who went back to writing keeps the keyboard", async ({ page }) => {
   const id = await runBlock(page);
-  // The ⌘↩-and-keep-taking-notes flow: the caret has moved on, so the run's
-  // claim lapses instead of swallowing the next sentence.
-  // (The H1 renders concealed once the caret leaves it, so address it by
-  // position rather than by its raw text.)
+  // The case here is ⌘↩ and then carrying on with the note. The caret has
+  // moved, so the run's claim lapses instead of swallowing the next sentence.
+  // The H1 renders concealed once the caret leaves it, so address that line by
+  // position rather than by its raw text.
   await page.locator(".cm-line").first().click();
   await page.keyboard.type(" more prose");
 
@@ -70,7 +69,10 @@ test("Escape twice hands the keyboard back to the note", async ({ page }) => {
   await page.evaluate((runId) => window.__harness.runOutput(runId, "Password:"), id);
   await expect.poll(() => page.evaluate(IN_TERMINAL)).toBe(true);
 
-  // One Escape belongs to whatever is running; the second one is the exit.
+  // The program gets the first Escape. The second one leaves, and only if it
+  // lands within ESC_EXIT_MS of the first (600ms, editor/inlineTerm.ts). The
+  // page.evaluate between the two presses fits in that budget. A wait, a poll
+  // or a screenshot added here would not.
   await page.keyboard.press("Escape");
   expect(await page.evaluate(IN_TERMINAL)).toBe(true);
   await page.keyboard.press("Escape");
