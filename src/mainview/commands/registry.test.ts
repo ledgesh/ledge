@@ -741,9 +741,10 @@ describe("registry", () => {
     const calls: string[] = [];
     const cmds = buildCommands(stubDeps(calls));
     const confirmed: string[] = [];
+    const askedToLock: string[] = [];
     const onB: CommandCtx = {
       ...makeCtx(state),
-      ui: { confirmRemoveLock: (n) => confirmed.push(n.path) },
+      ui: { confirmRemoveLock: (n) => confirmed.push(n.path), confirmLock: (n) => askedToLock.push(n.path) },
       target: { kind: "note", path: b.path },
     };
     const onSealed: CommandCtx = { ...onB, target: { kind: "note", path: sealed.path } };
@@ -751,9 +752,12 @@ describe("registry", () => {
     expect(find(cmds, "note.lockOn").when!(onSealed)).toBe(false);
     expect(find(cmds, "note.lockOff").when!(onB)).toBe(false);
     expect(find(cmds, "note.lockOff").when!(onSealed)).toBe(true);
-    // The vault stub is "unlocked", so both run their direct paths.
+    // The vault stub is "unlocked", so both skip the passphrase dialog. Both
+    // ask before acting: neither locking nor unlocking a note is reversible
+    // in the sense that matters, so each states its own limit (locking.md §7).
     find(cmds, "note.lockOn").run(onB);
-    expect(calls).toEqual([`lockNoteNow:${FOLDER}:${b.path}`]);
+    expect(askedToLock).toEqual([b.path]);
+    expect(calls).toEqual([]); // nothing encrypted until the confirm comes back
     find(cmds, "note.lockOff").run(onSealed);
     expect(confirmed).toEqual([sealed.path]);
   });

@@ -287,11 +287,12 @@ function unwrapDataKey(header: LockedHeader): Buffer {
     return gcmOpen(key, header.wrapNonce, header.wrappedKey);
   } catch {
     // The master key was checked at unlock, so this is not a mistyped
-    // passphrase. The header was wrapped under some other key: an older or a
-    // newer passphrase (changeVaultPassphrase in notes.ts commits only after
-    // its sweep, so a crash leaves headers already rewrapped), a note synced
-    // in from a different vault, or a tampered header.
-    throw new Error("this note's key does not open with the current passphrase (damaged, or locked under an old passphrase)");
+    // passphrase. The header was wrapped under a different master key: another
+    // person's vault (locking.md §6a: locked notes do not travel between
+    // people), this machine's own vault minted before the note was restored
+    // (§6a's recovery order), or a passphrase change whose sweep did not
+    // finish. The message names the two the user can act on.
+    throw new Error("this note was locked by a different vault, so the current passphrase cannot open it (a note from another person's Ledge, or your own restored onto a machine that already had a passphrase)");
   }
 }
 
@@ -440,7 +441,7 @@ export function openAssetBytes(sealed: Uint8Array): Buffer {
     try {
       return gcmOpen(key, wrapNonce, wrapped);
     } catch {
-      throw new Error("this image's key does not open with the current passphrase (damaged, or sealed under an old passphrase)");
+      throw new Error("this image was sealed by a different vault, so the current passphrase cannot open it (locking.md §6a)");
     }
   })();
   try {

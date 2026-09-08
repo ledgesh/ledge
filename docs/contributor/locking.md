@@ -272,6 +272,51 @@ it. Assets are therefore in scope from v1, with one structural decision:
 - **Pre-lock history** — sync services and backups keep the plaintext
   versions they already took (§1).
 
+## 6a. One vault, one person: sharing is a non-goal, recovery is not
+
+**A locked note does not travel between people, and v1 will not make it.**
+The passphrase is one, app-wide (§3), and `unwrapDataKey` uses the single
+master key in memory rather than re-deriving from the note header's own
+salt. So a recipient who already has a vault cannot open a locked note that
+arrived from somebody else, with either passphrase: their own unlocks their
+vault but will not unwrap the foreign data key, and the sender's is refused
+by their vault's check value before it gets that far. Probed against the
+real code paths, both outcomes, both directions.
+
+Making it work means per-recipient keys, which means public keys, which
+means an identity model. Ledge has none and is not getting one for this: the
+sharing story is a git remote (docs/user/19), and a secret meant for a
+collaborator belongs in a profile, which never enters a notes folder
+(architecture.md §6a). Say the non-goal rather than half-building it.
+
+**The self-contained envelope is for one person on another machine**, which
+is what §2 claims and all it claims. That case is recovery, it works, and it
+is the reason the salt rides in every header and every sealed asset.
+
+| Restoring locked notes from git, S3, or any backup | Result |
+| --- | --- |
+| Onto a machine with no vault yet | Opens. `vaultUnlock` probes `firstLockedHeader`, derives from the note's own salt, and adopts it as the vault's. |
+| Onto a machine that already minted a vault, same passphrase | **Does not open.** The probe runs only at `vaultState() === "none"`, and a fresh vault has a different salt, so the same passphrase yields a different master key. |
+| Restore that includes `.vault.json` (what `backup-paths` produces) | Opens, whatever the machine had before. |
+
+**So the order matters, and only the user can get it right: restore before
+locking anything new on the new machine.** The middle row is the trap, it is
+silent, and the passphrase being correct is what makes it convincing. Two
+things answer it and both are cheap: `backup-paths` already carries
+`.vault.json` (`bun/backup.ts` excludes only the socket, the pid, the logs
+and the docs mirror), and `unwrapDataKey`'s error names the case instead of
+saying "damaged". A code fix that re-derived per note header would mean
+holding more than one master key, which is §3's model, not a patch.
+
+**The probe unlock adopts the sender's key material, which is why the
+non-goal is stated rather than left implicit.** `unlockVault`'s probe path
+ends in `saveVaultFile(header.salt, key)`, so a recipient with no vault who
+opens somebody's shared note has a vault built from that person's salt and
+passphrase. Everything they lock afterwards is wrapped under it. Probed:
+the sender's passphrase then decrypts the recipient's own private notes.
+Nothing in the UI says so, which is tolerable only because §6a's first
+sentence means this is not a flow Ledge offers.
+
 ## 7. Interaction spec
 
 Written to interactions.md's grammar; merges there when the feature lands.
@@ -282,7 +327,7 @@ every other action; tooltips derive; palette carries everything (R1).
 | ------- | --- | ----- |
 | Lock Notes | ⌘L | relocks the vault now — the walking-away gesture, which is why it earns a chord: of the free ⌘ letters, L is the mnemonic one (Lock; ⌥⌘L backlinks is unrelated and stays). Flush-then-drop per §3; no-op when nothing is locked or the vault is already locked. Page and editor domains (window-dispatched; CodeMirror does not bind ⌘L) |
 | Unlock Notes… | — (palette) | opens the passphrase dialog proactively. The dialog is otherwise *interposed*: opening a locked note while the vault is locked prompts in place (the host-picker move — always-ask is the point, so the act that needs the key asks for it). Wrong passphrase shakes and stays; Escape/dismiss opens nothing |
-| Lock This Note… | — (palette) | two-faces pair with Remove Lock (exactly one shows, per the note's live state — the template-marker move). First lock ever runs vault creation (§3: passphrase twice, the no-recovery sentence); locking an existing note states the history caveat (§1) and sweeps its assets (§5). Requires the vault unlocked (or just created) |
+| Lock This Note… | — (palette) | two-faces pair with Remove Lock (exactly one shows, per the note's live state — the template-marker move). First lock ever runs vault creation (§3: passphrase twice, the no-recovery sentence). Then one confirm, always, carrying the §1 history caveat: encrypting now cannot retract the plaintext a sync service, a backup, or a git commit already holds. It is not a §4-destructive confirm and it is not asking whether to lock; it is the only place that sentence can be said to somebody who is about to believe otherwise. The confirm comes AFTER the passphrase dialog when one interposes, the same order Remove Lock uses: the unlock proves identity and nothing more. Sweeps the note's assets on the way (§5) |
 | Remove Lock… | — (palette) | decrypts note and solely-referenced assets back to plaintext, behind one confirm — not because data is destroyed (it is not; this is not §4-destructive) but because the consequence is silent *exposure*: the next sync/agent scan sees the body. Requires the vault unlocked; command-only, never a text edit (§2) |
 | Change Vault Passphrase… | — (palette) | §3 rewrap; unlocked only; reports the count rewrapped |
 

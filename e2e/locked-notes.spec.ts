@@ -122,6 +122,10 @@ test("lock a note, then remove the lock: round trip through setup-free unlock an
   await expect(page.locator('[data-testid="vault-dialog"]')).toBeVisible();
   await page.keyboard.type("letmein");
   await page.keyboard.press("Enter");
+  // The unlock proved identity and nothing else, so the lock's own confirm
+  // still comes: encrypting now cannot retract plaintext already captured.
+  await expect(page.getByText("stay plain text where they were taken", { exact: false })).toBeVisible();
+  await page.getByRole("button", { name: "Lock Note" }).click();
   // Alpha is locked now, and its row shows the open lock, since the interposed
   // unlock left the vault unlocked. The editor shows the note's new "locked:"
   // marker in the frontmatter.
@@ -178,10 +182,14 @@ test("Lock This Note… from the row menu locks that row, not the focused note",
   await expect(page.locator(".cm-line", { hasText: "alpha body" })).toBeVisible();
   await page.locator('[data-target-kind="note"]', { hasText: "Beta" }).click({ button: "right" });
   await page.getByRole("menuitem", { name: "Lock This Note…" }).click();
-  // The vault is shut, so the unlock interposes and the lock follows through.
+  // The vault is shut, so the unlock interposes, then the lock's own confirm.
   await expect(page.locator('[data-testid="vault-dialog"]')).toBeVisible();
   await page.keyboard.type("letmein");
   await page.keyboard.press("Enter");
+  // The confirm names the row's note, not the focused one: the target survives
+  // the trip through the passphrase dialog.
+  await expect(page.getByText("“Beta” will be encrypted", { exact: false })).toBeVisible();
+  await page.getByRole("button", { name: "Lock Note" }).click();
   // Beta joins Codebook, both showing the open lock since the vault is now
   // unlocked. Alpha, the focused note, was never touched.
   await expect(page.locator('[data-testid="note-unlocked-glyph"]')).toHaveCount(2);

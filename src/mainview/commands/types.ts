@@ -12,7 +12,7 @@ import type { FocusDomain } from "./keymap";
 // the command that was waiting on the passphrase. App.tsx runs the follow-up.
 // The dialog only collects the passphrase.
 export interface VaultFollowUp {
-  lock?: { path: string; folder: string };
+  lock?: { path: string; title: string; folder: string };
   removeLock?: { path: string; title: string; folder: string };
   // Not a follow-up: opens the dialog in its change-passphrase face, which
   // asks for the new passphrase twice. The command's `when` allows it only
@@ -129,6 +129,11 @@ export interface UiHooks {
   // because the body becomes readable and nothing else marks it. The next
   // sync or agent scan sees the plain text.
   confirmRemoveLock(note: { path: string; title: string; folder: string }): void;
+  // Open the Lock confirmation. Nothing is destroyed and nothing is exposed,
+  // so this is not an interactions.md §4 confirm: it is the one place Ledge
+  // can say that encrypting a note now does not retract the plaintext copies
+  // a sync service, a backup, or a git history already holds (locking.md §1).
+  confirmLock(note: { path: string; title: string; folder: string }): void;
   // Show an error under the note list (the browser's error strip). A failed
   // workspace create or attach reports here, on the same surface a failed
   // delete uses.

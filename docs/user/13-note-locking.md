@@ -12,9 +12,9 @@ Run "Lock This Note…" from the command palette.
 
 The first lock sets up the vault. You choose a passphrase, typed twice, and the dialog states the contract: there is no recovery. A forgotten passphrase means the note's body is gone.
 
-Locking a note also seals the images it references, since a screenshot pasted into a sensitive note is often the most sensitive thing in it.
+Locking then asks once, every time, and states one limit. Encrypting a note now does not reach backwards. Copies taken before this moment stay plain text where they were taken: a sync service's version history, a backup, or a git commit. Only a note locked from the start has a clean history. To retract a note that was committed in the open, rewriting the git history with `git filter-repo` is the only thing that does it.
 
-One limit the dialog repeats: versions of the note that a sync service or backup captured before the lock are still plaintext wherever they were captured. Only a note that was locked from the start has a clean history.
+Locking a note also seals the images it references, since a screenshot pasted into a sensitive note is often the most sensitive thing in it.
 
 ## Remove a lock
 
@@ -33,7 +33,29 @@ Once unlocked, every locked note reads and edits like a normal note, and saves g
 
 "Change Vault Passphrase…" rewraps every locked note under the new passphrase, leaving contents untouched, and reports how many it found.
 
-A locked note is self-contained. Synced to another machine, it unlocks with the passphrase alone.
+A locked note is self-contained. Carried to another of your machines, it unlocks with the passphrase alone, with no vault file to bring along. One ordering rule comes with that, under "Recover locked notes from a backup" below.
+
+## Recover locked notes from a backup
+
+Locked notes restore from git, S3, or any backup that carried the files, on any machine, with the passphrase alone. Each locked note and each sealed image carries what it needs to be decrypted, so there is no key file to keep safe alongside them.
+
+One rule makes that true, and it is about order:
+
+**Restore your notes before you lock anything new on the new machine.**
+
+Ledge derives its key from your passphrase and a random salt. Restored notes carry the salt they were locked under. A machine that has never locked anything adopts that salt from the notes themselves, which is what lets them open. A machine that locked something first has already minted a salt of its own, and then the same passphrase produces a different key: your restored notes stay shut, and the passphrase being right is what makes that confusing.
+
+If it happens, nothing is lost. Restore `.vault.json` from the same backup into `~/.ledge`, which puts the original salt back, and the notes open. Backups made with the `ledge backup-paths` recipe include that file already ([[Tutorial: Back Up Your Notes to S3]]).
+
+Locked notes from someone else's Ledge are a different matter, and they do not open. The next section says why.
+
+## Sharing locked notes
+
+You cannot. A locked note opens only on a machine holding your vault's key, so sending one to a colleague, with or without the passphrase, does not give them a readable note. If they already lock notes of their own, it fails outright; Ledge says the note was locked by a different vault.
+
+This is a limit, not a bug to work around. Sharing a workspace over git ([[Tutorial: Keep Notes Synced]]) carries locked notes as ciphertext that only you can open, which is the right outcome for a backup and the wrong one for collaboration.
+
+To share a secret with someone, use a profile ([[Profiles and Secrets]]). Profiles live outside every notes folder, so they never travel with a workspace in the first place.
 
 ## What stays visible
 

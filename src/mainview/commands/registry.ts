@@ -655,7 +655,8 @@ export function buildCommands(deps: RegistryDeps): Command[] {
     // like note.delete: the sidebar row's menu passes its note, the palette
     // passes none and targetNote falls back to the focused tab. Locking with
     // no vault runs first-time setup, and locking with a locked vault unlocks
-    // first: the dialog carries the lock as a follow-up so the act finishes.
+    // first: the dialog carries the lock as a follow-up, which lands on the
+    // same confirm the unlocked path opens (locking.md §7).
     cmd("note.lockOn", {
       icon: Lock,
       targetKind: "note",
@@ -667,13 +668,10 @@ export function buildCommands(deps: RegistryDeps): Command[] {
         const note = targetNote(ctx);
         if (!note) return;
         if (deps.vaultState() !== "unlocked") {
-          ctx.ui.openVaultDialog?.({ lock: { path: note.path, folder: ctx.selected.folder } });
+          ctx.ui.openVaultDialog?.({ lock: { path: note.path, title: note.title, folder: ctx.selected.folder } });
           return;
         }
-        void deps.lockNoteNow(ctx.selected.folder, note.path).then((res) => {
-          if (res.error) ctx.ui.showError?.(res.error);
-          else if (res.notice) ctx.ui.showNotice?.(res.notice);
-        }, failed(ctx));
+        ctx.ui.confirmLock?.({ path: note.path, title: note.title, folder: ctx.selected.folder });
       },
     }),
     // Unlocked only (locking.md §3). The rewrap needs the master key in hand,

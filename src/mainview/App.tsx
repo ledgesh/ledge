@@ -197,6 +197,12 @@ function Shell() {
   // confirmed because the note's body becomes readable to sync and agent
   // scans, not because anything is destroyed.
   const [removeLockConfirm, setRemoveLockConfirm] = useState<{ path: string; title: string; folder: string } | null>(null);
+  // Lock's own confirm, the mirror of the one above. It destroys nothing and
+  // exposes nothing: it is where the history caveat is said, that encrypting
+  // now cannot retract plaintext a sync, a backup, or a commit already holds
+  // (locking.md §1). Both confirms come after the passphrase dialog when one
+  // interposes, since an unlock proves identity and nothing else.
+  const [lockConfirm, setLockConfirm] = useState<{ path: string; title: string; folder: string } | null>(null);
   // The vertical stack (below the header) that holds the editor row and the
   // terminal drawer; its height bounds how tall the terminal can grow.
   const stackRef = useRef<HTMLDivElement>(null);
@@ -403,6 +409,7 @@ function Shell() {
       openConnectionPicker: () => setPickingConnection(true),
       openVaultDialog: (then) => setVaultDialog({ then }),
       confirmRemoveLock: setRemoveLockConfirm,
+      confirmLock: setLockConfirm,
     });
     // The locked placeholder's Unlock button runs the same `vault.unlock` the
     // palette runs. The pool reaches it through its own configureX seam,
@@ -898,19 +905,33 @@ function Shell() {
           onNotice={(m) => uiHooks.showNotice?.(m)}
           onClose={() => setVaultDialog(null)}
           onUnlocked={() => {
-            // The follow-up act the passphrase interrupted. Lock runs straight
-            // through, since the user already chose it. Remove-lock still gets
-            // its exposure confirm, because the unlock only proved identity.
+            // The follow-up act the passphrase interrupted. Both faces land on
+            // their confirm rather than acting: the unlock proved identity and
+            // nothing else. Lock's confirm states what encrypting now cannot
+            // retract, remove-lock's what decrypting exposes.
             const then = vaultDialog.then;
             if (then?.lock) {
-              void lockNoteAndRefresh(then.lock.folder, then.lock.path).then((res) => {
-                if (res.error) uiHooks.showError?.(res.error);
-                else if (res.notice) uiHooks.showNotice?.(res.notice);
-              });
+              setLockConfirm(then.lock);
             } else if (then?.removeLock) {
               setRemoveLockConfirm(then.removeLock);
             }
           }}
+        />
+      )}
+      {lockConfirm && (
+        <ConfirmDialog
+          title="Lock Note"
+          body={`“${lockConfirm.title}” will be encrypted from now on. Copies taken before now stay plain text where they were taken: a sync service's version history, a backup, or a git commit.`}
+          confirmLabel="Lock Note"
+          onConfirm={() => {
+            const c = lockConfirm;
+            setLockConfirm(null);
+            void lockNoteAndRefresh(c.folder, c.path).then((res) => {
+              if (res.error) uiHooks.showError?.(res.error);
+              else if (res.notice) uiHooks.showNotice?.(res.notice);
+            });
+          }}
+          onCancel={() => setLockConfirm(null)}
         />
       )}
       {removeLockConfirm && (
