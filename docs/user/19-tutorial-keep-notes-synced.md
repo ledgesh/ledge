@@ -71,6 +71,8 @@ A note in an attached workspace runs its shells in the folder itself, so that bl
 
 You get history for every note, diffs, branches, and hosting anywhere. Plain Markdown makes the diffs readable.
 
+A repository is also how a workspace reaches other people, with a clone each ([[Tutorial: Share Notes with a Git Clone]]).
+
 ## Move notes you already have
 
 Both setups start with a folder in the right place. Notes in a managed workspace live inside `~/.ledge`, which a sync service will not carry, so the workspace has to move out first.

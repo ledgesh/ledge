@@ -61,9 +61,13 @@ Locked notes from someone else's Ledge are a different matter, and they do not o
 
 ## Sharing locked notes
 
-You cannot. A locked note opens only on a machine holding your vault's key, so sending one to a colleague, with or without the passphrase, does not give them a readable note. If they already lock notes of their own, it fails outright; Ledge says the note was locked by a different vault.
+Locked notes are yours, on your own machines. There is one passphrase and one vault, so reading a locked note takes your key and nothing else.
 
-This is a limit, not a bug to work around. Sharing a workspace over git ([[Tutorial: Keep Notes Synced]]) carries locked notes as ciphertext that only you can open, which is the right outcome for a backup and the wrong one for collaboration.
+Sending a locked note to somebody without the passphrase gives them nothing. If they already lock notes of their own, Ledge says the note was locked by a different vault.
+
+Sending the passphrase with it does open the note, on a machine that has never locked anything. The note carries the salt it was locked under, and a machine with no vault adopts it (see above). That salt and your passphrase then become their vault, so everything they lock afterwards opens with your passphrase. Nothing on screen says so.
+
+A workspace shared over git carries locked notes as ciphertext ([[Tutorial: Share Notes with a Git Clone]]). That suits a backup and does not suit collaboration.
 
 To share a secret with someone, use a profile ([[Profiles and Secrets]]). Profiles live outside every notes folder, so they never travel with a workspace in the first place.
 

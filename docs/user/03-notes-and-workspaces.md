@@ -1,6 +1,6 @@
 # Notes and Workspaces
 
-This page covers where your notes live and how to arrange them: the file a note is, the folder a workspace is, the folders you file notes into, and the tabs and panes you read them in.
+This page covers where your notes live and how to arrange them: the file a note is, the folder a workspace is, the folders you file notes into, how a workspace reaches other people, and the tabs and panes you read them in.
 
 ## A note is a Markdown file
 
@@ -26,6 +26,22 @@ With a workspace row focused, or from its right-click menu:
 - Dragging reorders the strip.
 - "Move Workspace Folder…" relocates the folder on disk.
 - ⌫ closes it, which only detaches it. No files are touched, and attaching the same folder later brings everything back.
+
+## Share a workspace with others
+
+Put the workspace in a git repository and let the others clone it ([[Tutorial: Share Notes with a Git Clone]]). A workspace is a folder, and each clone of that folder attaches as an ordinary workspace.
+
+Everyone works in their own clone. Notes appear and change on screen when a pull lands, with nothing to refresh.
+
+Git merges what you all wrote. If a pull rewrites a note you have open and edited, your version keeps the file and the incoming one goes to the workspace trash, with a notice in the sidebar naming it.
+
+A clone carries the notes, their images, and their frontmatter. It does not carry your profiles, which live outside every notes folder ([[Profiles and Secrets]]). Locked notes travel as ciphertext and arrive shut ([[Note Locking]]).
+
+Blocks run on the machine that opens the note. A note's `cwd:`, `host:`, and `profile:` lines name paths, machines, and credentials on the setup it was written for, so a block that deploys from your laptop may find none of that in anyone else's clone ([[Frontmatter and Environments]]).
+
+Read a workspace somebody sends you before you run anything in it, as you would a script from the same person.
+
+Giving somebody a login to your Ledge server also gives them your notes, along with everything else on the machine ([[Keep Notes on a Remote Server]]).
 
 ## Folders
 

@@ -471,8 +471,11 @@ ends in `saveVaultFile(header.salt, key)`, so a recipient with no vault who
 opens somebody's shared note has a vault built from that person's salt and
 passphrase. Everything they lock afterwards is wrapped under it. Probed:
 the sender's passphrase then decrypts the recipient's own private notes.
-Nothing in the UI says so, which is tolerable only because §6a's first
-sentence means this is not a flow Ledge offers.
+Nothing in the UI says so. That is tolerable only because §6a's first
+sentence means this is not a flow Ledge offers, and because the manual states
+the outcome where a reader looks for it (docs/user/13, "Sharing locked
+notes"), which it did not before: it claimed the passphrase made no
+difference.
 
 ## 7. Interaction spec
 

@@ -311,6 +311,18 @@ A note saved on one device appears on the other without a refresh. Everything el
 
 The one thing two devices cannot share is a note's terminal.
 
+## Sharing a server with others
+
+A server is one account, and everyone who connects to it shares that account. Anyone else on your server reads every note in every workspace, writes to any of them, and runs commands as the account the server runs as.
+
+Locked notes stay shut on each device until somebody types the passphrase there. There is one vault and one passphrase, so whoever has it opens every locked note on the server ([[Note Locking]]).
+
+Profiles are on the server, and a note names one by name. A note somebody else writes can run a block with your credentials in its environment, without ever opening the file ([[Profiles and Secrets]]).
+
+Several people can work this way. They get the same notes, the same trash, and the same tags, and every save appears on every device. What they do not get is separation: no per-person access, no per-workspace permission, and no record of who changed a note.
+
+For notes that belong to different people, give each person a server, or keep a clone each over git ([[Tutorial: Share Notes with a Git Clone]]).
+
 ## Take a shell from another device
 
 Opening a note's terminal on a second device moves the shell there, output and typing together. A shell has one keyboard: two devices typing into the same one would interleave their keystrokes on a single line.
@@ -389,6 +401,7 @@ Ledge also stops when the server hangs up on purpose rather than the wire failin
 
 ## Limits
 
+- No accounts. A server is one account's notes, and anyone who can connect to it has all of them (see above).
 - One connection per window. Search, tags, backlinks, and wikilinks all stay within the machine that window is on. Open a second window for a second machine (see above).
 - One device at a time in a note's terminal. Everything else on a server is shared by every device connected to it (see above).
 - No moving a note between servers from inside the app. Use `rsync` or `git`; the notes are ordinary files ([[Tutorial: Keep Notes Synced]]).
