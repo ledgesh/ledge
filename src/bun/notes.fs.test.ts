@@ -41,7 +41,7 @@ import {
   trashDirOf,
   writeNote,
 } from "./notes";
-import { createVault, lockVault, resetVaultForTests, unlockVault } from "./vault";
+import { createVault, lockVault, resetVaultForTests, touchVault, unlockVault, vaultActivityForTests } from "./vault";
 import { MAX_HITS, MAX_HITS_PER_NOTE } from "../shared/search";
 
 if (!resolve(APP_HOME).startsWith(resolve(tmpdir()) + sep)) {
@@ -1326,6 +1326,23 @@ describe("note locking", () => {
     lockVault();
     const note = await createNote(ROOT, "# Secrets\n\nbody\n");
     expect(lockNote(note.path)).rejects.toThrow(/vault is locked/);
+  });
+
+  // The idle-relock clock belongs to the client handlers (locking.md §3).
+  // notes.ts is what MCP and the CLI call, so a touch anywhere in here would
+  // let an agent loop hold the vault open with nobody at the machine. The
+  // clock is read directly because the alternative is waiting fifteen minutes.
+  test("the note store does not extend the idle-relock clock", async () => {
+    const note = await createNote(ROOT, `# Secrets\n\n${NEEDLE}\n`);
+    await lockNote(note.path);
+    touchVault();
+    const at = vaultActivityForTests();
+    await new Promise((done) => setTimeout(done, 5)); // the clock is in milliseconds
+    await readNote(note.path);
+    await writeNote(note.path, `# Secrets\n\n${NEEDLE} again\n`);
+    await favoriteNote(note.path, true);
+    await stashNote(note.path, "# Secrets\n\nstashed\n");
+    expect(vaultActivityForTests()).toBe(at);
   });
 });
 

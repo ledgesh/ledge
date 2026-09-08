@@ -31,11 +31,12 @@ const CHECK_PLAINTEXT = Buffer.from("ledge-vault-check-v1", "utf8");
 
 export const VAULT_PATH = join(APP_HOME, ".vault.json");
 
-// Relock after 15 minutes with no note RPC traffic. Wire activity stands in
-// for user activity: notes.ts calls touchVault on every read and write. The
-// autosave debounce is seconds, so nothing dirty is left unflushed by the
-// time this window elapses. No settings knob until the default demonstrably
-// fails someone (architecture.md §6).
+// Relock after 15 minutes in which no client changed a note. server.ts's
+// per-connection handlers are what touch the clock, so the walk-away window
+// measures a person rather than a process (locking.md §3). The autosave
+// debounce is seconds, so nothing dirty is left unflushed by the time this
+// window elapses. No settings knob until the default demonstrably fails
+// someone (architecture.md §6).
 const IDLE_RELOCK_MS = 15 * 60 * 1000;
 const IDLE_SWEEP_MS = 60 * 1000;
 
@@ -58,8 +59,8 @@ export function configureVault(handlers: { onAutoLock: () => void }): void {
   onAutoLock = handlers.onAutoLock;
 }
 
-/** Reset the idle-relock clock. notes.ts calls this from readNote, writeNote
- * and stashNote, the funnel every note content path already passes. */
+/** Reset the idle-relock clock. server.ts calls this from the handlers that
+ * change a note, and from nowhere else (locking.md §3). */
 export function touchVault(): void {
   lastActivity = Date.now();
 }
@@ -564,6 +565,12 @@ export function stripLockedLine(text: string): string {
 }
 
 // --- test seams -------------------------------------------------------------
+
+/** When the clock was last reset. Tests only: what touches it and what does
+ * not is otherwise observable only by waiting fifteen minutes. */
+export function vaultActivityForTests(): number {
+  return lastActivity;
+}
 
 /** Clear the master key and the salt, stop the idle timer, and forget the
  * auto-lock callback. Tests only: module state outlives a test file, so a

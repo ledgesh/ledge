@@ -119,9 +119,9 @@ export const viewPush: ViewPush = {
       // dead wire too (terminal/channel.ts).
       dispatchTerminalRelink();
       // This asks the vault again, since any `vaultChanged` pushed at the dead
-      // wire was lost. The idle relock's clock is note-RPC traffic
-      // (bun/vault.ts touchVault), so it fires behind a client whose wire is
-      // down. A relock reaches decrypted buffers through the mirrored state,
+      // wire was lost. The idle relock's clock counts note changes clients
+      // asked for (bun/server.ts CHANGES_A_NOTE), so it fires behind a client
+      // whose wire is down. A relock reaches decrypted buffers through the mirrored state,
       // which evicts them (workspace/editorPool.ts), so a client that never
       // asks keeps a locked note's plaintext on screen until the tab closes.
       // Asking costs nothing: the mirror notifies only on a change.

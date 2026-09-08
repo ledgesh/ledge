@@ -168,17 +168,27 @@ tags: finance
   with the process. The passphrase crosses the RPC exactly once per unlock
   (view → Bun, from the dialog), is used for the KDF, and is dropped; the
   dialog clears its field either way.
-- **Relock**: ⌘L (§7), and automatically after 15 minutes with no note RPC
-  traffic — activity on the wire is the idle proxy, Bun-side only, no new
-  signal needed. No settings knob at v1: per architecture §6 a knob needs a
-  default that demonstrably fails someone, and nobody has failed yet.
+- **Relock**: ⌘L (§7), and automatically after 15 minutes in which no client
+  changed a note. `server.ts`'s `CHANGES_A_NOTE` is the list, applied to a
+  connection's handlers in one pass, and `touchVault` is called from nowhere
+  else. Two exclusions carry the rule. Reads are out because they are not a
+  person: the view re-reads every open note on window focus, on a relink, and
+  on the watcher's push, so an agent writing notes in the background would
+  otherwise hold the vault open with nobody at the machine. Agent surfaces are
+  out because they call `notes.ts` directly and never reach a handler — MCP
+  and the CLI import `readNote` and `writeNote`, not `forClient`. A note
+  change is the one signal left that only ever follows something a person did.
+  Adding a handler that changes a note and leaving it off the list costs a
+  relock while someone is working, which is the direction to be wrong in. No
+  settings knob at v1: per architecture §6 a knob needs a default that
+  demonstrably fails someone, and nobody has failed yet.
   Relock order matters and is fixed: flush any dirty locked buffers through
   the normal save (encrypting), *then* drop the master key and every cached
   data key, then push `vaultChanged` so the view swaps locked tabs to
   placeholders, evicts decrypted bodies, and evicts the asset data-URL
   cache (`lib/assets.ts` — RAM-only, but RAM the lock must also clear).
   On a server that push can fail to arrive: a client whose wire is down is
-  not a connection to send to, and a client that cannot send note RPCs is
+  not a connection to send to, and a client that cannot change a note is
   also why the timer got to fire. So the view re-asks `vaultState` on every
   reconnect and feeds the answer through the same mirror — without that, a
   remote client is the one client this eviction never reaches

@@ -49,7 +49,7 @@ import {
   tagsIn,
   writeNote,
 } from "./notes";
-import { configureVault, createVault, loadVault, lockVault, unlockVault, vaultState } from "./vault";
+import { configureVault, createVault, loadVault, lockVault, touchVault, unlockVault, vaultState } from "./vault";
 import {
   APP_HOME,
   assertRegisteredRoot,
@@ -695,12 +695,57 @@ export async function createServer(deps: { push: Audience; native: NativeDeps })
     }
   }
 
+  // What resets the vault's idle-relock clock (vault.ts IDLE_RELOCK_MS).
+  // Changes only, and only ones a client asked for. A read is left out
+  // because reads happen on their own: the view re-reads every open note on
+  // window focus, on a relink, and on the watcher's push, so counting them
+  // would let an agent writing notes in the background hold the vault open
+  // with nobody at the machine. A change only ever follows something a person
+  // did. Agent surfaces call notes.ts directly and pass none of this, which is
+  // the point (locking.md §3).
+  //
+  // Forgetting to list a new handler here costs a relock while someone works,
+  // which is the direction to be wrong in.
+  const CHANGES_A_NOTE: ReadonlySet<keyof RequestHandlers> = new Set([
+    "dailyOpen",
+    "folderDelete",
+    "folderRename",
+    "noteCreate",
+    "noteDelete",
+    "noteFavorite",
+    "noteFromTemplate",
+    "noteLock",
+    "noteMove",
+    "noteRemoveLock",
+    "noteRetitle",
+    "noteStash",
+    "noteWrite",
+    "trashDelete",
+    "trashEmpty",
+    "trashRestore",
+  ]);
+
+  /** Put the touch in front of each listed handler. One pass over the map,
+   * rather than a line in each of sixteen bodies that the seventeenth would
+   * forget. */
+  const touchingVault = (handlers: RequestHandlers): RequestHandlers => {
+    const map = handlers as unknown as Record<string, (params: never) => unknown>;
+    for (const name of CHANGES_A_NOTE) {
+      const handler = map[name]!;
+      map[name] = (params: never) => {
+        touchVault();
+        return handler(params);
+      };
+    }
+    return handlers;
+  };
+
   // Built per connection, so the client's id is in scope wherever a handler
   // needs it. The alternative, one shared map plus a small second one for the
   // handlers that differ, moves six handlers away from the neighbours that
   // explain them. It saves sixty closures per client on a path that runs once
   // per connection.
-  const requestsFor = (client: string): RequestHandlers => ({
+  const requestsFor = (client: string): RequestHandlers => touchingVault({
     // --- workspaces --------------------------------------------------------
     // The registry lives server-side (workspaces.ts): the view only ever
     // passes back roots it was handed. The one way an arbitrary folder gets

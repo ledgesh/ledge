@@ -27,7 +27,7 @@ One passphrase covers every locked note, app-wide.
 - Opening a locked note while the vault is shut asks for the passphrase there. A wrong passphrase shakes and lets you retry.
 - "Unlock Notes…" in the palette asks for it up front.
 - ⌘L runs Lock Notes, which relocks the vault immediately. Use it when you walk away.
-- The vault also relocks itself after 15 minutes of inactivity.
+- The vault also relocks itself after 15 minutes in which no note changed. Reading a note does not hold it open, and neither does an agent working in your notes while you are away.
 
 Once unlocked, every locked note reads and edits like a normal note, and saves go back to disk encrypted. Locked notes show a lock glyph in the sidebar and in ⌘P, drawn open while the vault is unlocked, so you can see what is readable without opening anything.
 

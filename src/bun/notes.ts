@@ -39,7 +39,6 @@ import {
   splitHead,
   stampLockedLine,
   stripLockedLine,
-  touchVault,
   vaultState,
 } from "./vault";
 import { assetPathOf, assetRefFor, imageMimeOf, rawAssetBytes, replaceAssetBytes } from "./assets";
@@ -432,7 +431,6 @@ export interface NoteFile {
 // decrypted body never reaches them.
 export async function readNote(path: string): Promise<NoteFile | null> {
   assertNote(path);
-  touchVault();
   let raw: string;
   let mtimeMs: number;
   try {
@@ -521,7 +519,6 @@ async function sealFor(path: string, text: string): Promise<{ outgoing: string; 
 let tmpCounter = 0;
 export async function writeNote(path: string, text: string, baseMtimeMs: number | null = null): Promise<WriteResult> {
   const root = assertWritableRoot(assertNote(path));
-  touchVault();
   await rootReady(root);
   const dir = dirname(path);
   await mkdir(dir, { recursive: true });
@@ -683,7 +680,6 @@ function rebaseAssetRefs(text: string, root: string, from: string, to: string): 
 // not rewrite the file to say what it already says.
 export async function favoriteNote(path: string, on: boolean): Promise<NoteMeta> {
   assertWritableRoot(assertNote(path)); // the manual's pages take no marker
-  touchVault();
   let raw: string;
   let mtimeMs: number;
   try {
@@ -1371,7 +1367,6 @@ async function pruneEmptyDirs(dir: string): Promise<void> {
  */
 export async function stashNote(path: string, text: string): Promise<string> {
   const root = assertWritableRoot(assertNote(path));
-  touchVault();
   await rootReady(root);
   const { outgoing } = await sealFor(path, text);
   // The note's own folder, mirrored, exactly as a delete records it. A restore
