@@ -35,6 +35,19 @@ export const WORKSPACES_PATH = join(APP_HOME, ".workspaces.json");
 // managed workspace slug (slugify emits only [a-z0-9-], never a leading dot).
 export const DOCS_ROOT = join(APP_HOME, ".ledge-docs");
 
+// The ignore file a new managed workspace is seeded with, so that `git init`
+// in it commits the notes and their images and not the trash. Only
+// createManaged writes it: an attached folder's .gitignore is the user's file,
+// and the trash carries an ignore file of its own for that case (notes.ts
+// ensureTrashDir).
+export const GITIGNORE = ".gitignore";
+
+const WORKSPACE_GITIGNORE = `# Ledge workspace. Notes and .ledge-assets/ are committed; these are not.
+.ledge-trash/
+.*.md.tmp-*
+.DS_Store
+`;
+
 export async function ensureAppHome(): Promise<void> {
   await mkdir(APP_HOME, { recursive: true });
 }
@@ -284,6 +297,11 @@ export async function createManaged(name: string): Promise<string> {
   const taken = new Set(await readdir(APP_HOME));
   const root = join(APP_HOME, uniqueName(base, taken, ""));
   await mkdir(root, { recursive: true });
+  // Best-effort: a workspace the user asked for matters more than its ignore
+  // file, so a failed write is logged and the folder is still a workspace.
+  await writeFile(join(root, GITIGNORE), WORKSPACE_GITIGNORE, "utf8").catch((err) => {
+    console.warn(`[workspaces] could not write ${GITIGNORE} in ${root}`, err);
+  });
   entries.set(resolve(root), { available: true });
   await save();
   return resolve(root);

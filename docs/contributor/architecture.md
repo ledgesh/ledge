@@ -307,6 +307,24 @@ Bun therefore validates everything and derives anything derivable:
   the trash's top level instead: it is already invisible to `listNotes`, and
   burying it under an invisible trash folder would make it unrecoverable from
   the Trash section rather than merely unlisted.
+- **Ledge seeds two ignore files, and neither is a file the user owns.**
+  A workspace folder is what people put in git (docs/user/19), so the
+  guarantee that has to hold is that `git add -A` never commits the trash:
+  deleted notes age out on `TRASH_TTL_MS`, and a commit keeps them in the log
+  long after `purgeTrash` has run. `ensureTrashDir` (`bun/notes.ts`) writes
+  `.ledge-trash/.gitignore` holding one `*`, on the same call that creates the
+  trash directory for a delete or a stash. Ignoring the trash from INSIDE it is
+  what makes the rule hold for a folder attached from a repository the user
+  already had: nothing appends to their `.gitignore`, and no workspace has to
+  have been created by Ledge. The write is `flag: "wx"` and its failure is
+  swallowed, so it neither rewrites the file on every delete nor lets an
+  ignore file stand between a user and deleting a note. `createManaged`
+  (`bun/workspaces.ts`) seeds a second one at the root of a NEW managed
+  workspace, covering `.DS_Store` and `writeNote`'s temp file; it is
+  best-effort and logged, and `attachExternal` writes nothing at all,
+  since an existing folder's `.gitignore` is the user's file. Both seeded
+  files are dot-entries, so `listNotes` and `trashFiles` skip them and no
+  purge, empty, or Trash listing can see them.
 - **A folder is the only name a caller chooses, so it is the only name
   validated.** Filenames never needed a guard: `slugOf` builds them from the
   note's own heading and emits only `[a-z0-9-]`, so there is no name to check

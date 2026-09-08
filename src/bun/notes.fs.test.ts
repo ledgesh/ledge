@@ -102,7 +102,9 @@ describe("createNote / writeNote / readNote", () => {
   test("a save leaves no temp file behind for listNotes to show", async () => {
     const note = await createNote(ROOT, "# One\n");
     await writeNote(note.path, "# One\n\nedited");
-    expect(await readdir(ROOT)).toEqual(["one.md"]);
+    // Sorted and exact, dot-entries included: the temp file this guards against
+    // is itself dotted (writeNote), so filtering them out would pass blind.
+    expect((await readdir(ROOT)).sort()).toEqual([".gitignore", "one.md"]);
   });
 
   test("reading a note that is gone is null, not a throw", async () => {
@@ -473,14 +475,14 @@ describe("retitleNote", () => {
     const moved = await retitleNote(note.path, "# Final\n");
     expect(moved.path).toBe(join(ROOT, "final.md"));
     expect(await textAt(moved.path)).toBe("# Draft\n"); // retitle moves, it does not save
-    expect(await readdir(ROOT)).toEqual(["final.md"]);
+    expect((await readdir(ROOT)).sort()).toEqual([".gitignore", "final.md"]);
   });
 
   test("a note's own name is not an obstacle to itself: retitling to the same heading stays put", async () => {
     const note = await createNote(ROOT, "# Keep\n");
     const again = await retitleNote(note.path, "# Keep\n\nmore text");
     expect(again.path).toBe(note.path);
-    expect(await readdir(ROOT)).toEqual(["keep.md"]);
+    expect((await readdir(ROOT)).sort()).toEqual([".gitignore", "keep.md"]);
   });
 
   test("retitling into another note's name enumerates instead of clobbering it", async () => {
@@ -532,6 +534,38 @@ describe("trash round-trip", () => {
     expect(restored.path).toBe(join(ROOT, "twice-2.md"));
     expect(await textAt(restored.path)).toBe("# Twice\n\noriginal");
     expect(await textAt(join(ROOT, "twice.md"))).toBe("# Twice\n\nusurper");
+  });
+});
+
+describe("the trash's ignore file", () => {
+  // Deleted notes wait out TRASH_TTL_MS in the trash, so a workspace in git
+  // must not commit them: the log would hold them past the purge. The trash
+  // ignores itself rather than the root .gitignore doing it, which is what
+  // covers a workspace attached from a repo the user already had.
+  test("a delete leaves a .gitignore covering the whole trash", async () => {
+    await deleteNote((await createNote(ROOT, "# Doomed\n")).path);
+    expect(await readRaw(join(TRASH, ".gitignore"), "utf8")).toContain("*");
+  });
+
+  test("stashNote seeds it too: parking text creates the trash the same way", async () => {
+    const note = await createNote(ROOT, "# Parked\n");
+    await rm(TRASH, { recursive: true, force: true });
+    await stashNote(note.path, "# Parked\n\nnewer");
+    expect(await readRaw(join(TRASH, ".gitignore"), "utf8")).toContain("*");
+  });
+
+  test("it is not a trashed note: the Trash section and the purge both skip it", async () => {
+    await deleteNote((await createNote(ROOT, "# Doomed\n")).path);
+    await purgeTrash(ROOT, -1); // everything is past a negative TTL
+    expect(await listTrash(ROOT)).toEqual([]);
+    expect(await readRaw(join(TRASH, ".gitignore"), "utf8")).toContain("*");
+  });
+
+  test("an edited one is kept: the write is `wx`, not a rewrite on every delete", async () => {
+    await deleteNote((await createNote(ROOT, "# First\n")).path);
+    await writeRaw(join(TRASH, ".gitignore"), "# mine\n*\n!keep.md\n", "utf8");
+    await deleteNote((await createNote(ROOT, "# Second\n")).path);
+    expect(await readRaw(join(TRASH, ".gitignore"), "utf8")).toBe("# mine\n*\n!keep.md\n");
   });
 });
 
@@ -1060,7 +1094,9 @@ describe("the unlink paths", () => {
     await writeFile(join(TRASH, "not-a-note.txt"), "keep me");
     await mkdir(join(TRASH, "subdir"), { recursive: true });
     expect(await emptyTrash(ROOT)).toBe(2);
-    expect((await readdir(TRASH)).sort()).toEqual(["not-a-note.txt", "subdir"]);
+    // .gitignore among them: it reached the trash by the same route, and
+    // trashFiles skips dot-entries, so emptyTrash never had it to remove.
+    expect((await readdir(TRASH)).sort()).toEqual([".gitignore", "not-a-note.txt", "subdir"]);
   });
 
   test("emptyTrash empties one workspace's trash, not every workspace's", async () => {

@@ -80,6 +80,16 @@ describe("createManaged", () => {
     expect(root).toBe(join(resolve(APP_HOME), "plan-2"));
   });
 
+  test("seeds a .gitignore that keeps the trash out of git and the images in", async () => {
+    // A workspace folder is what people put in git (docs/user/19), so a fresh
+    // one arrives ready for `git init`. Attached folders get no such file:
+    // their .gitignore is the user's.
+    const root = await createManaged("Shipping Notes");
+    const text = await readFile(join(root, ".gitignore"), "utf8");
+    const rules = text.split("\n").filter((l) => l.trim() !== "" && !l.startsWith("#"));
+    expect(rules).toEqual([".ledge-trash/", ".*.md.tmp-*", ".DS_Store"]);
+  });
+
   test("a name that slugs to nothing falls back rather than failing", async () => {
     const root = await createManaged("???");
     expect(root).toBe(join(resolve(APP_HOME), "workspace"));
@@ -165,6 +175,15 @@ describe("attachExternal", () => {
     const deep = join(root, "sub");
     await mkdir(deep);
     expect(await attachExternal(deep)).toHaveProperty("error");
+  });
+});
+
+describe("attachExternal and the user's own files", () => {
+  test("writes no .gitignore: an attached folder's ignore file is the user's", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "ledge-attach-"));
+    const before = await readdir(dir);
+    await attachExternal(dir);
+    expect(await readdir(dir)).toEqual(before);
   });
 });
 

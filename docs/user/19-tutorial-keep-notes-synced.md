@@ -11,6 +11,7 @@ Everything a workspace is lives in its folder:
 - The notes, as `.md` files.
 - Pasted images, in `.ledge-assets/`.
 - Deleted notes, in `.ledge-trash/`.
+- A `.gitignore`, in a workspace Ledge created.
 
 Sync the folder and you have synced the workspace. There is no database on the side.
 
@@ -34,7 +35,26 @@ If a synced change arrives while you are editing the same note, your version win
 
 A workspace folder can be a git repository, and an attached project workspace usually already is. For a notes-only repo: create a folder, run `git init` in it, and attach it.
 
-Add `.ledge-trash/` to `.gitignore`. Do commit `.ledge-assets/`, since the images belong to the notes.
+Deleted notes stay out of git on their own. Ledge puts a `.gitignore` inside `.ledge-trash/` that covers the whole folder, so `git add -A` never reaches it. That happens the same way in a workspace Ledge created and in a repository you already had, and your own `.gitignore` is never edited.
+
+The trash empties thirty days after a delete. Git keeps what it was given, so a trashed note that reached a commit is still in the log once Ledge has purged it.
+
+An ignore rule does not untrack what a repository already committed. If your workspace committed its trash before, untrack it once:
+
+```
+git rm -r --cached .ledge-trash
+```
+
+That removes the trash from future commits and leaves the files on disk. The earlier commits still hold what they held; rewriting them is a `git filter-repo` job and is only worth it for something that should never have left the machine.
+
+Images are committed. `.ledge-assets/` holds the pictures the notes reference, so it is tracked like any other content.
+
+A workspace you create in Ledge arrives with a `.gitignore` for the rest: macOS's `.DS_Store`, and the temp file a save leaves behind if the app is killed mid-write. A folder you made yourself has no such file, so add those two lines if you want them:
+
+```
+.*.md.tmp-*
+.DS_Store
+```
 
 Then let the workspace sync itself, with a note in it:
 

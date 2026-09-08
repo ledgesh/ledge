@@ -21,7 +21,7 @@ import { collectHits, type SearchHit } from "../shared/search";
 import { resolveWikiTitle, wikiRefsOf } from "../shared/wikilinks";
 import { normalizeTag, tagDirectoryOf, tagRefsOf, type TagInfo } from "../shared/tags";
 import { loadIgnore } from "./ignore";
-import { assertRegisteredRoot, assertWritableRoot, isInside, kindOf, rootContaining, uniqueName } from "./workspaces";
+import { assertRegisteredRoot, assertWritableRoot, GITIGNORE, isInside, kindOf, rootContaining, uniqueName } from "./workspaces";
 import {
   beginPassphraseChange,
   commitPassphraseChange,
@@ -1147,6 +1147,21 @@ function trashSubdirOf(root: string, path: string): string {
   return segments === null || segments.length === 0 ? trashDir : join(trashDir, ...segments);
 }
 
+const TRASH_GITIGNORE = "# Deleted notes stay out of git.\n*\n";
+
+// The trash directory a delete writes into, with the ignore file that keeps
+// the trash out of git. Deleted notes wait out TRASH_TTL_MS here, so a
+// `git add -A` that committed them would hold them in the log long past the
+// purge. One `*` covers the whole directory, which is what lets a workspace
+// attached from an existing repo need no edit to its own .gitignore.
+async function ensureTrashDir(root: string, dir: string): Promise<void> {
+  await mkdir(dir, { recursive: true });
+  // `wx` rather than a plain write: this runs on every delete, and a user who
+  // edited the file keeps their version. A failure leaves the delete alone.
+  const marker = join(trashDirOf(root), GITIGNORE);
+  await writeFile(marker, TRASH_GITIGNORE, { encoding: "utf8", flag: "wx" }).catch(() => {});
+}
+
 // Delete a note by renaming it into the trash rather than unlinking it. Same
 // rename(2) as a save, so it is atomic, and a misclick costs a trip to the
 // Trash section rather than the note. The trash is the note's own root's, so
@@ -1157,7 +1172,7 @@ export async function deleteNote(path: string): Promise<string | null> {
   const trashDir = trashDirOf(root);
   if (isInside(trashDir, path)) return null; // already trashed
   const destDir = trashSubdirOf(root, path);
-  await mkdir(destDir, { recursive: true });
+  await ensureTrashDir(root, destDir);
   const taken = new Set(await readdir(destDir));
   const dest = join(destDir, uniqueName(titleOf(path), taken));
   try {
@@ -1270,7 +1285,7 @@ export async function stashNote(path: string, text: string): Promise<string> {
   // The note's own folder, mirrored, exactly as a delete records it. A restore
   // has to land beside the live note, which means in the note's own folder.
   const destDir = trashSubdirOf(root, path);
-  await mkdir(destDir, { recursive: true });
+  await ensureTrashDir(root, destDir);
   const taken = new Set(await readdir(destDir));
   const dest = join(destDir, uniqueName(titleOf(path), taken));
   await writeFile(dest, outgoing, "utf8");
