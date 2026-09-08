@@ -53,9 +53,30 @@ Each pane has its own tab strip.
 | ⌃Tab and ⌃⇧Tab | Next and previous tab. ⇧⌘] and ⇧⌘[ do the same. |
 | ⌃1 to ⌃9 | Jump to a tab by position. |
 
-Hold ⌃ and each tab shows its number. The + button at the end of the strip is New Note, and a tab's context menu holds Close Tab and Close Other Tabs.
+Hold ⌃ and each tab shows its number. The + button at the end of the strip is New Note, and a tab's context menu holds Close Tab, Close Other Tabs, and Keep Tab Open.
 
 When a pane holds more tabs than fit, the strip scrolls sideways and fades at whichever edge is hiding tabs.
+
+## Preview tabs
+
+A note you open by navigating to it opens in *italics*. That tab is a preview: the next note you navigate to takes its place instead of adding a tab beside it.
+
+Clicking down the sidebar, or through a run of search hits, therefore leaves you with one tab rather than a strip of notes you looked at once.
+
+A preview tab becomes a permanent one, and stops being replaced, as soon as you do any of these:
+
+| What keeps it | Where |
+| --- | --- |
+| Type in the note | The usual one. A note you are editing is a note you meant to keep. |
+| Double-click its tab | In the strip. |
+| Drag its tab | A tab you put somewhere stays there. |
+| Keep Tab Open | The tab's context menu, the View menu, and the command palette. |
+
+New notes are never previews. ⌘N, New Note in Folder, a note made from a template, and `ledge <title>` from a terminal all open a tab that stays.
+
+Nothing you have typed can be swept away by this. Typing in a note is itself what keeps its tab, so a tab that gets replaced is always one holding exactly what is on disk.
+
+On a phone the behavior is the same, and Keep Tab Open is in the menu a long press on the tab opens ([[Ledge on Your Phone]]).
 
 ## Move a tab between panes
 
@@ -70,6 +91,8 @@ The destination pane takes focus, as if you had clicked the tab there. If the ta
 A note that is already open focuses its existing tab, wherever that tab lives, including in another workspace. Ledge never opens one note twice, because two tabs on one file would be two editors saving over each other.
 
 A note that is not open becomes a new tab in the focused pane. This is how ⌘P, search hits, wikilinks, backlinks, and `ledge <title>` from a terminal all arrive ([[Finding Things]], [[The ledge CLI]]).
+
+All of those except `ledge <title>` are navigations, so the tab they open is a preview one.
 
 ## The terminal drawer follows the focused note
 
@@ -89,6 +112,8 @@ Two things do not come back:
 
 - **Tabs you never typed in.** A note has no file until its first edit, so an untouched Untitled tab has nothing to restore. Its pane returns with a fresh one.
 - **Notes that moved or were deleted while Ledge was closed.** Those tabs are dropped and the rest of the layout restores around them.
+
+A preview tab comes back a preview one, so the strip returns exactly as you left it, down to which tab the next note you open will replace.
 
 ## The window
 

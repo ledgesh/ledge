@@ -484,6 +484,94 @@ describe("notes", () => {
   });
 });
 
+// Preview tabs (interactions.md §1b): a navigation opens an italic tab that
+// the next navigation into the same pane replaces, until something says to
+// keep it.
+describe("preview tabs", () => {
+  const note = (title: string): NoteMeta => ({ path: `${FOLDER}/${title}.md`, title, mtimeMs: 1 });
+  const withNotes = (...actions: Action[]): AppState =>
+    actions.reduce(reducer, initialState(FOLDER, [note("a"), note("b"), note("c")]));
+  const tabs = (s: AppState) => firstLeaf(selected(s).root).tabs;
+
+  test("a preview open replaces the pane's preview tab in its own slot", () => {
+    // The boot tab (a, permanent) stays; b arrives as a preview and c takes
+    // b's slot rather than the end of the strip.
+    let s = withNotes({ type: "openNote", note: note("b"), preview: true });
+    expect(tabs(s).map((t) => [t.title, t.preview])).toEqual([["a", false], ["b", true]]);
+
+    s = reducer(s, { type: "openNote", note: note("c"), preview: true });
+    expect(tabs(s).map((t) => [t.title, t.preview])).toEqual([["a", false], ["c", true]]);
+    expect(focusedTab(selected(s))!.title).toBe("c");
+  });
+
+  test("an open with no preview flag appends and leaves the preview tab alone", () => {
+    // A create is not a navigation: its tab joins the strip and nothing is
+    // swept away to make room for it.
+    let s = withNotes({ type: "openNote", note: note("b"), preview: true });
+    s = reducer(s, { type: "openNote", note: note("c") });
+    expect(tabs(s).map((t) => [t.title, t.preview])).toEqual([
+      ["a", false],
+      ["b", true],
+      ["c", false],
+    ]);
+  });
+
+  test("a preview open of an already-open note focuses its tab without demoting it", () => {
+    // The already-open branch is untouched by the flag: a permanent tab stays
+    // permanent when a browser click lands on it again.
+    let s = withNotes({ type: "openNote", note: note("b") });
+    const before = countTabs(selected(s).root);
+    s = reducer(s, { type: "openNote", note: note("b"), preview: true });
+    expect(countTabs(selected(s).root)).toBe(before);
+    expect(focusedTab(selected(s))!.preview).toBe(false);
+  });
+
+  test("keepTab promotes by docId and is a no-op on an ordinary tab", () => {
+    const s = withNotes({ type: "openNote", note: note("b"), preview: true });
+    const docId = focusedTab(selected(s))!.docId;
+    const kept = reducer(s, { type: "keepTab", docId });
+    expect(focusedTab(selected(kept))!.preview).toBe(false);
+    // Identity is preserved when nothing moved, so React skips the re-render
+    // this fires on every keystroke.
+    expect(reducer(kept, { type: "keepTab", docId })).toBe(kept);
+    expect(reducer(kept, { type: "keepTab", docId: "doc-nobody" })).toBe(kept);
+  });
+
+  test("a promoted tab is no longer the slot the next navigation takes", () => {
+    let s = withNotes({ type: "openNote", note: note("b"), preview: true });
+    s = reducer(s, { type: "keepTab", docId: focusedTab(selected(s))!.docId });
+    s = reducer(s, { type: "openNote", note: note("c"), preview: true });
+    expect(tabs(s).map((t) => t.title)).toEqual(["a", "b", "c"]);
+  });
+
+  test("keepTab reaches a tab in a workspace that is not selected", () => {
+    // An edit lands as a docId wherever the tab sits: the note may have been
+    // typed in and then switched away from.
+    let s = withNotes({ type: "openNote", note: note("b"), preview: true });
+    const docId = focusedTab(selected(s))!.docId;
+    s = reducer(s, addWs(2));
+    s = reducer(s, { type: "keepTab", docId });
+    const home = s.workspaces[0];
+    expect(firstLeaf(home.root).tabs.find((t) => t.docId === docId)!.preview).toBe(false);
+  });
+
+  test("dragging a preview tab promotes it", () => {
+    // Nobody arranges a strip around a tab the next click replaces.
+    let s = withNotes({ type: "openNote", note: note("b"), preview: true });
+    const leaf = firstLeaf(selected(s).root);
+    const tabId = focusedTab(selected(s))!.id;
+    s = reducer(s, { type: "moveTab", fromPaneId: leaf.id, tabId, toPaneId: leaf.id, toIndex: 0 });
+    expect(tabs(s).map((t) => [t.title, t.preview])).toEqual([["b", false], ["a", false]]);
+  });
+
+  test("a scratch tab is never a preview", () => {
+    // Its text lives nowhere but its editor, so a later navigation must not
+    // take its slot.
+    const s = withNotes({ type: "newTab" });
+    expect(tabs(s).every((t) => !t.preview)).toBe(true);
+  });
+});
+
 describe("allDocIds", () => {
   test("collects every tab's docId across all workspaces", () => {
     const s = run({ type: "newTab" }, addWs(2));

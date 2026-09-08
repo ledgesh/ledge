@@ -33,7 +33,9 @@ Rules:
 - **R2.** A hover-revealed control is an accelerator, never the only path: a
   context-menu or palette equivalent must exist.
 - **R3.** Double-click rename stays, but the context-menu "Rename" item is the
-  discoverable path.
+  discoverable path. Keep Tab Open (§1b) is the second verb of this shape and
+  follows the same rule: double-clicking the tab is the accelerator, the tab's
+  menu is where it is found.
 - **R4.** Pointer gestures (resize dividers, drag-reorder) are not commands and
   do not appear in the palette; their affordance is the cursor and the drop
   marker.
@@ -83,6 +85,7 @@ section.
 | Hover-revealed button | the row's menu, per R2 — and the button is ABSENT, not transparent. Unless the verb has no equally direct path: then it is LIT and 44 points, which is the fence's ▶ |
 | Right-click | a long press on the row |
 | Double-click rename | the menu's Rename item, which R3 already calls the discoverable path |
+| Double-click a preview tab to keep it | the same tab's menu, where Keep Tab Open sits beside Close Tab (§1b) |
 | ↑/↓ roving focus (R5) | a tap; the tapped row is the focused row |
 | Bare-key row verbs | the row's menu |
 | ⌘P / ⇧⌘P / ⌥⌘P | the magnifier in the header, which opens the overlay |
@@ -359,6 +362,62 @@ None of this is reachable in the shipping Mac app, where every pointer is a
 mouse; it is the affordance layer the iOS client stands on (`ios.md` §6, §14
 phase 2). It is exercised at 390x844 by `e2e/phone.spec.ts` in the `phone`
 project (testing.md §5).
+
+## 1b. Preview tabs
+
+**A tab a navigation opened is a PREVIEW: drawn in italics, and replaced in
+place by the next navigation into the same pane.** One pane holds at most one.
+The strip is the app's scarcest surface, and without this every glance at a
+note costs a tab that then has to be closed one at a time.
+
+**A navigation opens a preview; a create never does.** That is the whole of the
+rule, and it is why `openNote` carries the flag per call site rather than
+deciding for itself (`workspace/store.tsx`). Clicking a row, a quick-open hit,
+a search hit, a wikilink, a backlink row, a tag occurrence and a manual page
+are navigations: they take you to something that already exists, and you may be
+passing through. ⌘N, New Note in Folder, a template instantiation, the starter
+cheatsheet and `ledge <title>` from a shell are creates or explicit
+instructions: their tab stays. Omitting the flag means permanent, so a call
+site added later behaves the way every call site behaved before this existed.
+
+**A tab holding text nothing else has is never a preview.** A scratch tab has
+no file until it is typed in (`notes/store.ts`), so replacing one would drop
+what was typed. `makeTab` therefore refuses the mark and only `makeNoteTab`
+takes it.
+
+**Four things promote a preview, and the first is the one that matters.**
+
+| Promotion | Why |
+| --------- | --- |
+| Editing the note | The plainest statement that a note should stay. It is also what makes the replacement safe: an edit fires before any later open, so the tab that gets replaced can never be holding unsaved text |
+| Double-clicking the tab | The accelerator, the shape R3 already gives Rename |
+| Dragging the tab | Reordering or moving a tab places it deliberately, and a tab the next click replaces has not been placed |
+| Keep Tab Open | The canonical home, per R2: the tab's context menu, the View menu, and the palette |
+
+The edit path is a broadcast from `notes/store.ts` (`onNoteEdited`), not
+`editor/docEvents.ts`, which fires for the loads that pour a note's text in at
+open and would promote every preview tab the moment it drew. The promotion
+itself is `keepTab`, keyed by **docId**: an edit arrives as a docId, and a tab
+dragged elsewhere has moved by the time the dispatch lands (architecture.md
+§4).
+
+**On touch the model is identical and one substitution is needed.** Double-click
+is one of the four columns a finger does not have (§1a), so Keep Tab Open sits
+in the menu the long press opens, beside Close Tab. That is not a workaround
+for the phone: it is what R2 already required, since the double-click was only
+ever an accelerator. **The payoff is larger there**, because closing a tab on a
+client with no ⌘W is itself a long press and a menu item, so a strip that fills
+up costs more to empty than it does on a Mac.
+
+**The mark is persisted.** `.layout.json` records the preview slot per pane
+as an index into its tab list (`workspace/persist.ts`), read as defensively as
+`expanded` is, so a file written before the field existed restores a strip of
+ordinary tabs. A restored session shows the strip it left, down to which tab
+the next click replaces.
+
+**No setting turns this off.** The bar in architecture.md §6 asks for a
+hardcoded default that demonstrably fails someone, and this one has four ways
+out, one of which is typing in the note.
 
 ## 2. Hotkey allocation policy
 

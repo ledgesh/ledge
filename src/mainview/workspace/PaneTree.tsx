@@ -363,6 +363,15 @@ function TabBar({ leaf, focused }: { leaf: LeafNode; focused: boolean }) {
             target={{ kind: "tab", paneId: leaf.id, tabId: menu.tabId }}
             onClose={() => setMenu(null)}
           />
+          {/* Keep Tab Open: the discoverable path to promoting the italic tab
+              a navigation opened, and the only one where there is no
+              double-click (interactions.md §1a, §1b). Disabled rather than
+              absent on an ordinary tab, the way Close Pane is with one pane. */}
+          <CommandMenuItem
+            id="tab.keep"
+            target={{ kind: "tab", paneId: leaf.id, tabId: menu.tabId }}
+            onClose={() => setMenu(null)}
+          />
           <CommandMenuItem
             id="pane.splitRight"
             target={{ kind: "pane", paneId: leaf.id }}
@@ -470,7 +479,15 @@ function TabItem({
     <div
       ref={ref}
       data-tab
+      // The preview mark, for the tests and for anything reading the strip.
+      // The italics below are the user-facing half.
+      data-preview={tab.preview ? "" : undefined}
       {...press}
+      // The double-click accelerator for Keep Tab Open, beside the menu entry
+      // that is the discoverable path (interactions.md R3, §1b). Its second
+      // click lands on the tab the first already selected, so nothing else
+      // fires along the way.
+      onDoubleClick={() => exec("tab.keep", { kind: "tab", paneId: leaf.id, tabId: tab.id })}
       draggable
       className={cn(
         // Wider on touch as well as taller. The strip sets the height, but a
@@ -494,7 +511,11 @@ function TabItem({
         setDragged(false);
       }}
     >
-      <span className="truncate">{tab.title}</span>
+      {/* Italic while the tab is a preview: the one thing on screen saying the
+          next note opened will take this slot (interactions.md §1b). The label
+          rather than a badge, since the strip is the app's densest row and a
+          phone's is 390 points wide. */}
+      <span className={cn("truncate", tab.preview && "italic")}>{tab.title}</span>
       {unsaved && (
         // Before the close button, so it does not move when the button appears
         // on hover. It is present on touch, where that button is not

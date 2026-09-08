@@ -82,6 +82,13 @@ export const COMMANDS = {
   // "bigger scope" shift rule).
   "tab.close": { title: "Close Tab", keys: ["Mod-w"] },
   "tab.closeOthers": { title: "Close Other Tabs" },
+  // Promotes a preview tab, the italic one a navigation opened
+  // (interactions.md §1b). No chord: it is the rare half of the pair, since
+  // typing in the note does the same thing and is what usually happens next.
+  // Double-clicking the tab is the accelerator, the way double-clicking a
+  // workspace row renames it (R3), and the menu entry is the discoverable
+  // path — and the only one on a client with no double-click.
+  "tab.keep": { title: "Keep Tab Open" },
   "tab.next": { title: "Next Tab", keys: ["Ctrl-Tab", "Mod-Shift-]"] },
   "tab.prev": { title: "Previous Tab", keys: ["Ctrl-Shift-Tab", "Mod-Shift-["] },
 

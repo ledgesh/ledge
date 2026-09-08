@@ -205,6 +205,10 @@ export const MENU: readonly MenuSection[] = [
       // instead.
       { command: "tab.next", key: "Mod-Shift-]" },
       { command: "tab.prev", key: "Mod-Shift-[" },
+      // Keep Tab Open, beside the other verbs on the focused pane's active
+      // tab. It has no chord, so the menu bar and the tab's own menu are where
+      // a pointer client finds it (interactions.md §1b).
+      { command: "tab.keep" },
       "---",
       { label: "Switch to Workspace", items: WORKSPACE_SLOTS },
       "---",

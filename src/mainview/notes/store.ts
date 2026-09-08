@@ -232,11 +232,33 @@ export function noteChanged(docId: string, text: string): void {
   if (!e) return; // not a persisted note (an editor built outside the pool, e.g. a test)
   e.pending = text;
   refreshDirty();
+  for (const sink of editSinks) sink(docId);
   if (e.timer !== null) clearTimeout(e.timer);
   e.timer = setTimeout(() => {
     e.timer = null;
     void flush(e);
   }, SAVE_DELAY_MS);
+}
+
+// --- who was edited ----------------------------------------------------------
+
+const editSinks = new Set<(docId: string) => void>();
+
+/**
+ * Subscribe to every real edit, by the note's docId.
+ *
+ * It exists for one listener: App promotes a preview tab the moment its note
+ * is typed in (interactions.md §1b).
+ *
+ * Not editor/docEvents.ts, which broadcasts the loads that pour a note's text
+ * in at open and would promote every preview tab as it drew. Not onDirtyChange
+ * either, which reports a set moving in both directions and names no note.
+ */
+export function onNoteEdited(sink: (docId: string) => void): () => void {
+  editSinks.add(sink);
+  return () => {
+    editSinks.delete(sink);
+  };
 }
 
 // --- who is unsaved ----------------------------------------------------------

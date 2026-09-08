@@ -119,7 +119,7 @@ export async function openDocs(
     dispatch({ type: "selectWorkspace", id: existing.id });
     // openNote acts on the selected workspace at reduce time, so it follows
     // the select above and the page opens in the docs workspace's pane.
-    if (start) dispatch({ type: "openNote", note: start });
+    if (start) dispatch({ type: "openNote", note: start, preview: true });
   } else {
     // The docs workspace joins state.workspaces like any other, so panes,
     // tabs, search and quick-open all work on it. The strip does not list it

@@ -17,7 +17,7 @@ import { TagsPanel } from "@/workspace/TagsPanel";
 import { WorkspaceView } from "@/workspace/WorkspaceView";
 import { HostPicker } from "@/components/HostPicker";
 import { LOCAL_HOST } from "../shared/frontmatter";
-import { configureStoreUi, flushAll, folderOf, paramsOf } from "@/notes/store";
+import { configureStoreUi, flushAll, folderOf, onNoteEdited, paramsOf } from "@/notes/store";
 import { parseWikiTarget, resolveWikiTitle } from "@/editor/wikilinks";
 import { refreshWikilinks } from "@/editor/livePreview";
 import { refreshFolder } from "@/workspace/actions";
@@ -451,7 +451,9 @@ function Shell() {
         // Register the reveal before the open, as the Overlay's search does.
         // openNote's render is what attaches the editor the reveal lands in.
         if (parsed.heading) requestHeadingReveal(note.path, parsed.heading);
-        dispatch({ type: "openNote", note });
+        // A followed link is a navigation, so its tab is a preview
+        // (interactions.md §1b).
+        dispatch({ type: "openNote", note, preview: true });
       },
       // The `#` completion's vocabulary: the per-folder snapshot kept fresh
       // below. Synchronous like wikiNotes, because a decoration or completion
@@ -507,6 +509,12 @@ function Shell() {
     () => onTerminalExit((sid) => { if (sid === activeDocId) setTermOpen(false); }),
     [activeDocId],
   );
+
+  // Typing in a preview tab is what says to keep it (interactions.md §1b).
+  // onNoteEdited fires for real edits and not for the loads at open, and
+  // keepTab is a no-op on every other tab, so this changes nothing the rest of
+  // the time.
+  useEffect(() => onNoteEdited((docId) => dispatch({ type: "keepTab", docId })), [dispatch]);
 
   // Tear down a pooled editor and its per-note shells once the tab (or pane,
   // or workspace) is gone. One reconciliation point covers every close path:
@@ -644,7 +652,7 @@ function Shell() {
         const ws = wsRef.current[0];
         if (!ws || (!page && tabPaths(ws.root).length > 0)) return;
         const note = docsLanding(notesRef.current[ws.folder] ?? [], page);
-        if (note) dispatch({ type: "openNote", note });
+        if (note) dispatch({ type: "openNote", note, preview: true });
       }),
     [dispatch],
   );

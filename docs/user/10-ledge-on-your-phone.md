@@ -60,6 +60,8 @@ A phone and a Mac can be on one server at once. Each keeps its own tabs, and a n
 
 The pages for those features say how each works on a touch screen: Run on every block, the Code Block button, and the control keys above the keyboard in [[Running Code]], the photo library in [[Images]], the mode chips under the search field in [[Finding Things]], and splits in [[Panes and Tabs]].
 
+Tapping through the tree reuses one tab rather than filling the strip, since a note you tap opens as an italic preview ([[Panes and Tabs]]). A long press on the tab holds Keep Tab Open, which is what makes it stay, and so does typing in the note. It matters more here than on a Mac: there is no ⌘W, so a strip that filled up would take a long press and a menu item per tab to empty.
+
 A block keeps running on the server while the app is in the background, and what it printed is waiting when you come back. A program that needs a whole terminal belongs in a Mac's drawer on the same server.
 
 Unlocking a locked note asks for the passphrase every time. The phone stores none of it, and Face ID does not stand in for it. The relock timer is the server's, so a phone put away for an hour finds its locked notes closed again ([[Note Locking]]).

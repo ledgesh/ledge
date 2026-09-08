@@ -57,6 +57,11 @@ interface PersistedLeaf {
   tabs: string[];
   activeIndex: number;
   focused?: true;
+  // The slot holding this pane's preview tab (interactions.md §1b), absent
+  // when it has none. An index into `tabs`, like activeIndex, and read as
+  // defensively: a file written before the field existed restores a strip of
+  // ordinary tabs, which is what the build that wrote it had.
+  preview?: number;
 }
 interface PersistedSplit {
   kind: "split";
@@ -120,11 +125,13 @@ function persistNode(node: PaneNode, focusedPaneId: string): PersistedNode {
     const before = node.tabs.slice(0, Math.max(origIndex, 0)).filter((t) => t.path !== null).length;
     activeIndex = Math.min(before, Math.max(kept.length - 1, 0));
   }
+  const preview = kept.findIndex((t) => t.preview);
   return {
     kind: "leaf",
     tabs: kept.map((t) => t.path as string),
     activeIndex,
     ...(node.id === focusedPaneId ? { focused: true as const } : {}),
+    ...(preview >= 0 ? { preview } : {}),
   };
 }
 
@@ -223,9 +230,14 @@ function restoreNode(
   // note is no reason to collapse the layout, and removeTabsBy leaves an
   // emptied pane standing on the same grounds (tree.ts). The docs workspace
   // stays empty: a scratch tab there is a note that can never save.
+  //
+  // The preview slot is matched by its index in the FILE rather than its index
+  // after pruning, so a pane whose preview tab is gone comes back with none and
+  // nothing is promoted in its place (interactions.md §1b).
+  const rawPreview = typeof raw.preview === "number" ? raw.preview : -1;
   const tabs: TabState[] =
     survivors.length > 0
-      ? survivors.map((s) => makeNoteTab(s.meta.path, s.meta.title))
+      ? survivors.map((s) => makeNoteTab(s.meta.path, s.meta.title, s.origIndex === rawPreview))
       : docs
         ? []
         : [makeTab("scratch")];

@@ -146,6 +146,11 @@ export type Action =
   | { type: "newTab"; paneId?: string }
   | { type: "closeTab"; paneId: string; tabId: string }
   | { type: "selectTab"; paneId: string; tabId: string }
+  // Promote a preview tab to one that stays (interactions.md §1b). Keyed by
+  // docId rather than by pane and tab: an edit arrives from notes/store.ts as a
+  // docId, and a tab dragged elsewhere has moved by the time this lands. A
+  // no-op on a tab that was never a preview.
+  | { type: "keepTab"; docId: string }
   | { type: "moveTab"; fromPaneId: string; tabId: string; toPaneId: string; toIndex: number }
   // `empty` splits without seeding the new pane a scratch tab. A scratch tab
   // in the read-only docs workspace could never be saved, so
@@ -159,7 +164,12 @@ export type Action =
   | { type: "noteCreated"; docId: string; folder: string; note: NoteMeta }
   // Open a note from the browser or the palette, or focus its tab if it is
   // already open somewhere.
-  | { type: "openNote"; note: NoteMeta }
+  //
+  // `preview` marks the open a navigation, which takes the focused pane's
+  // preview slot instead of adding a tab (interactions.md §1b). Creates never
+  // pass it. Omitted means permanent, so a call site added later behaves the
+  // way every one behaved before previews existed.
+  | { type: "openNote"; note: NoteMeta; preview?: true }
   // One workspace folder was re-read (at window focus). Replaces that folder's
   // known list and no other's.
   | { type: "notesLoaded"; folder: string; notes: NoteMeta[] }
@@ -351,6 +361,19 @@ export function reducer(state: AppState, action: Action): AppState {
         ),
       }));
 
+    case "keepTab": {
+      // Not withSelected: an edit can land in a tab of a workspace that is not
+      // the selected one (a background autosave, a note edited then switched
+      // away from), and the docId is what names it wherever it sits.
+      const workspaces = state.workspaces.map((ws) => {
+        const root = mapTabs(ws.root, (t) =>
+          t.docId === action.docId && t.preview ? { ...t, preview: false } : t,
+        );
+        return root === ws.root ? ws : { ...ws, root };
+      });
+      return workspaces.every((w, i) => w === state.workspaces[i]) ? state : { ...state, workspaces };
+    }
+
     case "closeTab":
       return withSelected(state, (ws) => ({
         ...ws,
@@ -370,8 +393,12 @@ export function reducer(state: AppState, action: Action): AppState {
 
     case "moveTab":
       return withSelected(state, (ws) => {
-        const root = moveTab(ws.root, action.fromPaneId, action.tabId, action.toPaneId, action.toIndex);
-        if (root === ws.root) return ws;
+        const moved = moveTab(ws.root, action.fromPaneId, action.tabId, action.toPaneId, action.toIndex);
+        if (moved === ws.root) return ws;
+        // A dragged tab was placed deliberately, so it stays (interactions.md
+        // §1b). The one promotion made here rather than through keepTab: the
+        // drop is already a moveTab dispatch.
+        const root = mapTabs(moved, (t) => (t.id === action.tabId && t.preview ? { ...t, preview: false } : t));
         // The destination pane gains focus, as if the moved tab were clicked there.
         return { ...ws, root, focusedPaneId: action.toPaneId };
       });
@@ -513,16 +540,23 @@ export function reducer(state: AppState, action: Action): AppState {
           ),
         };
       }
-      // Not open: a new tab in the selected workspace's focused pane.
+      // Not open: a new tab in the selected workspace's focused pane. A
+      // preview open takes the pane's preview slot instead. The replaced tab's
+      // docId drops out of the live set, and App's reconciliation effect gives
+      // it the teardown every close path gets. It can never hold unsaved text:
+      // the edit that would dirty it promotes it first (interactions.md §1b).
       return withSelected(state, (ws) => {
         const paneId = ws.focusedPaneId;
         if (!findLeaf(ws.root, paneId)) return ws;
-        const tab = makeNoteTab(action.note.path, action.note.title);
-        const root = updateLeaf(ws.root, paneId, (leaf) => ({
-          ...leaf,
-          tabs: [...leaf.tabs, tab],
-          activeTabId: tab.id,
-        }));
+        const tab = makeNoteTab(action.note.path, action.note.title, action.preview);
+        const root = updateLeaf(ws.root, paneId, (leaf) => {
+          const slot = action.preview ? leaf.tabs.findIndex((t) => t.preview) : -1;
+          const tabs =
+            slot < 0
+              ? [...leaf.tabs, tab]
+              : [...leaf.tabs.slice(0, slot), tab, ...leaf.tabs.slice(slot + 1)];
+          return { ...leaf, tabs, activeTabId: tab.id };
+        });
         return { ...ws, root, focusedPaneId: paneId };
       });
     }

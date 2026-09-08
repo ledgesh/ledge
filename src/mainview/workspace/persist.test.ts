@@ -325,6 +325,43 @@ describe("pruning", () => {
     expect(leaf.activeTabId).toBe(leaf.tabs[1].id);
   });
 
+  test("the preview tab comes back a preview, and only it", () => {
+    // Which tab the next click replaces is arrangement like the rest of the
+    // strip (interactions.md §1b).
+    let s = initialState(FOLDER, NOTES); // opens alpha, permanent
+    s = reducer(s, { type: "openNote", note: NOTES[1], preview: true });
+    const after = restoreLayout(serializeLayout(s), ROOTS, NOTES_BY, {})!;
+    const leaf = firstLeaf(after.workspaces[0].root);
+    expect(leaf.tabs.map((t) => [t.path, t.preview])).toEqual([
+      ["/r/alpha.md", false],
+      ["/r/beta.md", true],
+    ]);
+  });
+
+  test("a pruned preview tab promotes nothing in its place", () => {
+    // The slot is matched by its index in the FILE, so a preview note deleted
+    // while the app was closed leaves a strip of ordinary tabs rather than
+    // handing the mark to whichever tab slid down.
+    let s = initialState(FOLDER, NOTES); // opens alpha
+    s = reducer(s, { type: "openNote", note: NOTES[1], preview: true });
+    s = reducer(s, { type: "openNote", note: NOTES[2] });
+    const after = restoreLayout(serializeLayout(s), ROOTS, { [FOLDER]: [NOTES[0], NOTES[2]] }, {})!;
+    const leaf = firstLeaf(after.workspaces[0].root);
+    expect(leaf.tabs.map((t) => [t.path, t.preview])).toEqual([
+      ["/r/alpha.md", false],
+      ["/r/gamma.md", false],
+    ]);
+  });
+
+  test("a file written before the preview field existed restores ordinary tabs", () => {
+    // The same defensive read `expanded` gets: an absent field is a good file
+    // from a build that had no previews, not a broken one.
+    const text = serializeLayout(richState()).replace(/"preview":\d+,?/g, "");
+    const after = restoreLayout(text, ROOTS, NOTES_BY, {})!;
+    const leaf = firstLeaf(after.workspaces[0].root);
+    expect(leaf.tabs.every((t) => !t.preview)).toBe(true);
+  });
+
   test("an open folder that no longer exists is dropped, like a tab on a missing note", () => {
     const before = richState();
     expandFolder(FOLDER, "projects/api");

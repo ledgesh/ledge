@@ -263,12 +263,13 @@ export function Overlay({
       // The reveal is registered before the open: openNote's render is what
       // attaches (or creates) the editor the reveal lands in.
       requestReveal(hit.path, hit.line, q);
-      dispatch({ type: "openNote", note: { path: hit.path, title: hit.title, mtimeMs: hit.mtimeMs } });
+      dispatch({ type: "openNote", note: { path: hit.path, title: hit.title, mtimeMs: hit.mtimeMs }, preview: true });
       onClose();
     } else {
       const note = notes[i];
       if (!note) return;
-      dispatch({ type: "openNote", note });
+      // Both rows navigate, so both open a preview tab (interactions.md §1b).
+      dispatch({ type: "openNote", note, preview: true });
       onClose();
     }
   };

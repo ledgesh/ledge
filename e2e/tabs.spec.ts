@@ -78,3 +78,67 @@ test("the fade masks track which edge is clipping", async ({ page }) => {
   await expect(strip).toHaveClass(/ledge-tabstrip-clip-l/);
   await expect(strip).toHaveClass(/ledge-tabstrip-clip-r/);
 });
+
+// Preview tabs (interactions.md §1b, workspace/store.tsx). A navigation opens
+// an italic tab that the next navigation replaces, so a walk down the tree
+// leaves one tab behind rather than one per row. Editing the note, dragging
+// the tab, or Keep Tab Open promotes it.
+test.describe("preview tabs", () => {
+  const preview = (page: Page) => page.locator("[data-tab][data-preview]");
+
+  test("clicking through the tree reuses one slot instead of filling the strip", async ({
+    page,
+  }) => {
+    await noteRow(page, "Alpha").click();
+    const tabs = page.locator("[data-tab]");
+    const settled = await tabs.count();
+    await expect(preview(page)).toHaveText(/Alpha/);
+
+    await noteRow(page, "Beta").click();
+    await expect(tabs).toHaveCount(settled); // Beta took Alpha's slot
+    await expect(preview(page)).toHaveText(/Beta/);
+    await noteRow(page, "Gamma").click();
+    await expect(tabs).toHaveCount(settled);
+    await expect(preview(page)).toHaveText(/Gamma/);
+  });
+
+  test("typing in the note keeps its tab, and the next note opens beside it", async ({
+    page,
+  }) => {
+    await noteRow(page, "Alpha").click();
+    const tabs = page.locator("[data-tab]");
+    const settled = await tabs.count();
+    await page.locator(".cm-content").first().click();
+    await page.keyboard.type("kept");
+    // The edit promotes it, so nothing is left holding text nobody saved yet.
+    await expect(preview(page)).toHaveCount(0);
+
+    await noteRow(page, "Beta").click();
+    await expect(tabs).toHaveCount(settled + 1);
+  });
+
+  test("double-clicking the tab keeps it, and Keep Tab Open is the menu's way", async ({
+    page,
+  }) => {
+    await noteRow(page, "Alpha").click();
+    await preview(page).dblclick();
+    await expect(preview(page)).toHaveCount(0);
+
+    // The menu entry is the discoverable path, and the only one where there is
+    // no double-click (interactions.md §1a).
+    await noteRow(page, "Beta").click();
+    await expect(preview(page)).toHaveText(/Beta/);
+    await preview(page).click({ button: "right" });
+    await page.getByRole("menuitem", { name: "Keep Tab Open" }).click();
+    await expect(preview(page)).toHaveCount(0);
+  });
+
+  test("a new note is never a preview: it is not a navigation", async ({ page }) => {
+    await noteRow(page, "Alpha").click();
+    await expect(preview(page)).toHaveCount(1);
+    await page.keyboard.press("Meta+n");
+    // ⌘N's tab holds text nothing else has, so no later click may take its
+    // slot. Alpha's preview tab is left standing beside it.
+    await expect(preview(page)).toHaveText(/Alpha/);
+  });
+});

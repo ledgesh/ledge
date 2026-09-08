@@ -14,12 +14,18 @@ export type SplitDir = "row" | "col"; // row: children sit left|right; col: top|
 // (architecture.md §4). `path` is null until the note's first save allocates
 // one (notes/store.ts). `seed` supplies the starting text. It matters only
 // while `path` is null. A tab with a path loads its content from the file.
+//
+// `preview` marks the tab a navigation opened: it draws in italics and the
+// next navigation into its pane takes its slot (interactions.md §1b). At most
+// one tab per pane carries it, and `makeTab` refuses it, since a scratch tab's
+// text lives nowhere else.
 export interface TabState {
   id: string;
   title: string;
   docId: string;
   path: string | null;
   seed: "demo" | "scratch";
+  preview: boolean;
 }
 
 export interface LeafNode {
@@ -63,17 +69,18 @@ export function uid(prefix: string): string {
 
 // --- tab / leaf factories --------------------------------------------------
 
-// A new, unsaved note: no file until it is typed in.
+// A new, unsaved note: no file until it is typed in. Never a preview: its text
+// lives nowhere but its editor, so a later navigation must not take its slot.
 export function makeTab(seed: "demo" | "scratch", title = "Untitled"): TabState {
-  return { id: uid("tab"), title, docId: uid("doc"), path: null, seed };
+  return { id: uid("tab"), title, docId: uid("doc"), path: null, seed, preview: false };
 }
 
 // A tab onto a note that already exists on disk. Its seed is never used: the
 // content comes from the file. Its docId is fresh, so opening the same note
 // twice would give two independent sessions. That is why path and docId are
 // separate keys.
-export function makeNoteTab(path: string, title: string): TabState {
-  return { id: uid("tab"), title, docId: uid("doc"), path, seed: "scratch" };
+export function makeNoteTab(path: string, title: string, preview = false): TabState {
+  return { id: uid("tab"), title, docId: uid("doc"), path, seed: "scratch", preview };
 }
 
 // A pane holding one tab, or (with no argument) none at all. A tabless leaf is

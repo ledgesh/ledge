@@ -683,7 +683,8 @@ describe("registry", () => {
     find(cmds, "tag.openNote").run(ctx);
     // backlink.open's contract: the reveal is registered before the open.
     expect(calls).toEqual([`revealBacklink:${n.path}:4:#work`]);
-    expect(dispatched).toEqual([{ type: "openNote", note: n }]);
+    // A navigation, so the tab is a preview (interactions.md §1b).
+    expect(dispatched).toEqual([{ type: "openNote", note: n, preview: true }]);
 
     find(cmds, "tag.openNote").run({
       ...ctx,
@@ -793,7 +794,8 @@ describe("registry", () => {
       target: { kind: "note", path: n.path },
     };
     find(commands, "note.open").run(ctx);
-    expect(dispatched).toEqual([{ type: "openNote", note: n }]);
+    // A row click navigates, so the tab it opens is a preview one.
+    expect(dispatched).toEqual([{ type: "openNote", note: n, preview: true }]);
   });
 
   test("run: trash rows restore and confirm-delete the targeted item", () => {

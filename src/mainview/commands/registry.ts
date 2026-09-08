@@ -41,6 +41,7 @@ import {
   Link2,
   PanelLeft,
   Pencil,
+  Pin,
   PlugZap,
   Play,
   Plus,
@@ -195,6 +196,19 @@ function targetPaneId(ctx: CommandCtx): string {
 
 function activeLeaf(ctx: CommandCtx) {
   return findLeaf(ctx.selected.root, targetPaneId(ctx));
+}
+
+// The docId tab.keep promotes, or null: the menu's tab, else the focused
+// pane's active one, and only if it is still a preview. A docId rather than a
+// tab so `when` and `run` share one lookup, since keepTab is keyed by it
+// (workspace/store.tsx).
+function keepTarget(ctx: CommandCtx): string | null {
+  const leaf = activeLeaf(ctx);
+  if (!leaf) return null;
+  const t = ctx.target;
+  const tabId = t?.kind === "tab" ? t.tabId : leaf.activeTabId;
+  const tab = leaf.tabs.find((x) => x.id === tabId);
+  return tab?.preview ? tab.docId : null;
 }
 
 // The note a note-scoped command acts on: an explicit row/menu target, else
@@ -430,6 +444,18 @@ export function buildCommands(deps: RegistryDeps): Command[] {
         const leaf = activeLeaf(ctx);
         if (leaf?.activeTabId)
           ctx.dispatch({ type: "closeTab", paneId: leaf.id, tabId: leaf.activeTabId });
+      },
+    }),
+    // The explicit half of preview-tab promotion (interactions.md §1b), on the
+    // menu's tab or the focused pane's active one. `when` asks for a tab that
+    // is actually a preview, so on an ordinary strip the entry is disabled
+    // rather than a verb that visibly does nothing.
+    cmd("tab.keep", {
+      icon: Pin,
+      when: (ctx) => keepTarget(ctx) !== null,
+      run: (ctx) => {
+        const docId = keepTarget(ctx);
+        if (docId) ctx.dispatch({ type: "keepTab", docId });
       },
     }),
     cmd("tab.closeOthers", {
@@ -825,7 +851,9 @@ export function buildCommands(deps: RegistryDeps): Command[] {
       when: (ctx) => !!targetNote(ctx),
       run: (ctx) => {
         const note = targetNote(ctx);
-        if (note) ctx.dispatch({ type: "openNote", note });
+        // A navigation, so the tab is a preview: a walk down the browser
+        // reuses one slot instead of filling the strip (interactions.md §1b).
+        if (note) ctx.dispatch({ type: "openNote", note, preview: true });
       },
     }),
     cmd("note.delete", {
@@ -870,7 +898,7 @@ export function buildCommands(deps: RegistryDeps): Command[] {
         const note = notesOf(ctx.state, ctx.selected.folder).find((n) => n.path === t.path);
         if (!note) return;
         deps.revealBacklink(t.path, t.line, t.raw);
-        ctx.dispatch({ type: "openNote", note });
+        ctx.dispatch({ type: "openNote", note, preview: true });
       },
     }),
     // Enter or a click on an Outline-panel row puts the caret on that heading
@@ -931,7 +959,7 @@ export function buildCommands(deps: RegistryDeps): Command[] {
         const note = notesOf(ctx.state, ctx.selected.folder).find((n) => n.path === t.path);
         if (!note) return;
         deps.revealBacklink(t.path, t.line, t.raw);
-        ctx.dispatch({ type: "openNote", note });
+        ctx.dispatch({ type: "openNote", note, preview: true });
       },
     }),
     cmd("note.copyPath", {

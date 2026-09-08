@@ -200,6 +200,11 @@ test.describe("a tap changes nothing but what it acts on", () => {
   test("one tap on a tab shows that tab's note", async ({ page }) => {
     await openSidebar(page);
     await noteRow(page, "Beta").tap();
+    // Beta arrives as a preview tab, which Gamma would otherwise replace
+    // (interactions.md §1b). Keeping it is the phone's promotion path, and it
+    // is what leaves two tabs for the tap below to be about.
+    await pressAndHold(page.locator("[data-tab]", { hasText: "Beta" }));
+    await page.getByRole("menuitem", { name: "Keep Tab Open" }).tap();
     await openSidebar(page);
     await noteRow(page, "Gamma").tap();
     await expect(page.locator(".cm-content").first()).toContainText("gamma body");
@@ -379,6 +384,32 @@ test.describe("with the tree on screen", () => {
     await pressAndHold(tabs.first());
     await page.getByRole("menuitem", { name: "Close Tab" }).tap();
     await expect(tabs).toHaveCount(open - 1);
+  });
+
+  // Preview tabs on a phone (interactions.md §1b). The model is the desktop's,
+  // with one substitution: the double-click that promotes a tab is a column a
+  // finger does not have, so the same long press that carries Close Tab
+  // carries Keep Tab Open. The payoff is larger here, because closing a tab on
+  // this client is itself a long press and a menu item.
+  test("tapping through the tree reuses one tab, and the menu is what keeps one", async ({
+    page,
+  }) => {
+    await noteRow(page, "Beta").tap(); // the drawer is already up here
+    const tabs = page.locator("[data-tab]");
+    const settled = await tabs.count();
+    await openSidebar(page);
+    await noteRow(page, "Gamma").tap();
+    // Gamma took Beta's slot: a walk down the tree on a 390-point strip does
+    // not leave a tab per row to be long-pressed away one at a time.
+    await expect(tabs).toHaveCount(settled);
+    await expect(page.locator("[data-tab][data-preview]")).toHaveText(/Gamma/);
+
+    await pressAndHold(page.locator("[data-tab]", { hasText: "Gamma" }));
+    await page.getByRole("menuitem", { name: "Keep Tab Open" }).tap();
+    await expect(page.locator("[data-tab][data-preview]")).toHaveCount(0);
+    await openSidebar(page);
+    await noteRow(page, "Alpha").tap();
+    await expect(tabs).toHaveCount(settled + 1);
   });
 
   test("the chrome's control opens quick-open, which is the way to every note", async ({
