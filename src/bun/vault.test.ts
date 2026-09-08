@@ -108,6 +108,23 @@ describe("vault lifecycle and the envelope", () => {
     expect(openBody(header, armored)).toBe(body);
   });
 
+  test("unlocking an already-unlocked vault still checks the passphrase", async () => {
+    // The answer used to be an unconditional yes whenever the key was in
+    // memory. No screen reached it, since the dialog opens only while the
+    // vault is shut, but the RPC is the contract and scoping an unlock to a
+    // caller would have turned the same shape into a way in (locking.md §3).
+    await createVault("correct horse");
+    expect(vaultState()).toBe("unlocked");
+
+    expect(await unlockVault("wrong pass")).toBe(false);
+    // And a wrong answer changes nothing: relocking on a typo would be a way
+    // to shut somebody else's session out.
+    expect(vaultState()).toBe("unlocked");
+
+    expect(await unlockVault("correct horse")).toBe(true);
+    expect(vaultState()).toBe("unlocked");
+  });
+
   test("tampered ciphertext refuses as damage, never wrong plaintext", async () => {
     await createVault("pw");
     const header = mintLockedHeader();

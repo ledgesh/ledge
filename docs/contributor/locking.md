@@ -154,6 +154,15 @@ tags: finance
   a precious one — every locked note carries its own salt (§2), so a lost
   vault file costs a re-derive, never a note. Corrupt: renamed aside for
   forensics, rebuilt from the next successful unlock's parameters.
+- **An unlock checks the passphrase even when the vault is already open.**
+  The answer used to be an unconditional yes whenever the key was in memory.
+  No screen reaches that, because `vault.unlock`'s `when` opens the dialog
+  only while the vault is shut, but `vaultUnlock` is an RPC any client can
+  call and the shape is a bypass under any per-caller scoping. The check is
+  one derive compared against the key in hand rather than a read of the vault
+  file, so a vault file that went missing cannot turn a right passphrase into
+  a refusal. A wrong one refuses and relocks nothing: relocking on a typo
+  would be a way to shut another window out.
 - **The master key lives in Bun-process memory only**, from unlock to
   relock. It is never written anywhere, never crosses the RPC, and dies
   with the process. The passphrase crosses the RPC exactly once per unlock

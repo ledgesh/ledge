@@ -187,7 +187,23 @@ export async function createVault(passphrase: string): Promise<void> {
  * rebuilds the vault file. A wrong passphrase returns false, never throws.
  */
 export async function unlockVault(passphrase: string, probeHeader?: string): Promise<boolean> {
-  if (masterKey) return true;
+  // Already unlocked: still check the passphrase, against the key in hand
+  // rather than the vault file, which is one derive and no read. The early
+  // "yes" this replaces answered a passphrase it never looked at. Nothing in
+  // the app reaches it today, since vault.unlock's `when` opens the dialog
+  // only while the vault is shut, so this is the contract being made honest
+  // rather than a hole being closed: the RPC is callable by any client, and
+  // the shape becomes a bypass the moment an unlock is scoped to a caller
+  // instead of to the process (locking.md §3). A wrong answer refuses and
+  // changes nothing, since a vault that relocked on a typo would be a way to
+  // shut another window out.
+  if (masterKey !== null) {
+    if (vaultSalt === null) return false; // unreachable: a key implies a salt
+    const attempt = deriveKey(passphrase, vaultSalt);
+    if (!timingSafeEqual(attempt, masterKey)) return false;
+    startIdle(); // an unlock the user typed is activity, even a redundant one
+    return true;
+  }
   if (vaultSalt !== null) {
     let checkB64: string;
     try {
