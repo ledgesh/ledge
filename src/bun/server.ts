@@ -49,7 +49,17 @@ import {
   tagsIn,
   writeNote,
 } from "./notes";
-import { configureVault, createVault, loadVault, lockVault, touchVault, unlockVault, vaultState } from "./vault";
+import {
+  configureVault,
+  createVault,
+  loadVault,
+  lockVaultFor,
+  touchVault,
+  unlockVault,
+  vaultOpenFor,
+  vaultState,
+  vaultStateFor,
+} from "./vault";
 import {
   APP_HOME,
   assertRegisteredRoot,
@@ -190,6 +200,35 @@ const CAN_INSTALL_CLI = statSync(CLI_ENTRY, { throwIfNoEntry: false })?.isFile()
 const NO_DIALOG =
   "A headless server cannot open a folder dialog. Attaching a folder needs the app running on the machine that holds the notes.";
 
+// What a handler that needs the vault answers a device that has not unlocked
+// (locking.md §3a). Thrown rather than returned: these calls have no `error`
+// field, and the view already shows a thrown message on a failed lock. The
+// wording says "on this device" because the vault may well be open on another
+// one, and "the vault is locked" alone would read as a contradiction beside a
+// phone that is showing the same notes.
+const VAULT_SHUT_HERE = "the vault is locked on this device: unlock notes here first";
+
+/**
+ * Refuse a locked note to a device that has not unlocked, and let every other
+ * note through.
+ *
+ * The three callers write a note's bytes or read them to rewrite them, and
+ * each already refuses when nobody has unlocked at all: `sealBody` and
+ * `openBody` throw with no key (locking.md §4). This adds the case a
+ * process-wide key cannot see, where another device is holding the vault open
+ * and this one has not been let in.
+ *
+ * A device that cannot read a locked note cannot write one either, which is
+ * the rule that keeps the two halves from disagreeing.
+ */
+async function refuseLockedFrom(device: string, path: string): Promise<void> {
+  // Only while another device is holding the key. With no key in the process
+  // at all the callers refuse on their own, and checking anyway would cost a
+  // file read on every save on every machine that has never locked anything.
+  if (vaultState() !== "unlocked" || vaultOpenFor(device)) return;
+  if (await isNoteLocked(path)) throw new Error(VAULT_SHUT_HERE);
+}
+
 // The same refusal for cliInstall, and it exists for the reason NO_DIALOG does.
 // The palette leaves the verb out (mainview/lib/shell.ts), and anything that
 // asks anyway gets a sentence instead of the shim's own "the CLI entry is
@@ -237,8 +276,13 @@ export interface LedgeServer {
    * is fixed for that connection's life (remote.md §5), so it is bound once
    * here rather than passed at each call. A caller holding one client's map
    * cannot ask it for another client's answer.
+   *
+   * `device` is which machine that client runs on, bound here for the same
+   * reason and answering a different question: the vault is unlocked per
+   * device, and a Mac's several windows are several clients on one of them
+   * (locking.md §3a).
    */
-  forClient(client: string): RequestHandlers;
+  forClient(client: string, device: string): RequestHandlers;
   /** Whether anything is mid-job: a block running, or a drawer's shell inside
    * a command. The daemon asks when its last client goes away (remote.md §7).
    * A run keeps the process alive; an idle prompt does not. */
@@ -695,14 +739,35 @@ export async function createServer(deps: { push: Audience; native: NativeDeps })
     }
   }
 
-  // What resets the vault's idle-relock clock (vault.ts IDLE_RELOCK_MS).
-  // Changes only, and only ones a client asked for. A read is left out
-  // because reads happen on their own: the view re-reads every open note on
-  // window focus, on a relink, and on the watcher's push, so counting them
-  // would let an agent writing notes in the background hold the vault open
-  // with nobody at the machine. A change only ever follows something a person
-  // did. Agent surfaces call notes.ts directly and pass none of this, which is
-  // the point (locking.md §3).
+  // Which device each connected client runs on (locking.md §3a). Filled as a
+  // connection's handlers are built, and read only to address a push: the
+  // vault is open per device, so one state cannot be broadcast to everyone.
+  // Entries for clients that have gone are dropped on the next push rather
+  // than on a teardown hook, because `push.has` already knows and a second
+  // path to the same fact would be a second path to get wrong.
+  const deviceOf = new Map<string, string>();
+
+  /** Tell every connected client what the vault looks like from where it is
+   * sitting. Replaces the `push.all` a process-wide vault could use: after an
+   * unlock on the Mac, the Mac's windows are open and the phone is not. */
+  function pushVaultState(): void {
+    for (const [client, device] of deviceOf) {
+      if (!push.has(client)) {
+        deviceOf.delete(client);
+        continue;
+      }
+      push.to(client).vaultChanged({ state: vaultStateFor(device) });
+    }
+  }
+
+  // What resets the calling device's idle-relock clock (vault.ts
+  // IDLE_RELOCK_MS). Changes only, and only ones a client asked for. A read is
+  // left out because reads happen on their own: the view re-reads every open
+  // note on window focus, on a relink, and on the watcher's push, so counting
+  // them would let an agent writing notes in the background hold the vault
+  // open with nobody at the machine. A change only ever follows something a
+  // person did. Agent surfaces call notes.ts directly and pass none of this,
+  // which is the point (locking.md §3).
   //
   // Forgetting to list a new handler here costs a relock while someone works,
   // which is the direction to be wrong in.
@@ -725,15 +790,39 @@ export async function createServer(deps: { push: Audience; native: NativeDeps })
     "trashRestore",
   ]);
 
-  /** Put the touch in front of each listed handler. One pass over the map,
-   * rather than a line in each of sixteen bodies that the seventeenth would
-   * forget. */
-  const touchingVault = (handlers: RequestHandlers): RequestHandlers => {
+  // Handlers that mint or drop a lock, and so cannot do their job without the
+  // vault whatever note they are pointed at. They refuse for a device that has
+  // not unlocked, where without the check they would succeed on another
+  // device's key.
+  //
+  // The handlers that touch a locked note only sometimes are not here. They
+  // check the note instead, inside their own bodies (`refuseLockedFrom`),
+  // because refusing them outright would stop an un-unlocked device editing
+  // ordinary notes. Neither is `vaultChangePassphrase`, which answers a
+  // refusal in its `error` field rather than by throwing.
+  const NEEDS_THE_VAULT: ReadonlySet<keyof RequestHandlers> = new Set(["noteLock", "noteRemoveLock"]);
+
+  /** Put the gate and the touch in front of the listed handlers. One pass over
+   * the map, rather than a line in each of eighteen bodies that the nineteenth
+   * would forget. The gate is applied last, so it is the outer wrapper and a
+   * refusal happens before anything else does. */
+  const scopedToDevice = (client: string, device: string, handlers: RequestHandlers): RequestHandlers => {
+    deviceOf.set(client, device);
     const map = handlers as unknown as Record<string, (params: never) => unknown>;
     for (const name of CHANGES_A_NOTE) {
       const handler = map[name]!;
       map[name] = (params: never) => {
-        touchVault();
+        touchVault(device);
+        return handler(params);
+      };
+    }
+    for (const name of NEEDS_THE_VAULT) {
+      const handler = map[name]!;
+      map[name] = (params: never) => {
+        // Only while another device holds the key, for refuseLockedFrom's
+        // reason: with no key at all, notes.ts already refuses, and in better
+        // words for a machine that has never had a vault.
+        if (vaultState() === "unlocked" && !vaultOpenFor(device)) throw new Error(VAULT_SHUT_HERE);
         return handler(params);
       };
     }
@@ -745,7 +834,7 @@ export async function createServer(deps: { push: Audience; native: NativeDeps })
   // handlers that differ, moves six handlers away from the neighbours that
   // explain them. It saves sixty closures per client on a path that runs once
   // per connection.
-  const requestsFor = (client: string): RequestHandlers => touchingVault({
+  const requestsFor = (client: string, device: string): RequestHandlers => scopedToDevice(client, device, {
     // --- workspaces --------------------------------------------------------
     // The registry lives server-side (workspaces.ts): the view only ever
     // passes back roots it was handed. The one way an arbitrary folder gets
@@ -806,17 +895,27 @@ export async function createServer(deps: { push: Audience; native: NativeDeps })
     // roots inside notes.ts, so a compromised or buggy client cannot read or
     // write outside the folders the user chose.
     noteList: async ({ root }) => ({ notes: await listNotes(root) }),
-    noteRead: async ({ path }) => ({ note: await readNote(path) }),
+    // The one place the device gate decides what a read returns rather than
+    // whether it happens. A device that has not unlocked gets the withheld
+    // shape, exactly as it would from a vault nobody had opened, so its tabs
+    // render the placeholder face with no second code path (locking.md §3a).
+    noteRead: async ({ path }) => ({ note: await readNote(path, vaultOpenFor(device)) }),
     // The guard and the divergence-to-trash live in writeNote (notes.ts).
     // This only reports. A non-null divergedTo is logged server-side too,
     // because the view's console is invisible in the shipped app.
     noteWrite: async ({ path, text, baseMtimeMs }) => {
+      await refuseLockedFrom(device, path);
       const res = await writeNote(path, text, baseMtimeMs);
       if (res.divergedTo) console.warn("[notes] external edit preserved in trash:", res.divergedTo, "(save to", path, "won)");
       return res;
     },
     noteCreate: async ({ root, text, folder }) => ({ note: await createNote(root, text, folder) }),
-    noteMove: async ({ path, folder }) => ({ note: await moveNote(path, folder) }),
+    noteMove: async ({ path, folder }) => {
+      // moveNote reads a locked body to rebase its image references, so it is
+      // one of the three that needs the key rather than only the file.
+      await refuseLockedFrom(device, path);
+      return { note: await moveNote(path, folder) };
+    },
     folderRename: ({ root, folder, name }) => renameFolder(root, folder, name),
     folderDelete: ({ root, folder }) => deleteFolder(root, folder),
     noteRetitle: async ({ path, text }) => ({ note: await retitleNote(path, text) }),
@@ -840,6 +939,7 @@ export async function createServer(deps: { push: Audience; native: NativeDeps })
     // typing did not become the note, and the view's console is invisible in
     // the shipped app.
     noteStash: async ({ path, text }) => {
+      await refuseLockedFrom(device, path);
       const stashed = await stashNote(path, text);
       console.warn("[notes] unsaved edit preserved in trash:", stashed, "(the server's copy of", path, "won)");
       return { stashed };
@@ -857,30 +957,35 @@ export async function createServer(deps: { push: Audience; native: NativeDeps })
     tagNotes: async ({ root, tag }) => notesTagged(root, tag),
 
     // --- the vault (note locking) -----------------------------------------
-    vaultState: () => ({ state: vaultState() }),
+    // This device's answer, not the process's: a phone that has not unlocked
+    // says "locked" while the Mac beside it reads the same notes.
+    vaultState: () => ({ state: vaultStateFor(device) }),
     vaultCreate: async ({ passphrase }) => {
       try {
-        await createVault(passphrase);
+        await createVault(passphrase, device);
       } catch (err) {
         console.warn("[vault] create refused:", err);
         return { ok: false };
       }
-      push.all.vaultChanged({ state: vaultState() });
+      pushVaultState();
       return { ok: true };
     },
     vaultUnlock: async ({ passphrase }) => {
-      // With no vault file but locked notes on disk (synced from another
-      // machine), a locked note's own self-contained header is the check.
+      // The probe is about the machine, so it asks the process's state and not
+      // this device's: with no vault file but locked notes on disk (synced from
+      // another machine), a locked note's own self-contained header is the
+      // check. A second device unlocking takes the key-in-hand path instead.
       const probe = vaultState() === "none" ? await firstLockedHeader(availableRoots()) : undefined;
-      const ok = await unlockVault(passphrase, probe);
-      if (ok) push.all.vaultChanged({ state: vaultState() });
+      const ok = await unlockVault(passphrase, device, probe);
+      if (ok) pushVaultState();
       return { ok };
     },
     vaultLock: () => {
       // The view flushed dirty locked buffers before asking (⌘L's contract).
-      // All the server drops here is keys.
-      lockVault();
-      push.all.vaultChanged({ state: vaultState() });
+      // All the server drops here is this device's claim on the key, and the
+      // key itself once no device is left holding it.
+      lockVaultFor(device);
+      pushVaultState();
       return { ok: true };
     },
     noteLock: async ({ path }) => {
@@ -889,6 +994,11 @@ export async function createServer(deps: { push: Audience; native: NativeDeps })
     },
     noteRemoveLock: async ({ path }) => ({ note: await removeLockNote(path) }),
     vaultChangePassphrase: async ({ passphrase }) => {
+      // A refusal here is data, not an exception: the dialog shows this
+      // string, and the sweep's own failures already arrive that way.
+      if (vaultState() === "unlocked" && !vaultOpenFor(device)) {
+        return { ok: false, rewrapped: 0, error: VAULT_SHUT_HERE };
+      }
       try {
         // lockableRoots, not availableRoots: a root the sweep cannot read has
         // to be seen and refused, not skipped (locking.md §3).
@@ -1166,7 +1276,10 @@ export async function createServer(deps: { push: Audience; native: NativeDeps })
     // it is read. assetWrite names the file itself, so the client supplies
     // nothing but bytes and handles it was given.
     assetRead: async ({ root, src, notePath }) => {
-      const res = await readAsset(root, src, notePath);
+      // Sealed images follow their notes: a device that gets the withheld
+      // shape from noteRead gets the locked-image placeholder here (locking.md
+      // §5), rather than the one picture the note's own body is hiding.
+      const res = await readAsset(root, src, notePath, vaultOpenFor(device));
       if (res !== null && "sealed" in res) return { image: null, sealed: true };
       return { image: res };
     },
@@ -1278,7 +1391,7 @@ export async function createServer(deps: { push: Audience; native: NativeDeps })
   // Auto-relock (idle) pushes the same vaultChanged the explicit paths do. The
   // view cannot tell why the vault locked, only that it did, so it has one
   // eviction path instead of two.
-  configureVault({ onAutoLock: () => push.all.vaultChanged({ state: vaultState() }) });
+  configureVault({ onAutoLock: pushVaultState });
 
   // Drain every live shell on a short interval. (poll()-gated reads never
   // block; see pty.ts.) Inline shells are sliced into per-block events. Block

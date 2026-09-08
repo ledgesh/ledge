@@ -40,6 +40,10 @@ export interface ServerConnection {
    * hello arrives. A getter rather than a promise: no request is dispatched
    * before the handshake, so a handler reading this always has the answer. */
   client(): string;
+  /** The device that client runs on (wire.ts `Hello.device`), which the vault
+   * scopes an unlock to (locking.md §3a). A client that named none is its own
+   * device, so this falls back to `client()` and never answers "". */
+  device(): string;
   /** What that client calls itself (wire.ts `Hello.label`), for the presence
    * list every other client is pushed (remote.md §7). "" until the hello, and
    * "" for a client that gave no name. */
@@ -141,6 +145,7 @@ export function serverConnection(duplex: Duplex, opts: ServerOpts): ServerConnec
   let handlers: RequestHandlers | null = null;
   let greeted = false;
   let peerClient = "";
+  let peerDevice = "";
   let peerLabel = "";
   // What this connection's client asked for, under this server's ceiling. Read
   // after the connection ends, by whoever decides how long to stay (daemon.ts).
@@ -282,6 +287,10 @@ export function serverConnection(duplex: Duplex, opts: ServerOpts): ServerConnec
       }
       greeted = true;
       peerClient = msg.client;
+      // Empty reads as "this client is its own device" (wire.ts `Hello.device`
+      // for why that is the safe reading). Resolved here so no caller has to
+      // remember the fallback.
+      peerDevice = msg.device === "" ? msg.client : msg.device;
       // Already bounded and stripped of control characters by parseControl
       // (wire.ts cleanLabel), so the string kept here is displayable.
       peerLabel = msg.label;
@@ -378,6 +387,7 @@ export function serverConnection(duplex: Duplex, opts: ServerOpts): ServerConnec
       for (const { id, m, p, op } of waiting.splice(0)) void dispatch(id, m, p, op);
     },
     client: () => peerClient,
+    device: () => peerDevice,
     label: () => peerLabel,
     hold: () => peerHold,
     closed,

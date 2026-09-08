@@ -16,15 +16,26 @@ import {
   mintLockedHeader,
   openBody,
   parseLockedHeader,
+  authorizedDeviceCount,
+  lockVaultFor,
   resetVaultForTests,
   sealBody,
   splitHead,
   stampLockedLine,
   stripLockedLine,
   unlockVault,
+  touchVault,
+  vaultActivityForTests,
   VAULT_PATH,
   vaultState,
+  vaultStateFor,
 } from "./vault";
+
+// Two devices, because an unlock belongs to one of them (locking.md §3a). The
+// names are what the tests below read as: the Mac unlocks, and the phone is
+// the other device that did not.
+const MAC = "device-mac";
+const PHONE = "device-phone";
 
 if (!resolve(APP_HOME).startsWith(resolve(tmpdir()) + sep)) {
   throw new Error(`refusing to run vault tests against ${APP_HOME} — is the preload configured?`);
@@ -87,7 +98,7 @@ describe("locked: line surgery", () => {
 
 describe("vault lifecycle and the envelope", () => {
   test("create → seal → open round-trips, and a lock refuses both directions", async () => {
-    await createVault("correct horse");
+    await createVault("correct horse", MAC);
     expect(vaultState()).toBe("unlocked");
     const header = mintLockedHeader();
     parseLockedHeader(header); // throws if the header is malformed
@@ -102,9 +113,9 @@ describe("vault lifecycle and the envelope", () => {
     expect(() => sealBody(header, body)).toThrow(/vault is locked/);
     expect(() => openBody(header, armored)).toThrow(/vault is locked/);
 
-    expect(await unlockVault("wrong pass")).toBe(false);
+    expect(await unlockVault("wrong pass", MAC)).toBe(false);
     expect(vaultState()).toBe("locked");
-    expect(await unlockVault("correct horse")).toBe(true);
+    expect(await unlockVault("correct horse", MAC)).toBe(true);
     expect(openBody(header, armored)).toBe(body);
   });
 
@@ -113,20 +124,87 @@ describe("vault lifecycle and the envelope", () => {
     // memory. No screen reached it, since the dialog opens only while the
     // vault is shut, but the RPC is the contract and scoping an unlock to a
     // caller would have turned the same shape into a way in (locking.md §3).
-    await createVault("correct horse");
+    await createVault("correct horse", MAC);
     expect(vaultState()).toBe("unlocked");
 
-    expect(await unlockVault("wrong pass")).toBe(false);
+    expect(await unlockVault("wrong pass", MAC)).toBe(false);
     // And a wrong answer changes nothing: relocking on a typo would be a way
     // to shut somebody else's session out.
     expect(vaultState()).toBe("unlocked");
 
-    expect(await unlockVault("correct horse")).toBe(true);
+    expect(await unlockVault("correct horse", MAC)).toBe(true);
     expect(vaultState()).toBe("unlocked");
   });
 
+  // An unlock belongs to the device it was typed on (locking.md §3a). One key
+  // for the process, and a set of devices allowed to reach it: vaultState is
+  // what the process holds, vaultStateFor is what one device sees.
+  test("a device that did not unlock sees a locked vault", async () => {
+    await createVault("correct horse", MAC);
+    expect(vaultStateFor(MAC)).toBe("unlocked");
+    expect(vaultStateFor(PHONE)).toBe("locked");
+    // Not "none": a vault exists on this machine, so the phone is asked to
+    // type the passphrase rather than to choose one.
+    expect(vaultState()).toBe("unlocked");
+  });
+
+  test("a second device unlocks with the same passphrase, and a wrong one shuts nobody out", async () => {
+    await createVault("correct horse", MAC);
+
+    expect(await unlockVault("wrong pass", PHONE)).toBe(false);
+    expect(vaultStateFor(PHONE)).toBe("locked");
+    expect(vaultStateFor(MAC)).toBe("unlocked"); // a typo on one device is not a lock on another
+
+    expect(await unlockVault("correct horse", PHONE)).toBe(true);
+    expect(vaultStateFor(PHONE)).toBe("unlocked");
+    expect(authorizedDeviceCount()).toBe(2);
+  });
+
+  test("Lock Notes shuts the device it was run on, and the key goes with the last one", async () => {
+    await createVault("correct horse", MAC);
+    expect(await unlockVault("correct horse", PHONE)).toBe(true);
+
+    // ⌘L on the Mac. The phone in someone's pocket keeps reading.
+    lockVaultFor(MAC);
+    expect(vaultStateFor(MAC)).toBe("locked");
+    expect(vaultStateFor(PHONE)).toBe("unlocked");
+    expect(vaultState()).toBe("unlocked"); // the key is still in memory for the phone
+
+    lockVaultFor(PHONE);
+    expect(vaultStateFor(PHONE)).toBe("locked");
+    expect(authorizedDeviceCount()).toBe(0);
+    // The last device out drops the key, so a vault nobody is holding open is
+    // not left decryptable in memory.
+    expect(vaultState()).toBe("locked");
+    expect(() => mintLockedHeader()).toThrow(/vault is locked/);
+  });
+
+  test("locking a device that never unlocked leaves the others alone", async () => {
+    await createVault("correct horse", MAC);
+    lockVaultFor(PHONE); // a phone running ⌘L without ever having unlocked
+    expect(vaultStateFor(MAC)).toBe("unlocked");
+    expect(vaultState()).toBe("unlocked");
+  });
+
+  test("the idle clock is per device: touching one does not hold the other open", async () => {
+    await createVault("correct horse", MAC);
+    expect(await unlockVault("correct horse", PHONE)).toBe(true);
+    const phoneAt = vaultActivityForTests(PHONE);
+    await new Promise((done) => setTimeout(done, 5)); // the clock is in milliseconds
+    touchVault(MAC);
+    expect(vaultActivityForTests(MAC)).toBeGreaterThan(phoneAt);
+    expect(vaultActivityForTests(PHONE)).toBe(phoneAt);
+  });
+
+  test("touching an unauthorized device does not let it in", async () => {
+    await createVault("correct horse", MAC);
+    touchVault(PHONE);
+    expect(vaultStateFor(PHONE)).toBe("locked");
+    expect(vaultActivityForTests(PHONE)).toBe(0);
+  });
+
   test("tampered ciphertext refuses as damage, never wrong plaintext", async () => {
-    await createVault("pw");
+    await createVault("pw", MAC);
     const header = mintLockedHeader();
     const armored = sealBody(header, "the secret body\n");
     // Flip one character mid-ciphertext (past the nonce region).
@@ -136,7 +214,7 @@ describe("vault lifecycle and the envelope", () => {
   });
 
   test("a locked note is self-contained: its header alone unlocks a vaultless machine", async () => {
-    await createVault("travelling pw");
+    await createVault("travelling pw", MAC);
     const header = mintLockedHeader();
     const armored = sealBody(header, "synced body\n");
     // Simulate the other machine: no vault file, no memory.
@@ -144,19 +222,19 @@ describe("vault lifecycle and the envelope", () => {
     await rm(VAULT_PATH, { force: true });
     await loadVault();
     expect(vaultState()).toBe("none");
-    expect(await unlockVault("wrong", header)).toBe(false);
-    expect(await unlockVault("travelling pw", header)).toBe(true);
+    expect(await unlockVault("wrong", MAC, header)).toBe(false);
+    expect(await unlockVault("travelling pw", MAC, header)).toBe(true);
     expect(openBody(header, armored)).toBe("synced body\n");
     // The probe unlock rebuilt the vault file from the header's salt, so the
     // next unlock is ordinary and needs no probe header.
     resetVaultForTests();
     await loadVault();
     expect(vaultState()).toBe("locked");
-    expect(await unlockVault("travelling pw")).toBe(true);
+    expect(await unlockVault("travelling pw", MAC)).toBe(true);
   });
 
   test("a corrupt vault file is moved aside and costs nothing but the check", async () => {
-    await createVault("pw");
+    await createVault("pw", MAC);
     resetVaultForTests();
     await Bun.write(VAULT_PATH, "{not json");
     await loadVault();

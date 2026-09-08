@@ -288,7 +288,14 @@ async function attachFor(win: Win, conn: Connection): Promise<Attached> {
   // server's first client.
   const others = windows.filter((w) => w !== win && !w.docs && w.connection === conn.id).length;
   const blank = win.docs || others > 0;
-  const client = blank ? ephemeralClientId() : await clientIdFor(conn.id);
+  // Every window on this Mac points at the same device, including the blank
+  // ones, so an unlock in one window is an unlock in the next (locking.md
+  // §3a). It is the id this Mac already keeps for this connection, which is
+  // also the first window's `client`: no second id to mint, and the same value
+  // across launches, so a relaunch does not ask for the passphrase again while
+  // the server is still holding the vault open.
+  const device = await clientIdFor(conn.id);
+  const client = blank ? ephemeralClientId() : device;
   // The name other clients display for this window (remote.md §5: a server
   // displays what it is told). The second and later windows on one server are
   // numbered. The manual's window says "(manual)": it registers in presence
@@ -306,8 +313,12 @@ async function attachFor(win: Win, conn: Connection): Promise<Attached> {
 
   if (conn.destination === "") {
     const server = await acquireLocal();
-    const requests = await clientOverlay(server.forClient(client), nativeFor(win));
+    // Registered before the handlers are built, so `push.has` is already true
+    // by the time `forClient` files this client's device (server.ts
+    // pushVaultState prunes on that answer). bun/daemon.ts does the same in
+    // the same order.
     localClients.set(client, { push: win.push, label, token });
+    const requests = await clientOverlay(server.forClient(client, device), nativeFor(win));
     arrived();
     announceLocalPresence();
     return {
@@ -382,6 +393,7 @@ async function attachFor(win: Win, conn: Connection): Promise<Attached> {
     build,
     client,
     label,
+    device,
     // How long the far end keeps this session after the wire drops, the same
     // ask a phone makes (shared/transport.ts SESSION_HOLD_MS). A lid closed
     // for a meeting, a lift, or a walk between buildings should not cost the

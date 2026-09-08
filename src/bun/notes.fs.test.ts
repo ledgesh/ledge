@@ -44,6 +44,10 @@ import {
 import { createVault, lockVault, resetVaultForTests, touchVault, unlockVault, vaultActivityForTests } from "./vault";
 import { MAX_HITS, MAX_HITS_PER_NOTE } from "../shared/search";
 
+// The device the vault is unlocked on. notes.ts takes no device of its own
+// (server.ts applies that gate), so one name covers every test here.
+const DEVICE = "device-under-test";
+
 if (!resolve(APP_HOME).startsWith(resolve(tmpdir()) + sep)) {
   throw new Error(`refusing to run filesystem tests against ${APP_HOME} — is the preload configured?`);
 }
@@ -572,7 +576,7 @@ describe("the trash's ignore file", () => {
 describe("stashNote", () => {
   beforeEach(async () => {
     resetVaultForTests(); // wiping the app home does not clear the module's key
-    await createVault("test passphrase");
+    await createVault("test passphrase", DEVICE);
   });
 
   const STRANDED = "the paragraph nobody else has";
@@ -861,7 +865,7 @@ describe("renameFolder", () => {
     // changes no note's depth, so those references still resolve and nothing
     // reads inside.
     resetVaultForTests();
-    await createVault("test passphrase");
+    await createVault("test passphrase", DEVICE);
     const note = await createNote(ROOT, "# Secrets\n\nplutonium\n", "old");
     await lockNote(note.path);
     const sealed = await readRaw(note.path, "utf8");
@@ -1020,7 +1024,7 @@ describe("deleteFolder", () => {
     // Deleting reads no body either. It renames the file, so the sealed bytes
     // are unchanged and the note is still locked in the trash.
     resetVaultForTests();
-    await createVault("test passphrase");
+    await createVault("test passphrase", DEVICE);
     const note = await createNote(ROOT, "# Secrets\n\nplutonium\n", "old");
     await lockNote(note.path);
     const sealed = await readRaw(note.path, "utf8");
@@ -1162,7 +1166,7 @@ describe("favoriteNote", () => {
 
   test("a locked note takes the marker with the vault shut, and stays sealed", async () => {
     resetVaultForTests();
-    await createVault("test passphrase");
+    await createVault("test passphrase", DEVICE);
     const note = await createNote(ROOT, "# Secrets\n\nplutonium shipment schedule\n");
     await lockNote(note.path);
     lockVault();
@@ -1175,7 +1179,7 @@ describe("favoriteNote", () => {
     expect(raw).not.toContain("plutonium shipment schedule");
     // And the body still opens: the marker went into the head, which is not
     // what the seal authenticates.
-    await unlockVault("test passphrase");
+    await unlockVault("test passphrase", DEVICE);
     expect((await readNote(note.path))?.text).toContain("plutonium shipment schedule");
   });
 
@@ -1192,7 +1196,7 @@ describe("favoriteNote", () => {
 describe("note locking", () => {
   beforeEach(async () => {
     resetVaultForTests(); // wiping the app home does not clear the module's key
-    await createVault("test passphrase");
+    await createVault("test passphrase", DEVICE);
   });
 
   const NEEDLE = "plutonium shipment schedule";
@@ -1328,6 +1332,32 @@ describe("note locking", () => {
     expect(lockNote(note.path)).rejects.toThrow(/vault is locked/);
   });
 
+  // The other half of the device gate (locking.md §3a). server.ts decides who
+  // asked; this is what notes.ts does with the answer, and it has to be the
+  // same shape a shut vault produces or the placeholder face would need a
+  // second code path to render.
+  test("a read told not to open withholds the body the process could decrypt", async () => {
+    const note = await createNote(ROOT, `# Secrets\n\n${NEEDLE}\n`);
+    await lockNote(note.path);
+
+    const open = await readNote(note.path);
+    expect(open?.text).toContain(NEEDLE);
+    expect(open?.held).toBeUndefined();
+
+    const withheld = await readNote(note.path, false);
+    expect(withheld?.text).not.toContain(NEEDLE);
+    expect(withheld?.locked).toBe(true);
+    expect(withheld?.held).toBe(true);
+    // The title stays, exactly as it does with the vault shut: navigation and
+    // wikilinks keep working on a device that has not unlocked (locking.md §6).
+    expect(withheld?.text).toContain("# Secrets");
+
+    // An ordinary note is unaffected: the gate is about locked bodies, not
+    // about which notes a device may read.
+    const plain = await createNote(ROOT, "# Plain\n\nnothing hidden\n");
+    expect((await readNote(plain.path, false))?.text).toContain("nothing hidden");
+  });
+
   // The idle-relock clock belongs to the client handlers (locking.md §3).
   // notes.ts is what MCP and the CLI call, so a touch anywhere in here would
   // let an agent loop hold the vault open with nobody at the machine. The
@@ -1335,14 +1365,14 @@ describe("note locking", () => {
   test("the note store does not extend the idle-relock clock", async () => {
     const note = await createNote(ROOT, `# Secrets\n\n${NEEDLE}\n`);
     await lockNote(note.path);
-    touchVault();
-    const at = vaultActivityForTests();
+    touchVault(DEVICE);
+    const at = vaultActivityForTests(DEVICE);
     await new Promise((done) => setTimeout(done, 5)); // the clock is in milliseconds
     await readNote(note.path);
     await writeNote(note.path, `# Secrets\n\n${NEEDLE} again\n`);
     await favoriteNote(note.path, true);
     await stashNote(note.path, "# Secrets\n\nstashed\n");
-    expect(vaultActivityForTests()).toBe(at);
+    expect(vaultActivityForTests(DEVICE)).toBe(at);
   });
 });
 
@@ -1359,7 +1389,7 @@ describe("changeVaultPassphrase refuses rather than sweeping halfway", () => {
   // (locking.md §3).
   beforeEach(async () => {
     resetVaultForTests();
-    await createVault("old pass");
+    await createVault("old pass", DEVICE);
   });
 
   test("a workspace it cannot read stops the change; the old passphrase still works", async () => {
@@ -1377,8 +1407,8 @@ describe("changeVaultPassphrase refuses rather than sweeping halfway", () => {
     expect(changeVaultPassphrase("new pass", [ROOT, other])).rejects.toThrow(/not readable right now/);
 
     lockVault();
-    expect(await unlockVault("new pass")).toBe(false);
-    expect(await unlockVault("old pass")).toBe(true);
+    expect(await unlockVault("new pass", DEVICE)).toBe(false);
+    expect(await unlockVault("old pass", DEVICE)).toBe(true);
     expect((await readNote(here.path))?.text).toContain("here body");
   });
 
@@ -1400,8 +1430,8 @@ describe("changeVaultPassphrase refuses rather than sweeping halfway", () => {
     expect(changeVaultPassphrase("new pass", [ROOT])).rejects.toThrow(/different passphrase/);
 
     lockVault();
-    expect(await unlockVault("new pass")).toBe(false);
-    expect(await unlockVault("old pass")).toBe(true);
+    expect(await unlockVault("new pass", DEVICE)).toBe(false);
+    expect(await unlockVault("old pass", DEVICE)).toBe(true);
     expect((await readNote(mine.path))?.text).toContain("mine body"); // untouched
   });
 
@@ -1410,8 +1440,8 @@ describe("changeVaultPassphrase refuses rather than sweeping halfway", () => {
     await lockNote(a.path);
     expect(await changeVaultPassphrase("new pass", [ROOT])).toBe(1);
     lockVault();
-    expect(await unlockVault("old pass")).toBe(false);
-    expect(await unlockVault("new pass")).toBe(true);
+    expect(await unlockVault("old pass", DEVICE)).toBe(false);
+    expect(await unlockVault("new pass", DEVICE)).toBe(true);
     expect((await readNote(a.path))?.text).toContain("a body");
   });
 });
@@ -1420,7 +1450,7 @@ describe("changeVaultPassphrase", () => {
   test("rewraps every locked note; only the new passphrase opens afterwards", async () => {
     resetVaultForTests();
     await rmF(VP, { force: true });
-    await createVault("old pass");
+    await createVault("old pass", DEVICE);
     const a = await createNote(ROOT, "# One\n\nfirst secret body\n");
     const b = await createNote(ROOT, "# Two\n\nsecond secret body\n");
     await lockNote(a.path);
@@ -1432,8 +1462,8 @@ describe("changeVaultPassphrase", () => {
     // Across a cold start, only the new passphrase derives the key.
     resetVault2();
     await loadVault();
-    expect(await unlockV("old pass")).toBe(false);
-    expect(await unlockV("new pass")).toBe(true);
+    expect(await unlockV("old pass", DEVICE)).toBe(false);
+    expect(await unlockV("new pass", DEVICE)).toBe(true);
     expect((await readNote(b.path))?.text).toContain("second secret body");
   });
 });

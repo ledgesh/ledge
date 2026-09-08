@@ -31,7 +31,7 @@ const CHECK_PLAINTEXT = Buffer.from("ledge-vault-check-v1", "utf8");
 
 export const VAULT_PATH = join(APP_HOME, ".vault.json");
 
-// Relock after 15 minutes in which no client changed a note. server.ts's
+// Relock a device after 15 minutes in which it changed no note. server.ts's
 // per-connection handlers are what touch the clock, so the walk-away window
 // measures a person rather than a process (locking.md §3). The autosave
 // debounce is seconds, so nothing dirty is left unflushed by the time this
@@ -48,26 +48,66 @@ export type VaultState = "none" | "locked" | "unlocked";
 // holds a copy of it.
 let masterKey: Buffer | null = null;
 let vaultSalt: Buffer | null = null;
-let lastActivity = 0;
+
+// Which devices may use that key, and when each last changed a note
+// (locking.md §3a). One key for the process and a set of devices that may
+// reach it, rather than a key per device: the notes are one vault under one
+// passphrase, and a second copy of the same key would protect nothing while
+// doubling what a memory dump yields. Unlocking is what a person does on a
+// device, so that is what this records.
+//
+// The key exists only while this map does. Emptying it drops the key, which
+// is why nothing here has to decide separately when a vault with no users
+// should shut.
+const authorized = new Map<string, number>();
+
 let idleTimer: ReturnType<typeof setInterval> | null = null;
 let onAutoLock: (() => void) | null = null;
 
-/** Register what auto-relock does beyond dropping the master key (server.ts
- * passes a callback that pushes vaultChanged). One callback, replaced rather
- * than stacked. */
+/** Register what auto-relock does beyond dropping devices (server.ts passes a
+ * callback that pushes vaultChanged to every client). One callback, replaced
+ * rather than stacked. */
 export function configureVault(handlers: { onAutoLock: () => void }): void {
   onAutoLock = handlers.onAutoLock;
 }
 
-/** Reset the idle-relock clock. server.ts calls this from the handlers that
- * change a note, and from nowhere else (locking.md §3). */
-export function touchVault(): void {
-  lastActivity = Date.now();
+/** Reset one device's idle-relock clock. server.ts calls this from the
+ * handlers that change a note, and from nowhere else (locking.md §3). A
+ * device that is not authorized has no clock to reset. */
+export function touchVault(device: string): void {
+  if (authorized.has(device)) authorized.set(device, Date.now());
 }
 
+/**
+ * The vault as this process holds it, which is not what any one device sees.
+ *
+ * `notes.ts` and `assets.ts` read this, because they decrypt on the process's
+ * key and the device gate sits above them, at the handler that knows who asked
+ * (locking.md §3a). `server.ts` reads it for the two questions that are about
+ * the machine rather than about a device: whether an unlock needs a probe
+ * header, and whether a device gate has anything to add.
+ */
 export function vaultState(): VaultState {
   if (masterKey) return "unlocked";
   return vaultSalt ? "locked" : "none";
+}
+
+/** The vault as `device` sees it: open only if this device unlocked it and
+ * has not idled out since. A device that never unlocked sees `locked` while
+ * another device reads its notes. */
+export function vaultStateFor(device: string): VaultState {
+  if (masterKey && authorized.has(device)) return "unlocked";
+  return vaultSalt ? "locked" : "none";
+}
+
+/** Shorthand for the gate every handler that touches a locked body applies. */
+export function vaultOpenFor(device: string): boolean {
+  return vaultStateFor(device) === "unlocked";
+}
+
+/** How many devices hold the vault open. For a log line and for tests. */
+export function authorizedDeviceCount(): number {
+  return authorized.size;
 }
 
 // --- the vault file ---------------------------------------------------------
@@ -169,7 +209,7 @@ function gcmOpen(key: Buffer, nonce: Buffer, ctAndTag: Buffer): Buffer {
 /** Create the vault from the first lock's passphrase: a fresh salt, the
  * derived master key, and the vault file. Throws when a vault already
  * exists, which is unlockVault's case. */
-export async function createVault(passphrase: string): Promise<void> {
+export async function createVault(passphrase: string, device: string): Promise<void> {
   if (vaultSalt !== null) throw new Error("a vault already exists");
   if (passphrase.length === 0) throw new Error("empty passphrase");
   const salt = randomBytes(SALT_LEN);
@@ -177,7 +217,7 @@ export async function createVault(passphrase: string): Promise<void> {
   await saveVaultFile(salt, key);
   vaultSalt = salt;
   masterKey = key;
-  startIdle();
+  authorize(device);
 }
 
 /**
@@ -187,22 +227,19 @@ export async function createVault(passphrase: string): Promise<void> {
  * the key. Unwrapping that header's data key is then the check, and a success
  * rebuilds the vault file. A wrong passphrase returns false, never throws.
  */
-export async function unlockVault(passphrase: string, probeHeader?: string): Promise<boolean> {
-  // Already unlocked: still check the passphrase, against the key in hand
-  // rather than the vault file, which is one derive and no read. The early
-  // "yes" this replaces answered a passphrase it never looked at. Nothing in
-  // the app reaches it today, since vault.unlock's `when` opens the dialog
-  // only while the vault is shut, so this is the contract being made honest
-  // rather than a hole being closed: the RPC is callable by any client, and
-  // the shape becomes a bypass the moment an unlock is scoped to a caller
-  // instead of to the process (locking.md §3). A wrong answer refuses and
-  // changes nothing, since a vault that relocked on a typo would be a way to
-  // shut another window out.
+export async function unlockVault(passphrase: string, device: string, probeHeader?: string): Promise<boolean> {
+  // Another device already opened it. The passphrase is still checked, against
+  // the key in hand rather than the vault file, which is one derive and no
+  // read. This is the path that admits a second device, and it is why the
+  // check has to be real: the answer used to be an unconditional yes whenever
+  // the key was in memory, which under per-device scoping would have let any
+  // client join by asking. A wrong answer refuses and changes nothing, so a
+  // typo on one device cannot shut another out.
   if (masterKey !== null) {
     if (vaultSalt === null) return false; // unreachable: a key implies a salt
     const attempt = deriveKey(passphrase, vaultSalt);
     if (!timingSafeEqual(attempt, masterKey)) return false;
-    startIdle(); // an unlock the user typed is activity, even a redundant one
+    authorize(device); // for a device already in, an unlock the user typed is activity
     return true;
   }
   if (vaultSalt !== null) {
@@ -216,7 +253,7 @@ export async function unlockVault(passphrase: string, probeHeader?: string): Pro
     const key = deriveKey(passphrase, vaultSalt);
     if (!checkAgainstFile(key, checkB64)) return false;
     masterKey = key;
-    startIdle();
+    authorize(device);
     return true;
   }
   if (probeHeader === undefined) return false;
@@ -230,27 +267,55 @@ export async function unlockVault(passphrase: string, probeHeader?: string): Pro
   await saveVaultFile(header.salt, key);
   vaultSalt = header.salt;
   masterKey = key;
-  startIdle();
+  authorize(device);
   return true;
 }
 
-/** Drop the master key. Callers push vaultChanged and evict view-side
- * plaintext. Dirty locked buffers must already be flushed: the ⌘L command
- * (vault.lock) flushes before calling this, and idle relock fires only after
- * minutes of no note traffic. */
+/**
+ * Shut the vault for one device: ⌘L, or that device idling out.
+ *
+ * This device only, because the alternative is a Mac's ⌘L relocking a phone in
+ * someone's pocket. Walking away from one screen says nothing about the other
+ * (locking.md §3a). The key goes when the last device does, so a vault nobody
+ * is holding open is not left in memory.
+ *
+ * Callers push vaultChanged and evict view-side plaintext. Dirty locked
+ * buffers must already be flushed: the ⌘L command (vault.lock) flushes before
+ * calling this, and idle relock fires only after minutes of no note changes.
+ */
+export function lockVaultFor(device: string): void {
+  authorized.delete(device);
+  if (authorized.size === 0) lockVault();
+}
+
+/** Shut the vault for every device and drop the key. The passphrase change's
+ * failure path and the tests use it; ⌘L does not (lockVaultFor above). */
 export function lockVault(): void {
   masterKey = null;
+  authorized.clear();
   stopIdle();
 }
 
+function authorize(device: string): void {
+  authorized.set(device, Date.now());
+  startIdle();
+}
+
 function startIdle(): void {
-  lastActivity = Date.now();
   if (idleTimer) return;
   idleTimer = setInterval(() => {
-    if (masterKey === null) return;
-    if (Date.now() - lastActivity < IDLE_RELOCK_MS) return;
-    console.log("[vault] idle; relocking");
-    lockVault();
+    const cutoff = Date.now() - IDLE_RELOCK_MS;
+    let dropped = 0;
+    for (const [device, at] of authorized) {
+      if (at >= cutoff) continue;
+      authorized.delete(device);
+      dropped += 1;
+    }
+    if (dropped === 0) return;
+    // Named by count, not by id: a device id is a UUID and says nothing to
+    // whoever reads the log. How many are left is the part worth having.
+    console.log(`[vault] idle; relocked ${dropped} device(s), ${authorized.size} still open`);
+    if (authorized.size === 0) lockVault();
     onAutoLock?.();
   }, IDLE_SWEEP_MS);
   // The sweep must not hold the process open: tests would hang on it, and
@@ -406,6 +471,10 @@ export async function commitPassphraseChange(newKey: Buffer, newSalt: Buffer): P
   await saveVaultFile(newSalt, newKey);
   vaultSalt = newSalt;
   masterKey = newKey;
+  // The authorized devices are left alone. They were let in by the person who
+  // has just changed the passphrase, on that person's own devices, and
+  // shutting them here would relock a phone as the side effect of a Mac's
+  // settings change (locking.md §3a).
 }
 
 // --- the head/body split ----------------------------------------------------
@@ -566,10 +635,11 @@ export function stripLockedLine(text: string): string {
 
 // --- test seams -------------------------------------------------------------
 
-/** When the clock was last reset. Tests only: what touches it and what does
- * not is otherwise observable only by waiting fifteen minutes. */
-export function vaultActivityForTests(): number {
-  return lastActivity;
+/** When this device's clock was last reset, or 0 for a device that is not
+ * authorized. Tests only: what touches it and what does not is otherwise
+ * observable only by waiting fifteen minutes. */
+export function vaultActivityForTests(device: string): number {
+  return authorized.get(device) ?? 0;
 }
 
 /** Clear the master key and the salt, stop the idle timer, and forget the
@@ -578,6 +648,7 @@ export function vaultActivityForTests(): number {
 export function resetVaultForTests(): void {
   masterKey = null;
   vaultSalt = null;
+  authorized.clear();
   stopIdle();
   onAutoLock = null;
 }

@@ -268,6 +268,10 @@ describe("the extension a paste is written under", () => {
 // --- sealed images (locking.md §5) --------------------------------------
 import { createNote, lockNote, moveNote, readNote, removeLockNote } from "./notes";
 import { createVault, isSealedAsset, lockVault, resetVaultForTests, unlockVault } from "./vault";
+
+// One device, because nothing here is about the per-device vault (locking.md
+// §3a): these tests are the seal, the placeholder and the unseal sweep.
+const DEVICE = "device-under-test";
 import { readFile as readRawFile, stat } from "node:fs/promises";
 
 // A reference is relative to the note, so moving the note changes what each
@@ -328,7 +332,7 @@ describe("moving a note rebases its image references", () => {
 describe("sealed images", () => {
   beforeEach(async () => {
     resetVaultForTests();
-    await createVault("asset-pass");
+    await createVault("asset-pass", DEVICE);
   });
 
   test("a paste into a locked note is sealed from the first byte, and round-trips", async () => {
@@ -418,7 +422,7 @@ describe("sealed images", () => {
     // Moving anyway would land the note with its picture pointing at nothing.
     lockVault();
     expect(moveNote(moved.path, "elsewhere")).rejects.toThrow(/unlock first/);
-    expect(await unlockVault("asset-pass")).toBe(true);
+    expect(await unlockVault("asset-pass", DEVICE)).toBe(true);
     const again = await moveNote(moved.path, "elsewhere");
     expect((await readNote(again.path))!.text).toContain("![x](../.ledge-assets/secret.png)");
   });

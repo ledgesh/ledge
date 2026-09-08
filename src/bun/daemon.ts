@@ -235,7 +235,7 @@ export async function startDaemon(opts: DaemonOpts = {}): Promise<Daemon> {
       // accept time: until the hello lands there is nobody to answer as, and
       // four of these handlers would answer for the wrong client
       // (bun/server.ts `forClient`).
-      conn.serve(server.forClient(id));
+      conn.serve(server.forClient(id, conn.device()));
       // The daemon closes the previous connection after registering the new
       // one, so the pushes a teardown emits go to the connection that is still
       // here rather than to the one being hung up on.

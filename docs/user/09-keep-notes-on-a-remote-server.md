@@ -241,6 +241,8 @@ Profile values never cross the connection. A note names a profile and the server
 
 Unlocking a locked note sends the passphrase to the server, which is the only machine that can use it ([[Note Locking]]). The vault and its idle relock timer stay there.
 
+Each device unlocks for itself. Typing the passphrase on your Mac does not open the locked notes on your phone, and ⌘L on one leaves the other reading. Every window on the same Mac shares one unlock.
+
 ## Back up the server
 
 Ledge backs nothing up. `ledge-server backup-paths` prints the paths a backup has to cover, and you point a backup tool at them.

@@ -168,14 +168,15 @@ tags: finance
   with the process. The passphrase crosses the RPC exactly once per unlock
   (view → Bun, from the dialog), is used for the KDF, and is dropped; the
   dialog clears its field either way.
-- **Relock**: ⌘L (§7), and automatically after 15 minutes in which no client
-  changed a note. `server.ts`'s `CHANGES_A_NOTE` is the list, applied to a
+- **Relock**: ⌘L (§7), and automatically after 15 minutes in which the calling
+  device changed no note. Both are per device, per §3a. `server.ts`'s
+  `CHANGES_A_NOTE` is the list of handlers that reset the clock, applied to a
   connection's handlers in one pass, and `touchVault` is called from nowhere
   else. Two exclusions carry the rule. Reads are out because they are not a
   person: the view re-reads every open note on window focus, on a relink, and
   on the watcher's push, so an agent writing notes in the background would
   otherwise hold the vault open with nobody at the machine. Agent surfaces are
-  out because they call `notes.ts` directly and never reach a handler — MCP
+  out because they call `notes.ts` directly and never reach a handler: MCP
   and the CLI import `readNote` and `writeNote`, not `forClient`. A note
   change is the one signal left that only ever follows something a person did.
   Adding a handler that changes a note and leaving it off the list costs a
@@ -239,6 +240,78 @@ tags: finance
   passphrase they may have stopped rehearsing. Ship this only once the
   Team ID we intend to keep is the one signing releases. Nothing else in
   this document depends on the signing identity; this one feature does.
+
+## 3a. Whose unlock it is
+
+**One key for the process, and a set of devices allowed to reach it.** The
+master key is per server, as §3 describes. Who may use it is per device.
+
+The alternative was to keep the key per process and nothing else, so that any
+client of a server read what any other client had unlocked. That is the wrong
+default for the shape Ledge is taking. A server is often a VPS a person keeps
+for one project and reaches from a Mac and a phone, and an unlock typed on the
+Mac at a desk should not open the notes on a phone that is in someone else's
+hand. Every comparable tool scopes an unlock to a client: Trilium holds the
+protected-session key in the browser, Standard Notes in the session, Apple
+Notes behind each device's own passcode, and `sudo` defaults to one time stamp
+per tty rather than one per user.
+
+A key per device was not the answer either. The notes are one vault under one
+passphrase, so a second copy of the same key protects nothing and doubles what
+a memory dump yields.
+
+**What a device is.** `Hello.device`, resolved by `bun/transport.ts` to
+`client` when a peer names none. On a Mac it is the id that machine already
+keeps per connection (`clientHome.ts` `clientIdFor`), shared by every window
+including the blank second ones, so a new window does not ask for the
+passphrase again. On a phone it is the client id, which is that phone. A peer
+that predates the field gets the fallback, which scopes an unlock more
+narrowly than the sender meant and never more widely.
+
+**Where the gate is.** At the handler, in `bun/server.ts`, which is the only
+layer that knows who asked:
+
+| What | How it is scoped |
+| --- | --- |
+| `vaultState` | `vaultStateFor(device)`, so a phone says `locked` while the Mac reads |
+| `vaultUnlock`, `vaultCreate` | authorize this device; the passphrase is checked either way |
+| `vaultLock` (⌘L) | this device only; the key drops when the last device goes |
+| Idle relock | per device, on the same 15 minutes |
+| `noteRead`, `assetRead` | `mayOpen` false gives the withheld shape a shut vault gives |
+| `noteLock`, `noteRemoveLock` | refused outright (`NEEDS_THE_VAULT`) |
+| `vaultChangePassphrase` | refused in its `error` field, which the dialog shows |
+| `noteWrite`, `noteStash`, `noteMove` | refused for a locked note (`refuseLockedFrom`) |
+| `vaultChanged` | pushed per client, each as its own device sees it |
+
+The three refusals in that table ask `vaultState() === "unlocked"` first, so
+each only ever adds the case a process-wide key cannot see. With no key in the
+process the old refusals stand, in their own words, and a machine that has
+never locked anything pays nothing: without that short-circuit
+`refuseLockedFrom` would put an `isNoteLocked` read in front of every save on
+every install.
+
+`notes.ts` and `assets.ts` stay process-wide and decrypt on the key in hand.
+Threading a device into them would put the same parameter on every internal
+caller, and the callers that would have to fill it in are not devices: the
+scans, `moveNote`, `daily.ts`. `mayOpen` is the one bit that crosses, defaulted
+to true, and `server.ts` is the only caller that passes it.
+
+A passphrase change leaves the authorized devices authorized. They were let in
+by the person changing it, on that person's own devices, and shutting them
+would relock a phone as the side effect of a settings change on a Mac.
+
+**⌘L shuts one screen, not every screen.** Walking away from a Mac says
+nothing about the phone in your pocket, and a lock that reached across devices
+would be one person stepping on their own toes. When the last device locks, the
+key goes, so a vault nobody is holding open is not left decryptable in memory.
+
+**A device id is asserted, not proved.** The transport is what authenticates:
+an ssh key on the Mac, an enclave key on the phone (`remote.md` §4a). A client
+that can reach the server at all could name another device's id, but ids are
+random and no client is ever shown another's. So per-device unlocking raises
+the bar for a paired device somebody else is holding. It does not defend
+against a hostile client that already has the key to the front door, and
+nothing in §4's seam policy relies on it.
 
 ## 4. Seam policy
 

@@ -1674,8 +1674,7 @@ The vault lives on the server and `bun/vault.ts` does not move. The
 passphrase crosses the connection once per unlock, as it crosses the RPC once
 per unlock today, and the master key stays in the server's memory.
 
-Two facts change and both are stateable in one line each in `locking.md` when
-this lands:
+Two facts change and both are stated in `locking.md`:
 
 - **The passphrase now leaves the client machine.** It travels inside ssh to
   the machine that holds the notes, which is the only machine that can use
@@ -1687,9 +1686,25 @@ this lands:
   an agent, and the refusals stay where they are because they live at the
   `notes.ts` seam.
 
-Idle relock is the server's timer and is unchanged. A client that
-disconnects does not relock the vault; walking away does, which is what the
-timer already measures.
+**An unlock belongs to the device it was typed on** (`locking.md` §3a). The
+key is one per server process, and which devices may use it is a set the
+server keeps. So a Mac and a phone on one VPS unlock separately, and a Mac's
+second window does not, because both windows name the same device in their
+hello. `vaultChanged` is addressed per client rather than broadcast, since one
+state does not describe every client of a server.
+
+Idle relock is the server's timer, per device, and a client that disconnects
+does not relock. Walking away does, which is what the timer measures.
+
+The shape this is designed for is one person with several devices, which is
+also what §8a is built around. Several people on one server works, and two
+limits come with it. The vault is the smaller one: each person unlocks on
+their own device now, but anyone who can reach the server already reads every
+note somebody else has unlocked, spawns shells as its account, and holds the
+same workspace registry, so per-device unlocking is not separation between
+people and should not be described as any. The larger one is that a server has
+no notion of who is asking beyond the client id in a hello, which is why
+`presence` names devices rather than accounts (§7).
 
 ## 10. What never crosses the wire
 

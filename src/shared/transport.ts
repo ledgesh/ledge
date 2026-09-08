@@ -205,6 +205,9 @@ export function clientConnection(
     build: string;
     client?: string;
     label?: string;
+    /** The device every window of this client shares, for the vault
+     * (`Hello.device`). Omitted means "the same as `client`". */
+    device?: string;
     hold?: number;
     heartbeat?: HeartbeatOpts;
   },
@@ -489,7 +492,7 @@ export function clientConnection(
     REQUEST_METHODS.map((m) => [m, (p: unknown) => call(m, p)]),
   ) as unknown as RequestClient;
 
-  raw(encodeControl(hello("client", opts.build, opts.client ?? "", "", opts.hold ?? 0, opts.label ?? "")));
+  raw(encodeControl(hello("client", opts.build, opts.client ?? "", "", opts.hold ?? 0, opts.label ?? "", opts.device ?? "")));
   // Started at the hello rather than at the end of the handshake, which gives
   // the handshake a bound it never had: a server that accepts a connection and
   // then says nothing at all used to leave `ready` pending forever. The ssh
@@ -534,6 +537,10 @@ export interface ReconnectOpts {
    * (`Hello.label`). A shell with no name to give omits it and shows up as an
    * unnamed device in their chrome rather than as an absent one. */
   label?: string;
+  /** The device every window of this client shares, for the vault
+   * (`Hello.device`). Omitted means "the same as `client`", which is right for
+   * a shell that only ever opens one window. */
+  device?: string;
   /**
    * How long to ask the server to keep this client's sessions after the wire
    * ends, in ms. Omitted by a client that does not ask (`Hello.hold`).
@@ -662,6 +669,10 @@ export async function reconnectingClient(opts: ReconnectOpts): Promise<ClientCon
         // and a reconnect that dropped it would leave this client unnamed in
         // everyone else's chrome until the app was restarted.
         ...(opts.label === undefined ? {} : { label: opts.label }),
+        // On every dial for `label`'s reason: the device is a fact about this
+        // client, not about one connection, and a reconnect that dropped it
+        // would ask for the passphrase again on a wire that just came back.
+        ...(opts.device === undefined ? {} : { device: opts.device }),
         // `hold` goes on every dial, not only the first. The ask belongs to the
         // client rather than to one connection, and a reconnect that dropped it
         // would hold nothing for the app switch after this one.

@@ -215,6 +215,35 @@ describe("a client and a server over one connection", () => {
     expect(server.client()).toBe("mac-1");
   });
 
+  // The vault scopes an unlock to a device, and several windows on one Mac are
+  // one device (locking.md §3a, wire.ts `Hello.device`).
+  test("the server learns which device the client runs on", async () => {
+    const pipe = pipePair();
+    const server = serverConnection(pipe.a, { build: "0.1.0" });
+    server.serve(handlers());
+    const client = clientConnection(pipe.b, {
+      push: recordingPush().push,
+      build: "0.1.0",
+      client: "window-2",
+      device: "mac-1",
+    });
+    await client.ready;
+    expect(server.client()).toBe("window-2");
+    expect(server.device()).toBe("mac-1");
+  });
+
+  test("a client that names no device is its own device", async () => {
+    // What a phone sends (one window) and what a peer predating the field
+    // sends. The fallback scopes an unlock more narrowly than the sender
+    // meant, never more widely.
+    const pipe = pipePair();
+    const server = serverConnection(pipe.a, { build: "0.1.0" });
+    server.serve(handlers());
+    const client = clientConnection(pipe.b, { push: recordingPush().push, build: "0.1.0", client: "phone-1" });
+    await client.ready;
+    expect(server.device()).toBe("phone-1");
+  });
+
   test("a client that names nobody is still a client", async () => {
     const pipe = pipePair();
     const server = serverConnection(pipe.a, { build: "0.1.0" });

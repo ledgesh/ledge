@@ -766,6 +766,10 @@ describe("settings", () => {
 // the same process serves the tools. They pass with the vault open, so what
 // refuses is the note's locked flag, not the vault state.
 import { lockNote, removeLockNote } from "./notes";
+
+// One device. The agent surfaces reach no device at all (locking.md §3a);
+// this is only what the vault needs to have been opened by somebody.
+const DEVICE = "device-under-test";
 import { createVault, resetVaultForTests } from "./vault";
 import { resolveNoteForOpen } from "./mcpTools";
 
@@ -774,7 +778,7 @@ describe("locked notes refuse agents", () => {
 
   async function seedLocked(): Promise<string> {
     resetVaultForTests();
-    await createVault("agent-test-pass");
+    await createVault("agent-test-pass", DEVICE);
     const note = await createNote(ROOT, `# Sealed\n\n${SECRET}, #hush and [[Open Note]]\n`);
     await createNote(ROOT, "# Open Note\n\nplain body\n");
     await lockNote(note.path);

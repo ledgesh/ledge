@@ -135,8 +135,12 @@ export type AssetRead = { dataB64: string; mime: string } | { sealed: true } | n
  * sealed asset (detected by its magic header, whatever its name) decrypts here
  * when the vault is open. This is the one decrypt seam for display, sitting
  * exactly where the RPC reads (locking.md §5). Remove Lock's unseal sweep
- * (removeLockNote in notes.ts) also decrypts, to write plaintext back. */
-export async function readAsset(root: string, src: string, from?: string | null): Promise<AssetRead> {
+ * (removeLockNote in notes.ts) also decrypts, to write plaintext back.
+ *
+ * `mayOpen` is readNote's parameter, for readNote's reason: false withholds
+ * the bytes from a key this process holds, because the device that asked has
+ * not unlocked (locking.md §3a). */
+export async function readAsset(root: string, src: string, from?: string | null, mayOpen = true): Promise<AssetRead> {
   const path = assetPathOf(root, src, from);
   let bytes: Buffer;
   try {
@@ -145,7 +149,7 @@ export async function readAsset(root: string, src: string, from?: string | null)
     return null; // deleted or unreadable: the widget shows a broken placeholder
   }
   if (!isSealedAsset(bytes)) return { dataB64: bytes.toString("base64"), mime: imageMimeOf(path)! };
-  if (vaultState() !== "unlocked") return { sealed: true };
+  if (!mayOpen || vaultState() !== "unlocked") return { sealed: true };
   try {
     return { dataB64: openAssetBytes(bytes).toString("base64"), mime: imageMimeOf(path)! };
   } catch (err) {

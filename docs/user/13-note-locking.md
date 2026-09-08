@@ -22,18 +22,28 @@ Locking a note also seals the images it references, since a screenshot pasted in
 
 ## Unlock and relock
 
-One passphrase covers every locked note, app-wide.
+One passphrase covers every locked note, on the device you type it on.
 
 - Opening a locked note while the vault is shut asks for the passphrase there. A wrong passphrase shakes and lets you retry.
 - "Unlock Notes…" in the palette asks for it up front.
-- ⌘L runs Lock Notes, which relocks the vault immediately. Use it when you walk away.
+- ⌘L runs Lock Notes, which relocks immediately. Use it when you walk away.
 - The vault also relocks itself after 15 minutes in which no note changed. Reading a note does not hold it open, and neither does an agent working in your notes while you are away.
+
+Unlocking covers every window on that Mac, so opening a second window does not ask again.
 
 Once unlocked, every locked note reads and edits like a normal note, and saves go back to disk encrypted. Locked notes show a lock glyph in the sidebar and in ⌘P, drawn open while the vault is unlocked, so you can see what is readable without opening anything.
 
 "Change Vault Passphrase…" rewraps every locked note under the new passphrase, leaving contents untouched, and reports how many it found.
 
 A locked note is self-contained. Carried to another of your machines, it unlocks with the passphrase alone, with no vault file to bring along. One ordering rule comes with that, under "Recover locked notes from a backup" below.
+
+## Unlocking on more than one device
+
+If you keep notes on a server and reach them from more than one device ([[Keep Notes on a Remote Server]]), each device unlocks for itself.
+
+Unlocking on your Mac does not unlock your phone. Both use the same passphrase, and neither can see the other's locked notes until it is typed there. ⌘L works the same way: it locks the device you run it on and leaves the others reading.
+
+This is the behavior a stolen phone needs. Somebody holding an unlocked, paired device still has to know the passphrase to open a locked note on it.
 
 ## Recover locked notes from a backup
 

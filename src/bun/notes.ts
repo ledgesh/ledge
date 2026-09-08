@@ -429,7 +429,15 @@ export interface NoteFile {
 // The scans filter on the meta's locked flag before calling, whatever the
 // vault state, and the agent surfaces refuse first (mcpTools locate), so a
 // decrypted body never reaches them.
-export async function readNote(path: string): Promise<NoteFile | null> {
+//
+// `mayOpen` is the caller's half of that decision, and the vault's key is the
+// other half: false withholds the body from a key this process is holding,
+// which is what the vault being open on one device and not another looks like
+// down here (locking.md §3a). The default is true, so the internal callers
+// (the scans, moveNote, daily.ts) read on the process's key as they always
+// have. Only server.ts's noteRead passes it, because it is the only caller
+// that knows who asked.
+export async function readNote(path: string, mayOpen = true): Promise<NoteFile | null> {
   assertNote(path);
   let raw: string;
   let mtimeMs: number;
@@ -442,7 +450,7 @@ export async function readNote(path: string): Promise<NoteFile | null> {
   const header = parseFrontmatter(raw).params.locked;
   if (header === null) return { text: raw, mtimeMs };
   const { head, body } = splitHead(raw);
-  if (vaultState() !== "unlocked") return { text: head, mtimeMs, locked: true, held: true };
+  if (!mayOpen || vaultState() !== "unlocked") return { text: head, mtimeMs, locked: true, held: true };
   try {
     return { text: head + openBody(header, body), mtimeMs, locked: true };
   } catch (err) {

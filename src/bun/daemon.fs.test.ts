@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startDaemon, connectToDaemon, IDLE_EXIT_NEVER, type Daemon } from "./daemon";
 import { closeWatchers } from "./watch";
+import { resetVaultForTests, VAULT_PATH } from "./vault";
 import { clientConnection } from "../shared/transport";
 import { BUILD_VERSION } from "../shared/version";
 import { PUSH_MESSAGES, type ServerPush } from "../shared/wire";
@@ -52,6 +53,10 @@ afterEach(async () => {
   // daemon after the first in this file would send its notesChanged into a
   // stopped daemon's closure.
   closeWatchers();
+  // The vault is module state in the daemon's own process, and this file is
+  // that process. A test that created one must not leave it for the next.
+  resetVaultForTests();
+  await rm(VAULT_PATH, { force: true });
   for (const dir of dirs.splice(0)) await rm(dir, { recursive: true, force: true });
 });
 
@@ -71,13 +76,18 @@ async function daemonIn(opts: { idleMs?: number; holdMs?: number } = {}) {
   return { d, socketPath, pidPath };
 }
 
-const connect = async (socketPath: string, who: string, opts: { hold?: number; seen?: Seen; label?: string } = {}) => {
+const connect = async (
+  socketPath: string,
+  who: string,
+  opts: { hold?: number; seen?: Seen; label?: string; device?: string } = {},
+) => {
   const duplex = await connectToDaemon({ socketPath, spawn: () => {}, timeoutMs: 2000 });
   return clientConnection(duplex, {
     push: opts.seen ? record(opts.seen) : push,
     build: BUILD_VERSION,
     client: who,
     ...(opts.label === undefined ? {} : { label: opts.label }),
+    ...(opts.device === undefined ? {} : { device: opts.device }),
     ...(opts.hold === undefined ? {} : { hold: opts.hold }),
   });
 };
@@ -111,6 +121,56 @@ describe("several clients at once", () => {
     // the daemon never sent it a goodbye.
     expect(await mac.requests.vaultState({})).toBeDefined();
     expect(mac.farewell()).toBe(null);
+  });
+
+  // The vault is one key and a set of devices allowed to reach it (locking.md
+  // §3a). Two clients on one server is the case a per-server unlock got wrong:
+  // the phone would have found the notes already open, without anyone typing
+  // the passphrase on it.
+  test("an unlock belongs to the device it was typed on", async () => {
+    const { socketPath } = await daemonIn();
+    const macSeen: Seen = [];
+    const phoneSeen: Seen = [];
+    const mac = await connect(socketPath, "mac-window-1", { seen: macSeen, device: "mac" });
+    await mac.ready;
+    const phone = await connect(socketPath, "phone-1", { seen: phoneSeen, device: "phone" });
+    await phone.ready;
+
+    expect(await mac.requests.vaultState({})).toEqual({ state: "none" });
+    expect(await phone.requests.vaultState({})).toEqual({ state: "none" });
+
+    expect(await mac.requests.vaultCreate({ passphrase: "correct horse" })).toEqual({ ok: true });
+    expect(await mac.requests.vaultState({})).toEqual({ state: "unlocked" });
+    // Not "none": a vault exists on this machine now, so the phone is asked to
+    // type the passphrase rather than to choose one.
+    expect(await phone.requests.vaultState({})).toEqual({ state: "locked" });
+
+    // The same push, addressed twice, because one state does not describe both
+    // (server.ts pushVaultState). Both are waited for: they go out over two
+    // sockets, so the second is not there because the first arrived.
+    const bothPushed = () => got(macSeen, "vaultChanged").length > 0 && got(phoneSeen, "vaultChanged").length > 0;
+    expect(await until(bothPushed)).toBe(true);
+    expect(got(macSeen, "vaultChanged").at(-1)).toEqual({ state: "unlocked" });
+    expect(got(phoneSeen, "vaultChanged").at(-1)).toEqual({ state: "locked" });
+
+    // A second window on the Mac is another client and the same device, so it
+    // finds the vault open rather than asking for the passphrase again.
+    const second = await connect(socketPath, "mac-window-2", { device: "mac" });
+    await second.ready;
+    expect(await second.requests.vaultState({})).toEqual({ state: "unlocked" });
+
+    expect(await phone.requests.vaultUnlock({ passphrase: "wrong" })).toEqual({ ok: false });
+    expect(await phone.requests.vaultState({})).toEqual({ state: "locked" });
+    expect(await mac.requests.vaultState({})).toEqual({ state: "unlocked" });
+
+    expect(await phone.requests.vaultUnlock({ passphrase: "correct horse" })).toEqual({ ok: true });
+    expect(await phone.requests.vaultState({})).toEqual({ state: "unlocked" });
+
+    // ⌘L on the phone. The Mac keeps reading, which is the whole point of
+    // scoping the lock to one screen.
+    expect(await phone.requests.vaultLock({})).toEqual({ ok: true });
+    expect(await phone.requests.vaultState({})).toEqual({ state: "locked" });
+    expect(await mac.requests.vaultState({})).toEqual({ state: "unlocked" });
   });
 
   // Displacement now applies within one client id. A reconnect dials past a

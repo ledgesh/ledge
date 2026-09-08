@@ -87,6 +87,18 @@ export interface Hello {
   // no layout to keep has no id, and the server files it under a shared key
   // rather than refusing the connection over a preference.
   client: string;
+  // Which device this client runs on, for the vault (locking.md §3a). The
+  // `client` above is per window, and a Mac's second window on one server is a
+  // client the server has never met (bun/clientHome.ts ephemeralClientId), so
+  // scoping an unlock to it would ask for the passphrase again in a window the
+  // same person just opened. This id is shared by every window on the device.
+  //
+  // Empty means "same as `client`", which is what a phone sends (one window)
+  // and what any peer that predates the field gets. That reading is the safe
+  // one: it scopes an unlock more narrowly than the sender intended, never
+  // more widely. The field is additive and both readings work against either
+  // end, so it does not move PROTOCOL_VERSION.
+  device: string;
   // What that device calls itself: a Mac's hostname, a phone's device name,
   // taken from the device rather than typed by the user. The id above is
   // opaque and always will be, because it keys files; this is the half a
@@ -568,6 +580,7 @@ export function hello(
   instance = "",
   hold = 0,
   label = "",
+  device = "",
 ): Hello {
   // `serves` comes from the role rather than from a caller: which methods an
   // end serves follows from which end it is. A server that could forget to
@@ -582,6 +595,7 @@ export function hello(
     methods: serves ? [...WIRE_METHODS] : [],
     pushes: serves ? [...PUSH_MESSAGES] : [],
     client,
+    device,
     // Cleaned on the way out as well as on the way in, so the rule belongs to
     // the wire rather than to whichever shell asked the operating system for a
     // name. A device name with a newline in it must not reach a server that
@@ -711,6 +725,7 @@ export function parseControl(text: string): WireMessage {
       // version with both numbers named, which reads better than "a hello with
       // no client".
       if (m["client"] !== undefined && typeof m["client"] !== "string") return bad("a hello with a non-string client");
+      if (m["device"] !== undefined && typeof m["device"] !== "string") return bad("a hello with a non-string device");
       if (m["instance"] !== undefined && typeof m["instance"] !== "string") return bad("a hello with a non-string instance");
       // Structural, unlike the type checks above, because the server does
       // arithmetic on this number and the client chose it: a NaN makes every
@@ -733,6 +748,7 @@ export function parseControl(text: string): WireMessage {
         methods: names(m["methods"]),
         pushes: names(m["pushes"]),
         client: typeof m["client"] === "string" ? m["client"] : "",
+        device: typeof m["device"] === "string" ? m["device"] : "",
         // The label is cleaned rather than checked. `cleanLabel` reduces any
         // shape to something displayable, and refusing a connection over a
         // device name would hang up on a phone over a cosmetic string.
