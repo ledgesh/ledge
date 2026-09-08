@@ -58,7 +58,11 @@ export function VaultDialog({
       if (change) {
         const res = await changeVaultPassphrase(pass);
         if (!res.ok) {
-          setProblem("Could not change the passphrase.");
+          // Bun refuses rather than committing a partial sweep, and its
+          // message names what would have been left behind. Show it: "could
+          // not change the passphrase" sends the user to retry the thing that
+          // will refuse again for the same reason (locking.md §3).
+          setProblem(res.error ?? "Could not change the passphrase.");
           return;
         }
         onNotice?.(`Passphrase changed; ${res.rewrapped} locked ${res.rewrapped === 1 ? "item" : "items"} rewrapped.`);
@@ -113,7 +117,7 @@ export function VaultDialog({
         </div>
         <p className="mt-1.5 text-[13px] leading-snug text-muted-foreground">
           {change
-            ? "Every locked note and sealed image is rewrapped under the new passphrase; the old one stops working everywhere. There is still no recovery."
+            ? "Every locked note and sealed image is rewrapped under the new passphrase; the old one stops working everywhere. If any of them cannot be reached, such as a workspace on a drive that is not plugged in, nothing changes and Ledge says so. There is still no recovery."
             : setup
               ? "Choose the passphrase that locks and unlocks your locked notes. There is no recovery: a forgotten passphrase is the locked notes, gone. Title and front matter are not encrypted."
               : "Enter your vault passphrase."}

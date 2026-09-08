@@ -1015,10 +1015,14 @@ export type LedgeRPC = {
       noteLock: { params: { path: string }; response: { note: NoteMeta; sealedShared: string[] } };
       noteRemoveLock: { params: { path: string }; response: { note: NoteMeta } };
       // Change the passphrase: a new salt and master key, with every locked
-      // note's header and every sealed image's key wrap rewritten across all
-      // available roots. Headers and wraps only, bodies never (locking.md §3).
+      // note's header and every sealed image's key wrap rewritten across every
+      // registered root. Headers and wraps only, bodies never (locking.md §3).
       // Requires the vault unlocked. `rewrapped` is the count for the notice.
-      vaultChangePassphrase: { params: { passphrase: string }; response: { ok: boolean; rewrapped: number } };
+      // All or nothing: Bun plans the whole sweep first and refuses rather
+      // than commit a partial one, so `ok` false carries `error` saying which
+      // items would have been left behind, for the dialog to show. The old
+      // passphrase still works after a refusal.
+      vaultChangePassphrase: { params: { passphrase: string }; response: { ok: boolean; rewrapped: number; error: string | null } };
       // Open a note link in the OS default handler (browser, mail client).
       // Sent by the editor's ⌘-click and the "Open Link" command. The URL is
       // re-validated Bun-side against the same scheme allowlist the view used

@@ -333,6 +333,20 @@ export function openBody(headerValue: string, armored: string): string {
   return plain.toString("utf8");
 }
 
+/** Whether `key` unwraps this header's data key. The passphrase change plans
+ * its whole sweep before writing anything (locking.md §3), and this is the
+ * per-note half of that check: it opens nothing and writes nothing. A
+ * malformed header answers false, the same as one wrapped elsewhere. */
+export function headerOpensWith(headerValue: string, key: Buffer): boolean {
+  try {
+    const header = parseLockedHeader(headerValue);
+    gcmOpen(key, header.wrapNonce, header.wrappedKey);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Re-wrap a header's data key from `oldKey` to `newKey`, stamping in
  * `newSalt`. This is the passphrase change: headers are rewritten, bodies
  * are not. The body still decrypts because the data key is unchanged. */
@@ -356,12 +370,16 @@ export function rewrapHeader(headerValue: string, oldKey: Buffer, newKey: Buffer
  * note's header and every sealed asset (notes.ts owns finding them). The
  * vault file is not written until commitPassphraseChange. Unlocked only.
  */
-export async function beginPassphraseChange(newPassphrase: string): Promise<{ oldKey: Buffer; newKey: Buffer; newSalt: Buffer }> {
+export async function beginPassphraseChange(newPassphrase: string): Promise<{ oldKey: Buffer; oldSalt: Buffer; newKey: Buffer; newSalt: Buffer }> {
   const oldKey = requireKey();
+  if (!vaultSalt) throw new Error("no vault");
   if (newPassphrase.length === 0) throw new Error("empty passphrase");
   const newSalt = randomBytes(SALT_LEN);
   const newKey = deriveKey(newPassphrase, newSalt);
-  return { oldKey, newKey, newSalt };
+  // `oldSalt` is what a rollback stamps back in when the sweep fails partway
+  // (notes.ts changeVaultPassphrase). Without it the undo could restore the
+  // old wrap under the new salt, which opens with neither passphrase.
+  return { oldKey, oldSalt: vaultSalt, newKey, newSalt };
 }
 
 /** Finish a passphrase change once every header is rewrapped: write the new
@@ -411,6 +429,28 @@ const ASSET_MAGIC = Buffer.from("LEDGESEAL1", "ascii");
 
 export function isSealedAsset(bytes: Uint8Array): boolean {
   return bytes.length >= ASSET_MAGIC.length && ASSET_MAGIC.compare(bytes, 0, ASSET_MAGIC.length) === 0;
+}
+
+/** How many bytes at the front of a sealed asset carry its wrapped data key:
+ * the magic, the salt, the wrap nonce, and the wrapped key with its tag. The
+ * passphrase change's plan pass reads this much rather than whole images. */
+export const SEALED_ASSET_HEAD_LEN = ASSET_MAGIC.length + SALT_LEN + NONCE_LEN + KEY_LEN + TAG_LEN;
+
+/** Whether `key` unwraps this sealed asset's data key, given at least its
+ * first SEALED_ASSET_HEAD_LEN bytes. The asset half of the plan check above.
+ * False for bytes that are not a sealed asset, or are too short to tell. */
+export function sealedAssetOpensWith(head: Uint8Array, key: Buffer): boolean {
+  if (!isSealedAsset(head) || head.length < SEALED_ASSET_HEAD_LEN) return false;
+  const buf = Buffer.from(head.buffer, head.byteOffset, head.byteLength);
+  let at = ASSET_MAGIC.length + SALT_LEN;
+  const wrapNonce = buf.subarray(at, (at += NONCE_LEN));
+  const wrapped = buf.subarray(at, (at += KEY_LEN + TAG_LEN));
+  try {
+    gcmOpen(key, wrapNonce, wrapped);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Seal image bytes under a fresh data key wrapped by the master key.

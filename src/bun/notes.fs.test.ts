@@ -1335,6 +1335,70 @@ import { changeVaultPassphrase } from "./notes";
 import { loadVault, resetVaultForTests as resetVault2, unlockVault as unlockV, VAULT_PATH as VP } from "./vault";
 import { rm as rmF } from "node:fs/promises";
 
+describe("changeVaultPassphrase refuses rather than sweeping halfway", () => {
+  // The invariant: the vault's key opens every locked item. A sweep that
+  // skipped one and committed anyway left it wrapped under a passphrase that
+  // no longer opens the vault, which is the one way locking loses a note
+  // (locking.md §3).
+  beforeEach(async () => {
+    resetVaultForTests();
+    await createVault("old pass");
+  });
+
+  test("a workspace it cannot read stops the change; the old passphrase still works", async () => {
+    // An EXTERNAL root, because that is what an unmounted volume is: a managed
+    // one self-heals with an mkdir (rootReady) and would list as empty.
+    const dir = await mkdtemp(join(tmpdir(), "ledge-volume-"));
+    const attached = await attachExternal(dir);
+    const other = "root" in attached ? attached.root : "";
+    const here = await createNote(ROOT, "# Here\n\nhere body");
+    const there = await createNote(other, "# There\n\nthere body");
+    await lockNote(here.path);
+    await lockNote(there.path);
+    await rm(other, { recursive: true, force: true }); // the volume goes away
+
+    expect(changeVaultPassphrase("new pass", [ROOT, other])).rejects.toThrow(/not readable right now/);
+
+    lockVault();
+    expect(await unlockVault("new pass")).toBe(false);
+    expect(await unlockVault("old pass")).toBe(true);
+    expect((await readNote(here.path))?.text).toContain("here body");
+  });
+
+  test("an item locked under some other passphrase stops it too, before anything is written", async () => {
+    const mine = await createNote(ROOT, "# Mine\n\nmine body");
+    await lockNote(mine.path);
+    // A note that arrived from another vault: a well-formed header this key
+    // cannot unwrap (locking.md §6a).
+    const foreign = join(ROOT, "foreign.md");
+    const raw = await readRaw(mine.path, "utf8");
+    const [, salt, nonce, wrapped] = /locked: v1\.([^.]+)\.([^.]+)\.(\S+)/.exec(raw)!;
+    const flip = (b64: string) => {
+      const b = Buffer.from(b64, "base64");
+      b[0] = b[0]! ^ 0xff; // same shape, different key material
+      return b.toString("base64");
+    };
+    await writeRaw(foreign, raw.replace(`v1.${salt}.${nonce}.${wrapped}`, `v1.${salt}.${nonce}.${flip(wrapped!)}`), "utf8");
+
+    expect(changeVaultPassphrase("new pass", [ROOT])).rejects.toThrow(/different passphrase/);
+
+    lockVault();
+    expect(await unlockVault("new pass")).toBe(false);
+    expect(await unlockVault("old pass")).toBe(true);
+    expect((await readNote(mine.path))?.text).toContain("mine body"); // untouched
+  });
+
+  test("a clean sweep still commits, and counts images with the notes", async () => {
+    const a = await createNote(ROOT, "# A\n\na body");
+    await lockNote(a.path);
+    expect(await changeVaultPassphrase("new pass", [ROOT])).toBe(1);
+    lockVault();
+    expect(await unlockVault("old pass")).toBe(false);
+    expect(await unlockVault("new pass")).toBe(true);
+    expect((await readNote(a.path))?.text).toContain("a body");
+  });
+});
+
 describe("changeVaultPassphrase", () => {
   test("rewraps every locked note; only the new passphrase opens afterwards", async () => {
     resetVaultForTests();

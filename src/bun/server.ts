@@ -55,6 +55,7 @@ import {
   assertRegisteredRoot,
   attachExternal,
   availableRoots,
+  lockableRoots,
   createManaged,
   detachRoot,
   ensureDefault,
@@ -844,11 +845,13 @@ export async function createServer(deps: { push: Audience; native: NativeDeps })
     noteRemoveLock: async ({ path }) => ({ note: await removeLockNote(path) }),
     vaultChangePassphrase: async ({ passphrase }) => {
       try {
-        const rewrapped = await changeVaultPassphrase(passphrase, availableRoots());
-        return { ok: true, rewrapped };
+        // lockableRoots, not availableRoots: a root the sweep cannot read has
+        // to be seen and refused, not skipped (locking.md §3).
+        const rewrapped = await changeVaultPassphrase(passphrase, lockableRoots());
+        return { ok: true, rewrapped, error: null };
       } catch (err) {
         console.warn("[vault] passphrase change refused:", err);
-        return { ok: false, rewrapped: 0 };
+        return { ok: false, rewrapped: 0, error: err instanceof Error ? err.message : String(err) };
       }
     },
     trashList: async ({ root }) => ({ items: await listTrash(root) }),

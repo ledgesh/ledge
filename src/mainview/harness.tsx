@@ -832,9 +832,9 @@ configureVault({
   lockNote: async (path) => ({ note: store.lockNote(path), sealedShared: [] }),
   removeLock: async (path) => store.removeLock(path),
   changePassphrase: async (pass) => {
-    if (store.vault.state !== "unlocked") return { ok: false, rewrapped: 0 };
+    if (store.vault.state !== "unlocked") return { ok: false, rewrapped: 0, error: "the vault is locked" };
     store.vault.pass = pass;
-    return { ok: true, rewrapped: 1 };
+    return { ok: true, rewrapped: 1, error: null };
   },
 });
 recordVaultState(store.vault.state);

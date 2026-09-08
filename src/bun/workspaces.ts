@@ -137,6 +137,16 @@ export function writableRoots(): string[] {
   return availableRoots().filter((r) => kindOf(r) !== "docs");
 }
 
+// Every registered root a passphrase change has to cover: writableRoots
+// without the availability filter. The sweep must SEE an unmounted volume
+// rather than skip it (locking.md §3): its locked notes keep the old wrap, so
+// skipping one and committing anyway strands them under neither passphrase.
+// `available` is a load-time snapshot besides, so the sweep's own listNotes is
+// the live answer and the refusal is built on that.
+export function lockableRoots(): string[] {
+  return roots().filter((r) => kindOf(r) !== "docs");
+}
+
 export function listWorkspaceRoots(): WorkspaceRootInfo[] {
   return [...entries].map(([root, e]) => ({ root, kind: kindOf(root), available: e.available }));
 }

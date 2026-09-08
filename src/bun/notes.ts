@@ -12,7 +12,7 @@
 // app uses. The two are separate keys with separate lifetimes
 // (architecture.md §4).
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
-import { mkdir, readdir, readFile, rename, rmdir, stat, unlink, writeFile } from "node:fs/promises";
+import { mkdir, open, readdir, readFile, rename, rmdir, stat, unlink, writeFile } from "node:fs/promises";
 import type { Stats } from "node:fs";
 import { ASSETS_DIRNAME, type BacklinkHit, type NoteMeta, type TagHit, type TrashMeta } from "../shared/rpc-schema";
 import { headingOf, labelOf, slugOf, titleOf } from "../shared/slug";
@@ -25,6 +25,9 @@ import { assertRegisteredRoot, assertWritableRoot, GITIGNORE, isInside, kindOf, 
 import {
   beginPassphraseChange,
   commitPassphraseChange,
+  headerOpensWith,
+  SEALED_ASSET_HEAD_LEN,
+  sealedAssetOpensWith,
   isSealedAsset,
   mintLockedHeader,
   openAssetBytes,
@@ -793,52 +796,141 @@ export async function removeLockNote(path: string): Promise<NoteMeta> {
   return metaAt(path);
 }
 
-// Change the vault passphrase: a new salt, a new master key, and a rewrite of
-// every locked note's header and every sealed image's key wrap across the given
-// roots. Headers and wraps only, never a body byte, since the per-note data
-// keys do not change. The commit lands after the sweep, so a crash leaves the
-// old vault file and a partial sweep: the headers already rewrapped will not
-// open under the old passphrase until the change is re-run. Re-running finishes
-// the job, and nothing is lost. rewrapHeader throws on a header that has
-// already moved, and the loop reports and skips it.
+/**
+ * Change the vault passphrase: a new salt, a new master key, and a rewrite of
+ * every locked note's header and every sealed image's key wrap across the
+ * given roots. Headers and wraps only, never a body byte, since the per-note
+ * data keys do not change.
+ *
+ * The invariant is that the vault's key opens every locked item, and it is
+ * kept by planning the whole sweep before writing anything (locking.md §3). A
+ * root that will not list is a refusal, not a skip: its locked notes would
+ * keep the old wrap while the vault moved to the new key, and they would then
+ * open under neither passphrase. An item whose wrap does not open is the same
+ * refusal for the same reason. Nothing is written and nothing is committed.
+ */
 export async function changeVaultPassphrase(newPassphrase: string, rootsToScan: string[]): Promise<number> {
-  const { oldKey, newKey, newSalt } = await beginPassphraseChange(newPassphrase);
-  let rewrapped = 0;
+  const { oldKey, oldSalt, newKey, newSalt } = await beginPassphraseChange(newPassphrase);
+  const plan = await planRewrap(rootsToScan, oldKey);
+  const done: Array<{ path: string; kind: "note" | "image" }> = [];
+  try {
+    for (const path of plan.notes) {
+      await rewrapNoteAt(path, oldKey, newKey, newSalt);
+      done.push({ path, kind: "note" });
+    }
+    for (const path of plan.images) {
+      await rewrapImageAt(path, oldKey, newKey, newSalt);
+      done.push({ path, kind: "image" });
+    }
+  } catch (err) {
+    // A write failed after the plan said every item was rewrappable: a volume
+    // pulled mid-sweep, a disk that filled. Put the written ones back on the
+    // old key before rethrowing, so the vault the user still has opens
+    // everything it opened a moment ago.
+    await rollBack(done, newKey, oldKey, oldSalt);
+    throw new Error(`passphrase not changed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  await commitPassphraseChange(newKey, newSalt);
+  return done.length;
+}
+
+interface RewrapPlan {
+  notes: string[];
+  images: string[];
+}
+
+// Everything the sweep must rewrap, with every item proven to open under the
+// current key first. Paths only: the bytes are re-read at write time so a note
+// edited between the plan and the write is not overwritten with a stale body.
+async function planRewrap(rootsToScan: readonly string[], oldKey: Buffer): Promise<RewrapPlan> {
+  const plan: RewrapPlan = { notes: [], images: [] };
+  const stuck: string[] = [];
   for (const root of rootsToScan) {
     let metas: NoteMeta[];
     try {
       metas = await listNotes(root);
     } catch {
-      continue; // skip an unlistable root, the boot fetch's stance
+      throw new Error(`the workspace folder ${root} is not readable right now, so its locked notes cannot be rewrapped`);
     }
     for (const meta of metas) {
       if (!meta.locked) continue;
-      try {
-        const raw = await readFile(meta.path, "utf8");
-        const header = parseFrontmatter(raw).params.locked;
-        if (header === null) continue;
-        await writeSealed(meta.path, stampLockedLine(raw, rewrapHeader(header, oldKey, newKey, newSalt)), (await stat(meta.path)).mtimeMs);
-        rewrapped += 1;
-      } catch (err) {
-        console.warn("[vault] could not rewrap", meta.path, err);
-      }
+      const header = await headAt(meta.path).then((h) => (h === null ? null : parseFrontmatter(h).params.locked));
+      if (header === null) continue; // unlocked between the listing and here
+      if (headerOpensWith(header, oldKey)) plan.notes.push(meta.path);
+      else stuck.push(meta.path);
     }
     // Sealed images: any in-root image file carrying the magic. The walk is
     // listNotes' walk (dot-entries skipped) plus the app's own assets
     // directory, which is dotted so listings never show it.
     for (const path of await imageFilesUnder(root)) {
-      try {
-        const bytes = await readFile(path);
-        if (!isSealedAsset(bytes)) continue;
-        await replaceAssetBytes(path, rewrapAssetBytes(bytes, oldKey, newKey, newSalt));
-        rewrapped += 1;
-      } catch (err) {
-        console.warn("[vault] could not rewrap sealed image", path, err);
-      }
+      const head = await readHead(path, SEALED_ASSET_HEAD_LEN);
+      if (head === null || !isSealedAsset(head)) continue;
+      if (sealedAssetOpensWith(head, oldKey)) plan.images.push(path);
+      else stuck.push(path);
     }
   }
-  await commitPassphraseChange(newKey, newSalt);
-  return rewrapped;
+  if (stuck.length > 0) {
+    throw new Error(
+      `${stuck.length} locked ${stuck.length === 1 ? "item was" : "items were"} locked under a different passphrase and would be left behind (${stuck[0]}${stuck.length > 1 ? ", and others" : ""})`,
+    );
+  }
+  return plan;
+}
+
+// The first `len` bytes of a file, or null when it cannot be read. The plan
+// pass asks whether a key opens a sealed image, which the wrap at the front
+// answers: reading the whole photo to check its header would be the sweep's
+// bytes twice over.
+async function readHead(path: string, len: number): Promise<Buffer | null> {
+  const fh = await open(path, "r").catch(() => null);
+  if (!fh) return null;
+  try {
+    const buf = Buffer.alloc(len);
+    const { bytesRead } = await fh.read(buf, 0, len, 0);
+    return buf.subarray(0, bytesRead);
+  } catch {
+    return null;
+  } finally {
+    await fh.close().catch(() => {});
+  }
+}
+
+async function rewrapNoteAt(path: string, from: Buffer, to: Buffer, salt: Buffer): Promise<void> {
+  const raw = await readFile(path, "utf8");
+  const header = parseFrontmatter(raw).params.locked;
+  if (header === null) throw new Error(`${path} is no longer locked`);
+  await writeSealed(path, stampLockedLine(raw, rewrapHeader(header, from, to, salt)), (await stat(path)).mtimeMs);
+}
+
+async function rewrapImageAt(path: string, from: Buffer, to: Buffer, salt: Buffer): Promise<void> {
+  const bytes = await readFile(path);
+  if (!isSealedAsset(bytes)) return;
+  await replaceAssetBytes(path, rewrapAssetBytes(bytes, from, to, salt));
+}
+
+// Undo a partial sweep, item by item, back onto the old key and salt. Best
+// effort by necessity: whatever stopped the sweep may stop this too. What it
+// cannot put back it names, because those items now open only under the
+// passphrase that was never committed.
+async function rollBack(
+  done: ReadonlyArray<{ path: string; kind: "note" | "image" }>,
+  from: Buffer,
+  to: Buffer,
+  salt: Buffer,
+): Promise<void> {
+  const lost: string[] = [];
+  for (const item of done) {
+    try {
+      if (item.kind === "note") await rewrapNoteAt(item.path, from, to, salt);
+      else await rewrapImageAt(item.path, from, to, salt);
+    } catch (err) {
+      lost.push(item.path);
+      console.error("[vault] could not roll back", item.path, err);
+    }
+  }
+  if (lost.length > 0) {
+    console.error(`[vault] ${lost.length} item(s) are wrapped under the new passphrase, which was not committed:`, lost);
+  }
 }
 
 // Every image file the passphrase sweep must consider: the root's dotted

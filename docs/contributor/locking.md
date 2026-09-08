@@ -51,6 +51,45 @@ external editors, Spotlight — the plain-files ethos is the product. A user
 who wants an encrypted root puts it on an encrypted sparse bundle or
 FileVault'd volume; the README should carry that recipe.
 
+## 1a. What the ciphertext earns, and what the marker earns
+
+Locking is two mechanisms, and §1's three threats do not divide between them
+evenly. Stated here because the split is not obvious from the code and it
+decides what any future work on this feature is for.
+
+| Threat | What actually stops it |
+| --- | --- |
+| 1. Agents | The `locked:` marker. `mcpTools.ts` refuses on the note meta's flag, read from disk, with vault state irrelevant. |
+| 2. The synced folder | The ciphertext. |
+| 3. Casual access | The ciphertext, plus the vault being a UI state. |
+
+**So the headline threat does not need encryption.** A plaintext
+`private: true` marker would deliver the agent invariant in full, with no
+passphrase, no KDF, no vault file, no rewrap sweep, and no recovery order to
+get right. Everything expensive in this document is bought by threats 2 and
+3 alone.
+
+**What the ciphertext costs is the note's place in the corpus.** A locked
+note is not searched, not scanned for backlinks, contributes only the tags
+in its plaintext head, refuses every agent surface, and has its `prompt`
+fences disabled (§8). Ledge's pitch is pointing agents at the notes, and a
+locked note is the one note that is not there. That is the trade, and it is
+the same trade whether the body is encrypted or merely marked.
+
+**And locking is not where the credentials are.** API keys and tokens belong
+in profiles, which are `0600` dotenv files outside every notes root and out
+of scope here by §1. Locking encrypts prose. A user who locks a note
+expecting their secrets to be covered has covered the wrong thing, which is
+what §1's ordering is for.
+
+**v1 ships them as one feature anyway.** Splitting into a cheap marker tier
+and an encrypted tier is two things to explain, one more state per note, and
+a second set of interactions, and nobody has asked for the cheap one:
+architecture.md §6's bar for a knob applies to a tier as well. The split
+stays available as a v2 move if the corpus hole turns out to be what people
+actually mind, and this section is here so that move starts from the
+analysis rather than rediscovering it.
+
 ## 2. The envelope
 
 A locked note stays a `.md` file, so rename-not-unlink, trash, `uniqueName`,
@@ -138,8 +177,34 @@ tags: finance
 - **Passphrase change** re-derives a new master key under a new salt and
   rewraps every locked note's data key and every encrypted asset's header —
   headers only, bodies untouched. It enumerates locked notes by the same
-  walk `listNotes` uses, across all registered roots, and reports what it
-  rewrapped. Available only while unlocked.
+  walk `listNotes` uses, and sealed assets by `imageFilesUnder`, across
+  `lockableRoots()`: every REGISTERED root but the docs one, not
+  `availableRoots()`. Available only while unlocked.
+
+  **It is all or nothing, and that is the invariant the feature rests on:
+  the vault's key opens every locked item.** `changeVaultPassphrase` plans
+  the whole sweep before it writes anything — `headerOpensWith` for each
+  note, `sealedAssetOpensWith` for each asset's head bytes — and refuses if
+  a root will not list or an item's wrap will not open. Nothing is written,
+  nothing is committed, and the old passphrase still works. The plan holds
+  paths and not bytes, so a note edited between the plan and the write is
+  re-read rather than overwritten with a stale body.
+
+  It has to be that way because a skip and a commit is how locking loses a
+  note. The version before this one caught each failure with a
+  `console.warn`, skipped an unlistable root with a `continue`, and
+  committed regardless: change your passphrase with an external workspace's
+  volume unplugged and its locked notes kept the old wrap while the vault
+  moved to the new key. They then opened under NEITHER passphrase on that
+  machine, recoverable only through §6a's probe path, while the dialog said
+  "Every locked note and sealed image is rewrapped" and the notice reported
+  a success count with no denominator.
+
+  A write that fails after a clean plan (a volume pulled mid-sweep, a full
+  disk) rolls the written items back onto the old key and salt, which is why
+  `beginPassphraseChange` returns `oldSalt`. Rollback is best-effort by
+  necessity, and what it cannot restore it names in the log: those items
+  open only under a passphrase that was never committed.
 - **First lock** is vault creation: a setup dialog that takes the
   passphrase twice and states the contract in one sentence — *there is no
   recovery; a forgotten passphrase is the notes, gone*. Keychain-backed

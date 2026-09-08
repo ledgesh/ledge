@@ -20,7 +20,7 @@ interface VaultHandlers {
   lock: () => Promise<void>;
   lockNote: (path: string) => Promise<{ note: NoteMeta; sealedShared: string[] }>;
   removeLock: (path: string) => Promise<NoteMeta>;
-  changePassphrase: (passphrase: string) => Promise<{ ok: boolean; rewrapped: number }>;
+  changePassphrase: (passphrase: string) => Promise<{ ok: boolean; rewrapped: number; error: string | null }>;
 }
 
 let handlers: VaultHandlers | null = null;
@@ -123,12 +123,11 @@ export function removeNoteLock(path: string): Promise<NoteMeta> {
 }
 
 /** Rewraps every locked note's header and every sealed image's key under a
- * new passphrase. The vault must be unlocked (locking.md §3). Bun sweeps
- * availableRoots(), not every registered root (server.ts
- * vaultChangePassphrase). A root whose volume is not mounted is skipped: its
- * locked notes keep the old wrap and open under neither passphrase until the
- * change is re-run with the volume mounted. */
-export function changeVaultPassphrase(passphrase: string): Promise<{ ok: boolean; rewrapped: number }> {
+ * new passphrase. The vault must be unlocked (locking.md §3). All or nothing:
+ * Bun plans the sweep across every registered root and refuses if any item
+ * would be left behind, so `ok` false means nothing changed and the old
+ * passphrase still works. `error` says what stopped it, for the dialog. */
+export function changeVaultPassphrase(passphrase: string): Promise<{ ok: boolean; rewrapped: number; error: string | null }> {
   return bridge().changePassphrase(passphrase);
 }
 

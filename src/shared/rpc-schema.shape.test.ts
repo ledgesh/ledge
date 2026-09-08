@@ -93,7 +93,19 @@ describe("the schema's shape against the protocol version", () => {
   // somewhere wrong, and a NoteMeta with no `favorite` reads as unmarked,
   // which is what every note on such a server is. Nothing was retyped, made
   // required, or narrowed. The pin moves and the version does not.
-  const PINNED = { protocol: 5, shape: "1717880ad464b32e" };
+  // Then vaultChangePassphrase's response gained `error`. The sweep behind it
+  // became all-or-nothing (locking.md §3), so a refusal now has a reason worth
+  // showing, and the field carries it. Additive, and it degrades in both
+  // directions: an old client ignores a field it does not read and keeps
+  // printing its own "could not change the passphrase", while a new client
+  // against an old server reads `undefined` and falls back to that same
+  // sentence (VaultDialog's `??`). `ok` and `rewrapped` are untouched, so
+  // neither end reads an existing field differently. What an old SERVER does
+  // to the notes is the old sweep, which is a bug in that server and not a
+  // disagreement between the two: the wire says the same thing either way.
+  // Nothing was retyped, made required, or narrowed. The pin moves and the
+  // version does not.
+  const PINNED = { protocol: 5, shape: "62926ff60e100f76" };
 
   test("a payload shape does not change without someone deciding whether it breaks", async () => {
     const shape = digest(shapeOf(await Bun.file(SCHEMA).text()));
