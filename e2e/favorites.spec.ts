@@ -63,6 +63,17 @@ test("the row menu carries the verb, titled for the row it is about", async ({ p
   await expect(page.getByRole("menu").getByRole("menuitem", { name: "Unfavorite" })).toBeVisible();
 });
 
+test("the star appears without moving the row it appears in", async ({ page }) => {
+  // The button is taller than the title beside it, so the row holds that
+  // height at rest (NoteBrowser ROW_CLASS). Without it every row the pointer
+  // crossed grew a little as it went.
+  const row = treeRow(page, "gamma.md");
+  const rest = await row.boundingBox();
+  await row.hover();
+  await expect(row.getByRole("button", { name: "Favorite" })).toBeVisible();
+  expect((await row.boundingBox())?.height).toBe(rest?.height);
+});
+
 test("the hover star toggles the marker without opening the note", async ({ page }) => {
   // Gamma is not open, and clicking its star must not open it: the star is a
   // control inside the row, and the row's own click is stopped there.

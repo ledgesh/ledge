@@ -85,7 +85,7 @@ section.
 | Hover-revealed button | the row's menu, per R2 — and the button is ABSENT, not transparent. Unless the verb has no equally direct path: then it is LIT and 44 points, which is the fence's ▶ |
 | Right-click | a long press on the row |
 | Double-click rename | the menu's Rename item, which R3 already calls the discoverable path |
-| Double-click a preview tab to keep it | the same tab's menu, where Keep Tab Open sits beside Close Tab (§1b) |
+| Double-click a preview tab, or the note's row, to keep it | the tab's menu, where Keep Tab Open sits beside Close Tab (§1b) |
 | ↑/↓ roving focus (R5) | a tap; the tapped row is the focused row |
 | Bare-key row verbs | the row's menu |
 | ⌘P / ⇧⌘P / ⌥⌘P | the magnifier in the header, which opens the overlay |
@@ -385,12 +385,13 @@ no file until it is typed in (`notes/store.ts`), so replacing one would drop
 what was typed. `makeTab` therefore refuses the mark and only `makeNoteTab`
 takes it.
 
-**Four things promote a preview, and the first is the one that matters.**
+**Five things promote a preview, and the first is the one that matters.**
 
 | Promotion | Why |
 | --------- | --- |
 | Editing the note | The plainest statement that a note should stay. It is also what makes the replacement safe: an edit fires before any later open, so the tab that gets replaced can never be holding unsaved text |
 | Double-clicking the tab | The accelerator, the shape R3 already gives Rename |
+| Double-clicking the note's row in the browser | The first click opens the preview and the second keeps it, so `tab.keep` is handed no target and promotes whichever tab that first click made active. The same accelerator at the end the note was opened from, which is where VS Code puts it |
 | Dragging the tab | Reordering or moving a tab places it deliberately, and a tab the next click replaces has not been placed |
 | Keep Tab Open | The canonical home, per R2: the tab's context menu, the View menu, and the palette |
 

@@ -133,6 +133,18 @@ test.describe("preview tabs", () => {
     await expect(preview(page)).toHaveCount(0);
   });
 
+  test("double-clicking a note's row keeps the tab that row opened", async ({ page }) => {
+    await noteRow(page, "Alpha").click();
+    const tabs = page.locator("[data-tab]");
+    const settled = await tabs.count();
+    // The second click lands on the row that already opened the note, and
+    // keeps its tab the way double-clicking the tab does (interactions.md §1b).
+    await noteRow(page, "Alpha").dblclick();
+    await expect(preview(page)).toHaveCount(0);
+    await noteRow(page, "Beta").click();
+    await expect(tabs).toHaveCount(settled + 1); // nothing left for Beta to take
+  });
+
   test("a new note is never a preview: it is not a navigation", async ({ page }) => {
     await noteRow(page, "Alpha").click();
     await expect(preview(page)).toHaveCount(1);

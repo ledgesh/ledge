@@ -69,6 +69,7 @@ A preview tab becomes a permanent one, and stops being replaced, as soon as you 
 | --- | --- |
 | Type in the note | The usual one. A note you are editing is a note you meant to keep. |
 | Double-click its tab | In the strip. |
+| Double-click its row | In the sidebar, on the row you opened the note from. |
 | Drag its tab | A tab you put somewhere stays there. |
 | Keep Tab Open | The tab's context menu, the View menu, and the command palette. |
 

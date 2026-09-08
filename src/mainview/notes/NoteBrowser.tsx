@@ -867,8 +867,12 @@ function TrashRow({
 // (interactions.md §1a): they are stacked with no gap between them, so a miss
 // opens the wrong note. `min-h` and not `h`, so a taller row keeps its own
 // height.
+//
+// Where there is a hover, the row also holds the height its hover-revealed
+// buttons need: 20 points of button and 12 of padding. Without that the row
+// grew as the pointer crossed it, since a title is shorter than a star.
 const ROW_CLASS =
-  "group flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 outline-none hover:bg-accent/50 focus-visible:ring-1 focus-visible:ring-ring touch:min-h-[44px]";
+  "group flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 outline-none hover:bg-accent/50 focus-visible:ring-1 focus-visible:ring-ring hoverable:min-h-8 touch:min-h-[44px]";
 
 // The drag's own MIME type, carrying the dragged note's path. A custom type
 // rather than text/plain because dataTransfer.types is readable during
@@ -918,6 +922,7 @@ function NoteRow({
   // useRowMenu swallows the click WebKit sends afterwards, so a long press
   // does not also open the note it was asking about (interactions.md §1a).
   const press = useRowMenu(onContextMenu, onOpen);
+  const { exec } = useCommands();
   // The star's tooltip, from the command itself: this row's face of it.
   const favoriteTitle = useCommandTitle("note.favorite", { kind: "note", path: note.path });
   return (
@@ -925,6 +930,11 @@ function NoteRow({
       {...rowProps}
       {...targetAttrs({ kind: "note", path: note.path })}
       {...press}
+      // The second click keeps the tab the first one opened, the way
+      // double-clicking the tab itself does (interactions.md §1b). No target:
+      // that first click made this note the focused pane's active tab, which
+      // is what tab.keep promotes when it is handed none.
+      onDoubleClick={() => exec("tab.keep")}
       // Dragging a row is a pointer gesture, not a command (interactions.md
       // R4): its affordance is the drag image and the target's highlight. The
       // long press that opens the menu is touch and pen only, so a held left
