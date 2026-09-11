@@ -24,7 +24,6 @@
 // host key to confirm there, and appends whatever `authorized_keys` line is
 // pasted into it. Ctrl-C takes it all down again.
 import { mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
-import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -165,19 +164,18 @@ const signalDaemon = (sig: "STOP" | "CONT") => {
  * A connect rather than `lsof`: lsof run without root cannot see a socket that
  * launchd holds, which is how Remote Login listens, so it reported 22 free
  * while the Mac's own sshd answered there. A listener on every interface also
- * answers on loopback, so this covers the `--serve` binding too.
+ * answers on loopback, so this covers the `--serve` binding too. `Bun.connect`
+ * rather than `node:net`, which ports.test.ts forbids everywhere.
  */
 function answers(port: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const socket = connect({ host: "127.0.0.1", port });
-    const settle = (yes: boolean) => {
-      socket.destroy();
-      resolve(yes);
-    };
-    socket.once("connect", () => settle(true));
-    socket.once("error", () => settle(false));
-    socket.setTimeout(2000, () => settle(false));
-  });
+  const attempt = Bun.connect({ hostname: "127.0.0.1", port, socket: { data() {} } }).then(
+    (socket) => {
+      socket.end();
+      return true;
+    },
+    () => false,
+  );
+  return Promise.race([attempt, Bun.sleep(2000).then(() => false)]);
 }
 
 try {
