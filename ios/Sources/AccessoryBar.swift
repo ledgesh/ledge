@@ -53,9 +53,10 @@ enum AccessoryBar {
         // most expensive thing to type on this keyboard: the backtick is behind
         // the numeric page and a long press, three times over.
         ("format.codeBlock", "chevron.left.forwardslash.chevron.right", "Code Block"),
-        // The photo library. Last because it is the one that leaves: it puts a
-        // system picker over the whole app, where the six before it are edits
-        // that happen under the thumb (ios.md §11).
+        // A picture, from the library, the camera or Files. Last because it is
+        // the one that leaves: it puts a menu and then a system screen over the
+        // whole app, where the six before it are edits that happen under the
+        // thumb (ios.md §11).
         ("image.insert", "photo.on.rectangle", "Insert Image"),
     ]
 
@@ -90,6 +91,20 @@ enum AccessoryBar {
             button(symbol: symbol, title: nil, label: label, id: id) { tapped(id) }
         }
         return bar(row: row, trailing: hideKeyboard(dismiss))
+    }
+
+    /// The button `id` names in `bar` while the bar is on screen, as the anchor
+    /// for a popover (ImagePicker's menu on an iPad). Nil when the bar is not
+    /// showing, which is the case when Insert Image… ran from the palette.
+    static func onScreen(_ id: String, in bar: UIView?) -> UIView? {
+        guard let bar, bar.window != nil else { return nil }
+        var queue = [bar]
+        while !queue.isEmpty {
+            let view = queue.removeFirst()
+            if view.accessibilityIdentifier == id { return view }
+            queue.append(contentsOf: view.subviews)
+        }
+        return nil
     }
 
     /// Not a command, and apart from the verbs. Nothing else on this screen

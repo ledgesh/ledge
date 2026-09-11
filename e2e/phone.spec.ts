@@ -771,8 +771,8 @@ test.describe("the v1 features, by tap", () => {
   test("Insert Image… embeds what the device's picker answered", async ({
     page,
   }) => {
-    // The phone has no ⌘V and nothing on its pasteboard. The picker is the
-    // only way a picture gets into a note there (ios.md §11).
+    // The page's half: the command, the embed and the render. The harness
+    // answers for the device, whose menu of sources is Swift's (ios.md §11).
     await page.getByRole("button", { name: /Go to Note/ }).tap();
     await page.keyboard.type(">insert image");
     await page.keyboard.press("Enter");

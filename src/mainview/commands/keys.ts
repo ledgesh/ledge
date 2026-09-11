@@ -321,7 +321,8 @@ export const COMMANDS = {
   // one key there.
   "format.codeBlock": { title: "Code Block" },
   // A picture, from wherever this device keeps pictures: the file dialog on a
-  // Mac, the photo library on a phone (ios.md §11). No chord: ⌘V is already
+  // Mac; the photo library, the camera or Files on a phone (ios.md §11). No
+  // chord: ⌘V is already
   // the desktop's way in and this is the other source, and on the client with
   // no ⌘V a chord would be no way in at all.
   "image.insert": { title: "Insert Image…" },

@@ -839,8 +839,9 @@ export type LedgeRPC = {
         response: { src: string | null };
       };
       // The same trip, but it asks the device for a picture instead of reading
-      // its pasteboard: the macOS file dialog, and on iOS the photo library
-      // (ios.md §11). Sent by Insert Image…, for a picture nobody copied.
+      // its pasteboard: the macOS file dialog, and on iOS the photo library,
+      // the camera or Files (ios.md §11). Sent by Insert Image…, for a picture
+      // nobody copied.
       // A client method for assetPaste's reason, and answering in its shape:
       // the picker belongs to the machine with a person at it, the bytes ride
       // assetWrite, and the name still comes back from the machine that holds

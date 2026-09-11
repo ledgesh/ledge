@@ -12,9 +12,9 @@ import UIKit
 /// answer has to reach. See `share` below.
 ///
 /// Two of them are not here. The menu bar, because a phone has none and the
-/// page answers `menuSet` itself (ios.md §11); and the picture library, which
-/// has its own file because it is the only seam that puts a screen up and waits
-/// for a person (PhotoPicker.swift).
+/// page answers `menuSet` itself (ios.md §11); and the picture pickers, which
+/// have their own file because they are the only seam that puts a screen up and
+/// waits for a person (ImagePicker.swift).
 enum Natives {
     static func clipboardRead() -> String {
         UIPasteboard.general.string ?? ""
@@ -49,7 +49,7 @@ enum Natives {
     /// PNG is ten times the bytes, and the re-encode drops the EXIF location.
     static func clipboardImage() -> String {
         guard UIPasteboard.general.hasImages, let image = UIPasteboard.general.image,
-            let jpeg = image.jpegData(compressionQuality: PhotoPicker.quality)
+            let jpeg = image.jpegData(compressionQuality: ImagePicker.quality)
         else { return "" }
         return jpeg.base64EncodedString()
     }
@@ -60,7 +60,7 @@ enum Natives {
     /// §11). The encode is the picker's, so the EXIF location goes too.
     static func encodeImage(_ base64: String) -> String {
         guard let data = Data(base64Encoded: base64), let image = UIImage(data: data),
-            let jpeg = image.jpegData(compressionQuality: PhotoPicker.quality)
+            let jpeg = image.jpegData(compressionQuality: ImagePicker.quality)
         else { return "" }
         return jpeg.base64EncodedString()
     }

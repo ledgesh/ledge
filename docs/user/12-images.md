@@ -20,9 +20,9 @@ A reference points at the file from the note that holds it, the way Markdown ref
 
 Run **Insert Image…** from the palette to pick a picture instead of pasting one. Ledge saves it and inserts the reference exactly as a paste does.
 
-On a Mac this opens a file dialog. On a phone it opens the photo library, and the button for it sits on the bar above the keyboard.
+On a Mac this opens a file dialog. On a phone it asks where the picture is: **Photo Library**, **Take Photo**, or **Choose File** for one in the Files app. The button for it sits on the bar above the keyboard. Take Photo appears only on a device with a camera, and the first time it asks permission to use it.
 
-A picture chosen this way is saved as a JPEG when it already is one (a photograph off a camera roll stays a tenth of the size it would be as a PNG), and as a PNG otherwise. A picture pasted on a phone is saved as a JPEG too. Location data is not carried over.
+On a Mac, a picture chosen this way is saved as a JPEG when it already is one (a photograph stays a tenth of the size it would be as a PNG), and as a PNG otherwise. On a phone it is saved as a JPEG, except a PNG chosen from Files, which stays a PNG so a transparent background survives. A picture pasted on a phone is saved as a JPEG too. A phone does not carry location data over.
 
 ## What renders
 

@@ -13,7 +13,7 @@ import {
   type RequestClient,
 } from "../../shared/wire";
 
-/** What Swift implements: eighteen strings and a flat switch. The calls are
+/** What Swift implements: nineteen strings and a flat switch. The calls are
  * their own vocabulary, `clipboard.read` and not `clipboardRead`: they are not
  * the schema's methods, and naming them as if they were is the invitation to
  * implement half the schema in Swift (ios.md §2). `clipboard.image` is the case
@@ -48,10 +48,11 @@ export const SHELL_CALLS = [
   // §11). WebKit already read it during the user's Paste, so the page hands
   // it over rather than `clipboard.image` reading the pasteboard again.
   "image.encode",
-  // The photo library, as JPEG bytes (ios.md §11). Slow by the standards of
-  // everything else here: it puts a whole system picker on the screen and waits
-  // for a person. Answers "" for a cancel, which is the common case.
-  "photos.pick",
+  // A picture from the photo library, the camera or Files, as bytes the server
+  // can store (ios.md §11). Slow by the standards of everything else here: it
+  // puts a menu and then a system screen up and waits for a person. Answers ""
+  // for a cancel, which is the common case.
+  "image.pick",
   "link.open",
   // The device's own share sheet, for the one string a phone has to get onto
   // another machine: its `authorized_keys` line (ios.md §4). The clipboard ends
@@ -413,9 +414,10 @@ function clientSeams(
       if (!dataB64) return { src: null };
       return requests.assetWrite({ root, notePath, dataB64 });
     },
-    // The one above with a photo library where the pasteboard was (ios.md §11).
+    // The one above with the device's pickers where the pasteboard was (ios.md
+    // §11).
     assetPick: async ({ root, notePath }) => {
-      const dataB64 = (await shell.call("photos.pick", {})) as string;
+      const dataB64 = (await shell.call("image.pick", {})) as string;
       if (!dataB64) return { src: null };
       return requests.assetWrite({ root, notePath, dataB64 });
     },

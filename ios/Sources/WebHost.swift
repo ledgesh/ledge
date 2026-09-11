@@ -513,15 +513,19 @@ extension WebHost: WKScriptMessageHandler {
             reply(id, Natives.clipboardImage())
         case "image.encode":
             reply(id, Natives.encodeImage(params["dataB64"] as? String ?? ""))
-        case "photos.pick":
-            // The one call that waits on a person. The reply is deferred until
-            // the picker closes, which the bridge already allows for: a call is
-            // a promise and nothing about it is timed on this end.
-            PhotoPicker.pick(over: self) { [weak self] base64 in self?.reply(id, base64) }
+        case "image.pick":
+            // The one call that waits on a person, for the menu of sources and
+            // then for the picture. The reply is deferred until both close,
+            // which the bridge already allows for: a call is a promise and
+            // nothing about it is timed on this end. The bar's button anchors
+            // the menu when the bar is up, since an iPad shows it as a popover.
+            ImagePicker.pick(over: self, from: AccessoryBar.onScreen("image.insert", in: noteBar)) { [weak self] base64 in
+                self?.reply(id, base64)
+            }
         case "link.open":
             reply(id, ["ok": Natives.linkOpen(params["url"] as? String ?? "")])
         case "share.text":
-            // Answered once the sheet is up, unlike `photos.pick` above: the
+            // Answered once the sheet is up, unlike `image.pick` above: the
             // page is not waiting on what the user picks, and there is nothing
             // for it to do with the answer. Presenting is the whole call.
             reply(id, ["ok": Natives.share(params["text"] as? String ?? "", over: self, from: nil)])

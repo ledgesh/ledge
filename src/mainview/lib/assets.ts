@@ -89,9 +89,9 @@ export function pasteImageAsset(folder: string, notePath: string | null = null, 
 
 /**
  * The same as pasteImageAsset, taking the bytes from the device's picture
- * picker: the macOS file dialog, or the iOS photo library (ios.md §11). The
- * Insert Image… command calls this. Resolves to null when the picker is
- * cancelled, which is the common outcome and not a failure.
+ * picker: the macOS file dialog, or on iOS the photo library, the camera or
+ * Files (ios.md §11). The Insert Image… command calls this. Resolves to null
+ * when the picker is cancelled, which is the common outcome and not a failure.
  */
 export function pickImageAsset(folder: string, notePath: string | null = null): Promise<string | null> {
   return pickHandler ? pickHandler(folder, notePath) : Promise.resolve(null);

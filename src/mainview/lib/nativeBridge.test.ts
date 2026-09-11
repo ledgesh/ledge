@@ -442,6 +442,24 @@ describe("the client overlay", () => {
     expect(await overlay(async () => "").assetPaste({ root: "/notes", notePath: "/notes/a.md" })).toEqual({ src: null });
   });
 
+  test("Insert Image… takes the picture the shell's pickers answered, and the server names it", async () => {
+    const png = toBase64(new Uint8Array([137, 80, 78, 71]));
+    const asked: unknown[] = [];
+    const wrote: unknown[] = [];
+    const o = overlay(
+      async (m, p) => (asked.push([m, p]), png),
+      noServer({ assetWrite: async (p) => (wrote.push(p), { src: ".ledge-assets/1.png" }) }),
+    );
+    expect(await o.assetPick({ root: "/notes", notePath: "/notes/a.md" })).toEqual({ src: ".ledge-assets/1.png" });
+    expect(asked).toEqual([["image.pick", {}]]);
+    expect(wrote).toEqual([{ root: "/notes", notePath: "/notes/a.md", dataB64: png }]);
+  });
+
+  test("a cancelled pick costs the server nothing", async () => {
+    // noServer() throws on assetWrite, so the test passing is the assertion.
+    expect(await overlay(async () => "").assetPick({ root: "/notes", notePath: "/notes/a.md" })).toEqual({ src: null });
+  });
+
   test("the connection list is this phone's own, and the selection is what is served", async () => {
     const { o } = withServers([VPS, PI], PI.id);
     const status = await o.connectionList({});

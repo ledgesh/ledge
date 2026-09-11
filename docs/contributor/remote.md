@@ -1723,7 +1723,8 @@ no notion of who is asking beyond the client id in a hello, which is why
 `clipboardWrite`, `clipboardRead`, `clipboardReadRich`, `assetPaste`,
 `assetPick`, `linkOpen`, `menuSet`, and `windowNew`. Opening a URL happens on
 the device the user is holding, not on the VPS; the picture you want to insert
-is in that device's photo library or on its disk (ios.md §11); a headless
+is in that device's photo library, in its files, or in front of its camera
+(ios.md §11); a headless
 server handed the view's menu would swallow ⌘Q with it; and a machine with no
 screen has nowhere to put a window (§8a). The six connection entries (§8) join
 them for a different reason: a server has no business knowing which servers this

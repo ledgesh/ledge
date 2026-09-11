@@ -841,7 +841,7 @@ blocks inline. It has no terminal drawer.**
 | Tags, backlinks, the outline | Attaching a workspace folder |
 | Editing, with live preview | Moving a workspace |
 | Daily notes, templates, wikilinks | |
-| Rendered images, and adding them from the photo library or by pasting | |
+| Rendered images, and adding them from the photo library, the camera, Files, or by pasting | |
 | Running a block inline, with the host picker and the confirmation | |
 | Editing the note's profile, which is what a run's environment is | |
 | The trash | |
@@ -1031,7 +1031,7 @@ own:
 - **Notes are not in Files.** The app's container holds no note bytes. There
   is nothing to export and nothing to sync, and the share sheet shares text
   the view already has rather than a file.
-- **Images arrive from the photo picker and from the pasteboard.** The picker
+- **Images arrive from the device's pickers and from the pasteboard.** The picker
   is its own client method rather than a different `assetPaste`: `assetPick`
   is that one with a picker where the pasteboard was, and the two are
   identical below the first line. The bytes still ride `assetWrite` on a
@@ -1043,7 +1043,16 @@ own:
   `CLIENT_METHODS` is total by construction: a name every shell must implement
   cannot be one only one shell has.
 
-  **PHPicker, which is why there is no permission prompt and no
+  **Insert Image… offers three sources: the photo library, the camera, and
+  Files.** `image.pick` puts up a menu first, the one Safari shows for an image
+  file input, and then the system screen for the source chosen
+  (`ios/Sources/ImagePicker.swift`). Take Photo is left off where there is no
+  camera, which includes every Simulator. The menu is a popover on an iPad,
+  anchored to the bar's button when the bar asked and to the middle of the
+  screen when the palette did. A cancel at either step answers "" and inserts
+  nothing.
+
+  **PHPicker, which is why the library asks no permission and there is no
   `NSPhotoLibraryUsageDescription`.** It runs out of process and hands back
   only what the user chose, so the app never asks for library access and never
   has it — iOS says as much on the picker itself. A usage string would describe
@@ -1057,6 +1066,18 @@ own:
   Mac is still PNG, because there the source really is one. Re-encoding also
   drops the EXIF, so the GPS a phone stamps on every picture does not travel to
   the server with it.
+
+  **The camera asks permission, and Files hands back a copy.** The system camera
+  is `UIImagePickerController`, which runs in the app's process, so the
+  Info.plist carries `NSCameraUsageDescription` and iOS shows it the first
+  time. Files is `UIDocumentPickerViewController` with `asCopy`, so the app
+  holds no security-scoped access to anything outside its container, and the
+  copy is deleted once read. A PNG from Files stays a PNG. A file there is as
+  likely to be a diagram with a transparent background as a photograph, and JPEG
+  has no transparency. Every other picture is the picker's JPEG. Every source
+  re-encodes, so none of the picture's own metadata leaves the phone: no
+  location, no camera, no date taken. UIKit writes a small Exif block of its
+  own into the JPEG, and it names none of those.
 
   **A copied picture pastes from the callout, and the event carries the
   bytes.** Photos' Copy puts `public.jpeg` on the pasteboard. The callout's

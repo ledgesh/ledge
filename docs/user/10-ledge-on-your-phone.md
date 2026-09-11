@@ -51,14 +51,14 @@ A phone and a Mac can be on one server at once. Each keeps its own tabs, and a n
 | Reading, editing, and creating notes, with live preview | The terminal drawer |
 | Quick open, full-text search, tags, backlinks, the outline | Attaching a folder as a workspace |
 | Daily notes, templates, wikilinks | Moving a workspace folder |
-| Images, added from the photo library | |
+| Images, added from the photo library, the camera, or Files | |
 | Running a block inline, with the host picker and the confirmation | |
 | Editing a note's profile | |
 | Unlocking locked notes | |
 | The trash | |
 | Switching workspaces and servers | |
 
-The pages for those features say how each works on a touch screen: Run on every block, the Code Block button, and the control keys above the keyboard in [[Running Code]], the photo library in [[Images]], the mode chips under the search field in [[Finding Things]], and splits in [[Panes and Tabs]].
+The pages for those features say how each works on a touch screen: Run on every block, the Code Block button, and the control keys above the keyboard in [[Running Code]], adding a picture in [[Images]], the mode chips under the search field in [[Finding Things]], and splits in [[Panes and Tabs]].
 
 Tapping through the tree reuses one tab rather than filling the strip, since a note you tap opens as an italic preview ([[Panes and Tabs]]). A long press on the tab holds Keep Tab Open, which is what makes it stay, and so does typing in the note. It matters more here than on a Mac: there is no ⌘W, so a strip that filled up would take a long press and a menu item per tab to empty.
 
