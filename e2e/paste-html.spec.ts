@@ -51,6 +51,21 @@ test("a copied link keeps its destination, which the plain text had thrown away"
   expect(await doc(page)).toBe("see [the docs](https://ledge.dev/x)");
 });
 
+// The same conversion through the platform's paste event, which is how a
+// phone's callout Paste arrives (editor/clipboard.ts pasteEvent). There the
+// event carries the pasteboard itself, so nothing is seeded.
+test("a paste event carrying formatted HTML converts it the way ⌘V does", async ({ page }) => {
+  await page.evaluate(() => {
+    const data = new DataTransfer();
+    data.setData("text/plain", "the docs");
+    data.setData("text/html", '<p>see <a href="https://ledge.dev/x">the docs</a></p>');
+    const event = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "clipboardData", { value: data });
+    document.querySelector(".cm-content")!.dispatchEvent(event);
+  });
+  expect(await doc(page)).toBe("see [the docs](https://ledge.dev/x)");
+});
+
 test("⇧⌘V pastes the pasteboard's own text, formatting and all left behind", async ({ page }) => {
   await seed(page, "the docs", '<p>see <a href="https://ledge.dev/x">the docs</a></p>');
   await page.keyboard.press("Meta+Shift+v");

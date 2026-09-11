@@ -25,7 +25,7 @@ import { formatting } from "./formatting";
 import { findReplace } from "./find";
 import { fromDisk, sessionIdFacet } from "./session";
 import { noteChanged, saveNow } from "../notes/store";
-import { copySelection, cutSelection, pasteHere, pastePlain } from "./clipboard";
+import { copySelection, cutSelection, pasteEvent, pasteHere, pastePlain } from "./clipboard";
 import { settings } from "../lib/settings";
 import { softKeyboard } from "../lib/shell";
 import { keyOf } from "../commands/keys";
@@ -434,6 +434,9 @@ export function createEditor(parent: HTMLElement, doc: string, sessionId: string
         findReplace(),
         appKeymap,
         clipboardKeymap,
+        // The platform's paste event, which a phone's callout Paste raises and
+        // which carries nothing on a Mac (editor/clipboard.ts pasteEvent).
+        pasteEvent,
         indentKeymap,
         // ⌘B/⌘I/⌘K (editor/formatting.ts). Editing behavior like quoteExit, so
         // not gated by livePreview: raw markdown toggles the same markers.

@@ -22,7 +22,7 @@ enum BarFace: String {
 /// frame arrives from the page as base64 and goes down the socket as bytes, and
 /// bytes off the socket go up as base64.
 ///
-/// No frame is parsed here and no method name is understood except the eighteen
+/// No frame is parsed here and no method name is understood except the nineteen
 /// in `SHELL_CALLS` (mainview/lib/nativeBridge.ts), which are the things only a
 /// device can answer.
 final class WebHost: UIViewController {
@@ -508,6 +508,8 @@ extension WebHost: WKScriptMessageHandler {
             reply(id, Natives.clipboardReadRich())
         case "clipboard.image":
             reply(id, Natives.clipboardImage())
+        case "image.encode":
+            reply(id, Natives.encodeImage(params["dataB64"] as? String ?? ""))
         case "photos.pick":
             // The one call that waits on a person. The reply is deferred until
             // the picker closes, which the bridge already allows for: a call is

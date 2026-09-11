@@ -127,4 +127,27 @@ describe("a pasted image is two machines' work", () => {
     const seams = clientSeams({ readImage: async () => new Uint8Array(0) }, { assetWrite: async () => ({ src: "never" }) });
     expect(await seams.assetPaste({ root: "/w", notePath: null })).toEqual({ src: null });
   });
+
+  test("bytes a paste event carried go to the server without a pasteboard read", async () => {
+    // A Mac's paste event never carries a picture (editor/clipboard.ts
+    // pasteEvent), but the method is one contract: bytes given are bytes sent.
+    const seen: unknown[] = [];
+    const seams = clientSeams(
+      {
+        readImage: async () => {
+          throw new Error("the pasteboard was read");
+        },
+      },
+      {
+        assetWrite: async (p) => {
+          seen.push(p);
+          return { src: ".ledge-assets/pasted.jpg" };
+        },
+      },
+    );
+    expect(await seams.assetPaste({ root: "/w", notePath: "/w/a.md", dataB64: "/9j/" })).toEqual({
+      src: ".ledge-assets/pasted.jpg",
+    });
+    expect(seen).toEqual([{ root: "/w", notePath: "/w/a.md", dataB64: "/9j/" }]);
+  });
 });

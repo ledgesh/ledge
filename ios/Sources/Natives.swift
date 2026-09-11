@@ -39,16 +39,30 @@ enum Natives {
         return ["text": board.string ?? "", "html": html]
     }
 
-    /// The pasteboard's image as base64 PNG, or "" for none.
+    /// The pasteboard's image as base64 JPEG, or "" for none.
     ///
     /// Bytes only. The file is the server's to name (remote.md §2), so the page
     /// sends these on to `assetWrite` and the name comes back. That is why this
     /// returns a string rather than answering `assetPaste` itself.
+    ///
+    /// JPEG for the picker's reasons (ios.md §11): a copied photo re-encoded as
+    /// PNG is ten times the bytes, and the re-encode drops the EXIF location.
     static func clipboardImage() -> String {
         guard UIPasteboard.general.hasImages, let image = UIPasteboard.general.image,
-            let png = image.pngData()
+            let jpeg = image.jpegData(compressionQuality: PhotoPicker.quality)
         else { return "" }
-        return png.base64EncodedString()
+        return jpeg.base64EncodedString()
+    }
+
+    /// The paste event's picture, re-encoded as base64 JPEG, or "" for bytes
+    /// UIKit cannot read. WebKit read it during the user's Paste, so the page
+    /// sends it here rather than `clipboardImage` above reading again (ios.md
+    /// §11). The encode is the picker's, so the EXIF location goes too.
+    static func encodeImage(_ base64: String) -> String {
+        guard let data = Data(base64Encoded: base64), let image = UIImage(data: data),
+            let jpeg = image.jpegData(compressionQuality: PhotoPicker.quality)
+        else { return "" }
+        return jpeg.base64EncodedString()
     }
 
     /// Put a string in front of the system share sheet: AirDrop, Messages,

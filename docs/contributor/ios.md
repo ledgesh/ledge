@@ -123,7 +123,7 @@ an optimization to reach for with a profile in hand, not a thing to build
 first. Phase 3 says it is not the bottleneck yet: a whole boot's frames cross
 it inside the 16ms between `server` and `view` in §5's measurement.
 
-**The bridge is eighteen strings, and it is written down twice.**
+**The bridge is nineteen strings, and it is written down twice.**
 `mainview/lib/nativeBridge.ts` is the page's half and
 `ios/Sources/WebHost.swift` is Swift's; between them is a byte stream in both
 directions and a request/response channel for what only a device can answer.
@@ -841,7 +841,7 @@ blocks inline. It has no terminal drawer.**
 | Tags, backlinks, the outline | Attaching a workspace folder |
 | Editing, with live preview | Moving a workspace |
 | Daily notes, templates, wikilinks | |
-| Rendered images, and adding them from the photo library | |
+| Rendered images, and adding them from the photo library or by pasting | |
 | Running a block inline, with the host picker and the confirmation | |
 | Editing the note's profile, which is what a run's environment is | |
 | The trash | |
@@ -1031,12 +1031,12 @@ own:
 - **Notes are not in Files.** The app's container holds no note bytes. There
   is nothing to export and nothing to sync, and the share sheet shares text
   the view already has rather than a file.
-- **Images arrive from the photo picker, not a pasteboard.** Its own client
-  method rather than a different `assetPaste`: `assetPick` is that one with a
-  picker where the pasteboard was, and the two are identical below the first
-  line. The bytes still ride `assetWrite` on a type-1 frame and the server
-  still names the file, seals it if the note is locked, and refuses a read-only
-  root. remote.md §2's "the client never names a file" is unaffected.
+- **Images arrive from the photo picker and from the pasteboard.** The picker
+  is its own client method rather than a different `assetPaste`: `assetPick`
+  is that one with a picker where the pasteboard was, and the two are
+  identical below the first line. The bytes still ride `assetWrite` on a
+  type-1 frame and the server still names the file, seals it if the note is
+  locked, and refuses a read-only root. remote.md §2's "the client never names a file" is unaffected.
 
   It is a seam and not just an iOS path because the Mac has an answer to the
   same verb — Insert Image… opens a file dialog there — and because
@@ -1057,6 +1057,19 @@ own:
   Mac is still PNG, because there the source really is one. Re-encoding also
   drops the EXIF, so the GPS a phone stamps on every picture does not travel to
   the server with it.
+
+  **A copied picture pastes from the callout, and the event carries the
+  bytes.** Photos' Copy puts `public.jpeg` on the pasteboard. The callout's
+  Paste then raises WebKit's paste event with that picture as a file and no
+  text, which CodeMirror's own handler answers by pasting the empty text.
+  `editor/clipboard.ts` takes the event first and hands the file's bytes to
+  `assetPaste`, which sends them through `image.encode` for the picker's JPEG
+  and then on to `assetWrite`. The bytes come from the event because WebKit
+  read them under the user's own Paste. A read of Swift's own would be a
+  second, programmatic one, the kind iOS 16 guards with its Allow Paste alert.
+  iOS also refuses a paste of anything copied too long ago: the `pasted`
+  daemon logs `CopiedTooFarInPast` and "Paste denied silently", and the paste
+  carries nothing. Measured in the Simulator; a device has not been checked.
 - **`menuSet` is a no-op, and `windowNew` answers no.** There is no menu bar,
   and a phone shows one app at a time, so a window and a client are the same
   thing here in a way they stopped being on the Mac (remote.md §8a). Both are

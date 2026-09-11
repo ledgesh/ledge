@@ -238,7 +238,7 @@ export function bootView(requests: RequestClient): Promise<void> {
   configureAssets({
     read: (folder, src, notePath) =>
       requests.assetRead({ root: folder, src, notePath }).then((r) => (r.sealed ? { sealed: true as const } : r.image)),
-    pasteImage: (folder, notePath) => requests.assetPaste({ root: folder, notePath }).then((r) => r.src),
+    pasteImage: (folder, notePath, dataB64) => requests.assetPaste({ root: folder, notePath, dataB64 }).then((r) => r.src),
     pickImage: (folder, notePath) => requests.assetPick({ root: folder, notePath }).then((r) => r.src),
   });
 

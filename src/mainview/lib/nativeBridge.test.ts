@@ -418,6 +418,25 @@ describe("the client overlay", () => {
     expect(fromBase64(png)).toEqual(new Uint8Array([137, 80, 78, 71]));
   });
 
+  test("a paste event's picture is encoded here rather than read again", async () => {
+    // WebKit already read the picture during the user's Paste (ios.md §11),
+    // so the bytes the event carried go to `image.encode` and the pasteboard
+    // is not read a second time.
+    const carried = toBase64(new Uint8Array([137, 80, 78, 71]));
+    const jpeg = toBase64(new Uint8Array([0xff, 0xd8, 0xff]));
+    const asked: unknown[] = [];
+    const wrote: unknown[] = [];
+    const o = overlay(
+      async (m, p) => (asked.push([m, p]), jpeg),
+      noServer({ assetWrite: async (p) => (wrote.push(p), { src: ".ledge-assets/1.jpg" }) }),
+    );
+    expect(await o.assetPaste({ root: "/notes", notePath: "/notes/a.md", dataB64: carried })).toEqual({
+      src: ".ledge-assets/1.jpg",
+    });
+    expect(asked).toEqual([["image.encode", { dataB64: carried }]]);
+    expect(wrote).toEqual([{ root: "/notes", notePath: "/notes/a.md", dataB64: jpeg }]);
+  });
+
   test("no image on the pasteboard costs the server nothing", async () => {
     // noServer() throws on assetWrite, so the test passing is the assertion.
     expect(await overlay(async () => "").assetPaste({ root: "/notes", notePath: "/notes/a.md" })).toEqual({ src: null });

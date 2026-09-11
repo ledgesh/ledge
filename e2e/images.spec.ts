@@ -119,6 +119,30 @@ test("⌘V with text on the pasteboard still pastes the text", async ({ page }) 
   await expect(lines.nth(1)).toHaveText("plain words");
 });
 
+// The platform's paste event, which is how a phone's callout Paste arrives
+// (editor/clipboard.ts pasteEvent). Built by hand the way Photos' Copy leaves
+// it on iOS: a picture file and no text. The harness's pasteImage fake then
+// supplies the reference, as it does for ⌘V.
+test("a paste event carrying a picture and no text embeds it, rendered at once", async ({ page }) => {
+  await page.keyboard.press("Meta+a");
+  await page.keyboard.type("notes so far");
+  await page.keyboard.press("Enter");
+  await page.evaluate(() => {
+    const data = new DataTransfer();
+    data.items.add(new File([new Uint8Array([0xff, 0xd8, 0xff])], "image.jpeg", { type: "image/jpeg" }));
+    const event = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "clipboardData", { value: data });
+    document.querySelector(".cm-content")!.dispatchEvent(event);
+  });
+
+  await expect(page.locator(".ledge-mdimage img")).toBeVisible();
+  await page.keyboard.press("ArrowLeft");
+  await expect(page.locator(".cm-content")).toContainText("![](.ledge-assets/pasted-1.png)");
+  await expect(page.locator(".cm-line").nth(0)).toHaveText("notes so far");
+  // The picture is the event's own bytes, not a second read of the pasteboard.
+  expect(await page.evaluate(() => window.__harness.pastedBytes())).toBe("/9j/");
+});
+
 test("dragging a selection across an image keeps the image drawn", async ({ page }) => {
   // The regression this covers: an image that reveals mid-drag collapses its
   // line to one row of markdown, and the lines below jump up past the held

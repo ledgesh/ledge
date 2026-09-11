@@ -149,7 +149,10 @@ export function clientSeams(
     // No image on the pasteboard answers null without a round trip. That is
     // the common case here: ⌘V with text on the pasteboard reaches this
     // handler only after the editor has declined to paste it as text.
-    assetPaste: async ({ root, notePath }) => {
+    assetPaste: async ({ root, notePath, dataB64 }) => {
+      // Bytes a paste event already carried, which a Mac's never does
+      // (editor/clipboard.ts pasteEvent). Passed on as they came.
+      if (dataB64) return server.assetWrite({ root, notePath, dataB64 });
       const bytes = await (native.readImage ?? readClipboardImage)();
       if (!bytes || bytes.length === 0) return { src: null };
       return server.assetWrite({ root, notePath, dataB64: Buffer.from(bytes).toString("base64") });

@@ -1,17 +1,19 @@
-// Cut, Copy and the two Pastes, as editor commands.
+// Cut, Copy and the two Pastes, as editor commands, and the paste event.
 //
-// The view runs under the views:// scheme, which is not a secure context:
+// The Mac's view runs under the views:// scheme, which is not a secure context:
 // navigator.clipboard is unavailable and WebKit's own cut/copy/paste events
-// never carry data, so every one of these goes through the Bun process
-// (lib/clipboard.ts, pbcopy/pbpaste). Two surfaces run them: the chords in
-// setup.ts's keymap and the editor's context menu (interactions.md §11).
-// Keeping them here rather than inline in the keymap makes a menu item and a
-// chord one act with one undo entry, not two implementations that drift apart.
-import type { Command, EditorView } from "@codemirror/view";
+// never carry data, so every one of these goes through the client
+// (lib/clipboard.ts: pbcopy on a Mac, UIPasteboard on a phone). Two surfaces
+// run them: the chords in setup.ts's keymap and the editor's context menu
+// (interactions.md §11). Keeping them here rather than inline in the keymap
+// makes a menu item and a chord one act with one undo entry, not two
+// implementations that drift apart.
+import { EditorView, type Command } from "@codemirror/view";
 import { copyText, readClipboard, readRichClipboard } from "../lib/clipboard";
 import { blockPasteInsert, parsePasteHtml, richPasteMarkdown, verbatimPaste } from "./htmlPaste";
 import { embedImage } from "./images";
 import { pasteImageAsset } from "../lib/assets";
+import { toBase64 } from "../../shared/wire";
 
 /** Every selected range, newline-joined: what ⌘C puts on the pasteboard. */
 export function selectedText(view: EditorView): string {
@@ -97,3 +99,41 @@ export const pastePlain: Command = (view) => {
   });
   return true;
 };
+
+/**
+ * What a paste event carries, reduced to what the editor does with it: text
+ * with its HTML flavor, a picture and no text, or nothing it can use. Text
+ * wins, as it does for ⌘V. `fileTypes` are the MIME types of the event's file
+ * items.
+ */
+export type EventPaste = { kind: "text"; text: string; html: string } | { kind: "image" } | null;
+
+export function eventPaste(text: string, html: string, fileTypes: readonly string[]): EventPaste {
+  if (text) return { kind: "text", text, html };
+  return fileTypes.some((t) => t.startsWith("image/")) ? { kind: "image" } : null;
+}
+
+// The platform's own paste, which is how a phone's callout Paste arrives. On
+// iOS the event carries the pasteboard (ios.md §11); on the Mac it carries
+// nothing, this returns false, and CodeMirror's own handler runs as before.
+// The picture is taken from the event while it dispatches: WebKit read it
+// under the user's Paste, and a second read is one iOS guards.
+export const pasteEvent = EditorView.domEventHandlers({
+  paste(event, view) {
+    const data = event.clipboardData;
+    if (!data || view.state.readOnly) return false;
+    const files = Array.from(data.items).filter((item) => item.kind === "file");
+    const text = data.getData("text/plain") || data.getData("text/uri-list");
+    const got = eventPaste(text, data.getData("text/html"), files.map((item) => item.type));
+    if (!got) return false;
+    if (got.kind === "text") {
+      pasteText(view, got.text, got.html);
+      return true;
+    }
+    const file = files.find((item) => item.type.startsWith("image/"))?.getAsFile() ?? null;
+    void embedImage(view, async (folder, notePath) =>
+      pasteImageAsset(folder, notePath, file ? toBase64(new Uint8Array(await file.arrayBuffer())) : undefined),
+    );
+    return true;
+  },
+});

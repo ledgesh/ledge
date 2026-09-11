@@ -105,7 +105,14 @@ describe("the schema's shape against the protocol version", () => {
   // disagreement between the two: the wire says the same thing either way.
   // Nothing was retyped, made required, or narrowed. The pin moves and the
   // version does not.
-  const PINNED = { protocol: 5, shape: "62926ff60e100f76" };
+  // Then assetPaste's params gained an optional `dataB64`, the picture a paste
+  // event carried (ios.md §11). assetPaste is client-only (shared/wire.ts
+  // NATIVE_METHODS): the client shell answers it and no server ever sees it,
+  // so only a view and its own shell have to agree, and they ship together.
+  // A shell that predates the field ignores it and reads its pasteboard as
+  // before. Nothing was retyped, made required, or narrowed. The pin moves and
+  // the version does not.
+  const PINNED = { protocol: 5, shape: "d114d8f8cf5f9b43" };
 
   test("a payload shape does not change without someone deciding whether it breaks", async () => {
     const shape = digest(shapeOf(await Bun.file(SCHEMA).text()));

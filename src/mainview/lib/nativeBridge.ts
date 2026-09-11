@@ -44,6 +44,10 @@ export const SHELL_CALLS = [
   "clipboard.write",
   "clipboard.readRich",
   "clipboard.image",
+  // A paste event's picture, re-encoded the way a picked photo is (ios.md
+  // §11). WebKit already read it during the user's Paste, so the page hands
+  // it over rather than `clipboard.image` reading the pasteboard again.
+  "image.encode",
   // The photo library, as JPEG bytes (ios.md §11). Slow by the standards of
   // everything else here: it puts a whole system picker on the screen and waits
   // for a person. Answers "" for a cancel, which is the common case.
@@ -399,15 +403,17 @@ function clientSeams(
     // answers with the image's bytes or "" for no image, and the name comes
     // back from the machine that holds the notes. Neither the view nor the
     // shell ever names a file (remote.md §2).
-    assetPaste: async ({ root, notePath }) => {
-      const dataB64 = (await shell.call("clipboard.image", {})) as string;
+    //
+    // A paste event's picture is re-encoded rather than read again, which
+    // would be the programmatic read iOS guards with Allow Paste (ios.md §11).
+    assetPaste: async ({ root, notePath, dataB64: carried }) => {
+      const dataB64 = (
+        carried ? await shell.call("image.encode", { dataB64: carried }) : await shell.call("clipboard.image", {})
+      ) as string;
       if (!dataB64) return { src: null };
       return requests.assetWrite({ root, notePath, dataB64 });
     },
     // The one above with a photo library where the pasteboard was (ios.md §11).
-    // It is also the only one of the two that matters on a phone: a phone has a
-    // pasteboard, but nothing on it got there by being copied out of a browser,
-    // and the picture worth inserting is the one the camera took.
     assetPick: async ({ root, notePath }) => {
       const dataB64 = (await shell.call("photos.pick", {})) as string;
       if (!dataB64) return { src: null };

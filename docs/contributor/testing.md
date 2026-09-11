@@ -507,6 +507,17 @@ Quit and reopen Simulator and it is right again. Anything about LAYOUT under the
 keyboard — which is most of what ios.md §7 now settles — is untestable in that
 state, because the keyboard that would change the layout never appears.
 
+**The Simulator copies this Mac's clipboard onto the device, which spoils a
+paste probe.** Simulator's Automatically Sync Pasteboard is on by default, so
+bringing Simulator to the front replaces what Photos' Copy put on the device's
+pasteboard with whatever the Mac last copied. `xcrun simctl pbinfo <device>`
+lists what is really there. Quit Simulator, `defaults write
+com.apple.iphonesimulator PasteboardAutomaticSync -bool false`, reopen it, and
+set it back afterwards. The panel's taps need Simulator running, and quitting
+it shuts its devices down. Copy afresh before each paste, too: iOS silently
+refuses to paste something copied too long ago, and only `log show` on the
+`pasted` process says so (`CopiedTooFarInPast`).
+
 **Rebuild the container when the probe needs a method the image predates.**
 `ledge-sshd:probe` bakes the server in, and a client built from a newer
 `rpc-schema.ts` now CONNECTS to an older image rather than being refused by it

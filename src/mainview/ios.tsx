@@ -5,7 +5,7 @@
 // across `lib/nativeBridge.ts`. So the reconnect ladder, the op ids, the held
 // requests and the instance check are the same code the Mac runs over ssh
 // (ios.md §2). Only the socket, the pasteboard and the keys are a phone's own:
-// the eighteen calls in `SHELL_CALLS`.
+// the nineteen calls in `SHELL_CALLS`.
 import { reconnectingClient, SESSION_HOLD_MS } from "../shared/transport";
 import { sessionHold } from "../shared/wire";
 import { BUILD_VERSION } from "../shared/version";

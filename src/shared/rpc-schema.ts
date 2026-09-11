@@ -819,7 +819,9 @@ export type LedgeRPC = {
       // Save the pasteboard's image into the workspace root's .ledge-assets/ as
       // a PNG and return the markdown-relative reference to embed
       // (`.ledge-assets/pasted-….png`), or null when the pasteboard holds no
-      // image. Sent by the editor's ⌘V when the pasteboard has no text.
+      // image. Sent by the editor's ⌘V when the pasteboard has no text, and by
+      // the paste event a phone's callout Paste raises when it carries a
+      // picture and no text (editor/clipboard.ts pasteEvent).
       // `root` is the pasting note's workspace. `notePath` is the pasting
       // note's file, when it has one: the server reads that note on disk, never
       // a view flag, to decide whether the paste is sealed at birth because the
@@ -828,12 +830,17 @@ export type LedgeRPC = {
       // device the user is holding, and a VPS has none. The client reads the
       // image and hands the bytes to assetWrite below, which names the file.
       // The view never names one.
-      assetPaste: { params: { root: string; notePath?: string | null }; response: { src: string | null } };
+      // `dataB64` is the picture when the paste event carried one. The client
+      // encodes those bytes rather than reading its pasteboard a second time,
+      // which on iOS is the programmatic read the Allow Paste alert guards
+      // (ios.md §11).
+      assetPaste: {
+        params: { root: string; notePath?: string | null; dataB64?: string };
+        response: { src: string | null };
+      };
       // The same trip, but it asks the device for a picture instead of reading
       // its pasteboard: the macOS file dialog, and on iOS the photo library
-      // (ios.md §11). Sent by Insert Image…, the only way in on a phone. There
-      // is no ⌘V there, and the picture the user wants is the one they took,
-      // not one they somehow copied.
+      // (ios.md §11). Sent by Insert Image…, for a picture nobody copied.
       // A client method for assetPaste's reason, and answering in its shape:
       // the picker belongs to the machine with a person at it, the bytes ride
       // assetWrite, and the name still comes back from the machine that holds

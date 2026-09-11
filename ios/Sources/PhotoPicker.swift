@@ -20,6 +20,11 @@ import UIKit
 /// Re-encoding rather than forwarding the original file also drops the EXIF, so
 /// the GPS coordinates a phone stamps on a picture do not reach the server.
 enum PhotoPicker {
+    /// 0.9, which is where JPEG stops being distinguishable from the original
+    /// by eye and keeps being a tenth of the size. Natives.clipboardImage
+    /// encodes a pasted picture at the same quality.
+    static let quality: CGFloat = 0.9
+
     /// Present over `host` and answer base64 JPEG, or "" for a cancel, a
     /// non-image, or a picture the library could not produce.
     static func pick(over host: UIViewController, then answer: @escaping (String) -> Void) {
@@ -76,9 +81,7 @@ enum PhotoPicker {
                 return finish("")
             }
             provider.loadObject(ofClass: UIImage.self) { [weak self] object, error in
-                // 0.9, which is where JPEG stops being distinguishable from the
-                // original by eye and keeps being a tenth of the size.
-                guard let image = object as? UIImage, let jpeg = image.jpegData(compressionQuality: 0.9)
+                guard let image = object as? UIImage, let jpeg = image.jpegData(compressionQuality: PhotoPicker.quality)
                 else {
                     if let error { print("[shell] photo pick failed: \(error.localizedDescription)") }
                     return self?.finish("") ?? ()

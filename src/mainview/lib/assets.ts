@@ -26,14 +26,17 @@
 export type AssetReadResult = { dataB64: string; mime: string } | { sealed: true } | null;
 
 type ProduceAsset = (folder: string, notePath: string | null) => Promise<string | null>;
+// A paste may bring its own bytes, the picture a paste event carried
+// (editor/clipboard.ts pasteEvent). Without them the client reads its pasteboard.
+type PasteAsset = (folder: string, notePath: string | null, dataB64?: string) => Promise<string | null>;
 
 let readHandler: ((folder: string, src: string, notePath: string | null) => Promise<AssetReadResult>) | null = null;
-let pasteHandler: ProduceAsset | null = null;
+let pasteHandler: PasteAsset | null = null;
 let pickHandler: ProduceAsset | null = null;
 
 export function configureAssets(fns: {
   read: (folder: string, src: string, notePath: string | null) => Promise<AssetReadResult>;
-  pasteImage: ProduceAsset;
+  pasteImage: PasteAsset;
   pickImage: ProduceAsset;
 }): void {
   readHandler = fns.read;
@@ -77,20 +80,18 @@ export async function assetDataUrl(folder: string, src: string, notePath: string
  * Save the pasteboard's image as an asset of the given workspace. Resolves to
  * the markdown-relative reference to embed, or null when the pasteboard holds
  * no image. `notePath` is the pasting note's file, null before its first save.
- * Bun seals the bytes before writing them when that note is locked
- * (locking.md §5).
+ * `dataB64` is the picture when the paste event already carried it. Bun seals
+ * the bytes before writing them when that note is locked (locking.md §5).
  */
-export function pasteImageAsset(folder: string, notePath: string | null = null): Promise<string | null> {
-  return pasteHandler ? pasteHandler(folder, notePath) : Promise.resolve(null);
+export function pasteImageAsset(folder: string, notePath: string | null = null, dataB64?: string): Promise<string | null> {
+  return pasteHandler ? pasteHandler(folder, notePath, dataB64) : Promise.resolve(null);
 }
 
 /**
  * The same as pasteImageAsset, taking the bytes from the device's picture
  * picker: the macOS file dialog, or the iOS photo library (ios.md §11). The
- * Insert Image… command calls this. On a phone it is the only way an image
- * gets into a note, because there is no ⌘V there and nothing has been copied.
- * Resolves to null when the picker is cancelled, which is the common outcome
- * and not a failure.
+ * Insert Image… command calls this. Resolves to null when the picker is
+ * cancelled, which is the common outcome and not a failure.
  */
 export function pickImageAsset(folder: string, notePath: string | null = null): Promise<string | null> {
   return pickHandler ? pickHandler(folder, notePath) : Promise.resolve(null);

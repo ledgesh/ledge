@@ -993,6 +993,7 @@ const assets = new Map<string, { dataB64: string; mime: string }>([
   [`${SCRATCH}\0assets/dot.png`, { dataB64: PIXEL_B64, mime: "image/png" }],
 ]);
 let pasteCount = 0;
+let pastedB64: string | null = null;
 // `?pick=cancel` boots with a picker that answers null every time. That is the
 // dialog's other outcome, and the one a "nothing is inserted" spec needs.
 const PICK_CANCELS = new URLSearchParams(window.location.search).get("pick") === "cancel";
@@ -1006,7 +1007,10 @@ configureAssets({
   // surface, and no harness spec pastes into a locked note. A locked note's
   // editor is reachable only unlocked, where pastes stay plain until the next
   // lock.
-  pasteImage: async (folder, _notePath) => {
+  // The bytes a paste event carried are kept for a spec to read back
+  // (window.__harness.pastedBytes), since they are the event's whole point.
+  pasteImage: async (folder, _notePath, dataB64) => {
+    pastedB64 = dataB64 ?? null;
     pasteCount += 1;
     const src = `.ledge-assets/pasted-${pasteCount}.png`;
     assets.set(`${folder}\0${src}`, { dataB64: PIXEL_B64, mime: "image/png" });
@@ -1248,6 +1252,9 @@ declare global {
       // Put both pasteboard flavors up, the way another app's copy does: the
       // rich-paste path has no in-app writer to drive it from.
       setClipboard: (text: string, html: string) => void;
+      // The bytes the last image paste carried, or null when it read the
+      // pasteboard instead (editor/clipboard.ts pasteEvent).
+      pastedBytes: () => string | null;
       // Keyed by home: the dialog has a tab per settings file.
       settingsText: (home: SettingsHome) => string;
       linkOpens: () => string[];
@@ -1347,6 +1354,7 @@ window.__harness = {
     clip = text;
     clipHtml = html;
   },
+  pastedBytes: () => pastedB64,
   settingsText: (home) => settingsFiles[home],
   linkOpens: () => [...linkOpens],
   windowOpens: () => windowOpens.length,

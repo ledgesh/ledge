@@ -4,7 +4,7 @@ A Markdown image reference alone on its own line renders as the picture. The fas
 
 ## Paste an image
 
-Copy an image anywhere, a screenshot or a picture from the web, and press ⌘V in a note. Ledge saves the image into the workspace and inserts the reference:
+Copy an image anywhere, a screenshot or a picture from the web, and press ⌘V in a note. On a phone, copy a photo in Photos, then tap in the note and choose Paste. Ledge saves the image into the workspace and inserts the reference:
 
 ```
 ![](.ledge-assets/pasted-2026-07-19.png)
@@ -20,9 +20,9 @@ A reference points at the file from the note that holds it, the way Markdown ref
 
 Run **Insert Image…** from the palette to pick a picture instead of pasting one. Ledge saves it and inserts the reference exactly as a paste does.
 
-On a Mac this opens a file dialog. On a phone it opens the photo library, and the button for it sits on the bar above the keyboard: a phone has no ⌘V, so this is the way pictures get into a note there.
+On a Mac this opens a file dialog. On a phone it opens the photo library, and the button for it sits on the bar above the keyboard.
 
-A picture chosen this way is saved as a JPEG when it already is one (a photograph off a camera roll stays a tenth of the size it would be as a PNG), and as a PNG otherwise. Location data is not carried over.
+A picture chosen this way is saved as a JPEG when it already is one (a photograph off a camera roll stays a tenth of the size it would be as a PNG), and as a PNG otherwise. A picture pasted on a phone is saved as a JPEG too. Location data is not carried over.
 
 ## What renders
 
