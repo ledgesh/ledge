@@ -148,3 +148,27 @@ test("typing norun onto a fence takes the pair away, and deleting it brings it b
   for (let i = 0; i < " norun".length; i += 1) await page.keyboard.press("Backspace");
   await expect(page.locator('[data-act="run"]')).toHaveCount(1);
 });
+
+test("an indented body line leaves the card's left edge straight", async ({ page }) => {
+  // The card is drawn per line (editor/blocks.ts), and the hanging indent
+  // (editor/wrap.ts) used to shift an indented line right with `margin-left`,
+  // taking that line's slice of the card with it and notching the edge. Inside
+  // a fence the shift goes into the padding instead, so every line's box
+  // starts in the same column.
+  await write(page, "# Untitled\n\n```sh\n  ls -a ~/ledge\n```\n");
+  const lines = page.locator(".cm-line.ledge-code");
+  await expect(lines).toHaveCount(3);
+  const lefts = await lines.evaluateAll((els) => els.map((el) => el.getBoundingClientRect().left));
+  expect(new Set(lefts).size).toBe(1);
+
+  // The indent itself survives: the code's first character still sits two
+  // columns in from the card's own inset.
+  const [inset, first] = await page.evaluate(() => {
+    const line = document.querySelectorAll<HTMLElement>(".cm-line.ledge-code")[1]!;
+    const range = document.createRange();
+    range.setStart(line.firstChild!, 2);
+    range.setEnd(line.firstChild!, 3);
+    return [line.getBoundingClientRect().left, range.getBoundingClientRect().left];
+  });
+  expect(first - inset).toBeGreaterThan(12);
+});

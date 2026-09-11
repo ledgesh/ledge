@@ -115,6 +115,10 @@
   /* Fenced code-block panel: stronger than --panel-bg so blocks read as cards. */
   --code-panel-bg: rgba(0, 0, 0, 0.045);
   --code-panel-border: rgba(0, 0, 0, 0.1);
+  /* How far a code card insets its code from its own left edge. A variable
+     rather than a literal because the output panel, the inline terminal, and
+     the hanging indent (editor/wrap.ts) all have to land in the same column. */
+  --code-inset: 12px;
   /* Inline code chip (`like this`). Its own pair rather than the panel's,
      because a one-word span needs more contrast than a whole card does. */
   --inline-code-bg: rgba(175, 184, 193, 0.35);
@@ -602,8 +606,8 @@ body {
   background: var(--code-panel-bg);
   border-left: 1px solid var(--code-panel-border);
   border-right: 1px solid var(--code-panel-border);
-  padding-left: 12px;
-  padding-right: 12px;
+  padding-left: var(--code-inset);
+  padding-right: var(--code-inset);
 }
 .cm-line.ledge-code-top {
   border-top: 1px solid var(--code-panel-border);
@@ -827,9 +831,9 @@ body {
   align-items: center;
   gap: 6px;
   height: 24px;
-  /* 12px in, matching `.ledge-code`'s own inset, so the status line starts in
-     the same column as the code above it. */
-  padding: 0 4px 0 12px;
+  /* Matching `.ledge-code`'s own inset, so the status line starts in the same
+     column as the code above it. */
+  padding: 0 4px 0 var(--code-inset);
   border-bottom: 1px solid var(--panel-border);
   cursor: default;
   user-select: none;
@@ -1027,10 +1031,10 @@ body {
    to the run grid, shrunk to content on finish); the body just gives it a little
    inset and its own background so it reads as a terminal within the card. */
 .ledge-term-body {
-  /* Same 12px inset as `.ledge-code`, so the terminal's first column lands
-     under the code's first column, which is the strongest single cue that the
+  /* Same inset as `.ledge-code`, so the terminal's first column lands under
+     the code's first column, which is the strongest single cue that the
      output belongs to the block rather than sitting beneath it. */
-  padding: 6px 12px;
+  padding: 6px var(--code-inset);
 }
 /* Before the first byte: name the silence instead of showing a bare header
    over an empty body. Invisible for the first beat (the animation's delay),

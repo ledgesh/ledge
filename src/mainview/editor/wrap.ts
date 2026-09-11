@@ -1,4 +1,5 @@
-import { RangeSetBuilder } from "@codemirror/state";
+import { syntaxTree } from "@codemirror/language";
+import { RangeSetBuilder, type EditorState } from "@codemirror/state";
 import {
   Decoration,
   type DecorationSet,
@@ -26,26 +27,59 @@ export function hangingIndentCols(lineText: string): number {
   return m ? m[0].length : 0;
 }
 
-// Hangs wrapped rows under the content column. `margin-left` shifts a line
-// right by N columns. A matching negative `text-indent` pulls its first row
-// back to column 0, so only the wrapped rows keep the indent. Each visible
-// line with a nonzero hang gets one decoration.
-//
-// The decoration sets margin, not padding. CodeMirror's base theme gives
-// .cm-line a small padding-left, and an inline padding replaces it rather
-// than adding to it: list lines lose those pixels, and the marker sits left
-// of where plain prose starts. Margin composes with the base padding.
+/**
+ * The inline style that hangs a line's wrapped rows under column `cols`.
+ *
+ * The negative `text-indent` pulls the first row back to column 0, so only the
+ * wrapped rows keep the indent. What supplies the indent depends on where the
+ * line is.
+ *
+ * Prose shifts with `margin-left`. CodeMirror's base theme gives .cm-line a
+ * small padding-left, and an inline padding replaces it rather than adding to
+ * it: list lines would lose those pixels, and the marker would sit left of
+ * where plain prose starts. Margin composes with the base padding.
+ *
+ * A line inside a fenced code block carries the card's background and borders
+ * instead (blocks.ts), and a margin would shift the card itself right for that
+ * one line, notching its left edge. So the shift goes into the padding, added
+ * to the card's own inset (`--code-inset` in index.css).
+ */
+export function hangStyle(cols: number, inCode: boolean): string {
+  const indent = `text-indent:-${cols}ch;`;
+  return inCode
+    ? `${indent}padding-left:calc(var(--code-inset) + ${cols}ch)`
+    : `${indent}margin-left:${cols}ch`;
+}
+
+// The fenced code blocks overlapping a visible range. Lezer gives an
+// unterminated block a node too, so a note that stops mid-block still reports
+// the lines it has.
+function fencesIn(state: EditorState, from: number, to: number): { from: number; to: number }[] {
+  const out: { from: number; to: number }[] = [];
+  syntaxTree(state).iterate({
+    from,
+    to,
+    enter(node) {
+      if (node.name === "FencedCode") out.push({ from: node.from, to: node.to });
+    },
+  });
+  return out;
+}
+
+// Each visible line with a nonzero hang gets one decoration.
 function buildDecorations(view: EditorView): DecorationSet {
   const builder = new RangeSetBuilder<Decoration>();
   for (const { from, to } of view.visibleRanges) {
+    const fences = fencesIn(view.state, from, to);
     for (let pos = from; pos <= to; ) {
       const line = view.state.doc.lineAt(pos);
       const n = hangingIndentCols(line.text);
       if (n > 0) {
+        const inCode = fences.some((f) => line.from >= f.from && line.from <= f.to);
         builder.add(
           line.from,
           line.from,
-          Decoration.line({ attributes: { style: `text-indent:-${n}ch;margin-left:${n}ch` } }),
+          Decoration.line({ attributes: { style: hangStyle(n, inCode) } }),
         );
       }
       pos = line.to + 1;

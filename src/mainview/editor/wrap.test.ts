@@ -1,5 +1,5 @@
 import { test, expect, describe } from "bun:test";
-import { hangingIndentCols } from "./wrap";
+import { hangStyle, hangingIndentCols } from "./wrap";
 
 describe("hangingIndentCols", () => {
   test("plain text and empty lines have no hang", () => {
@@ -39,5 +39,15 @@ describe("hangingIndentCols", () => {
   test("headings and code fences do not hang", () => {
     expect(hangingIndentCols("# Heading")).toBe(0);
     expect(hangingIndentCols("```py")).toBe(0);
+  });
+});
+
+describe("hangStyle", () => {
+  test("prose shifts with margin, so the base line padding survives", () => {
+    expect(hangStyle(2, false)).toBe("text-indent:-2ch;margin-left:2ch");
+  });
+
+  test("a code line shifts with padding, so the card's left edge stays straight", () => {
+    expect(hangStyle(2, true)).toBe("text-indent:-2ch;padding-left:calc(var(--code-inset) + 2ch)");
   });
 });
