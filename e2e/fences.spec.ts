@@ -162,13 +162,26 @@ test("an indented body line leaves the card's left edge straight", async ({ page
   expect(new Set(lefts).size).toBe(1);
 
   // The indent itself survives: the code's first character still sits two
-  // columns in from the card's own inset.
+  // columns in from the card's own inset. The glyph is found by walking text
+  // nodes because the `sh` highlighter may or may not have split the line
+  // into spans by the time this runs.
   const [inset, first] = await page.evaluate(() => {
     const line = document.querySelectorAll<HTMLElement>(".cm-line.ledge-code")[1]!;
-    const range = document.createRange();
-    range.setStart(line.firstChild!, 2);
-    range.setEnd(line.firstChild!, 3);
-    return [line.getBoundingClientRect().left, range.getBoundingClientRect().left];
+    let x: number | null = null;
+    const walk = (n: Node) => {
+      if (x !== null) return;
+      const text = n.textContent ?? "";
+      if (n.nodeType === Node.TEXT_NODE && text.trim()) {
+        const r = new Range();
+        r.setStart(n, text.length - text.trimStart().length);
+        r.setEnd(n, text.length);
+        x = r.getBoundingClientRect().left;
+        return;
+      }
+      n.childNodes.forEach(walk);
+    };
+    walk(line);
+    return [line.getBoundingClientRect().left, x!];
   });
   expect(first - inset).toBeGreaterThan(12);
 });
