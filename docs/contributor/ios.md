@@ -1223,10 +1223,11 @@ Per `testing.md`'s categories:
   recipe, including how a probe pairs a build without a human.
 - **A real device, against that same fixture on the network**:
   `bun run probe:ssh -- --serve` publishes it on every interface instead of
-  loopback, prints the destination and the host key fingerprint for the pairing
-  screen, and appends whatever `authorized_keys` line is pasted into it. A
-  Simulator shares this Mac's network stack and can dial `127.0.0.1`; a phone
-  cannot, and that is the only reason the fixture has a second mode.
+  loopback, prints the destination, the port and the host key fingerprint for
+  the pairing screen, and appends whatever `authorized_keys` line is pasted
+  into it. A Simulator shares this Mac's network stack and can dial
+  `127.0.0.1`; a phone cannot, and that is the only reason the fixture has a
+  second mode.
 - **What no harness can reach**: WebKit's own tap heuristics. iOS withholds the
   click of a tap whose synthetic hover changed the rendering
   (interactions.md §1a), and that decision lives in WebKit's UI process, not in

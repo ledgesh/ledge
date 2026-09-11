@@ -298,7 +298,10 @@ a run the next connection cannot show is interrupted when it claims. That last
 step is what found a one-byte pty race that made every inline run on a Linux
 server begin and never end (`bun/markers.ts`), which is the kind of thing only
 a real shell on a real kernel says out loud. It holds
-`127.0.0.1:22` for a few seconds and removes everything it made. `bun test` in
+`127.0.0.1:2222` for a few seconds (`--port <n>` names another) and removes
+everything it made. It refuses to start if anything already answers on that
+port. Not 22: with Remote Login on, the Mac's own sshd answers there (the iOS
+variant below has the details). `bun test` in
 that same image (`docker build --target build`) runs the whole server suite on
 glibc, which is the Linux port's other half.
 
@@ -409,7 +412,8 @@ holds port 22 for the Mac's own sshd. The container cannot publish on
 `127.0.0.1:22`, and a Simulator dialling `127.0.0.1` on 22 reaches the Mac,
 which fails as a host-key mismatch. Check the port with `nc -z`, not `lsof`:
 `lsof` run without root cannot see a socket launchd holds, and reports 22 free
-when the Mac's sshd is answering on it.
+when the Mac's sshd is answering on it. `bun run probe:ssh` defaults to 2222
+too, so stop this container before running it, or pass it `--port <n>`.
 
 **A probe pairs with launch arguments, and that is not a back door.**
 UserDefaults reads `-key value` pairs off the command line, which is how
@@ -467,10 +471,13 @@ bun run ios -- --phone                        # build, sign, install, stream the
 
 **The fixture has to leave loopback.** A Simulator shares this Mac's network
 stack, so `127.0.0.1` is the server; a phone is a different machine and there
-is nothing there. `--serve` publishes the same container on every interface,
-prints the `user@host` to type and the fingerprint to check the pairing screen
-against, and appends the `authorized_keys` line pasted into it. Ctrl-C removes
-the container and the scratch home.
+is nothing there. `--serve` publishes the same container on port 2222 of every
+interface, prints the `user@host` and the port to type and the fingerprint to
+check the pairing screen against, and appends the `authorized_keys` line pasted
+into it. Ctrl-C removes the container and the scratch home. The port and the
+host key stay the same from run to run (Debian's `openssh-server` package makes
+the host key when the image is built), so a phone that paired before dials its
+saved record again. Only its `authorized_keys` line has to be pasted anew.
 
 **Pair by hand here, not with launch arguments.** `-LedgeHostKey` exists so a
 Simulator probe can consider itself paired without a human; on a phone it skips

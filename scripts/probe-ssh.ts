@@ -14,16 +14,17 @@
 // clientConnection speaks the protocol. A probe that hand-wrote an ssh command
 // line would prove only that ssh works, which was never in doubt.
 //
-// Run it: `bun run probe:ssh`. It builds two images, holds 127.0.0.1:22 for a
-// few seconds, and removes everything it made.
+// Run it: `bun run probe:ssh`. It builds two images, holds 127.0.0.1:2222 for
+// a few seconds (`--port <n>` for another), and removes everything it made.
 //
 // `bun run probe:ssh -- --serve` is the same fixture with the assertions left
 // off and the container left up, for the one client that cannot reach loopback:
 // a real phone (ios.md §13). It publishes on every interface rather than
-// 127.0.0.1, prints the address to type on the pairing screen and the host key
-// to confirm there, and appends whatever `authorized_keys` line is pasted into
-// it. Ctrl-C takes it all down again.
+// 127.0.0.1, prints the address and port to type on the pairing screen and the
+// host key to confirm there, and appends whatever `authorized_keys` line is
+// pasted into it. Ctrl-C takes it all down again.
 import { mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
+import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -33,7 +34,7 @@ const SCRATCH = await mkdtemp(join(tmpdir(), "ledge-ssh-probe-"));
 // (testing.md §6).
 process.env["LEDGE_NOTES_ROOT"] = join(SCRATCH, "home");
 
-const { sshDial, pickHostKey, knownHostsText, PORT_UNSET } = await import("../src/bun/connections");
+const { sshDial, pickHostKey, knownHostsText, parsePort, PORT_UNSET } = await import("../src/bun/connections");
 const { ensureAskpass, forgetPassword, storePassword } = await import("../src/bun/secrets");
 type Connection = import("../src/bun/connections").Connection;
 const { clientConnection, reconnectingClient } = await import("../src/shared/transport");
@@ -50,6 +51,17 @@ const NAME = "ledge-ssh-probe";
 
 // Stand the fixture up for a phone instead of asserting against it.
 const SERVE = Bun.argv.includes("--serve");
+
+// Where the key fixture's sshd answers on this Mac. Not 22: with Remote Login
+// on, launchd holds 22 for the Mac's own sshd (testing.md §6). Fixed rather
+// than picked per run: the image keeps its host key too, so a phone's saved
+// record from an earlier `--serve` still matches the next one.
+const portAt = Bun.argv.indexOf("--port");
+const PORT = portAt >= 0 ? (parsePort(Bun.argv[portAt + 1] ?? "") ?? PORT_UNSET) : 2222;
+if (PORT === PORT_UNSET) {
+  await rm(SCRATCH, { recursive: true, force: true });
+  throw new Error(`--port takes a port from 1 to 65535, not "${Bun.argv[portAt + 1] ?? ""}"`);
+}
 
 let failures = 0;
 const ok = (claim: string, detail = "") => console.log(`  ok    ${claim}${detail && `  (${detail})`}`);
@@ -98,7 +110,8 @@ async function teardown() {
  *
  * Both directions delete the rule first, so they are idempotent: a cut asked
  * for twice leaves one rule rather than two for a mend to peel off one at a
- * time.
+ * time. The rule names 22, sshd's port inside the container, whatever PORT
+ * publishes it as on this Mac.
  */
 const RULE = ["OUTPUT", "-p", "tcp", "--sport", "22", "-j", "DROP"];
 const iptables = (flag: string) => run(["docker", "exec", NAME, "iptables", flag, ...RULE], { quiet: true });
@@ -146,16 +159,33 @@ const signalDaemon = (sig: "STOP" | "CONT") => {
   if (sent.code !== 0) throw new Error(`could not send SIG${sig} to the daemon: ${sent.err || sent.out || "no such process"}`);
 };
 
+/**
+ * Whether anything accepts a TCP connection on 127.0.0.1 at `port`.
+ *
+ * A connect rather than `lsof`: lsof run without root cannot see a socket that
+ * launchd holds, which is how Remote Login listens, so it reported 22 free
+ * while the Mac's own sshd answered there. A listener on every interface also
+ * answers on loopback, so this covers the `--serve` binding too.
+ */
+function answers(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = connect({ host: "127.0.0.1", port });
+    const settle = (yes: boolean) => {
+      socket.destroy();
+      resolve(yes);
+    };
+    socket.once("connect", () => settle(true));
+    socket.once("error", () => settle(false));
+    socket.setTimeout(2000, () => settle(false));
+  });
+}
+
 try {
-  // Port 22 and not a high one for the key fixture: it predates the port field
-  // and the [password] step below is what exercises a high one. An ssh
-  // destination has no port in it (the same constraint testing.md §6 records
-  // for `host:` shells). Loopback only, and gone at teardown. Under --serve the
-  // client is on another machine, so both the binding and this check widen to
-  // every interface.
-  const where = SERVE ? "" : "@127.0.0.1";
-  const held = run(["sh", "-c", `lsof -nP -iTCP${where}:22 -sTCP:LISTEN 2>/dev/null | tail -n +2`], { quiet: true });
-  if (held.out) throw new Error(`something already listens on port 22:\n${held.out}\nStop it, or run this elsewhere.`);
+  // The fixture below binds loopback only and is gone at teardown. Under
+  // --serve the client is on another machine, so it binds every interface.
+  if (await answers(PORT)) {
+    throw new Error(`something already answers on 127.0.0.1:${PORT}. Stop it, or pick another port with --port <n>.`);
+  }
 
   step("[build] the shipped image, then the fixture that adds an sshd to it");
   run(["docker", "build", "-t", IMAGE, REPO]);
@@ -172,7 +202,7 @@ try {
   // network namespace and nothing outside it.
   run([
     ...["docker", "run", "-d", "--name", NAME, "--cap-add=NET_ADMIN"],
-    ...["-p", SERVE ? "22:22" : "127.0.0.1:22:22", "-e", `LEDGE_PUBKEY=${pub}`, FIXTURE],
+    ...["-p", SERVE ? `${PORT}:22` : `127.0.0.1:${PORT}:22`, "-e", `LEDGE_PUBKEY=${pub}`, FIXTURE],
   ]);
   console.log(`  authorized_keys: restrict,command="ledge-server serve" ${pub.slice(0, 32)}…`);
 
@@ -180,7 +210,7 @@ try {
   let scan = "";
   for (let i = 0; i < 40 && !pickHostKey(scan); i++) {
     await Bun.sleep(250);
-    scan = run(["ssh-keyscan", "-T", "2", "127.0.0.1"], { quiet: true }).out;
+    scan = run(["ssh-keyscan", "-T", "2", "-p", String(PORT), "127.0.0.1"], { quiet: true }).out;
   }
   const hostKey = pickHostKey(scan);
   if (!hostKey) throw new Error("the fixture's sshd never answered ssh-keyscan");
@@ -200,11 +230,13 @@ try {
 
     console.log(`
   Pair the phone with    ledge@${lan}
+  On port                ${PORT}
   Confirm this host key  ${fingerprint.split(" ").slice(0, 2).join(" ")}
 
-  This sshd answers on every interface for as long as this runs, on ${iface}
-  and any other. It takes public keys only and pins each one to a single
-  command, which is the same posture remote.md §4 asks of a real server.
+  This sshd answers on port ${PORT} of every interface for as long as this
+  runs, on ${iface} and any other. It takes public keys only and pins each one
+  to a single command, which is the same posture remote.md §4 asks of a real
+  server.
 
   Copy the line the phone's pairing screen shows, paste it here, press Enter.
   Type  cut     to stop this end answering, without closing anything. Requests
@@ -301,7 +333,7 @@ try {
     // wrong reads as a plain "Permission denied (publickey)", which is what a
     // wrong key looks like too, so the message does not say which it was.
     destination: "ledge@127.0.0.1",
-    port: PORT_UNSET,
+    port: PORT,
     keyPath,
     auth: "key",
     hostKey,
@@ -915,7 +947,7 @@ try {
   // Asked while the client is giving up rather than before it starts, because
   // the claim is about that moment: sshd is answering on the very machine the
   // client is about to hang up on.
-  const stillListening = pickHostKey(run(["ssh-keyscan", "-T", "2", "127.0.0.1"], { quiet: true }).out);
+  const stillListening = pickHostKey(run(["ssh-keyscan", "-T", "2", "-p", String(PORT), "127.0.0.1"], { quiet: true }).out);
   signalDaemon("CONT");
   check("sshd on that machine answered throughout, so nothing under the protocol had anything to notice", stillListening === hostKey);
   check("the client gives up on a server that stopped answering", /stopped answering/.test(verdict), `${noticedAfter}s: ${verdict}`);
