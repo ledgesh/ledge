@@ -35,7 +35,8 @@ final class WebHost: UIViewController {
     /// Called when a dial fails for a reason retrying cannot fix: a host key
     /// that changed, or a key the server will not accept. The page's ladder
     /// would otherwise spend the next half minute asking the same question.
-    private let onRepair: (String) -> Void
+    /// It is handed the record that was refused, and why.
+    private let onRepair: (ServerRecord, String) -> Void
     /// Called when the page has no more use for this connection and wants the
     /// shell's own server screens instead: the list it saved has nothing left
     /// in it to dial, or the boot failed and the person holding the phone asked
@@ -75,7 +76,7 @@ final class WebHost: UIViewController {
     init(
         config: ShellConfig,
         server: ServerRecord,
-        onRepair: @escaping (String) -> Void,
+        onRepair: @escaping (ServerRecord, String) -> Void,
         onServers: @escaping (String) -> Void
     ) {
         self.config = config
@@ -205,6 +206,8 @@ final class WebHost: UIViewController {
         socket?.close()
         generation += 1
         let gen = generation
+        // Held for the reply: `servers.save` can repoint `server` mid-dial.
+        let dialled = server
         let key: DeviceKey.Held
         do {
             key = try DeviceKey.load()
@@ -213,18 +216,18 @@ final class WebHost: UIViewController {
         }
         let next = SSHTransport(
             generation: gen,
-            server: server,
+            server: dialled,
             key: key,
             // The pinned case, always. Nothing in the running app can be asked
             // to trust a new key: that question belongs to pairing, where a
             // person is looking at the screen.
-            hostKey: PinnedHostKey(openSSHLine: server.hostKey),
+            hostKey: PinnedHostKey(openSSHLine: dialled.hostKey),
             // Read here and not held between connections: a password is in the
             // keychain, and this is the moment it is needed (`ServerPassword`).
             // Nil for a record on the key door, and nil for one that says
             // password and has none. That fails as a refusal naming the server
             // rather than as a dial that offers an empty string.
-            password: server.usesPassword ? ServerPassword.read(server.id) : nil,
+            password: dialled.usesPassword ? ServerPassword.read(dialled.id) : nil,
             log: { print("[shell] \($0)") }
         )
         socket = next
@@ -240,7 +243,7 @@ final class WebHost: UIViewController {
                         // address is the one error message nobody can act on.
                         let why = error.localizedDescription
                         self.fail(id, why)
-                        if SSHFailure.needsPairing(error) { self.onRepair(why) }
+                        if SSHFailure.needsPairing(error) { self.onRepair(dialled, why) }
                     }
                 }
             },

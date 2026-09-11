@@ -396,12 +396,20 @@ filesystem is the scratch root, so nothing has to be pointed away from
 ```
 bun run ios -- --build                        # build; the app mints its key at first launch
 xcrun simctl launch --console-pty <dev> dev.ledge.ios     # read the [pair] line
-docker run -d --name ledge-ios-probe --cap-add=NET_ADMIN -p 127.0.0.1:22:22 \
+nc -z 127.0.0.1 2222 || echo free             # any port nothing answers on
+docker run -d --name ledge-ios-probe --cap-add=NET_ADMIN -p 127.0.0.1:2222:22 \
   -e LEDGE_PUBKEY="<that key>" ledge-sshd:probe
-ssh-keyscan -t ed25519 127.0.0.1              # the line to pin
+ssh-keyscan -t ed25519 -p 2222 127.0.0.1      # the key after [127.0.0.1]:2222 is the pin
 xcrun simctl launch --console-pty <dev> dev.ledge.ios \
-  -LedgeServer ledge@127.0.0.1 -LedgeHostKey "ssh-ed25519 AAAA…"
+  -LedgeServer ledge@127.0.0.1 -LedgePort 2222 -LedgeHostKey "ssh-ed25519 AAAA…"
 ```
+
+**Publish the fixture on a free port, not 22.** With Remote Login on, launchd
+holds port 22 for the Mac's own sshd. The container cannot publish on
+`127.0.0.1:22`, and a Simulator dialling `127.0.0.1` on 22 reaches the Mac,
+which fails as a host-key mismatch. Check the port with `nc -z`, not `lsof`:
+`lsof` run without root cannot see a socket launchd holds, and reports 22 free
+when the Mac's sshd is answering on it.
 
 **A probe pairs with launch arguments, and that is not a back door.**
 UserDefaults reads `-key value` pairs off the command line, which is how
@@ -409,9 +417,23 @@ UserDefaults reads `-key value` pairs off the command line, which is how
 that considers itself paired without a human tapping Trust. Nothing on a device
 can set those, the pin is still compared on every connection, and the values
 live in the argument domain, so they vanish at the next launch and shadow
-anything the app stores. BOTH are required: an address on its own lands on the
-pairing screen, because a launch argument that named no key would otherwise be
-paired to a key stored for somewhere else.
+anything the app stores. The address and the key are both required: an address
+on its own lands on the pairing screen, because a launch argument that named no
+key would otherwise be paired to a key stored for somewhere else.
+`-LedgePort` is optional and defaults to 22. A value that is not a port from 1
+to 65535 refuses the launch pairing rather than dialling 22. With no
+`-LedgeHostKey`, `-LedgeServer` and `-LedgePort` pre-fill the pairing form,
+which `bun run ios -- --server ledge@127.0.0.1 --port 2222` also passes.
+
+**A refused launch pairing leaves the stored servers alone.** A host key or
+device key the fixture refuses sends the app to the pairing form, pre-filled
+with the launch address and port. The pin it drops is the refused record's,
+and the launch record is not stored, so every stored pin survives. The launch
+arguments shadow the stored selection until the shell's own server screens
+appear: that refusal, or the page's button for choosing another server. From
+then until the next launch, the list and the form act on stored records only.
+A relaunch without the arguments dials the Simulator's stored selection, which
+an earlier session may have left pointing at a real machine.
 
 `NET_ADMIN` is there so the container can cut its own wire, which is what
 `[drop]` does to itself in the Bun probe. On a phone a cut proves that the server
@@ -528,7 +550,7 @@ probe seeded. A refusal naming the PROTOCOL version is the other case, and that
 one always needs the rebuild.
 
 Tear down by uninstalling the app (`simctl uninstall`), `docker rm -f`, and
-checking that nothing still listens on 22.
+checking with `nc -z` that nothing still answers on the port the fixture used.
 
 **A slow reader is a test dimension, and until iOS there was no client that
 was one.** Everything that speaks the framed protocol — the harness, the Mac,

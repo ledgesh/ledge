@@ -41,7 +41,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         let screen = WebHost(
             config: config,
             server: server,
-            onRepair: { [weak self] why in self?.repair(why) },
+            onRepair: { [weak self] refused, why in self?.repair(refused, why) },
             // Either the page removed the last server, or the person holding
             // the phone asked for this list from a page that could not reach
             // anything (mainview/ios.tsx). A phone has no local server to fall
@@ -64,8 +64,10 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     /// A phone with no servers roots the stack at the form, so a first launch
     /// is one screen and has no Back button pointing at an empty list. Every
     /// other case roots it at the list, which is the screen that can get a
-    /// phone out of a saved server that stopped answering.
-    private func showServers(because: String?, pairing pairFirst: Bool = false) {
+    /// phone out of a saved server that stopped answering. `pairing` pushes
+    /// the form pre-filled with that record, the one `repair` was handed.
+    private func showServers(because: String?, pairing refused: ServerRecord? = nil) {
+        ServerStore.setLaunchAside()
         let stored = ServerStore.load()
         let list = ServerListViewController(
             servers: stored.servers,
@@ -92,17 +94,17 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         )
         // Nothing selected falls back to what the launch suggested, which is how
         // a probe points a build at a scratch server.
-        let selected = stored.servers.first(where: { $0.id == stored.selected })
+        let selected = refused ?? stored.servers.first(where: { $0.id == stored.selected })
         let form = {
             self.pairingScreen(
                 suggest: selected?.destination ?? ShellConfig.suggestion,
-                port: selected?.port ?? 0,
+                port: selected?.port ?? ShellConfig.suggestedPort,
                 because: because
             )
         }
         let nav = UINavigationController(rootViewController: stored.servers.isEmpty ? form() : list)
         nav.navigationBar.prefersLargeTitles = true
-        if !stored.servers.isEmpty, pairFirst { nav.pushViewController(form(), animated: false) }
+        if !stored.servers.isEmpty, refused != nil { nav.pushViewController(form(), animated: false) }
         host = nil
         chooser = nav
         window?.rootViewController = nav
@@ -122,15 +124,16 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         }
     }
 
-    /// A failure retrying cannot fix. The pin is dropped and the destination
-    /// kept: the address is still the one the user meant, and the key is the
-    /// thing to look at again, so this lands on the form rather than the list.
-    private func repair(_ why: String) {
+    /// A failure retrying cannot fix. The refused record's pin is dropped and
+    /// its destination kept: the address is still the one the user meant, and
+    /// the key is the thing to look at again, so this lands on the form rather
+    /// than the list. A launch-argument record has no stored pin to drop.
+    private func repair(_ refused: ServerRecord, _ why: String) {
         // The page's ladder keeps dialing while this decision is being made, so
         // every attempt would otherwise ask for the same screen.
         guard chooser == nil else { return }
-        ServerStore.forgetPin()
-        showServers(because: why, pairing: true)
+        ServerStore.forgetPin(of: refused.id)
+        showServers(because: why, pairing: refused)
     }
 
     // iOS suspends an app shortly after it leaves the foreground, and a

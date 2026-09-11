@@ -109,6 +109,12 @@ enum ServerStore {
     // then only ever as a launch suggestion (`ShellConfig.suggestion`).
     private static let destinationKey = "LedgeServer"
     private static let hostKeyKey = "LedgeHostKey"
+    // Never stored: a launch argument only, beside the two above (`launched()`).
+    fileprivate static let portKey = "LedgePort"
+    private static let launchID = "launch-argument"
+    /// Set when the shell's own server screens are shown, and never cleared.
+    /// From then on the launch arguments stop shadowing the stored selection.
+    private static var launchSetAside = false
 
     struct Stored: Codable {
         var version: Int
@@ -146,13 +152,14 @@ enum ServerStore {
         return record
     }
 
-    /// A pairing that came from the launch arguments, for one launch.
+    /// A pairing that came from the launch arguments, until the shell's server
+    /// screens set it aside (`setLaunchAside`).
     ///
-    /// `-LedgeServer ledge@127.0.0.1 -LedgeHostKey "ssh-ed25519 AAAA…"` is how
-    /// testing.md §6 points a Simulator at a scratch server without a human
-    /// tapping Trust. Both halves are read from the argument domain, and both
-    /// are required: an address and a pin that named each other on one command
-    /// line cannot be mismatched.
+    /// `-LedgeServer ledge@127.0.0.1 -LedgePort 2222 -LedgeHostKey "ssh-ed25519
+    /// AAAA…"` is how testing.md §6 points a Simulator at a scratch server
+    /// without a human tapping Trust. All three are read from the argument
+    /// domain. The address and the pin are required: an address and a pin that
+    /// named each other on one command line cannot be mismatched.
     ///
     /// That mismatch is why `migrated()` below reads the persistent domain
     /// instead. Nothing is written here, so this vanishes at the next launch
@@ -161,14 +168,36 @@ enum ServerStore {
     /// It is not a back door. Nothing on a device can set an argument domain,
     /// and the pin here is compared on every connection like any other.
     private static func launched() -> ServerRecord? {
+        guard !launchSetAside else { return nil }
         let argv = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
         guard let destination = argv[destinationKey] as? String,
             let hostKey = argv[hostKeyKey] as? String,
             !hostKey.isEmpty,
-            ServerRecord.problem(with: destination) == nil
+            ServerRecord.problem(with: destination) == nil,
+            let port = launchPort(argv[portKey])
         else { return nil }
         let host = String(destination.drop(while: { $0 != "@" }).dropFirst())
-        return ServerRecord(id: "launch-argument", name: host, destination: destination, hostKey: hostKey)
+        return ServerRecord(id: launchID, name: host, destination: destination, port: port, hostKey: hostKey)
+    }
+
+    /// `-LedgePort`'s value, 0 when absent, and nil when it is not a port.
+    /// A nil refuses the whole launch pairing rather than dialling 22, which
+    /// on a Mac with Remote Login on is the Mac's own sshd.
+    fileprivate static func launchPort(_ value: Any?) -> Int? {
+        guard let value else { return 0 }
+        // `-LedgePort 2222` arrives as the string "2222", not a number.
+        guard let port = (value as? Int) ?? (value as? String).flatMap({ Int($0) }), (1...65535).contains(port)
+        else { return nil }
+        return port
+    }
+
+    /// Stop honouring the launch arguments for the rest of this launch.
+    ///
+    /// Called whenever the shell's server screens are shown. The launch
+    /// record is not in the stored list, so a server chosen or paired there is
+    /// a stored one, and dialling the launch record instead would ignore it.
+    static func setLaunchAside() {
+        launchSetAside = true
     }
 
     static func save(servers: [ServerRecord], selected: String) {
@@ -233,12 +262,15 @@ enum ServerStore {
         save(servers: stored.servers, selected: id)
     }
 
-    /// Forget the selected record's pin but keep the record: the case this
-    /// exists for is a host key that changed, where the address is still the
-    /// one the user meant and the key is the thing to look at again.
-    static func forgetPin() {
+    /// Forget one record's pin but keep the record: the case this exists for
+    /// is a host key that changed, where the address is still the one the user
+    /// meant and the key is the thing to look at again.
+    ///
+    /// By id, not by selection. The launch record is not stored, so a refusal
+    /// of it matches nothing here and leaves every stored pin alone.
+    static func forgetPin(of id: String) {
         var stored = load()
-        guard let at = stored.servers.firstIndex(where: { $0.id == stored.selected }) else { return }
+        guard let at = stored.servers.firstIndex(where: { $0.id == id }) else { return }
         stored.servers[at].hostKey = ""
         save(servers: stored.servers, selected: stored.selected)
     }
@@ -317,6 +349,12 @@ struct ShellConfig {
         UserDefaults.standard.string(forKey: "LedgeServer")
             ?? (Bundle.main.object(forInfoDictionaryKey: "LedgeServer") as? String)
             ?? ""
+    }
+
+    /// The port the pairing screen starts with, from `-LedgePort`, and 0
+    /// (the blank field) when there is none or it is not a port.
+    static var suggestedPort: Int {
+        ServerStore.launchPort(UserDefaults.standard.object(forKey: ServerStore.portKey)) ?? 0
     }
 
     /// What this device calls itself, for the presence list every other client

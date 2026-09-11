@@ -4,6 +4,7 @@
 //   bun run ios -- --build            build only
 //   bun run ios -- --phone            the same, on a real device
 //   bun run ios -- --server ledge@10.0.0.4
+//   bun run ios -- --server ledge@127.0.0.1 --port 2222
 //   bun run ios -- --device "iPhone 16 Pro"
 //
 // A package manifest and a directory, not an Xcode project. The app is a
@@ -49,6 +50,10 @@ const flag = (name: string): string | null => {
 const buildOnly = argv.includes("--build");
 const device = flag("device") ?? "iPhone 16";
 const server = flag("server");
+// A launch argument only, never baked into Info.plist: it pre-fills the
+// pairing form's port field for this launch (ShellConfig.swift `suggestedPort`).
+const port = flag("port");
+const launchArgs = [...(server !== null ? ["-LedgeServer", server] : []), ...(port !== null ? ["-LedgePort", port] : [])];
 
 // `--phone`, optionally naming one: `--phone <name-or-udid>`, as `xcrun
 // devicectl list devices` prints it. The name is optional because most Macs
@@ -547,7 +552,7 @@ if (phone && profile) {
   // `--console` is the device's `--console-pty`: the shell's print() lines and
   // every boot number the view reports come out here, and Ctrl-C detaches and
   // leaves the app running. The trailing arguments reach the app's argv, which
-  // is where UserDefaults finds `-LedgeServer` (ShellConfig.swift).
+  // is where UserDefaults finds `-LedgeServer` and `-LedgePort` (ShellConfig.swift).
   console.log(`[ios] launching; Ctrl-C detaches\n`);
   const launch = [
     "xcrun",
@@ -565,7 +570,7 @@ if (phone && profile) {
   // everything after the bundle id too, so `-LedgeServer` comes back as
   // "Unknown option '-L'". simctl takes the same pair with no separator, which
   // is why the two lines below this one and above it do not match.
-  if (server !== null) launch.push("--", "-LedgeServer", server);
+  if (launchArgs.length > 0) launch.push("--", ...launchArgs);
   await run(launch);
   process.exit(0);
 }
@@ -610,5 +615,5 @@ await run(["xcrun", "simctl", "terminate", target.udid, BUNDLE_ID], { quiet: tru
 // (WebHost.swift, ios.tsx). Ctrl-C detaches and leaves the app running.
 console.log(`[ios] launching; Ctrl-C detaches\n`);
 const launch = ["xcrun", "simctl", "launch", "--console-pty", target.udid, BUNDLE_ID];
-if (server !== null) launch.push("-LedgeServer", server);
+launch.push(...launchArgs);
 await run(launch);
