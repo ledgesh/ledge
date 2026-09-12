@@ -131,6 +131,16 @@ test("a task renders a checkbox; clicking it toggles the [x] in the text", async
   await expect(page.locator(".cm-line").first()).not.toContainText("[ ]");
   await expect(page.locator(".cm-line").first()).toHaveText(" buy milk");
 
+  // The hotspot over it is the box itself on a pointer client. The finger's
+  // one is larger, out to the line's height and into the gutter beside it
+  // (e2e/phone.spec.ts), and the same padding here would swallow clicks meant
+  // for the caret in the text around the box.
+  const spot = (await page.locator(".ledge-hotspot").boundingBox())!;
+  const drawn = (await box.boundingBox())!;
+  expect(spot.width).toBeCloseTo(drawn.width, 1);
+  expect(spot.height).toBeCloseTo(drawn.height, 1);
+  expect(spot.x).toBeCloseTo(drawn.x, 1);
+
   // Clicking it checks the box by editing the document: the text now carries
   // [x], the widget re-renders checked, and the label gets the done styling.
   await box.dispatchEvent("mousedown", { button: 0 });

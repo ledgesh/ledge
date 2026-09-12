@@ -153,6 +153,30 @@ section.
   fence, clear of the code. `editor/blocks.ts` still anchors it to that fence's
   glyph and knows nothing about either number — the pair belongs next to each
   other in one file, not one of them in a measurement.
+- **A control drawn inside text grows its target rather than itself.** A task's
+  `[ ]` is a real checkbox on the character grid, and the box's 1ch advance is
+  what puts a task's label in the column a bullet's label is in (`index.css`
+  `.ledge-task`, `editor/lists.ts`). At editor text size that box is 13 points,
+  which is a speck to aim at, and a 44-point box in a 21-point line would cover
+  the lines above and below it. So the box and its target move separately: the
+  box is drawn to a floor of 18 points on touch, overhanging its advance rather
+  than widening it, and the hotspot over it (`editor/livePreview.ts`) takes the
+  whole height of the line and 1.5 characters of the gutter the concealed `- `
+  left. It stops at the label, because a tap in the text belongs to the caret,
+  and it stops at the line, because the line below carries the next task's box.
+  This is the one target on this client that is deliberately under 44 points,
+  and the sweep below names it for that reason: what a miss costs here is a
+  caret in the wrong place or the next task, and a 44-point box would take the
+  taps that place the caret in a checklist.
+- **A drawn control states the two colours the engine was choosing.** The same
+  checkbox was the platform's own: `accent-color` over a native box, which is a
+  grey square in a light theme and a grey square in a dark one. It is
+  `appearance: none` now, with the outline, the corner and the accent fill
+  written down, which is what every note app on the platform draws and what
+  makes an 18-point box read as a box rather than as a bigger speck. The tick
+  inside a checked one is the page's own background colour (`--task-tick`), not
+  white: the dark theme's accent is light enough that a white tick on it is a
+  blank blue square.
 - **A control that stops floating over things stops needing the box that says
   so.** The same group draws a filled, bordered box around its buttons on a
   pointer client, where it is what holds two 22-point glyphs apart from the code

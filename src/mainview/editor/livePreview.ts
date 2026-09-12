@@ -45,6 +45,7 @@ import {
   WidgetType,
 } from "@codemirror/view";
 import { openableUrl } from "../../shared/links";
+import { isTouchPointer } from "../lib/viewport";
 import { tooltip } from "../commands/format";
 import { frontmatterRange } from "./frontmatter";
 import { openExternal, openTag, openWikiNote, wikiNotes } from "./bridge";
@@ -762,6 +763,7 @@ const hotspotPlugin = ViewPlugin.fromClass(
 
     read(): HotspotMeasure {
       const view = this.view;
+      const touch = isTouchPointer();
       // A pooled editor for an inactive tab is detached (editorPool.ts):
       // collapse the layer rather than strand hotspots on screen.
       if (!view.dom.isConnected) {
@@ -817,13 +819,21 @@ const hotspotPlugin = ViewPlugin.fromClass(
           });
         }
       }
+      // A checkbox's hotspot is its box on a pointer client and larger than it
+      // on a finger's: the whole height of the line, and 1.5 characters of the
+      // gutter the concealed `- ` left (interactions.md §1a). It grows left and
+      // not right because the drawn box already overhangs the space on its
+      // right, and what is past that space is the label, which is where a tap
+      // means the caret.
+      const padX = touch ? view.defaultCharacterWidth * 1.5 : 0;
       for (const el of view.contentDOM.querySelectorAll<HTMLInputElement>("input.ledge-task")) {
         const r = el.getBoundingClientRect();
+        const padY = touch ? Math.max(0, (view.defaultLineHeight - r.height) / 2) : 0;
         spots.push({
-          left: r.left - base.left,
-          top: r.top - base.top,
-          width: r.width,
-          height: r.height,
+          left: r.left - base.left - padX,
+          top: r.top - base.top - padY,
+          width: r.width + padX,
+          height: r.height + padY * 2,
           title: tooltip("task.toggle"),
           act: () => toggleTaskAt(view, view.posAtDOM(el)),
         });

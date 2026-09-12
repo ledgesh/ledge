@@ -109,6 +109,11 @@
   --cursor: #1d1d1f;
   --selection: rgba(0, 122, 255, 0.25);
   --link: #2563eb;
+  /* The tick inside a checked task box (.ledge-task), as the page's own
+     background colour so it reads as cut out of the accent fill rather than
+     painted on top of it. A white tick on the dark theme's lighter --link is
+     the pair that does not survive the switch. */
+  --task-tick: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='none' stroke='white' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round' d='M3.5 8.6 6.6 11.7 12.5 4.8'/%3E%3C/svg%3E");
   --ed-muted: rgba(60, 60, 67, 0.55);
   --panel-bg: rgba(0, 0, 0, 0.03);
   --panel-border: rgba(0, 0, 0, 0.12);
@@ -149,6 +154,7 @@
   --cursor: #e8e8ea;
   --selection: rgba(10, 132, 255, 0.35);
   --link: #6cb2ff;
+  --task-tick: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='none' stroke='%2309090b' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round' d='M3.5 8.6 6.6 11.7 12.5 4.8'/%3E%3C/svg%3E");
   --ed-muted: rgba(235, 235, 245, 0.55);
   --panel-bg: rgba(255, 255, 255, 0.04);
   --panel-border: rgba(255, 255, 255, 0.14);
@@ -453,26 +459,45 @@ body {
   opacity: 0.75;
 }
 /* A task's [ ]/[x] marker, rendered as a real checkbox while concealed
-   (livePreview.ts TaskWidget). Sized to the text it sits in; accent follows
-   the link color so checked boxes read as "the app did this". Explicit
-   pointer, like .ledge-mdlink-live, because the box acts on plain click.
-
-   The margin is arithmetic, not taste: it pins the box's advance to exactly
-   1ch. The widget stands in for `- [ ]` (the bullet hides with the marker),
-   and the space after it is still drawn as text, so a 1ch box puts a task's
-   label at column 2.
-
-   That is where `- ` puts a plain bullet's label, where a mixed list needs
-   both to line up, and what the continuation indent aims for
-   (editor/lists.ts). Sizing the gap in ch against an em-sized box keeps all
-   three agreeing at any font size. */
+   (livePreview.ts TaskWidget). Drawn rather than native: the engine's own
+   checkbox is a grey square whose weight and corner come from the platform,
+   and what a notebook draws is an outline that fills with the accent when it
+   is checked (interactions.md §1a). Explicit pointer, like .ledge-mdlink-live,
+   because the box acts on plain click. */
 .ledge-task {
-  width: 0.95em;
-  height: 0.95em;
-  margin: 0 calc((1ch - 0.95em) / 2);
-  vertical-align: -0.1em;
-  accent-color: var(--link);
+  /* The drawn size, named once because the margin below is arithmetic on it:
+     the margin pins the box's ADVANCE to 1ch however large the box is drawn.
+     The widget stands in for `- [ ]` (the bullet hides with the marker) and
+     the space after it is still drawn as text, so the label lands at column 2,
+     where `- ` puts a bullet's label and where the continuation indent aims
+     (editor/lists.ts). A box wider than 1ch overhangs the hidden bullet on one
+     side and the drawn space on the other, and the label moves by at most the
+     pixel WebKit rounds the line to (e2e/phone.spec.ts). */
+  --task-box: 1.05em;
+  appearance: none;
+  box-sizing: border-box;
+  width: var(--task-box);
+  height: var(--task-box);
+  margin: 0 calc((1ch - var(--task-box)) / 2);
+  vertical-align: -0.18em;
+  border: 1.5px solid color-mix(in srgb, var(--ed-muted) 85%, transparent);
+  border-radius: calc(var(--task-box) / 4);
+  background: transparent;
   cursor: pointer;
+}
+.ledge-task:checked {
+  background: var(--link) var(--task-tick) center / 70% 70% no-repeat;
+  border-color: var(--link);
+}
+/* The same box, for a finger (interactions.md §1a). A floor in pixels rather
+   than a size: what the box has to suit here is a fingertip, which does not
+   shrink with the note's font, and 18 points is as tall as it can be drawn
+   without the boxes of a task list meeting in a 14-point note's line. The
+   target around it is the hotspot layer's (editor/livePreview.ts). */
+@media (hover: none) {
+  .ledge-task {
+    --task-box: max(18px, 1.1em);
+  }
 }
 /* A checked task's label: done, quiet. */
 .ledge-task-done,

@@ -1702,6 +1702,120 @@ test.describe("running a block by finger", () => {
   });
 });
 
+// --- a task's checkbox, for a finger -----------------------------------------
+//
+// The box is drawn inside text, on the character grid, which is what keeps a
+// task's label in the column a bullet's label is in. At editor text size that
+// is a 13-point control, and 13 points is a speck to aim at. So the box takes
+// a floor of 18 points on touch (index.css) and the hotspot over it takes the
+// rest: the whole height of its line, and the gutter the concealed `- ` left
+// (editor/livePreview.ts). It stops short of the label, because a tap there is
+// the caret's.
+test.describe("ticking a task by finger", () => {
+  const boxes = (page: Page) => page.locator("input.ledge-task");
+  const spots = (page: Page) => page.locator(".ledge-hotspot[title='Toggle Checkbox']");
+
+  // The x of the first character of `needle`, which is what says which column
+  // the text after a marker starts in. A range over the character rather than
+  // the line's own box: the line starts at the margin either way.
+  const columnOf = (page: Page, needle: string) =>
+    page.evaluate((text) => {
+      const root = document.querySelector(".cm-content");
+      if (!root) return null;
+      const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+        const at = (n as Text).data.indexOf(text);
+        if (at < 0) continue;
+        const range = document.createRange();
+        range.setStart(n, at);
+        range.setEnd(n, at + 1);
+        return range.getBoundingClientRect().left;
+      }
+      return null;
+    }, needle);
+
+  test.beforeEach(async ({ page }) => {
+    await page.goto("/harness.html?shell=ios");
+    await expect(page.getByRole("button", { name: /Toggle Sidebar/ })).toBeVisible();
+    await page.keyboard.press("Meta+n");
+    await expect(page.locator(".cm-line").first()).toHaveText("# Untitled");
+    await page.keyboard.press("Meta+a");
+    // A plain bullet under the two tasks: its label is the column the tasks'
+    // labels have to land in.
+    await page.keyboard.insertText(
+      "# Untitled\n\n- [ ] ship it\n- [ ] and the other\n- plain item\n",
+    );
+    await expect(boxes(page)).toHaveCount(2);
+    await expect(spots(page)).toHaveCount(2);
+  });
+
+  test("the box is bigger than the text, and the label stays in column 2", async ({
+    page,
+  }) => {
+    const box = (await boxes(page).first().boundingBox())!;
+    expect(box.width).toBeGreaterThanOrEqual(18);
+    expect(box.height).toBeGreaterThanOrEqual(18);
+
+    // The box overhangs its advance rather than widening it. The advance is
+    // 1ch whatever the box is drawn at (index.css .ledge-task), so a task's
+    // label sits where a bullet's does and the continuation indent still aims
+    // at both (editor/lists.ts).
+    const task = await columnOf(page, "ship it");
+    const bullet = await columnOf(page, "plain item");
+    expect(task).not.toBeNull();
+    // Within a pixel, which is as exact as this gets: WebKit quantizes the
+    // line's layout to whole pixels, so a box wider than 1ch lands the text
+    // after it on the near side of the same pixel rather than on the exact
+    // advance. A tenth of a character at any font the editor offers.
+    expect(Math.abs(task! - bullet!)).toBeLessThanOrEqual(1);
+  });
+
+  test("the target is the line's height, and the gutter beside the box", async ({
+    page,
+  }) => {
+    const box = (await boxes(page).first().boundingBox())!;
+    const spot = (await spots(page).first().boundingBox())!;
+    const second = (await spots(page).nth(1).boundingBox())!;
+
+    // Wider than the box, and out to the left: what is free there is the
+    // gutter the hidden `- ` left.
+    expect(spot.width).toBeGreaterThan(box.width);
+    expect(spot.x).toBeLessThan(box.x);
+    // And it ends before the label, which is caret territory.
+    const label = (await columnOf(page, "ship it"))!;
+    expect(spot.x + spot.width).toBeLessThanOrEqual(label);
+
+    // Taller than the box, up to the line's own height and no further: the
+    // line below carries the next task's box, and a target that reached it
+    // would tick the wrong one.
+    const line = (await page.locator(".cm-line", { hasText: "ship it" }).boundingBox())!;
+    expect(spot.height).toBeGreaterThan(box.height);
+    expect(spot.height).toBeLessThanOrEqual(line.height + 0.5);
+    expect(second.y).toBeGreaterThanOrEqual(spot.y + spot.height - 0.5);
+  });
+
+  test("a tap on the gutter beside the box ticks it; a tap on the label does not", async ({
+    page,
+  }) => {
+    const spot = (await spots(page).first().boundingBox())!;
+    // The part of the target that is not the box at all: a miss a pointer
+    // client would have dropped into the text.
+    await page.touchscreen.tap(Math.round(spot.x + 2), Math.round(spot.y + spot.height / 2));
+    await expect(boxes(page).first()).toBeChecked();
+
+    // The label is not part of it. A tap in the second task's text is a caret
+    // move, and its box is still open afterwards: a target that reached the
+    // label would tick a task every time someone put the caret in one.
+    const label = (await page.locator(".cm-line", { hasText: "and the other" }).boundingBox())!;
+    await page.touchscreen.tap(
+      Math.round(label.x + label.width / 2),
+      Math.round(label.y + label.height / 2),
+    );
+    await expect(boxes(page).nth(1)).not.toBeChecked();
+    await expect(boxes(page).first()).toBeChecked();
+  });
+});
+
 // --- every target, measured (interactions.md §1a) ----------------------------
 //
 // The rule is that controls a finger chooses between are at least 44 points.
@@ -1742,6 +1856,13 @@ test.describe("every target a finger chooses between", () => {
         const lr = label.getBoundingClientRect();
         if (lr.width >= 44 && lr.height >= 44) continue;
       }
+      // The one control in the app that is under the floor on purpose. A
+      // task's checkbox is drawn inside text, on the grid that keeps its label
+      // in a bullet's column, and its target is the hotspot over it: the
+      // line's height and the gutter beside the box, and no further, because
+      // the neighbours are the caret and the next task (interactions.md §1a).
+      // "ticking a task by finger" above measures that one instead.
+      if (el.classList.contains('ledge-task')) continue;
       if (r.width >= 44 && r.height >= 44) continue;
       bad.push(
         (el.getAttribute('aria-label') || el.getAttribute('title') || el.textContent || el.tagName)
@@ -1993,3 +2114,4 @@ test.describe("what covers the note covers its block controls", () => {
     expect(await takingTaps(page)).toEqual([]);
   });
 });
+

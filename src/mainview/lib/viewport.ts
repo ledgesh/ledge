@@ -38,3 +38,20 @@ function subscribe(cb: () => void): () => void {
 export function useSinglePane(): boolean {
   return useSyncExternalStore(subscribe, () => media?.matches ?? false);
 }
+
+// Whether the pointer is a finger. A different question from the width above,
+// and the answer is not the same on either of the two clients that disagree:
+// a touchscreen laptop is coarse at 1920 points, and a Mac window dragged to
+// 390 still has a mouse. The CSS asks it as `@media (hover: none)`
+// (index.css), and this is that query for the sizes script works out instead
+// (editor/livePreview.ts).
+const hoverless =
+  typeof window !== "undefined" && typeof window.matchMedia === "function"
+    ? window.matchMedia("(hover: none)")
+    : null;
+
+/** Whether this client points with a finger, and so takes the touch column's
+ * target sizes (interactions.md §1a). */
+export function isTouchPointer(): boolean {
+  return hoverless?.matches ?? false;
+}
