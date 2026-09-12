@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { useSinglePane } from "@/lib/viewport";
 import { hasTerminal } from "@/lib/shell";
 import { docsWindow, onDocsShow } from "@/lib/windows";
+import { onUpdateNotice } from "@/lib/updates";
 import { pushLayer } from "@/commands/layers";
 import { ResizeHandle } from "@/components/ResizeHandle";
 import { TerminalDrawer } from "@/terminal/TerminalDrawer";
@@ -472,6 +473,18 @@ function Shell() {
     // same neutral tone as the bridge's notices above.
     configureStoreUi({ notice: (message) => uiHooks.showNotice?.(message) });
   }, [exec, runInTerminal, dispatch, showTag]);
+
+  // The update's notices (lib/updates.ts): the answer to this window's Check for
+  // Updates…, and a finished download in every window. Same strip as above, with
+  // the error tone for a failure somebody asked about.
+  useEffect(
+    () =>
+      onUpdateNotice((n) => {
+        if (n.tone === "error") uiHooks.showError?.(n.message);
+        else uiHooks.showNotice?.(n.message);
+      }),
+    [],
+  );
 
   // The tag vocabulary the `#` completion reads (bridge workspaceTags above):
   // the selected workspace's directory, refetched when its note lists change.

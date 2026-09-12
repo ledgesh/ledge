@@ -26,6 +26,7 @@ import { configureClipboard } from "./lib/clipboard";
 import { configureMenu, dispatchNativeCommand } from "./lib/menu";
 import { configureCli } from "./lib/cli";
 import { configureWindows, dispatchDocsShow, recordWindowRole } from "./lib/windows";
+import { configureUpdates, loadUpdateState, recordUpdateState } from "./lib/updates";
 import { captureFailures, configureLog } from "./lib/log";
 import { hideBooting, showBooting } from "./lib/booting";
 import { configureAssets } from "./lib/assets";
@@ -78,6 +79,9 @@ export const viewPush: ViewPush = {
   // somebody asked for a page while that window was already open (remote.md
   // §8a). The shell has raised the window, and this lands it on the page.
   docsShow: ({ page }) => dispatchDocsShow(page),
+  // Sent by the shell to every window when this app's update moves. Also never
+  // a server's: the update is the app's (lib/updates.ts).
+  updateChanged: ({ state }) => recordUpdateState(state),
   // Raised by the shell holding this end of the wire, never by a server: the
   // end on the far side of a dropped wire cannot report it (remote.md §10).
   connectionState: ({ state, detail }) => {
@@ -436,6 +440,15 @@ async function boot(requests: RequestClient): Promise<void> {
   configureCli({
     install: () => requests.cliInstall({}),
   });
+  // The app's own update, answered by the shell rather than any server. Not
+  // awaited, like the vault read below: the mirror starts "off", so the update
+  // verbs are absent for the round trip and appear when it lands.
+  configureUpdates({
+    state: () => requests.updateState({}),
+    check: () => requests.updateCheck({}),
+    install: () => requests.updateInstall({}).then((r) => r.ok),
+  });
+  void loadUpdateState().catch(() => {});
   // A fresh page claims nothing: whatever this server is still running was
   // started by the page this one replaced, and no id survived the reload, so
   // the server interrupts the rest (editor/bridge.ts reconcileRuns). Not

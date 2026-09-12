@@ -119,7 +119,7 @@ describe("loadSettings", () => {
     expect(s.editor.fontSize).toBe(DEFAULT_SETTINGS.editor.fontSize);
     expect(s.trash.ttlDays).toBe(7);
     expect((await inspectSettings()).problems).toEqual([
-      '"editor" describes this screen, so it moved to this app\'s own settings; the copy here does nothing',
+      '"editor" belongs to this app rather than the notes, so it lives in this app\'s own settings; the copy here does nothing',
     ]);
   });
 

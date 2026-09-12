@@ -84,6 +84,24 @@ export interface NoteMeta {
  * is loaded. */
 export type VaultState = "none" | "locked" | "unlocked";
 
+/** Where this app's own update stands (bun/updates.ts, releasing.md §7).
+ *
+ * | phase | meaning | `version` |
+ * | --- | --- | --- |
+ * | off | this build never updates; `detail` says why | "" |
+ * | idle | no check has run yet this launch | "" |
+ * | checking | asking the update server | "" |
+ * | current | nothing newer is published | the running version |
+ * | downloading | a newer build is being fetched | the new version |
+ * | ready | downloaded, waiting for Restart to Install Update | the new version |
+ * | failed | the last check or download failed; `detail` says why | "" |
+ */
+export interface UpdateState {
+  phase: "off" | "idle" | "checking" | "current" | "downloading" | "ready" | "failed";
+  version: string;
+  detail: string;
+}
+
 /** A CLI open request after Bun resolved and guarded it (bun/openRequest.ts).
  * It carries the note as a full NoteMeta, which is what the store's openNote
  * takes, plus the workspace root holding it, so the view can select that
@@ -745,6 +763,26 @@ export type LedgeRPC = {
       // view is in is not a fact about the notes, so it never becomes a frame.
       // A shell with one window answers false.
       windowRole: { params: {}; response: { docs: boolean; page: string } };
+      // This app's own update, which is the client's and never a server's: a
+      // server across a connection is a different program, updated by whoever
+      // installed it (remote.md §11). All three are in NATIVE_METHODS and never
+      // become frames. A shell that does not update itself, a phone or a dev
+      // build, answers phase "off", and the view leaves both update verbs out.
+      // updateState is the view's boot read. The shell pushes every change after
+      // that (updateChanged below), and a push can land before a new window
+      // listens, so the read is what a window opened later starts from.
+      updateState: { params: {}; response: UpdateState };
+      // Check for Updates…: ask the update server now. Answers at once with the
+      // state the check starts from, and every result after that is a push.
+      // The fetch can outlast the RPC's 10-second request timeout, and a
+      // download always does. A check or download already in flight is not
+      // started again; the answer is its current state.
+      updateCheck: { params: {}; response: UpdateState };
+      // Restart to Install Update. Only does anything in phase "ready". On
+      // success the app quits and relaunches as the new version, so no answer
+      // arrives. `ok: false` is an install that did not start, and the state
+      // it leaves (pushed) says why.
+      updateInstall: { params: {}; response: { ok: boolean } };
       // The validated settings snapshot (shared/settings.ts), fetched once at
       // boot. Bun owns the files, the parsing, and the fallbacks. The view sees
       // one complete, valid Settings and never learns there were two of them:
@@ -1147,6 +1185,10 @@ export type LedgeRPC = {
       // windows is the only thing that knows one of them is showing the manual,
       // and a server has no windows at all.
       docsShow: { page: string };
+      // This app's update moved (updateState above), sent to every window. A
+      // client push, for the same reason as the three requests: an update is the
+      // app's, and no server knows anything about it.
+      updateChanged: { state: UpdateState };
     };
   };
 };

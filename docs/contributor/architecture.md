@@ -645,8 +645,9 @@ There are TWO of them, split by machine rather than by lifetime (remote.md
 §5). `settings.jsonc` in the app home is the SERVER's: the shell every PTY
 spawns, the trash TTL, what a code fence runs, where daily notes live — facts
 about the machine holding the notes. `.client/settings.jsonc` is the CLIENT's:
-font sizes, the theme, live preview — facts about the screen in front of you,
-which follow the app to whichever machine's notes it is showing.
+font sizes, the theme, live preview, automatic update checks — facts about the
+app and the screen in front of you, which follow the app to whichever machine's
+notes it is showing.
 `SETTINGS_HOMES` in `shared/settings.ts` is the only place that mapping is
 written down, and it is `satisfies Record<keyof Settings, SettingsHome>`, so a
 section added without a home does not compile. Everything below applies to
@@ -702,7 +703,16 @@ snapshot at construction time through `lib/settings.ts`.
   (`editor.livePreview`: it exists as the escape hatch, not a preference —
   raw markdown is the app's original deliberate stance, and precise syntax
   editing demonstrably needs a way back to text-on-screen-is-text-on-disk),
-  trash TTL, runnable fence languages, and the fence-language → interpreter
+  automatic update checks (`updates.automatic`: the launch and daily request
+  to ledge.sh stays the default, because an install that never checks keeps
+  its bugs. The off switch exists because an unprompted request demonstrably
+  fails some machines: a firewall that prompts or blocks on every launch, a
+  managed Mac whose version IT pins, a user whose policy is that a tool makes
+  no network request they did not ask for. It stops only the schedule, never
+  the verb: Check for Updates… still checks and downloads, so turning checks
+  off never strands an install on a known bug. It is a client setting because
+  the update belongs to the app, and a server's file must not switch off a
+  Mac's checks), trash TTL, runnable fence languages, and the fence-language → interpreter
   map (`blocks.interpreters`, applied Bun-side by `bun/runner.ts`; it exists
   because "which python" has no universal answer — the default resolves via
   the login shell's PATH, and a venv or pinned toolchain demonstrably needs

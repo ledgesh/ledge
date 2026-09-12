@@ -10,7 +10,7 @@
 // is index.html, so none of this ships.
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import type { BacklinkHit, NoteMeta, TagHit, TerminalClaim, TrashMeta, VaultState, WorkspaceRootInfo } from "../shared/rpc-schema";
+import type { BacklinkHit, NoteMeta, TagHit, TerminalClaim, TrashMeta, UpdateState, VaultState, WorkspaceRootInfo } from "../shared/rpc-schema";
 import { headingOf, labelOf, slugify, slugOf } from "../shared/slug";
 import { frontmatterEnd, parseFrontmatter, setFavoriteLine } from "../shared/frontmatter";
 import { instantiateTemplate, isoDateOf } from "../shared/template";
@@ -29,6 +29,7 @@ import { configureVault, recordVaultState, refreshVaultState } from "./vault/cha
 import { configureWorkspaces, recordWorkspaceKinds } from "./workspace/channel";
 import { configureClipboard } from "./lib/clipboard";
 import { configureCli } from "./lib/cli";
+import { configureUpdates, loadUpdateState, recordUpdateState } from "./lib/updates";
 import { configureWindows, dispatchDocsShow, recordWindowRole } from "./lib/windows";
 import { configureAssets } from "./lib/assets";
 import { configureSettings } from "./lib/settings";
@@ -1229,6 +1230,33 @@ configureCli({
   install: async () => ({ ok: true, message: "ledge installed: ~/.local/bin/ledge" }),
 });
 
+// The app's update is the shell's, and this fake plays the shell: it holds the
+// state, pushes every change the way bun/updates.ts does (the push before the
+// answer), and finishes a check with whatever a spec set as its result.
+let updateShell: UpdateState = { phase: "current", version: "0.1.0", detail: "" };
+let updateCheckResult: UpdateState = { phase: "current", version: "0.1.0", detail: "" };
+let updateChecks = 0;
+let updateInstalls = 0;
+function pushUpdate(next: UpdateState): void {
+  updateShell = next;
+  recordUpdateState(next);
+}
+configureUpdates({
+  state: async () => updateShell,
+  check: async () => {
+    updateChecks += 1;
+    if (updateShell.phase === "ready" || updateShell.phase === "downloading") return updateShell;
+    pushUpdate({ phase: "checking", version: "", detail: "" });
+    setTimeout(() => pushUpdate(updateCheckResult), 50);
+    return updateShell;
+  },
+  install: async () => {
+    updateInstalls += 1;
+    return updateShell.phase === "ready";
+  },
+});
+void loadUpdateState();
+
 // New Window is a native seam with no in-page consequence: the second window is
 // another client of another server, in another webview (remote.md §8a). A spec
 // can see only that the ask left, and how many times. The manual's window is the
@@ -1267,6 +1295,13 @@ declare global {
       // Simulate the shell's docsShow push: somebody asked for a page while
       // the manual's window was already open. Only meaningful under `?docs=1`.
       showDocs: (page: string) => void;
+      // Simulate the shell's updateChanged push, for the states no page action
+      // reaches: a background download finishing, a build that does not update.
+      setUpdate: (state: UpdateState) => void;
+      // What the next Check for Updates… finds.
+      setUpdateCheckResult: (state: UpdateState) => void;
+      updateChecks: () => number;
+      updateInstalls: () => number;
       layout: () => string | null;
       termAttaches: () => { sessionId: string; host: string | null }[];
       termPastes: () => { sessionId: string; text: string; host: string | null }[];
@@ -1360,6 +1395,12 @@ window.__harness = {
   windowOpens: () => windowOpens.length,
   docsOpens: () => [...docsOpens],
   showDocs: (page) => dispatchDocsShow(page),
+  setUpdate: (state) => pushUpdate(state),
+  setUpdateCheckResult: (state) => {
+    updateCheckResult = state;
+  },
+  updateChecks: () => updateChecks,
+  updateInstalls: () => updateInstalls,
   layout: () => layoutText,
   termAttaches: () => termAttaches.map((a) => ({ ...a })),
   termPastes: () => termPastes.map((p) => ({ ...p })),

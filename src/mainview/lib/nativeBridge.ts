@@ -5,6 +5,7 @@
 // `attachShell` at the bottom touches WebKit; the rest is testable in Bun.
 import { hostPart, validateConnection, validatePassword, type AuthMode } from "../../shared/connections";
 import { fedDuplex, type ClientConnection, type Duplex } from "../../shared/transport";
+import type { UpdateState } from "../../shared/rpc-schema";
 import {
   CLIENT_METHODS,
   fromBase64,
@@ -361,6 +362,7 @@ const NO_SUCH = "There is no such connection.";
 // one, so this is the backstop rather than the path.
 const PIN_MOVED = "That pinned key belongs to another host. Check the new host's fingerprint first.";
 const KEYCHAIN_REFUSED = "This device's keychain would not store that password.";
+const PHONE_UPDATES: UpdateState = { phase: "off", version: "", detail: "A phone gets Ledge updates from the store it was installed from." };
 
 /**
  * A fresh record's id.
@@ -445,6 +447,11 @@ function clientSeams(
     // The one window a phone has is never the manual's. The manual is a
     // workspace inside it (mainview/workspace/actions.ts openDocs).
     windowRole: async () => ({ docs: false, page: "" }),
+    // A phone's app is updated by the store it came from, never by itself, so
+    // the view leaves Check for Updates… out (lib/updates.ts). No Swift call.
+    updateState: async () => PHONE_UPDATES,
+    updateCheck: async () => PHONE_UPDATES,
+    updateInstall: async () => ({ ok: false }),
 
     // The phone's own list and not a server's, the same claim remote.md §8
     // makes about a Mac's. Swift holds the file; the rules are all in this

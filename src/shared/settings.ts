@@ -9,10 +9,11 @@
 // One shape, two homes (remote.md §5). `Settings` is a single interface, but
 // each section is a fact about one of two things: the machine holding the
 // notes (which shell to spawn, how long the trash keeps things, what a
-// ```python fence runs) or the screen in front of the user (font sizes, the
-// theme, whether markdown syntax is concealed). The first kind lives in the
-// server's settings.jsonc, the second in the client's, and SETTINGS_HOMES
-// below is the only place that mapping is written down. A phone's font size
+// ```python fence runs) or the app in front of the user (font sizes, the
+// theme, whether markdown syntax is concealed, whether it checks for updates).
+// The first kind lives in the server's settings.jsonc, the second in the
+// client's, and SETTINGS_HOMES below is the only place that mapping is written
+// down. A phone's font size
 // is not a VPS's font size, and no server can know whether the Mac in front
 // of the user is in dark mode.
 //
@@ -47,6 +48,11 @@ export interface Settings {
   // at launch like every setting, but "system" keeps tracking the OS
   // afterwards: that is the OS changing, not the setting.
   appearance: { theme: Theme };
+  // `automatic` checks for a newer version at launch and once a day
+  // (bun/updates.ts). False stops only those checks: Check for Updates… still
+  // asks, and still downloads what it finds. Why the knob is earned:
+  // architecture.md §6.
+  updates: { automatic: boolean };
   // How long a deleted note stays recoverable before the launch-time purge
   // evicts it (bun/notes.ts purgeTrash).
   trash: { ttlDays: number };
@@ -166,6 +172,7 @@ export const SETTINGS_HOMES = {
   editor: "client",
   terminal: "client",
   appearance: "client",
+  updates: "client",
   trash: "server",
   blocks: "server",
   daily: "server",
@@ -187,6 +194,7 @@ export function mergeSettings(server: Settings, client: Settings): Settings {
     editor: client.editor,
     terminal: client.terminal,
     appearance: client.appearance,
+    updates: client.updates,
     trash: server.trash,
     blocks: server.blocks,
     daily: server.daily,
@@ -198,6 +206,7 @@ export const DEFAULT_SETTINGS: Settings = Object.freeze({
   editor: { fontSize: 14, livePreview: true },
   terminal: { fontSize: 12 },
   appearance: { theme: "system" as Theme },
+  updates: { automatic: true },
   trash: { ttlDays: 30 },
   blocks: {
     runnable: [
@@ -246,10 +255,10 @@ export function settingsTemplate(shellPath: string): string {
 // its default with a warning in the launch log; it never takes the rest of
 // the file down.
 //
-// Font sizes, the theme, and live preview are NOT here. Those describe the
-// screen you are reading this on rather than the machine the notes are
-// stored on, so they live in this app's own settings file — the other tab
-// in the ⌘, dialog.
+// Font sizes, the theme, live preview, and update checks are NOT here. Those
+// describe this app and the screen you are reading this on, not the machine
+// the notes are stored on, so they live in this app's own settings file: the
+// other tab in the ⌘, dialog.
 {
   // The login shell every terminal drawer and inline run spawns. Seeded with
   // this machine's own, if that is zsh or bash: the shells Ledge can read.
@@ -361,11 +370,11 @@ export function clientSettingsTemplate(s: Settings): string {
 // commas) are fine. A bad value falls back to its default with a warning in
 // the launch log; it never takes the rest of the file down.
 //
-// Everything here is a fact about the display in front of you, which is why
-// it stays with the app rather than with the notes: connect to another
-// machine's notes and these come with you. The shell, the trash lifetime, and
-// what a code fence runs are that machine's business and live in its own
-// settings file — the other tab in this dialog.
+// Everything here is a fact about this app and the display in front of you,
+// which is why it stays with the app rather than with the notes: connect to
+// another machine's notes and these come with you. The shell, the trash
+// lifetime, and what a code fence runs are that machine's business and live in
+// its own settings file: the other tab in this dialog.
 {
   "editor": {
     "fontSize": ${s.editor.fontSize},
@@ -385,6 +394,14 @@ export function clientSettingsTemplate(s: Settings): string {
     // for a Mac on the automatic day/night schedule, a room where one side is
     // unreadable, or screenshots that have to match.
     "theme": ${JSON.stringify(s.appearance.theme)}
+  },
+
+  "updates": {
+    // Check ledge.sh for a newer version when Ledge starts and once a day,
+    // and download it in the background. Set false to check only when you
+    // choose Ledge > Check for Updates…. The check sends nothing from your
+    // notes or settings.
+    "automatic": ${s.updates.automatic}
   }
 }
 `;
@@ -426,6 +443,7 @@ export function parseSettings(raw: unknown, home: SettingsHome): { settings: Set
   const editor = mine("editor");
   const terminal = mine("terminal");
   const appearance = mine("appearance");
+  const updates = mine("updates");
   const trash = mine("trash");
   const blocks = mine("blocks");
   const daily = mine("daily");
@@ -451,6 +469,7 @@ export function parseSettings(raw: unknown, home: SettingsHome): { settings: Set
       appearance: {
         theme: oneOf(appearance, "theme", "appearance.theme", THEMES, d.appearance.theme, problems),
       },
+      updates: { automatic: bool(updates, "automatic", "updates.automatic", d.updates.automatic, problems) },
       trash: { ttlDays: num(trash, "ttlDays", "trash.ttlDays", d.trash.ttlDays, 1, 36500, problems) },
       blocks: {
         runnable: strings(blocks, "runnable", "blocks.runnable", d.blocks.runnable, problems).map((l) =>
@@ -500,7 +519,7 @@ function hostMaps(blocks: Record<string, unknown>, problems: string[]): Record<s
 // leftover to delete, not a setting to move by hand.
 function elsewhere(section: keyof Settings): string {
   return SETTINGS_HOMES[section] === "client"
-    ? `"${section}" describes this screen, so it moved to this app's own settings; the copy here does nothing`
+    ? `"${section}" belongs to this app rather than the notes, so it lives in this app's own settings; the copy here does nothing`
     : `"${section}" describes the machine holding the notes, so it lives in that server's settings; the copy here does nothing`;
 }
 

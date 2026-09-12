@@ -169,6 +169,12 @@ export interface RegistryDeps {
   // Show the session log in Finder. Returns nothing: the Finder window it
   // opens is the feedback.
   revealLog(): void;
+  // Ask the update server for a newer build. Returns nothing: the answer and
+  // its notice arrive through the update mirror (lib/updates.ts).
+  checkForUpdates(): void;
+  // Quit and relaunch into the downloaded update. Resolves to the notice to
+  // show when the install did not start.
+  installUpdate(): Promise<{ tone: "notice" | "error"; message: string } | null>;
   // Open another window, which is another client of another server (remote.md
   // §8a). Returns nothing: the new window is the feedback.
   newWindow(): void;

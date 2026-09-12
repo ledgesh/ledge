@@ -10,7 +10,7 @@
 // carries that checklist.
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import config from "../electrobun.config";
+import config, { UPDATE_BASE_URL } from "../electrobun.config";
 
 const ROOT = resolve(import.meta.dir, "..");
 const problems: string[] = [];
@@ -52,6 +52,23 @@ if (process.arch === "arm64") {
   bad(
     `this is an ${process.arch} Mac and 0.1.0 ships arm64 only`,
     "Cut the release on Apple Silicon. Electrobun 2.x builds for the build host, so there is no target to override.",
+  );
+}
+
+// --- the update address -------------------------------------------------------
+// Every build asks the address it was built with for its updates, for as long as
+// it is installed (releasing.md §7). A probe override that reached a signed
+// build would strand everyone who installed it. An unsigned build runs on this
+// Mac only, so there the override is the probe it exists for.
+const probeUrl = process.env["LEDGE_UPDATE_BASE_URL"];
+if (!probeUrl) {
+  ok(`update address ${config.release.baseUrl}`);
+} else if (process.env["LEDGE_UNSIGNED"] === "1") {
+  notes.push(`This build asks ${probeUrl} for updates (LEDGE_UPDATE_BASE_URL), not ${UPDATE_BASE_URL}.`);
+} else {
+  bad(
+    `LEDGE_UPDATE_BASE_URL is set to ${probeUrl}`,
+    `Unset it. A signed build asks that address for updates for as long as it is installed, and releases ask ${UPDATE_BASE_URL}.`,
   );
 }
 

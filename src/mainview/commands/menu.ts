@@ -68,6 +68,11 @@ export const MENU: readonly MenuSection[] = [
     label: "Ledge",
     items: [
       { role: "about", label: "About Ledge" },
+      // A two-faces pair: while an update waits to be installed, Restart to
+      // Install Update replaces Check for Updates…. Both are absent on a build
+      // that does not update itself (lib/updates.ts).
+      { command: "update.check", hideWhenDisabled: true },
+      { command: "update.install", hideWhenDisabled: true },
       "---",
       { command: "settings.open" },
       { command: "cli.install" },

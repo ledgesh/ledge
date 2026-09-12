@@ -38,6 +38,7 @@ import {
 import { copyText } from "@/lib/clipboard";
 import { installCli } from "@/lib/cli";
 import { revealLog } from "@/lib/log";
+import { checkForUpdates, installUpdate } from "@/lib/updates";
 import { openDocsWindow, openWindow } from "@/lib/windows";
 import { restartSession } from "@/terminal/channel";
 import { attachWorkspace, closeDocs, closeWorkspace, createWorkspace, moveWorkspace, openDocs } from "@/workspace/actions";
@@ -70,6 +71,8 @@ export const registryDeps: RegistryDeps = {
   copyText,
   installCli,
   revealLog,
+  checkForUpdates,
+  installUpdate,
   newWindow: openWindow,
   createWorkspace,
   attachWorkspace,

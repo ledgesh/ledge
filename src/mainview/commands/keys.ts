@@ -166,6 +166,10 @@ export const COMMANDS = {
   // Titled "Reveal" because it lands in Finder, not in Ledge: the log is not a
   // note, and opening it in the editor would suggest it is.
   "log.reveal": { title: "Reveal Log in Finder" },
+  // The app's own update (lib/updates.ts). A two-faces pair in the Ledge menu:
+  // exactly one is live at a time. No chords, since both run a few times a year.
+  "update.check": { title: "Check for Updates…" },
+  "update.install": { title: "Restart to Install Update" },
 
   // Per-note params (frontmatter). Both verbs are palette and menu only, since
   // neither is frequent enough to spend a chord on. Restart kills the note's

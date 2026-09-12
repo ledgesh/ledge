@@ -12,6 +12,7 @@ import {
   Bold,
   Brackets,
   CircleHelp,
+  CircleArrowUp,
   Braces,
   CalendarDays,
   ClipboardPaste,
@@ -48,6 +49,7 @@ import {
   RefreshCw,
   Replace,
   RotateCcw,
+  RotateCw,
   Rows2,
   Save,
   Scale,
@@ -75,6 +77,7 @@ import { parseFrontmatter } from "../../shared/frontmatter";
 import type { NoteMeta } from "../../shared/rpc-schema";
 import { canInstallCli, canPickFolder, hasTerminal, multiWindow, runsBlocks, spawnsSessions } from "../lib/shell";
 import { docsWindow } from "../lib/windows";
+import { offersCheck, updateState } from "../lib/updates";
 import { activeConnection, linkState, reconnectLink } from "../lib/connections";
 import { keysOf, listKeysOf, tabSelectKey, titleOf, workspaceSelectKey, type CommandId } from "./keys";
 import { chipOf } from "./format";
@@ -783,6 +786,26 @@ export function buildCommands(deps: RegistryDeps): Command[] {
     cmd("log.reveal", {
       icon: ScrollText,
       run: () => deps.revealLog(),
+    }),
+    // The app's own update (releasing.md §7). Absent where this app does not
+    // update itself, a phone or a dev build, and while an update waits to be
+    // installed, when the other face below is the live one (lib/updates.ts
+    // offersCheck). The outcome surfaces from the update mirror, not from here.
+    cmd("update.check", {
+      icon: CircleArrowUp,
+      when: () => offersCheck(updateState()),
+      run: () => deps.checkForUpdates(),
+    }),
+    // Quits and relaunches as the new version. No confirmation, the same as
+    // ⌘Q: shells end and every note is already on disk (interactions.md §4).
+    cmd("update.install", {
+      icon: RotateCw,
+      when: () => updateState().phase === "ready",
+      run: (ctx) => {
+        void deps.installUpdate().then((n) => {
+          if (n) ctx.ui.showError?.(n.message);
+        }, failed(ctx));
+      },
     }),
 
     // --- per-note params (frontmatter) ----------------------------------------

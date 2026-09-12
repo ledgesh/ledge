@@ -7,6 +7,7 @@ import { parseKey, resolveChord, DEFAULT_DOMAINS, type FocusDomain } from "./key
 import type { Command, CommandCtx, RegistryDeps } from "./types";
 import { configureShell, recordServerCaps } from "@/lib/shell";
 import { recordWindowRole } from "@/lib/windows";
+import { recordUpdateState } from "@/lib/updates";
 
 // Stub deps. The registry never touches the editor stack or the clipboard in
 // tests, so these only record which edge was invoked. `noteHead` is what a
@@ -27,6 +28,11 @@ function stubDeps(
       return { ok: true, message: "installed" };
     },
     revealLog: () => calls.push("revealLog"),
+    checkForUpdates: () => calls.push("checkForUpdates"),
+    installUpdate: async () => {
+      calls.push("installUpdate");
+      return { tone: "error", message: "Could not install the update: EACCES" };
+    },
     newWindow: () => calls.push("newWindow"),
     createWorkspace: async () => {
       calls.push("createWorkspace");
@@ -329,6 +335,38 @@ describe("registry", () => {
     await Bun.sleep(0); // the run does not await. Success or failure surfaces a microtask later
     expect(calls).toEqual(["installCli"]);
     expect(notices).toEqual(["installed"]);
+  });
+
+  // The pair's faces follow the mirrored update state (lib/updates.ts). Exactly
+  // one is live on a build that updates, and neither on one that does not.
+  test("update.check and update.install are one live face at a time, and none when off", () => {
+    const cmds = buildCommands(stubDeps([]));
+    const ctx = makeCtx(initialState(FOLDER, []));
+    const live = () => ["update.check", "update.install"].filter((id) => find(cmds, id).when!(ctx));
+    try {
+      recordUpdateState({ phase: "off", version: "", detail: "Development builds do not update." });
+      expect(live()).toEqual([]);
+      recordUpdateState({ phase: "current", version: "0.1.0", detail: "" });
+      expect(live()).toEqual(["update.check"]);
+      recordUpdateState({ phase: "downloading", version: "0.1.1", detail: "" });
+      expect(live()).toEqual(["update.check"]);
+      recordUpdateState({ phase: "ready", version: "0.1.1", detail: "" });
+      expect(live()).toEqual(["update.install"]);
+    } finally {
+      recordUpdateState({ phase: "off", version: "", detail: "" });
+    }
+  });
+
+  test("run: update.install surfaces an install that did not start", async () => {
+    const calls: string[] = [];
+    const cmds = buildCommands(stubDeps(calls));
+    const errors: string[] = [];
+    const ctx = makeCtx(initialState(FOLDER, []));
+    ctx.ui.showError = (m) => errors.push(m);
+    find(cmds, "update.install").run(ctx);
+    await Bun.sleep(0);
+    expect(calls).toEqual(["installUpdate"]);
+    expect(errors).toEqual(["Could not install the update: EACCES"]);
   });
 
   test("run: daily.open routes the selected folder to the daily edge", async () => {

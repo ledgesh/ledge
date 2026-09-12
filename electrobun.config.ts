@@ -7,6 +7,13 @@ import type { ElectrobunConfig } from "electrobun";
 // and nowhere else, since Gatekeeper rejects it on any other Mac.
 const signed = process.env["LEDGE_UNSIGNED"] !== "1";
 
+// Where every build asks for a newer one (releasing.md §7). A build carries this
+// for good, so the address can never move. LEDGE_UPDATE_BASE_URL points a probe
+// build at a local server instead, and release-preflight.ts refuses a release
+// with it set.
+export const UPDATE_BASE_URL = "https://ledge.sh/updates";
+const updateBaseUrl = process.env["LEDGE_UPDATE_BASE_URL"] || UPDATE_BASE_URL;
+
 export default {
   app: {
     name: "Ledge",
@@ -74,5 +81,8 @@ export default {
     },
     linux: { bundleCEF: false },
     win: { bundleCEF: false },
+  },
+  release: {
+    baseUrl: updateBaseUrl,
   },
 } satisfies ElectrobunConfig;

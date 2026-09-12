@@ -24,11 +24,13 @@ import { join } from "node:path";
 import { fitFrame, readWindows, writeWindows, type Rect, type WindowState } from "./windowFrame";
 import { startLogging } from "./log";
 import { EXTRACTION_DIRNAME, pruneExtractionDir } from "./updateCache";
+import { createUpdates, offReason } from "./updates";
 import { APP_HOME } from "./workspaces";
 import { createServer, type LedgeServer, type NativeDeps } from "./server";
 import { audienceOf } from "./audience";
 import type { RequestHandlers, ServerPush } from "../shared/wire";
 import { clientOverlay, type ClientNative } from "./clientSeams";
+import { loadClientSettings } from "./clientSettings";
 import { imageFromFile } from "./clipboard";
 import { clientIdFor, clientLabel, ephemeralClientId } from "./clientHome";
 import { createConnectionManager, type Attached, type ConnectionManager } from "./connectionManager";
@@ -38,7 +40,7 @@ import { ASKPASS_PATH, ensureAskpass, hasPassword } from "./secrets";
 import { reconnectingClient, Refused, SESSION_HOLD_MS } from "../shared/transport";
 import { spawnDuplex } from "./transport";
 import { BUILD_VERSION } from "../shared/version";
-import type { LedgeRPC } from "../shared/rpc-schema";
+import type { LedgeRPC, UpdateState } from "../shared/rpc-schema";
 
 // Called before anything that can fail: from here every console line in this
 // process is also on disk, Electrobun's own output included. Call sites keep
@@ -57,12 +59,29 @@ console.log(
 // it frees disk, and boot does not depend on the result. The extraction folder
 // and the running hash are supplied here so updateCache.ts stays importable
 // without booting the Electrobun runtime.
-void (async () => {
+const pruned = (async () => {
   if (typeof local?.hash !== "string") return;
   const dir = join(await Updater.appDataFolder(), EXTRACTION_DIRNAME);
   const removed = await pruneExtractionDir(dir, local.hash);
   if (removed.length > 0) console.log(`[bun] pruned ${removed.length} stale update file(s): ${removed.join(", ")}`);
 })().catch(() => {});
+
+// This app's own update (bun/updates.ts, releasing.md §7). One per process, like
+// the pasteboard: every window's handlers reach it, and every change is pushed
+// to all of them. `windows` is declared below, and nothing here runs before it
+// exists.
+const updates = createUpdates({
+  running: local?.version ?? BUILD_VERSION,
+  off: offReason(local),
+  check: () => Updater.checkForUpdate(),
+  download: () => Updater.downloadUpdate(),
+  info: () => Updater.updateInfo(),
+  apply: () => Updater.applyUpdate(),
+  changed: (state) => {
+    console.log(`[update] ${state.phase}${state.version ? ` ${state.version}` : ""}${state.detail ? `: ${state.detail}` : ""}`);
+    for (const win of windows) win.update({ state });
+  },
+});
 
 // In the dev channel, prefer a running Vite dev server (bun run dev:hmr) so the
 // React view hot-reloads. Otherwise load the built view copied into the bundle.
@@ -135,6 +154,11 @@ const sharedNative: ClientNative = {
     ).join(",");
     return picked ? imageFromFile(picked) : null;
   },
+  updates: {
+    state: () => updates.state(),
+    check: () => updates.check(),
+    install: () => updates.install(),
+  },
 };
 
 // The handlers are enumerated rather than proxied, so a message added to the
@@ -163,6 +187,8 @@ interface Win {
   /** Lands the manual on a page. The other client push, sent only to a window
    * whose `docs` is true. */
   show(p: { page: string }): void;
+  /** Tells this window the app's update moved (wire.ts CLIENT_PUSHES). */
+  update(p: { state: UpdateState }): void;
   /** Whether this window is the manual's (`windowDocs`). One window per app
    * has it. Its title, that it saves no layout, and that it is not in the
    * saved window list all follow from it. */
@@ -641,6 +667,7 @@ async function buildWindow(want: string, frame?: Rect, docs?: { page: string }):
     },
     say: (p) => rpc?.send.connectionState(p),
     show: (p) => rpc?.send.docsShow(p),
+    update: (p) => rpc?.send.updateChanged(p),
     docs: docs !== undefined,
     page: docs?.page ?? "",
     manager: null,
@@ -794,6 +821,15 @@ if (windows.length === 0) {
   console.error("[bun] no window opened; exiting");
   process.exit(1);
 }
+
+// After the prune, which deletes tars from this same folder. A download that
+// started first could lose its file to it. updates.automatic false leaves only
+// the menu's Check for Updates….
+void Promise.all([pruned, loadClientSettings().catch(() => null)]).then(([, client]) => {
+  const automatic = client?.updates.automatic ?? true;
+  if (!automatic) console.log("[update] automatic checks are off (updates.automatic)");
+  updates.start({ automatic });
+});
 
 process.on("exit", () => {
   // Flushes the pending frame writes. A resize or drag in the last

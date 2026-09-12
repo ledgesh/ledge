@@ -1,4 +1,5 @@
-// The client's half of settings: font sizes, the theme, live preview.
+// The client's half of settings: font sizes, the theme, live preview, update
+// checks.
 //
 // bun/settings.ts is the server-side sibling, and the two are near-identical:
 // same JSONC, same commented template seeded on first read, same atomic save,

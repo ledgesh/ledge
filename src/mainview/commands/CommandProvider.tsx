@@ -6,6 +6,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { useWorkspace } from "@/workspace/store";
 import { useVaultState } from "@/vault/channel";
+import { useUpdateState } from "@/lib/updates";
 import { buildCommands } from "./registry";
 import { eventToChord, resolveChord, type FocusDomain } from "./keymap";
 import { modalOpen } from "./layers";
@@ -48,6 +49,9 @@ export function CommandProvider({ children }: { children: ReactNode }) {
   // Locking or unlocking changes no store field, so the menu push effect below
   // lists `vault` in its dependency array.
   const vault = useVaultState();
+  // The same for the update pair's two faces (lib/updates.ts): a download
+  // finishing changes no store field either.
+  const update = useUpdateState();
   const commands = useMemo(() => buildCommands(registryDeps), []);
 
   // The latest ctx sits in a ref, so the window listener below registers once
@@ -112,13 +116,13 @@ export function CommandProvider({ children }: { children: ReactNode }) {
   // The menu bar is installed from Bun, so it cannot ask a `when` anything at
   // the moment the user pulls it down: it carries whatever enablement was true
   // at the last push. This effect pushes again when the state the `when`s read
-  // moves: the document model, the selected workspace, the vault. A `when` on
-  // live frontmatter (the template marker, profile.open) lags until autosave's
-  // notesChanged refreshes the note list. Watching the document text instead
-  // would rebuild the menu on every keystroke (interactions.md §10).
+  // moves: the document model, the selected workspace, the vault, the update.
+  // A `when` on live frontmatter (the template marker, profile.open) lags until
+  // autosave's notesChanged refreshes the note list. Watching the document text
+  // instead would rebuild the menu on every keystroke (interactions.md §10).
   useEffect(() => {
     setAppMenu(buildMenu(commands, ctxRef.current));
-  }, [commands, state, selected, vault]);
+  }, [commands, state, selected, vault, update]);
 
   const api = useMemo<CommandsApi>(() => ({ exec, commands, ctx }), [exec, commands, ctx]);
   return <CommandsContext.Provider value={api}>{children}</CommandsContext.Provider>;

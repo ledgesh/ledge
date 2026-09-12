@@ -93,6 +93,18 @@ describe("parseSettings", () => {
     expect(problems).toEqual(['"editor.livePreview" must be true or false']);
   });
 
+  test("updates.automatic takes only booleans and is read from the client's file", () => {
+    expect(parseSettings({ updates: { automatic: false } }, "client").settings.updates.automatic).toBe(false);
+    const { settings, problems } = parseSettings({ updates: { automatic: "no" } }, "client");
+    expect(settings.updates.automatic).toBe(true);
+    expect(problems).toEqual(['"updates.automatic" must be true or false']);
+    // In the server's file it is inert, so a Mac cannot have its own checks
+    // turned off by the settings of a server it connects to.
+    const server = parseSettings({ updates: { automatic: false } }, "server");
+    expect(server.settings.updates.automatic).toBe(true);
+    expect(server.problems).toHaveLength(1);
+  });
+
   test("appearance.theme takes the three spellings and nothing else", () => {
     for (const theme of ["system", "light", "dark"] as const) {
       const { settings, problems } = parseSettings({ appearance: { theme } }, "client");
@@ -292,8 +304,8 @@ describe("a section in the wrong file", () => {
     expect(settings.editor.fontSize).toBe(DEFAULT_SETTINGS.editor.fontSize);
     expect(settings.appearance.theme).toBe("system");
     expect(problems).toEqual([
-      '"editor" describes this screen, so it moved to this app\'s own settings; the copy here does nothing',
-      '"appearance" describes this screen, so it moved to this app\'s own settings; the copy here does nothing',
+      '"editor" belongs to this app rather than the notes, so it lives in this app\'s own settings; the copy here does nothing',
+      '"appearance" belongs to this app rather than the notes, so it lives in this app\'s own settings; the copy here does nothing',
     ]);
   });
 
@@ -388,12 +400,14 @@ describe("the seeded templates", () => {
       editor: { fontSize: 17, livePreview: false },
       terminal: { fontSize: 11 },
       appearance: { theme: "dark" },
+      updates: { automatic: false },
     });
     const { settings, problems } = parseSettings(JSON.parse(stripJsonc(text)), "client");
     expect(problems).toEqual([]);
     expect(settings.editor).toEqual({ fontSize: 17, livePreview: false });
     expect(settings.terminal).toEqual({ fontSize: 11 });
     expect(settings.appearance).toEqual({ theme: "dark" });
+    expect(settings.updates).toEqual({ automatic: false });
     expect(text).toContain("// Conceal markdown syntax away from the caret");
   });
 });

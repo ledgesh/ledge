@@ -7,11 +7,15 @@
 // files the app wrote, named by content hash, that no user chose and no
 // listing shows.
 import { rm } from "node:fs/promises";
-import { readdirSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 /** The folder Electrobun extracts into, under the channel's app data dir. */
 export const EXTRACTION_DIRNAME = "self-extraction";
+
+/** The record Electrobun's updater writes beside a downloaded update that has
+ * not been installed yet. Its `hash` names the tar the install will unpack. */
+export const PREPARED_UPDATE_FILE = ".electrobun-prepared-update.json";
 
 // --- pure core (unit-tested in updateCache.test.ts) --------------------------
 
@@ -22,12 +26,28 @@ export const EXTRACTION_DIRNAME = "self-extraction";
  * versions' tars can never be a baseline again, so they go, along with the
  * `.patch` and `from-<hash>.tar` scratch files a patch run writes.
  *
+ * `preparedHash` is a downloaded update waiting for Restart to Install Update.
+ * Its tar is the install, so it stays too.
+ *
  * A null `liveHash` deletes nothing. Deleting the wrong tar costs a user a
  * full download, and keeping them all only costs disk. */
-export function staleExtractionFiles(entries: string[], liveHash: string | null): string[] {
+export function staleExtractionFiles(entries: string[], liveHash: string | null, preparedHash: string | null = null): string[] {
   if (!liveHash) return [];
-  const keep = `${liveHash}.tar`;
-  return entries.filter((e) => e !== keep && (e.endsWith(".tar") || e.endsWith(".patch")));
+  const keep = new Set([liveHash, preparedHash].filter(Boolean).map((hash) => `${hash}.tar`));
+  return entries.filter((e) => !keep.has(e) && (e.endsWith(".tar") || e.endsWith(".patch")));
+}
+
+/** The hash a prepared-update record names, or null for no record or one this
+ * cannot read. Null keeps the prune to its old rule. Electrobun's updater
+ * validates the record itself before an install uses it. */
+export function preparedHashOf(recordText: string | null): string | null {
+  if (!recordText) return null;
+  try {
+    const hash = (JSON.parse(recordText) as { hash?: unknown }).hash;
+    return typeof hash === "string" && /^[a-z0-9]{1,13}$/.test(hash) ? hash : null;
+  } catch {
+    return null;
+  }
 }
 
 // --- the files ---------------------------------------------------------------
@@ -45,8 +65,15 @@ export async function pruneExtractionDir(dir: string, liveHash: string | null): 
     return []; // no extraction folder: a dev build, or a first run
   }
 
+  let record: string | null = null;
+  try {
+    record = readFileSync(join(dir, PREPARED_UPDATE_FILE), "utf8");
+  } catch {
+    // No update is waiting to be installed.
+  }
+
   const removed: string[] = [];
-  for (const name of staleExtractionFiles(entries, liveHash)) {
+  for (const name of staleExtractionFiles(entries, liveHash, preparedHashOf(record))) {
     // An entry can be a directory rather than a file: a half-finished
     // extraction leaves one named like a tar. `recursive` removes that too.
     try {

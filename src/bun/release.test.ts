@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import config from "../../electrobun.config";
+import config, { UPDATE_BASE_URL } from "../../electrobun.config";
 import { BUILD_VERSION } from "../shared/version";
 import { manifest } from "./npmPackage";
 
@@ -62,6 +62,35 @@ describe("the release build config", () => {
     // The preflight catches a mistyped signing identity before the build
     // starts, rather than minutes later when the build fails at signing.
     expect(pkg.scripts["release"]).toContain("release-preflight.ts");
+  });
+});
+
+// Every build carries its update address for as long as it is installed, so a
+// build that shipped with the wrong one could never be told about the next
+// release (releasing.md §7).
+describe("the update address", () => {
+  function baseUrlWith(env: Record<string, string | undefined>): string {
+    const p = Bun.spawnSync(
+      [process.execPath, "-e", "import c from './electrobun.config'; console.log(c.release.baseUrl)"],
+      { cwd: ROOT, env: { ...process.env, ...env }, stdout: "pipe", stderr: "pipe" },
+    );
+    if (p.exitCode !== 0) throw new Error(p.stderr.toString());
+    return p.stdout.toString().trim();
+  }
+
+  test("is ledge.sh unless a probe points it elsewhere", () => {
+    expect(baseUrlWith({ LEDGE_UPDATE_BASE_URL: undefined })).toBe("https://ledge.sh/updates");
+  });
+
+  // An http:// address would let anything on the network path answer an
+  // install's update check. Electrobun validates the manifest's shape, not who
+  // sent it.
+  test("is https, with no trailing slash", () => {
+    expect(UPDATE_BASE_URL).toMatch(/^https:\/\/[^/]+(\/[^/]+)*$/);
+  });
+
+  test("a probe can point an unsigned build at a local server", () => {
+    expect(baseUrlWith({ LEDGE_UPDATE_BASE_URL: "http://127.0.0.1:8787" })).toBe("http://127.0.0.1:8787");
   });
 });
 

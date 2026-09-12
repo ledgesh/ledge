@@ -9,13 +9,17 @@ publishing.
 
 ## 1. What a release consists of
 
-`bun run release` writes three files to `artifacts/` (gitignored):
+`bun run release` writes these files to `artifacts/` (gitignored):
 
 | File | What it is |
 | --- | --- |
-| `stable-macos-arm64-Ledge.dmg` | What users download. Contains the self-extracting app and a symlink to `/Applications`. |
-| `stable-macos-arm64-Ledge.app.tar.zst` | The app itself, compressed. This is what the updater downloads. |
-| `stable-macos-arm64-update.json` | `{version, hash, platform, arch}`, read by the updater to decide whether a newer build exists. |
+| `macos-arm64-Ledge.dmg` | What users download. Contains the self-extracting app and a symlink to `/Applications`. |
+| `stable-macos-arm64-Ledge.app.tar.zst` | The app itself, compressed. The updater downloads it when no patch applies. |
+| `stable-macos-arm64-update.json` | The manifest the updater reads (§7). |
+| `stable-macos-arm64-<hash>.patch` | A binary diff from the previous release's build, named by that build's hash, to this one. Written only when the update server was serving a previous release during the build. |
+
+Every release uploads all of them. A missing patch costs installs a full
+download. A missing tarball or manifest breaks the update.
 
 Two app bundles get built, and both are signed:
 
@@ -58,9 +62,8 @@ server's handshake naming a build somebody can actually install.
 the About panel and Finder's Get Info have no version to show). The preflight
 and `src/bun/release.test.ts` both fail when the two files disagree.
 
-`update.json` carries the same version, and the updater compares versions to
-decide whether to offer an upgrade. A release that reuses a version number is a
-release the updater cannot see.
+`update.json` carries the same version, but the version is not what the updater
+compares. It compares the build's hash (§7).
 
 ## 3. What signing needs
 
@@ -116,7 +119,10 @@ preflight first for that reason.
 3. `bun run release`. Expect several minutes: the tarball compresses for about
    ten seconds and notarization is two round trips to Apple.
 4. Verify the artifact (§5).
-5. Tag the commit and publish `artifacts/` to wherever releases live.
+5. Tag the commit `v<version>`, create the GitHub release on `ledgesh/ledge`
+   with every file in `artifacts/`, then publish that tag to the update server
+   (§7). Publishing the tag is the step that offers the release to every
+   existing install.
 
 Add `LEDGE_UNSIGNED=1` to package without signing or notarizing. That is for
 exercising the packaging path itself, and the app it produces runs on the
@@ -171,6 +177,10 @@ that all other testing uses:
   `bun`, from outside the bundle.
 - Open a workspace under `~/Documents` or `~/Desktop` and confirm the TCC prompt
   appears and, once granted, that notes read and write.
+- Ledge > Check for Updates… answers "Ledge <version> is the latest version."
+  That is the answer before the release is published to the update server (a
+  404) and after (a manifest naming this build's own hash). An error strip here
+  is the updater's fetch failing under the hardened runtime.
 
 A signed build that fails one of these is not a release; it is a bug in the
 entitlements (`build.mac.entitlements` in `electrobun.config.ts`).
@@ -248,14 +258,84 @@ that has never existed also decides the account that owns it forever. Neither
 is a step that can be rehearsed, so `npm publish --dry-run ./dist-npm` is the
 rehearsal: it prints the exact file list and the tarball size without uploading.
 
-## 7. What is not automated
+## 7. Updates
 
-- **Auto-update.** `release.baseUrl` is unset, so no build offers an upgrade to
-  the one before it, and no patch is generated. The artifacts are already the
-  right shape for it: publishing them under a `baseUrl` and setting that key is
-  what turns it on.
-- **Publishing.** Nothing uploads `artifacts/`, and nothing runs `npm publish`
-  (§6). CI builds the app but does not release it.
+Every stable build checks `https://ledge.sh/updates` for a newer one: ten
+seconds after launch, then once a day, and an hour after a check that failed.
+It downloads a newer build in the background, and Ledge > Restart to Install
+Update installs it. `bun/updates.ts` decides when; Electrobun's `Updater` does
+the fetch, the validation and the install. The client setting
+`updates.automatic` set to `false` stops the scheduled checks, and Check for
+Updates… still checks and downloads.
+
+**The address is permanent.** It is `release.baseUrl` in
+`electrobun.config.ts`, compiled into every bundle's `version.json`, and a build
+asks it for as long as that build is installed. Moving it strands every install
+that has the old one. `release.test.ts` pins it.
+
+What an install requests, under that address:
+
+| Request | Served |
+| --- | --- |
+| `stable-macos-arm64-update.json?<random>` | The current release's manifest, or 404 while nothing is published |
+| `stable-macos-arm64-<its own hash>.patch` | The patch from that install's build, or 404, which falls back to the tarball |
+| `stable-macos-arm64-Ledge.app.tar.zst?cache=<random>` | The current release's tarball |
+
+**A 404 for the manifest reads as up to date.** That is how every install
+behaves before the first release is published, and `noRelease` in
+`bun/updates.ts` is the rule.
+
+**The updater compares hashes, never versions.** An install offers an update
+whenever the manifest's `hash` differs from its own. So:
+
+- The manifest the site serves must be the one the build wrote, byte for byte.
+  A hand-edited or stale manifest offers every install whatever it points at,
+  including an older build.
+- Pulling a bad release means serving the previous release's manifest again.
+  Every install on the bad build then moves back to the previous one.
+- A manifest published before its tarball uploads gives every install a failed
+  download.
+
+**Publishing is `bun run updates:publish v<version>` in `ledgesh/ledge-www`**,
+run after every asset has finished uploading to the GitHub release. It
+downloads that release's manifest, validates it against the rules Electrobun
+enforces, checks that the tarball downloads, and only then writes the manifest
+and the release's asset list into that repo's `updates/`. Committing those two
+files and deploying the site is what offers the release. The tarball and the
+patches redirect to the tagged release's assets. `updates/README.md` there is
+the site's half of this section.
+
+**Probing an update without publishing one** uses `LEDGE_UPDATE_BASE_URL`,
+which replaces the address in an unsigned build. The preflight refuses it in a
+signed one. The recipe, all against a scratch `HOME` and `LEDGE_NOTES_ROOT`
+(`testing.md` §6):
+
+1. Serve an empty folder on `127.0.0.1` from a static server that answers 404
+   for anything missing.
+2. `LEDGE_UNSIGNED=1 LEDGE_UPDATE_BASE_URL=http://127.0.0.1:<port> bun run release`
+   builds A. Unpack its tarball with the devkit's `zig-zstd` and `tar`, and run
+   `Ledge.app/Contents/MacOS/launcher` from there. Its log says
+   `[update] current <version>`.
+3. Put A's manifest and tarball in the served folder, raise the version in
+   `package.json` and `electrobun.config.ts`, and build B. The build downloads A
+   and writes the patch. Put B's manifest, tarball and patch in the folder
+   instead of A's, and put the version back.
+4. Copy A's unpacked `.tar` to
+   `$HOME/Library/Application Support/sh.ledge.app/stable/self-extraction/<A's hash>.tar`,
+   where the DMG's extractor would have left it, so the patch applies.
+5. Run A again. Its log reads `checking`, `downloading`, `ready`, and Restart to
+   Install Update relaunches the bundle as B, which then logs `current`.
+
+The relaunched app inherits the environment of the one that installed it, so
+it stays on the scratch root. That was checked on 2026-09-12, and it is a fact
+about Electrobun's update helper rather than a guarantee: a probe should guard
+it before relying on it.
+
+## 8. What is not automated
+
+- **Publishing.** Nothing uploads `artifacts/`, nothing publishes a tag to the
+  update server (§7), and nothing runs `npm publish` (§6). CI builds the app but
+  does not release it.
 - **The server package in `bun run release`.** The release script builds the Mac
   app and stops; `bun run build:npm` is a second command, run by hand. Folding
   it in means the release depends on Docker being up, which is a fair trade to

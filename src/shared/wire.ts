@@ -269,6 +269,9 @@ export const REQUEST_METHODS = [
   "noteRemoveLock",
   "vaultChangePassphrase",
   "linkOpen",
+  "updateState",
+  "updateCheck",
+  "updateInstall",
 ] as const satisfies readonly RequestMethod[];
 
 /** Every message the server pushes, unsolicited. */
@@ -289,9 +292,9 @@ export const PUSH_MESSAGES = [
  * Pushes the client shell raises itself, which no server may send. The mirror
  * of CLIENT_METHODS below, on the other direction of the wire: a connection's
  * state is a fact about the wire, and the end holding the far side of a
- * dropped one cannot report it.
+ * dropped one cannot report it. The app's own update is the app's.
  */
-export const CLIENT_PUSHES = ["connectionState", "docsShow"] as const satisfies readonly PushMessage[];
+export const CLIENT_PUSHES = ["connectionState", "docsShow", "updateChanged"] as const satisfies readonly PushMessage[];
 
 export type ClientPush = (typeof CLIENT_PUSHES)[number];
 
@@ -307,13 +310,15 @@ export type ClientPush = (typeof CLIENT_PUSHES)[number];
 // added here without a matching refusal fails to compile.
 
 /**
- * The native ten: the pasteboard, the picture library, the browser, the menu
- * bar, and the windows. All of them belong to the device in front of the user.
+ * The native thirteen: the pasteboard, the picture library, the browser, the
+ * menu bar, the windows, and the app's own update. All of them belong to the
+ * device in front of the user.
  *
  * Answering them on the server reaches the wrong machine: a VPS's empty
  * pasteboard, a file dialog opened on a screen nobody is looking at, a link
  * opened in a browser nobody is looking at, a menu bar that does not exist and
- * takes ⌘Q with it (remote.md §10), a window on a machine with no screen.
+ * takes ⌘Q with it (remote.md §10), a window on a machine with no screen, an
+ * update for a program that is not the one running over there.
  */
 export const NATIVE_METHODS = [
   "clipboardRead",
@@ -326,6 +331,9 @@ export const NATIVE_METHODS = [
   "windowNew",
   "windowDocs",
   "windowRole",
+  "updateState",
+  "updateCheck",
+  "updateInstall",
 ] as const satisfies readonly RequestMethod[];
 
 export type NativeMethod = (typeof NATIVE_METHODS)[number];

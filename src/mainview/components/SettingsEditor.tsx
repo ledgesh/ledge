@@ -85,7 +85,7 @@ function problemsOf(text: string, home: SettingsHome): string[] {
 // app to whichever machine's notes it is showing (remote.md §5).
 const TABS: Array<{ home: SettingsHome; label: string; hint: string }> = [
   { home: "server", label: "Notes machine", hint: "The shell, the trash, and what a code fence runs." },
-  { home: "client", label: "This app", hint: "Font sizes, theme, and live preview." },
+  { home: "client", label: "This app", hint: "Font sizes, theme, live preview, and update checks." },
 ];
 
 export function SettingsEditor({ onClose }: { onClose: () => void }) {

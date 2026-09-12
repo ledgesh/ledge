@@ -112,7 +112,12 @@ describe("the schema's shape against the protocol version", () => {
   // A shell that predates the field ignores it and reads its pasteboard as
   // before. Nothing was retyped, made required, or narrowed. The pin moves and
   // the version does not.
-  const PINNED = { protocol: 5, shape: "d114d8f8cf5f9b43" };
+  // Then the app's own update: UpdateState, three requests (updateState,
+  // updateCheck, updateInstall) and one push (updateChanged). All four are
+  // client-only (NATIVE_METHODS and CLIENT_PUSHES), so no frame carries them and
+  // no server's view of the wire changes. Nothing existing moved. The pin moves
+  // and the version does not.
+  const PINNED = { protocol: 5, shape: "d0b398132e98aee4" };
 
   test("a payload shape does not change without someone deciding whether it breaks", async () => {
     const shape = digest(shapeOf(await Bun.file(SCHEMA).text()));

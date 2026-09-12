@@ -21,6 +21,7 @@
 import { readClipboardHtml, readClipboardImage, readClipboardText, writeClipboard } from "./clipboard";
 import { loadClientSettings, readClientSettingsFile, writeClientSettingsFile } from "./clientSettings";
 import { mergeSettings, type Settings } from "../shared/settings";
+import type { UpdateState } from "../shared/rpc-schema";
 import { openableUrl } from "../shared/links";
 import { NATIVE_METHODS, type NativeMethod, type RequestHandlers } from "../shared/wire";
 
@@ -55,7 +56,17 @@ export interface ClientNative {
   // no picker makes Insert Image… answer null. A cancelled picker answers null
   // too, and the view already handles that.
   pickImage?(): Promise<Uint8Array | null>;
+  // This app's own update (bun/updates.ts). Absent on a shell that does not
+  // update itself, which then answers phase "off" and the view leaves the
+  // update verbs out.
+  updates?: {
+    state(): UpdateState;
+    check(): UpdateState;
+    install(): Promise<boolean>;
+  };
 }
+
+const NO_UPDATES: UpdateState = { phase: "off", version: "", detail: "This app does not update itself." };
 
 // NATIVE_METHODS, CONNECTION_METHODS and CLIENT_METHODS live in
 // shared/wire.ts, not here. This module implements the first group for the Mac
@@ -108,7 +119,7 @@ export async function clientOverlay(base: RequestHandlers, native: ClientNative)
 }
 
 /**
- * The ten native handlers (shared/wire.ts NATIVE_METHODS). `server` is where
+ * The native handlers (shared/wire.ts NATIVE_METHODS). `server` is where
  * the two that produce a file, assetPaste and assetPick, send their bytes:
  * this device reads the pasteboard or the picker, and the machine holding the
  * notes names the file.
@@ -198,6 +209,11 @@ export function clientSeams(
     // Which window this view is in, asked once at boot. A shell that has one
     // window answers for it: it is never the manual's.
     windowRole: async () => native.windowRole?.() ?? { docs: false, page: "" },
+    // The app's update, which belongs to the process rather than to a window,
+    // so every window's handlers reach the same one (bun/index.ts).
+    updateState: async () => native.updates?.state() ?? NO_UPDATES,
+    updateCheck: async () => native.updates?.check() ?? NO_UPDATES,
+    updateInstall: async () => ({ ok: (await native.updates?.install()) ?? false }),
     // openableUrl is the guard, not a convenience. `open` treats a non-URL
     // argument as a file path and launches .app bundles, so only the
     // allowlisted schemes pass (shared/links.ts). The url arrives from a note,

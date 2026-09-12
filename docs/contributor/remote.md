@@ -552,6 +552,7 @@ splits again, by machine:
 | The watcher | server | pushes `notesChanged` as today |
 | Behavior settings (shell, interpreters, trash TTL, daily workspace) | server | facts about that machine |
 | Appearance settings (theme, font sizes, `editor.livePreview`) | **client** | facts about that screen |
+| Whether the app checks for updates (`updates.automatic`) | **client** | the update is the app's, `releasing.md` §7 |
 | Window frame (`window.json`) | **client** | amends `architecture.md` §6 |
 | Clipboard, rich paste, pasted image bytes, link opening | **client** | §10 |
 | Whether the connection is up | **client** | §7, `CLIENT_PUSHES` |
@@ -1725,27 +1726,31 @@ no notion of who is asking beyond the client id in a hello, which is why
 - **Locked plaintext to an agent surface**, per §9.
 - **A path the client constructed.** Per §2.
 
-**Eight RPC entries are the client's outright** and never become frames
-(`bun/clientSeams.ts`, whose `CLIENT_METHODS` is the list both ends read):
+**Thirteen RPC entries are the client's outright** and never become frames
+(`NATIVE_METHODS` in `shared/wire.ts`, served on a Mac by `bun/clientSeams.ts`):
 `clipboardWrite`, `clipboardRead`, `clipboardReadRich`, `assetPaste`,
-`assetPick`, `linkOpen`, `menuSet`, and `windowNew`. Opening a URL happens on
+`assetPick`, `linkOpen`, `menuSet`, `windowNew`, `windowDocs`, `windowRole`,
+`updateState`, `updateCheck`, and `updateInstall`. Opening a URL happens on
 the device the user is holding, not on the VPS; the picture you want to insert
 is in that device's photo library, in its files, or in front of its camera
 (ios.md §11); a headless
-server handed the view's menu would swallow ⌘Q with it; and a machine with no
-screen has nowhere to put a window (§8a). The six connection entries (§8) join
-them for a different reason: a server has no business knowing which servers this
-client can reach.
+server handed the view's menu would swallow ⌘Q with it; a machine with no
+screen has nowhere to put a window (§8a); and the update is this app's, where a
+server is a different program installed by whoever runs it (releasing.md §7).
+The seven connection entries (§8) join them for a different reason: a server has
+no business knowing which servers this client can reach.
 
-The server implements all fourteen as REFUSALS rather than omitting them,
+The server implements all twenty as REFUSALS rather than omitting them,
 because the handler map is total by construction; reaching one means a client
 forgot its overlay, and `{text: ""}` back from a clipboard read would look
 exactly like an empty clipboard until somebody went looking. `bun/server.ts` now has no
 `osascript` call site at all.
 
-**One push is the client's too**, for the mirror-image reason: `connectionState`
-says whether the wire is up, and the end on the far side of a dropped one is in
-no position to report it. `CLIENT_PUSHES` in `shared/wire.ts` is that list, and
+**Three pushes are the client's too**, for the mirror-image reason:
+`connectionState` says whether the wire is up, and the end on the far side of a
+dropped one is in no position to report it. `docsShow` and `updateChanged` are
+about this app's windows and this app's update, which no server knows about.
+`CLIENT_PUSHES` in `shared/wire.ts` is that list, and
 it is subtracted from the `ServerPush` type rather than stubbed — a server
 handed a method whose only correct implementation is not to call it is a
 mistake waiting to be made.

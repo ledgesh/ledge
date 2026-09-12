@@ -228,7 +228,7 @@ On a Mac, the server needs Remote Login turned on in System Settings, under Gene
 
 | On the server | On this Mac |
 | --- | --- |
-| Notes, images, and the trash | Theme, font sizes, and live preview |
+| Notes, images, and the trash | Theme, font sizes, live preview, and update checks |
 | Workspaces | Window size and position |
 | The vault and locked notes | The clipboard |
 | Profiles and their secrets | Which connections exist, their pinned keys, and any stored passwords |
