@@ -281,8 +281,10 @@ export function dispatchNotesChanged(root: string): void {
 // the view about the roots that moved while the wire was down: another
 // device's save, a git checkout, an agent working in a drawer. The lists and
 // every open buffer go on showing what was true when the wire went. Window
-// focus is a second net on a Mac, and it misses the cases that matter most:
-// the window never left, or there is no window focus to have (ios.md §5).
+// focus is a second net on a Mac, and it misses the case that matters most:
+// the window never left. A phone has no window focus at all, and reaches this
+// sink from its own foreground notification instead (mainview/ios.tsx,
+// boot.tsx viewResumed).
 
 // One sink, replaced not stacked, like the drawer's (terminal/channel.ts):
 // App owns the folder list and the open tabs and is the only thing that can

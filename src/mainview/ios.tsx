@@ -9,7 +9,7 @@
 import { reconnectingClient, SESSION_HOLD_MS } from "../shared/transport";
 import { sessionHold } from "../shared/wire";
 import { BUILD_VERSION } from "../shared/version";
-import { bootView, viewPush } from "./boot";
+import { bootView, viewPush, viewResumed } from "./boot";
 import { hideBooting, showBooting } from "./lib/booting";
 import { attachShell, barFaceOf, focusReporter, nativeOverlay, type Shell } from "./lib/nativeBridge";
 import { sendRunKey } from "./editor/inlineTerm";
@@ -18,12 +18,16 @@ import { configureShell } from "./lib/shell";
 
 // Milestones, in milliseconds since the page began loading.
 //
-// Foregrounding a phone is a boot (ios.md §5), so the number to measure is the
-// handshake in front of the first round trip. A Mac's local server needs none
-// of it. The phases stay apart rather than summed: `socket` is the connect,
-// `server` adds the protocol handshake, and `view` adds boot.tsx's concurrent
-// prefetch, which remote.md §12 charges as one round trip. Timing `view` on
-// its own is how that charge gets checked.
+// A launch pays an ssh handshake in front of its first round trip and a Mac's
+// local server pays none of it, so that handshake is the latency a phone
+// actually feels (ios.md §5). The phases stay apart rather than summed:
+// `socket` is the connect, `server` adds the protocol handshake, and `view`
+// adds boot.tsx's concurrent prefetch, which remote.md §12 charges as one
+// round trip. Timing `view` on its own is how that charge gets checked.
+//
+// This line is a launch's, not a resume's: foregrounding no longer reloads, so
+// there is no second boot to measure. What a resume costs is on the `[resume]`
+// line instead.
 const marks: string[] = [];
 const mark = (what: string): void => void marks.push(`${what}=${Math.round(performance.now())}ms`);
 
@@ -128,15 +132,39 @@ async function start(): Promise<void> {
   // a server clamped the hold this client asked for.
   const held = sessionHold(SESSION_HOLD_MS, peer.hold);
 
-  // Foregrounding is a boot (ios.md §5). The shell closes the socket on the way
-  // out, because a suspended app's socket dies anyway and a half-open one looks
-  // live until the first write fails. So the wire is not live on the way back
-  // in and the page reloads. The `live` check is not dead code: an app switch
-  // that never suspended costs nothing. The boot latency in the log line below
-  // is the number that would say whether holding the socket across a short trip
-  // is worth building.
-  shell.onResume(() => {
-    if (!live) window.location.reload();
+  // Foregrounding probes the wire it left (ios.md §5). It used to reload, and
+  // the screen that reload blanked was a complete one: the note, its text, its
+  // scroll position, rendered and still valid. A reload spent an ssh
+  // handshake, a Secure Enclave signature and a repaint to arrive at the
+  // picture already on the glass, and it took every inline run panel with it.
+  //
+  // `recheck` is the distinction the reload was standing in for: one ping,
+  // answered only by the process holding the notes, milliseconds on a wire
+  // that works (shared/transport.ts). A live wire comes back to a screen that
+  // never changed. A dead one lands on the ladder, under a UI that stays up
+  // while it climbs, and `connectionState` resettles what the reconnect
+  // invalidates: saves held, buffers resolved, runs reconciled, shells
+  // re-claimed, the vault re-read, every note list re-read (boot.tsx). That is
+  // what a Mac has always done for a lid that opened, and none of it wanted a
+  // blank screen.
+  //
+  // Unconditional, because `live` is the page's belief and not a fact. The
+  // wire may have died while the app was away with nothing running to notice,
+  // and on a live-looking connection this is the call that asks.
+  shell.onResume((awayMs) => {
+    shell.log(`[resume] away ${(awayMs / 1000).toFixed(1)}s, wire ${live ? "live" : "down"}: probing`);
+    // A phone has no window focus event, and foregrounding is the one it was
+    // missing (remote.md §10). Every push aimed at this page while it was
+    // suspended went at a page that was not running, so the lists and the
+    // vault are re-read on the way back in, exactly as a Mac does when its
+    // window comes forward. Reads, so the ladder replays them as themselves if
+    // the probe below turns out to have found a dead wire.
+    //
+    // Only while the wire looks live. A reconnect announces `live` and runs
+    // the same sweep on its own, and two of them would be two round trips for
+    // one answer (boot.tsx).
+    if (live) viewResumed();
+    wire.recheck();
   });
 
   // The accessory bar above the keyboard (ios.md §7). Swift holds the buttons

@@ -881,9 +881,16 @@ whole sweep is one round trip (§12) however many folders and tabs are open.
 The belt is window focus, which runs that same refresh, and it is worth being
 precise about why it is not enough. It never fires when the wire returns to a
 window that never left, which is the case whenever somebody is sitting there
-watching the bar say "reconnecting…". And a phone has no such event to wait for
-at all (`ios.md` §5) while being the client whose wire drops constantly, so on
-the client with the worst staleness the belt is not fastened.
+watching the bar say "reconnecting…". And a phone has no such event at all,
+while being the client whose wire drops constantly, so on the client with the
+worst staleness the belt was not fastened.
+
+What fastens it there is foregrounding, which is a phone's window focus and is
+also the one moment its pushes are guaranteed to have gone nowhere: a suspended
+page is not running to receive them, and the wire they arrived over need never
+have dropped, so no `live` announcement follows to run the sweep. `ios.tsx`
+runs `viewResumed` on the way back in, which is the vault re-read and the note
+re-read out of the `live` branch above (`mainview/boot.tsx`, ios.md §5).
 
 The refresh reloads CLEAN buffers only (`reloadCandidates` in
 `mainview/notes/store.ts`), which is why reusing it matters rather than writing a

@@ -154,6 +154,41 @@ describe("the byte stream", () => {
 // The accessory bar's half of the bridge (ios.md §7). Swift sends a command
 // id and the page hands it to the registry. The tests below check that the
 // bridge passes an id through without interpreting it.
+// Foregrounding, which is the one message on this channel that is about the
+// app rather than about a socket or a key. ios.tsx probes the wire on it
+// rather than reloading (ios.md §5), and the duration is Swift's measurement
+// because no timer of the page's ran while the app was away.
+describe("coming back to the foreground", () => {
+  test("hands the subscriber how long the app was away", () => {
+    const { shell } = recorder();
+    const trips: number[] = [];
+    shell.onResume((awayMs) => trips.push(awayMs));
+    shell.deliver({ t: "resumed", away: 1_800 });
+    shell.deliver({ t: "resumed", away: 612_000 });
+    expect(trips).toEqual([1_800, 612_000]);
+  });
+
+  test("before anything subscribes, it is dropped rather than thrown", () => {
+    // The window between the page loading and ios.tsx reaching its
+    // subscription, which is behind the first dial and so behind a network.
+    // A throw would land in `deliver`, which Swift calls from
+    // evaluateJavaScript and cannot handle.
+    const { shell } = recorder();
+    expect(() => shell.deliver({ t: "resumed", away: 40 })).not.toThrow();
+  });
+
+  test("and it settles no pending native call", async () => {
+    // A resume and a reply cross the same channel. This one carries no id, so
+    // the case is that it is not mistaken for one.
+    const { shell } = recorder();
+    let settled = false;
+    void shell.call("clipboard.read", {}).then(() => (settled = true));
+    shell.deliver({ t: "resumed", away: 40 });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+  });
+});
+
 describe("a button on the keyboard bar", () => {
   test("arrives as the command id Swift sent, verbatim", () => {
     const { shell } = recorder();

@@ -626,6 +626,23 @@ the failure it prevents, which is running a command on the wrong box.
   alone says nothing about what it names. The size is what puts it in scope
   order: everything below the bar belongs to the machine on it, so it reads
   larger than the section headings it sits above rather than smaller.
+- **A strip stands in for it wherever it is not on screen.** The bar lives in
+  the sidebar, which is a pane on a Mac and a shut drawer on a phone
+  (ios.md §9), so the app's one report on the link was behind a tap on a phone
+  and gone with a collapsed sidebar on a Mac. `workspace/LinkNotice.tsx` draws
+  a one-line strip above the content while the link is not live and that bar is
+  not showing, and nothing while it is: two reports of one wire are the same
+  sentence twice. It matters most on a phone, where foregrounding probes the
+  wire underneath a UI that stays on screen rather than reloading behind the
+  boot panel (ios.md §5), so a wire taking its time is a note that looks
+  ordinary and cannot save.
+- **The strip is a sentence while the ladder climbs and a target once it
+  stops.** Mid-ladder the app dials again within seconds, so there is nothing a
+  press could bring forward and the strip carries no verb, which is §8's rule
+  about a control that is present and inert. Past the ladder the beat is half a
+  minute wide, and the whole strip becomes Reconnect: one target, full width,
+  44 points on touch, rather than a button inside a 24-point row that a finger
+  cannot hit (§1a).
 - **It also says who else is on that machine, and only when somebody is.** One
   other device is named; past that it counts, with the names in the hover
   (remote.md §7). Nothing at all is drawn while you are alone, which is nearly
@@ -739,6 +756,11 @@ the failure it prevents, which is running a command on the wrong box.
     verbs; the registry that holds them is built by `CommandProvider`, which is
     downstream of everything this screen is waiting for. A verb that cannot
     exist yet cannot carry the only control on the screen.
+  - **It covers a launch and never a reconnect.** A launch has nothing to show.
+    A reconnect has the whole app already rendered against the notes, so it
+    keeps it and reports the wire in the strip above instead (ios.md §5). That
+    includes a phone coming back to the foreground, which used to reload and
+    land here.
 - **A refusal and a rejection both end as a sentence.** Every action here sets
   a busy flag before it asks, and Bun can fail to answer as well as answer no:
   the view gives a request thirty seconds (`maxRequestTime`, `main.tsx`) and

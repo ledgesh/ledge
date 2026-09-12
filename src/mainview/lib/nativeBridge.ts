@@ -113,10 +113,15 @@ export type ToPage =
   | { t: "closed"; gen: number }
   | { t: "reply"; id: number; r: unknown }
   | { t: "fail"; id: number; e: string }
-  // The app came back to the foreground. Not a socket event: iOS runs no
-  // timers in a suspended process, so the ladder cannot be what notices a
-  // wire that died while the app was away (ios.md §5).
-  | { t: "resumed" }
+  // The app came back to the foreground, with how many milliseconds it was
+  // away. Not a socket event: iOS runs no timers in a suspended process, so
+  // the ladder cannot be what notices a wire that died while the app was away
+  // (ios.md §5).
+  //
+  // `away` is Swift's measurement because it cannot be taken here. No timer of
+  // this page's ran while the app was gone, which is the same reason `beat` in
+  // shared/transport.ts counts ticks rather than reading a clock.
+  | { t: "resumed"; away: number }
   // A button on the keyboard accessory bar (ios.md §7). The payload is a
   // command id and nothing else: the bar names a verb the way the Mac's menu
   // bar does, and the command registry knows what any of them mean. Swift holds
@@ -160,8 +165,9 @@ export interface Shell {
   /** Say what has focus, so the shell knows which bar to put on the keyboard it
    * is about to show. Idempotent and cheap: only transitions are sent. */
   focus(over: BarFace): void;
-  /** Told when the app comes back to the foreground. */
-  onResume(fn: () => void): void;
+  /** Told when the app comes back to the foreground, and how many
+   * milliseconds it was away. */
+  onResume(fn: (awayMs: number) => void): void;
   /** Told when a bar button was tapped, by command id. */
   onVerb(fn: (id: string) => void): void;
   /** Told when a key on the run's bar was tapped, by name. */
@@ -181,7 +187,7 @@ export function nativeShell(post: (msg: ToShell) => void): Shell {
   let nextId = 1;
   let live: { gen: number; io: ReturnType<typeof fedDuplex> } | null = null;
   let where = "";
-  let resumed: () => void = () => {};
+  let resumed: (awayMs: number) => void = () => {};
   let verb: (id: string) => void = () => {};
   let key: (name: string) => void = () => {};
 
@@ -264,7 +270,7 @@ export function nativeShell(post: (msg: ToShell) => void): Shell {
           return;
         }
         case "resumed":
-          resumed();
+          resumed(msg.away);
           return;
         case "verb":
           verb(msg.id);

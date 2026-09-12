@@ -4,9 +4,9 @@ import UIKit
 ///
 /// The app's whole state is the connection, and that belongs to WebHost. This
 /// exists to own a window, to choose between pairing and the app, and to
-/// forward the two lifecycle moments that mean something to a client whose
-/// socket the operating system will kill (ios.md §5): going to the background,
-/// and coming back.
+/// forward the two lifecycle moments that mean something to a client the
+/// operating system stops running (ios.md §5): going to the background, and
+/// coming back.
 @objc(AppDelegate)
 final class AppDelegate: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
@@ -136,14 +136,14 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         showServers(because: why, pairing: refused)
     }
 
-    // iOS suspends an app shortly after it leaves the foreground, and a
-    // suspended app's socket dies (ios.md §5). No timer runs while suspended,
-    // so the page's reconnect ladder cannot be what notices: the client dials
-    // on the foreground notification instead, and foregrounding is a boot.
+    // iOS suspends an app shortly after it leaves the foreground, and no timer
+    // runs while it is suspended (ios.md §5). So the page's reconnect ladder
+    // cannot be what notices a wire that died while the app was away: these
+    // two notifications are, and the page probes on the second one.
     //
-    // Both edges are reported and the page decides. The socket is closed on the
-    // way out rather than left: one the system killed during a suspension looks
-    // identical to a live one until the first write fails.
+    // Both edges are reported and the page decides. Neither of them closes the
+    // socket: a short app switch usually comes back to a wire that still
+    // works, and `WebHost.willSuspend` has why.
     func applicationDidEnterBackground(_ application: UIApplication) {
         host?.willSuspend()
     }

@@ -1881,6 +1881,44 @@ test.describe("every target a finger chooses between", () => {
     await expect(page.locator("[data-switch]")).toBeVisible();
     expect(await sweep(page)).toEqual([]);
   });
+
+  // The strip that stands in for that bar while the tree holding it is shut,
+  // which on a phone is nearly always (workspace/LinkNotice.tsx). Resuming
+  // probes under a UI that stays on screen rather than reloading behind the
+  // boot panel (ios.md §5), so this is the app's whole report on a wire that
+  // is taking its time.
+  test("the strip that reports the wire while that bar is behind a drawer", async ({ page }) => {
+    const notice = page.locator("[data-link]:not([data-connection])");
+    // Nothing while the wire is up: the strip is not chrome the app rests on.
+    await expect(notice).toBeHidden();
+
+    await page.evaluate(() => window.__harness.linkState("reconnecting", "The connection dropped. Reconnecting…"));
+    await expect(notice).toHaveText(/Reconnecting/);
+    // The ladder dials again within seconds, so the strip is a sentence and
+    // not a target: a Reconnect here could only bring forward something
+    // already on its way (§8).
+    await expect(notice).toHaveJSProperty("tagName", "DIV");
+
+    // Past the ladder the beat is half a minute wide, so the whole strip
+    // becomes the press, at the 44 points every target on this client gets.
+    await page.evaluate(() => window.__harness.linkState("lost", "Lost the connection: host is down."));
+    await expect(notice).toHaveText(/host is down/);
+    await expect(notice).toHaveJSProperty("tagName", "BUTTON");
+    expect(await sweep(page)).toEqual([]);
+
+    await page.evaluate(() => window.__harness.linkState("live", ""));
+    await expect(notice).toBeHidden();
+  });
+
+  test("and it gives way to that bar rather than doubling it", async ({ page }) => {
+    await page.evaluate(() => window.__harness.linkState("lost", "Lost the connection: host is down."));
+    await expect(page.locator("[data-link]:not([data-connection])")).toBeVisible();
+    // Opening the tree brings the bar on screen, and two reports of one wire
+    // is the same sentence twice (App.tsx).
+    await openSidebar(page);
+    await expect(page.locator("[data-link]:not([data-connection])")).toBeHidden();
+    await expect(page.locator("[data-connection]")).toBeVisible();
+  });
 });
 
 // --- the stacking ladder (index.css) -----------------------------------------

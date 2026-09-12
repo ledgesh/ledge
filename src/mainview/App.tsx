@@ -11,6 +11,7 @@ import { TerminalDrawer } from "@/terminal/TerminalDrawer";
 import { configureBridge, requestHostPick, type HostPickRequest, type RunConfirmRequest } from "@/editor/bridge";
 import { sendTerminalPaste, closeSession, onTerminalExit, terminalStatus } from "@/terminal/channel";
 import { Sidebar } from "@/workspace/Sidebar";
+import { LinkNotice } from "@/workspace/LinkNotice";
 import { BacklinksPanel } from "@/workspace/BacklinksPanel";
 import { OutlinePanel } from "@/workspace/OutlinePanel";
 import { TagsPanel } from "@/workspace/TagsPanel";
@@ -584,7 +585,8 @@ function Shell() {
     // have named which roots moved were dropped while it was down
     // (notes/channel.ts onNotesRelink), so nothing here knows. Focus is no
     // substitute, since watching the bar say "reconnecting…" never leaves the
-    // window and a phone has no such event to wait for (ios.md §5). Concurrent
+    // window, and a phone has no focus event and runs this from its own
+    // foreground notification instead (boot.tsx viewResumed). Concurrent
     // like the focus refresh, so the whole sweep is one round trip (remote.md
     // §12) however many folders and tabs are open.
     const offRelink = onNotesRelink(refresh);
@@ -784,6 +786,12 @@ function Shell() {
           </Button>
         )}
       </header>
+
+      {/* Only where ConnectionBar is not: the bar is the app's report on the
+          link and this stands in for it while the sidebar holding it is shut
+          (LinkNotice.tsx). Two of them at once would be the same sentence
+          twice. */}
+      {!sidebarOpen && <LinkNotice />}
 
       <div ref={stackRef} className="flex min-h-0 flex-1 flex-col">
         {/* `relative` only where a drawer needs something to be absolute

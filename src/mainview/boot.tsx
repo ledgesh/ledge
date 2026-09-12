@@ -118,21 +118,42 @@ export const viewPush: ViewPush = {
       // A mounted drawer claims its shell again, since its pushes went to the
       // dead wire too (terminal/channel.ts).
       dispatchTerminalRelink();
-      // This asks the vault again, since any `vaultChanged` pushed at the dead
-      // wire was lost. The idle relock's clock counts note changes clients
-      // asked for (bun/server.ts CHANGES_A_NOTE), so it fires behind a client
-      // whose wire is down. A relock reaches decrypted buffers through the mirrored state,
-      // which evicts them (workspace/editorPool.ts), so a client that never
-      // asks keeps a locked note's plaintext on screen until the tab closes.
-      // Asking costs nothing: the mirror notifies only on a change.
-      void refreshVaultState().catch(() => {});
-      // Every `notesChanged` for every root that moved meanwhile was dropped,
-      // and no push names them afterwards, so re-read the lot (notes/channel.ts
-      // onNotesRelink).
-      dispatchNotesRelink();
+      // The pushes a dead wire dropped, which is the same pair `viewResumed`
+      // below asks for and the same reason.
+      viewResumed();
     }
   },
 };
+
+/**
+ * What a client asks for after a stretch where pushes went nowhere.
+ *
+ * Two of them, both re-reads of state a push would otherwise have kept
+ * current. The vault first: any `vaultChanged` in that stretch was lost, and
+ * the idle relock's clock counts note changes clients asked for (bun/server.ts
+ * CHANGES_A_NOTE), so it fires behind a client that is not listening. A relock
+ * reaches decrypted buffers through the mirrored state, which evicts them
+ * (workspace/editorPool.ts), so a client that never asks keeps a locked note's
+ * plaintext on screen until the tab closes. Asking costs nothing, because the
+ * mirror notifies only on a change. Then the notes: no push names the roots
+ * that moved after the fact, so every one is re-read (notes/channel.ts
+ * onNotesRelink), and only clean buffers follow their files, so nothing takes a
+ * half-typed paragraph away (remote.md §10).
+ *
+ * Two callers, one shape. A wire that came back had its pushes dropped by the
+ * server (remote.md §7). A phone that came back to a wire that never dropped
+ * had them delivered at a suspended page instead, and that is the belt
+ * remote.md §10 records as unfastened on the client with the worst staleness:
+ * window focus is what a Mac runs this on, and a phone has no such event.
+ * Foregrounding is the event it was missing (mainview/ios.tsx).
+ *
+ * Concurrent, so the sweep is one round trip however many folders and tabs are
+ * open (remote.md §12).
+ */
+export function viewResumed(): void {
+  void refreshVaultState().catch(() => {});
+  dispatchNotesRelink();
+}
 
 /**
  * Wire every seam to `requests`, then boot and render.

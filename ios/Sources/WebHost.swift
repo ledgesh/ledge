@@ -72,6 +72,10 @@ final class WebHost: UIViewController {
     /// would run in the background, succeed, and hand back a socket that
     /// suspension kills a moment later while it still looks live.
     private var away = false
+    /// When the app left the foreground, for `didResume` to measure against.
+    /// Nil while the app is on screen. The page cannot measure this for
+    /// itself: no timer of its own ran while it was away.
+    private var leftAt: Date?
 
     init(
         config: ShellConfig,
@@ -158,23 +162,42 @@ final class WebHost: UIViewController {
 
     // --- the lifecycle the socket cannot survive (ios.md §5) ------------------
 
+    /// The socket is left open, and that is the whole of what leaving does.
+    ///
+    /// Closing it here made every app switch a boot, however short: the page
+    /// came back to a wire it had been told was gone, so it reloaded, and a
+    /// reload is an ssh handshake, a key exchange, a Secure Enclave signature
+    /// and a repaint to arrive at the picture already on screen.
+    ///
+    /// What the close was for was the half-open socket, and there are now two
+    /// answers to that, both of them cheaper than a reload and neither of them
+    /// a guess. The kernel's keepalive settles whether the TCP connection
+    /// survived, on its own twenty-second budget and without a timer to
+    /// schedule, which is the one mechanism a suspended process still has
+    /// (`SSHTransport.probeAfterIdle`). The protocol's `recheck` settles
+    /// whether the process holding the notes is still on the other end of it,
+    /// which nothing at the transport layer can answer
+    /// (shared/transport.ts). `didResume` below fires the second one.
+    ///
+    /// Suspension itself does not close a socket. It freezes a process; the
+    /// connection stays established in the kernel, and what ends one is time,
+    /// a network the phone left, or a server that gave up.
     func willSuspend() {
         away = true
-        socket?.close()
-        socket = nil
+        leftAt = Date()
     }
 
-    /// Foregrounding is a boot. The page reloads unless its connection is still
-    /// live, which after the close above it never is.
+    /// Coming back to the foreground, with how long the app was away.
     ///
-    /// The alternative is to hold the socket across a short app switch and
-    /// probe it on the way back. That is an optimization, and the boot latency
-    /// this phase measures is the number that says whether it is worth
-    /// anything. Guessing first would be guessing about a half-open socket,
-    /// which looks exactly like a working one.
+    /// Reported because the page cannot work it out: no timer of its own ran
+    /// while it was gone, so its clock says nothing about the gap (the same
+    /// reason `shared/transport.ts` `beat` counts ticks instead of reading
+    /// one). The page probes on this and does not reload (mainview/ios.tsx).
     func didResume() {
         away = false
-        deliver(["t": "resumed"])
+        let gone = leftAt.map { Date().timeIntervalSince($0) } ?? 0
+        leftAt = nil
+        deliver(["t": "resumed", "away": Int((gone * 1000).rounded())])
     }
 
     // --- the bridge -----------------------------------------------------------
@@ -346,12 +369,32 @@ final class WebHost: UIViewController {
 }
 
 extension WebHost: WKNavigationDelegate {
+    /// The web content process was jettisoned, which the system does to a
+    /// backgrounded app under memory pressure. WebKit does not re-run the last
+    /// navigation by itself, so without this the app comes back to a blank
+    /// view and stays there.
+    ///
+    /// Reachable because resuming no longer reloads (`willSuspend` above). The
+    /// unconditional reload that used to be there was covering this case by
+    /// accident, and it is the one case where a reload is the right answer:
+    /// there is no page left to probe from.
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        print("[shell] the web content process was jettisoned; reloading")
+        // The socket belonged to a page that no longer exists: its generation,
+        // its decoder and its held requests went with the process. Left open,
+        // it would deliver the old generation's bytes into the new page's
+        // handshake.
+        socket?.close()
+        socket = nil
+        webView.load(URLRequest(url: BundleScheme.entry))
+    }
+
     /// The accessory bar goes on after the page has loaded, because the view it
     /// attaches to does not exist before then (AccessoryBar.swift).
     ///
-    /// Every load, not only the first: ios.md §5 makes foregrounding a reload,
-    /// and a content view rebuilt by one would otherwise come back with the
-    /// system's bar and no way to indent.
+    /// Every load, not only the first: a jettisoned content process reloads
+    /// above, and a content view rebuilt by that would otherwise come back
+    /// with the system's bar and no way to indent.
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         // A fresh page has focused nothing yet, and a reload that kept the flag
         // set would put the bar over whatever the new page focuses first.

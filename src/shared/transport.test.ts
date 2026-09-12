@@ -538,6 +538,58 @@ describe("a client whose wire has gone quiet", () => {
     await expect(client.ready).rejects.toThrow(/stopped answering/);
   });
 
+  // `recheck` is that same wake, asked for by name rather than inferred from a
+  // late tick. A phone coming back to the foreground is the caller it was
+  // written for: the beat's own clock check would get there, but up to five
+  // seconds later, and those are five seconds of a note that looks ordinary
+  // and cannot save (mainview/ios.tsx, ios.md §5). The Mac's Reconnect button
+  // and its wake both land here too.
+  test("asking by name probes at once, without waiting for the next beat", async () => {
+    const { server, client, probes } = connect();
+    server.greet();
+    await client.ready;
+    expect(probes()).toBe(0);
+    client.recheck();
+    expect(probes()).toBe(1);
+    expect(server.isClosed()).toBe(false);
+  });
+
+  test("and a wire that answers it is a wire nothing happened to", async () => {
+    const { server, beats, client } = connect();
+    server.greet();
+    await client.ready;
+    client.recheck();
+    server.say({ t: "pong" });
+    // The pong restores the whole budget, so the app switch this models costs
+    // one round trip and no reconnect: four beats would end a wire that had
+    // spent its budget.
+    beats.beat(4);
+    expect(server.isClosed()).toBe(false);
+  });
+
+  test("and one that does not is done, on the next beat rather than the fourth", async () => {
+    const { server, beats, client } = connect();
+    server.greet();
+    await client.ready;
+    client.recheck();
+    // The whole budget, spent on that one probe: after something outside
+    // changed, the question is not whether the wire is slow.
+    beats.beat();
+    expect(server.isClosed()).toBe(true);
+    await expect(client.requests.vaultState({})).rejects.toThrow(/stopped answering/);
+  });
+
+  test("and asking a connection that already ended costs nothing", async () => {
+    // Reachable from the resume path: an app can come back to a wire whose
+    // close it was told about while it was away, or never told about at all.
+    const { server, client, probes } = connect();
+    server.greet();
+    await client.ready;
+    client.close();
+    expect(() => client.recheck()).not.toThrow();
+    expect(probes()).toBe(0);
+  });
+
   test("the heartbeat stops when the connection does", async () => {
     const { server, beats, client } = connect();
     server.greet();

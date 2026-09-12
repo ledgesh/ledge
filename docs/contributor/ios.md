@@ -457,7 +457,7 @@ again.
 ## 5. The connection drops constantly, and that is the normal case
 
 **iOS suspends an app shortly after it leaves the foreground, and a suspended
-app's socket dies.** Reconnecting is the ordinary path on a phone, not the
+app runs no code.** Reconnecting is the ordinary path on a phone, not the
 failure path, and five numbers decide what that costs:
 
 | Clock | Length |
@@ -472,42 +472,85 @@ Three consequences, in the order they bite:
 
 - **The ladder does not run while suspended.** No timers fire in a suspended
   process. A phone that comes back after an hour would resume a countdown
-  that learned nothing, so the client dials on the foreground lifecycle
+  that learned nothing, so the client acts on the foreground lifecycle
   notification rather than on a timer. The ladder keeps its job, which is a
   wire that flaps while the app is on screen.
 
-  The shell does the simplest true version: it closes the socket on the way
-  out and refuses a dial while the app is away, and on the way back the page
-  reloads unless its connection is somehow still live. Refusing the dial is the
-  part that is not obvious — iOS gives about thirty seconds of background
-  execution and the ladder is 31.75s long, so without it the whole ladder runs
-  in the background, succeeds, and hands back a socket that suspension kills a
-  moment later. Holding the socket across a short app switch instead is an
-  optimization, and the thing it would have to get right is telling a live
-  socket from a half-open one, which is the one distinction that has no cheap
-  answer.
+  The shell reports both edges and closes nothing. Leaving sets the flag that
+  refuses a dial, which is the part that is not obvious: iOS gives about thirty
+  seconds of background execution and the ladder is 31.75s long, so without it
+  the whole ladder runs in the background, succeeds, and hands back a socket
+  that suspension kills a moment later. Coming back probes the wire the app
+  left, with how long it was away (`WebHost.didResume`, `mainview/ios.tsx`).
+  The duration is Swift's measurement because the page has none: no timer of
+  its own ran while the app was gone.
 
-  Measured over ssh: leaving the app announces `reconnecting` and the refused
-  dial keeps the ladder from doing anything with it; coming back reloads and
-  reaches a server again 211ms later. A whole boot is cheaper than the
-  bookkeeping that would avoid it.
+  **Foregrounding used to be a boot, and the measurement that justified it
+  measured the wrong thing.** The shell closed the socket on the way out, so
+  the wire was never live on the way back in and the page reloaded. Over ssh
+  that reload reached a server again in 211ms, which is what made it look
+  cheap. What it left out is that the screen it blanked was a complete one: the
+  note, its text, its scroll position, rendered and still valid. An app switch
+  of two seconds paid an ssh handshake, a Secure Enclave signature, a repaint
+  and every inline run panel to arrive at the picture already on the glass, and
+  it ran past the boot screen's 600ms reveal doing it, so a trip to another app
+  and back came home to a spinner (interactions.md §4-1).
 
-  **A boot that is not that fast has to say so.** 211ms is the good case; the
-  bad one is a phone that moved off the network its server is on, which spends
-  `SSHTransport.dialTimeout` — fifteen seconds — finding out. Every boot starts
-  on an empty `#root`, so all of that was a black screen, and the refusal at the
-  end of it was the first thing the app said. `ios.tsx` raises
-  `mainview/lib/booting.ts` before the dial, with the destination `@hello`
-  answered with and a button that hands the window back to `servers.choose`;
-  the first render takes it down. The delays are in interactions.md §4-1, and
-  they are why the 211ms case still paints nothing.
+  **The distinction the reload stood in for is `recheck`, and it was already
+  written.** One ping, answered only by the process holding the notes, one
+  chance rather than the heartbeat's three, and milliseconds on a wire that
+  works (`shared/transport.ts`). The Mac has used it for a lid that opened
+  since phase 4, and the phone already exposed it as `connectionReconnect`.
+  `ios.tsx` calls it on resume. The beat's own clock check would get there on
+  its own, since a tick late by more than the whole patience budget rechecks
+  rather than counting, but up to five seconds later.
 
-  The reload takes every inline run panel with it, which is a problem the
-  drawer does not have — it re-attaches and replays its ring, while a run is
-  only a push keyed by an id the old page owned. So the boot claims the runs it
-  can still show and the server interrupts the rest (remote.md §7,
-  `inlineClaim`). The hold below is untouched by that: what a hold keeps is the
-  shell, and a run in flight was never the thing it was for.
+  Two mechanisms underneath are why the probe is not a guess. Suspension
+  freezes a process and does not close its sockets, so a short trip usually
+  comes back to a connection that still works. Whether the TCP connection
+  survived a long one is settled by the kernel's keepalive on its own
+  twenty-second budget, which is the one mechanism a suspended process still
+  has and why `SSHTransport` sets those four socket options (§3). Whether the
+  process holding the notes is still on the other end of it is the half nothing
+  at the transport layer can answer, and that is what `recheck` asks.
+
+  **So a reconnect no longer blanks the screen, on either client.** A live wire
+  comes back to a UI that never changed. A dead one lands on the ladder under a
+  UI that stays on screen while it climbs, and `connectionState` resettles what
+  the reconnect invalidates: saves held, buffers resolved, runs reconciled,
+  shells re-claimed, the vault re-read, every note list re-read
+  (`mainview/boot.tsx`). That is what a Mac has always done for a lid that
+  opened. The inline run panels survive with the page, so they are reconciled
+  rather than reclaimed out of a boot (remote.md §7, `reconcileRuns`); the hold
+  below is untouched either way, because what a hold keeps is the shell and a
+  run in flight was never the thing it was for.
+
+  **What a reconnect does need is somewhere to say so.** `ConnectionBar` is the
+  app's report on the link and it lives in the sidebar, which is a pane on a
+  Mac and a shut drawer on a phone (`mainview/App.tsx`). The reload used to
+  cover that, because a person watched the boot screen rather than any chrome.
+  Under a UI that stays up, a wire taking its time is a note that looks
+  ordinary and cannot save, so `workspace/LinkNotice.tsx` draws a one-line
+  strip above the content wherever that bar is not on screen, and nothing
+  where it is.
+
+  **The blocking screen is a launch's now, and only a launch's.** A launch has
+  nothing to show. Every one starts on an empty `#root`, and the bad case is a
+  phone that moved off the network its server is on, which spends
+  `SSHTransport.dialTimeout`, fifteen seconds, finding out. All of that was a
+  black screen with the refusal at the end of it as the first thing the app
+  said. `ios.tsx` raises `mainview/lib/booting.ts` before the dial, with the
+  destination `@hello` answered with and a button that hands the window back to
+  `servers.choose`; the first render takes it down. The delays are in
+  interactions.md §4-1, and they are why a fast launch still paints nothing.
+
+  **One case still reloads, and it is the case with no page left.** The system
+  jettisons a backgrounded app's web content process under memory pressure, and
+  WebKit does not re-run the last navigation by itself. The unconditional
+  reload was covering that by accident, so removing it made
+  `webViewWebContentProcessDidTerminate` load-bearing: it closes the socket the
+  dead page owned, whose generation and decoder went with the process, and
+  loads the entry again.
 - **The server is gone in a minute unless the client asked it to stay.** Sixty
   seconds of no client and nothing running is the daemon exiting. `running()`
   means a block in flight or a shell inside a foreground command, so an idle
@@ -534,11 +577,11 @@ Three consequences, in the order they bite:
   the way they answer for a shell that ended, which is a sentence on screen
   rather than a dead connection row.
 
-  Foregrounding still reloads (§5 below), and that is unchanged and still the
-  simpler answer on a phone: the shell closes the socket on the way out, so the
-  wire is never live on the way back in. What the adoption fixes is the app that
-  was NOT foregrounded — one running with the wire dropping under it — and it
-  fixes the Mac, which has no foregrounding at all.
+  Foregrounding reaches the same mechanisms, now that it probes rather than
+  reloading (above): a phone that comes back to a restarted server climbs the
+  ladder into it and hears the `lost` then `live` pair, exactly as a Mac whose
+  wire dropped under it does. The adoption is what makes that pair reachable on
+  either client.
 - **A phone and a Mac on one server used to be a fight nobody wins.** The daemon
   served one client and handed the session to whoever dialled last, so each
   displaced the other; a phone that re-dialled a displacement looped against the
@@ -587,15 +630,16 @@ and a message answered costs, and a phone is granted it whole; ten is there for
 a client that asks for something nobody waits through. A number that always came
 back clamped would teach nobody anything on the day it mattered.
 
-**So foregrounding is a boot, and the boot is the number to measure.** The
-view's boot builds the registry, the note lists, the tags and the layout, and
-those are concurrent, so remote.md §12 charges them as one round trip. What
-it does not charge is the SSH handshake in front of them: a TCP connect, a
-key exchange, an authentication, and a channel open, none of which can be
+**A launch is the boot, and the boot is the number to measure.** The view's
+boot builds the registry, the note lists, the tags and the layout, and those
+are concurrent, so remote.md §12 charges them as one round trip. What it does
+not charge is the SSH handshake in front of them: a TCP connect, a key
+exchange, an authentication, and a channel open, none of which can be
 overlapped with the first frame. That is the latency the phone actually
 feels, it is invisible on a Mac whose local server needs no handshake at all,
 and it is why §14's first measurable phase is a stopwatch rather than a
-screen.
+screen. A resume no longer pays any of it, and the `[resume]` line is what
+says how long the trip was and what the probe found.
 
 **The stopwatch.** `ios.tsx` marks each phase and reports the line through the
 bridge's `@log`, so it comes out of `simctl launch --console-pty`. On a
@@ -631,9 +675,11 @@ P-256 signature in the Secure Enclave in place of a `connect(2)`. **And
 `bridge`: a first launch after install measured 1548ms to paint, so any figure
 taken from a cold Simulator is measuring the Simulator.
 
-Four hundred milliseconds of ssh, end to end, and the app is on screen. That
-is the number that decides whether §14's "foregrounding is a boot" is a design
-or an apology.
+Four hundred milliseconds of ssh, end to end, and the app is on screen. A
+launch pays it once, which is what a launch is for. What this table settled is
+that a resume must not pay it again: the numbers are small enough to live with
+on the one boot nobody can avoid, and too large to spend on a trip to another
+app and back.
 
 ## 6. Touch is a column the affordance matrix does not have
 
@@ -804,7 +850,7 @@ Four decisions follow:
   it. Every step can fail without consequence: a miss logs a line and the app
   keeps the system's own bar, which matters because the alternative failure
   would be a crash on the first keystroke. It runs on every `didFinish`, not
-  only the first, because §5 makes foregrounding a reload.
+  only the first, because a jettisoned web content process reloads (§5).
 
   **The provider hangs off the view, not off the class**, and this cost a
   session to find. A class pair can be registered once under a name and never
@@ -937,10 +983,12 @@ daemon open through `running()`, so the run itself survives, and its output is
 still in the ring when the app comes back, as long as the phone returns before
 the next idle check finds nothing running. That grace is anything from zero to
 sixty seconds after the run ends, depending on where it fell in the window
-relative to the last check. A run also survives the page it was started from: a
-foregrounded reload claims the panels it can still show and the server ends the
-rest (`inlineClaim`, remote.md §7). What does not survive is an idle drawer,
-which is one of the reasons a phone has none.
+relative to the last check. A run also survives the wire it was started
+over: a reconnect reconciles the panels against what the server still has
+running (`reconcileRuns`, remote.md §7), and a reload, which now means a
+jettisoned web content process, claims the ones it can still show
+(`inlineClaim`). What does not survive is an idle drawer, which is one of the
+reasons a phone has none.
 
 **Attaching a workspace is cut because the server already refuses it.**
 `bun/server.ts` answers a headless folder dialog with "attaching a folder
@@ -1304,11 +1352,16 @@ that there is not one. The fallback must be visible in the UI or must not
 exist.
 
 The lifecycle itself is testable and should be tested by hand every time §5
-changes: background the app, wait past 60 seconds, foreground it, and check
-that it dials, that the daemon is a new instance, and that a write made just
-before backgrounding did not apply twice. Once a phone opens shells, the same
-walk with one open should find the SAME instance inside the session hold and a
-new one past it.
+changes, as three walks rather than one. Background the app, wait past 60
+seconds, foreground it, and check that it dials, that the daemon is a new
+instance, and that a write made just before backgrounding did not apply twice.
+Background it and come straight back, and check that nothing is dialled at all:
+the `[resume]` line reports the probe, the note is on screen unchanged, and no
+`[link]` line follows. Then the same short trip with the server stopped while
+the app is away, which is the half-open case the probe exists for: the strip
+appears over the note the app came back to, and no boot screen does.
+Once a phone opens shells, the first walk with one open should find the SAME
+instance inside the session hold and a new one past it.
 
 ## 14. Phasing
 
@@ -1529,10 +1582,11 @@ Live command execution is the phase after v1, and it is in the client now:
 were built before it. A client asks for its sessions to be held and the server
 sets the term (`Hello.hold`, `HOLD_MAX_MS`), which is what a backgrounded phone
 comes back to. And a run's output being a push keyed by its id, with no attach
-beside it, no longer leaves a foreground reload with a run the new page can
-neither see nor `cancelRun` — dismissing a panel is what sends that, and a
-reload is not a dismissal, so the boot claims what it can still show instead and
-the server ends the rest (`inlineClaim`, remote.md §7).
+beside it, no longer leaves a new page with a run it can neither see nor
+`cancelRun`. Dismissing a panel is what sends that, and neither a reconnect nor
+a reload is a dismissal, so a reconnect reconciles the panels against the
+server (`reconcileRuns`) and a reload claims what it can still show
+(`inlineClaim`, remote.md §7).
 
 **The cut it lifts is inline runs and not the drawer**, which is why §8's
 `runsCommands` is now `runsBlocks` and `hasTerminal`: the ▶ without the terminal
