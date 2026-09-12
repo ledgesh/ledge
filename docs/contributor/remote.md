@@ -531,6 +531,84 @@ Ledge writing somebody's `authorized_keys`, so the objection at the top of this
 section still applies to it and it is still not built; what is no longer true is
 that it was considered. It was not. The thing that was considered is the QR.
 
+## 4b. Pairing codes: an address and host key fingerprints, never a credential
+
+A pairing code is a link naming a server and the host keys it offers. A phone
+reads it from a QR code or a tapped link, and pairs without anyone typing an
+address or comparing a fingerprint by eye.
+
+```
+https://ledge.sh/pair#v=1&u=dan&h=atlas.example.net&p=2222&k=SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w
+```
+
+| Field | Holds | Rule |
+| --- | --- | --- |
+| `v` | The format version, `1` | Required. A higher number is refused as a code for a newer Ledge. |
+| `u` | The account Ledge signs in as | Required. ASCII letters, digits, `_`, `.` and `-`, not starting with `-` or `.`, at most 64 characters. |
+| `h` | A host name or an IPv4 address | Required. The same characters as `u`, at most 253. No IPv6, because the phone refuses a colon in a destination. |
+| `p` | The sshd port | Optional. Absent means 22, and a reader stores 22 as the default port (`PORT_UNSET`). |
+| `k` | A host key fingerprint, as `ssh-keygen -lf` prints it | Required and repeatable: one per host key the server offers, at most four different ones. |
+
+`shared/pairing.ts` makes and reads the link, and `ios/Sources/PairingCode.swift`
+reads it on the phone. Nothing prints a code or scans one yet. `ledge-server
+pair`, a Mac command that shows the code for a connection, and the phone's
+scanner are still to build.
+
+**The fields travel in the fragment.** A browser never sends the part after `#`,
+so opening the link tells ledge.sh nothing about the server. A script on the
+`/pair` page can still read it, so that page loads no third-party script and
+clears the fragment once it has read it.
+
+**The grammar is strict wherever two readers could disagree.**
+
+- The part before `#` is `https://ledge.sh/pair` or `ledge://pair`, compared
+  without regard to ASCII case. Anything else is not a code.
+- Fields are `key=value` pairs separated by `&`. Empty pairs and unknown keys are
+  ignored, so a later version can add a field.
+- `v` is read before any other field. A future format with a different grammar
+  is then reported as newer rather than as damaged.
+- `v`, `u`, `h` and `p` appear once. Given twice, one reader could take the
+  first and another the last, so the code is refused.
+- Values are percent-decoded, and only escapes of ASCII bytes are accepted. A
+  literal plus is a plus. The writer escapes it as `%2B` anyway, because
+  `URLSearchParams` reads a literal one as a space.
+
+**Two languages read a code, and one file of vectors decides both.** The phone
+reads it in Swift because the screen that scans it is native and has no page
+(ios.md §4). `shared/pairing.vectors.json` lists links and what a reader returns
+for each, down to the problem text. `shared/pairing.test.ts` runs the TypeScript
+reader over it. `shared/pairing.swift.test.ts` compiles `PairingCode.swift` with
+`swiftc` for the Mac running the suite and runs it over the same file, so a rule
+changed in one language and not the other fails `bun test`.
+
+**A code carries no credential and writes nothing on the server.** That is the
+difference from the enrollment QR §4a dropped, which carried a one-shot
+credential and ended with Ledge writing `authorized_keys`. A code replaces
+typing and nothing else. The phone still signs in with its own key, installed as
+§4a describes, or with a password.
+
+**What a code reveals is where an ssh login is.**
+
+| Field | What someone holding the code learns |
+| --- | --- |
+| `u`, `h`, `p` | An account and the address to try it at. That matters most on a server that accepts passwords. A Tailscale host name also names the tailnet. |
+| `k` | Nothing new. sshd sends the same key to anyone who connects. |
+
+**The risk is a forged code, not a leaked one.** A matching fingerprint proves
+the server matches the code. It does not prove the code came from the user's own
+server. A forged code for a lookalike server, followed by a password sign-in,
+hands that server the password. A reader therefore follows three rules:
+
+- A code never replaces the pin of a server the phone already has. A code for a
+  known address whose fingerprints do not include the pinned key is handled as a
+  changed host key (§4). `ServerStore.pair` re-pins a record at the same address
+  today, so the scanner cannot call it with a code's key.
+- A code never dials by itself. The phone shows the account, the host and the
+  fingerprint, and pairs only when the person holding it confirms.
+- A tapped link says so on that screen, and asks the person to continue only if
+  the link came from their own server. A scanned code came from a screen in
+  front of them, and a tapped one could have come from anyone.
+
 ## 5. State ownership: server or client
 
 `architecture.md` §5 splits state three ways by lifetime. The boundary now

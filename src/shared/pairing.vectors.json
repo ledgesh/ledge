@@ -1,0 +1,282 @@
+{
+  "about": "Pairing links and what a reader must make of each (remote.md §4b). pairing.test.ts runs them through shared/pairing.ts and pairing.swift.test.ts through ios/Sources/PairingCode.swift. A vector marked canonical is also exactly what pairingLink prints for its code.",
+  "vectors": [
+    {
+      "name": "a code for sshd's default port has no port field",
+      "canonical": true,
+      "link": "https://ledge.sh/pair#v=1&u=dan&h=atlas.example.net&k=SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w",
+      "code": { "user": "dan", "host": "atlas.example.net", "port": 0, "fingerprints": ["SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w"] }
+    },
+    {
+      "name": "a code with a port and two host keys escapes the plus in a fingerprint",
+      "canonical": true,
+      "link": "https://ledge.sh/pair#v=1&u=deploy&h=203.0.113.7&p=2222&k=SHA256:K1zgEabMVuIGb180Vgx5Kkpx%2BlGxkA5qoH6h9KU4iTE&k=SHA256:Sk3/CKiRSuik41/ZQkJnKQVOw7uSKXcYiVPXvXCo5IE",
+      "code": {
+        "user": "deploy",
+        "host": "203.0.113.7",
+        "port": 2222,
+        "fingerprints": ["SHA256:K1zgEabMVuIGb180Vgx5Kkpx+lGxkA5qoH6h9KU4iTE", "SHA256:Sk3/CKiRSuik41/ZQkJnKQVOw7uSKXcYiVPXvXCo5IE"]
+      }
+    },
+    {
+      "name": "the app's own scheme carries the same code",
+      "link": "ledge://pair#v=1&u=dan&h=atlas.tail4f2c.ts.net&k=SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w",
+      "code": { "user": "dan", "host": "atlas.tail4f2c.ts.net", "port": 0, "fingerprints": ["SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w"] }
+    },
+    {
+      "name": "port 22 is stored as the default port",
+      "link": "https://ledge.sh/pair#v=1&u=dan&h=atlas.example.net&p=22&k=SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w",
+      "code": { "user": "dan", "host": "atlas.example.net", "port": 0, "fingerprints": ["SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w"] }
+    },
+    {
+      "name": "a port with leading zeros is that port",
+      "link": "https://ledge.sh/pair#v=1&u=dan&h=atlas.example.net&p=02222&k=SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w",
+      "code": { "user": "dan", "host": "atlas.example.net", "port": 2222, "fingerprints": ["SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w"] }
+    },
+    {
+      "name": "a literal plus in a fingerprint is a plus, not a space",
+      "link": "https://ledge.sh/pair#v=1&u=dan&h=atlas.example.net&k=SHA256:K1zgEabMVuIGb180Vgx5Kkpx+lGxkA5qoH6h9KU4iTE",
+      "code": { "user": "dan", "host": "atlas.example.net", "port": 0, "fingerprints": ["SHA256:K1zgEabMVuIGb180Vgx5Kkpx+lGxkA5qoH6h9KU4iTE"] }
+    },
+    {
+      "name": "an escaped colon and escaped slashes decode",
+      "link": "https://ledge.sh/pair#v=1&u=dan&h=atlas.example.net&k=SHA256%3ASk3%2FCKiRSuik41%2FZQkJnKQVOw7uSKXcYiVPXvXCo5IE",
+      "code": { "user": "dan", "host": "atlas.example.net", "port": 0, "fingerprints": ["SHA256:Sk3/CKiRSuik41/ZQkJnKQVOw7uSKXcYiVPXvXCo5IE"] }
+    },
+    {
+      "name": "whitespace and line breaks around a pasted link are trimmed",
+      "link": " \n\thttps://ledge.sh/pair#v=1&u=dan&h=atlas.example.net&k=SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w\r\n",
+      "code": { "user": "dan", "host": "atlas.example.net", "port": 0, "fingerprints": ["SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w"] }
+    },
+    {
+      "name": "the link before the fragment is matched without regard to case",
+      "link": "HTTPS://LEDGE.SH/PAIR#v=1&u=dan&h=atlas.example.net&k=SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w",
+      "code": { "user": "dan", "host": "atlas.example.net", "port": 0, "fingerprints": ["SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w"] }
+    },
+    {
+      "name": "the fields may come in any order",
+      "link": "https://ledge.sh/pair#k=SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w&h=atlas.example.net&u=dan&v=1",
+      "code": { "user": "dan", "host": "atlas.example.net", "port": 0, "fingerprints": ["SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w"] }
+    },
+    {
+      "name": "a field this version does not know is ignored, even a damaged one",
+      "link": "https://ledge.sh/pair#v=1&u=dan&h=atlas.example.net&n=%ZZ&x&k=SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w",
+      "code": { "user": "dan", "host": "atlas.example.net", "port": 0, "fingerprints": ["SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w"] }
+    },
+    {
+      "name": "empty fields between separators are ignored",
+      "link": "https://ledge.sh/pair#&v=1&&u=dan&h=atlas.example.net&k=SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w&",
+      "code": { "user": "dan", "host": "atlas.example.net", "port": 0, "fingerprints": ["SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w"] }
+    },
+    {
+      "name": "a host key listed twice is kept once, before the keys are counted",
+      "link": "https://ledge.sh/pair#v=1&u=dan&h=atlas.example.net&k=SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w&k=SHA256:h3cjTPQJhsRsL4MfPTS9Insd64VNhAGhzUzD7mOynpY&k=SHA256:ds6FHOhxaMF2QI6mhu8ESV7KMpLRkUuTM7uy8qMuIII&k=SHA256:MMvWWWLYJroMnaZpPH1IPQJHuFtTUhgWZhAwiQChjbY&k=SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w",
+      "code": {
+        "user": "dan",
+        "host": "atlas.example.net",
+        "port": 0,
+        "fingerprints": [
+          "SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w",
+          "SHA256:h3cjTPQJhsRsL4MfPTS9Insd64VNhAGhzUzD7mOynpY",
+          "SHA256:ds6FHOhxaMF2QI6mhu8ESV7KMpLRkUuTM7uy8qMuIII",
+          "SHA256:MMvWWWLYJroMnaZpPH1IPQJHuFtTUhgWZhAwiQChjbY"
+        ]
+      }
+    },
+    {
+      "name": "an empty string",
+      "link": "",
+      "problem": "This is not a Ledge pairing code."
+    },
+    {
+      "name": "a link to another site",
+      "link": "https://example.com/pair#v=1&u=dan&h=atlas.example.net&k=SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w",
+      "problem": "This is not a Ledge pairing code."
+    },
+    {
+      "name": "a subdomain of ledge.sh is another site",
+      "link": "https://evil.ledge.sh/pair#v=1&u=dan&h=atlas.example.net&k=SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w",
+      "problem": "This is not a Ledge pairing code."
+    },
+    {
+      "name": "a host that only starts with ledge.sh is another site",
+      "link": "https://ledge.sh.example.com/pair#v=1&u=dan&h=atlas.example.net&k=SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w",
+      "problem": "This is not a Ledge pairing code."
+    },
+    {
+      "name": "plain http",
+      "link": "http://ledge.sh/pair#v=1&u=dan&h=atlas.example.net&k=SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w",
+      "problem": "This is not a Ledge pairing code."
+    },
+    {
+      "name": "a query string in place of the fragment",
+      "link": "https://ledge.sh/pair?v=1&u=dan&h=atlas.example.net&k=SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w",
+      "problem": "This is not a Ledge pairing code."
+    },
+    {
+      "name": "a query string before the fragment",
+      "link": "https://ledge.sh/pair?ref=x#v=1&u=dan&h=atlas.example.net&k=SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w",
+      "problem": "This is not a Ledge pairing code."
+    },
+    {
+      "name": "a trailing slash on the path",
+      "link": "https://ledge.sh/pair/#v=1&u=dan&h=atlas.example.net&k=SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w",
+      "problem": "This is not a Ledge pairing code."
+    },
+    {
+      "name": "no version field",
+      "link": "https://ledge.sh/pair#u=dan&h=atlas.example.net&k=SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w",
+      "problem": "This is not a Ledge pairing code."
+    },
+    {
+      "name": "a newer version, even with fields this version cannot read",
+      "link": "https://ledge.sh/pair#v=2&q=%ZZ",
+      "problem": "This pairing code needs a newer version of Ledge. Update the app, then try the code again."
+    },
+    {
+      "name": "a version that is not a number",
+      "link": "https://ledge.sh/pair#v=one&u=dan&h=atlas.example.net&k=SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w",
+      "problem": "The pairing code's version is not one Ledge recognizes."
+    },
+    {
+      "name": "version zero",
+      "link": "https://ledge.sh/pair#v=0&u=dan&h=atlas.example.net&k=SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w",
+      "problem": "The pairing code's version is not one Ledge recognizes."
+    },
+    {
+      "name": "the version given twice",
+      "link": "https://ledge.sh/pair#v=1&v=1&u=dan&h=atlas.example.net&k=SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w",
+      "problem": "The pairing code gives the version more than once."
+    },
+    {
+      "name": "the account given twice",
+      "link": "https://ledge.sh/pair#v=1&u=dan&u=root&h=atlas.example.net&k=SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w",
+      "problem": "The pairing code gives the account name more than once."
+    },
+    {
+      "name": "the host given twice, which two readers could each settle differently",
+      "link": "https://ledge.sh/pair#v=1&u=dan&h=atlas.example.net&h=203.0.113.66&k=SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w",
+      "problem": "The pairing code gives the host more than once."
+    },
+    {
+      "name": "the port given twice",
+      "link": "https://ledge.sh/pair#v=1&u=dan&h=atlas.example.net&p=22&p=2222&k=SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w",
+      "problem": "The pairing code gives the port more than once."
+    },
+    {
+      "name": "a truncated escape",
+      "link": "https://ledge.sh/pair#v=1&u=dan%4&h=atlas.example.net&k=SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w",
+      "problem": "The pairing code has a damaged character in it."
+    },
+    {
+      "name": "an escape with a sign where a hex digit belongs",
+      "link": "https://ledge.sh/pair#v=1&u=dan%+4&h=atlas.example.net&k=SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w",
+      "problem": "The pairing code has a damaged character in it."
+    },
+    {
+      "name": "an escape of a byte above ASCII",
+      "link": "https://ledge.sh/pair#v=1&u=dan&h=atl%C3%A1s.example.net&k=SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w",
+      "problem": "The pairing code has a damaged character in it."
+    },
+    {
+      "name": "a character above ASCII in the host",
+      "link": "https://ledge.sh/pair#v=1&u=dan&h=atlás.example.net&k=SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w",
+      "problem": "The pairing code has no valid host name or IP address."
+    },
+    {
+      "name": "a combining mark after a separator belongs to the next field's name",
+      "link": "https://ledge.sh/pair#v=1&́u=dan&h=atlas.example.net&k=SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w",
+      "problem": "The pairing code has no valid account name."
+    },
+    {
+      "name": "no account",
+      "link": "https://ledge.sh/pair#v=1&h=atlas.example.net&k=SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w",
+      "problem": "The pairing code has no valid account name."
+    },
+    {
+      "name": "an account field with no equals sign is empty",
+      "link": "https://ledge.sh/pair#v=1&u&h=atlas.example.net&k=SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w",
+      "problem": "The pairing code has no valid account name."
+    },
+    {
+      "name": "an account starting with a dash, which ssh would read as an option",
+      "link": "https://ledge.sh/pair#v=1&u=-oProxyCommand=sh&h=atlas.example.net&k=SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w",
+      "problem": "The pairing code has no valid account name."
+    },
+    {
+      "name": "an account with an escaped at sign",
+      "link": "https://ledge.sh/pair#v=1&u=dan%40203.0.113.66&h=atlas.example.net&k=SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w",
+      "problem": "The pairing code has no valid account name."
+    },
+    {
+      "name": "a host starting with a dash",
+      "link": "https://ledge.sh/pair#v=1&u=dan&h=-oProxyCommand&k=SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w",
+      "problem": "The pairing code has no valid host name or IP address."
+    },
+    {
+      "name": "a host starting with a dot",
+      "link": "https://ledge.sh/pair#v=1&u=dan&h=.example.net&k=SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w",
+      "problem": "The pairing code has no valid host name or IP address."
+    },
+    {
+      "name": "an IPv6 address",
+      "link": "https://ledge.sh/pair#v=1&u=dan&h=2001:db8::1&k=SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w",
+      "problem": "The pairing code has no valid host name or IP address."
+    },
+    {
+      "name": "an empty port",
+      "link": "https://ledge.sh/pair#v=1&u=dan&h=atlas.example.net&p=&k=SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w",
+      "problem": "The pairing code's port is not a whole number from 1 to 65535."
+    },
+    {
+      "name": "port zero",
+      "link": "https://ledge.sh/pair#v=1&u=dan&h=atlas.example.net&p=0&k=SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w",
+      "problem": "The pairing code's port is not a whole number from 1 to 65535."
+    },
+    {
+      "name": "a port above 65535",
+      "link": "https://ledge.sh/pair#v=1&u=dan&h=atlas.example.net&p=65536&k=SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w",
+      "problem": "The pairing code's port is not a whole number from 1 to 65535."
+    },
+    {
+      "name": "a port with a letter after it",
+      "link": "https://ledge.sh/pair#v=1&u=dan&h=atlas.example.net&p=22x&k=SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w",
+      "problem": "The pairing code's port is not a whole number from 1 to 65535."
+    },
+    {
+      "name": "the account, host, port and host keys are checked in that order",
+      "link": "https://ledge.sh/pair#v=1&p=abc&k=MD5:16:27&h=-x&u=dan",
+      "problem": "The pairing code has no valid host name or IP address."
+    },
+    {
+      "name": "no host key",
+      "link": "https://ledge.sh/pair#v=1&u=dan&h=atlas.example.net",
+      "problem": "The pairing code has no host key fingerprint."
+    },
+    {
+      "name": "an MD5 fingerprint",
+      "link": "https://ledge.sh/pair#v=1&u=dan&h=atlas.example.net&k=MD5:16:27:ac:a5:76:28:2d:36:63:1b:56:4d:eb:df:a6:48",
+      "problem": "The pairing code has a host key fingerprint that is not a SHA256 fingerprint."
+    },
+    {
+      "name": "a fingerprint one character short",
+      "link": "https://ledge.sh/pair#v=1&u=dan&h=atlas.example.net&k=SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7",
+      "problem": "The pairing code has a host key fingerprint that is not a SHA256 fingerprint."
+    },
+    {
+      "name": "a fingerprint whose last character has bits a SHA-256 digest cannot",
+      "link": "https://ledge.sh/pair#v=1&u=dan&h=atlas.example.net&k=SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7x",
+      "problem": "The pairing code has a host key fingerprint that is not a SHA256 fingerprint."
+    },
+    {
+      "name": "one good host key beside a bad one",
+      "link": "https://ledge.sh/pair#v=1&u=dan&h=atlas.example.net&k=SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w&k=",
+      "problem": "The pairing code has a host key fingerprint that is not a SHA256 fingerprint."
+    },
+    {
+      "name": "five different host keys",
+      "link": "https://ledge.sh/pair#v=1&u=dan&h=atlas.example.net&k=SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w&k=SHA256:h3cjTPQJhsRsL4MfPTS9Insd64VNhAGhzUzD7mOynpY&k=SHA256:ds6FHOhxaMF2QI6mhu8ESV7KMpLRkUuTM7uy8qMuIII&k=SHA256:MMvWWWLYJroMnaZpPH1IPQJHuFtTUhgWZhAwiQChjbY&k=SHA256:Sk3/CKiRSuik41/ZQkJnKQVOw7uSKXcYiVPXvXCo5IE",
+      "problem": "The pairing code names more than 4 host keys."
+    }
+  ]
+}

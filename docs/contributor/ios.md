@@ -199,6 +199,11 @@ UI rather than of the comparison. The fingerprint shown at pairing is for a
 human to read, so it is rendered from the same bytes and never used to
 decide.
 
+A pairing code is the one exception (remote.md §4b). The offered key's
+fingerprint has to be one the code lists before the phone offers to pair. That
+fingerprint is the whole SHA-256 digest, not a truncation of it, and the pin
+stored afterwards is still the key's bytes.
+
 **No RSA, and that is a constraint on the server too.** SwiftNIO SSH supports
 Ed25519 and ECDSA over P256, P384 and P521, with AES-GCM and x25519, and
 nothing else. Two consequences: a server offering only an `ssh-rsa` host key
@@ -411,6 +416,11 @@ dialog like a Mac's (remote.md §8): the same list, the same fingerprint step.
 The key line the pairing screen hands over is the same line that dialog's form
 shows, carried across on `@hello` because it is a fact about the device rather
 than about any connection to one.
+
+**The pairing code is one rule that is written twice.** A code is read on the
+screen that has no page, so `PairingCode.swift` reads it in Swift beside
+`shared/pairing.ts`. The two are held to one answer by a shared file of vectors
+that `bun test` runs through both (remote.md §4b).
 
 The same call carries what this phone calls itself, which every other client on
 the server it dials is pushed (remote.md §7): it is what a Mac's notice says when
@@ -1268,7 +1278,10 @@ Per `testing.md`'s categories:
   `src/shared/` (§2) keeps every test it has, and the move is only correct if
   they stay green unchanged. New: the host-key comparison and its refusal,
   and the `authorized_keys` line the pairing screen generates, which must
-  match what remote.md §4 specifies character for character.
+  match what remote.md §4 specifies character for character. The one Swift
+  file with a unit test is `PairingCode.swift`: `shared/pairing.swift.test.ts`
+  compiles it with `swiftc` and runs it over the pairing code vectors
+  (remote.md §4b).
 - **e2e (headless WebKit)**: a phone is the same view at a phone's viewport,
   so the harness gained a mobile project at 390x844 rather than a second
   harness (phase 2, done). WebKit at that size is what catches a palette
