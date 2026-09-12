@@ -145,7 +145,7 @@ test("a task renders a checkbox; clicking it toggles the [x] in the text", async
   // [x], the widget re-renders checked, and the label gets the done styling.
   await box.dispatchEvent("mousedown", { button: 0 });
   await expect(page.locator("input.ledge-task")).toBeChecked();
-  await expect(page.locator(".ledge-task-done")).toHaveText(" buy milk");
+  await expect(page.locator(".ledge-task-done")).toHaveText("buy milk");
 
   // Caret onto the marker's edge reveals the raw [x].
   await page.keyboard.press("Meta+ArrowUp");

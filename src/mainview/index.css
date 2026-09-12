@@ -474,11 +474,21 @@ body {
      side and the drawn space on the other, and the label moves by at most the
      pixel WebKit rounds the line to (e2e/phone.spec.ts). */
   --task-box: 1.05em;
+  /* How much of the overhang goes on the left. The two margins below sum to
+     `1ch - var(--task-box)` at any value of it, which is what holds the
+     advance; this only says where inside that advance the box is drawn. It
+     leans left because what is on that side is the gutter the hidden bullet
+     left, and what is on the other is the space before the label. Centred,
+     the box took half of that space and sat against the first word. */
+  --task-lean: 0.8;
   appearance: none;
   box-sizing: border-box;
   width: var(--task-box);
   height: var(--task-box);
-  margin: 0 calc((1ch - var(--task-box)) / 2);
+  margin-top: 0;
+  margin-bottom: 0;
+  margin-left: calc((1ch - var(--task-box)) * var(--task-lean));
+  margin-right: calc((1ch - var(--task-box)) * (1 - var(--task-lean)));
   vertical-align: -0.18em;
   border: 1.5px solid color-mix(in srgb, var(--ed-muted) 85%, transparent);
   border-radius: calc(var(--task-box) / 4);

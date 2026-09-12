@@ -160,7 +160,9 @@ section.
   which is a speck to aim at, and a 44-point box in a 21-point line would cover
   the lines above and below it. So the box and its target move separately: the
   box is drawn to a floor of 18 points on touch, overhanging its advance rather
-  than widening it, and the hotspot over it (`editor/livePreview.ts`) takes the
+  than widening it, and left of centre inside that advance (`--task-lean`), so
+  the overhang lands in the gutter the bullet left rather than in the space
+  before the label. The hotspot over it (`editor/livePreview.ts`) takes the
   whole height of the line and 1.5 characters of the gutter the concealed `- `
   left. It stops at the label, because a tap in the text belongs to the caret,
   and it stops at the line, because the line below carries the next task's box.

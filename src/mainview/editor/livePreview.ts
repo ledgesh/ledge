@@ -255,7 +255,13 @@ export function concealments(
           parent.to > node.to &&
           !(exclude !== null && node.from <= exclude.to && node.to >= exclude.from)
         ) {
-          out.push({ kind: "done", from: node.to, to: parent.to });
+          // From the label, not from the space before it. The line-through
+          // over that space draws as a dash between the box and the first
+          // word, and the box already overhangs into it (index.css
+          // `--task-lean`).
+          let from = node.to;
+          while (from < parent.to && doc.sliceString(from, from + 1) === " ") from += 1;
+          if (from < parent.to) out.push({ kind: "done", from, to: parent.to });
         }
         return;
       }

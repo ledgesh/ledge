@@ -193,12 +193,18 @@ describe("concealments", () => {
   });
 
   test("a checked task's label is marked done, concealed or not", () => {
+    // From 9, not 8: the space between the marker and the label is not part
+    // of the label, and struck through it draws as a dash against the box.
     const concealed = conceal("x\n\n- [x] shut");
-    expect(concealed.filter((c) => c.kind === "done")).toEqual([{ kind: "done", from: 8, to: 13 }]);
+    expect(concealed.filter((c) => c.kind === "done")).toEqual([{ kind: "done", from: 9, to: 13 }]);
     // Caret on the marker reveals the raw [x] but the label stays done.
     const revealedOut = conceal("x\n\n- [x] shut", [{ from: 6, to: 6 }]);
     expect(revealedOut.filter((c) => c.kind === "task")).toEqual([]);
-    expect(revealedOut.filter((c) => c.kind === "done")).toEqual([{ kind: "done", from: 8, to: 13 }]);
+    expect(revealedOut.filter((c) => c.kind === "done")).toEqual([{ kind: "done", from: 9, to: 13 }]);
+  });
+
+  test("a checked task with no label at all gets no done span", () => {
+    expect(conceal("x\n\n- [x] ").filter((c) => c.kind === "done")).toEqual([]);
   });
 
   test("a caret in the task's label does NOT reveal the marker", () => {
