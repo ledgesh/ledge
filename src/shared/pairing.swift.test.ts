@@ -45,9 +45,12 @@ function readInSwift(links: string[]): unknown[] {
 }
 
 // At load, outside any test, so the compile is not held to a test's timeout.
-const results = readInSwift(vectors.map((v) => v.link));
+// Linux has no swiftc, and the server suite also runs there (remote.md §13). A
+// Mac without one fails here rather than skipping.
+const onMac = process.platform === "darwin";
+const results = onMac ? readInSwift(vectors.map((v) => v.link)) : [];
 
-describe("the Swift reader agrees with the vectors", () => {
+describe.skipIf(!onMac)("the Swift reader agrees with the vectors", () => {
   test.each(vectors.map((v, i) => [v.name, v, i] as const))("%s", (_name, vector, i) => {
     expect(results[i]).toEqual(vector.code ? { code: vector.code } : { problem: vector.problem! });
   });

@@ -1076,6 +1076,15 @@ imports at their devkit paths, and `vite.config.ts` calls the devkit's own
 SDK rather than to the throwing stub. Both must be updated together if a new
 `electrobun/*` import ever appears.
 
+**uqr draws QR codes, and it is the one dependency outside those families.**
+`ledge-server pair` prints a pairing code as a QR code in a terminal (`remote.md`
+§4b), and nothing in the approved set encodes one. An encoder is Reed-Solomon
+error correction, version selection and mask scoring: about 600 lines, where a
+mistake produces a code that looks right and does not scan. uqr is a port of
+Project Nayuki's QR code generator. It is 27 KB, has no
+dependencies, and runs in both Bun and the view. Ledge uses its `encode` for the
+module grid and draws the modules itself (`bun/pair.ts`).
+
 Dev-only tooling gets the same test but a lower bar, since it never ships:
 `@playwright/test` is in because nothing in the existing set can execute a
 real DOM (`testing.md` §5) — the canonical example of a reason that

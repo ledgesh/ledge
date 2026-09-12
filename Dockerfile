@@ -38,15 +38,24 @@ FROM oven/bun:1-debian AS native
 # headers, and shipping those to every server so a fallback can run is exactly
 # backwards. Compile here; the runtime stage gets the .so and no toolchain.
 #
-# procps is for `bun test` rather than for the build: this stage is also where
-# the suite runs against glibc (remote.md §13), and pty.fs.test.ts asks `ps`
-# whether a closed shell was collected or left as a zombie.
+# procps and openssh-client are for `bun test` rather than for the build: this
+# stage is also where the suite runs against glibc (remote.md §13).
+# pty.fs.test.ts asks `ps` whether a closed shell was collected or left as a
+# zombie, and pair.fs.test.ts describes host keys with ssh-keygen.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends build-essential procps \
+  && apt-get install -y --no-install-recommends build-essential procps openssh-client \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
-COPY package.json tsconfig.json bunfig.toml electrobun.config.ts THIRD-PARTY-NOTICES.md ./
+
+# The server bundles one npm package, uqr, for `ledge-server pair`
+# (architecture.md §8). The install is pinned by the lockfile and skips install
+# scripts, since the root package's postinstall sets up the Mac app's
+# toolchain. It stays in the build stages: the runtime stage copies the binary.
+COPY package.json bun.lock ./
+RUN bun install --frozen-lockfile --production --ignore-scripts
+
+COPY tsconfig.json bunfig.toml electrobun.config.ts THIRD-PARTY-NOTICES.md ./
 COPY scripts ./scripts
 COPY docs/user ./docs/user
 COPY src ./src

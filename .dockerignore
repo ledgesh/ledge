@@ -6,6 +6,7 @@
 !src
 !scripts
 !package.json
+!bun.lock
 !tsconfig.json
 !bunfig.toml
 !electrobun.config.ts

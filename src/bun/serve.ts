@@ -1,13 +1,13 @@
 // `ledge-server`: this machine's notes, reachable over ssh (remote.md §3).
 //
-// Three verbs. `serve` is what a client runs (`ssh <target> ledge-server
+// Four verbs. `serve` is what a client runs (`ssh <target> ledge-server
 // serve`), and what an `authorized_keys` forced command names (§4). It pumps
 // bytes between stdio and the daemon's socket and parses no frames, so an ssh
 // session cannot desynchronize the protocol. `daemon` holds the notes, the
 // shells and the watchers. It outlives every connection to it (§7). A run
 // survives the wire dropping, and a reconnecting client can replay safely.
 // Phase 4 split the two (§14). `backup-paths` prints the paths a backup has
-// to cover and exits (backup.ts, §11).
+// to cover and exits (backup.ts, §11). `pair` prints a pairing code (§4b).
 //
 // stdout belongs to the protocol: one stray byte in a length-prefixed stream
 // desynchronizes it with no way back. `main` points `console.log`,
@@ -27,7 +27,20 @@ import { startLogging } from "./log";
 import { APP_HOME, availableRoots, loadWorkspaces, roots } from "./workspaces";
 import { PROFILES_DIR } from "./spawnParams";
 import { backupSet } from "./backup";
+import {
+  containerRefusal,
+  HOST_KEY_DIR,
+  KEYGEN_PATH,
+  pairAddress,
+  pairCode,
+  pairReport,
+  parsePairArgs,
+  phoneHostKeys,
+} from "./pair";
 import { BUILD_VERSION } from "../shared/version";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { hostname, userInfo } from "node:os";
+import { join } from "node:path";
 
 /**
  * Pump stdio to the daemon and back. Resolves when either end hangs up.
@@ -124,6 +137,85 @@ export async function backupPaths(argv: readonly string[]): Promise<void> {
 }
 
 /**
+ * Print this machine's pairing code as a QR code, with the link beneath it
+ * (pair.ts, remote.md §4b). Returns the exit status. Like `backup-paths`, it
+ * writes to `process.stdout` directly and starts no daemon.
+ */
+export async function pair(argv: readonly string[]): Promise<number> {
+  const fail = (message: string, status = 1) => {
+    console.error(message);
+    return status;
+  };
+  if (argv.includes("--help") || argv.includes("-h")) {
+    process.stdout.write(`${PAIR_USAGE}\n`);
+    return 0;
+  }
+  const args = parsePairArgs(argv.slice(3));
+  if ("error" in args) return fail(`${args.error}\n${PAIR_USAGE}`, 2);
+  if (existsSync("/.dockerenv") || existsSync("/run/.containerenv")) {
+    const refusal = containerRefusal(args);
+    if (refusal) return fail(refusal);
+  }
+  const address = pairAddress(args, process.env.SSH_CONNECTION, hostname());
+  if ("error" in address) return fail(address.error, 2);
+
+  let keyText = "";
+  if (args.keys === "-") keyText = await Bun.stdin.text();
+  else if (args.keys !== undefined) {
+    try {
+      keyText = readFileSync(args.keys, "utf8");
+    } catch {
+      return fail(`Could not read ${args.keys}.`);
+    }
+  } else {
+    const files = existsSync(HOST_KEY_DIR) ? readdirSync(HOST_KEY_DIR).filter((f) => /^ssh_host_\w+_key\.pub$/.test(f)) : [];
+    for (const file of files) {
+      try {
+        keyText += `${readFileSync(join(HOST_KEY_DIR, file), "utf8")}\n`;
+      } catch {
+        // Unreadable here, and ssh-keygen would say nothing more useful.
+      }
+    }
+    if (keyText.trim() === "") {
+      return fail(`There are no sshd host keys in ${HOST_KEY_DIR}. If sshd keeps them elsewhere, pass the .pub file with --keys.`);
+    }
+  }
+
+  let described: string;
+  try {
+    const p = Bun.spawn([KEYGEN_PATH, "-lf", "-"], { stdin: "pipe", stdout: "pipe", stderr: "ignore" });
+    p.stdin.write(keyText);
+    await p.stdin.end();
+    described = await new Response(p.stdout).text();
+    await p.exited;
+  } catch (err) {
+    return fail(`Could not run ssh-keygen (${err instanceof Error ? err.message : String(err)}).`);
+  }
+  const keys = phoneHostKeys(described);
+  if (keys.length === 0) {
+    if (!described.includes("SHA256:")) return fail(`${args.keys === "-" ? "stdin" : (args.keys ?? HOST_KEY_DIR)} holds no public host keys.`);
+    return fail(
+      "None of these host keys is Ed25519 or ECDSA, and those are the kinds Ledge on a phone can check.\n" +
+        "`sudo ssh-keygen -A` creates the missing default keys. Restart sshd after it.",
+    );
+  }
+
+  const code = pairCode(args.user ?? userInfo().username, address, keys);
+  if ("error" in code) return fail(code.error);
+  const columns = process.stdout.isTTY ? process.stdout.columns : undefined;
+  process.stdout.write(pairReport({ code, keys, hostFrom: address.hostFrom, columns }));
+  return 0;
+}
+
+const PAIR_USAGE = [
+  "usage: ledge-server pair [--user NAME] [--host ADDRESS] [--port N] [--keys FILE]",
+  "  --user   the account a phone signs in as (default: whoever runs pair)",
+  "  --host   the name or IPv4 address a phone dials (default: this ssh session's address, or the machine's name)",
+  "  --port   sshd's port (default: this ssh session's port, or 22)",
+  "  --keys   public host keys to describe, - for stdin (default: /etc/ssh/ssh_host_*_key.pub)",
+].join("\n");
+
+/**
  * Run the command line. Exported so `bin/ledge-server.js` can call it.
  *
  * That launcher (npmPackage.ts) is its own module and imports this one, so
@@ -139,8 +231,8 @@ export async function main(argv: readonly string[]): Promise<never> {
   console.debug = console.error;
 
   const verb = argv[2] ?? "serve";
-  if (verb !== "serve" && verb !== "daemon" && verb !== "backup-paths") {
-    console.error("usage: ledge-server [serve|daemon [--autostart]|backup-paths [options]]");
+  if (verb !== "serve" && verb !== "daemon" && verb !== "backup-paths" && verb !== "pair") {
+    console.error("usage: ledge-server [serve|daemon [--autostart]|backup-paths [options]|pair [options]]");
     console.error("  serve         the protocol on stdin and stdout, attached to this machine's daemon");
     console.error("  daemon        BE this machine's server; runs until stopped");
     console.error("                  --autostart   exit when idle; what serve passes to the one it starts");
@@ -148,16 +240,19 @@ export async function main(argv: readonly string[]): Promise<never> {
     console.error("                  --exclude     print the exclusions instead of the inclusions");
     console.error("                  --no-secrets  leave out the profiles dir");
     console.error("                  --json        both lists, plus any root that is not on disk");
+    console.error("  pair          a QR code a phone scans to add this server");
+    console.error("                  --user, --host, --port, --keys   see `ledge-server pair --help`");
     process.exit(2);
   }
 
-  // `backup-paths` reads the registry and prints. It starts no daemon and
-  // touches none, so it needs no log file of its own and must not rotate the
-  // ones a running server is writing.
+  // `backup-paths` and `pair` read and print. They start no daemon and touch
+  // none, so they need no log file of their own and must not rotate the ones
+  // a running server is writing.
   if (verb === "backup-paths") {
     await backupPaths(argv);
     process.exit(0);
   }
+  if (verb === "pair") process.exit(await pair(argv));
 
   // `serve` and `daemon` log to separate files. Both can be running at once on
   // one machine, and two processes appending to one log interleave their lines

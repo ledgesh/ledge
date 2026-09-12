@@ -550,9 +550,9 @@ https://ledge.sh/pair#v=1&u=dan&h=atlas.example.net&p=2222&k=SHA256:TC7eh5uTmsVc
 | `k` | A host key fingerprint, as `ssh-keygen -lf` prints it | Required and repeatable: one per host key the server offers, at most four different ones. |
 
 `shared/pairing.ts` makes and reads the link, and `ios/Sources/PairingCode.swift`
-reads it on the phone. Nothing prints a code or scans one yet. `ledge-server
-pair`, a Mac command that shows the code for a connection, and the phone's
-scanner are still to build.
+reads it on the phone. `ledge-server pair` prints a code on the server. A Mac
+command that shows the code for a connection, and the phone's scanner, are still
+to build, so `docs/user/` does not describe `pair` yet.
 
 **The fields travel in the fragment.** A browser never sends the part after `#`,
 so opening the link tells ledge.sh nothing about the server. A script on the
@@ -608,6 +608,58 @@ hands that server the password. A reader therefore follows three rules:
 - A tapped link says so on that screen, and asks the person to continue only if
   the link came from their own server. A scanned code came from a screen in
   front of them, and a tapped one could have come from anyone.
+
+### `ledge-server pair`
+
+`pair` fills each field from the machine it runs on, prints the code as a QR
+code in the terminal, and prints the fields and the link beneath it. It starts
+no daemon. The rules are pure functions in `bun/pair.ts`, and `serve.ts` does
+the reading and the spawning.
+
+| Field | Where `pair` gets it | Flag |
+| --- | --- | --- |
+| `u` | The account running `pair` (`os.userInfo`) | `--user` |
+| `h` | The server address in `SSH_CONNECTION`, when that is IPv4 and not loopback. Otherwise the machine's name (`os.hostname`). | `--host` |
+| `p` | The server port in `SSH_CONNECTION`, otherwise 22 | `--port` |
+| `k` | `/etc/ssh/ssh_host_*_key.pub`, described by `ssh-keygen -lf -` | `--keys FILE`, or `-` for stdin |
+
+**The address an ssh session reached comes before the machine's name.** Someone
+running `pair` over ssh has just proved that address reaches the server. A VPS's
+own name usually resolves nowhere. The report says which source it used, and
+suggests `--host` when it fell back to the name.
+
+**The keys come from the `.pub` files rather than from `ssh-keyscan`.** A scan
+of this machine needs sshd listening on an address `pair` can reach, and
+§4's recommended posture binds sshd to the tailnet interface only. Reading the
+files needs no network. A key sshd keeps somewhere else is passed with `--keys`.
+A `.pub` file sshd does not actually load only adds a fingerprint no connection
+will offer. That costs space in the code and nothing else.
+
+**Only Ed25519 and ECDSA fingerprints go in the code.** NIOSSH checks no other
+kind (ios.md §3), so an RSA fingerprint could never match and would only enlarge
+the code. A server with neither kind is refused with `sudo ssh-keygen -A` as the
+fix.
+
+**In a container, `pair` needs all three of `--user`, `--host` and `--keys`.**
+The container's account, name and host keys are not the server's: the image
+ships no sshd (§11), and a phone signs in to the machine that runs the
+container. `pair` detects a container by `/.dockerenv` or `/run/.containerenv`
+and refuses with the command to run on that machine instead:
+
+```
+cat /etc/ssh/ssh_host_*_key.pub | docker exec -i ledge ledge-server pair --user "$USER" --host <address> --keys -
+```
+
+**The QR code sets its own colors.** Each terminal line holds two rows of
+modules as half blocks, drawn black on bright white with SGR escapes, so the
+code is dark on light whatever the terminal's theme. The quiet zone is the four
+light modules the QR standard asks for. Error correction starts at L and is
+raised as far as the smallest version that fits allows. A two-key code is 57
+columns wide, and a code with four keys and a long host name still fits 80. A
+terminal narrower than the code gets a sentence and the link instead, because a
+wrapped QR code does not scan. A Vision `VNDetectBarcodesRequest` read the
+drawn modules back as the link when this was written, but nothing in the suite
+repeats that check.
 
 ## 5. State ownership: server or client
 
