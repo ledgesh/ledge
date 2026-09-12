@@ -167,6 +167,25 @@ test.describe("creating", () => {
     await expect(noteRow(page, "Untitled")).toHaveAttribute("data-target-path", /\/trips\//);
   });
 
+  test("the New Note dropdown carries New Note as well as New Folder…", async ({ page }) => {
+    // The chevron half of a split button names the wide half's verb first, the
+    // way the workspace strip's does (interactions.md R6b).
+    await page.getByRole("button", { name: "New note options" }).click();
+    await expect(page.getByRole("menuitem", { name: "New Note" })).toBeVisible();
+    await expect(page.getByRole("menuitem", { name: "New Folder…" })).toBeVisible();
+  });
+
+  test("a right-click on the browser's blank space opens the same menu", async ({ page }) => {
+    // interactions.md R6b: the space below the last note is the list itself.
+    const list = page.getByTestId("note-list");
+    const box = (await list.boundingBox())!;
+    await list.click({ button: "right", position: { x: 20, y: box.height - 8 } });
+    await expect(page.getByRole("menuitem", { name: "New Note" })).toBeVisible();
+    await expect(page.getByRole("menuitem", { name: "New Folder…" })).toBeVisible();
+    // A note row's verbs are absent: this menu is about the list, not a row.
+    await expect(page.getByRole("menuitem", { name: "Move to Folder…" })).toHaveCount(0);
+  });
+
   test("New Folder… on a folder row nests inside it", async ({ page }) => {
     await folderRow(page, "admin").click({ button: "right" });
     await page.getByRole("menuitem", { name: "New Folder…" }).click();

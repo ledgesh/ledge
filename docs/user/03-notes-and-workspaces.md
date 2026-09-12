@@ -14,7 +14,7 @@ Ledge saves as you type, a moment after you pause. ⌘S saves at once.
 
 The strip at the top of the sidebar lists your workspaces. Each one is a single folder of notes, and ⌘1 through ⌘9 jump between them. There are two kinds:
 
-- **Attached.** "Attach Folder as Workspace…" (in the command palette, or the + button's menu) turns a folder you already have into a workspace, usually a project you work on. Its `.md` files become notes where they are, and each of those notes runs its blocks in the project folder with no frontmatter ([[Running Code]]).
+- **Attached.** "Attach Folder as Workspace…" (in the command palette, in the + button's menu, or by right-clicking the empty space below the workspaces) turns a folder you already have into a workspace, usually a project you work on. Its `.md` files become notes where they are, and each of those notes runs its blocks in the project folder with no frontmatter ([[Running Code]]).
 - **Managed.** ⇧⌘N creates a workspace whose folder Ledge makes for you inside `~/.ledge`. Its notes default to your home folder, and `cwd:` frontmatter points them elsewhere ([[Frontmatter and Environments]]).
 
 Managed workspace folders live in `~/.ledge`.
@@ -67,7 +67,7 @@ There are three ways to put a note in a folder:
 
 "Move to Folder…" opens a list of the workspace's folders. Type to narrow it, and if what you type is not a folder yet, the last row offers to create it. A name with slashes in it, like `projects/api`, makes a folder inside a folder. Nothing is created until you pick a row, so Escape leaves no empty folder behind.
 
-**"New Folder…"** is in the File menu, in the command palette, in the menu beside the New Note button, and in a folder's right-click menu, where it makes a folder inside that one. It creates the folder and opens the first note in it, because Ledge shows the folders its notes are in: a folder with nothing inside has no row.
+**"New Folder…"** is in the File menu, in the command palette, in the menu beside the New Note button, in the menu you get by right-clicking the empty space below the note list, and in a folder's right-click menu, where it makes a folder inside that one. It creates the folder and opens the first note in it, because Ledge shows the folders its notes are in: a folder with nothing inside has no row.
 
 That is also why moving the last note out of a folder takes the folder's row with it. The folder itself is still on disk, and putting a note back in it brings the row back.
 
@@ -118,7 +118,7 @@ Set `editor.livePreview` to `false` under This app in Settings (⌘,) and relaun
 
 Everything else is unaffected: ⌘B, the `[[` picker, and fence completion work the same either way.
 
-## Right-clicking in a note
+## Right-click menus
 
 Right-click anywhere in a note to get a menu of what you can do there.
 
@@ -129,6 +129,8 @@ The click moves the cursor to where you clicked, so the menu acts on that spot.
 Right-clicking inside a selection keeps the selection, which is how you cut, copy or bold the text you just selected.
 
 Every item shows its keyboard shortcut beside it, so the menu is also where you find them.
+
+The sidebar answers a right-click too. On a row you get that row's menu, and on the empty space below a list you get the list's own: New Workspace and Attach Folder as Workspace… under the workspaces, New Note and New Folder… under the notes. Those two are the menus the small chevrons beside the New Workspace and New Note buttons drop.
 
 ## Pasting formatted text
 

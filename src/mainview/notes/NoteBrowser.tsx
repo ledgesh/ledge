@@ -44,7 +44,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { notesUnder } from "../../shared/folders";
 import { cn } from "@/lib/utils";
 import { useListNav } from "@/lib/useListNav";
-import { useRowMenu } from "@/lib/useRowMenu";
+import { onBlankSpace, useRowMenu } from "@/lib/useRowMenu";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ContextMenu, MenuDivider } from "@/components/ContextMenu";
 import { useCommands, useCommandTitle } from "@/commands/CommandProvider";
@@ -95,7 +95,8 @@ export function NoteBrowser() {
   >(null);
   // The folder chooser, when Move to Folder… or New Folder… opened it.
   const [picking, setPicking] = useState<FolderRequest | null>(null);
-  // The New Note button's dropdown half, where New Folder… lives.
+  // The add menu (New Note / New Folder…), opened by the New Note button's
+  // dropdown half or by a right-click on the list's blank space.
   const [addMenu, setAddMenu] = useState<{ x: number; y: number } | null>(null);
   // The folder a dragged note is currently over: null for the top level (the
   // header), undefined for nothing. Highlighting that target is the only
@@ -361,7 +362,21 @@ export function NoteBrowser() {
         )}
       </div>
 
-      <div {...nav.containerProps} className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-2">
+      <div
+        {...nav.containerProps}
+        data-testid="note-list"
+        className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-2"
+        // A right-click below the last note opens the same menu the New Note
+        // button's chevron does, since the blank space is the list itself
+        // (interactions.md R6b). A click on a row opened that row's menu on
+        // the way up here. The docs workspace has neither verb, so it has no
+        // menu either.
+        onContextMenu={(e) => {
+          if (readOnly || !onBlankSpace(e.target)) return;
+          e.preventDefault();
+          setAddMenu({ x: e.clientX, y: e.clientY });
+        }}
+      >
         {/* The favorites, in a section of their own above the tree. It draws
             nothing while nothing is marked, the Trash section's stance: a
             heading over an empty list only takes room from the notes. */}
@@ -484,6 +499,11 @@ export function NoteBrowser() {
 
       {addMenu && (
         <ContextMenu x={addMenu.x} y={addMenu.y} onClose={() => setAddMenu(null)}>
+          {/* New Note leads, the way New Workspace leads the strip's menu: the
+              chevron half of a split button names what the wide half does
+              before it names the verb it is there to carry, and a right-click
+              on the blank space has no wide half at all. */}
+          <CommandMenuItem id="note.new" onClose={() => setAddMenu(null)} />
           <CommandMenuItem
             id="folder.new"
             hint="A folder holds notes, so Ledge opens one in it"

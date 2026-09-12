@@ -45,6 +45,15 @@ function onOwnControl(el: EventTarget | null): boolean {
   return el instanceof Element && el.closest("button, input, textarea") !== null;
 }
 
+// Whether a right-click landed on a list's blank space rather than on one of
+// its rows. Rows publish data-target-kind (commands/target.ts). Everything
+// else inside a list is chrome (a section heading, the "no notes yet" line),
+// and a menu opened there is about the list rather than about a row
+// (interactions.md R6b).
+export function onBlankSpace(el: EventTarget | null): boolean {
+  return !(el instanceof Element) || el.closest("[data-target-kind]") === null;
+}
+
 export interface RowMenuProps {
   onContextMenu: (e: MouseEvent) => void;
   onPointerDown: (e: PointerEvent) => void;

@@ -3,7 +3,7 @@ import { ChevronDown, Plus, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useCmdHeld } from "@/lib/useCmdHeld";
 import { useListNav } from "@/lib/useListNav";
-import { useRowMenu } from "@/lib/useRowMenu";
+import { onBlankSpace, useRowMenu } from "@/lib/useRowMenu";
 import { ResizeHandle } from "@/components/ResizeHandle";
 import { ContextMenu } from "@/components/ContextMenu";
 import { RenameField } from "@/components/RenameField";
@@ -90,7 +90,8 @@ function WorkspaceStrip() {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   // The right-click menu: which workspace, and where to anchor it. Null when closed.
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
-  // The + button's dropdown (New Workspace / Attach Folder…). Null when closed.
+  // The add menu (New Workspace / Attach Folder…), opened by the + row's
+  // chevron or by a right-click on the strip's blank space. Null when closed.
   const [addMenu, setAddMenu] = useState<{ x: number; y: number } | null>(null);
   // The workspace whose icon is being picked, and the row the popover hangs off.
   const [pickingId, setPickingId] = useState<string | null>(null);
@@ -192,10 +193,20 @@ function WorkspaceStrip() {
       </div>
       <div
         {...nav.containerProps}
+        data-testid="workspace-strip"
         className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-2"
         onDragOver={onDragOver}
         onDrop={onDrop}
         onDragLeave={onDragLeave}
+        // A right-click below the last row opens the same menu the + row's
+        // chevron does, because the strip's blank space is the strip itself
+        // (interactions.md R6b). A click on a row opened that row's menu on
+        // the way up here.
+        onContextMenu={(e) => {
+          if (!onBlankSpace(e.target)) return;
+          e.preventDefault();
+          setAddMenu({ x: e.clientX, y: e.clientY });
+        }}
       >
         {strip.map((ws, i) => (
           <div key={ws.id}>

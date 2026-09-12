@@ -83,3 +83,27 @@ test("the last workspace refuses to close", async ({ page }) => {
   await page.keyboard.press("Backspace");
   await expect(wsRow(page, "Scratch")).toBeVisible();
 });
+
+test("a right-click on the strip's blank space opens the add menu", async ({ page }) => {
+  // interactions.md R6b: the blank space below the last row is the strip
+  // itself, so it answers with the menu the + row's chevron drops. The click
+  // lands near the bottom of the list, well under the one Scratch row.
+  const strip = page.getByTestId("workspace-strip");
+  const box = (await strip.boundingBox())!;
+  await strip.click({ button: "right", position: { x: 20, y: box.height - 8 } });
+  await expect(page.getByRole("menuitem", { name: "New Workspace" })).toBeVisible();
+  await expect(
+    page.getByRole("menuitem", { name: "Attach Folder as Workspace…" }),
+  ).toBeVisible();
+  // And it is the strip's own menu, not a row's: the workspace verbs are absent.
+  await expect(page.getByRole("menuitem", { name: "Rename Workspace…" })).toHaveCount(0);
+});
+
+test("a right-click on a row opens that row's menu, not the strip's", async ({ page }) => {
+  // The row handler runs first and the strip's own handler asks whether a row
+  // sits above the click (lib/useRowMenu.ts onBlankSpace), so one right-click
+  // opens one menu.
+  await wsRow(page, "Scratch").click({ button: "right" });
+  await expect(page.getByRole("menuitem", { name: "Rename Workspace…" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Attach Folder as Workspace…" })).toHaveCount(0);
+});
