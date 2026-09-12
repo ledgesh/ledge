@@ -220,6 +220,25 @@ test("a pipe table renders as a real table; clicking a cell reveals the pipes th
   await expect(page.locator(".cm-line").nth(2)).toHaveText("| 1 | !2 |");
 });
 
+test("a long cell wraps without squeezing short columns below their words", async ({ page }) => {
+  // The editor's line wrapping sets overflow-wrap: anywhere, which lets auto
+  // table layout shrink every column to one character (editor/tables.ts).
+  const long = "word ".repeat(80).trim();
+  await page.keyboard.press("Meta+a");
+  await page.keyboard.type(`| # | Scope | Size |\n| --- | --- | --- |\n| A1 | ${long} | S |\n`);
+  const table = page.locator(".ledge-mdtable");
+  await expect(table).toBeVisible();
+
+  const fits = async (cell: string) =>
+    table.locator("th, td", { hasText: new RegExp(`^${cell}$`) }).first().evaluate((el) => {
+      const span = el.firstElementChild as HTMLElement;
+      return span.getClientRects().length === 1;
+    });
+  expect(await fits("Size")).toBe(true);
+  expect(await fits("A1")).toBe(true);
+  expect(await fits("#")).toBe(true);
+});
+
 test("clicking a cell still lands there after edits above shift the table down", async ({ page }) => {
   // A table bakes absolute cell offsets into its DOM, so a shifted table has
   // to be redrawn rather than reused: TableWidget.eq compares position as

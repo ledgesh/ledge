@@ -577,6 +577,12 @@ body {
   padding: 3px 10px;
   text-align: left;
   vertical-align: top;
+  /* The editor's line wrapping inherits overflow-wrap: anywhere and
+     word-break: break-word, which let table layout shrink a column below its
+     longest word. overflow-wrap: break-word still splits an overlong word, but
+     only after the columns are sized. */
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 .ledge-mdtable th {
   background: var(--panel-bg);
