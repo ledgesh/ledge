@@ -12,7 +12,7 @@
     "hmr": "vite --port 5173",
     "build": "vite build && bun run build:cli && electrobun build",
     "release": "bun scripts/release-preflight.ts && vite build && bun run build:cli && electrobun build --env=stable",
-    "build:cli": "bun build src/bun/cli.ts --target=bun --outdir=dist-cli",
+    "build:cli": "bun build src/bun/cli.ts src/bun/serve.ts --target=bun --outdir=dist-cli",
     "build:native": "bun scripts/build-native.ts",
     "build:npm": "bun scripts/build-npm.ts",
     "build:server": "bun scripts/build-server.ts",

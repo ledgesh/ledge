@@ -111,10 +111,10 @@ let link: { state: LinkState; detail: string } = { state: "live", detail: "" };
  * The other clients connected to this server (rpc-schema `presence`).
  *
  * An empty list means nobody else is connected, not that nobody has been
- * asked: both servers push `presence` on every arrival and departure, to a
- * lone client too (bun/daemon.ts `announcePresence`, bun/index.ts
- * `announceLocalPresence`). Nothing is drawn until another client is listed,
- * and the connection bar draws that beside the machine name and link state.
+ * asked: a server pushes `presence` on every arrival and departure, to a lone
+ * client too (bun/daemon.ts `announcePresence`). Nothing is drawn until
+ * another client is listed, and the connection bar draws that beside the
+ * machine name and link state.
  */
 let others: PeerInfo[] = [];
 

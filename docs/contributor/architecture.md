@@ -8,13 +8,20 @@ disagrees with it is wrong, or the rule is — change one deliberately.
 
 ## 1. Process topology
 
-Two processes, one contract. (A connection to another machine adds a third
-across the network, and changes nothing here: the boundary is the same one,
-allowed to be a wire. `remote.md` is where that lives.)
+Three processes, one contract. (A connection to another machine swaps one of
+them for a process across the network, and changes nothing here: the boundary
+is the same one, allowed to be a wire. `remote.md` is where that lives.)
 
-- **Bun main process** (`src/bun/`) owns everything with side effects on the
-  machine: the filesystem (`notes.ts`), the PTYs (`pty.ts` via bun:ffi), and
-  the system clipboard. It has no UI.
+- **The server** (`ledge-server daemon`, `src/bun/serve.ts` over
+  `src/bun/server.ts`) owns everything with side effects on the notes: the
+  filesystem (`notes.ts`), the PTYs (`pty.ts` via bun:ffi), the watchers, the
+  vault. It has no UI and no window. On a Mac it is a process the app starts
+  from its own bundle and reaches over a unix socket in the app home
+  (`remote.md` §1); on a VPS it is the same code reached over ssh.
+- **The Mac shell** (`src/bun/index.ts`, Electrobun's Bun main process) owns
+  the windows, the menu bar, the updater, the pasteboard, and the list of
+  servers this Mac can reach. It is a client of the server, one connection per
+  window, and holds no note state at all.
 - **WKWebView** (`src/mainview/`) runs the React app. It owns everything the
   user sees and no machine state at all. One per window, and a window is a
   separate client of a possibly different server (`remote.md` §8a).
@@ -28,19 +35,21 @@ allowed to be a wire. `remote.md` is where that lives.)
   here is a module that has quietly stopped being shared. `portable.test.ts`
   enforces both.
 
-**What holds the Bun process open is the drain loop**, the timer in `server.ts`
-that reads every live pty (`remote.md` §6 sets its cadence). Housekeeping
-timers therefore `unref` themselves and lean on it — `vault.ts`'s idle relock
-says so — which makes it load-bearing in a way its own module cannot see. It
-may be slowed, and it is; it may not be cleared while the process should live,
-because the thing that would end up deciding that is the absence of a timer
-rather than anyone's policy. Whether a server with nothing open should still be
-running is the daemon's idle exit (`remote.md` §7), which decides it out loud.
+**What holds the server process open is the drain loop**, the timer in
+`server.ts` that reads every live pty (`remote.md` §6 sets its cadence).
+Housekeeping timers therefore `unref` themselves and lean on it — `vault.ts`'s
+idle relock says so — which makes it load-bearing in a way its own module
+cannot see. It may be slowed, and it is; it may not be cleared while the
+process should live, because the thing that would end up deciding that is the
+absence of a timer rather than anyone's policy. Whether a server with nothing
+open should still be running is the daemon's idle exit (`remote.md` §7), which
+decides it out loud.
 
 Every crossing rides the schema in `src/shared/rpc-schema.ts` — as the typed
-Electrobun RPC on the Mac, and as frames on a socket where the boundary is a
-wire. There is no second channel: no direct filesystem access from the view
-(the webview cannot), no untyped message bus beside the schema. Each schema
+Electrobun RPC between the webview and the shell, and as frames on a socket
+between the shell and the server, on this Mac as on any other. There is no
+second channel: no direct filesystem access from the view (the webview
+cannot), no untyped message bus beside the schema. Each schema
 entry carries a comment saying what it is for and when it fires — the schema
 doubles as the protocol's documentation, so an uncommented entry is an
 undocumented protocol change.
@@ -154,13 +163,14 @@ own output. Verb conventions, deixis, and output discipline are
 interactions.md §9's.
 
 The third is **`ledge-server`** (`src/bun/serve.ts`, `src/bun/daemon.ts`), the
-same handler map with a frame codec where the Electrobun RPC would be. It is
-what a remote client reaches over ssh, and it has two verbs: `daemon`, which
-holds the notes and the shells behind a unix socket in the app home and
-outlives every connection to it, and `serve`, which pumps bytes between stdio
-and that socket. The Mac app does not use it — its own server is in this
-process, which is the whole point of the split (`remote.md` §1) — but every
-rule above applies to it unchanged, because it IS `bun/server.ts`.
+same handler map with a frame codec where the Electrobun RPC would be. It has
+two verbs that matter here: `daemon`, which holds the notes and the shells
+behind a unix socket in the app home and outlives every connection to it, and
+`serve`, which pumps bytes between stdio and that socket for a client arriving
+over ssh. It is not a third entry point beside the app so much as the server
+the app is a client of: the bundle ships `serve.js` beside `index.js`, the
+shell runs `daemon` from it, and every rule above applies to it unchanged,
+because it IS `bun/server.ts` (`remote.md` §1).
 
 ## 2. The trust boundary
 
@@ -497,11 +507,13 @@ Bun therefore validates everything and derives anything derivable:
   session) — WKWebView's console reaches only the Web Inspector, so a render
   error is otherwise a blank pane and nothing else. It is in the app home,
   not `~/Library/Logs`, so `LEDGE_NOTES_ROOT` isolates it from every probe.
-  **One file per process**, not per machine: a server daemon and the app can
-  be running at once (remote.md §1), and two processes appending to one file
-  interleave their lines and race each other's rotation. `startLogging(name)`
-  is how a process claims its own — `ledge-server.log` for the daemon,
-  `ledge-serve.log` for the pump.
+  **One file per process**, not per machine: the app and the daemon it dials
+  are two processes on every Mac (remote.md §1), and two processes appending
+  to one file interleave their lines and race each other's rotation.
+  `startLogging(name)` is how a process claims its own — `ledge-server.log`
+  for the daemon, `ledge-serve.log` for the pump — so "why did my shell die"
+  is answered in `ledge-server.log` and "why did the window close" in
+  `ledge.log`.
 - **`LEDGE_NOTES_ROOT`** overrides the APP HOME (`~/.ledge` — where
   `settings.jsonc`, `.layout.json`, `.workspaces.json`, `.client/`,
   `logs/`, and

@@ -34,7 +34,7 @@ one it is in:
 
 | Shell | Entry point | Reaches a server by | Ships |
 | ----- | ----------- | ------------------- | ----- |
-| Electrobun (`bun/index.ts`) | `main.tsx` | in-process, or `ssh` | the Mac app |
+| Electrobun (`bun/index.ts`) | `main.tsx` | this Mac's socket, or `ssh` | the Mac app |
 | Playwright (`harness.tsx`) | `harness.tsx` | `FakeStore`, in memory | nothing; `test:e2e` |
 | Swift (`ios/`) | `ios.tsx` | SSH, always | the iOS app |
 

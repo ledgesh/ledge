@@ -2,9 +2,9 @@
 // bun/server.ts names which client each push is for and leaves the routing to
 // whoever holds the clients. Which client is a fact about a session or a run,
 // and only the server knows it. How to reach that client is a fact about
-// connections, and only the holder knows it. There are two holders:
-// bun/daemon.ts holds a socket per client, bun/index.ts a window per client
-// (remote.md §8a). This module is the part they do identically.
+// connections, and only the holder knows it: bun/daemon.ts, with a socket per
+// client. The Mac app's windows are clients over that socket too (remote.md
+// §8a), so this is the one place routing happens.
 import { PUSH_MESSAGES, type ServerPush } from "../shared/wire";
 import type { Audience } from "./server";
 
@@ -12,8 +12,8 @@ import type { Audience } from "./server";
  * A push object that writes to whoever `pick` names at the moment it is called.
  *
  * fanout takes a picker rather than a client's own push object because a
- * server outlives every connection and every window it was built with. Nothing
- * may be captured when createServer runs.
+ * server outlives every connection it was built with. Nothing may be captured
+ * when createServer runs.
  */
 export function fanout(pick: () => Iterable<ServerPush>): ServerPush {
   return Object.fromEntries(
@@ -28,7 +28,7 @@ export function fanout(pick: () => Iterable<ServerPush>): ServerPush {
 
 /**
  * Both audiences over one live map of client id to whatever the holder keeps
- * per client: a socket for the daemon, a window for the shell.
+ * per client, which is the daemon's connection.
  *
  * `to` runs on the hot path for a shell's bytes (per drawer, per drain tick),
  * so it memoizes each client's push object. The memo captures the client id

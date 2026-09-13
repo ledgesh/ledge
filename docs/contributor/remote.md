@@ -40,16 +40,17 @@ process boundary allowed to be a network:
 
 | Case | Transport |
 | ---- | --------- |
-| Mac app, local notes | the server in this process |
+| Mac app, this Mac's notes | the unix socket in the app home, dialled directly |
 | Mac app, remote notes | `ssh <target> ledge-server serve` |
 | iOS app, your Mac | `ssh <target> ledge-server serve` |
 | iOS app, your VPS | `ssh <target> ledge-server serve` |
-| `serve` to the machine's own daemon | a unix socket in the app home |
+| `serve` to the machine's own daemon | that same unix socket |
 
-The Mac app connecting to its own local server is not a special case. It is
-the same client, the same protocol, and the same server binary, over a
-cheaper transport. Keeping it that way is what stops the remote path from
-becoming a second, less-tested code path.
+The Mac app connecting to its own Mac is not a special case. It is the same
+client, the same protocol, and the same server code, over a cheaper transport.
+No server runs inside the app's process. Keeping it that way is what stops
+the remote path from becoming a second, less-tested code path, and what stops
+"local" from being a mode with rules of its own.
 
 **A server is a daemon behind a unix socket, and `serve` is a pump to it.**
 `ledge-server serve` — what a client runs and what a forced command names (§4)
@@ -110,17 +111,54 @@ with a fixed buffer, including the ordering rule that a second write must not
 overtake the first's remainder), because the real thing needs a reader slow
 enough to provoke it — see testing.md §6.
 
-**The Mac app's own local server stays in this process.** It is the one case
-where the socket buys nothing: the same user, the same disk, and a quit that
-takes the window with it anyway. Making it a child would put a second binary in
-the app bundle and §11's upgrade question in front of every launch, which is
-shipping work and belongs with phase 5.
+**Your Mac is a server, and the app is one of its clients.** The bundle
+carries `serve.js` beside the shell's own entry (`electrobun.config.ts`
+`copy`, built by `bun run build:cli`), and the first window to want this Mac
+runs `bun serve.js daemon --autostart` from the bundle's own Bun, then dials
+`.server.sock` the way `serve` does (`bun/localServer.ts`). A second window
+finds the daemon already there. A phone reaching this Mac over ssh finds the
+same one. There is no in-process server, no folder-dialog seam the daemon
+lacks and the app has, and no answer to "who is connected" that the app keeps
+for itself: presence, routing and the vault are the daemon's for every client
+alike.
 
-**The desktop app is therefore split, not extended.** `bun/index.ts` becomes
-two entry points: `serve` (RPC handlers, sessions, watcher, no UI) and the
-Mac shell (menus, window, `Screen`, `Updater`, tray). Nothing in
-`src/mainview/` changes. Nothing else in `src/bun/` imports Electrobun today,
-which is what makes the split a move rather than a rewrite.
+What that costs, stated plainly. Every request from a window is a frame over
+a socket rather than a function call, which the round-trip budget (§12) was
+already sized for. The daemon outlives the app by its idle minute, so `ps`
+shows a `ledge-server` for a moment after ⌘Q. A local failure now looks like
+a remote one: the connection bar says "reconnecting" while a daemon that
+crashed is started again, where the old arrangement would have taken the
+window down with it. And the app's log and the daemon's log are two files
+(`log.ts`), because they are two processes.
+
+**A window asks for no hold.** A phone and a Mac over ssh ask the daemon to
+keep their sessions for five minutes after the wire drops (§7), because their
+wires drop. A unix socket does not: this wire ending means the app quit or
+crashed, and shells kept for it would be kept for nobody. The daemon reads the
+missing ask as exactly that. When the last connection from a device ends
+without a hold, that device's unlock ends too (`locking.md` §3a), which is how
+⌘Q and a crash both lock the vault with no code running at quit to do it.
+
+**A daemon of another build makes way.** "Restart to Install Update"
+relaunches the app inside the old daemon's idle minute, and the old daemon is
+the old app's code. Every window compares the daemon's `build` from its hello
+with its own, and one that differs is sent SIGUSR1 (`daemon.ts`
+`retireDaemon`), which the daemon answers by stopping as soon as `running()`
+is false: a build in flight finishes first, and the clients are then told the
+server is coming back, so their ladders dial again and the first to find no
+socket starts a daemon from the new bundle. A daemon that refuses the
+handshake outright, because the protocol version moved, cannot serve this
+build at all and is stopped now (SIGTERM, `stopDaemon`) before the dial is
+tried again. A dev build's version never changes between builds, so a dev
+build stops whatever daemon it finds before its first dial rather than judging
+it; `bun run dev` then always runs the code it just built.
+
+**The desktop app is therefore split, not extended.** `bun/index.ts` is the
+Mac shell (menus, windows, `Screen`, `Updater`, the connection list) and
+`bun/serve.ts` is the server, and the shell reaches the server the way every
+other client does. Nothing in `src/mainview/` knows which. Nothing else in
+`src/bun/` imports Electrobun, which is what makes the split a move rather
+than a rewrite.
 
 ## 2. The client is the least-trusted end
 
@@ -724,7 +762,7 @@ splits again, by machine:
 | How long they outlive it | server, on the client's ask | §7, `Hello.hold` |
 | Which inline runs are still worth executing | server, on each client's claim for its own | §7, `inlineClaim` |
 | Which client owns a drawer (bytes, keystrokes, winsize) | server | §7, `Term.owner` |
-| Which clients are connected | server | §7, `presence`, and only the daemon has more than one |
+| Which clients are connected | server | §7, `presence`; the Mac's windows are clients of its daemon like any other |
 | What a device calls itself | **client** | §7, `Hello.label`: a hostname, a device name |
 | The dedupe window for replayed writes | server | §7, spans reconnects |
 | The watcher | server | pushes `notesChanged` as today |
@@ -1679,7 +1717,7 @@ between them, one owner per drawer — now reachable without a second device.
 | The window frame | window |
 | The connection list and its pinned host keys | process |
 | The client home: `known_hosts`, client settings, the window list, the connection-to-client-id map | process |
-| The local server, its watchers, its vault, its PTYs | process |
+| This Mac's server, its watchers, its vault, its PTYs | the daemon, a process of its own (§1) |
 | The menu bar | process, driven by the focused window |
 
 **A window is titled by the connection it is on**, so a title bar says "This
@@ -1713,17 +1751,16 @@ from here, so leaving it pointed at the old machine while the row names the new
 one would be the lie the indicator exists to prevent. A rename is never
 refused, because it changes nothing about how a connection is made.
 
-**One local server, however many windows.** `attach` builds a server in this
-process for the local connection (`bun/index.ts`), and a second one over the
-same notes root would give the machine two watchers, two vaults, two PTY maps,
-and two consumers of the open-request file. So it is built on the first local
-attach and each window takes an overlay of it through
-`createServer(...).forClient(id)`, which already took a client id. It is torn
-down when the last of those overlays is released, which is what keeps a window
-switching away from this Mac costing exactly what it always cost, its shells,
-while a second window on this Mac costs nothing. The audience that addresses
-those overlays is `bun/audience.ts`, shared with the daemon: routing between
-clients was the daemon's alone only while a Mac was one client.
+**One daemon, however many windows.** Every window pointed at this Mac dials
+the same socket (§1), and the daemon serves them as it serves a Mac and a
+phone: one entry per client id, one overlay per connection through
+`forClient(id)`. Two servers over one notes root would be two watchers, two
+vaults, two PTY maps and two consumers of the open-request file, and the
+socket is what makes a second one impossible rather than merely avoided. A
+window switching away from this Mac costs its own connection and nothing else.
+The daemon's idle minute is what ends the shells once the last window has
+gone, and a hold is never asked for over the socket (§1), so that minute is
+not lengthened for a client that is not coming back.
 
 **Identity follows the connection, not the window.** `bun/clientHome.ts` keeps
 a map of connection id to client id, each minted the first time that connection
@@ -1828,14 +1865,15 @@ they describe the server's state and a second window is the second screen they
 exist for. A drawer is busy for everyone watching it, which is why that one is
 not addressed even though its four neighbours are. So does `openExternal`, for
 §8's reason unchanged: `ledge <title>` names a note, not a screen. None of this
-is new work in `bun/server.ts`: it already said which, for the daemon, and what
-changed is only that the app process now answers the question too.
+is the shell's work: `bun/server.ts` names the client each push is for, and
+`bun/daemon.ts` routes it to the window as it would to a phone.
 
-**Presence over the local server is the shell's**, for the daemon's reason
-(`announcePresence`): it is a fact about who is CONNECTED, and only the thing
-holding the connections knows. Two windows on one Mac need it as much as a Mac
-and a phone do, because without it the drawer the other window took was taken
-by nobody in particular (`interactions.md` §4-2).
+**Presence is the daemon's, for every window.** It is a fact about who is
+CONNECTED, and only the thing holding the connections knows
+(`announcePresence`). Two windows on one Mac are two of those connections, so
+they learn about each other the way a Mac and a phone do, and the drawer the
+other window took is taken by a named window rather than by nobody in
+particular (`interactions.md` §4-2).
 
 **The menu bar belongs to the focused window.** macOS gives an application one
 menu bar, the view owns its contents (`interactions.md` §10), and two views
@@ -1849,10 +1887,9 @@ landing in between would have nowhere to go.
 
 **Almost nothing here reaches the daemon or the phone.** A server already
 serves several clients and has no interest in whether two of them are windows
-on one Mac (§1); what it gained is a second caller for the routing it already
-had. iOS has one window and one connection list (`ios.md` §4), and gains one
-stub: `windowNew` answers false there, which is what keeps the verb out of the
-palette rather than in it and silent.
+on one Mac (§1). iOS has one window and one connection list (`ios.md` §4), and
+gains one stub: `windowNew` answers false there, which is what keeps the verb
+out of the palette rather than in it and silent.
 
 ## 9. Locking across the wire
 
@@ -2550,7 +2587,17 @@ Each phase leaves the app shippable.
    What is still owed: the clock. A container on loopback answers in under 3ms
    and never sleeps, so latency, a slow key exchange, and a machine suspended
    mid-session are still modelled by nothing.
-6. **The iOS client**, which is `docs/contributor/ios.md` and depends on
+6. **Done.** The Mac app as a client of its own daemon (§1). `bun/index.ts`
+   stopped building a server in its process and dials `.server.sock` through
+   `bun/localServer.ts`, with `serve.js` shipped in the bundle. What it
+   settled: a window asks for no hold and the daemon locks a device whose last
+   hold-less connection ends (`locking.md` §3a); a daemon of another build is
+   asked to retire when idle, and one that refuses the handshake is stopped;
+   a dev build replaces the daemon it finds. What it gave up is listed under
+   "what that costs" in §1. The folder dialog went with the in-process server,
+   which is the next phase's subject: attaching a folder by path, validated
+   server-side, with the Mac's picker as a client seam that fills the field.
+7. **The iOS client**, which is `docs/contributor/ios.md` and depends on
    nothing above being redone. That document is written and none of it is code
    yet; its own §14 phases the work, starting with a move of this transport's
    portable half into `src/shared/` so a webview can run it. Writing it

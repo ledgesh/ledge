@@ -674,6 +674,125 @@ describe("a daemon nobody is using", () => {
   });
 });
 
+// The Mac app asks its previous version's daemon to make way after an update
+// (bun/localServer.ts). A daemon that agreed to stop the moment it was asked
+// would cut short whatever the old app left running.
+describe("a daemon asked to retire", () => {
+  test("stops now when nothing is running, and tells its clients it is coming back", async () => {
+    const { d, socketPath } = await daemonIn({ idleMs: 60_000 });
+    const mac = await joined(socketPath, "mac-1");
+    // Registered, not only greeted: the server's hello crosses the client's,
+    // so `ready` can resolve before the daemon has this client on its list,
+    // and a stop that early would have nobody to say goodbye to. The presence
+    // push follows the registration.
+    expect(await until(() => company(mac.seen) !== null)).toBe(true);
+
+    d.retireWhenIdle();
+    await d.done;
+    await mac.conn.closed;
+    expect(mac.conn.farewell()).toEqual({ why: "this server is shutting down", back: true });
+  });
+
+  // The other half of the crossing hellos: a client that dialled as the
+  // daemon stopped is not refused, only cut off, so its ladder dials again
+  // and finds the daemon that replaces this one.
+  test("a connection that had not greeted yet is ended, not refused", async () => {
+    const { d, socketPath } = await daemonIn({ idleMs: 60_000 });
+    const late = await connect(socketPath, "mac-1");
+    await late.ready;
+    d.retireWhenIdle();
+    await d.done;
+    await late.closed;
+    // Either it was registered in time and told, or it was not and simply
+    // closed. What it must never be is refused.
+    const bye = late.farewell();
+    expect(bye === null || bye.back).toBe(true);
+  });
+
+  test("waits for a run to end first", async () => {
+    const { d, socketPath } = await daemonIn({ idleMs: 60_000 });
+    const mac = await joined(socketPath, "mac-1");
+    await mac.conn.requests.runBlock({ sessionId: "note-1", id: "run-1", code: "echo going; sleep 0.5; echo done", language: "sh" });
+    // The run is under way before the ask, or the daemon would rightly find
+    // nothing running. Its first line is the proof: `began` is sent when the
+    // shell is handed the block, which can be before it starts executing.
+    const printed = () => decode(got<{ dataB64: string }>(mac.seen, "runEvent").filter((ev) => "dataB64" in ev));
+    expect(await until(() => printed().includes("going"))).toBe(true);
+
+    d.retireWhenIdle();
+    const raced = await Promise.race([d.done.then(() => "exited"), new Promise((r) => setTimeout(() => r("still up"), 200))]);
+    expect(raced).toBe("still up");
+
+    await d.done;
+    // The run finished on its own terms: its last event reached the client
+    // before the stop, not a kill in its place.
+    expect(got<RunEvent>(mac.seen, "runEvent").some((ev) => ev.kind === "ended" && ev.exitCode === 0)).toBe(true);
+  });
+});
+
+// The daemon holds the vault key, so an app that quits or crashes cannot lock
+// on its way out (locking.md §3a). The Mac app over the socket asks for no
+// hold, and its last window closing is what ends its unlock. A phone, or a Mac
+// over ssh, asks for one and keeps its unlock for the idle timer to end.
+describe("a device whose last connection ends", () => {
+  test("is locked when it asked for no hold, and stays open while another of its windows is here", async () => {
+    const { socketPath } = await daemonIn();
+    const phoneSeen: Seen = [];
+    const first = await connect(socketPath, "mac-window-1", { device: "mac" });
+    const second = await connect(socketPath, "mac-window-2", { device: "mac" });
+    const phone = await connect(socketPath, "phone-1", { seen: phoneSeen, device: "phone", hold: 5_000 });
+    await first.ready;
+    await second.ready;
+    await phone.ready;
+
+    expect(await first.requests.vaultCreate({ passphrase: "correct horse" })).toEqual({ ok: true });
+    expect(await phone.requests.vaultUnlock({ passphrase: "correct horse" })).toEqual({ ok: true });
+    expect(await second.requests.vaultState({})).toEqual({ state: "unlocked" });
+
+    // One window closing is not the Mac leaving: the other still reads.
+    first.close();
+    await first.closed;
+    expect(await second.requests.vaultState({})).toEqual({ state: "unlocked" });
+
+    // The last window closing is. The phone, another device, is untouched:
+    // what it is pushed is its own state, and that did not change.
+    second.close();
+    await second.closed;
+    expect(await phone.requests.vaultState({})).toEqual({ state: "unlocked" });
+    const back = await connect(socketPath, "mac-window-3", { device: "mac" });
+    await back.ready;
+    expect(await back.requests.vaultState({})).toEqual({ state: "locked" });
+    expect(got(phoneSeen, "vaultChanged").at(-1)).toEqual({ state: "unlocked" });
+  });
+
+  test("keeps its unlock when it asked for a hold", async () => {
+    const { socketPath } = await daemonIn();
+    const phone = await connect(socketPath, "phone-1", { device: "phone", hold: 5_000 });
+    await phone.ready;
+    expect(await phone.requests.vaultCreate({ passphrase: "correct horse" })).toEqual({ ok: true });
+
+    phone.close();
+    await phone.closed;
+    const back = await connect(socketPath, "phone-1", { device: "phone", hold: 5_000 });
+    await back.ready;
+    expect(await back.requests.vaultState({})).toEqual({ state: "unlocked" });
+  });
+
+  // A reconnect displaces the same client's earlier connection, and the
+  // earlier one closing must not read as the device leaving.
+  test("is not what a reconnect looks like", async () => {
+    const { socketPath } = await daemonIn();
+    const first = await connect(socketPath, "mac-window-1", { device: "mac" });
+    await first.ready;
+    expect(await first.requests.vaultCreate({ passphrase: "correct horse" })).toEqual({ ok: true });
+
+    const again = await connect(socketPath, "mac-window-1", { device: "mac" });
+    await again.ready;
+    await first.closed;
+    expect(await again.requests.vaultState({})).toEqual({ state: "unlocked" });
+  });
+});
+
 // The windows here are milliseconds where production is minutes. The same
 // constraint applies as above: a hold has to be comfortably longer than the
 // idle window it outlasts, or the two are indistinguishable and the test

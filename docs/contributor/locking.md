@@ -163,10 +163,11 @@ tags: finance
   file, so a vault file that went missing cannot turn a right passphrase into
   a refusal. A wrong one refuses and relocks nothing: relocking on a typo
   would be a way to shut another window out.
-- **The master key lives in Bun-process memory only**, from unlock to
-  relock. It is never written anywhere, never crosses the RPC, and dies
-  with the process. The passphrase crosses the RPC exactly once per unlock
-  (view → Bun, from the dialog), is used for the KDF, and is dropped; the
+- **The master key lives in the server process's memory only**, from unlock
+  to relock. It is never written anywhere, never crosses the RPC, and dies
+  with the process: a daemon that is stopped or that crashes has relocked by
+  construction. The passphrase crosses the connection exactly once per unlock
+  (view → server, from the dialog), is used for the KDF, and is dropped; the
   dialog clears its field either way.
 - **Relock**: ⌘L (§7), and automatically after 15 minutes in which the calling
   device changed no note. Both are per device, per §3a. `server.ts`'s
@@ -277,6 +278,7 @@ layer that knows who asked:
 | `vaultUnlock`, `vaultCreate` | authorize this device; the passphrase is checked either way |
 | `vaultLock` (⌘L) | this device only; the key drops when the last device goes |
 | Idle relock | per device, on the same 15 minutes |
+| The device's last connection ending without a hold | that device only (`LedgeServer.relock`, called by the daemon) |
 | `noteRead`, `assetRead` | `mayOpen` false gives the withheld shape a shut vault gives |
 | `noteLock`, `noteRemoveLock` | refused outright (`NEEDS_THE_VAULT`) |
 | `vaultChangePassphrase` | refused in its `error` field, which the dialog shows |
@@ -304,6 +306,17 @@ would relock a phone as the side effect of a settings change on a Mac.
 nothing about the phone in your pocket, and a lock that reached across devices
 would be one person stepping on their own toes. When the last device locks, the
 key goes, so a vault nobody is holding open is not left decryptable in memory.
+
+**Quitting the app locks its device, and so does crashing.** The vault is the
+daemon's, and the daemon outlives the app (`remote.md` §1), so no code that
+runs at quit could be relied on to lock it. The rule is the daemon's instead:
+when the last connection from a device ends and that connection asked for no
+session hold, the device's unlock ends with it. The Mac app over its socket
+never asks for one, because a unix socket does not drop for any reason but the
+app going away. A phone and a Mac over ssh do ask, because their wires drop
+for reasons of their own, and their unlocks stay for the idle timer to end. So
+a relaunched app asks for the passphrase again, whether ⌘Q or a crash ended
+the last one, and a phone that lost its signal for a minute does not.
 
 **A device id is asserted, not proved.** The transport is what authenticates:
 an ssh key on the Mac, an enclave key on the phone (`remote.md` §4a). A client

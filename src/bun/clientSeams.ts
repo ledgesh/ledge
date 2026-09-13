@@ -90,9 +90,8 @@ export function wantsHtml(formats: string[] | null): boolean {
  * and this owns the other, and the view gets one merged snapshot that does not
  * mention there were two.
  *
- * `base` may be a server in this process or one across an ssh connection. The
- * overlay is the same either way, so the in-process server exercises it too
- * and the ssh path is not the only place it runs.
+ * `base` is a server across a wire either way: this Mac's daemon over its
+ * socket, or one across an ssh connection. The overlay is the same for both.
  */
 export async function clientOverlay(base: RequestHandlers, native: ClientNative): Promise<RequestHandlers> {
   // The client's settings, read once here. Settings apply at launch and never

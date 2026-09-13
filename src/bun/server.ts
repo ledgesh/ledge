@@ -8,10 +8,10 @@
 // a persistent one per note plus ephemeral overflow shells so blocks can run
 // concurrently. The terminal-drawer shell is raw and drives xterm.js.
 //
-// It imports nothing from electrobun (remote.md §1), so the same handlers
-// serve a webview in this process today and a socket tomorrow. The native
-// seams it needs arrive as NativeDeps below, supplied by the entry point that
-// starts it (index.ts, the Mac shell).
+// It imports nothing from electrobun (remote.md §1): it runs as
+// `ledge-server daemon` on every machine, the Mac included, and the app is
+// one of its clients over a socket. The native seams it needs arrive as
+// NativeDeps below, supplied by the entry point that starts it (daemon.ts).
 import { watch } from "node:fs";
 import { homedir } from "node:os";
 import { basename, resolve } from "node:path";
@@ -122,10 +122,9 @@ export interface NativeDeps {
  * drawer's bytes belong to whoever is watching that drawer, and a block's
  * output to whoever ran the block.
  *
- * Routing belongs to the caller. bun/daemon.ts fans out over the connections
- * it holds, and bun/index.ts over the local windows attached to this machine's
- * server. Neither picks the audience, which follows from a session or a run
- * that only this module knows.
+ * Routing belongs to the caller: bun/daemon.ts fans out over the connections
+ * it holds, the Mac app's windows among them. It never picks the audience,
+ * which follows from a session or a run that only this module knows.
  */
 export interface Audience {
   /** Every client connected right now. */
@@ -296,6 +295,12 @@ export interface LedgeServer {
    * wants the shell's cwd and exported variables; a client that is not gains
    * nothing from them. */
   sessionsOpen(): boolean;
+  /** The last connection from `device` ended without asking for a hold, so
+   * its unlock ends too (locking.md §3a). The daemon calls this, because
+   * only the holder of the connections knows when a device's last one went.
+   * A device that had not unlocked is left alone: no key to drop, and
+   * nothing to announce. */
+  relock(device: string): void;
   // Tear down every shell. The caller owns the process-exit hook, because it
   // usually has its own last-moment work (the shell saves the window frame).
   shutdown(): void;
@@ -1519,6 +1524,11 @@ export async function createServer(deps: { push: Audience; native: NativeDeps })
     // than by isBusy. A zsh sitting at a prompt is what a hold is for, and it
     // is what `running` above ignores.
     sessionsOpen: () => inlinePool.sessionsOpen() || terms.size > 0,
+    relock(device) {
+      if (!vaultOpenFor(device)) return;
+      lockVaultFor(device);
+      pushVaultState();
+    },
     shutdown() {
       if (drain) clearInterval(drain);
       inlinePool.closeAll();

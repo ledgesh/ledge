@@ -28,6 +28,7 @@ One passphrase covers every locked note, on the device you type it on.
 - "Unlock Notes…" in the palette asks for it up front.
 - ⌘L runs Lock Notes, which relocks immediately. Use it when you walk away.
 - The vault also relocks itself after 15 minutes in which no note changed. Reading a note does not hold it open, and neither does an agent working in your notes while you are away.
+- Quitting Ledge locks its notes, and so does a crash. The next launch asks for the passphrase again.
 
 Unlocking covers every window on that Mac, so opening a second window does not ask again.
 

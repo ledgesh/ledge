@@ -60,7 +60,7 @@ export interface Connection {
   id: string;
   name: string;
   /** An ssh destination (`host`, `user@host`, a ~/.ssh/config alias), or "" for
-   * the server in this process. Never `host:port`. The port is its own field,
+   * this Mac's own daemon. Never `host:port`. The port is its own field,
    * because that is what ssh takes (`-p`) and what every other client's form
    * asks for separately. */
   destination: string;

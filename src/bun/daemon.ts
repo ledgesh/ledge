@@ -8,10 +8,13 @@
 // between stdio and that socket, and a connection is something the server has
 // rather than something it is.
 //
-// The daemon serves several clients at once. Each has one entry in the map
-// below, and every push names the client it is for (`Audience` in
-// bun/server.ts). It used to serve whichever client dialled last and hang up on
-// the other, so one device connecting cost another device its session. What
+// The daemon serves several clients at once, and the Mac app's windows are
+// among them: the app starts this daemon from its own bundle and dials the
+// socket directly, so a window and a phone are the same kind of client
+// (bun/localServer.ts). Each has one entry in the map below, and every push
+// names the client it is for (`Audience` in bun/server.ts). It used to serve
+// whichever client dialled last and hang up on the other, so one device
+// connecting cost another device its session. What
 // needed a rule was smaller: a session's `owner` and its scrollback ring are
 // per session and not per client (bun/server.ts), so two clients cannot share
 // a drawer's keyboard. Notes, search, tags, the registry and the vault need
@@ -27,7 +30,7 @@
 // can also ask for its idle shells to be kept (HOLD_MAX_MS). That ask is the
 // one case the rules above get wrong on their own: a phone suspended by iOS
 // looks the same as a client that is never coming back.
-import { chmodSync, mkdirSync, openSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createServer, type NativeDeps } from "./server";
 import { fedDuplex, type Duplex } from "../shared/transport";
@@ -96,6 +99,9 @@ export interface DaemonOpts {
   idleMs?: number;
   /** The ceiling on a client's session hold; `HOLD_MAX_MS` by default. */
   holdMs?: number;
+  /** How often `retireWhenIdle` asks whether the run it is waiting on has
+   * ended; `RETIRE_POLL_MS` by default. */
+  retirePollMs?: number;
   build?: string;
 }
 
@@ -103,13 +109,28 @@ export interface Daemon {
   /** Resolves when the daemon has stopped: idle timeout, or stop(). */
   done: Promise<void>;
   stop(): void;
+  /**
+   * Stop as soon as nothing is running, clients or no clients.
+   *
+   * What an updated app asks of the daemon its previous version started
+   * (bun/localServer.ts, remote.md §1). The clients are told the server is
+   * coming back, so their ladders dial again and the first one to find no
+   * socket starts a daemon from the new build. A run in flight is not cut
+   * short for it: the stop waits for `running()` to go false, the way the
+   * idle exit does.
+   */
+  retireWhenIdle(): void;
 }
+
+/** How often a retiring daemon re-asks whether its last run has ended. */
+export const RETIRE_POLL_MS = 1_000;
 
 export async function startDaemon(opts: DaemonOpts = {}): Promise<Daemon> {
   const socketPath = opts.socketPath ?? SOCKET_PATH;
   const pidPath = opts.pidPath ?? PID_PATH;
   const idleMs = opts.idleMs ?? IDLE_EXIT_MS;
   const holdMax = opts.holdMs ?? HOLD_MAX_MS;
+  const retirePollMs = opts.retirePollMs ?? RETIRE_POLL_MS;
   const build = opts.build ?? BUILD_VERSION;
 
   mkdirSync(APP_HOME, { recursive: true });
@@ -123,6 +144,10 @@ export async function startDaemon(opts: DaemonOpts = {}): Promise<Daemon> {
   // describes no state for the next connection's boot to re-read, so
   // bun/server.ts holds it before it reaches this map.
   const clients = new Map<string, ServerConnection>();
+  // Every connection accepted, greeted or not, so that `stop` can end the
+  // ones that have not said who they are yet. A client's hello crosses the
+  // server's, so a client can hold a connection the map above does not list.
+  const accepted = new Set<ServerConnection>();
 
   // The routing itself is bun/audience.ts, shared with the app's own shell:
   // a window is a client too, and one local server under N windows has exactly
@@ -134,11 +159,11 @@ export async function startDaemon(opts: DaemonOpts = {}): Promise<Daemon> {
    *
    * It lives in the daemon rather than the server because presence is a fact
    * about connections, and only the code holding the connections knows them.
-   * bun/index.ts does the same for the windows on this Mac
-   * (`announceLocalPresence`). Each client gets a different list, since it is
-   * told about the others and never about itself. Building one list per client
-   * is cheap: this runs when somebody arrives or leaves, over a map with two
-   * or three entries.
+   * Two windows on one Mac are two of those connections, so the app learns who
+   * else is here the same way a phone does. Each client gets a different list,
+   * since it is told about the others and never about itself. Building one
+   * list per client is cheap: this runs when somebody arrives or leaves, over
+   * a map with two or three entries.
    */
   function announcePresence(): void {
     const everyone = [...clients].map(([client, conn]) => ({ client, label: conn.label() }));
@@ -187,6 +212,14 @@ export async function startDaemon(opts: DaemonOpts = {}): Promise<Daemon> {
       },
       drain(socket) {
         socket.data.out.drain();
+      },
+      // A peer that ended its side is done talking, and this end closes in
+      // answer. Without this a client's `close` waits on a socket the daemon
+      // never finishes, and a stop that had already said goodbye looks to that
+      // client like a wire that went quiet.
+      end(socket) {
+        socket.data.io.finish();
+        socket.end();
       },
       close(socket) {
         socket.data.io.finish();
@@ -255,22 +288,33 @@ export async function startDaemon(opts: DaemonOpts = {}): Promise<Daemon> {
       announcePresence();
     };
     const conn = serverConnection(io, { build, ops, instance, greeted: greet, holdMax });
+    accepted.add(conn);
     void conn.closed.then(() => {
+      accepted.delete(conn);
       // Only while this is still the registered connection. A connection its
       // own client has already replaced must not delete the replacement on its
       // way out. The announcement sits inside the same check because the client
       // is still here under the new connection, so the list has not changed and
       // announcing would repeat it to everybody on every reconnect.
+      const hold = conn.hold();
       if (clients.get(conn.client()) === conn) {
         clients.delete(conn.client());
         announcePresence();
+        // A client that asked for no hold is not coming back to this
+        // connection: the Mac app over the socket, whose wire cannot flap and
+        // whose absence means it quit or crashed. When the last such
+        // connection from a device ends, that device's unlock ends with it
+        // (locking.md §3a). A client that asked for a hold, a phone or a Mac
+        // over ssh, said it means to return, and its relock stays the idle
+        // timer's.
+        const device = conn.device();
+        if (hold === 0 && ![...clients.values()].some((c) => c.device() === device)) server.relock(device);
       }
       // Recorded on the way out whether or not anyone else is left, because a
       // hold runs from the moment that connection ended and the last client to
       // leave is not necessarily the one that asked. A phone backgrounding
       // while a Mac stays connected is the ordinary case: its five minutes must
       // not become the Mac's sixty seconds because the Mac quit second.
-      const hold = conn.hold();
       if (hold > 0) heldUntil = Math.max(heldUntil, Date.now() + hold);
       // A silent socket closing leaves an unattended daemon exactly as the last
       // client leaving does, and the timer was cleared when it arrived.
@@ -307,6 +351,23 @@ export async function startDaemon(opts: DaemonOpts = {}): Promise<Daemon> {
     }, wait);
   }
 
+  let retiring = false;
+  function retireWhenIdle(): void {
+    if (stopped || retiring) return;
+    retiring = true;
+    const tick = (): void => {
+      if (stopped) return;
+      if (server.running()) {
+        setTimeout(tick, retirePollMs);
+        return;
+      }
+      console.error("[daemon] retiring: nothing running, and a newer build was asked for");
+      stop();
+    };
+    console.error("[daemon] asked to retire; stopping once nothing is running");
+    tick();
+  }
+
   function stop(): void {
     if (stopped) return;
     stopped = true;
@@ -317,9 +378,21 @@ export async function startDaemon(opts: DaemonOpts = {}): Promise<Daemon> {
     // would end the client's reconnect ladder and leave nothing dialling until
     // somebody pressed Reconnect (shared/transport.ts). The displacing close in
     // `accept` above is the one that is final.
-    for (const conn of clients.values()) conn.close("this server is shutting down", true);
+    //
+    // A connection that has not greeted yet is ended without a bye. Before
+    // the handshake a bye reads as a refusal (shared/transport.ts), and a
+    // client that dialled as the daemon stopped has been refused nothing: its
+    // wire simply closes, and it dials again.
+    for (const conn of accepted) {
+      if (clients.get(conn.client()) === conn) conn.close("this server is shutting down", true);
+      else conn.close();
+    }
     clients.clear();
-    listener.stop(true);
+    // Without `closeActiveConnections`: that tears the sockets down before the
+    // byes just written have left the send buffer, and the clients see a wire
+    // that stopped rather than a server that said it is coming back. Each
+    // connection's close above ends its own socket once its bytes are out.
+    listener.stop();
     server.shutdown();
     // Best-effort: a socket file left behind is swept by the next daemon, and
     // failing to remove either must not stop this one from exiting.
@@ -334,7 +407,7 @@ export async function startDaemon(opts: DaemonOpts = {}): Promise<Daemon> {
   }
 
   armIdleExit();
-  return { done, stop };
+  return { done, stop, retireWhenIdle };
 }
 
 /**
@@ -410,6 +483,14 @@ async function tryConnect(socketPath: string): Promise<Fed | null> {
         // send buffer far less often than the daemon's end does. Far less often
         // is not never: a paste of a large image is one write.
         drain: () => out?.drain(),
+        // The daemon's `end` handler above, seen from this side: a daemon that
+        // stopped wrote its `bye` and ended its side, and this end must
+        // finish on that rather than wait for a close that only comes once
+        // both sides have ended.
+        end: (s) => {
+          io?.finish();
+          s.end();
+        },
         close: () => io?.finish(),
         error: () => io?.finish(),
       },
@@ -427,6 +508,21 @@ async function tryConnect(socketPath: string): Promise<Fed | null> {
 }
 
 /**
+ * How this process would run itself as a daemon: the runtime and, when the
+ * runtime is Bun, the entry script.
+ *
+ * `process.execPath` is `bun` in a checkout, the npm package and a server.sh
+ * install, and the binary itself for a `bun build --compile` server, so the
+ * entry script goes back on the command line only in the first cases:
+ * `bun bin/ledge-server.js daemon` there, `ledge-server daemon` here. The Mac
+ * app passes its own head instead: its `Bun.main` is the app, not the server
+ * (bun/localServer.ts).
+ */
+export function ownCommand(execPath = process.execPath, main = Bun.main): string[] {
+  return /(^|\/)bun$/.test(execPath) ? [execPath, main] : [execPath];
+}
+
+/**
  * Start a daemon that outlives this process.
  *
  * Detached, and not sharing this process's stdio: over ssh stdout is the
@@ -434,17 +530,11 @@ async function tryConnect(socketPath: string): Promise<Fed | null> {
  * way back (bun/serve.ts). Its stderr goes to the file its own console tee
  * writes, so a crash Bun reports before any app code runs is not lost. Both
  * writers open that file O_APPEND, the one interleaving guarantee POSIX gives.
- *
- * `process.execPath` is `bun` in a checkout, the npm package and a server.sh
- * install, and the binary itself for a `bun build --compile` server, so the
- * entry script goes back on the command line only in the first cases:
- * `bun bin/ledge-server.js daemon` there, `ledge-server daemon` here.
  */
-function spawnDaemon(): void {
+export function spawnDaemon(head: readonly string[] = ownCommand()): void {
   // --autostart is what makes the idle timeout apply: this daemon exists
   // because a connection wanted one, so it should go when connections stop
   // coming. One typed by a person, or written into a unit file, should not.
-  const head = /(^|\/)bun$/.test(process.execPath) ? [process.execPath, Bun.main] : [process.execPath];
   const argv = [...head, "daemon", "--autostart"];
   let errFd: number | "ignore" = "ignore";
   try {
@@ -455,4 +545,69 @@ function spawnDaemon(): void {
     // start it over that would be worse.
   }
   Bun.spawn({ cmd: argv, stdin: "ignore", stdout: "ignore", stderr: errFd }).unref();
+}
+
+/**
+ * The pid behind `pidPath`, or null when there is no file or it holds none.
+ *
+ * Only meaningful right after a connect: the daemon writes the file as soon as
+ * it is listening, so a socket that answered was written by the process the
+ * file names. Read at any other moment the file can be a stale one a crash
+ * left, whose pid the kernel may have handed to something else.
+ */
+export function daemonPid(pidPath = PID_PATH): number | null {
+  try {
+    const pid = Number(readFileSync(pidPath, "utf8").trim());
+    return Number.isInteger(pid) && pid > 1 ? pid : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Ask the daemon to stop once nothing is running (`Daemon.retireWhenIdle`).
+ * SIGUSR1, which bun/serve.ts's `daemon` verb wires to it. Returns false when
+ * there is no daemon to ask.
+ */
+export function retireDaemon(pidPath = PID_PATH): boolean {
+  const pid = daemonPid(pidPath);
+  if (pid === null) return false;
+  try {
+    process.kill(pid, "SIGUSR1");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Stop the daemon now and wait for it to go.
+ *
+ * SIGTERM, which the `daemon` verb turns into `stop()`: every client is told
+ * the server is coming back, and the socket and pid file are removed. This
+ * resolves once the process is gone or `timeoutMs` has passed, and says which,
+ * so a caller about to dial again knows whether it will meet the same daemon.
+ */
+export async function stopDaemon(opts: { pidPath?: string; timeoutMs?: number } = {}): Promise<boolean> {
+  const pid = daemonPid(opts.pidPath ?? PID_PATH);
+  if (pid === null) return true;
+  const alive = (): boolean => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  try {
+    process.kill(pid, "SIGTERM");
+  } catch {
+    return true;
+  }
+  const deadline = Date.now() + (opts.timeoutMs ?? 5_000);
+  while (alive()) {
+    if (Date.now() >= deadline) return false;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  return true;
 }

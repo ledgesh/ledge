@@ -19,6 +19,7 @@ import { CONTROL_FRAME, encodeControl, FRAME_HEADER_BYTES, FrameDecoder, hello, 
 import { BUILD_VERSION } from "../shared/version";
 import { clientConnection, type ClientConnection } from "../shared/transport";
 import { spawnDuplex } from "./transport";
+import { daemonPid, retireDaemon, stopDaemon as daemonStop } from "./daemon";
 import type { NoteMeta, WorkspaceRootInfo } from "../shared/rpc-schema";
 
 const SERVE = join(import.meta.dir, "serve.ts");
@@ -245,3 +246,52 @@ test("the daemon outlives the connection that started it, and says where it is",
   await stopDaemon(home);
   await rm(home, { recursive: true, force: true });
 });
+
+// The two signals the Mac app sends a daemon of another build (daemon.ts
+// `retireDaemon`, `stopDaemon`). Both go by the pid file, so they are proved
+// against a daemon in a process of its own: the in-process tests can call
+// `retireWhenIdle` directly, and this is the assertion that a signal reaches
+// it.
+test("the app can ask a daemon to retire, or stop it, by its pid file", async () => {
+  const home = await mkdtemp(join(tmpdir(), "ledge-retire-"));
+  await mkdir(join(home, "ws"), { recursive: true });
+  await writeFile(join(home, ".workspaces.json"), JSON.stringify({ version: 1, roots: [join(home, "ws")] }));
+  const pidPath = join(home, ".server.pid");
+  const dialled = () =>
+    clientConnection(spawnDuplex([process.execPath, SERVE, "serve"], { env: { LEDGE_NOTES_ROOT: home } }), {
+      push,
+      build: BUILD_VERSION,
+      client: "probe-1",
+    });
+
+  const first = dialled();
+  await first.ready;
+  // Registered, and not only greeted: the presence push follows the
+  // daemon's registration of this client (daemon.fs.test.ts says why).
+  const heard = pushes.length;
+  expect(await until(() => pushes.slice(heard).some(([m]) => m === "presence"))).toBe(true);
+  const pid = daemonPid(pidPath);
+  expect(pid).not.toBeNull();
+  expect(retireDaemon(pidPath)).toBe(true);
+  // Nothing running, so it goes now, and it says so in the client's own terms.
+  await first.closed;
+  expect(first.farewell()).toEqual({ why: "this server is shutting down", back: true });
+  expect(await until(() => daemonPid(pidPath) === null)).toBe(true);
+
+  // The next dial starts a fresh one, which is the other half of what an
+  // update relies on.
+  const second = dialled();
+  await second.ready;
+  expect(daemonPid(pidPath)).not.toBe(pid);
+  expect(await daemonStop({ pidPath })).toBe(true);
+  expect(daemonPid(pidPath)).toBeNull();
+  second.close();
+
+  await rm(home, { recursive: true, force: true });
+});
+
+const until = async (cond: () => boolean, ms = 3_000): Promise<boolean> => {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline && !cond()) await new Promise((r) => setTimeout(r, 20));
+  return cond();
+};

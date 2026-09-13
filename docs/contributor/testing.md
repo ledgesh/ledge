@@ -229,7 +229,12 @@ the clipboard):
 5. Focus the element first (`.focus()`), then dispatch; assert on
    `document.activeElement` when focus itself is the behavior under test.
 6. **Tear down**: revert the probe (its diff should be the whole diff to
-   `main.tsx`), kill the app processes, delete the scratch root.
+   `main.tsx`), kill the app processes, and the daemon the app started, which
+   outlives it by a minute and holds the scratch root's socket:
+   `kill $(cat <scratch>/.server.pid)`. Then delete the scratch root. The
+   daemon inherits `LEDGE_NOTES_ROOT` from the app (remote.md §1), so a probe
+   launched with one never reaches the real daemon, and its log is
+   `<scratch>/logs/ledge-server.log` beside the app's.
 
 Four hard-won warnings. Query dialogs by `[role="alertdialog"]` (ConfirmDialog
 is an alertdialog, not a dialog). Edit `main.tsx` with proper edit tools, not

@@ -700,8 +700,8 @@ the failure it prevents, which is running a command on the wrong box.
   row verb has no touch form, and this dialog is the only surface either verb
   appears on — there is no palette entry for "rename the VPS". So the two
   controls sit at the end of every row that is a record, in the tab order beside
-  it, and the local server's row has neither because there is nothing about the
-  server in this process to change.
+  it, and this Mac's row has neither because there is nothing about this Mac's
+  own server to change.
 - **No confirmation, by §4's arrangement-loss rule.** Nothing is destroyed:
   the tabs are on the other machine and come back when you switch back. What
   the dialog does instead is *say so* before the click ("Switching closes every
@@ -778,7 +778,7 @@ the failure it prevents, which is running a command on the wrong box.
   removed by the first render. Three rules shape it.
   - **The reveals are delays, not timers**, the same idiom as the inline
     terminal's waiting line: the panel fades in at 600ms and a second line
-    arrives at 4s, so a boot against a server in this process — every local
+    arrives at 4s, so a boot against this Mac's own daemon — every local
     launch — paints none of it and costs no flash. What is asserted in the
     suite is the delays, not a race against them (`e2e/booting.spec.ts`).
   - **A way out only where there is somewhere to go.** On a phone the button

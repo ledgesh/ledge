@@ -6,7 +6,9 @@
 // session cannot desynchronize the protocol. `daemon` holds the notes, the
 // shells and the watchers. It outlives every connection to it (§7). A run
 // survives the wire dropping, and a reconnecting client can replay safely.
-// Phase 4 split the two (§14). `backup-paths` prints the paths a backup has
+// Phase 4 split the two (§14). The Mac app ships this file beside its own
+// entry and runs `daemon` from it, then dials the socket itself with no pump
+// in between (bun/localServer.ts). `backup-paths` prints the paths a backup has
 // to cover and exits (backup.ts, §11). `pair` prints a pairing code (§4b).
 //
 // stdout belongs to the protocol: one stray byte in a length-prefixed stream
@@ -75,6 +77,12 @@ export async function serve(): Promise<void> {
 
   console.error(`[serve] ledge-server ${BUILD_VERSION} attached to ${SOCKET_PATH}`);
   await done;
+  // The daemon's last frame is its `bye`, and `main` exits right after this
+  // returns. stdout is a pipe here, written asynchronously, so the exit is
+  // held until what was written has left this process: a `bye` that never
+  // reached the client would turn a server saying it is coming back into a
+  // wire that went quiet (shared/transport.ts).
+  await new Promise<void>((resolve) => process.stdout.write("", () => resolve()));
 }
 
 /**
@@ -92,6 +100,9 @@ export async function daemon(autostart = false): Promise<void> {
   console.error(`[daemon] ledge-server ${BUILD_VERSION} on ${SOCKET_PATH}; app home: ${APP_HOME}; ${life}`);
   // A supervisor stops this with a signal, and so does the live probe.
   for (const sig of ["SIGTERM", "SIGINT"] as const) process.on(sig, () => d.stop());
+  // An updated Mac app asks its previous version's daemon to make way, once
+  // nothing is running (daemon.ts `retireDaemon`).
+  process.on("SIGUSR1", () => d.retireWhenIdle());
   await d.done;
 }
 

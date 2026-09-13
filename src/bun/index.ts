@@ -4,12 +4,13 @@
 // (remote.md §8a): its own connection, its own client id, its own row in
 // presence. There can be several, pointed at several machines. This file owns
 // the AppKit half: the windows and their geometry, the application menu, the
-// updater, the native folder dialog, and the pasteboard's flavor list. It also
-// owns the two things that belong to the process rather than to one window:
-// the connection list, and the one local server every window on this Mac
-// shares. The servers own the notes, the shells, and the watchers, and import
-// none of this (remote.md §1), so the same handlers can be served over a
-// socket to another machine without a second implementation.
+// updater, and the pasteboard's flavor list. It also owns the two things that
+// belong to the process rather than to one window: the connection list, and
+// the daemon this Mac's windows dial (bun/localServer.ts). No server runs in
+// this process. This Mac's own is `ledge-server daemon`, started from the
+// bundle and reached over its socket, so a window on this Mac and a window on
+// a VPS are the same code path with a different wire underneath (remote.md
+// §1).
 import {
   ApplicationMenu,
   BrowserView,
@@ -26,8 +27,6 @@ import { startLogging } from "./log";
 import { EXTRACTION_DIRNAME, pruneExtractionDir } from "./updateCache";
 import { createUpdates, offReason } from "./updates";
 import { APP_HOME } from "./workspaces";
-import { createServer, type LedgeServer, type NativeDeps } from "./server";
-import { audienceOf } from "./audience";
 import type { RequestHandlers, ServerPush } from "../shared/wire";
 import { clientOverlay, type ClientNative } from "./clientSeams";
 import { loadClientSettings } from "./clientSettings";
@@ -36,9 +35,11 @@ import { clientIdFor, clientLabel, ephemeralClientId } from "./clientHome";
 import { createConnectionManager, type Attached, type ConnectionManager } from "./connectionManager";
 import { createConnectionStore } from "./connectionStore";
 import { explainDial, KNOWN_HOSTS_PATH, LOCAL_ID, sshDial, userKnownHosts, type Connection } from "./connections";
+import { stopDaemon } from "./daemon";
 import { ASKPASS_PATH, ensureAskpass, hasPassword } from "./secrets";
-import { reconnectingClient, Refused, SESSION_HOLD_MS } from "../shared/transport";
+import { reconnectingClient, Refused, SESSION_HOLD_MS, type Duplex } from "../shared/transport";
 import { spawnDuplex } from "./transport";
+import { localServer } from "./localServer";
 import { BUILD_VERSION } from "../shared/version";
 import type { LedgeRPC, UpdateState } from "../shared/rpc-schema";
 
@@ -99,26 +100,6 @@ async function mainViewUrl(): Promise<string> {
   return "views://mainview/index.html";
 }
 
-// The folder dialog, the one native seam a local server still needs from this
-// process (remote.md §5). A server across a connection has no dialog and says
-// so.
-const native: NativeDeps = {
-  // openFileDialog splits its FFI result on ",", so a path containing a comma
-  // comes back shredded. Re-joining it restores the path. The caller refuses a
-  // path that does not exist rather than guessing where to split it.
-  pickFolder: async (startingFolder) => {
-    const picked = (
-      await Utils.openFileDialog({
-        startingFolder,
-        canChooseFiles: false,
-        canChooseDirectory: true,
-        allowsMultipleSelection: false,
-      })
-    ).join(",");
-    return picked || null;
-  },
-};
-
 // The seams that stay on this side of every connection (remote.md §10): the
 // pasteboard, the picture library, the browser, and the menu bar are this
 // Mac's, local server or remote. AppKit supplies the native halves.
@@ -142,8 +123,9 @@ const sharedNative: ClientNative = {
   // can store. A picked file that is not a picture comes back null, the same
   // answer as a cancelled dialog, which the view treats as nothing to insert.
   pickImage: async () => {
-    // pickFolder's comma caveat, for the same FFI: re-join, and let the read
-    // refuse a path that does not exist rather than guess where to split it.
+    // openFileDialog splits its FFI result on ",", so a path containing a
+    // comma comes back shredded. Re-joining it restores the path, and the read
+    // refuses a path that does not exist rather than guessing where to split.
     const picked = (
       await Utils.openFileDialog({
         startingFolder: homedir(),
@@ -229,56 +211,12 @@ const windows: Win[] = [];
 // those.
 const store = await createConnectionStore({ inUse: () => windows.map((w) => w.connection).filter(Boolean) });
 
-// --- the local server, once, under every window pointed at it ----------------
+// --- this Mac's server ---------------------------------------------------------
 //
-// A second createServer over the same notes root would give this machine two
-// watchers, two vaults, two PTY maps, and two consumers of the open-request
-// file. So the server is built on the first local attach and torn down when
-// the last one goes. The last window switching away from this Mac still costs
-// its shells. A second window on this Mac costs nothing.
-const localClients = new Map<string, { push: ServerPush; label: string; token: number }>();
-const localAudience = audienceOf(localClients, (held) => held.push);
-
-let localServer: LedgeServer | null = null;
-let localPending: Promise<LedgeServer> | null = null;
-let localHolders = 0;
-let attachToken = 0;
-
-async function acquireLocal(): Promise<LedgeServer> {
-  localHolders += 1;
-  if (!localPending) localPending = createServer({ push: localAudience, native });
-  try {
-    return (localServer = await localPending);
-  } catch (err) {
-    localHolders -= 1;
-    throw err;
-  }
-}
-
-function releaseLocal(): void {
-  localHolders -= 1;
-  if (localHolders > 0) return;
-  const server = localServer;
-  localServer = null;
-  localPending = null;
-  server?.shutdown();
-}
-
-/**
- * Tells every window on this Mac who else is here (rpc-schema `presence`).
- *
- * bun/daemon.ts announcePresence does this for a server across a wire, and
- * this does it for the server in this process. Only the code holding the
- * connections knows who is connected. Two windows on this Mac need presence as
- * much as a Mac and a phone do: without it, a drawer taken by the other window
- * shows as taken by nobody in particular (interactions.md §4-2).
- */
-function announceLocalPresence(): void {
-  const everyone = [...localClients].map(([client, held]) => ({ client, label: held.label }));
-  for (const [client, held] of localClients) {
-    held.push.presence({ others: everyone.filter((p) => p.client !== client) });
-  }
-}
+// One per process, however many windows dial it: the daemon is one process
+// behind one socket, and this is the app's one view of which daemon that is
+// (bun/localServer.ts). Every window's "This Mac" wire is a dial through it.
+const thisMac = localServer({ build: local?.version ?? BUILD_VERSION, channel: local?.channel ?? "" });
 
 // --- opening a connection, for one window ------------------------------------
 
@@ -297,10 +235,11 @@ function withoutLayout(base: RequestHandlers): RequestHandlers {
  * and when. This decides how, the only part that needs Electrobun's version
  * string and a child process.
  *
- * The client overlay goes on last in both branches, so the local case and the
- * remote case are the same code path with a different server underneath
- * (remote.md §1). The pasteboard is read here whether the notes are on this
- * disk or on a VPS.
+ * One code path for both kinds of connection (remote.md §1). What differs is
+ * the dial underneath the reconnecting client: this Mac's daemon over its
+ * socket, or `ssh <target> ledge-server serve`. Everything above the dial, the
+ * handshake, the ladder, the client overlay, the blank second window, is the
+ * same, so the local case exercises the remote path rather than bypassing it.
  */
 async function attachFor(win: Win, conn: Connection): Promise<Attached> {
   const build = local?.version ?? BUILD_VERSION;
@@ -328,132 +267,140 @@ async function attachFor(win: Win, conn: Connection): Promise<Attached> {
   // like any other client, and two rows both reading "MacBook" would name
   // nothing.
   const label = win.docs ? `${myLabel} (manual)` : others > 0 ? `${myLabel} (${others + 1})` : myLabel;
-  const token = ++attachToken;
-  const arrived = (): void => {
-    win.connection = conn.id;
-    win.client = client;
-    // Which window is which client of which server. Every later log line that
-    // names a client id names one of these.
-    console.log(`[window] ${label} on ${conn.name} as ${client}${blank ? " (blank; the layout on file is another window's)" : ""}`);
-  };
+  const here = conn.destination === "";
 
-  if (conn.destination === "") {
-    const server = await acquireLocal();
-    // Registered before the handlers are built, so `push.has` is already true
-    // by the time `forClient` files this client's device (server.ts
-    // pushVaultState prunes on that answer). bun/daemon.ts does the same in
-    // the same order.
-    localClients.set(client, { push: win.push, label, token });
-    const requests = await clientOverlay(server.forClient(client, device), nativeFor(win));
-    arrived();
-    announceLocalPresence();
-    return {
-      requests: blank ? withoutLayout(requests) : requests,
-      build,
-      // Nothing to recheck: the server is in this process, so there is no wire
-      // to hurry.
-      recheck: () => {},
-      shutdown: () => {
-        // Removes the client only if this attach is still the one registered.
-        // Re-selecting a local connection whose wire was declared lost
-        // attaches again under the same id, and the old attach must not delete
-        // the new one on its way out. bun/daemon.ts makes the same check.
-        if (localClients.get(client)?.token === token) {
-          localClients.delete(client);
-          announceLocalPresence();
-        }
-        releaseLocal();
-      },
-    };
-  }
-
-  if (conn.auth === "password") {
-    // Checked here rather than left to ssh. A missing keychain item reaches
-    // the user as "Permission denied (password)", which sends them to check a
-    // password that is right on a server that is fine. The fault is on this
-    // Mac, and this is the only place that can say so.
-    if (!(await hasPassword(conn.id))) {
-      throw new Error(`no password is stored for ${conn.name} on this Mac. Edit the connection and enter it again`);
-    }
-    // Written here rather than at boot, because only a password connection
-    // needs it. A Mac that never uses one never grows the file, and a
-    // connection that starts using one gets a current script rather than one
-    // an older version left behind.
-    await ensureAskpass();
-  }
-  const { argv, env } = sshDial(conn, {
-    knownHosts: KNOWN_HOSTS_PATH,
-    userKnownHosts: userKnownHosts(),
-    askpass: ASKPASS_PATH,
-  });
   // What ssh said, kept because it is the only account of a failure that
   // happens before the protocol starts (connections.ts explainDial). Capped at
   // the last 4096 bytes: a login shell on the far end can be chatty, and this
-  // is a diagnosis rather than a log.
+  // is a diagnosis rather than a log. Empty for this Mac's socket, which has
+  // no stderr to read.
   let said = "";
-  const listen = (text: string): void => {
-    // Logged as it arrives as well as kept. ssh's stderr also carries the
-    // remote server's own log lines, which under an inherited stderr went
-    // straight to a descriptor and never reached startLogging. They land in
-    // the log file here, named by the machine they came from. console.log
-    // rather than warn, because most of it is a server talking, not a failure.
-    for (const line of text.split("\n")) if (line.trim()) console.log(`[ssh] ${conn.name}: ${line.trim()}`);
-    said = (said + text).slice(-4096);
-  };
-  // A reconnecting client, because an ssh over a real network drops for
-  // reasons that have nothing to do with either end: a laptop lid, a changed
-  // network, an idle timeout on a middlebox. `dial` runs again on every
-  // attempt, so each retry spawns a fresh ssh.
-  //
-  // reconnectingClient throws when the two ends disagree about the protocol,
-  // with both versions named, and when the ssh child dies before saying
-  // anything (a refused key, an unknown host, no route). The manager keeps the
-  // connection that already works and reports this one (remote.md §8), so the
-  // catch below only puts ssh's words in front of the transport's.
-  const wire = await reconnectingClient({
+  let dial: () => Promise<Duplex> | Duplex;
+  if (here) {
+    dial = () => thisMac.dial();
+  } else {
+    if (conn.auth === "password") {
+      // Checked here rather than left to ssh. A missing keychain item reaches
+      // the user as "Permission denied (password)", which sends them to check a
+      // password that is right on a server that is fine. The fault is on this
+      // Mac, and this is the only place that can say so.
+      if (!(await hasPassword(conn.id))) {
+        throw new Error(`no password is stored for ${conn.name} on this Mac. Edit the connection and enter it again`);
+      }
+      // Written here rather than at boot, because only a password connection
+      // needs it. A Mac that never uses one never grows the file, and a
+      // connection that starts using one gets a current script rather than one
+      // an older version left behind.
+      await ensureAskpass();
+    }
+    const { argv, env } = sshDial(conn, {
+      knownHosts: KNOWN_HOSTS_PATH,
+      userKnownHosts: userKnownHosts(),
+      askpass: ASKPASS_PATH,
+    });
+    const listen = (text: string): void => {
+      // Logged as it arrives as well as kept. ssh's stderr also carries the
+      // remote server's own log lines, which under an inherited stderr went
+      // straight to a descriptor and never reached startLogging. They land in
+      // the log file here, named by the machine they came from. console.log
+      // rather than warn, because most of it is a server talking, not a failure.
+      for (const line of text.split("\n")) if (line.trim()) console.log(`[ssh] ${conn.name}: ${line.trim()}`);
+      said = (said + text).slice(-4096);
+    };
     // `env` goes with every attempt, not just the first: a reconnect is a
     // fresh ssh, and it needs the same askpass helper the first one was
     // pointed at (bun/secrets.ts).
-    dial: () => spawnDuplex(argv, { env, onStderr: listen }),
-    push: win.push,
-    build,
-    client,
-    label,
-    device,
-    // How long the far end keeps this session after the wire drops, the same
-    // ask a phone makes (shared/transport.ts SESSION_HOLD_MS). A lid closed
-    // for a meeting, a lift, or a walk between buildings should not cost the
-    // shells on the other end. A Mac that asked for nothing would lose them to
-    // the daemon's idle timer however briefly it had been away.
-    hold: SESSION_HOLD_MS,
-    onState: (state, detail) => {
-      if (state !== "live") console.warn(`[connect] ${conn.name}: ${detail}`);
-      // The ladder ran out, or the server said goodbye. The manager has to
-      // know. Otherwise choosing this same connection again, the only recovery
-      // the chrome offers, would be the no-op it is for a connection that is
-      // already working (connectionManager.ts).
-      if (state === "lost") win.manager?.lost(conn.id, detail);
-      // The wire came back by itself, which it can now do: the ladder ends in
-      // a retry beat rather than a stop (shared/transport.ts RETRY_EVERY_MS).
-      // Without this the manager never hears about the recovery, and choosing
-      // this same connection afterwards would rebuild a working session.
-      if (state === "live") win.manager?.restored(conn.id);
-      win.say({ state, detail });
-    },
-    // Only the first dial reaches the catch below: reconnectingClient resolves
-    // once the wire is up, so every later failure is the ladder's business.
-  }).catch((err: unknown) => {
+    dial = () => spawnDuplex(argv, { env, onStderr: listen });
+  }
+
+  // A reconnecting client for both. An ssh over a real network drops for
+  // reasons that have nothing to do with either end: a laptop lid, a changed
+  // network, an idle timeout on a middlebox. This Mac's socket drops when the
+  // daemon behind it goes: an idle exit, a crash, or the retirement `review`
+  // below asks for. `dial` runs again on every attempt, so each retry spawns
+  // a fresh ssh, or finds the daemon again and starts one if there is none.
+  const open = () =>
+    reconnectingClient({
+      dial,
+      push: win.push,
+      build,
+      client,
+      label,
+      device,
+      // How long the far end keeps this session after the wire drops, the
+      // same ask a phone makes (shared/transport.ts SESSION_HOLD_MS). A lid
+      // closed for a meeting, a lift, or a walk between buildings should not
+      // cost the shells on the other end. A Mac that asked for nothing would
+      // lose them to the daemon's idle timer however briefly it had been
+      // away.
+      //
+      // Not asked of this Mac's daemon. A unix socket never flaps, so this
+      // wire ending means the app quit or crashed, and a hold would keep
+      // shells for a client that is not coming back to them. The daemon reads
+      // the missing ask as exactly that, and locks this device's vault when
+      // the last window goes (locking.md §3a).
+      ...(here ? {} : { hold: SESSION_HOLD_MS }),
+      onState: (state, detail) => {
+        if (state !== "live") console.warn(`[connect] ${conn.name}: ${detail}`);
+        // The ladder ran out, or the server said goodbye. The manager has to
+        // know. Otherwise choosing this same connection again, the only
+        // recovery the chrome offers, would be the no-op it is for a
+        // connection that is already working (connectionManager.ts).
+        if (state === "lost") win.manager?.lost(conn.id, detail);
+        // The wire came back by itself, which it can now do: the ladder ends
+        // in a retry beat rather than a stop (shared/transport.ts
+        // RETRY_EVERY_MS). Without this the manager never hears about the
+        // recovery, and choosing this same connection afterwards would
+        // rebuild a working session.
+        if (state === "live") win.manager?.restored(conn.id);
+        win.say({ state, detail });
+      },
+    });
+
+  // Only the first dial reaches these catches: reconnectingClient resolves
+  // once the wire is up, so every later failure is the ladder's business.
+  //
+  // reconnectingClient throws when the two ends disagree about the protocol,
+  // with both versions named, and when the child dies before saying anything
+  // (a refused key, an unknown host, no route). The manager keeps the
+  // connection that already works and reports this one (remote.md §8).
+  let wire: Awaited<ReturnType<typeof open>>;
+  try {
+    wire = await open();
+  } catch (err) {
     // A refused handshake keeps its own words (shared/transport.ts `Refused`).
     // ssh's stderr is the better account of any failure before the protocol
     // starts, which is what `explainDial` reads below. But once the two ends
     // have exchanged hellos, the last stderr line is the far end's `serve`
-    // saying it attached, and quoting that would call an up server unreachable.
-    if (err instanceof Refused) throw err;
-    throw new Error(explainDial(said) ?? (err instanceof Error ? err.message : String(err)));
-  });
+    // saying it attached, and quoting that would call an up server
+    // unreachable.
+    if (err instanceof Refused && here) {
+      // This Mac's daemon speaks another protocol: the daemon an earlier
+      // build started is still up, an update having relaunched the app
+      // inside its idle minute. It cannot serve this build at all, so it is
+      // stopped now rather than asked to retire, and the dial that follows
+      // starts one from this bundle. Whatever it was running ends with it,
+      // which is what "Restart to Install Update" already meant.
+      console.warn(`[connect] this Mac's daemon refused this build (${err.message}); replacing it`);
+      if (!(await stopDaemon())) throw err;
+      wire = await open();
+    } else if (err instanceof Refused || here) {
+      throw err;
+    } else {
+      throw new Error(explainDial(said) ?? (err instanceof Error ? err.message : String(err)));
+    }
+  }
   const peer = await wire.ready;
-  arrived();
-  console.log(`[connect] ${conn.name} (${conn.destination}): ledge-server ${peer.build}`);
+  win.connection = conn.id;
+  win.client = client;
+  // Which window is which client of which server. Every later log line that
+  // names a client id names one of these.
+  console.log(`[window] ${label} on ${conn.name} as ${client}${blank ? " (blank; the layout on file is another window's)" : ""}`);
+  console.log(`[connect] ${conn.name}${here ? "" : ` (${conn.destination})`}: ledge-server ${peer.build}`);
+  // A daemon of another build makes way once it is idle (bun/localServer.ts).
+  // The window stays on it until then: it answers this build's protocol, and
+  // a run it is executing is worth more than a restart now.
+  if (here) thisMac.review(peer);
   const requests = await clientOverlay(wire.requests, nativeFor(win));
   return {
     requests: blank ? withoutLayout(requests) : requests,
@@ -755,8 +702,9 @@ function closeWindow(win: Win): void {
   if (win.save) clearTimeout(win.save);
   win.save = null;
   if (focused === win) focused = windows[0] ?? null;
-  // The connection goes with the window: the ssh child is this window's, and
-  // releaseLocal tears the local server down when its last holder leaves.
+  // The connection goes with the window: the ssh child, or this window's
+  // socket to the daemon, is this window's alone. The daemon notices the last
+  // window leave the way it notices a phone leave (bun/daemon.ts).
   win.manager?.shutdown();
   // After the shutdown, so the list saved is the windows that remain.
   saveWindows();

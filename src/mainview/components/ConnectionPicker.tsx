@@ -288,8 +288,8 @@ function ConnectionRow({
       </button>
       {/* Always drawn, never revealed by a hover. A touch client has no hover,
           and the row verb these mirror (⌫) has no touch form either
-          (interactions.md §1a). The local row has neither button, because there
-          is nothing about the server in this process to change. */}
+          (interactions.md §1a). This Mac's row has neither button, because
+          there is nothing about its own server to change. */}
       {!local && (
         <>
           <RowButton label={`Edit ${conn.name}`} disabled={busy} onClick={onEdit}>

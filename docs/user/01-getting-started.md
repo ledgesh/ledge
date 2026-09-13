@@ -82,7 +82,7 @@ Notes are ordinary `.md` files in ordinary folders, so git, agents, and shell to
 
 Ledge checks for a newer version when it starts and once a day after that, and downloads one in the background when it finds one.
 
-When the download finishes, a notice says so and the Ledge menu shows Restart to Install Update. Choosing it quits Ledge and reopens the new version. Notes are already saved. A block that is still running stops, as it does when you quit.
+When the download finishes, a notice says so and the Ledge menu shows Restart to Install Update. Choosing it quits Ledge and reopens the new version. Notes are already saved. A block that is still running keeps running on the old server, and the new version waits for it to finish before it swaps the server for its own, so the output arrives in the new window.
 
 Ledge > Check for Updates… checks now and tells you the result.
 

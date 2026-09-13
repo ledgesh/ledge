@@ -190,8 +190,8 @@ export interface WorkspaceRootInfo {
  * One configured server (remote.md §8), as the view sees it. The stored
  * record carries more (bun/connections.ts): the pinned known_hosts line is a
  * hundred characters of base64 that only ssh reads, so this shape sends only
- * whether one exists. `destination` is "" for the server in this process, the
- * one connection that always exists and cannot be removed.
+ * whether one exists. `destination` is "" for this Mac's own daemon, the one
+ * connection that always exists and cannot be removed.
  */
 export interface ConnectionInfo {
   id: string;

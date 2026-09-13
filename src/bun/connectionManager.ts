@@ -9,8 +9,9 @@
 //
 // How a connection is made is not here. `attach` comes from bun/index.ts, the
 // shell that owns the windows and the child processes: building a connection
-// means either createServer in this process or an ssh child. What is left here
-// runs in a test with no window, no socket, and no ssh binary.
+// means dialling this Mac's daemon over its socket or spawning an ssh child.
+// What is left here runs in a test with no window, no socket, and no ssh
+// binary.
 //
 // Above the router, the webview's RPC and every command in it hold one handler
 // map for the life of the window. A switch replaces the connection under the
@@ -22,11 +23,10 @@ import { connectionInfo, createConnectionStore, type ConnectionStore } from "./c
 /** One live connection: the handlers it serves and the way to end it. */
 export interface Attached {
   requests: RequestHandlers;
-  /** Ask this connection's wire to try now (shared/transport.ts `recheck`).
-   * A no-op for a server in this process, which has no wire to ask. */
+  /** Ask this connection's wire to try now (shared/transport.ts `recheck`). */
   recheck(): void;
-  /** The server's build, from its handshake. This app's own build for a server
-   * in this process. The upgrade offer will read it (remote.md §11). */
+  /** The server's build, from its handshake. The upgrade offer will read it
+   * (remote.md §11). */
   build: string;
   shutdown(): void;
 }
