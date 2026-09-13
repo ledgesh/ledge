@@ -11,7 +11,8 @@
 // workspaceKind and docsFolder read the map. It mirrors Bun-side truth and is
 // never persisted: layout.json must not store kind (architecture.md §6a). A
 // stale entry after a detach is harmless: its folder has no notes open.
-import type { WorkspaceRootInfo } from "../../shared/rpc-schema";
+import { useSyncExternalStore } from "react";
+import type { TrashedWorkspace, WorkspaceRootInfo } from "../../shared/rpc-schema";
 
 export interface AttachResult {
   root: string | null;
@@ -30,6 +31,12 @@ interface WorkspaceHandlers {
   // the user cancelled, or where this client has none (lib/shell.ts
   // picksFolders says so before this is called).
   pickFolder: () => Promise<string | null>;
+  // Moves a managed root's folder into the app home's trash, storing the
+  // display name and icon beside it. An id for the entry, or a refusal.
+  trash: (root: string, name: string, symbol: string) => Promise<{ id: string | null; error: string | null }>;
+  trashList: () => Promise<TrashedWorkspace[]>;
+  restore: (id: string) => Promise<{ root: string | null; name: string; symbol: string; error: string | null }>;
+  removeTrashed: (id: string) => Promise<boolean>;
 }
 
 let handlers: WorkspaceHandlers | null = null;
@@ -122,6 +129,60 @@ export function detachWorkspaceFolder(root: string): Promise<boolean> {
   return bridge().detach(root);
 }
 
+// Moves a managed workspace's folder into the trash. The mirror below
+// refreshes either way, since a refusal can follow a change another client
+// made.
+export function trashWorkspaceFolder(
+  root: string,
+  name: string,
+  symbol: string,
+): Promise<{ id: string | null; error: string | null }> {
+  return bridge().trash(root, name, symbol).finally(() => void refreshTrashedWorkspaces());
+}
+
+export function restoreTrashedWorkspace(
+  id: string,
+): Promise<{ root: string | null; name: string; symbol: string; error: string | null }> {
+  return bridge().restore(id).then((res) => {
+    if (res.root !== null) kinds.set(res.root, "managed");
+    return res;
+  }).finally(() => void refreshTrashedWorkspaces());
+}
+
+export function deleteTrashedWorkspace(id: string): Promise<boolean> {
+  return bridge().removeTrashed(id).finally(() => void refreshTrashedWorkspaces());
+}
+
+// The deleted workspaces the strip's Trash section shows, mirrored from the
+// server like the kinds above. A module mirror rather than AppState, since
+// only that section reads it (architecture.md §5).
+let trashed: TrashedWorkspace[] = [];
+const trashListeners = new Set<() => void>();
+
+export function refreshTrashedWorkspaces(): Promise<void> {
+  return bridge().trashList().then(
+    (items) => {
+      trashed = items;
+      for (const fn of trashListeners) fn();
+    },
+    (err) => console.error("[workspace] trash list failed", err),
+  );
+}
+
+export function trashedWorkspace(id: string): TrashedWorkspace | undefined {
+  return trashed.find((t) => t.id === id);
+}
+
+export function useTrashedWorkspaces(): TrashedWorkspace[] {
+  return useSyncExternalStore(
+    (fn) => {
+      trashListeners.add(fn);
+      return () => trashListeners.delete(fn);
+    },
+    () => trashed,
+  );
+}
+
 // The recorded kind of a root, for the surfaces that show or gate per kind:
 // every read-only gate keys off "docs". Like workspaceDefaultCwd, this mirrors
 // Bun-side truth and guards nothing. Bun refuses every docs write whatever
@@ -139,4 +200,4 @@ export function docsFolder(): string | null {
   return null;
 }
 
-export type { WorkspaceRootInfo };
+export type { TrashedWorkspace, WorkspaceRootInfo };

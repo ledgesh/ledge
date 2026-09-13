@@ -187,6 +187,20 @@ export interface WorkspaceRootInfo {
 }
 
 /**
+ * One deleted workspace in the app home's trash (bun/workspaces.ts). `id` is
+ * the entry's handle for restore and permanent delete, never a path. `name`
+ * and `symbol` are what the strip showed when it was deleted, and `notes` is
+ * how many notes a permanent delete would remove.
+ */
+export interface TrashedWorkspace {
+  id: string;
+  name: string;
+  symbol: string;
+  deletedAt: number;
+  notes: number;
+}
+
+/**
  * One configured server (remote.md §8), as the view sees it. The stored
  * record carries more (bun/connections.ts): the pinned known_hosts line is a
  * hundred characters of base64 that only ssh reads, so this shape sends only
@@ -287,9 +301,28 @@ export type LedgeRPC = {
       // client's side (folderPick below); a phone types the path.
       workspaceAttach: { params: { path: string }; response: { root: string | null; kind: "managed" | "external" | null; error: string | null } };
       // Remove a root from the registry. Never deletes files: the folder and
-      // every note in it stay on disk, re-attachable later. Sent when a
-      // workspace is closed. The view refuses to close the last one.
+      // every note in it stay on disk, re-attachable later. Sent by Remove from
+      // Ledge on an attached workspace. The view refuses to remove the last one.
       workspaceDetach: { params: { root: string }; response: { ok: boolean } };
+      // Delete a managed workspace: Bun moves its folder into the app home's
+      // .ledge-trash and deregisters it (architecture.md §3). `name` and
+      // `symbol` are display strings stored with the entry, so the trash and a
+      // later restore can show what the strip showed. An attached or docs root
+      // is refused with an error: those are removed, never deleted. `id` is the
+      // entry handle for workspaceTrashRestore and workspaceTrashDelete.
+      workspaceTrash: { params: { root: string; name: string; symbol: string }; response: { id: string | null; error: string | null } };
+      // Every deleted workspace, newest first. Read at boot and after every
+      // change to the trash, for the strip's Trash section.
+      workspaceTrashList: { params: {}; response: { items: TrashedWorkspace[] } };
+      // Move a deleted workspace's folder back into the app home and register
+      // it, under a new folder name if its old one was taken meanwhile. Backs
+      // both the Undo strip and the Trash section's Restore. The response
+      // carries the stored name and icon for the view to show again.
+      workspaceTrashRestore: { params: { id: string }; response: { root: string | null; name: string; symbol: string; error: string | null } };
+      // Delete one deleted workspace for good, folder and all. Irreversible, so
+      // the view confirms first (interactions.md §4). false when it was
+      // already gone. Bun refuses an id that is not one entry of the trash.
+      workspaceTrashDelete: { params: { id: string }; response: { removed: boolean } };
       // The note store (notes.ts). Bun owns every path: the view holds paths
       // only as opaque handles it got from here, and Bun rejects any that fall
       // outside the registered workspace roots (workspaces.ts). Scoped calls

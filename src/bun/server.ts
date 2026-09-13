@@ -67,13 +67,18 @@ import {
   availableRoots,
   lockableRoots,
   createManaged,
+  deleteTrashedWorkspace,
   detachRoot,
   ensureDefault,
   kindOf,
+  listTrashedWorkspaces,
   listWorkspaceRoots,
   loadWorkspaces,
+  purgeTrashedWorkspaces,
+  restoreTrashedWorkspace,
   rootContaining,
   roots,
+  trashRoot,
 } from "./workspaces";
 import { createFromTemplatePath, openDaily, resolveConfiguredWorkspace } from "./daily";
 import { syncDocs } from "./docs";
@@ -831,6 +836,20 @@ export async function createServer(deps: { push: Audience }): Promise<LedgeServe
       refreshWatchers();
       return { ok };
     },
+    workspaceTrash: async ({ root, name, symbol }) => {
+      const res = await trashRoot(root, name, symbol);
+      if ("error" in res) return { id: null, error: res.error };
+      refreshWatchers();
+      return { id: res.id, error: null };
+    },
+    workspaceTrashList: async () => ({ items: await listTrashedWorkspaces() }),
+    workspaceTrashRestore: async ({ id }) => {
+      const res = await restoreTrashedWorkspace(id);
+      if ("error" in res) return { root: null, name: "", symbol: "", error: res.error };
+      refreshWatchers();
+      return { ...res, error: null };
+    },
+    workspaceTrashDelete: async ({ id }) => ({ removed: await deleteTrashedWorkspace(id) }),
 
     // --- note store --------------------------------------------------------
     // Every path these take is checked against the registered workspace
@@ -1422,6 +1441,12 @@ export async function createServer(deps: { push: Audience }): Promise<LedgeServe
       if (n > 0) console.log(`[notes] purged ${n} trashed note(s) past the ${settings.trash.ttlDays}-day limit`);
     })
     .catch((err) => console.error("[notes] trash purge failed", err));
+  // Deleted workspaces age out on the same setting, from the app home's trash.
+  void purgeTrashedWorkspaces(settings.trash.ttlDays * 24 * 60 * 60 * 1000)
+    .then((n) => {
+      if (n > 0) console.log(`[workspaces] purged ${n} deleted workspace(s) past the ${settings.trash.ttlDays}-day limit`);
+    })
+    .catch((err) => console.error("[workspaces] workspace trash purge failed", err));
 
   return {
     forClient: requestsFor,

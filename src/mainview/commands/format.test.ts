@@ -39,7 +39,7 @@ describe("tooltip", () => {
   });
 
   test("a row verb is advertised like any other key", () => {
-    expect(tooltip("workspace.close")).toBe("Close Workspace (⌫)");
+    expect(tooltip("workspace.remove")).toBe("Delete Workspace (⌫)");
     expect(tooltip("note.delete")).toBe("Delete (D)");
   });
 

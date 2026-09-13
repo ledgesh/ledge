@@ -275,6 +275,10 @@ export function bootView(requests: RequestClient): Promise<void> {
     attach: (path) => requests.workspaceAttach({ path }),
     detach: (root) => requests.workspaceDetach({ root }).then((r) => r.ok),
     pickFolder: () => requests.folderPick({}).then((r) => r.path),
+    trash: (root, name, symbol) => requests.workspaceTrash({ root, name, symbol }),
+    trashList: () => requests.workspaceTrashList({}).then((r) => r.items),
+    restore: (id) => requests.workspaceTrashRestore({ id }),
+    removeTrashed: (id) => requests.workspaceTrashDelete({ id }).then((r) => r.removed),
   });
 
   configureNotes({

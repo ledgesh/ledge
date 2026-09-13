@@ -361,7 +361,7 @@ test.describe("with the tree on screen", () => {
       menu.getByRole("menuitem", { name: "Rename Workspace…" }),
     ).toBeVisible();
     await expect(
-      menu.getByRole("menuitem", { name: "Close Workspace" }),
+      menu.getByRole("menuitem", { name: "Delete Workspace" }),
     ).toBeVisible();
     // Double-click is the desktop accelerator for a rename. R3 calls the menu
     // item the discoverable path, and on a phone it is the only path.

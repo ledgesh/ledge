@@ -8,7 +8,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import type { NoteMeta, WorkspaceRootInfo } from "../../shared/rpc-schema";
 import { initialState, reducer, type AppState } from "./store";
 import { findLeaf, firstLeaf, tabPaths, type LeafNode, type SplitNode } from "./tree";
-import { restoreLayout, restoredState, serializeLayout } from "./persist";
+import { restoreLayout, restoredState, reviveWorkspace, serializeLayout, snapshotWorkspace } from "./persist";
 import { DEFAULT_ICON } from "./icons";
 import { expandFolder, expandedIn, resetExpansion } from "../notes/expansion";
 
@@ -410,6 +410,43 @@ describe("pruning", () => {
     expect(all.filter((p) => p === "/r/alpha.md").length).toBe(1);
     // The duplicate was dropped from B, whose remaining tab carries on.
     expect(tabPaths(after.workspaces[1].root)).toEqual(["/r/beta.md"]);
+  });
+});
+
+// The Undo of Delete Workspace and Remove from Ledge keeps a snapshot of the
+// workspace it removed and rebuilds it through the restore path.
+describe("snapshot and revive", () => {
+  test("a revived workspace has its name, icon, panes and tabs, under fresh ids", () => {
+    let s = reducer(initialState(FOLDER, NOTES), { type: "openNote", note: NOTES[1]! });
+    s = reducer(s, { type: "splitPane", dir: "row" });
+    s = reducer(s, { type: "openNote", note: NOTES[2]! });
+    s = reducer(s, { type: "renameWorkspace", id: s.selectedId, name: "Kept" });
+    const ws = s.workspaces[0]!;
+    const back = reviveWorkspace(snapshotWorkspace(ws), FOLDER, NOTES)!;
+    expect(back.name).toBe("Kept");
+    expect(back.symbol).toBe(ws.symbol);
+    expect(back.id).not.toBe(ws.id);
+    expect(back.root.kind).toBe("split");
+    expect(tabPaths(back.root)).toEqual(tabPaths(ws.root));
+  });
+
+  test("a folder that came back under another handle keeps its panes and loses its tabs", () => {
+    let s = reducer(initialState(FOLDER, NOTES), { type: "openNote", note: NOTES[0]! });
+    s = reducer(s, { type: "splitPane", dir: "row" });
+    const back = reviveWorkspace(snapshotWorkspace(s.workspaces[0]!), "/r-2", [note("/r-2/alpha.md", "Alpha")])!;
+    expect(back.folder).toBe("/r-2");
+    expect(back.root.kind).toBe("split");
+    expect(tabPaths(back.root)).toEqual([]); // no path is rewritten view-side
+  });
+
+  test("open folders come back with the workspace, pruned to the folders it has", () => {
+    const s = initialState(FOLDER, [...NOTES, ...FILED]);
+    expandFolder(FOLDER, "admin");
+    expandFolder(FOLDER, "projects");
+    const snap = snapshotWorkspace(s.workspaces[0]!);
+    resetExpansion();
+    reviveWorkspace(snap, FOLDER, [...NOTES, FILED[1]!]);
+    expect([...expandedIn(FOLDER)]).toEqual(["admin"]);
   });
 });
 

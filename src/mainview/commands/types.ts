@@ -5,7 +5,8 @@
 import type { ComponentType } from "react";
 import type { Action, AppState } from "@/workspace/store";
 import type { Workspace } from "@/workspace/tree";
-import type { NoteMeta, TrashMeta, VaultState } from "../../shared/rpc-schema";
+import type { NoteMeta, TrashedWorkspace, TrashMeta, VaultState } from "../../shared/rpc-schema";
+import type { UndoOffer } from "@/workspace/actions";
 import type { FocusDomain } from "./keymap";
 
 // What to run once the vault dialog succeeds (unlock or first-time setup):
@@ -53,6 +54,11 @@ export type CommandTarget =
   // A row in the Tags panel's drill-in: the note bearing the tag, plus where
   // the tag sits. Backlink's shape, for backlink's open-at-the-place verb.
   | { kind: "tagnote"; path: string; line: number; raw: string }
+  // A row in the workspace strip's Trash section: a deleted workspace, by the
+  // id Bun gave its trash entry. Its own kind for the reason "trash" is apart
+  // from "note": the verbs (Restore, Delete Permanently) differ from a live
+  // workspace's.
+  | { kind: "trashedWorkspace"; id: string }
   | { kind: "tab"; paneId: string; tabId: string }
   | { kind: "pane"; paneId: string };
 
@@ -104,6 +110,15 @@ export interface UiHooks {
   restoreTrashed(path: string): void;
   // Open the Empty Trash confirmation.
   confirmEmptyTrash(): void;
+  // Offer an Undo for something other than a note delete, on the same strip.
+  // Delete Workspace and Remove from Ledge use it. `undo` resolves to an error
+  // message to show, or null.
+  offerUndo(undo: UndoOffer): void;
+  // Bring a deleted workspace back from the strip's Trash section.
+  restoreTrashedWorkspace(id: string): void;
+  // Open the confirmation for deleting a deleted workspace for good, folder and
+  // all. Irreversible, so a confirm rather than an undo (interactions.md §4).
+  confirmDeleteTrashedWorkspace(item: TrashedWorkspace): void;
   // Open the confirmation for unlinking one trashed note. Irreversible, so it
   // is a confirm rather than an undo (interactions.md §4).
   confirmDeleteTrashed(item: TrashMeta): void;
@@ -179,13 +194,21 @@ export interface RegistryDeps {
   // §8a). Returns nothing: the new window is the feedback.
   newWindow(): void;
   // Workspace lifecycle (workspace/actions.ts). Each needs a Bun round trip
-  // (create a folder, register a path, detach the registry entry), so the
-  // reducer cannot do it alone. The two async ones resolve to an error
-  // message to surface, or null. `attachWorkspace` is the dialog's submit
+  // (create a folder, register a path, trash or detach a folder), so the
+  // reducer cannot do it alone. Create and attach resolve to an error message
+  // to surface, or null. `attachWorkspace` is the dialog's submit
   // (ui.attachFolder above opens it), so its error goes back into the dialog.
+  // Remove resolves to that and the Undo to offer.
   createWorkspace(state: AppState, dispatch: (a: Action) => void): Promise<string | null>;
   attachWorkspace(path: string, dispatch: (a: Action) => void): Promise<string | null>;
-  closeWorkspace(id: string, state: AppState, dispatch: (a: Action) => void): void;
+  removeWorkspace(
+    id: string,
+    state: AppState,
+    dispatch: (a: Action) => void,
+  ): Promise<{ error: string | null; undo: UndoOffer | null }>;
+  // One deleted workspace from the strip's Trash mirror (workspace/channel.ts),
+  // undefined when the list no longer holds it.
+  trashedWorkspace(id: string): TrashedWorkspace | undefined;
   // The recorded kind of a workspace folder, mirrored view-side from what Bun
   // derives. It gates every verb the read-only docs workspace does not allow.
   workspaceKind(folder: string): "managed" | "external" | "docs" | null;
@@ -349,6 +372,9 @@ export interface Command {
   id: string;
   title: string | ((ctx: CommandCtx) => string);
   icon?: ComponentType<{ className?: string }>;
+  // The icon for this context, when it changes with the title (a workspace's
+  // ⌫ verb reads Delete or Remove). Menus and the palette prefer it to `icon`.
+  iconOf?(ctx: CommandCtx): ComponentType<{ className?: string }>;
   // CodeMirror-spelling bindings ("Mod-Shift-w"); first is the advertised one.
   keys?: readonly string[];
   // Bare keys ("d", "Enter") that fire only while a matching list row has

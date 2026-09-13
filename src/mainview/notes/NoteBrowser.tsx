@@ -60,6 +60,7 @@ import { useVaultState } from "@/vault/channel";
 import { FolderPicker } from "@/components/FolderPicker";
 import { RenameField } from "@/components/RenameField";
 import type { FolderRequest } from "@/commands/types";
+import type { UndoOffer } from "@/workspace/actions";
 import { agoLabel } from "./ago";
 import {
   deleteFolderTo,
@@ -109,12 +110,11 @@ export function NoteBrowser() {
   // than failures (where the CLI shim landed). This one expires; an error
   // stays up.
   const [notice, setNotice] = useState<string | null>(null);
-  // The notes just deleted, offered back, keyed by where each landed in the
-  // trash. A list because deleting a folder deletes the notes in it: one
-  // strip either way, and Undo runs the same restore once per path. `label`
-  // is the whole sentence rather than a title, since the two cases do not
-  // share a shape ("Deleted “Plan”" against "Deleted 5 notes in “projects”").
-  const [undo, setUndo] = useState<{ paths: string[]; label: string } | null>(null);
+  // What was just deleted, offered back: `label` is the strip's whole sentence
+  // ("Deleted “Plan”", "Deleted 5 notes in “projects”", "Removed “App” from
+  // Ledge"), and `run` reverses it, resolving to an error message or null.
+  // Notes, folders and workspaces all come through here, so one strip serves.
+  const [undo, setUndo] = useState<UndoOffer | null>(null);
   // The folder waiting on its delete confirmation (folder.delete). Ephemeral
   // chrome like `renaming`, and it lives here because the note count in the
   // dialog comes from the list this component already holds.
@@ -200,7 +200,8 @@ export function NoteBrowser() {
       setError(res.error);
       // No trashed path means the file was already gone, so there is nothing
       // to offer back and no strip.
-      setUndo(res.trashed ? { paths: [res.trashed], label: `Deleted “${note.title}”` } : null);
+      const trashed = res.trashed;
+      setUndo(trashed ? { label: `Deleted “${note.title}”`, run: () => undoAll([trashed]) } : null);
     });
   };
 
@@ -215,12 +216,17 @@ export function NoteBrowser() {
   // two running at once could pick the same free name. A failure is reported
   // and the remaining paths still run, so one note that will not come back
   // does not block the rest.
-  const undoAll = async (paths: readonly string[]) => {
-    setError(null);
-    setUndo(null);
+  const undoAll = async (paths: readonly string[]): Promise<string | null> => {
     let failure: string | null = null;
     for (const path of paths) failure = (await restoreNote(path, selected.folder, dispatch)) ?? failure;
-    setError(failure);
+    return failure;
+  };
+
+  // The strip's Undo button, for whichever kind of delete put it up.
+  const runUndo = (offer: UndoOffer) => {
+    setError(null);
+    setUndo(null);
+    void offer.run().then(setError);
   };
 
   // File a note, from the chooser or from a drop. One path for both, so the
@@ -263,12 +269,10 @@ export function NoteBrowser() {
       // Nothing trashed means nothing to offer back, so no strip. That is a
       // refusal, or a folder whose notes were already gone from disk.
       const n = res.trashed.length;
+      const paths = res.trashed.map((t) => t.to);
       setUndo(
         n > 0
-          ? {
-              paths: res.trashed.map((t) => t.to),
-              label: `Deleted ${n === 1 ? "1 note" : `${n} notes`} in “${folder}”`,
-            }
+          ? { label: `Deleted ${n === 1 ? "1 note" : `${n} notes`} in “${folder}”`, run: () => undoAll(paths) }
           : null,
       );
     });
@@ -293,6 +297,12 @@ export function NoteBrowser() {
       // The browser's error strip doubles as the workspace commands' error
       // surface (a refused attach, a failed create), so every failure is
       // reported in the same place.
+      // Delete Workspace and Remove from Ledge offer theirs on this strip too:
+      // the browser outlives the workspace that went.
+      offerUndo: (offer) => {
+        setError(null);
+        setUndo(offer);
+      },
       showError: (message) => setError(message),
       showNotice: (message) => setNotice(message),
     });
@@ -460,7 +470,7 @@ export function NoteBrowser() {
           <span className="min-w-0 flex-1 truncate text-muted-foreground">{undo.label}</span>
           <button
             className="shrink-0 font-medium text-primary hover:underline touch:min-h-[44px] touch:px-2"
-            onClick={() => void undoAll(undo.paths)}
+            onClick={() => runUndo(undo)}
           >
             Undo
           </button>

@@ -30,7 +30,7 @@ export function CommandMenuItem({
   const c = { ...ctx(), target };
   const enabled = !cmd.when || cmd.when(c);
   const title = typeof cmd.title === "function" ? cmd.title(c) : cmd.title;
-  const Icon = cmd.icon;
+  const Icon = cmd.iconOf?.(c) ?? cmd.icon;
 
   return (
     <MenuItem

@@ -41,8 +41,8 @@ import { revealLog } from "@/lib/log";
 import { checkForUpdates, installUpdate } from "@/lib/updates";
 import { openDocsWindow, openWindow } from "@/lib/windows";
 import { restartSession } from "@/terminal/channel";
-import { attachWorkspace, closeDocs, closeWorkspace, createWorkspace, openDocs } from "@/workspace/actions";
-import { dailyWorkspaceRoot, docsFolder, workspaceKind } from "@/workspace/channel";
+import { attachWorkspace, closeDocs, createWorkspace, openDocs, removeWorkspace } from "@/workspace/actions";
+import { dailyWorkspaceRoot, docsFolder, trashedWorkspace, workspaceKind } from "@/workspace/channel";
 import type { RegistryDeps, UiHooks } from "./types";
 
 // Enough of a note's text to parse its frontmatter. Matches HEAD_BYTES in
@@ -76,8 +76,9 @@ export const registryDeps: RegistryDeps = {
   newWindow: openWindow,
   createWorkspace,
   attachWorkspace,
-  closeWorkspace,
+  removeWorkspace,
   workspaceKind,
+  trashedWorkspace,
   docsFolder,
   openDocs,
   openDocsWindow,

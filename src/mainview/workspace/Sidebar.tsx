@@ -1,21 +1,29 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ChevronDown, Plus, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Plus, RotateCcw, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useCmdHeld } from "@/lib/useCmdHeld";
 import { useListNav } from "@/lib/useListNav";
 import { onBlankSpace, useRowMenu } from "@/lib/useRowMenu";
 import { ResizeHandle } from "@/components/ResizeHandle";
-import { ContextMenu } from "@/components/ContextMenu";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { ContextMenu, MenuDivider } from "@/components/ContextMenu";
 import { RenameField } from "@/components/RenameField";
 import { NoteBrowser } from "@/notes/NoteBrowser";
+import { agoLabel } from "@/notes/ago";
 import { docsWindow } from "@/lib/windows";
 import { ConnectionBar } from "./ConnectionBar";
-import { useCommands } from "@/commands/CommandProvider";
+import { useCommands, useCommandTitle } from "@/commands/CommandProvider";
 import { CommandMenuItem } from "@/commands/CommandMenuItem";
-import { configureUi } from "@/commands/glue";
-import { tooltip } from "@/commands/format";
+import { configureUi, uiHooks } from "@/commands/glue";
+import { keyChip, tooltip } from "@/commands/format";
 import { targetAttrs } from "@/commands/target";
-import { workspaceKind } from "./channel";
+import { deleteDeletedWorkspace, restoreDeletedWorkspace } from "./actions";
+import {
+  refreshTrashedWorkspaces,
+  useTrashedWorkspaces,
+  workspaceKind,
+  type TrashedWorkspace,
+} from "./channel";
 import { useWorkspace } from "./store";
 import { IconPicker } from "./IconPicker";
 import { iconFor } from "./icons";
@@ -216,7 +224,7 @@ function WorkspaceStrip() {
               onBeginRename={() => setRenamingId(ws.id)}
               onEndRename={() => setRenamingId(null)}
               onRename={(name) => dispatch({ type: "renameWorkspace", id: ws.id, name })}
-              onClose={() => exec("workspace.close", { kind: "workspace", id: ws.id })}
+              onRemove={() => exec("workspace.remove", { kind: "workspace", id: ws.id })}
               onDragStart={() => (draggingWs = ws.id)}
               onDragEnd={() => {
                 draggingWs = null;
@@ -231,6 +239,7 @@ function WorkspaceStrip() {
         ))}
         {dropIndex === strip.length && <DropMarker />}
       </div>
+      <WorkspaceTrashSection />
       {/* A split button: the wide half runs New Workspace, the chevron opens a
           menu of both ways to add one. Attach Folder has no chord (keys.ts);
           this menu, the File menu (menu.ts) and the palette are its three
@@ -284,8 +293,14 @@ function WorkspaceStrip() {
             target={{ kind: "workspace", id: menu.id }}
             onClose={() => setMenu(null)}
           />
+          <MenuDivider />
           <CommandMenuItem
-            id="workspace.close"
+            id="workspace.remove"
+            hint={
+              workspaceKind(state.workspaces.find((w) => w.id === menu.id)?.folder ?? "") === "external"
+                ? "The folder and its notes stay where they are"
+                : "Recoverable from Trash for 30 days"
+            }
             target={{ kind: "workspace", id: menu.id }}
             onClose={() => setMenu(null)}
           />
@@ -321,7 +336,7 @@ function WorkspaceRow({
   onBeginRename,
   onEndRename,
   onRename,
-  onClose,
+  onRemove,
   onDragStart,
   onDragEnd,
   onContextMenu,
@@ -336,13 +351,17 @@ function WorkspaceRow({
   onBeginRename: () => void;
   onEndRename: () => void;
   onRename: (name: string) => void;
-  onClose: () => void;
+  onRemove: () => void;
   onDragStart: () => void;
   onDragEnd: () => void;
   onContextMenu: (x: number, y: number) => void;
 }) {
   const press = useRowMenu(onContextMenu, onSelect);
   const Icon = iconFor(ws.symbol);
+  // The hover button says what ⌫ does to this row: Delete Workspace with a
+  // trash can, or Remove from Ledge with a cross for an attached folder.
+  const removeTitle = useCommandTitle("workspace.remove", { kind: "workspace", id: ws.id });
+  const RemoveIcon = workspaceKind(ws.folder) === "external" ? X : Trash2;
   const tabs = countTabs(ws.root);
   const panes = leafIds(ws.root).length;
   const summary = `${tabs} ${tabs === 1 ? "tab" : "tabs"}, ${panes} ${panes === 1 ? "pane" : "panes"}`;
@@ -383,17 +402,17 @@ function WorkspaceRow({
       </div>
       {canClose && (
         <button
-          // The ✕ is absent, not invisible, on a client with no hover, the way
-          // the tab strip's ✕ is (PaneTree.tsx). Close Workspace is in this
-          // row's context menu.
+          // Absent, not invisible, on a client with no hover, the way the tab
+          // strip's ✕ is (PaneTree.tsx). The same verb is in this row's
+          // context menu.
           className="hidden size-5 shrink-0 items-center justify-center rounded opacity-0 hover:bg-background group-hover:opacity-100 hoverable:flex"
-          title={tooltip("workspace.close")}
+          title={`${removeTitle} (${keyChip("workspace.remove")})`}
           onClick={(e) => {
             e.stopPropagation();
-            onClose();
+            onRemove();
           }}
         >
-          <X className="size-3.5" />
+          <RemoveIcon className="size-3.5" />
         </button>
       )}
       {hint != null && (
@@ -401,6 +420,167 @@ function WorkspaceRow({
           ⌘{hint}
         </span>
       )}
+    </div>
+  );
+}
+
+// --- trash -----------------------------------------------------------------
+
+// Deleted workspaces, collapsed by default, between the strip and its New
+// Workspace button: the note browser's Trash section one register up. It
+// renders nothing while the trash is empty. The list is the server's
+// (workspace/channel.ts), read when the strip mounts and when the window
+// regains focus, since another client can delete one too.
+function WorkspaceTrashSection() {
+  const { dispatch } = useWorkspace();
+  const items = useTrashedWorkspaces();
+  const [open, setOpen] = useState(false);
+  const [deleting, setDeleting] = useState<TrashedWorkspace | null>(null);
+  const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  const nav = useListNav();
+
+  const restore = (id: string) => {
+    void restoreDeletedWorkspace(id, dispatch).then((err) => {
+      if (err) uiHooks.showError?.(err);
+    });
+  };
+
+  const deleteForever = (id: string) => {
+    setDeleting(null);
+    void deleteDeletedWorkspace(id).then((err) => {
+      if (err) uiHooks.showError?.(err);
+    });
+  };
+
+  const hooks = useRef({ restore });
+  hooks.current = { restore };
+  useEffect(() => {
+    configureUi({
+      restoreTrashedWorkspace: (id) => hooks.current.restore(id),
+      confirmDeleteTrashedWorkspace: (item) => setDeleting(item),
+    });
+    void refreshTrashedWorkspaces();
+    const onFocus = () => void refreshTrashedWorkspaces();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, []);
+
+  useEffect(() => {
+    if (open) setNow(Date.now());
+  }, [open, items]);
+
+  if (items.length === 0 && !deleting) return null;
+
+  return (
+    <div className="border-t" data-testid="workspace-trash">
+      {/* 44 points on touch, for the note Trash header's reason: it sits just
+          above the New Workspace button, so a miss creates a workspace. */}
+      <button
+        className="flex w-full items-center gap-1 px-3 py-1.5 text-left touch:min-h-[44px]"
+        onClick={() => setOpen((o) => !o)}
+        title="Deleted workspaces, kept in ~/.ledge/.ledge-trash"
+      >
+        <ChevronRight
+          className={cn("size-3 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")}
+        />
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Trash</span>
+        <span className="text-[10px] text-muted-foreground/70">{items.length}</span>
+      </button>
+
+      {open && (
+        <div {...nav.containerProps} className="max-h-40 overflow-y-auto px-1.5 pb-1.5">
+          {items.map((item, i) => (
+            <TrashedWorkspaceRow
+              key={item.id}
+              item={item}
+              now={now}
+              rowProps={nav.rowProps(item.id, i)}
+              onRestore={() => restore(item.id)}
+              onContextMenu={(x, y) => setMenu({ id: item.id, x, y })}
+            />
+          ))}
+          <p className="px-2 pt-1.5 text-[10px] leading-snug text-muted-foreground/70">
+            Deleted workspaces are removed for good after 30 days.
+          </p>
+        </div>
+      )}
+
+      {menu && (
+        <ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)}>
+          <CommandMenuItem
+            id="workspace.restore"
+            target={{ kind: "trashedWorkspace", id: menu.id }}
+            onClose={() => setMenu(null)}
+          />
+          <CommandMenuItem
+            id="workspace.purge"
+            target={{ kind: "trashedWorkspace", id: menu.id }}
+            onClose={() => setMenu(null)}
+            hint="Removes the folder and everything in it from disk. Cannot be undone."
+          />
+        </ContextMenu>
+      )}
+
+      {deleting && (
+        <ConfirmDialog
+          title={`Delete “${deleting.name}” permanently?`}
+          body={`${
+            deleting.notes === 1 ? "Its 1 note" : `Its ${deleting.notes} notes`
+          }, and everything else in its folder, will be removed from disk. This cannot be undone.`}
+          confirmLabel="Delete Permanently"
+          onConfirm={() => deleteForever(deleting.id)}
+          onCancel={() => setDeleting(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function TrashedWorkspaceRow({
+  item,
+  now,
+  rowProps,
+  onRestore,
+  onContextMenu,
+}: {
+  item: TrashedWorkspace;
+  now: number;
+  rowProps: ReturnType<ReturnType<typeof useListNav>["rowProps"]>;
+  onRestore: () => void;
+  onContextMenu: (x: number, y: number) => void;
+}) {
+  const { exec } = useCommands();
+  const press = useRowMenu(onContextMenu);
+  const Icon = iconFor(item.symbol);
+  return (
+    <div
+      {...rowProps}
+      {...targetAttrs({ kind: "trashedWorkspace", id: item.id })}
+      {...press}
+      className="group flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 outline-none hover:bg-accent/50 focus-visible:ring-1 focus-visible:ring-ring hoverable:min-h-8 touch:min-h-[44px]"
+    >
+      <Icon className="size-3.5 shrink-0 text-muted-foreground/60" />
+      <div className="min-w-0 flex-1 truncate text-[13px] leading-tight text-muted-foreground">{item.name}</div>
+      <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground/60 group-hover:hidden">
+        {agoLabel(item.deletedAt, now)}
+      </span>
+      {/* The note trash row's two hover verbs: Restore first, Delete
+          Permanently at the edge, which confirms (interactions.md §4). */}
+      <button
+        className="hidden size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground group-hover:flex"
+        title={tooltip("workspace.restore")}
+        onClick={onRestore}
+      >
+        <RotateCcw className="size-3" />
+      </button>
+      <button
+        className="hidden size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive group-hover:flex"
+        title={tooltip("workspace.purge")}
+        onClick={() => exec("workspace.purge", { kind: "trashedWorkspace", id: item.id })}
+      >
+        <Trash2 className="size-3" />
+      </button>
     </div>
   );
 }

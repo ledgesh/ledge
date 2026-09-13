@@ -14,6 +14,7 @@ import {
   recordDailyRoot,
   recordWorkspaceKinds,
   resetWorkspaceKinds,
+  restoreTrashedWorkspace,
   workspaceDefaultCwd,
   workspaceKind,
   type AttachResult,
@@ -39,6 +40,10 @@ function fakeBridge(attach: AttachResult = attachResult({})) {
     attach: async () => attach,
     detach: async () => true,
     pickFolder: async () => null,
+    trash: async () => ({ id: "managed", error: null }),
+    trashList: async () => [],
+    restore: async () => ({ root: "/ws/restored", name: "Restored", symbol: "", error: null }),
+    removeTrashed: async () => true,
   });
 }
 
@@ -78,6 +83,14 @@ describe("workspaceDefaultCwd", () => {
     expect(workspaceDefaultCwd("/ext/boot")).toBe("/ext/boot");
   });
 
+});
+
+describe("roots that come back", () => {
+  test("a workspace restored from the trash is managed", async () => {
+    fakeBridge();
+    await restoreTrashedWorkspace("managed");
+    expect(workspaceKind("/ws/restored")).toBe("managed");
+  });
 });
 
 describe("dailyWorkspaceRoot", () => {

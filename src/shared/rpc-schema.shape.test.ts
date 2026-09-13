@@ -130,7 +130,15 @@ describe("the schema's shape against the protocol version", () => {
   // `cliShim`. An old client reads the missing flag as false and hides the
   // verb; a new client never sends the call to any server. The pin moves and
   // the version does not.
-  const PINNED = { protocol: 5, shape: "48941c3905ad15b7" };
+  // Then the workspace trash (architecture.md §3): TrashedWorkspace and four
+  // new methods (workspaceTrash, workspaceTrashList, workspaceTrashRestore,
+  // workspaceTrashDelete). folderRename's case four times over: a server that
+  // predates them refuses each by name at the handshake's method check, so a
+  // delete fails loudly and the workspace stays on screen, and the Trash
+  // section stays empty. An old client against a new server keeps sending
+  // workspaceDetach, which still detaches. No existing payload changed. The
+  // pin moves and the version does not.
+  const PINNED = { protocol: 5, shape: "df8eb6b4ca6fa69d" };
 
   test("a payload shape does not change without someone deciding whether it breaks", async () => {
     const shape = digest(shapeOf(await Bun.file(SCHEMA).text()));

@@ -110,6 +110,32 @@ test("a folder attaches by its path on the server, and a bad path is refused wit
   expect(bad.error).toContain("not an absolute path");
 });
 
+// Deleting a workspace needs no dialog, so a headless server does all of it:
+// the folder into its own trash, listed back, restored, then deleted for good.
+// These are the handlers a phone's delete reaches (architecture.md §3).
+test("a workspace deleted over the wire lands in the server's trash and restores whole", async () => {
+  const { root } = (await client.requests.workspaceCreate({ name: "Wire Trash" })) as { root: string };
+  await client.requests.noteCreate({ root, text: "# Survivor\n" });
+  const trashed = (await client.requests.workspaceTrash({ root, name: "Wire Trash", symbol: "inbox" })) as {
+    id: string | null;
+    error: string | null;
+  };
+  expect(trashed).toEqual({ id: "wire-trash", error: null });
+  const listed = (await client.requests.workspaceList({})) as { workspaces: WorkspaceRootInfo[] };
+  expect(listed.workspaces.map((w) => w.root)).not.toContain(root);
+  const { items } = await client.requests.workspaceTrashList({});
+  expect(items).toContainEqual(expect.objectContaining({ id: "wire-trash", name: "Wire Trash", notes: 1 }));
+
+  const back = await client.requests.workspaceTrashRestore({ id: "wire-trash" });
+  expect(back).toEqual({ root, name: "Wire Trash", symbol: "inbox", error: null });
+  expect(await Bun.file(join(root, "survivor.md")).text()).toBe("# Survivor\n");
+
+  await client.requests.workspaceTrash({ root, name: "Wire Trash", symbol: "" });
+  expect(await client.requests.workspaceTrashDelete({ id: "wire-trash" })).toEqual({ removed: true });
+  expect(await Bun.file(join(root, "survivor.md")).exists()).toBe(false);
+  await expect(client.requests.workspaceTrashDelete({ id: "../ws" })).rejects.toThrow("not a deleted workspace");
+});
+
 // The shell command is the client's to install (remote.md §10): the shims
 // land on the machine with the screen and run its own copy (bun/cliShim.ts).
 // The server refuses the call by name like the pasteboard's, and the

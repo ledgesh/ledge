@@ -111,7 +111,15 @@ export const COMMANDS = {
   "workspace.open": { title: "Switch to Workspace", listKeys: ["Enter"] },
   "workspace.rename": { title: "Rename Workspace…", listKeys: ["r"] },
   "workspace.icon": { title: "Change Icon…", listKeys: ["i"] },
-  "workspace.close": { title: "Close Workspace", listKeys: ["Backspace"] },
+  // One verb on ⌫ with a title per kind, since a bare key cannot be shared by
+  // two commands on one row kind: Delete Workspace for a folder Ledge created
+  // (to the trash, undoable), Remove from Ledge for an attached one (the folder
+  // stays where it is). The registry retitles it, as it does note.favorite.
+  "workspace.remove": { title: "Delete Workspace", listKeys: ["Backspace"] },
+  // Rows of the strip's Trash section, with the note trash's grammar: `r`
+  // restores, `d`/⌫ deletes the folder for good after a confirm.
+  "workspace.restore": { title: "Restore", listKeys: ["r"] },
+  "workspace.purge": { title: "Delete Permanently…", listKeys: ["d", "Backspace"] },
 
   // Chrome. ⌘, is the macOS settings convention. It opens settings.jsonc in
   // Ledge's own editor dialog. There is no settings panel: the file is the UI

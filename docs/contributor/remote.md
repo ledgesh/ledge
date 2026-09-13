@@ -760,6 +760,7 @@ splits again, by machine:
 | ----- | ----- | ----- |
 | Notes, assets, `.ledge-trash` | server | unchanged |
 | Workspace registry (`.workspaces.json`) | server | the trust artifact for that machine |
+| Deleted workspaces (`~/.ledge/.ledge-trash`) | server | the folders are that machine's; `architecture.md` §3 |
 | Vault and locked notes (`.vault.json`) | server | §9 |
 | Profiles (`~/.config/ledge/profiles/`) | server | never transmitted, §10 |
 | PTYs, sessions, scrollback | server | §7, and they outlive a connection |

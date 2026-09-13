@@ -163,6 +163,21 @@ export function serializeLayout(state: AppState): string {
   return JSON.stringify(layout);
 }
 
+// A removed workspace's arrangement, held by the Undo strip: the shape one
+// workspace has in the file, so reviveWorkspace below rebuilds it through the
+// same pruning a boot restore does.
+export type WorkspaceSnapshot = PersistedWorkspace;
+
+export function snapshotWorkspace(ws: Workspace): WorkspaceSnapshot {
+  return {
+    name: ws.name,
+    symbol: ws.symbol,
+    folder: ws.folder,
+    expanded: [...expandedIn(ws.folder)].sort(),
+    root: persistNode(ws.root, ws.focusedPaneId),
+  };
+}
+
 // --- restore ----------------------------------------------------------------
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -363,6 +378,18 @@ export function restoreLayout(
     trash[ws.folder] = trashByFolder[ws.folder] ?? [];
   }
   return { workspaces, selectedId: selected.id, notes, trash };
+}
+
+// Rebuild a snapshot over `folder`, the handle Bun gave back when the workspace
+// returned, with fresh ids. Tabs open only on paths `notes` lists. A folder that
+// came back under another name keeps its panes, name and icon, and its tabs
+// fall back to scratch ones: the view never rewrites a path (architecture.md §2).
+export function reviveWorkspace(snap: WorkspaceSnapshot, folder: string, notes: NoteMeta[]): Workspace | null {
+  const ws = restoreWorkspace(snap, folder, new Map(notes.map((m) => [m.path, m])), new Set(), 1, false);
+  if (!ws) return null;
+  const live = new Set(folderList(notes));
+  seedExpansion(folder, snap.expanded.filter((f) => live.has(f)));
+  return ws;
 }
 
 // The boot state: the saved session if it restores, else a fresh start on the

@@ -1,17 +1,21 @@
 // The workspace operations that need a Bun round trip before the reducer can
 // act, mirroring notes/actions.ts. The reducer stays pure, so creating a
-// folder, attaching one, and detaching a closed workspace's folder all
-// orchestrate here.
+// folder, attaching one by its path, deleting or removing a workspace, and
+// bringing one back all orchestrate here.
 import { listNotes, listTrash } from "../notes/channel";
 import { flushAllNow } from "../notes/store";
 import {
   attachWorkspaceFolder as attachFolder,
   createWorkspaceFolder,
+  deleteTrashedWorkspace,
   detachWorkspaceFolder,
   docsFolder,
+  restoreTrashedWorkspace,
+  trashWorkspaceFolder,
   workspaceKind,
 } from "./channel";
-import { docsLanding, notesOf, type Action, type AppState } from "./store";
+import { reviveWorkspace, snapshotWorkspace, type WorkspaceSnapshot } from "./persist";
+import { docsLanding, notesOf, trashOf, type Action, type AppState } from "./store";
 import { tabPaths } from "./tree";
 
 // New Workspace. Bun creates the folder first (it slugs the display name and
@@ -158,28 +162,137 @@ export function closeDocs(state: AppState, dispatch: (action: Action) => void): 
   dispatch({ type: "selectWorkspace", id: back.id });
 }
 
-// Close Workspace, the folder half. The reducer closes the view (refusing the
-// last workspace), and the folder leaves the registry only if the workspace
-// actually went. Detach never touches files: the folder is re-attachable with
-// everything still in it, so nothing asks the user to confirm
-// (interactions.md §4; commands/registry.ts workspace.close says the same).
-export function closeWorkspace(
+/** What a removal offers the Undo strip: its sentence, and the call that
+ * reverses it, resolving to an error message or null. */
+export interface UndoOffer {
+  label: string;
+  run: () => Promise<string | null>;
+}
+
+// Delete Workspace and Remove from Ledge, the verb on a workspace row's ⌫
+// (interactions.md §4). Pending saves land first, while every note's root is
+// still registered. A managed folder goes to the app home's trash, an attached
+// one leaves the registry, and the docs workspace only closes. The view closes
+// at once, and a refused delete brings the workspace back from its snapshot.
+export async function removeWorkspace(
   id: string,
   state: AppState,
   dispatch: (action: Action) => void,
-): void {
-  const ws = state.workspaces.find((w) => w.id === id);
-  if (!ws || state.workspaces.length <= 1) return; // the reducer would refuse too
+): Promise<{ error: string | null; undo: UndoOffer | null }> {
+  const index = state.workspaces.findIndex((w) => w.id === id);
+  const ws = state.workspaces[index];
+  if (!ws || state.workspaces.length <= 1) return { error: null, undo: null }; // the reducer would refuse too
+  const kind = workspaceKind(ws.folder);
+  // The docs folder never leaves the registry (bun/workspaces.ts detachRoot
+  // refuses it). Closing the Documentation workspace is a view arrangement,
+  // and the docs button reopens it.
+  if (kind === "docs") {
+    dispatch({ type: "closeWorkspace", id });
+    return { error: null, undo: null };
+  }
+  await flushAllNow();
+  const snap = snapshotWorkspace(ws);
+  const notes = notesOf(state, ws.folder);
+  const trash = trashOf(state, ws.folder);
   dispatch({ type: "closeWorkspace", id });
-  // The docs folder never detaches. Its registry line is Bun's own, and
-  // detachRoot refuses it anyway (bun/workspaces.ts). Closing the
-  // Documentation workspace is a view arrangement: the docs icon reopens it.
-  if (workspaceKind(ws.folder) === "docs") return;
-  detachWorkspaceFolder(ws.folder).catch((err) => {
-    // The workspace is gone from the view either way. A failed detach costs a
-    // stale registry line, which the next attach of the same folder reuses.
-    console.error("[workspace] detach failed", err);
-  });
+
+  if (kind === "external") {
+    const ok = await detachWorkspaceFolder(ws.folder).catch((err) => {
+      // The workspace is gone from the view either way. A failed detach costs a
+      // stale registry line, which the next attach of the same folder reuses.
+      console.error("[workspace] detach failed", err);
+      return false;
+    });
+    const undo = { label: `Removed “${ws.name}” from Ledge`, run: () => reattach(snap, index, dispatch) };
+    return { error: null, undo: ok ? undo : null };
+  }
+
+  const res = await trashWorkspaceFolder(ws.folder, ws.name, ws.symbol).catch((err: unknown) => ({
+    id: null,
+    error: err instanceof Error ? err.message : String(err),
+  }));
+  if (res.id === null) {
+    const back = reviveWorkspace(snap, ws.folder, notes);
+    if (back) dispatch({ type: "reviveWorkspace", workspace: back, index, notes, trash });
+    return { error: res.error ?? "the workspace could not be deleted", undo: null };
+  }
+  const entry = res.id;
+  return {
+    error: null,
+    undo: { label: `Deleted “${ws.name}”`, run: () => restoreDeletedWorkspace(entry, dispatch, { snap, index }) },
+  };
+}
+
+// Restore, from the strip's Trash section or from the Undo strip. The Undo
+// passes the snapshot, which puts the workspace back where it was with its
+// panes. The section has none, so it adds the workspace at the end of the strip
+// under the name and icon Bun stored.
+export async function restoreDeletedWorkspace(
+  id: string,
+  dispatch: (action: Action) => void,
+  from?: { snap: WorkspaceSnapshot; index: number },
+): Promise<string | null> {
+  let res: Awaited<ReturnType<typeof restoreTrashedWorkspace>>;
+  try {
+    res = await restoreTrashedWorkspace(id);
+  } catch (err) {
+    return err instanceof Error ? err.message : String(err);
+  }
+  if (res.root === null) return res.error ?? "the workspace could not be restored";
+  await bringBack(res.root, dispatch, from ?? null, { name: res.name, symbol: res.symbol });
+  return null;
+}
+
+// Delete Permanently on a deleted workspace, after its confirmation.
+export async function deleteDeletedWorkspace(id: string): Promise<string | null> {
+  try {
+    await deleteTrashedWorkspace(id);
+    return null;
+  } catch (err) {
+    return err instanceof Error ? err.message : String(err);
+  }
+}
+
+// The Undo of Remove from Ledge.
+async function reattach(
+  snap: WorkspaceSnapshot,
+  index: number,
+  dispatch: (action: Action) => void,
+): Promise<string | null> {
+  // The path the registry held, sent back through the same check a typed one
+  // gets (bun/workspaces.ts attachExternal): the folder was a root a moment
+  // ago, so the only refusal left is a change on disk meanwhile.
+  let res: Awaited<ReturnType<typeof attachFolder>>;
+  try {
+    res = await attachFolder(snap.folder);
+  } catch (err) {
+    return err instanceof Error ? err.message : String(err);
+  }
+  if (res.root === null) return res.error ?? "the folder could not be added back";
+  await bringBack(res.root, dispatch, { snap, index }, { name: snap.name, symbol: snap.symbol });
+  return null;
+}
+
+// Show a folder that just came back. Its lists are fetched first, since a
+// snapshot opens only the tabs its folder's note list still has.
+async function bringBack(
+  folder: string,
+  dispatch: (action: Action) => void,
+  from: { snap: WorkspaceSnapshot; index: number } | null,
+  label: { name: string; symbol: string },
+): Promise<void> {
+  const [notes, trash] = await Promise.all([
+    listNotes(folder).catch(() => []),
+    listTrash(folder).catch(() => []),
+  ]);
+  const ws = from ? reviveWorkspace(from.snap, folder, notes) : null;
+  if (from && ws) {
+    dispatch({ type: "reviveWorkspace", workspace: ws, index: from.index, notes, trash });
+    return;
+  }
+  dispatch({ type: "addWorkspace", name: label.name, folder, symbol: label.symbol });
+  dispatch({ type: "notesLoaded", folder, notes });
+  dispatch({ type: "trashLoaded", folder, items: trash });
 }
 
 // Re-fetch one folder's notes and trash. Each list dispatches on its own, so

@@ -13,9 +13,9 @@
 // are created. Notes live in the registered roots, never directly in APP_HOME.
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
-import { mkdir, readdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, rm, rmdir, stat, unlink, writeFile } from "node:fs/promises";
 import { slugify } from "../shared/slug";
-import type { WorkspaceRootInfo } from "../shared/rpc-schema";
+import type { TrashedWorkspace, WorkspaceRootInfo } from "../shared/rpc-schema";
 
 // The app's own folder, overridable so a test (or a throwaway run) can point
 // the whole app at a scratch folder. Nothing in the app sets the variable. Its
@@ -352,17 +352,231 @@ export async function attachExternal(path: string): Promise<{ root: string } | {
   return { root: p };
 }
 
-// Removes a root from the registry. This never touches the filesystem: closing
-// a workspace costs the registry line and no note bytes, the rename-not-unlink
+// Removes a root from the registry. This never touches the filesystem: Remove
+// from Ledge costs the registry line and no note bytes, the rename-not-unlink
 // stance applied to whole folders (architecture.md §3). A detached folder is
 // re-attachable with everything still in it, managed ones included, through
-// attachExternal's direct-child allowance.
+// attachExternal's direct-child allowance, and a later attach takes it back
+// without a dialog for as long as this process runs.
 export async function detachRoot(root: string): Promise<boolean> {
   // The docs root cannot be deregistered: dropping it mid-session would strand
   // open doc tabs outside every path guard. Closing the docs workspace is a
   // view arrangement, and the registry line stays.
   if (kindOf(root) === "docs") return false;
-  const removed = entries.delete(resolve(root));
+  const r = resolve(root);
+  const removed = entries.delete(r);
   if (removed) await save();
   return removed;
 }
+
+// --- the workspace trash -----------------------------------------------------
+
+// Deleted managed workspaces (architecture.md §3). Each entry is a directory
+// named by its id, holding the workspace folder and ENTRY_META: the name and
+// icon the strip showed, and when it was deleted. Attached folders never come
+// here; Remove from Ledge (detachRoot) is their only verb.
+export const WORKSPACE_TRASH = join(APP_HOME, ".ledge-trash");
+const ENTRY_META = "workspace.json";
+
+// Display strings from the view are capped rather than refused: they are
+// labels, never names on disk.
+const NAME_MAX = 200;
+const SYMBOL_MAX = 64;
+
+interface EntryMeta {
+  name: string;
+  symbol: string;
+  folder: string;
+  deletedAt: number;
+}
+
+// The entry directory an id names, or null. An id is one visible segment
+// directly inside WORKSPACE_TRASH: no separator, no dot-leading name, so no
+// id can reach the trash itself, its parent, or anything beside an entry. This
+// is the guard in front of the recursive delete below.
+export function trashEntryDir(id: string): string | null {
+  if (id === "" || id.startsWith(".") || /[/\\]/.test(id)) return null;
+  const dir = resolve(join(WORKSPACE_TRASH, id));
+  return dirname(dir) === resolve(WORKSPACE_TRASH) ? dir : null;
+}
+
+// The folder name inside an entry: the one its meta names when that is a
+// directory there, else the entry's only visible directory. A hand-edited or
+// half-written meta file costs the name, not the workspace.
+async function entryFolder(dir: string, meta: Partial<EntryMeta>): Promise<string | null> {
+  const named = typeof meta.folder === "string" ? meta.folder : "";
+  if (named && !named.startsWith(".") && !/[/\\]/.test(named)) {
+    if (await stat(join(dir, named)).then((s) => s.isDirectory()).catch(() => false)) return named;
+  }
+  const dirs = (await readdir(dir, { withFileTypes: true }).catch(() => []))
+    .filter((e) => e.isDirectory() && !e.name.startsWith("."));
+  return dirs.length === 1 ? dirs[0]!.name : null;
+}
+
+async function readEntryMeta(dir: string): Promise<Partial<EntryMeta>> {
+  try {
+    const json: unknown = JSON.parse(await readFile(join(dir, ENTRY_META), "utf8"));
+    return typeof json === "object" && json !== null ? (json as Partial<EntryMeta>) : {};
+  } catch {
+    return {};
+  }
+}
+
+// When an entry was deleted: its meta's stamp, else the entry directory's
+// mtime, which the meta write set when the entry was made.
+async function entryDeletedAt(dir: string, meta: Partial<EntryMeta>): Promise<number> {
+  if (typeof meta.deletedAt === "number" && Number.isFinite(meta.deletedAt)) return meta.deletedAt;
+  return stat(dir).then((s) => s.mtimeMs).catch(() => 0);
+}
+
+// How many notes a trashed folder holds, for the row and the confirm. Counts
+// visible .md files the way listNotes walks, without its ignore rules: the
+// number is what a permanent delete removes.
+async function countNotes(dir: string): Promise<number> {
+  let n = 0;
+  const walk = async (d: string): Promise<void> => {
+    for (const e of await readdir(d, { withFileTypes: true }).catch(() => [])) {
+      if (e.name.startsWith(".")) continue;
+      if (e.isDirectory()) await walk(join(d, e.name));
+      else if (e.isFile() && /\.md$/i.test(e.name)) n += 1;
+    }
+  };
+  await walk(dir);
+  return n;
+}
+
+// Moves a managed root's folder into the workspace trash and deregisters it.
+// One rename(2): managed folders and the trash both sit in APP_HOME, so the
+// move never crosses a volume. The root leaves the in-memory registry before
+// the rename, so no note write lands in the folder mid-move, and a failed
+// rename puts it back in its old place.
+export async function trashRoot(
+  root: string,
+  name: string,
+  symbol: string,
+): Promise<{ id: string } | { error: string }> {
+  const r = resolve(root);
+  const kind = kindOf(r);
+  if (kind === "docs") return { error: "the built-in documentation cannot be deleted" };
+  if (kind === "external") return { error: "an attached folder is removed from Ledge, not deleted" };
+  const entry = entries.get(r);
+  if (!entry) return { error: `not a registered workspace root: ${root}` };
+  if (!entry.available) return { error: `workspace folder is not available: ${root}` };
+  await mkdir(WORKSPACE_TRASH, { recursive: true });
+  const id = uniqueName(basename(r), new Set(await readdir(WORKSPACE_TRASH)), "");
+  const dir = join(WORKSPACE_TRASH, id);
+  const meta: EntryMeta = {
+    name: name.slice(0, NAME_MAX),
+    symbol: symbol.slice(0, SYMBOL_MAX),
+    folder: basename(r),
+    deletedAt: Date.now(),
+  };
+  // Undoes the entry by name, never recursively: on any failure path the
+  // entry holds at most the meta file. `made` keeps it off a directory some
+  // other call created.
+  let made = false;
+  const dropEntry = async () => {
+    if (!made) return;
+    await unlink(join(dir, ENTRY_META)).catch(() => {});
+    await rmdir(dir).catch(() => {});
+  };
+  const order = [...entries];
+  try {
+    await mkdir(dir);
+    made = true;
+    await writeFile(join(dir, ENTRY_META), JSON.stringify(meta), "utf8");
+    entries.delete(r);
+    await rename(r, join(dir, basename(r)));
+  } catch (err) {
+    entries.clear();
+    for (const [k, v] of order) entries.set(k, v);
+    await dropEntry();
+    return { error: `delete failed: ${err instanceof Error ? err.message : String(err)}` };
+  }
+  await save();
+  return { id };
+}
+
+// Every deleted workspace, newest first.
+export async function listTrashedWorkspaces(): Promise<TrashedWorkspace[]> {
+  const out: TrashedWorkspace[] = [];
+  for (const e of await readdir(WORKSPACE_TRASH, { withFileTypes: true }).catch(() => [])) {
+    const dir = e.isDirectory() ? trashEntryDir(e.name) : null;
+    if (!dir) continue;
+    const meta = await readEntryMeta(dir);
+    const folder = await entryFolder(dir, meta);
+    if (!folder) continue;
+    out.push({
+      id: e.name,
+      name: typeof meta.name === "string" && meta.name.trim() ? meta.name : folder,
+      symbol: typeof meta.symbol === "string" ? meta.symbol : "",
+      deletedAt: await entryDeletedAt(dir, meta),
+      notes: await countNotes(join(dir, folder)),
+    });
+  }
+  return out.sort((a, b) => b.deletedAt - a.deletedAt);
+}
+
+// Moves a deleted workspace's folder back into APP_HOME and registers it. The
+// folder keeps its name unless something took it meanwhile, in which case
+// uniqueName enumerates. The entry directory then goes, which unlinks only the
+// meta file this module wrote.
+export async function restoreTrashedWorkspace(
+  id: string,
+): Promise<{ root: string; name: string; symbol: string } | { error: string }> {
+  const dir = trashEntryDir(id);
+  if (!dir) return { error: `not a deleted workspace: ${id}` };
+  const meta = await readEntryMeta(dir);
+  const folder = await entryFolder(dir, meta);
+  if (!folder) return { error: `not a deleted workspace: ${id}` };
+  await ensureAppHome();
+  const next = resolve(join(APP_HOME, uniqueName(folder, new Set(await readdir(APP_HOME)), "")));
+  const conflict = nestingConflict(next);
+  if (conflict) return { error: `cannot restore ${folder}: nested with the workspace folder ${conflict}` };
+  try {
+    await rename(join(dir, folder), next);
+  } catch (err) {
+    return { error: `restore failed: ${err instanceof Error ? err.message : String(err)}` };
+  }
+  entries.set(next, { available: true });
+  await save();
+  await unlink(join(dir, ENTRY_META)).catch(() => {});
+  await rmdir(dir).catch(() => {});
+  return {
+    root: next,
+    name: typeof meta.name === "string" && meta.name.trim() ? meta.name : folder,
+    symbol: typeof meta.symbol === "string" ? meta.symbol : "",
+  };
+}
+
+// Deletes one trashed workspace for good: its folder and everything in it. The
+// view confirms first (interactions.md §4). Guarded by trashEntryDir, so only
+// an entry directly inside the workspace trash can go. False when it was
+// already gone.
+export async function deleteTrashedWorkspace(id: string): Promise<boolean> {
+  const dir = trashEntryDir(id);
+  if (!dir) throw new Error(`not a deleted workspace: ${id}`);
+  if (!(await stat(dir).then((s) => s.isDirectory()).catch(() => false))) return false;
+  await rm(dir, { recursive: true, force: true });
+  return true;
+}
+
+// Drops deleted workspaces past the TTL, once per launch (server.ts), on the
+// same clock and setting as purgeTrash for notes. Returns how many went.
+export async function purgeTrashedWorkspaces(ttlMs: number): Promise<number> {
+  const cutoff = Date.now() - ttlMs;
+  let n = 0;
+  for (const e of await readdir(WORKSPACE_TRASH, { withFileTypes: true }).catch(() => [])) {
+    const dir = e.isDirectory() ? trashEntryDir(e.name) : null;
+    if (!dir) continue;
+    if ((await entryDeletedAt(dir, await readEntryMeta(dir))) >= cutoff) continue;
+    try {
+      await rm(dir, { recursive: true, force: true });
+      n += 1;
+    } catch (err) {
+      console.error("[workspaces] could not purge a deleted workspace", dir, err);
+    }
+  }
+  return n;
+}
+

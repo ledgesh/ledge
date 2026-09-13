@@ -1,8 +1,10 @@
 // The workspace strip is a row list, and interactions.md R6 gives every row
 // kind the same grammar: Enter is the primary action (switch to it), ⌫ the
-// destructive one (close it), `r` the rename mnemonic. These specs cover that
-// grammar and its two guards: the last workspace cannot close, and while the
-// rename field is open the keys go into the text, not to the row verbs.
+// destructive one (Delete Workspace, or Remove from Ledge on an attached
+// folder), `r` the rename mnemonic. These specs cover that grammar and its two
+// guards: the last workspace cannot go, and while the rename field is open the
+// keys go into the text, not to the row verbs. The deleted workspaces' own
+// Trash section and the Undo strip are covered at the end.
 import { expect, test, type Page } from "@playwright/test";
 
 const wsRow = (page: Page, name: string) =>
@@ -68,7 +70,7 @@ test("keys typed in the rename field are typing, never row verbs", async ({ page
   await expect(page.locator('[data-target-kind="workspace"]')).toHaveCount(2);
 });
 
-test("⌫ closes the focused workspace", async ({ page }) => {
+test("⌫ deletes the focused workspace", async ({ page }) => {
   await page.keyboard.press("Meta+Shift+N");
   await wsRow(page, "Workspace 2").click();
   await page.keyboard.press("Backspace");
@@ -78,7 +80,7 @@ test("⌫ closes the focused workspace", async ({ page }) => {
   await expect(wsRow(page, "Scratch")).toHaveClass(/bg-accent/);
 });
 
-test("the last workspace refuses to close", async ({ page }) => {
+test("the last workspace refuses to go", async ({ page }) => {
   await wsRow(page, "Scratch").click();
   await page.keyboard.press("Backspace");
   await expect(wsRow(page, "Scratch")).toBeVisible();
@@ -106,4 +108,82 @@ test("a right-click on a row opens that row's menu, not the strip's", async ({ p
   await wsRow(page, "Scratch").click({ button: "right" });
   await expect(page.getByRole("menuitem", { name: "Rename Workspace…" })).toBeVisible();
   await expect(page.getByRole("menuitem", { name: "Attach Folder as Workspace…" })).toHaveCount(0);
+});
+
+const trashSection = (page: Page) => page.getByTestId("workspace-trash");
+const trashedRow = (page: Page, name: string) =>
+  page.locator('[data-target-kind="trashedWorkspace"]', { hasText: name });
+
+// A second workspace, with a note typed into it so there is something whose
+// survival the specs below can check.
+async function workspaceWithNote(page: Page): Promise<void> {
+  await page.keyboard.press("Meta+Shift+N");
+  await expect(wsRow(page, "Workspace 2")).toBeVisible();
+  await page.keyboard.press("Meta+n");
+  await page.keyboard.type("Kept Note");
+  await expect(page.locator('[data-target-kind="note"]', { hasText: "Kept Note" })).toBeVisible();
+}
+
+test("a deleted workspace comes back from the Undo strip, where it was and with its note", async ({ page }) => {
+  await workspaceWithNote(page);
+  await wsRow(page, "Workspace 2").click();
+  await page.keyboard.press("Backspace");
+  await expect(wsRow(page, "Workspace 2")).toHaveCount(0);
+  await expect(page.getByText("Deleted “Workspace 2”")).toBeVisible();
+  await expect(trashedRow(page, "Workspace 2")).toHaveCount(0); // the section starts collapsed
+  await expect(trashSection(page)).toContainText("Trash");
+  await page.getByRole("button", { name: "Undo" }).click();
+  await expect(wsRow(page, "Workspace 2")).toHaveClass(/(^|\s)bg-accent(\s|$)/);
+  await expect(page.locator('[data-target-kind="note"]', { hasText: "Kept Note" })).toBeVisible();
+  await expect(trashSection(page)).toHaveCount(0); // the trash is empty again
+});
+
+test("the strip's Trash section restores a deleted workspace with `r`", async ({ page }) => {
+  await workspaceWithNote(page);
+  await wsRow(page, "Workspace 2").click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Delete Workspace" }).click();
+  await expect(wsRow(page, "Workspace 2")).toHaveCount(0);
+  await trashSection(page).getByRole("button", { name: /Trash/ }).click();
+  await trashedRow(page, "Workspace 2").click();
+  await page.keyboard.press("r");
+  await expect(wsRow(page, "Workspace 2")).toBeVisible();
+  await expect(page.locator('[data-target-kind="note"]', { hasText: "Kept Note" })).toBeVisible();
+});
+
+test("Delete Permanently asks first, focused on Cancel, and says how many notes go", async ({ page }) => {
+  await workspaceWithNote(page);
+  await wsRow(page, "Workspace 2").click();
+  await page.keyboard.press("Backspace");
+  await trashSection(page).getByRole("button", { name: /Trash/ }).click();
+  await trashedRow(page, "Workspace 2").click();
+  await page.keyboard.press("d");
+  const dialog = page.getByRole("alertdialog");
+  await expect(dialog).toContainText("Delete “Workspace 2” permanently?");
+  await expect(dialog).toContainText("Its 1 note");
+  await expect(dialog.getByRole("button", { name: "Cancel" })).toBeFocused();
+  await dialog.getByRole("button", { name: "Delete Permanently" }).click();
+  await expect(trashSection(page)).toHaveCount(0);
+  const left = await page.evaluate(() => window.__harness.deletedWorkspaces());
+  expect(left).toEqual([]);
+});
+
+test("an attached workspace's ⌫ is Remove from Ledge, and Undo adds the folder back", async ({ page }) => {
+  await page.getByLabel("Add workspace options").click();
+  await page.getByRole("menuitem", { name: /Attach Folder as Workspace/ }).click();
+  // The dialog asks for a path; the harness's Choose Folder… fills its one
+  // external folder (workspaces-scoped.spec.ts does the same).
+  const dialog = page.getByRole("dialog", { name: /Attach Folder/ });
+  await dialog.getByRole("button", { name: "Choose Folder…" }).click();
+  await dialog.getByRole("button", { name: "Attach", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(wsRow(page, "external")).toBeVisible();
+  await wsRow(page, "external").click({ button: "right" });
+  await expect(page.getByRole("menuitem", { name: "Remove from Ledge" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Delete Workspace" })).toHaveCount(0);
+  await page.getByRole("menuitem", { name: "Remove from Ledge" }).click();
+  await expect(wsRow(page, "external")).toHaveCount(0);
+  await expect(page.getByText("Removed “external” from Ledge")).toBeVisible();
+  await expect(trashSection(page)).toHaveCount(0); // nothing went to the trash
+  await page.getByRole("button", { name: "Undo" }).click();
+  await expect(wsRow(page, "external")).toBeVisible();
 });

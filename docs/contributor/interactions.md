@@ -19,8 +19,8 @@ blank is optional. A finger has four of these six columns unavailable to it;
 | --------------------------------------------------------------- | --------------------------- | -------------------- | ------------------ | ---------------- | ----------------- | ------ |
 | High-frequency create/navigate (new note, go to note, switch)   | ✓                           | where an anchor exists | –                | ✓                | –                 | –      |
 | Layout (split, close pane, toggle sidebar/terminal)             | ✓                           | ✓ in-situ            | pane/tab menu      | ✓                | –                 | resize |
-| Object-scoped ops (rename/close workspace, delete note, close tab) | focused object only      | hover-revealed       | ✓ *canonical home* | ✓ on current     | rename accelerator | reorder |
-| **Row verbs** (open/delete a note, restore/purge a trashed one, rename/close a workspace) | ✓ bare key on the focused row | hover-revealed | ✓ *canonical home* | ✓ on current, if one exists | rename accelerator | reorder |
+| Object-scoped ops (rename/delete workspace, delete note, close tab) | focused object only     | hover-revealed       | ✓ *canonical home* | ✓ on current     | rename accelerator | reorder |
+| **Row verbs** (open/delete a note, restore/purge a trashed one, rename/delete a workspace) | ✓ bare key on the focused row | hover-revealed | ✓ *canonical home* | ✓ on current, if one exists | rename accelerator | reorder |
 | Destructive-irreversible (empty trash, delete permanently)      | – never a chord; ✓ row verb behind a confirm | button in owning section | ✓ | ✓ (confirmed) | – | – |
 | Editor-internal (find, run block, save)                         | ✓ CodeMirror keymap         | hover block buttons  | the note's own menu, §11 | ✓ (refocuses editor) | –       | –      |
 | Pointer gestures (resize, drag-reorder)                         | –                           | –                    | –                  | not commands     | –                 | ✓      |
@@ -587,7 +587,7 @@ CodeMirror and never at the window level.
 | Expand / Collapse     | `↩` on a focused folder row (also its menu) | a folder's primary action is showing what is in it (R6), so this is its Enter and its click. One command with a LIVE TITLE rather than a two-faces pair, for `frontmatter.edit`'s reason one register down: it holds a bare key, and two commands may not claim one bare key on one row kind. Collapsing takes the folder's descendants with it, so reopening it does not spill a subtree you closed a while ago. Which folders are open rides in `.layout.json` beside the pane tree (`workspace/persist.ts`), so it outlives the session: a relaunch reopens the tree rather than the top level, and a folder that has since gone comes back closed |
 | Rename Workspace…     | `r` (also menu / palette / double-click) | |
 | Change Icon…          | `i` (also menu / palette) | opens the icon grid on the workspace's row |
-| Close Workspace       | `⌫` (also menu / hover ✕) | detaches the folder from the registry; every note stays on disk, re-attachable |
+| Delete Workspace / Remove from Ledge | `⌫` (also menu / hover button) | ONE command with a LIVE TITLE (`workspace.remove`), for Favorite's reason: it holds a bare key. The face follows the target's kind, and so do its icon and the hover button's. MANAGED: Delete Workspace (trash can) moves the folder into the app home's `.ledge-trash` (architecture.md §3), and the strip's Trash section lists it until Restore, Delete Permanently…, or the 30-day purge. ATTACHED: Remove from Ledge (✕) takes the folder out of the registry and touches nothing in it; the way back after the strip fades is Attach Folder as Workspace…. Both are §4's first class: no confirm, and the note browser's Undo strip, whose Undo puts the workspace back at its strip position with its name, icon, panes and tabs (a snapshot through `workspace/persist.ts`). Pending saves flush first, while every note's root is still registered. On the docs workspace (a phone's palette only) the face is Close Documentation, a view arrangement. The last strip workspace can do none of these |
 | Copy Path             | `c` (also note context menu) | |
 | Empty Trash…          | — (button / palette, confirmed) | |
 
@@ -599,7 +599,8 @@ Row verbs, by row kind. Each fires only while a row of that kind has focus
 | Note      | Open              | Delete (to trash, undoable) | `c` Copy Path, `f` Favorite (Unfavorite on a marked row), `m` Move to Folder…; menu: the favorite verb, then the lock faces + the state-matching vault verb (locking.md §7). The favorite verb also has a hover star at the row's right edge, which stays visible once the note is marked, since that is what the section above is drawn from. On touch that button is absent (§1a) and the marked star stays as a glyph: 20 points between the title and the row's own tap is a mis-tap, and the long press carries the verb |
 | Folder    | Expand / Collapse | Delete Folder… (confirmed, then undoable) | `r` Rename Folder…, `/` Search in Folder; menu: Rename Folder…, Search in Folder, New Note in Folder, New Folder… (nested), then Delete Folder… under a divider. Neither mutating verb is a verb on the folder wearing a hat: a folder is a row only in that notes are in it, so a rename is a verb on THOSE NOTES and every one of them travels, and a delete is a verb on those notes and every one of them goes to the trash. The row then goes because nothing is in it, which is what losing the last note has always done. The confirm is §4's unseen-extent case, not its unlink case. What the browser still cannot do is make an empty folder, or keep one after the last note leaves |
 | Trash     | —                 | Delete Permanently… (confirmed) | `r` Restore |
-| Workspace | Switch to it      | Close Workspace            | `r` Rename, `i` Change Icon |
+| Workspace | Switch to it      | Delete Workspace (managed; to the trash, undoable) / Remove from Ledge (attached; undoable) | `r` Rename, `i` Change Icon; menu: the ⌫ verb under a divider |
+| Deleted workspace | —         | Delete Permanently… (confirmed) | `r` Restore. Rows of the Trash section between the strip and its New Workspace button, which draws nothing while the trash is empty: the note browser's Trash section one register up |
 | Backlink  | Open at the link  | —                          | menu: Copy Path (the note-row command on the linking note) |
 | Heading   | Jump to Heading   | —                          | `c` Copy Link — the heading's `[[Title#Heading]]` (plain `[[Title]]` when the row is the H1) |
 | Tag       | Show Notes (drill in) | —                      | the same `tag.open` verb every tag click runs |
@@ -610,10 +611,13 @@ Row verbs, by row kind. Each fires only while a row of that kind has focus
 - **Reversible destruction → no confirmation, provide undo.** Deleting a note
   moves it to its workspace folder's `.ledge-trash` and shows the Undo strip; a
   prompt in front of an undoable action teaches people to click through
-  prompts.
-- **Irreversible destruction → modal confirmation, focus on Cancel.** Two such
-  actions exist, both in the Trash section: **Empty Trash** and **Delete
-  Permanently** (one row). The confirmation *is* the command's behavior — the
+  prompts. Delete Workspace is the same class one register up: the folder moves
+  into the app home's `.ledge-trash`, and the same strip offers it back.
+- **Irreversible destruction → modal confirmation, focus on Cancel.** Three such
+  actions exist, each in a Trash section: **Empty Trash** and **Delete
+  Permanently** on a note row in the note browser's, and **Delete Permanently**
+  on a deleted workspace in the strip's, which removes the folder and
+  everything in it and says how many notes that is. The confirmation *is* the command's behavior — the
   command opens the dialog rather than deleting, so the row verb (`d`), the
   menu item, and the button cannot diverge into an unconfirmed path. Anything
   that unlinks a file, rather than moving it aside, joins this list.
@@ -627,11 +631,13 @@ Row verbs, by row kind. Each fires only while a row of that kind has focus
   the body becomes readable again by anything that syncs the folder. What
   earns a click here is a dialog that ANSWERS something; one that only asks
   belongs on the first bullet and is the tax it describes.
-- **Arrangement loss (close tab / pane / workspace, restart a note's shells)
-  → neither.** No data is destroyed; notes stay on disk. Closing a workspace
-  detaches its folder from the registry but unlinks nothing — the folder is
-  re-attachable with everything in it, which is what keeps it in this class
-  rather than the confirmed one. Restart Note Shell sits here deliberately:
+- **Arrangement loss (close tab / pane, remove an attached workspace, restart
+  a note's shells) → no confirmation.** No data is destroyed; notes stay on
+  disk. Remove from Ledge detaches an attached folder from the registry but
+  touches nothing in it, which is what keeps it out of the confirmed class. It
+  still gets the Undo strip: a workspace that vanishes from the strip reads as
+  deleted whatever happened on disk, and the way back through a dialog that
+  asks for a path is not one a person finds in a hurry. Restart Note Shell sits here deliberately:
   closing a tab already kills the same shells unconfirmed, and a confirm on
   the command whose whole point is "apply my frontmatter now" would be
   friction teaching click-through.

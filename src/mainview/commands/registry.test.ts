@@ -42,7 +42,12 @@ function stubDeps(
       calls.push(`attachWorkspace:${path}`);
       return null;
     },
-    closeWorkspace: (id) => calls.push(`closeWorkspace:${id}`),
+    removeWorkspace: async (id) => {
+      calls.push(`removeWorkspace:${id}`);
+      return { error: null, undo: { label: "Deleted", run: async () => null } };
+    },
+    trashedWorkspace: (id) =>
+      id === "gone" ? { id, name: "Gone", symbol: "", deletedAt: 0, notes: 3 } : undefined,
     workspaceKind: () => "external",
     docsFolder: () => null,
     openDocs: async (_state, _dispatch, page) => {
@@ -231,11 +236,65 @@ describe("registry", () => {
     expect(covered).toEqual([]);
   });
 
-  test("enablement: workspace.close needs a second workspace", () => {
+  test("enablement: workspace.remove needs a second workspace", () => {
     const one = initialState(FOLDER, []);
-    expect(find(commands, "workspace.close").when!(makeCtx(one))).toBe(false);
+    expect(find(commands, "workspace.remove").when!(makeCtx(one))).toBe(false);
     const two = apply(one, secondWs);
-    expect(find(commands, "workspace.close").when!(makeCtx(two))).toBe(true);
+    expect(find(commands, "workspace.remove").when!(makeCtx(two))).toBe(true);
+  });
+
+  test("workspace.remove says what ⌫ does to the kind of folder it targets", () => {
+    const state = apply(initialState(FOLDER, []), secondWs);
+    const title = (kind: "managed" | "external", target?: string) => {
+      const cmd = find(buildCommands({ ...stubDeps([]), workspaceKind: () => kind }), "workspace.remove");
+      const ctx: CommandCtx = { ...makeCtx(state), target: target ? { kind: "workspace", id: target } : undefined };
+      return [(cmd.title as (c: CommandCtx) => string)(ctx), cmd.iconOf!(ctx).displayName ?? ""];
+    };
+    expect(title("managed")[0]).toBe("Delete Workspace");
+    expect(title("external")[0]).toBe("Remove from Ledge");
+    expect(title("external", state.workspaces[0]!.id)[0]).toBe("Remove from Ledge");
+    expect(title("managed")[1]).not.toBe(title("external")[1]); // a trash can against a cross
+  });
+
+  test("workspace.remove offers the action's Undo, or shows its refusal", async () => {
+    const state = apply(initialState(FOLDER, []), secondWs);
+    const offered: string[] = [];
+    const errors: string[] = [];
+    const ui = {
+      offerUndo: (u: { label: string }) => offered.push(u.label),
+      showError: (m: string) => errors.push(m),
+    };
+    const ok = buildCommands(stubDeps([]));
+    find(ok, "workspace.remove").run({ ...makeCtx(state), ui });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(offered).toEqual(["Deleted"]);
+    const refused = buildCommands({
+      ...stubDeps([]),
+      removeWorkspace: async () => ({ error: "nope", undo: null }),
+    });
+    find(refused, "workspace.remove").run({ ...makeCtx(state), ui });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(errors).toEqual(["nope"]);
+  });
+
+  test("trashed-workspace rows: r restores, d asks to delete for good, and only a row can name one", () => {
+    const state = initialState(FOLDER, []);
+    const restored: string[] = [];
+    const confirming: string[] = [];
+    const ui = {
+      restoreTrashedWorkspace: (id: string) => restored.push(id),
+      confirmDeleteTrashedWorkspace: (item: { name: string; notes: number }) =>
+        confirming.push(`${item.name}:${item.notes}`),
+    };
+    const row: CommandCtx = { ...makeCtx(state), ui, target: { kind: "trashedWorkspace", id: "gone" } };
+    expect(find(commands, "workspace.restore").when!(makeCtx(state))).toBe(false);
+    expect(find(commands, "workspace.purge").when!(makeCtx(state))).toBe(false);
+    find(commands, "workspace.restore").run(row);
+    find(commands, "workspace.purge").run(row);
+    expect(restored).toEqual(["gone"]);
+    expect(confirming).toEqual(["Gone:3"]);
   });
 
   test("enablement: pane.close needs a second pane", () => {
@@ -592,15 +651,15 @@ describe("registry", () => {
   });
 
   test("run: workspace commands route through the action deps, not the reducer", () => {
-    // Creating needs a Bun round trip (the folder). Closing must detach the
-    // folder after the reducer closes the view. Both go through deps so the
-    // registry stays pure.
+    // Creating needs a Bun round trip (the folder). Removing trashes or
+    // detaches the folder after the reducer closes the view. Both go through
+    // deps so the registry stays pure.
     const calls: string[] = [];
     const cmds = buildCommands(stubDeps(calls));
     const state = apply(initialState(FOLDER, []), secondWs);
     find(cmds, "workspace.new").run(makeCtx(state));
-    find(cmds, "workspace.close").run(makeCtx(state));
-    expect(calls).toEqual(["createWorkspace", `closeWorkspace:${state.selectedId}`]);
+    find(cmds, "workspace.remove").run(makeCtx(state));
+    expect(calls).toEqual(["createWorkspace", `removeWorkspace:${state.selectedId}`]);
   });
 
   test("workspace.attach opens the dialog, which asks for the path", () => {
@@ -902,7 +961,7 @@ describe("registry", () => {
     expect(ids).toContain("note.new");
     expect(ids).toContain("workspace.select.1");
     expect(ids).not.toContain("workspace.select.2"); // only one workspace
-    expect(ids).not.toContain("workspace.close"); // when-false
+    expect(ids).not.toContain("workspace.remove"); // when-false
     expect(ids).not.toContain("tab.select.1"); // palette: false
     expect(ids).not.toContain("note.delete"); // menu-only form
     const newNote = items.find((i) => i.id === "note.new")!;
@@ -1100,10 +1159,10 @@ describe("registry", () => {
     const docsWs = state.workspaces.find((w) => w.folder === DOCS)!;
     const realWs = state.workspaces.find((w) => w.folder === FOLDER)!;
     const on = (id: string): CommandCtx => ({ ...makeCtx(state), target: { kind: "workspace", id } });
-    expect(find(cmds, "workspace.close").when!(on(docsWs.id))).toBe(true);
+    expect(find(cmds, "workspace.remove").when!(on(docsWs.id))).toBe(true);
     // The real workspace is the last one with a strip row, so closing it would
     // leave the user in a workspace the strip never shows.
-    expect(find(cmds, "workspace.close").when!(on(realWs.id))).toBe(false);
+    expect(find(cmds, "workspace.remove").when!(on(realWs.id))).toBe(false);
   });
 });
 

@@ -22,6 +22,7 @@ describe("targetAttrs / targetFromDataset", () => {
       { kind: "tag", tag: "project/ledge" },
       { kind: "tagnote", path: "/n/a.md", line: 4, raw: "#work" },
       { kind: "workspace", id: "ws1" },
+      { kind: "trashedWorkspace", id: "research-2" },
       { kind: "tab", paneId: "p1", tabId: "t1" },
       { kind: "pane", paneId: "p1" },
     ] as const;

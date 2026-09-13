@@ -122,11 +122,11 @@ test("attach surfaces the picked folder's notes as a new workspace", async ({ pa
   await expect(page.locator("[data-active]")).toContainText("Delta");
 });
 
-test("close then re-attach: the folder's notes survived the close", async ({ page }) => {
+test("remove then re-attach: the folder's notes survived the removal", async ({ page }) => {
   await attachExternal(page);
   await expect(noteRow(page, "Delta")).toBeVisible();
-  // Close the workspace (⌫ on its focused row). Closing removes only the
-  // registry entry. The files must not be deleted.
+  // Remove from Ledge (⌫ on an attached workspace's focused row) removes only
+  // the registry entry. The files must not be deleted.
   await wsRow(page, "external").click();
   await page.keyboard.press("Backspace");
   await expect(wsRow(page, "external")).toHaveCount(0);

@@ -195,6 +195,10 @@ export const REQUEST_METHODS = [
   "workspaceCreate",
   "workspaceAttach",
   "workspaceDetach",
+  "workspaceTrash",
+  "workspaceTrashList",
+  "workspaceTrashRestore",
+  "workspaceTrashDelete",
   "noteList",
   "noteRead",
   "noteWrite",
@@ -458,6 +462,7 @@ export type RequestClient = {
  */
 export const READ_ONLY_METHODS = [
   "workspaceList",
+  "workspaceTrashList",
   "noteList",
   "noteRead",
   "noteSearch",

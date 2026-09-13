@@ -96,7 +96,9 @@ export const MENU: readonly MenuSection[] = [
       { command: "folder.new" },
       "---",
       { command: "workspace.new" },
-      { command: "workspace.attach" },
+      // Absent rather than greyed where this machine has no folder picker (a
+      // server over a connection): no state of this window would enable it.
+      { command: "workspace.attach", hideWhenDisabled: true },
       // Beside Switch Connection rather than with the other News: a window is a
       // client of one server, so choosing a window is choosing a machine
       // (remote.md §8a).
@@ -112,7 +114,7 @@ export const MENU: readonly MenuSection[] = [
       "---",
       { command: "tab.close" },
       { command: "pane.close" },
-      { command: "workspace.close" },
+      { command: "workspace.remove" },
       "---",
       // No key equivalent. ⌘⌫ is CodeMirror's delete-to-line-start in the
       // editor, which is why note.deleteCurrent is page-focus-only

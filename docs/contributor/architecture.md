@@ -196,8 +196,12 @@ Bun therefore validates everything and derives anything derivable:
   anything holding it, not nested with another root — and answers the
   refusal as a sentence, `remote.md` §5), or Bun's own in-memory-only docs
   root (§3b — registered for the read paths, refused by every write). A root
-  never relocates: moving a folder is Finder's job, then close and attach
-  again. The registry file `.workspaces.json` is machine-written
+  never relocates: moving a folder is Finder's job, then remove and attach
+  again. A root that LEFT comes back under the same rule. The Undo of Remove
+  from Ledge is `workspaceAttach` again, with the path the registry held,
+  checked like any typed one. Restoring a deleted workspace
+  (`workspaceTrashRestore`) names only a trash entry id, and Bun moves that
+  entry's folder back into APP_HOME itself. The registry file `.workspaces.json` is machine-written
   AND Bun-shaped; the view cannot read or write its bytes. No root may
   equal or contain another (rootContaining must have a unique answer), or
   reach the app home itself.
@@ -291,27 +295,42 @@ Bun therefore validates everything and derives anything derivable:
   is a rename, within one root: a note's root decides its wikilink scope, its tag directory, its
   asset pool and its trash, so cross-root is four migrations rather than a
   rename and is not offered. Moving a workspace is not offered either: it
-  is Finder's rename, then close and attach the folder at its new path, so
+  is Finder's rename, then remove and attach the folder at its new path, so
   no code here ever copies-then-unlinks every note across a volume.
-  Detaching a workspace touches no file at all: the registry
-  line goes, the folder stays, re-attachable. Exactly three code paths
-  unlink a *note* — `deleteTrashed`, `emptyTrash`, `purgeTrash` — all in
-  `bun/notes.ts`, all gated by `assertTrashed`, and the first two sit behind
-  a confirmation (interactions.md §4). `assertTrashed` accepts a `.md` file
+  Detaching a workspace (Remove from Ledge, attached folders only)
+  touches no file at all: the registry line goes, the folder stays,
+  re-attachable. Deleting a MANAGED workspace (`trashRoot`) is one rename of
+  its folder into the app home's own `.ledge-trash`, inside an entry directory
+  named by an id, beside a `workspace.json` holding the name and icon the
+  strip showed. Managed folders and that trash are both direct children of
+  APP_HOME, so the rename never crosses a volume, and an attached folder is
+  refused rather than moved: it may be on another disk, and it is the user's.
+  Exactly three code paths unlink a *note* one file at a time
+  (`deleteTrashed`, `emptyTrash`, `purgeTrash`), all in `bun/notes.ts`, all
+  gated by `assertTrashed`, and the first two sit behind a confirmation
+  (interactions.md §4). Two more remove a whole deleted workspace, recursively:
+  `deleteTrashedWorkspace` and `purgeTrashedWorkspaces` in
+  `bun/workspaces.ts`, both gated by `trashEntryDir` (an id is one visible
+  segment directly inside the app home's `.ledge-trash`, so no id reaches the
+  trash itself, its parent, or a live workspace beside it), and the first sits
+  behind a confirmation that says how many notes go. `assertTrashed` accepts a `.md` file
   *visibly* inside the trash at any depth — visible meaning no dot-segment
   below `.ledge-trash`, the same rule `trashFiles` walks by, so the guard
   accepts exactly the set the Trash section listed. It used to require the
   file sit directly in the trash; that broke when the trash gained folders
   (below), because it would then refuse to restore or empty precisely the
   notes the mirroring is for. **Anything new that unlinks a file
-  joins all three lists: the guard, the confirm, and this sentence.** (Two
-  `unlink`s in the repo are outside the notes tree and so outside that rule.
+  joins all three lists: the guard, the confirm, and this sentence.** (Three
+  `unlink`s in the repo are outside that rule.
   `writeNote` discards its own temp file after a failed save — a dotted file
-  it created moments earlier that no listing ever shows. `updateCache.ts`
+  it created moments earlier that no listing ever shows.
+  `restoreTrashedWorkspace`, and `trashRoot` when its rename fails, remove the
+  `workspace.json` that module wrote beside a trashed folder, then the entry
+  directory with `rmdir` only. `updateCache.ts`
   prunes Electrobun's `self-extraction` folder in Application Support, where
   each installed version leaves an 80MB tar; it keeps the running version's,
   because the updater bsdiffs from it, and deletes nothing at all when it
-  cannot tell which that is. Both act on files the app wrote, named by the
+  cannot tell which that is. All three act on files the app wrote, named by the
   app, that no user chose and no listing shows.)
 - **The trash mirrors the workspace's folders.** A note deleted from
   `projects/api` lands in `.ledge-trash/projects/api`, and a restore reads its
@@ -521,7 +540,7 @@ Bun therefore validates everything and derives anything derivable:
   `ledge.log`.
 - **`LEDGE_NOTES_ROOT`** overrides the APP HOME (`~/.ledge` — where
   `settings.jsonc`, `.layout.json`, `.workspaces.json`, `.client/`,
-  `logs/`, and
+  `logs/`, the deleted workspaces' `.ledge-trash`, and
   the managed workspace folders live; `APP_HOME` in `bun/workspaces.ts`) for tests and
   throwaway runs. The env name predates the per-workspace split and is kept:
   every preload and probe already speaks it. Nothing in the app sets it;

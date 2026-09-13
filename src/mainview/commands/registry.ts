@@ -276,6 +276,19 @@ export function buildCommands(deps: RegistryDeps): Command[] {
   // docs workspace is excluded from both (Sidebar filters the same way).
   const stripWorkspaces = (ctx: CommandCtx) =>
     ctx.state.workspaces.filter((w) => deps.workspaceKind(w.folder) !== "docs");
+  // workspace.remove's face for its target: what the verb does to that kind of
+  // folder, in words and in a glyph.
+  const removeFace = (ctx: CommandCtx) => {
+    const ws = ctx.state.workspaces.find((w) => w.id === targetWorkspaceId(ctx));
+    const kind = ws ? deps.workspaceKind(ws.folder) : null;
+    if (kind === "external") return { title: "Remove from Ledge", icon: X };
+    if (kind === "docs") return { title: "Close Documentation", icon: X };
+    return { title: "Delete Workspace", icon: Trash2 };
+  };
+  // The deleted workspace a Trash-section row names, as the section's mirror
+  // holds it: the confirm needs its name and note count.
+  const targetTrashedWorkspace = (ctx: CommandCtx) =>
+    ctx.target?.kind === "trashedWorkspace" ? deps.trashedWorkspace(ctx.target.id) : undefined;
 
   const list: Command[] = [
     // --- create / navigate --------------------------------------------------
@@ -567,20 +580,53 @@ export function buildCommands(deps: RegistryDeps): Command[] {
       when: (ctx) => !docsTargeted(ctx),
       run: (ctx) => ctx.ui.pickWorkspaceIcon?.(targetWorkspaceId(ctx)),
     }),
-    cmd("workspace.close", {
+    // The destructive verb on a workspace row, titled by what it will do
+    // (keys.ts says why it is one command). A managed folder goes to the app
+    // home's trash and an attached one leaves the registry, both with an Undo
+    // strip and no confirm (interactions.md §4). The docs workspace has no
+    // strip row, so the palette form is how it closes: a view arrangement.
+    {
+      id: "workspace.remove",
+      title: (ctx) => removeFace(ctx).title,
+      iconOf: (ctx) => removeFace(ctx).icon,
       icon: Trash2,
+      listKeys: listKeysOf("workspace.remove"),
       targetKind: "workspace",
       destructive: true,
       // Closing the docs workspace needs only some other workspace to land
-      // on. Closing a real one has to leave another real one behind: the docs
+      // on. Removing a real one has to leave another real one behind: the docs
       // workspace has no strip row, so it would not show the user where they
       // ended up.
       when: (ctx) =>
         docsTargeted(ctx) ? ctx.state.workspaces.length > 1 : stripWorkspaces(ctx).length > 1,
-      // Closes the view and detaches the folder from the registry. No file is
-      // touched: the folder stays on disk, re-attachable with everything in
-      // it, so this takes no confirmation (interactions.md §4).
-      run: (ctx) => deps.closeWorkspace(targetWorkspaceId(ctx), ctx.state, ctx.dispatch),
+      run: (ctx) => {
+        void deps.removeWorkspace(targetWorkspaceId(ctx), ctx.state, ctx.dispatch).then((res) => {
+          if (res.error) ctx.ui.showError?.(res.error);
+          else if (res.undo) ctx.ui.offerUndo?.(res.undo);
+        }, failed(ctx));
+      },
+    },
+    // A row of the strip's Trash section. Palette-less like note.restore: they
+    // act on a specific deleted workspace, which only a row names.
+    cmd("workspace.restore", {
+      icon: RotateCcw,
+      targetKind: "trashedWorkspace",
+      palette: false,
+      when: (ctx) => ctx.target?.kind === "trashedWorkspace",
+      run: (ctx) => {
+        if (ctx.target?.kind === "trashedWorkspace") ctx.ui.restoreTrashedWorkspace?.(ctx.target.id);
+      },
+    }),
+    cmd("workspace.purge", {
+      icon: Trash2,
+      targetKind: "trashedWorkspace",
+      destructive: true,
+      palette: false,
+      when: (ctx) => !!targetTrashedWorkspace(ctx),
+      run: (ctx) => {
+        const item = targetTrashedWorkspace(ctx);
+        if (item) ctx.ui.confirmDeleteTrashedWorkspace?.(item);
+      },
     }),
 
     // --- chrome --------------------------------------------------------------
@@ -1406,7 +1452,7 @@ export function paletteItems(commands: readonly Command[], ctx: CommandCtx): Pal
       title: typeof c.title === "function" ? c.title(ctx) : c.title,
       chip: chipOf(c.keys, c.listKeys),
       chorded: (c.keys?.length ?? 0) > 0,
-      icon: c.icon,
+      icon: c.iconOf?.(ctx) ?? c.icon,
       destructive: c.destructive,
     });
   }

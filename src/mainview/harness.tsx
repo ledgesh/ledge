@@ -10,7 +10,7 @@
 // is index.html, so none of this ships.
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import type { BacklinkHit, NoteMeta, TagHit, TerminalClaim, TrashMeta, UpdateState, VaultState, WorkspaceRootInfo } from "../shared/rpc-schema";
+import type { BacklinkHit, NoteMeta, TagHit, TerminalClaim, TrashedWorkspace, TrashMeta, UpdateState, VaultState, WorkspaceRootInfo } from "../shared/rpc-schema";
 import { headingOf, labelOf, slugify, slugOf } from "../shared/slug";
 import { frontmatterEnd, parseFrontmatter, setFavoriteLine } from "../shared/frontmatter";
 import { instantiateTemplate, isoDateOf } from "../shared/template";
@@ -165,6 +165,56 @@ class FakeStore {
     if (i < 0) return false;
     this.attached.splice(i, 1);
     return true; // the data stays: detach never deletes
+  }
+
+  // The workspace trash (bun/workspaces.ts trashRoot and its siblings): a
+  // deleted managed root's data leaves `roots` whole, and a restore puts it back
+  // under the same folder name unless that was taken meanwhile.
+  deletedWorkspaces: Array<{ id: string; name: string; symbol: string; deletedAt: number; folder: string; data: RootData }> = [];
+  trashRoot(root: string, name: string, symbol: string): { id: string | null; error: string | null } {
+    const data = this.roots.get(root);
+    const kind = this.workspaceList().find((w) => w.root === root)?.kind;
+    if (!data || kind !== "managed") return { id: null, error: "an attached folder is removed from Ledge, not deleted" };
+    const folder = root.split("/").pop()!;
+    let id = folder;
+    for (let n = 2; this.deletedWorkspaces.some((d) => d.id === id); n += 1) id = `${folder}-${n}`;
+    this.roots.delete(root);
+    this.attached = this.attached.filter((r) => r !== root);
+    this.deletedWorkspaces.unshift({ id, name, symbol, deletedAt: this.tick(), folder: root, data });
+    return { id, error: null };
+  }
+  trashedWorkspaces(): TrashedWorkspace[] {
+    return this.deletedWorkspaces.map(({ id, name, symbol, deletedAt, data }) => ({
+      id,
+      name,
+      symbol,
+      deletedAt,
+      notes: data.notes.size,
+    }));
+  }
+  restoreWorkspace(id: string): { root: string | null; name: string; symbol: string; error: string | null } {
+    const i = this.deletedWorkspaces.findIndex((d) => d.id === id);
+    if (i < 0) return { root: null, name: "", symbol: "", error: `not a deleted workspace: ${id}` };
+    const entry = this.deletedWorkspaces.splice(i, 1)[0]!;
+    let root = entry.folder;
+    for (let n = 2; this.roots.has(root); n += 1) root = `${entry.folder}-${n}`;
+    if (root !== entry.folder) {
+      // Paths are keyed by root, so a restore under a new name rekeys them, as
+      // move does.
+      const rekey = (p: string) => root + p.slice(entry.folder.length);
+      entry.data = {
+        notes: new Map([...entry.data.notes].map(([p, v]) => [rekey(p), v] as const)),
+        trash: new Map([...entry.data.trash].map(([p, v]) => [rekey(p), v] as const)),
+      };
+    }
+    this.roots.set(root, entry.data);
+    this.attach(root);
+    return { root, name: entry.name, symbol: entry.symbol, error: null };
+  }
+  deleteTrashedWorkspace(id: string): boolean {
+    const before = this.deletedWorkspaces.length;
+    this.deletedWorkspaces = this.deletedWorkspaces.filter((d) => d.id !== id);
+    return this.deletedWorkspaces.length < before;
   }
 
   workspaceList(): WorkspaceRootInfo[] {
@@ -839,6 +889,10 @@ configureWorkspaces({
   },
   detach: async (root) => store.detach(root),
   pickFolder: async () => (FAKING_IOS ? null : EXTERNAL),
+  trash: async (root, name, symbol) => store.trashRoot(root, name, symbol),
+  trashList: async () => store.trashedWorkspaces(),
+  restore: async (id) => store.restoreWorkspace(id),
+  removeTrashed: async (id) => store.deleteTrashedWorkspace(id),
 });
 
 // No PTYs here: runs and the terminal are inert. A spec that needs real run
@@ -1244,6 +1298,8 @@ declare global {
   interface Window {
     __harness: {
       clipboard: () => string;
+      // The fake server's workspace trash, as workspaceTrashList answers it.
+      deletedWorkspaces: () => TrashedWorkspace[];
       // Put both pasteboard flavors up, the way another app's copy does: the
       // rich-paste path has no in-app writer to drive it from.
       setClipboard: (text: string, html: string) => void;
@@ -1352,6 +1408,7 @@ declare global {
 }
 window.__harness = {
   clipboard: () => clip,
+  deletedWorkspaces: () => store.trashedWorkspaces(),
   setClipboard: (text, html) => {
     clip = text;
     clipHtml = html;

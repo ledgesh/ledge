@@ -24,9 +24,26 @@ With a workspace row focused, or from its right-click menu:
 - Enter switches to it.
 - `r` renames it, `i` changes its icon.
 - Dragging reorders the strip.
-- ⌫ closes it, which only detaches it. No files are touched, and attaching the same folder later brings everything back.
+- ⌫ deletes a managed workspace, or removes an attached one from Ledge. See [[Notes and Workspaces#Deleting or removing a workspace]].
 
-To move a workspace's folder somewhere else on disk, close the workspace, move the folder in Finder, and attach it again at its new place. Everything travels with the folder: the notes, the images, and the trash.
+## Deleting or removing a workspace
+
+⌫ on a workspace row, the button that appears when you point at it, or the last item in its right-click menu takes the workspace out of the strip. What happens to the folder depends on the kind of workspace:
+
+| Workspace | The verb | What happens to the folder |
+| --- | --- | --- |
+| Managed | Delete Workspace | Moves to `~/.ledge/.ledge-trash`, notes and all |
+| Attached | Remove from Ledge | Stays where it is, untouched |
+
+Either way an Undo strip appears at the bottom of the sidebar for a few seconds. Undo puts the workspace back where it was in the strip, with its name, icon, panes and tabs.
+
+A deleted workspace stays recoverable after the strip fades. The Trash section under the workspaces lists deleted workspaces, where `r` restores one and `d` deletes it permanently after a confirmation, folder and all. Deleted workspaces are purged after 30 days, on the same `trash.ttlDays` setting as deleted notes.
+
+A removed attached folder is never in the trash, because Ledge did nothing to it. Run "Attach Folder as Workspace…" and give the folder's path to add it back.
+
+The last workspace in the strip cannot be deleted or removed.
+
+To move an attached workspace's folder somewhere else on disk, remove it from Ledge, move the folder in Finder, and attach it again at its new place. Everything travels with the folder: the notes, the images, and the trash. A managed folder can leave `~/.ledge` the same way: move it out in Finder (⇧⌘G opens a hidden folder), attach it at its new place, then delete the empty workspace Ledge makes in the old one's place.
 
 ## Share a workspace with others
 

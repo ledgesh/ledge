@@ -51,9 +51,9 @@ export function trashOf(state: AppState, folder: string): TrashMeta[] {
   return state.trash[folder] ?? [];
 }
 
-function makeWorkspace(name: string, folder: string, tab: TabState): Workspace {
+function makeWorkspace(name: string, folder: string, tab: TabState, symbol = DEFAULT_ICON): Workspace {
   const leaf = makeLeaf(tab);
-  return { id: uid("ws"), name, symbol: DEFAULT_ICON, folder, root: leaf, focusedPaneId: leaf.id };
+  return { id: uid("ws"), name, symbol, folder, root: leaf, focusedPaneId: leaf.id };
 }
 
 // The fresh-start launch state: one workspace on `folder`, one tab. The tab
@@ -130,8 +130,15 @@ export type Action =
   // folder some workspace already owns is selected, not duplicated. `note`
   // seeds the first tab with an existing note rather than a scratch tab, so
   // opening the docs lands on Getting Started, not on an unsavable Untitled.
-  | { type: "addWorkspace"; name: string; folder: string; note?: NoteMeta }
+  // `symbol` is the icon a workspace restored from the trash had; an unknown
+  // key falls back to the default.
+  | { type: "addWorkspace"; name: string; folder: string; note?: NoteMeta; symbol?: string }
   | { type: "closeWorkspace"; id: string }
+  // A removed workspace came back through Undo, rebuilt from its snapshot
+  // (workspace/persist.ts reviveWorkspace). It returns to its strip position
+  // and is selected. A folder some workspace already shows is selected
+  // instead, addWorkspace's one-workspace-per-folder rule.
+  | { type: "reviveWorkspace"; workspace: Workspace; index: number; notes: NoteMeta[]; trash: TrashMeta[] }
   // A workspace's folder moved on disk (Bun renamed it; workspace/actions.ts
   // did the round trip). Every open tab's path named the old folder, so the
   // pane tree resets to one scratch tab. The workspace keeps its id, name,
@@ -242,7 +249,8 @@ export function reducer(state: AppState, action: Action): AppState {
       const existing = state.workspaces.find((w) => w.folder === action.folder);
       if (existing) return { ...state, selectedId: existing.id };
       const tab = action.note ? makeNoteTab(action.note.path, action.note.title) : makeTab("scratch");
-      const ws = makeWorkspace(action.name, action.folder, tab);
+      const symbol = action.symbol && isIconKey(action.symbol) ? action.symbol : DEFAULT_ICON;
+      const ws = makeWorkspace(action.name, action.folder, tab, symbol);
       return {
         ...state,
         workspaces: [...state.workspaces, ws],
@@ -252,6 +260,21 @@ export function reducer(state: AppState, action: Action): AppState {
         // workspace/actions.ts).
         notes: state.notes[action.folder] ? state.notes : { ...state.notes, [action.folder]: [] },
         trash: state.trash[action.folder] ? state.trash : { ...state.trash, [action.folder]: [] },
+      };
+    }
+
+    case "reviveWorkspace": {
+      const existing = state.workspaces.find((w) => w.folder === action.workspace.folder);
+      if (existing) return { ...state, selectedId: existing.id };
+      const index = Math.max(0, Math.min(action.index, state.workspaces.length));
+      const workspaces = [...state.workspaces];
+      workspaces.splice(index, 0, action.workspace);
+      return {
+        ...state,
+        workspaces,
+        selectedId: action.workspace.id,
+        notes: { ...state.notes, [action.workspace.folder]: action.notes },
+        trash: { ...state.trash, [action.workspace.folder]: action.trash },
       };
     }
 

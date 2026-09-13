@@ -270,6 +270,34 @@ describe("workspaces", () => {
     expect(s2.trash["/ws/extra-2"]).toBeUndefined();
   });
 
+  test("addWorkspace takes a restored workspace's icon, and falls back on an unknown one", () => {
+    const s1 = run({ type: "addWorkspace", name: "Back", folder: "/ws/back", symbol: "inbox" });
+    expect(selected(s1).symbol).toBe("inbox");
+    const s2 = run({ type: "addWorkspace", name: "Odd", folder: "/ws/odd", symbol: "not-an-icon" });
+    expect(selected(s2).symbol).toBe(DEFAULT_ICON);
+  });
+
+  test("reviveWorkspace puts a workspace back at its strip position, selected, with its lists", () => {
+    const s1 = run(addWs(2), addWs(3));
+    const middle = s1.workspaces[1]!;
+    const s2 = reducer(s1, { type: "closeWorkspace", id: middle.id });
+    const notes: NoteMeta[] = [{ path: "/ws/extra-2/a.md", title: "A", mtimeMs: 1 }];
+    const trash: TrashMeta[] = [{ path: "/ws/extra-2/.ledge-trash/b.md", title: "B", deletedAt: 1 }];
+    const s3 = reducer(s2, { type: "reviveWorkspace", workspace: middle, index: 1, notes, trash });
+    expect(s3.workspaces.map((w) => w.folder)).toEqual(s1.workspaces.map((w) => w.folder));
+    expect(s3.selectedId).toBe(middle.id);
+    expect(notesOf(s3, "/ws/extra-2")).toEqual(notes);
+    expect(trashOf(s3, "/ws/extra-2")).toEqual(trash);
+  });
+
+  test("reviveWorkspace on a folder something already shows selects that instead", () => {
+    const s1 = run(addWs(2));
+    const twin = { ...s1.workspaces[1]!, id: "ws-twin" };
+    const s2 = reducer(s1, { type: "reviveWorkspace", workspace: twin, index: 0, notes: [], trash: [] });
+    expect(s2.workspaces).toHaveLength(2);
+    expect(s2.selectedId).toBe(s1.workspaces[1]!.id);
+  });
+
   test("closeWorkspace refuses to remove the last workspace", () => {
     const s0 = initialState(FOLDER);
     const s = reducer(s0, { type: "closeWorkspace", id: s0.selectedId });

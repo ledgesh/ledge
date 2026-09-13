@@ -17,17 +17,24 @@ import {
   APP_HOME,
   DOCS_ROOT,
   WORKSPACES_PATH,
+  WORKSPACE_TRASH,
   assertRegisteredRoot,
   assertWritableRoot,
   attachExternal,
   createManaged,
+  deleteTrashedWorkspace,
   detachRoot,
   ensureDefault,
   expandHome,
+  listTrashedWorkspaces,
   listWorkspaceRoots,
   loadWorkspaces,
+  purgeTrashedWorkspaces,
+  restoreTrashedWorkspace,
   rootContaining,
   roots,
+  trashEntryDir,
+  trashRoot,
   writableRoots,
 } from "./workspaces";
 
@@ -216,6 +223,116 @@ describe("detachRoot", () => {
 
   test("detaching an unknown root is false, not a throw", async () => {
     expect(await detachRoot("/nowhere/at/all")).toBe(false);
+  });
+});
+
+describe("the workspace trash", () => {
+  test("trashRoot moves the folder, notes and all, into the trash and deregisters it", async () => {
+    const root = await createManaged("Research");
+    await writeFile(join(root, "plan.md"), "# Plan\n", "utf8");
+    await mkdir(join(root, "sub"));
+    await writeFile(join(root, "sub", "deep.md"), "# Deep\n", "utf8");
+    const res = await trashRoot(root, "Research", "flask");
+    expect(res).toEqual({ id: "research" });
+    expect(await stat(root).catch(() => null)).toBeNull();
+    expect(await readFile(join(WORKSPACE_TRASH, "research", "research", "sub", "deep.md"), "utf8")).toBe("# Deep\n");
+    expect(userRoots()).toEqual([]);
+    await loadWorkspaces(); // not resurrected as an empty managed folder
+    expect(userRoots()).toEqual([]);
+    expect(await stat(root).catch(() => null)).toBeNull();
+  });
+
+  test("lists deleted workspaces newest first, with the name, icon and note count they had", async () => {
+    const a = await createManaged("Alpha");
+    await writeFile(join(a, "one.md"), "# One\n", "utf8");
+    await trashRoot(a, "Alpha", "book");
+    const b = await createManaged("Beta");
+    await trashRoot(b, "Beta Notes", "flask");
+    const items = await listTrashedWorkspaces();
+    expect(items.map((i) => [i.id, i.name, i.symbol, i.notes])).toEqual([
+      ["beta", "Beta Notes", "flask", 0],
+      ["alpha", "Alpha", "book", 1],
+    ]);
+  });
+
+  test("refuses attached folders, the docs root, and roots it does not know", async () => {
+    const dir = await externalDir();
+    await attachExternal(dir);
+    expect(await trashRoot(dir, "Ext", "")).toHaveProperty("error");
+    expect(userRoots()).toEqual([resolve(dir)]); // still registered, still there
+    expect(await trashRoot(DOCS_ROOT, "Docs", "")).toHaveProperty("error");
+    expect(await trashRoot(join(APP_HOME, "nope"), "Nope", "")).toHaveProperty("error");
+    expect(await listTrashedWorkspaces()).toEqual([]);
+  });
+
+  test("the same folder name twice gets two entries", async () => {
+    await trashRoot(await createManaged("Plan"), "Plan", "");
+    await trashRoot(await createManaged("Plan"), "Plan again", "");
+    expect((await listTrashedWorkspaces()).map((i) => i.id).sort()).toEqual(["plan", "plan-2"]);
+  });
+
+  test("restore moves the folder back into the app home, registered, and clears the entry", async () => {
+    const root = await createManaged("Research");
+    await writeFile(join(root, "plan.md"), "# Plan\n", "utf8");
+    const { id } = (await trashRoot(root, "My Research", "flask")) as { id: string };
+    expect(await restoreTrashedWorkspace(id)).toEqual({ root, name: "My Research", symbol: "flask" });
+    expect(await readFile(join(root, "plan.md"), "utf8")).toBe("# Plan\n");
+    expect(userList()).toEqual([{ root, kind: "managed", available: true }]);
+    expect(await readdir(WORKSPACE_TRASH)).toEqual([]);
+  });
+
+  test("a restore whose folder name was taken meanwhile enumerates instead of clobbering", async () => {
+    const root = await createManaged("Research");
+    await writeFile(join(root, "old.md"), "# Old\n", "utf8");
+    const { id } = (await trashRoot(root, "Research", "")) as { id: string };
+    const taken = await createManaged("Research");
+    await writeFile(join(taken, "new.md"), "# New\n", "utf8");
+    const res = (await restoreTrashedWorkspace(id)) as { root: string };
+    expect(res.root).toBe(join(resolve(APP_HOME), "research-2"));
+    expect(await readFile(join(taken, "new.md"), "utf8")).toBe("# New\n");
+    expect(await readFile(join(res.root, "old.md"), "utf8")).toBe("# Old\n");
+  });
+
+  test("delete permanently removes the entry and everything in it", async () => {
+    const root = await createManaged("Gone");
+    await writeFile(join(root, "x.md"), "# X\n", "utf8");
+    const { id } = (await trashRoot(root, "Gone", "")) as { id: string };
+    expect(await deleteTrashedWorkspace(id)).toBe(true);
+    expect(await readdir(WORKSPACE_TRASH)).toEqual([]);
+    expect(await deleteTrashedWorkspace(id)).toBe(false); // already gone
+  });
+
+  test("ids are one visible segment of the trash: nothing else can be named for deletion", async () => {
+    for (const bad of ["", ".", "..", "../scratch", "a/b", "a\\b", ".hidden"]) {
+      expect(trashEntryDir(bad)).toBeNull();
+      await expect(deleteTrashedWorkspace(bad)).rejects.toThrow(/not a deleted workspace/);
+      expect(await restoreTrashedWorkspace(bad)).toHaveProperty("error");
+    }
+    // A registered workspace next to the trash survives every one of those.
+    const root = await createManaged("Scratch");
+    await expect(deleteTrashedWorkspace("../scratch")).rejects.toThrow();
+    expect((await stat(root)).isDirectory()).toBe(true);
+  });
+
+  test("purge drops entries past the TTL and keeps the rest", async () => {
+    const old = await createManaged("Old");
+    const { id } = (await trashRoot(old, "Old", "")) as { id: string };
+    const meta = join(WORKSPACE_TRASH, id, "workspace.json");
+    const json = JSON.parse(await readFile(meta, "utf8")) as { deletedAt: number };
+    await writeFile(meta, JSON.stringify({ ...json, deletedAt: Date.now() - 40 * 86_400_000 }), "utf8");
+    await trashRoot(await createManaged("Fresh"), "Fresh", "");
+    expect(await purgeTrashedWorkspaces(30 * 86_400_000)).toBe(1);
+    expect((await listTrashedWorkspaces()).map((i) => i.id)).toEqual(["fresh"]);
+  });
+
+  test("a damaged meta file costs the name, not the workspace", async () => {
+    const root = await createManaged("Kept");
+    await writeFile(join(root, "k.md"), "# K\n", "utf8");
+    const { id } = (await trashRoot(root, "Kept Notes", "")) as { id: string };
+    await writeFile(join(WORKSPACE_TRASH, id, "workspace.json"), "{not json", "utf8");
+    expect((await listTrashedWorkspaces()).map((i) => [i.name, i.notes])).toEqual([["kept", 1]]);
+    const res = (await restoreTrashedWorkspace(id)) as { root: string };
+    expect(await readFile(join(res.root, "k.md"), "utf8")).toBe("# K\n");
   });
 });
 

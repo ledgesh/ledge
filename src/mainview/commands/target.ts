@@ -65,7 +65,8 @@ export function targetAttrs(target: CommandTarget): Record<string, string> {
         "data-target-raw": target.raw,
       };
     case "workspace":
-      return { "data-target-kind": "workspace", "data-target-id": target.id };
+    case "trashedWorkspace":
+      return { "data-target-kind": target.kind, "data-target-id": target.id };
     case "tab":
       return {
         "data-target-kind": "tab",
@@ -122,6 +123,8 @@ export function targetFromDataset(d: TargetDataset): CommandTarget | undefined {
     }
     case "workspace":
       return d.targetId ? { kind: "workspace", id: d.targetId } : undefined;
+    case "trashedWorkspace":
+      return d.targetId ? { kind: "trashedWorkspace", id: d.targetId } : undefined;
     case "tab":
       return d.targetPane && d.targetTab
         ? { kind: "tab", paneId: d.targetPane, tabId: d.targetTab }
