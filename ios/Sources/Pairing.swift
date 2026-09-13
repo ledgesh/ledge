@@ -87,7 +87,7 @@ final class PairingViewController: UIViewController {
         // The navigation bar's, not a label in the stack: this screen sits
         // inside a navigation stack, which draws the title itself.
         title = "Pair with a server"
-        reason.text = because
+        reason.text = because.map(HostKeyOffer.wrappable)
         reason.isHidden = because == nil
     }
 
@@ -372,7 +372,7 @@ final class PairingViewController: UIViewController {
     }
 
     private func say(_ text: String) {
-        status.text = text
+        status.text = HostKeyOffer.wrappable(text)
     }
 
     @objc private func copyLine() {
@@ -523,7 +523,7 @@ final class PairingViewController: UIViewController {
         let sheet = UIAlertController(
             title: "Is this the server?",
             message: """
-                \(offer.fingerprint)
+                \(HostKeyOffer.wrappable(offer.fingerprint))
 
                 Run this on the server to compare:
                 ssh-keygen -lf /etc/ssh/ssh_host_\(offer.keyType.contains("ed25519") ? "ed25519" : "ecdsa")_key.pub

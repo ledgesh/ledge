@@ -43,6 +43,14 @@ struct HostKeyOffer {
         }
         fingerprint = "SHA256:" + Data(SHA256.hash(data: blob)).base64EncodedString().replacingOccurrences(of: "=", with: "")
     }
+
+    /// `text` with a zero-width space between the characters of every
+    /// fingerprint in it, for a label or an alert to draw (ios.md §3). Only for
+    /// display: the spaces are characters, so the result is never compared,
+    /// logged or sent.
+    static func wrappable(_ text: String) -> String {
+        text.replacing(#/SHA256:[A-Za-z0-9+/]+/#) { $0.output.map(String.init).joined(separator: "\u{200B}") }
+    }
 }
 
 enum HostKeyError: Error, LocalizedError {

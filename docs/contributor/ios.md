@@ -204,6 +204,15 @@ fingerprint has to be one the code lists before the phone offers to pair. That
 fingerprint is the whole SHA-256 digest, not a truncation of it, and the pin
 stored afterwards is still the key's bytes.
 
+**A fingerprint on screen wraps without a hyphen.** UIKit on iOS 26 hyphenates
+a word too long for its line. A fingerprint is one 50-character word, and a
+hyphen UIKit adds reads as part of it to someone comparing it with
+`ssh-keygen -lf`. `HostKeyOffer.wrappable` puts a zero-width space between the
+characters of every fingerprint in text UIKit draws, so the line can break
+anywhere in one and has nothing to hyphenate. That also covers a
+`UIAlertController`, whose message takes no paragraph style. A label that shows
+only a fingerprint can use `.byCharWrapping` instead, as the code summary does.
+
 **No RSA, and that is a constraint on the server too.** SwiftNIO SSH supports
 Ed25519 and ECDSA over P256, P384 and P521, with AES-GCM and x25519, and
 nothing else. Two consequences: a server offering only an `ssh-rsa` host key

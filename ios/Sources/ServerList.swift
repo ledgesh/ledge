@@ -42,7 +42,7 @@ final class ServerListViewController: UIViewController {
         self.onAdd = onAdd
         super.init(nibName: nil, bundle: nil)
         title = "Servers"
-        reason.text = because
+        reason.text = because.map(HostKeyOffer.wrappable)
         reason.isHidden = because == nil
     }
 
