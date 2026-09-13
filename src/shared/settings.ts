@@ -249,16 +249,16 @@ export const DEFAULT_SETTINGS: Settings = Object.freeze({
 // settings UI, so it has to name what will run and stay editable to something
 // else on one line.
 export function settingsTemplate(shellPath: string): string {
-  return `// Ledge settings, for the machine holding the notes. The file is the settings
-// UI: edit it here (⌘,), relaunch to apply; no setting applies live. This is
-// JSONC: comments (and trailing commas) are fine. A bad value falls back to
-// its default with a warning in the launch log; it never takes the rest of
-// the file down.
+  return `// Ledge settings for the server, the machine holding the notes. The file is
+// the settings UI: edit it here (⌘,), relaunch to apply; no setting applies
+// live. This is JSONC: comments (and trailing commas) are fine. A bad value
+// falls back to its default with a warning in the launch log; it never takes
+// the rest of the file down.
 //
 // Font sizes, the theme, live preview, and update checks are NOT here. Those
 // describe this app and the screen you are reading this on, not the machine
 // the notes are stored on, so they live in this app's own settings file: the
-// other tab in the ⌘, dialog.
+// This app tab in the ⌘, dialog.
 {
   // The login shell every terminal drawer and inline run spawns. Seeded with
   // this machine's own, if that is zsh or bash: the shells Ledge can read.
@@ -374,7 +374,7 @@ export function clientSettingsTemplate(s: Settings): string {
 // which is why it stays with the app rather than with the notes: connect to
 // another machine's notes and these come with you. The shell, the trash
 // lifetime, and what a code fence runs are that machine's business and live in
-// its own settings file: the other tab in this dialog.
+// its own settings file: the Server tab in this dialog.
 {
   "editor": {
     "fontSize": ${s.editor.fontSize},

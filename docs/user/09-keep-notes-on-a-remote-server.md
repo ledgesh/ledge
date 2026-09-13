@@ -241,16 +241,18 @@ On a Mac, the server needs Remote Login turned on in System Settings, under Gene
 
 ## What lives on the server
 
-| On the server | On this Mac |
+| Server | This app |
 | --- | --- |
-| Notes, images, and the trash | Theme, font sizes, live preview, and update checks |
-| Workspaces | Window size and position |
-| The vault and locked notes | The clipboard |
-| Profiles and their secrets | Which connections exist, their pinned keys, and any stored passwords |
-| Shells, running blocks, and scrollback | |
-| The shell, interpreter, and trash settings | |
+| Notes, images, and the trash | Window size and position |
+| Workspaces, and where each attached folder is | The clipboard |
+| Shells, running blocks, and scrollback | Which servers you have added and their pinned host keys |
+| The vault and locked notes | Any stored passwords, in this Mac's keychain |
+| Profiles and their secrets | The `ledge` command, which reads this Mac's notes whichever server the window is on ([[The ledge CLI]]) |
+| The settings for the shell, interpreters, the trash, and daily notes | The settings for the theme, font sizes, live preview, and update checks |
 
-Settings (⌘,) shows both files. The appearance half follows you between machines; the behavior half describes the machine it is on, because a VPS's shell is not your laptop's.
+Settings (⌘,) has a tab for each column, Server and This app, and each tab is its own file. The This app half follows you between machines. The Server half describes the machine it is on, because a VPS's shell is not your laptop's.
+
+A Mac that runs the app is a server too. The app starts one of its own, so with no server added both columns are on this Mac, and the Server tab edits this Mac's file. Add a server and the left column moves there with your notes: the Server tab edits that machine's file, and so does "Edit Note Profile…".
 
 Profile values never cross the connection. A note names a profile and the server reads the file at spawn, so the secrets exist only where the commands run ([[Profiles and Secrets]]).
 
@@ -320,7 +322,7 @@ A second Ledge window counts as another device here. Point two windows at one se
 
 The connection bar shows who else is connected: one other device by name, more than one as a count. Hover it for the full list. Names come from the devices themselves, so a Mac uses its computer name, and a device that gives no name reads as "another device".
 
-Nothing appears there when you are the only one connected, and nothing ever appears while your notes are on this Mac.
+Nothing appears there when you are the only one connected. A Mac that runs the app is a server of its own, so a phone signed in to it, or a second window on it, appears there the same way.
 
 A note saved on one device appears on the other without a refresh. Everything else a server owns is shared the same way: the same workspaces, the same trash, the same tags and backlinks, the same vault.
 

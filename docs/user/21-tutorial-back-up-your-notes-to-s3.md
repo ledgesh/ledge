@@ -145,4 +145,4 @@ The paths inside the backup are absolute, so restoring to `/` puts the app home,
 
 - **Check the repository now and then.** A `restic check` block in the Backups note reads the bucket and reports anything missing or corrupt.
 - **Keep the provider's snapshots too.** A snapshot restores the machine, and this backup restores your notes to any machine. [[Keep Notes on a Remote Server]] compares the two.
-- **Back up a laptop the same way.** `ledge-server backup-paths` is not on a Mac that runs the app, but a Mac's notes are folders ([[Tutorial: Keep Notes Synced]]).
+- **Back up a laptop the same way.** A Mac that runs the app answers `ledge-server backup-paths` too, once "Install Shell Command (ledge)" has put the command on its PATH ([[The ledge CLI]]). Its notes are plain folders as well ([[Tutorial: Keep Notes Synced]]).

@@ -14,7 +14,7 @@ profile: deploy
 ---
 ```
 
-Profile names may contain letters, digits, `-`, and `_`. The name resolves to a file under `~/.config/ledge/profiles/`, here `deploy.env`, created for you the first time you open it for editing.
+Profile names may contain letters, digits, `-`, and `_`. The name resolves to a file under `~/.config/ledge/profiles/` on the machine holding the notes, here `deploy.env`, created for you the first time you open it for editing.
 
 A note names at most one profile, and any number of notes can share one. Every deploy-related note can say `profile: deploy` and pick up the same credentials.
 
@@ -42,6 +42,8 @@ A `profile:` line naming a file that does not exist is skipped, and the shell sp
 
 A profile edit applies to newly spawned shells, like every frontmatter change. Run "Restart Note Shell" after changing one.
 
-## Profiles stay on this machine
+## Profiles stay with the notes
+
+A profile lives on the machine that holds the notes and runs their blocks. With your notes on this Mac, that is this Mac. With your notes on a server, the file is on the server, "Edit Note Profile…" edits it there, and the values never come to this app. [[Keep Notes on a Remote Server]] has the table of what lives where.
 
 When a note runs its blocks on a remote host over ssh, Ledge does not send the profile ([[Run Code on Remote Hosts]]). A secret passed on a remote command line would be visible in that machine's process table to anyone who can list processes. If a remote run needs credentials, put them on the remote machine.

@@ -80,11 +80,12 @@ function problemsOf(text: string, home: SettingsHome): string[] {
   return parseSettings(parsed, home).problems;
 }
 
-// The two tabs, with the label and hover text in the user's terms. The client
-// tab reads "This app" rather than "this Mac" because its settings follow the
-// app to whichever machine's notes it is showing (remote.md §5).
+// The two tabs, in the words the manual's table of what lives where uses
+// (docs/user/09). "Server" rather than "this Mac", because the app's own
+// daemon is one (remote.md §1); "This app" rather than a machine, because its
+// settings follow the app to whichever machine's notes it shows (remote.md §5).
 const TABS: Array<{ home: SettingsHome; label: string; hint: string }> = [
-  { home: "server", label: "Notes machine", hint: "The shell, the trash, and what a code fence runs." },
+  { home: "server", label: "Server", hint: "The shell, the trash, and what a code fence runs, on the machine holding the notes." },
   { home: "client", label: "This app", hint: "Font sizes, theme, live preview, and update checks." },
 ];
 

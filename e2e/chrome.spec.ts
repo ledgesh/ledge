@@ -218,7 +218,7 @@ test("the settings dialog edits both files, and switching tabs keeps what was ty
   // The unsaved edit survives the trip to the other tab and back. Switching
   // tabs changes which held text the editor shows, and does not re-read the
   // file (SettingsEditor.tsx).
-  await dialog.getByRole("tab", { name: "Notes machine" }).click();
+  await dialog.getByRole("tab", { name: "Server" }).click();
   await expect(dialog.locator(".cm-content")).toContainText('"ttlDays": 5');
 
   await dialog.getByRole("button", { name: "Save" }).click();
@@ -236,7 +236,7 @@ test("a tab that was only looked at is not rewritten", async ({ page }) => {
   const clientBefore = await page.evaluate(() => window.__harness.settingsText("client"));
   await dialog.getByRole("tab", { name: "This app" }).click();
   await expect(dialog.locator(".cm-content")).toContainText('"fontSize"');
-  await dialog.getByRole("tab", { name: "Notes machine" }).click();
+  await dialog.getByRole("tab", { name: "Server" }).click();
   await dialog.locator(".cm-content").click();
   await page.keyboard.press("Meta+a");
   await page.keyboard.type('{ "trash": { "ttlDays": 8 } }');
