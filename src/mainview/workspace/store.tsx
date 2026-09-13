@@ -138,7 +138,6 @@ export type Action =
   // icon and strip position. App's reconciliation effect gives the dropped
   // docIds the editor teardown and closeSession calls every close path gets.
   // The files on disk are untouched.
-  | { type: "workspaceFolderMoved"; id: string; folder: string }
   | { type: "renameWorkspace"; id: string; name: string }
   | { type: "setWorkspaceIcon"; id: string; symbol: string }
   | { type: "moveWorkspace"; id: string; toIndex: number }
@@ -273,30 +272,6 @@ export function reducer(state: AppState, action: Action): AppState {
       delete notes[closing.folder];
       delete trash[closing.folder];
       return { ...state, workspaces, selectedId, notes, trash };
-    }
-
-    case "workspaceFolderMoved": {
-      const ws = state.workspaces.find((w) => w.id === action.id);
-      if (!ws || ws.folder === action.folder) return state;
-      // One workspace per folder still holds. Bun refuses nested and duplicate
-      // destinations, so a collision here is a stale dispatch: drop it.
-      if (state.workspaces.some((w) => w.folder === action.folder)) return state;
-      const leaf = makeLeaf(makeTab("scratch"));
-      const workspaces = state.workspaces.map((w) =>
-        w.id === action.id ? { ...w, folder: action.folder, root: leaf, focusedPaneId: leaf.id } : w,
-      );
-      // The old folder's lists go the way closeWorkspace's do; the new
-      // folder's are seeded empty and refreshed by the caller right after.
-      const notes = { ...state.notes };
-      const trash = { ...state.trash };
-      delete notes[ws.folder];
-      delete trash[ws.folder];
-      return {
-        ...state,
-        workspaces,
-        notes: { ...notes, [action.folder]: notes[action.folder] ?? [] },
-        trash: { ...trash, [action.folder]: trash[action.folder] ?? [] },
-      };
     }
 
     case "renameWorkspace": {

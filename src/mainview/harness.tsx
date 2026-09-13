@@ -72,6 +72,9 @@ configureShell({
   // harness can be. A phone runs a note's blocks inline as a Mac does, and the
   // two differ over the drawer alone (lib/shell.ts).
   hasTerminal: !FAKING_IOS,
+  // A phone has no folder dialog, so its Attach Folder dialog is the field
+  // alone (components/AttachFolderDialog.tsx).
+  picksFolders: !FAKING_IOS,
   // The whole set ios.tsx sets, because two of them decide what a spec can see.
   // `deviceKey` decides whether the connection form asks for a key file or
   // shows the line this client already has (components/ConnectionPicker.tsx).
@@ -105,18 +108,18 @@ recordWindowRole({ docs: DOCS_WINDOW });
 // The server's half of the same picture: what the machine holding the notes can
 // do for itself. Set here rather than arriving with workspaceList, because this
 // harness renders without boot.tsx's bootView(), which is where the real shells
-// record it. Both answers follow the faked shell. The ios one stands in for a
-// phone against a headless server, which has no dialog to open and no CLI to
-// hand over.
-recordServerCaps({ folderDialog: !FAKING_IOS, cliShim: !FAKING_IOS });
+// record it. The answer follows the faked shell. The ios one stands in for a
+// phone against a compiled server, which has no CLI to hand over.
+recordServerCaps({ cliShim: !FAKING_IOS });
 import "./index.css";
 import App from "./App";
 
 // Paths and roots are opaque handles the view passes back unmodified
 // (architecture.md §2), so fake ones only need to be distinct and stable.
 // SCRATCH is the attached-at-boot workspace folder. EXTERNAL starts seeded but
-// unattached, and the fake workspaceAttach returns it. That is what makes the
-// whole attach flow spec-able without the native dialog.
+// unattached: the fake folder picker answers it, and the fake workspaceAttach
+// registers any seeded folder it is sent. That is what makes the whole attach
+// flow spec-able without the native dialog.
 const SCRATCH = "/harness/scratch";
 const EXTERNAL = "/harness/external";
 // The built-in documentation root, attached at boot like the real one
@@ -165,27 +168,6 @@ class FakeStore {
     if (i < 0) return false;
     this.attached.splice(i, 1);
     return true; // the data stays: detach never deletes
-  }
-
-  // The fake workspaceMove: rename(2) in Map form. The root key and every path
-  // under it are rekeyed to the destination, so the data travels whole, and the
-  // registry line is replaced in place. That mirrors moveRoot's contract
-  // (bun/workspaces.ts), including the own-parent no-op: the real one answers
-  // the same root back, and the view's leave-tabs-alone branch keys off that.
-  move(root: string, destParent: string): string {
-    const data = this.roots.get(root);
-    if (!data) throw new Error(`harness: move of unknown root ${root}`);
-    if (root.slice(0, root.lastIndexOf("/")) === destParent) return root;
-    const base = root.split("/").pop()!;
-    let next = `${destParent}/${base}`;
-    for (let n = 2; this.roots.has(next); n += 1) next = `${destParent}/${base}-${n}`;
-    const rekey = (p: string) => next + p.slice(root.length);
-    const notes = new Map([...data.notes].map(([p, v]) => [rekey(p), v] as const));
-    const trash = new Map([...data.trash].map(([p, v]) => [rekey(p), v] as const));
-    this.roots.delete(root);
-    this.roots.set(next, { notes, trash });
-    this.attached = this.attached.map((r) => (r === root ? next : r));
-    return next;
   }
 
   workspaceList(): WorkspaceRootInfo[] {
@@ -840,38 +822,30 @@ configureVault({
 });
 recordVaultState(store.vault.state);
 
-// The registry fake. attach always offers EXTERNAL, the folder the "native
-// dialog" picks, so the attach flow runs in specs with no dialog, including
-// close then re-attach, which proves nothing was deleted. create mirrors
-// createManaged's slug-and-enumerate.
+// The registry fake. attach registers a seeded folder by its path and refuses
+// anything else with a sentence, the way the real server checks a typed path
+// (bun/workspaces.ts attachExternal), so specs cover close then re-attach
+// (which proves nothing was deleted) and a refused path alike. The fake
+// picker always chooses EXTERNAL, the way a Mac with somebody at it answers.
+// create mirrors createManaged's slug-and-enumerate.
 configureWorkspaces({
-  // folderDialog and cliShim follow the faked shell. The harness's "native
-  // dialog" is a function that always picks /external, the way a Mac with
-  // somebody at it answers, and its CLI is the app's. The ios shell is the
-  // headless case: both report false, and specs see the refusals the real one
-  // gives.
+  // cliShim follows the faked shell: the Mac's daemon has the app's CLI
+  // beside it, and a compiled server has none. The ios shell stands in for
+  // that server, so specs see the verb absent.
   list: async () => ({
     workspaces: store.workspaceList(),
     dailyRoot: null,
-    folderDialog: !FAKING_IOS,
     cliShim: !FAKING_IOS,
   }),
   create: async (name) => store.createManaged(name),
-  attach: async () => {
-    store.attach(EXTERNAL);
-    return { root: EXTERNAL, kind: "external", error: null };
+  attach: async (path) => {
+    if (path === DOCS) return { root: null, kind: null, error: "that folder is Ledge's built-in documentation (read-only)" };
+    if (!store.roots.has(path)) return { root: null, kind: null, error: `not a directory: ${path}` };
+    store.attach(path);
+    return { root: path, kind: path === EXTERNAL ? "external" : "managed", error: null };
   },
   detach: async (root) => store.detach(root),
-  // The "native destination picker" always picks /synced, the cloud-folder
-  // stand-in, so the move flow runs in specs with no dialog, the same trick
-  // attach uses above: the folder relocates, the notes stay, and the kind
-  // flips to external. The home face targets /harness, the fake app home, and
-  // flips the kind back.
-  move: async (root, home) => ({
-    root: store.move(root, home ? "/harness" : "/synced"),
-    kind: home ? "managed" : "external",
-    error: null,
-  }),
+  pickFolder: async () => (FAKING_IOS ? null : EXTERNAL),
 });
 
 // No PTYs here: runs and the terminal are inert. A spec that needs real run

@@ -185,15 +185,14 @@ Bun therefore validates everything and derives anything derivable:
   root gets in exactly four ways: Bun's own first-launch default, a managed
   folder whose name Bun slugged from a display name (`workspaceCreate` — the
   view names no path, the same move as `noteCreate`), a directory the user
-  picked in the NATIVE folder dialog (`workspaceAttach`, which takes no
-  arguments: the path comes from the OS dialog Bun-side, never from the
-  view), or Bun's own in-memory-only docs root (§3b — registered for the
-  read paths, refused by every write). A registered root RELOCATES under the same rule: `workspaceMove`
-  carries only the root — the destination parent is the native dialog's
-  pick, Bun-side, or Bun's own APP_HOME for the `home: true` return trip —
-  and Bun renames the folder and rewrites the registry line in place
-  (`moveRoot`, which re-runs every registration guard against the
-  destination). The registry file `.workspaces.json` is machine-written
+  named by its path (`workspaceAttach`, the ONE call that takes a path the
+  view typed rather than a handle it was given: `attachExternal` checks it
+  before it becomes a root — absolute, a directory, not the app home or
+  anything holding it, not nested with another root — and answers the
+  refusal as a sentence, `remote.md` §5), or Bun's own in-memory-only docs
+  root (§3b — registered for the read paths, refused by every write). A root
+  never relocates: moving a folder is Finder's job, then close and attach
+  again. The registry file `.workspaces.json` is machine-written
   AND Bun-shaped; the view cannot read or write its bytes. No root may
   equal or contain another (rootContaining must have a unique answer), or
   reach the app home itself.
@@ -222,8 +221,10 @@ Bun therefore validates everything and derives anything derivable:
   view-side against the store's `noteList`-provided metas, scoped to the
   note's own workspace. Following one dispatches `openNote` with a path Bun
   already vouched for; no link-derived string ever crosses the RPC.
-- **Spawn params are the one deliberate exception** to "the view never names
-  anything": `sessionConfigure` carries a cwd, env vars, and file references
+- **Spawn params are one of two deliberate exceptions** to "the view never
+  names anything", the other being the path `workspaceAttach` takes (above,
+  checked before it becomes a root): `sessionConfigure` carries a cwd, env
+  vars, and file references
   the view parsed out of a note's frontmatter (`shared/frontmatter.ts`). This
   grants the view nothing new — `runBlock` already executes arbitrary code as
   the user, and a shell's own `cd`/`export`/`source` can do everything these
@@ -284,11 +285,10 @@ Bun therefore validates everything and derives anything derivable:
   Moving a note between folders (`moveNote`)
   is a rename, within one root: a note's root decides its wikilink scope, its tag directory, its
   asset pool and its trash, so cross-root is four migrations rather than a
-  rename and is not offered. Moving a workspace (`moveRoot`) is ONE rename of the whole
-  folder — cross-volume is refused (EXDEV surfaces the move-in-Finder-then-
-  attach recipe) rather than becoming copy-then-unlink of every note, and
-  the destination name comes from `uniqueName` like every other rename
-  target. Detaching a workspace touches no file at all: the registry
+  rename and is not offered. Moving a workspace is not offered either: it
+  is Finder's rename, then close and attach the folder at its new path, so
+  no code here ever copies-then-unlinks every note across a volume.
+  Detaching a workspace touches no file at all: the registry
   line goes, the folder stays, re-attachable. Exactly three code paths
   unlink a *note* — `deleteTrashed`, `emptyTrash`, `purgeTrash` — all in
   `bun/notes.ts`, all gated by `assertTrashed`, and the first two sit behind
@@ -549,7 +549,7 @@ exactly like a note — from one special root that can never be written:
   entry, so it can never collide with a managed workspace slug. It is
   registered **in memory at every load**, kind `"docs"`, and never written to
   `.workspaces.json` — it is a fact about the installed app, not a user
-  choice. `attachExternal`, `detachRoot`, and `moveRoot` all refuse it, and
+  choice. `attachExternal` and `detachRoot` both refuse it, and
   `ensureDefault` does not count it (a docs-only registry still creates
   scratch).
 - **The corpus is compiled into the binary** (`bun/docsContent.ts`, text

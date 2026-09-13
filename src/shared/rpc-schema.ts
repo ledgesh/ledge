@@ -264,21 +264,16 @@ export type LedgeRPC = {
       // when it is unset or names a root that is gone. It says where ⌘J acts,
       // and the Edit Daily Template faces need that root to aim at. Read at
       // boot like the setting itself, so a change applies at the next launch.
-      // `folderDialog` rides along for the same reason: it is a fact about the
-      // machine this registry lives on, namely whether anybody is sitting at it
-      // to answer a native folder picker. It is false on every headless server,
-      // and the view then leaves Attach Folder and Move Workspace Folder out of
-      // the palette rather than offering verbs that can only answer with an
-      // error strip (ios.md §8, mainview/lib/shell.ts).
-      // `cliShim` is the same shape of fact, for Install Shell Command: whether
-      // this machine has a CLI to put on a PATH. The app carries one beside its
-      // main module; a compiled `ledge-server` does not.
+      // `cliShim` rides along for the same reason: it is a fact about the
+      // machine this registry lives on, namely whether it has a CLI to put on
+      // a PATH for Install Shell Command. The app's daemon carries one beside
+      // its entry; a compiled `ledge-server` does not. The view leaves the
+      // verb out where it is false (mainview/lib/shell.ts).
       workspaceList: {
         params: {};
         response: {
           workspaces: WorkspaceRootInfo[];
           dailyRoot: string | null;
-          folderDialog: boolean;
           cliShim: boolean;
         };
       };
@@ -286,32 +281,21 @@ export type LedgeRPC = {
       // name into a folder itself and registers it. The view never names a
       // path here, the same trust move as noteCreate. Sent by "New Workspace".
       workspaceCreate: { params: { name: string }; response: { root: string } };
-      // Open the native folder picker and register the chosen directory as a
-      // workspace root. The dialog runs Bun-side, so the path never rides the
-      // RPC and an arbitrary external root stays inside the trust boundary
-      // (architecture.md §2). root null with error null means the user
-      // cancelled. An error string means the choice was refused (not a
-      // directory, or nested with another root). Picking an already-registered
-      // folder returns it, and the view focuses that workspace instead of
-      // adding a twin.
-      workspaceAttach: { params: {}; response: { root: string | null; kind: "managed" | "external" | null; error: string | null } };
+      // Register a directory on the server as a workspace root, by its path
+      // there. The one call that takes a path the view typed rather than a
+      // handle it was given (architecture.md §2): the server checks it (an
+      // absolute directory, not the app home or anything holding it, not
+      // nested with another root) and answers with the root handle or the
+      // refusal as a sentence. `~` at the front means the server's home. A
+      // path that is already a root answers that root, and the view focuses
+      // its workspace instead of adding a twin. `root` is null exactly when
+      // `error` is a string. The Mac's native picker fills the field on the
+      // client's side (folderPick below); a phone types the path.
+      workspaceAttach: { params: { path: string }; response: { root: string | null; kind: "managed" | "external" | null; error: string | null } };
       // Remove a root from the registry. Never deletes files: the folder and
       // every note in it stay on disk, re-attachable later. Sent when a
       // workspace is closed. The view refuses to close the last one.
       workspaceDetach: { params: { root: string }; response: { ok: boolean } };
-      // Relocate a registered root's folder on disk (Move Workspace Folder…).
-      // The native folder picker chooses the destination parent Bun-side, so
-      // the destination never rides the RPC (workspaceAttach's trust move), and
-      // Bun renames the folder into it. Same volume only, and everything inside
-      // travels. root null with error null means cancelled. A returned root is
-      // the workspace's new handle, with `kind` recomputed, since moving into
-      // or out of the app home flips managed/external. Returning the old root
-      // unchanged means the chosen destination was already its parent.
-      // `home: true` (Move Workspace Folder Home) skips the picker and targets
-      // Bun's own APP_HOME, the return path for an external workspace. It needs
-      // no dialog because ~/.ledge is hidden and awkward to navigate to in a
-      // picker. Still no view-named path.
-      workspaceMove: { params: { root: string; home?: boolean }; response: { root: string | null; kind: "managed" | "external" | null; error: string | null } };
       // The note store (notes.ts). Bun owns every path: the view holds paths
       // only as opaque handles it got from here, and Bun rejects any that fall
       // outside the registered workspace roots (workspaces.ts). Scoped calls
@@ -886,6 +870,13 @@ export type LedgeRPC = {
       // the notes. null is a cancelled picker, the common outcome, and must not
       // reach the server or the error strip.
       assetPick: { params: { root: string; notePath?: string | null }; response: { src: string | null } };
+      // A folder chosen on this device, as its path, for the Attach Folder
+      // dialog's field. Native for assetPick's reason: the picker is this
+      // Mac's, so it is only offered where the notes are on this Mac too
+      // (workspace/Sidebar.tsx). The path is still the view's to send, and
+      // workspaceAttach checks it like a typed one. null is a cancelled
+      // picker, or a client with no picker to open (a phone).
+      folderPick: { params: {}; response: { path: string | null } };
       // Image bytes in, markdown reference out. The client's half of a paste
       // calls this; nothing in the view does. `dataB64` is the base64 the
       // schema says it is everywhere else, but it rides a binary frame over a

@@ -22,7 +22,7 @@ Sync workspace folders, not `~/.ledge` itself. The app home holds machine-local 
 ## Setup one: a synced drive
 
 1. Create a folder inside iCloud Drive, Dropbox, or any synced location.
-2. Run "Attach Folder as Workspace…" and pick it.
+2. Run "Attach Folder as Workspace…" and give its path, or press Choose Folder… to pick it.
 3. On a second Mac, attach the same folder there.
 
 Notes you write are files in the synced folder, and the service carries them.
@@ -77,14 +77,12 @@ A repository is also how a workspace reaches other people, with a clone each ([[
 
 Both setups start with a folder in the right place. Notes in a managed workspace live inside `~/.ledge`, which a sync service will not carry, so the workspace has to move out first.
 
-1. Run "Move Workspace Folder…" from the command palette, or from the workspace's row menu in the sidebar.
-2. Pick the destination's parent folder, such as your iCloud Drive folder.
-3. Reopen the tabs you were working in. They close during the move.
+1. Close the workspace (⌫ on its row). Closing only detaches the folder; no note is touched.
+2. In Finder, move the folder out of `~/.ledge` (it is hidden: press ⇧⌘. in Finder to show it, or use ⇧⌘G and type `~/.ledge`) into the synced location.
+3. Run "Attach Folder as Workspace…" and give its new path.
 4. Attach the same folder on your other Mac.
 
-The whole folder relocates: notes, images, and trash together, with references intact. The workspace continues at its new home as an ordinary attached folder.
-
-One limit: the move is a rename, so it cannot cross to a different volume. If you pick a destination on another disk, Ledge tells you rather than copying. Move the folder in Finder yourself, then run "Attach Folder as Workspace…" to pick it up again.
+The whole folder travels: notes, images, and trash together, with references intact. The workspace continues at its new home as an ordinary attached folder.
 
 ## What syncing does not carry
 

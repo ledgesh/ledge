@@ -181,7 +181,10 @@ break:
 - **Paths stay opaque handles.** The client holds only paths the server
   handed it and passes them back unmodified. This was already the rule; over
   a network it is also the reason a stale path from another server cannot
-  address a file.
+  address a file. The one path a client types is `workspaceAttach`'s, and it
+  is a request rather than a handle: the server checks it (an absolute
+  directory, not the app home or anything holding it, not nested with another
+  root) before it becomes one, and answers the refusal as a sentence.
 - **The client never names a file.** It sends a note's text and the server
   slugs the H1. A remote client gains no naming power a local one lacked.
 
@@ -1939,23 +1942,27 @@ no notion of who is asking beyond the client id in a hello, which is why
 - **`.workspaces.json` and `.vault.json` bytes.** Both are server-shaped
   trust artifacts and the client has never seen them.
 - **Locked plaintext to an agent surface**, per §9.
-- **A path the client constructed.** Per §2.
+- **A path the client constructed.** Per §2, with the one exception §2 names:
+  the path `workspaceAttach` takes, which the server checks before it is a
+  root.
 
-**Thirteen RPC entries are the client's outright** and never become frames
+**Fourteen RPC entries are the client's outright** and never become frames
 (`NATIVE_METHODS` in `shared/wire.ts`, served on a Mac by `bun/clientSeams.ts`):
 `clipboardWrite`, `clipboardRead`, `clipboardReadRich`, `assetPaste`,
-`assetPick`, `linkOpen`, `menuSet`, `windowNew`, `windowDocs`, `windowRole`,
-`updateState`, `updateCheck`, and `updateInstall`. Opening a URL happens on
-the device the user is holding, not on the VPS; the picture you want to insert
-is in that device's photo library, in its files, or in front of its camera
-(ios.md §11); a headless
+`assetPick`, `folderPick`, `linkOpen`, `menuSet`, `windowNew`, `windowDocs`,
+`windowRole`, `updateState`, `updateCheck`, and `updateInstall`. Opening a URL
+happens on the device the user is holding, not on the VPS; the picture you
+want to insert is in that device's photo library, in its files, or in front of
+its camera (ios.md §11); the folder dialog is that device's too, and only fills
+the Attach Folder field, since the path it holds is checked by the server like
+a typed one (§5); a headless
 server handed the view's menu would swallow ⌘Q with it; a machine with no
 screen has nowhere to put a window (§8a); and the update is this app's, where a
 server is a different program installed by whoever runs it (releasing.md §7).
 The seven connection entries (§8) join them for a different reason: a server has
 no business knowing which servers this client can reach.
 
-The server implements all twenty as REFUSALS rather than omitting them,
+The server implements all twenty-one as REFUSALS rather than omitting them,
 because the handler map is total by construction; reaching one means a client
 forgot its overlay, and `{text: ""}` back from a clipboard read would look
 exactly like an empty clipboard until somebody went looking. `bun/server.ts` now has no
@@ -2097,9 +2104,9 @@ which in the app is `Contents/MacOS/bun` plus the `cli.js` that
 `electrobun.config.ts` copies beside `index.js`. A compiled `ledge-server` has
 no such neighbour, so `cliInstall` there could only fail, and it used to fail by
 naming a path inside `/$bunfs` and advising a rebuild. `workspaceList` now
-reports `cliShim` alongside `folderDialog`, on the same round trip and for the
-same reason: Install Shell Command is absent on a connection to a server rather
-than present and failing (interactions.md §8). The call still refuses if it
+reports `cliShim` on its first round trip, so Install Shell Command is absent
+on a connection to a server rather than present and failing (interactions.md
+§8). The call still refuses if it
 arrives, in a sentence about where the CLI lives. Giving a server a CLI is a
 different piece of work than hiding a verb that cannot run — it needs the CLI
 compiled into the server binary behind a verb of its own, which is the same
@@ -2594,9 +2601,12 @@ Each phase leaves the app shippable.
    hold-less connection ends (`locking.md` §3a); a daemon of another build is
    asked to retire when idle, and one that refuses the handshake is stopped;
    a dev build replaces the daemon it finds. What it gave up is listed under
-   "what that costs" in §1. The folder dialog went with the in-process server,
-   which is the next phase's subject: attaching a folder by path, validated
-   server-side, with the Mac's picker as a client seam that fills the field.
+   "what that costs" in §1. The folder dialog went with the in-process server:
+   a folder is attached by its path on the server, which checks it
+   (`workspaceAttach`, `bun/workspaces.ts` attachExternal), and the Mac's
+   picker is a client seam that fills the dialog's field (`folderPick`, §10).
+   Move Workspace Folder went with it: moving a folder is Finder's job, then
+   close and attach again.
 7. **The iOS client**, which is `docs/contributor/ios.md` and depends on
    nothing above being redone. That document is written and none of it is code
    yet; its own §14 phases the work, starting with a move of this transport's

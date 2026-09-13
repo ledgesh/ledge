@@ -39,6 +39,11 @@ import { CommandProvider, useCommands } from "@/commands/CommandProvider";
 import { ProfileEditor } from "@/components/ProfileEditor";
 import { SettingsEditor } from "@/components/SettingsEditor";
 import { ConnectionPicker } from "@/components/ConnectionPicker";
+import { AttachFolderDialog } from "@/components/AttachFolderDialog";
+import { activeConnection } from "@/lib/connections";
+import { picksFolders } from "@/lib/shell";
+import { attachWorkspace } from "@/workspace/actions";
+import { pickFolderPath } from "@/workspace/channel";
 import { configureUi, uiHooks } from "@/commands/glue";
 import { tooltip } from "@/commands/format";
 import { Overlay, type OverlayMode } from "@/commands/Overlay";
@@ -190,6 +195,10 @@ function Shell() {
   // The ⌘, settings editor dialog (settings.jsonc in an in-app CodeMirror).
   const [settingsEditing, setSettingsEditing] = useState(false);
   const [pickingConnection, setPickingConnection] = useState(false);
+  // The Attach Folder dialog. Owned here rather than by the strip because a
+  // phone keeps the sidebar unmounted, and the verb is the palette's too.
+  const [attaching, setAttaching] = useState(false);
+  const closeAttach = useCallback(() => setAttaching(false), []);
   // The vault passphrase dialog, carrying the act that was waiting on it
   // (lock this note, remove that lock). App runs the follow-up once the
   // passphrase is accepted, rather than stopping at the prompt
@@ -409,6 +418,7 @@ function Shell() {
       openProfileEditor: setProfileEditing,
       openSettingsEditor: () => setSettingsEditing(true),
       openConnectionPicker: () => setPickingConnection(true),
+      attachFolder: () => setAttaching(true),
       openVaultDialog: (then) => setVaultDialog({ then }),
       confirmRemoveLock: setRemoveLockConfirm,
       confirmLock: setLockConfirm,
@@ -928,6 +938,28 @@ function Shell() {
       )}
       {settingsEditing && <SettingsEditor onClose={() => setSettingsEditing(false)} />}
       {pickingConnection && <ConnectionPicker onClose={() => setPickingConnection(false)} />}
+      {attaching &&
+        (() => {
+          // The path is the server's. This Mac's picker fills the field only
+          // when the notes are on this Mac: over a connection its folders are
+          // the wrong machine's (lib/shell.ts picksFolders).
+          const conn = activeConnection();
+          const local = conn.destination === "";
+          return (
+            <AttachFolderDialog
+              place={local ? "this Mac" : conn.name}
+              pick={picksFolders() && local ? pickFolderPath : null}
+              // A refusal stays in the dialog, under the field. Success
+              // closes it, with the new workspace selected by the reducer.
+              onAttach={async (path) => {
+                const err = await attachWorkspace(path, dispatch);
+                if (err === null) setAttaching(false);
+                return err;
+              }}
+              onCancel={closeAttach}
+            />
+          );
+        })()}
       {vaultDialog && (
         <VaultDialog
           mode={vaultDialog.then?.changePassphrase ? "change" : "auto"}

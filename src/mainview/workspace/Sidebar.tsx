@@ -12,11 +12,9 @@ import { docsWindow } from "@/lib/windows";
 import { ConnectionBar } from "./ConnectionBar";
 import { useCommands } from "@/commands/CommandProvider";
 import { CommandMenuItem } from "@/commands/CommandMenuItem";
-import { configureUi, uiHooks } from "@/commands/glue";
-import { MoveWorkspaceDialog } from "@/components/MoveWorkspaceDialog";
+import { configureUi } from "@/commands/glue";
 import { tooltip } from "@/commands/format";
 import { targetAttrs } from "@/commands/target";
-import { moveWorkspace } from "./actions";
 import { workspaceKind } from "./channel";
 import { useWorkspace } from "./store";
 import { IconPicker } from "./IconPicker";
@@ -96,19 +94,15 @@ function WorkspaceStrip() {
   // The workspace whose icon is being picked, and the row the popover hangs off.
   const [pickingId, setPickingId] = useState<string | null>(null);
   const [pickAnchor, setPickAnchor] = useState<HTMLElement | null>(null);
-  // The workspace whose move-destination chooser is open (external workspaces
-  // only; workspace.move sends managed ones straight to the native picker).
-  const [movingId, setMovingId] = useState<string | null>(null);
-
-  // The strip owns the inline-rename state, the icon picker, and the move
-  // chooser. It registers the hooks that workspace.rename, workspace.icon and
-  // workspace.move reach it through (registry.ts), whether they are run from a
-  // menu item, a row verb, or the palette.
+  // The strip owns the inline-rename state and the icon picker. It registers
+  // the hooks that workspace.rename and workspace.icon reach it through
+  // (registry.ts), whether they are run from a menu item, a row verb, or the
+  // palette. The Attach Folder dialog is App's (App.tsx): a phone keeps the
+  // sidebar unmounted, and a dialog owned here would not open there.
   useEffect(() => {
     configureUi({
       beginRenameWorkspace: setRenamingId,
       pickWorkspaceIcon: setPickingId,
-      pickMoveDestination: setMovingId,
     });
   }, []);
 
@@ -291,12 +285,6 @@ function WorkspaceStrip() {
             onClose={() => setMenu(null)}
           />
           <CommandMenuItem
-            id="workspace.move"
-            hint="Relocates the folder on disk; every note travels with it"
-            target={{ kind: "workspace", id: menu.id }}
-            onClose={() => setMenu(null)}
-          />
-          <CommandMenuItem
             id="workspace.close"
             target={{ kind: "workspace", id: menu.id }}
             onClose={() => setMenu(null)}
@@ -313,27 +301,6 @@ function WorkspaceStrip() {
         />
       )}
 
-      {(() => {
-        const movingWs = state.workspaces.find((w) => w.id === movingId);
-        if (!movingWs) return null;
-        // Either pick closes the dialog first, then runs the same move action
-        // workspace.move runs directly for managed folders. Failures land on
-        // the note browser's error strip, like every other workspace action.
-        const moveTo = (home: boolean) => {
-          setMovingId(null);
-          void moveWorkspace(movingWs.id, state, dispatch, home).then((err) => {
-            if (err) uiHooks.showError?.(err);
-          });
-        };
-        return (
-          <MoveWorkspaceDialog
-            name={movingWs.name}
-            onHome={() => moveTo(true)}
-            onPicker={() => moveTo(false)}
-            onCancel={() => setMovingId(null)}
-          />
-        );
-      })()}
     </>
   );
 }

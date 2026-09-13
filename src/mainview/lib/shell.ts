@@ -5,16 +5,16 @@
 //
 // Whether a note's blocks run here is the shell's answer about itself. A phone
 // has no terminal drawer, and v1 cut inline runs as well until the surfaces
-// they need had a touch column (ios.md §8). Whether a folder can be picked is
-// a fact about the machine at the other end. A headless server has no dialog
-// to open, which is true of a VPS reached from a Mac exactly as it is of one
-// reached from a phone.
+// they need had a touch column (ios.md §8). Whether a CLI can be installed is
+// a fact about the machine at the other end: a compiled `ledge-server` has
+// none beside it, which is true of a VPS reached from a Mac exactly as it is
+// of one reached from a phone.
 //
-// Four of the flags here withhold a verb that cannot work on this client, so
-// it is absent rather than present and failing: `runsBlocks`, `hasTerminal`,
-// `canPickFolder` and `canInstallCli` (interactions.md §8). `softKeyboard`
-// changes an editor rather than a verb, and `deviceKey` says which key
-// authenticates (ios.md §8).
+// Three of the flags here withhold a verb that cannot work on this client, so
+// it is absent rather than present and failing: `runsBlocks`, `hasTerminal`
+// and `canInstallCli` (interactions.md §8). `picksFolders` withholds a button
+// inside a dialog the same way. `softKeyboard` changes an editor rather than
+// a verb, and `deviceKey` says which key authenticates (ios.md §8).
 //
 // A configureX seam like the others (architecture.md §5). The entry point sets
 // it before bootView, the registry's `when` predicates and the chrome read it,
@@ -37,6 +37,8 @@ interface Shell {
   softKeyboard: boolean;
   /** Whether this client can open a second window. */
   multiWindow: boolean;
+  /** Whether this client has a folder dialog of its own to open. */
+  picksFolders: boolean;
 }
 
 let shell: Shell = {
@@ -46,6 +48,7 @@ let shell: Shell = {
   shareSheet: null,
   softKeyboard: false,
   multiWindow: true,
+  picksFolders: true,
 };
 
 export function configureShell(next: Partial<Shell>): void {
@@ -155,38 +158,37 @@ export function multiWindow(): boolean {
   return shell.multiWindow;
 }
 
+/**
+ * Whether this client can put a folder dialog on screen, for the Choose
+ * Folder… button in the Attach Folder dialog (workspace/Sidebar.tsx).
+ *
+ * The dialog's field is what attaches: the path in it goes to the server,
+ * which checks it (bun/workspaces.ts attachExternal). The button only fills
+ * the field, from this Mac's own folders, so the dialog offers it where the
+ * notes are on this Mac too. A phone has no folder dialog and its folders
+ * are never the server's, so there the field stands alone (ios.md §8).
+ */
+export function picksFolders(): boolean {
+  return shell.picksFolders;
+}
+
 // The server's half. Not part of `Shell` above because it arrives from a
 // different place at a different time: the shell knows its own answers at boot,
-// and these come back with `workspaceList` on the first round trip. They
-// default to true, so the desktop's verbs are present during the one paint
+// and this comes back with `workspaceList` on the first round trip. It
+// defaults to true, so the desktop's verb is present during the one paint
 // before `workspaceList` answers.
-//
-// Both are the same question asked about two verbs: does the machine at the
-// other end have the thing this verb needs? A headless server has neither, and
-// a Mac reaches one as easily as a phone does.
 interface ServerCaps {
-  /** Whether that machine can open a native folder picker. */
-  folderDialog: boolean;
   /** Whether that machine has a `ledge` CLI to put on its own PATH. */
   cliShim: boolean;
 }
 
-let server: ServerCaps = { folderDialog: true, cliShim: true };
+let server: ServerCaps = { cliShim: true };
 
 /** Record what the machine holding the notes can do, from `workspaceList` at
- * boot. Copied field by field, so a response carrying more than these two
- * leaves no extras here. */
+ * boot. Copied field by field, so a response carrying more than this leaves
+ * no extras here. */
 export function recordServerCaps(caps: ServerCaps): void {
-  server = { folderDialog: caps.folderDialog, cliShim: caps.cliShim };
-}
-
-/** Whether the machine holding the notes can ask a person to choose a folder.
- * False on any headless server, where `bun/server.ts` answers workspaceAttach
- * and workspaceMove with "attaching a folder needs the app running on the
- * machine that holds the notes". This flag hides the verb, so nobody reaches
- * that refusal. */
-export function canPickFolder(): boolean {
-  return server.folderDialog;
+  server = { cliShim: caps.cliShim };
 }
 
 /**

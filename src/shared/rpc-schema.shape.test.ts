@@ -117,7 +117,15 @@ describe("the schema's shape against the protocol version", () => {
   // client-only (NATIVE_METHODS and CLIENT_PUSHES), so no frame carries them and
   // no server's view of the wire changes. Nothing existing moved. The pin moves
   // and the version does not.
-  const PINNED = { protocol: 5, shape: "d0b398132e98aee4" };
+  // Then attaching by path (remote.md §5): workspaceAttach's params gained a
+  // required `path`, workspaceMove went, workspaceList lost `folderDialog`,
+  // and folderPick arrived (client-only). Decided not to break: an old client
+  // reads the missing `folderDialog` as false and hides Attach Folder, as it
+  // did against every server; an old server ignores the `path` a new client
+  // sends and answers its no-dialog refusal, which the new dialog shows under
+  // its field. Move was a verb no server-side client could reach. The pin
+  // moves and the version does not.
+  const PINNED = { protocol: 5, shape: "3d4ccca78a3dd191" };
 
   test("a payload shape does not change without someone deciding whether it breaks", async () => {
     const shape = digest(shapeOf(await Bun.file(SCHEMA).text()));

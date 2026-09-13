@@ -268,13 +268,14 @@ export function bootView(requests: RequestClient): Promise<void> {
   });
 
   // The server owns the workspace folders. The view only ever holds roots and
-  // paths it got from there.
+  // paths it got from there, except the one it sends to attach, which the
+  // server checks. The picker is this client's (a native seam, remote.md §10).
   configureWorkspaces({
     list: () => requests.workspaceList({}),
     create: (name) => requests.workspaceCreate({ name }).then((r) => r.root),
-    attach: () => requests.workspaceAttach({}),
+    attach: (path) => requests.workspaceAttach({ path }),
     detach: (root) => requests.workspaceDetach({ root }).then((r) => r.ok),
-    move: (root, home) => requests.workspaceMove({ root, home }),
+    pickFolder: () => requests.folderPick({}).then((r) => r.path),
   });
 
   configureNotes({
@@ -372,11 +373,10 @@ async function boot(requests: RequestClient): Promise<void> {
     // Edit Daily Template faces (workspace/channel.ts).
     recordWorkspaceKinds(roots);
     recordDailyRoot(registry.dailyRoot);
-    // What the machine holding the notes can do for itself: answer a folder
-    // picker, and hand over a CLI to install (lib/shell.ts). Recorded here for
-    // the same reason the two above are: this fetch bypasses the channel
-    // wrapper, and it is the first round trip, so the answers are in place
-    // before the first palette opens.
+    // What the machine holding the notes can do for itself: hand over a CLI
+    // to install (lib/shell.ts). Recorded here for the same reason the two
+    // above are: this fetch bypasses the channel wrapper, and it is the first
+    // round trip, so the answer is in place before the first palette opens.
     recordServerCaps(registry);
     // The manual's window lists one folder, its own. It can show nothing else,
     // and listing a workspace over a big external folder would slow a window

@@ -14,7 +14,7 @@ Ledge saves as you type, a moment after you pause. ⌘S saves at once.
 
 The strip at the top of the sidebar lists your workspaces. Each one is a single folder of notes, and ⌘1 through ⌘9 jump between them. There are two kinds:
 
-- **Attached.** "Attach Folder as Workspace…" (in the command palette, in the + button's menu, or by right-clicking the empty space below the workspaces) turns a folder you already have into a workspace, usually a project you work on. Its `.md` files become notes where they are, and each of those notes runs its blocks in the project folder with no frontmatter ([[Running Code]]).
+- **Attached.** "Attach Folder as Workspace…" (in the command palette, in the + button's menu, or by right-clicking the empty space below the workspaces) turns a folder you already have into a workspace, usually a project you work on. Type the folder's path (`~` stands for your home folder), or press Choose Folder… to pick it. Its `.md` files become notes where they are, and each of those notes runs its blocks in the project folder with no frontmatter ([[Running Code]]).
 - **Managed.** ⇧⌘N creates a workspace whose folder Ledge makes for you inside `~/.ledge`. Its notes default to your home folder, and `cwd:` frontmatter points them elsewhere ([[Frontmatter and Environments]]).
 
 Managed workspace folders live in `~/.ledge`.
@@ -24,8 +24,9 @@ With a workspace row focused, or from its right-click menu:
 - Enter switches to it.
 - `r` renames it, `i` changes its icon.
 - Dragging reorders the strip.
-- "Move Workspace Folder…" relocates the folder on disk.
 - ⌫ closes it, which only detaches it. No files are touched, and attaching the same folder later brings everything back.
+
+To move a workspace's folder somewhere else on disk, close the workspace, move the folder in Finder, and attach it again at its new place. Everything travels with the folder: the notes, the images, and the trash.
 
 ## Share a workspace with others
 

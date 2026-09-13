@@ -983,9 +983,10 @@ blocks inline. It has no terminal drawer.**
 | On a phone | Not on a phone |
 | ---------- | -------------- |
 | The note list, quick open, full-text search | The terminal drawer |
-| Tags, backlinks, the outline | Attaching a workspace folder |
-| Editing, with live preview | Moving a workspace |
+| Tags, backlinks, the outline | |
+| Editing, with live preview | |
 | Daily notes, templates, wikilinks | |
+| Attaching a workspace folder, by its path on the server | |
 | Rendered images, and adding them from the photo library, the camera, Files, or by pasting | |
 | Running a block inline, with the host picker and the confirmation | |
 | Editing the note's profile, which is what a run's environment is | |
@@ -1058,13 +1059,16 @@ and a phone has none of those chords while the focus costs half the screen to a
 keyboard that can type nothing. So `EditorView.editable` goes off there, and iOS
 selects and copies the text natively instead (interactions.md §1a).
 
-`folderDialog` is the SERVER's, and rides back on `workspaceList` at boot. It
-is false wherever nobody is sitting at the machine that holds the notes, which
-withholds Attach Folder and Move Workspace Folder. That one is not a phone
-question at all — a Mac pointed at a VPS gets the same answer, and used to get
-`bun/server.ts`'s refusal sentence instead, which is a good sentence to read
-and a bad one to discover by running the only verb that looked like it would
-help.
+`picksFolders` withholds a button rather than a verb. Attach Folder as
+Workspace… asks for the folder's path on the server, which checks it
+(`bun/workspaces.ts` attachExternal), so the verb works from a phone. A Mac
+adds a Choose Folder… button that fills the field from its own folder dialog,
+and only where the notes are on that Mac. A phone has no such dialog, and its
+folders are never the server's, so the flag is false and the field stands
+alone. `cliShim` is the one fact that is the SERVER's, riding back on
+`workspaceList` at boot: a compiled `ledge-server` has no CLI to install, so
+Install Shell Command is absent on every connection to one, from a Mac as
+from a phone.
 
 The harness can be either shell. `harness.html?shell=ios` is a phone's, and
 `e2e/phone.spec.ts` uses it to hold both halves of the claim — the cut verbs
@@ -1089,11 +1093,12 @@ jettisoned web content process, claims the ones it can still show
 (`inlineClaim`). What does not survive is an idle drawer, which is one of the
 reasons a phone has none.
 
-**Attaching a workspace is cut because the server already refuses it.**
-`bun/server.ts` answers a headless folder dialog with "attaching a folder
-needs the app running on the machine that holds the notes". A phone is
-permanently that case, which is why the flag that hides the verb is the
-server's rather than the shell's.
+**Attaching a workspace is typed.** The dialog asks for the folder's path on
+the server and the server checks it, so a phone attaches a folder the way a
+Mac connected to a server does. A refusal shows under the field, the same
+sentence `ledge-server` would give anyone. What a phone does without is the
+Choose Folder… button, since it has no folder dialog and its folders are not
+the server's (`picksFolders`, §8 above).
 
 ## 9. State ownership on a phone
 

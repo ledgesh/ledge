@@ -103,20 +103,14 @@ export const COMMANDS = {
   // only on a focused workspace row, which is why `r` can also mean Restore on
   // a trashed note without colliding.
   "workspace.new": { title: "New Workspace", keys: ["Mod-Shift-n"] },
-  // Opens the native folder picker; the chosen directory becomes a workspace
-  // whose notes stay where they already are. No chord, since attaching a
-  // folder is not frequent enough to spend one. The command lives in the
-  // palette and in the + button's dropdown (Sidebar.tsx).
+  // Asks for a folder's path on the server; that directory becomes a
+  // workspace whose notes stay where they already are. No chord, since
+  // attaching a folder is not frequent enough to spend one. The command lives
+  // in the palette and in the + button's dropdown (Sidebar.tsx).
   "workspace.attach": { title: "Attach Folder as Workspace…" },
   "workspace.open": { title: "Switch to Workspace", listKeys: ["Enter"] },
   "workspace.rename": { title: "Rename Workspace…", listKeys: ["r"] },
   "workspace.icon": { title: "Change Icon…", listKeys: ["i"] },
-  // No chord and no bare key: moving a folder is rare. The row's context menu
-  // is its main home, and the palette carries it too. A managed workspace goes
-  // straight to the native destination picker, Bun-side like attach. An
-  // external one gets an in-app chooser first (back to ~/.ledge, or that
-  // picker), because the native dialog cannot easily reach hidden ~/.ledge.
-  "workspace.move": { title: "Move Workspace Folder…" },
   "workspace.close": { title: "Close Workspace", listKeys: ["Backspace"] },
 
   // Chrome. ⌘, is the macOS settings convention. It opens settings.jsonc in

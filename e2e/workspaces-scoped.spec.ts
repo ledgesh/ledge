@@ -1,9 +1,10 @@
 // Notes are local to a workspace: the browser, quick-open (⌘P), full-text
 // search (⌥⌘P), and the Trash section show only the selected workspace's
 // folder. These specs cover those four surfaces. They also cover attaching a
-// folder, where the harness fakes the native dialog and returns
-// /harness/external, and closing a workspace then attaching the same folder
-// again, which proves the close deleted nothing.
+// folder by its path, typed or filled by the client's picker (which the
+// harness fakes as /harness/external), a refused path, and closing a
+// workspace then attaching the same folder again, which proves the close
+// deleted nothing.
 import { expect, test, type Page } from "@playwright/test";
 
 const wsRow = (page: Page, name: string) =>
@@ -18,6 +19,19 @@ async function runFromPalette(page: Page, title: string): Promise<void> {
   await page.keyboard.press("Meta+Shift+P");
   await page.getByPlaceholder("Run a command").fill(title);
   await page.keyboard.press("Enter");
+}
+
+// Attach Folder as Workspace… opens a dialog that asks for the folder's path
+// on the server (components/AttachFolderDialog.tsx). Choose Folder… fills it
+// from this client's own picker, and Attach sends it.
+const attachDialog = (page: Page) => page.getByRole("dialog", { name: "Attach Folder as Workspace" });
+async function attachExternal(page: Page): Promise<void> {
+  await runFromPalette(page, "Attach Folder");
+  const dialog = attachDialog(page);
+  await dialog.getByRole("button", { name: "Choose Folder…" }).click();
+  await expect(dialog.getByTestId("attach-folder-field")).toHaveValue("/harness/external");
+  await dialog.getByRole("button", { name: "Attach", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
 }
 
 test.beforeEach(async ({ page }) => {
@@ -95,7 +109,7 @@ test("the Trash section is the selected workspace's; deletes stay in their folde
 });
 
 test("attach surfaces the picked folder's notes as a new workspace", async ({ page }) => {
-  await runFromPalette(page, "Attach Folder");
+  await attachExternal(page);
   // The new workspace is named after the folder ("external"), and it becomes
   // the selected workspace. The notes already in that folder are listed.
   await expect(wsRow(page, "external")).toHaveClass(/bg-accent/);
@@ -109,7 +123,7 @@ test("attach surfaces the picked folder's notes as a new workspace", async ({ pa
 });
 
 test("close then re-attach: the folder's notes survived the close", async ({ page }) => {
-  await runFromPalette(page, "Attach Folder");
+  await attachExternal(page);
   await expect(noteRow(page, "Delta")).toBeVisible();
   // Close the workspace (⌫ on its focused row). Closing removes only the
   // registry entry. The files must not be deleted.
@@ -117,7 +131,7 @@ test("close then re-attach: the folder's notes survived the close", async ({ pag
   await page.keyboard.press("Backspace");
   await expect(wsRow(page, "external")).toHaveCount(0);
   // Re-attach: everything is still in the folder.
-  await runFromPalette(page, "Attach Folder");
+  await attachExternal(page);
   await expect(wsRow(page, "external")).toBeVisible();
   await expect(noteRow(page, "Delta")).toBeVisible();
   await expect(noteRow(page, "Epsilon")).toBeVisible();
@@ -129,17 +143,37 @@ test("the + button's dropdown offers both ways to add a workspace", async ({ pag
   const menu = page.getByRole("menu");
   await expect(menu.getByRole("menuitem", { name: /New Workspace/ })).toBeVisible();
   await menu.getByRole("menuitem", { name: /Attach Folder as Workspace/ }).click();
-  // This is the same flow the palette route takes. The fake dialog picks
-  // /harness/external.
+  // The same dialog the palette route opens. Typed this time, and Enter in
+  // the field is the submit.
+  const field = attachDialog(page).getByTestId("attach-folder-field");
+  await expect(field).toBeFocused();
+  await field.fill("/harness/external");
+  await page.keyboard.press("Enter");
+  await expect(attachDialog(page)).toHaveCount(0);
   await expect(wsRow(page, "external")).toHaveClass(/bg-accent/);
   await expect(noteRow(page, "Delta")).toBeVisible();
 });
 
-test("attaching an already-attached folder selects it instead of duplicating", async ({ page }) => {
+test("a refused path stays in the dialog, with the server's reason under the field", async ({ page }) => {
   await runFromPalette(page, "Attach Folder");
+  const dialog = attachDialog(page);
+  // Nothing to send yet: the button waits for a path.
+  await expect(dialog.getByRole("button", { name: "Attach", exact: true })).toBeDisabled();
+  await dialog.getByTestId("attach-folder-field").fill("/harness/nowhere");
+  await page.keyboard.press("Enter");
+  await expect(dialog.getByTestId("attach-folder-error")).toHaveText("not a directory: /harness/nowhere");
+  await expect(dialog).toBeVisible();
+  await expect(wsRow(page, "nowhere")).toHaveCount(0);
+  // Escape leaves nothing behind.
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+});
+
+test("attaching an already-attached folder selects it instead of duplicating", async ({ page }) => {
+  await attachExternal(page);
   await expect(wsRow(page, "external")).toBeVisible();
   await page.keyboard.press("Meta+1"); // back to Scratch
-  await runFromPalette(page, "Attach Folder");
+  await attachExternal(page);
   await expect(wsRow(page, "external")).toHaveCount(1);
   await expect(wsRow(page, "external")).toHaveClass(/bg-accent/);
 });

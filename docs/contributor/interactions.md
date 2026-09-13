@@ -540,7 +540,7 @@ CodeMirror and never at the window level.
 | Split Down            | ⇧⌘D                       | |
 | Close Pane            | ⇧⌘W                       | |
 | New Workspace         | ⇧⌘N                       | creates a managed folder under ~/.ledge (Bun slugs the name) |
-| Attach Folder as Workspace… | — (palette, + menu, the strip's blank space) | native folder picker (Bun-side; the view never names a path); the chosen directory's .md files become the workspace's notes. Picking an already-attached folder switches to it. Also in the New Workspace split button's dropdown (the strip's + row), and in the menu a right-click on the strip's blank space opens (R6b) |
+| Attach Folder as Workspace… | — (palette, + menu, the strip's blank space) | opens a dialog (`components/AttachFolderDialog.tsx`) asking for the folder's path on the machine that holds the notes; the server checks it (`bun/workspaces.ts` attachExternal: absolute, a directory, not the app home or nested with another root, `~` meaning the server's home) and a refusal shows under the field, so a typo is fixed in place. Choose Folder… fills the field from this Mac's own picker (a native seam, `remote.md` §10), offered only where the notes are on this Mac. The directory's .md files become the workspace's notes; a path that is already a root switches to it. Also in the New Workspace split button's dropdown (the strip's + row), and in the menu a right-click on the strip's blank space opens (R6b) |
 | Switch to Workspace N | ⌘1…9                      | badge shows while ⌘ held |
 | Go to Note…           | ⌘P                        | the overlay's first mode, and the one every crossing is measured from. Three chips under the field switch between the three (Notes / Commands / Text): a chip carries the typed query across with it, strips the sigil on the way back to notes, and is lit for the mode showing — including the mode a SIGIL put you in, so the row doubles as the indicator the overlay never had. On a client with a software keyboard the chips are the only way across (§1a) and they stop printing the sigils they name |
 | Command Palette…      | ⇧⌘P                       | also: the Commands chip, or type `>` as the first character in ⌘P. A filtered query ranks by match quality with chorded commands one notch up (CHORD_BOOST, notes/fuzzy.ts): the §2 policy allocates chords to the frequent acts, so the chord doubles as the ranking signal — "daily" surfaces ⌘J's Open Today's Daily Note above the unchorded template verbs whose titles merely match earlier. The boost decides between comparable matches only; it never beats a tighter match ("edit daily" still leads with Edit Daily Template). An empty query keeps the registry's semantic order |
@@ -587,7 +587,6 @@ CodeMirror and never at the window level.
 | Expand / Collapse     | `↩` on a focused folder row (also its menu) | a folder's primary action is showing what is in it (R6), so this is its Enter and its click. One command with a LIVE TITLE rather than a two-faces pair, for `frontmatter.edit`'s reason one register down: it holds a bare key, and two commands may not claim one bare key on one row kind. Collapsing takes the folder's descendants with it, so reopening it does not spill a subtree you closed a while ago. Which folders are open rides in `.layout.json` beside the pane tree (`workspace/persist.ts`), so it outlives the session: a relaunch reopens the tree rather than the top level, and a folder that has since gone comes back closed |
 | Rename Workspace…     | `r` (also menu / palette / double-click) | |
 | Change Icon…          | `i` (also menu / palette) | opens the icon grid on the workspace's row |
-| Move Workspace Folder… | — (palette; workspace row menu) | relocates the workspace's folder on disk: a destination parent is chosen, then Bun renames the folder into it — same volume only, everything inside travels (notes, `.ledge-trash`, `.ledge-assets`). How the destination is asked depends on where the folder is. Managed (under the hidden `~/.ledge`): straight to the native picker, Bun-side (the view names no path, attach's move) — the cloud-backup gesture, since a managed folder moved into iCloud Drive or Dropbox keeps every note and becomes an external workspace (its notes' shells now anchor there, architecture.md §6a). External: an in-app chooser first (`MoveWorkspaceDialog`) with two destinations — "Move to ~/.ledge" (the return trip, managed again, no picker: the native dialog cannot reasonably navigate into a hidden folder) or "Choose Another Location…" (that same native picker). Either way the workspace keeps its name, icon, and strip position; open tabs close — their paths named the old location — which is arrangement loss, not data loss (§4), so no confirm. Picking the folder's current parent is a no-op. No chord and no bare key: a rare, deliberate act |
 | Close Workspace       | `⌫` (also menu / hover ✕) | detaches the folder from the registry; every note stays on disk, re-attachable |
 | Copy Path             | `c` (also note context menu) | |
 | Empty Trash…          | — (button / palette, confirmed) | |
@@ -1317,15 +1316,16 @@ secret written to a synced file — because focus never moved.
   seconds and regrows is its own kind of untruth. `when` already hides what
   does not apply to the target;
   registry-wide facts do the same for what does not apply to the CLIENT
-  (`mainview/lib/shell.ts`). Four of them, two the shell's own answers about
-  itself and two the notes machine's:
+  (`mainview/lib/shell.ts`). Three of them, two the shell's own answers about
+  itself and one the notes machine's, plus one that withholds a button
+  rather than a verb:
 
   | Fact | Whose | Withholds |
   | ---- | ----- | --------- |
   | `runsBlocks` | shell | Run Block Inline and its chord, the ▶ on every runnable fence, the profile editor |
   | `hasTerminal` | shell | Toggle Terminal, Close Terminal, the chrome's button, Run Block in Terminal and its chord |
-  | `canPickFolder` | server | Attach Folder as Workspace…, Move Workspace Folder… |
   | `canInstallCli` | server | Install Shell Command (ledge) |
+  | `picksFolders` | shell | the Choose Folder… button in the Attach Folder dialog |
 
   Running a block and having a drawer are separate surfaces, which is why they
   are separate facts: a phone runs blocks inline before it has a terminal
@@ -1333,17 +1333,19 @@ secret written to a synced file — because focus never moved.
   a second arrangement and a keyboard grammar. Run Block in Terminal is the one
   verb that needs both answers, because it takes a block out of the note and
   puts it in the drawer. Restart Note Shell needs either, because both surfaces
-  spawn the shells it kills. `canPickFolder` is false wherever nobody is sitting
-  at the machine that holds the notes — a headless server, which a Mac can be
-  connected to as easily as a phone.
+  spawn the shells it kills.
 
-  The server's two arrive together, on `workspaceList`'s first round trip, and
-  they are two because a machine can have a person at it and still have nothing
-  to install. `canInstallCli` is the notes machine's answer rather than the
-  client's for the same reason `canPickFolder` is: the install writes a file
-  over there, and the `ledge` it writes reads the notes over there. A compiled
-  `ledge-server` has no CLI beside it to exec (`bun/cliShim.ts`), so the verb is
-  absent on every connection to one.
+  The server's arrives on `workspaceList`'s first round trip. `canInstallCli`
+  is the notes machine's answer rather than the client's because the install
+  writes a file over there, and the `ledge` it writes reads the notes over
+  there. A compiled `ledge-server` has no CLI beside it to exec
+  (`bun/cliShim.ts`), so the verb is absent on every connection to one.
+
+  Attaching a folder is gated by nothing: the path is typed and the server
+  checks it, so the verb works against every server. What a phone lacks is a
+  folder dialog of its own, and its folders would be the wrong machine's
+  anyway, so `picksFolders` withholds the button that fills the field and
+  the field stands alone (ios.md §8).
 
   All four default to the desktop app's answer, so a shell that says nothing
   keeps every verb: the failure mode of a forgotten call is a phone with a

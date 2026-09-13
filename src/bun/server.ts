@@ -10,8 +10,8 @@
 //
 // It imports nothing from electrobun (remote.md §1): it runs as
 // `ledge-server daemon` on every machine, the Mac included, and the app is
-// one of its clients over a socket. The native seams it needs arrive as
-// NativeDeps below, supplied by the entry point that starts it (daemon.ts).
+// one of its clients over a socket. Nothing here touches a screen: every
+// dialog and pasteboard is a client's (bun/clientSeams.ts, remote.md §10).
 import { watch } from "node:fs";
 import { homedir } from "node:os";
 import { basename, resolve } from "node:path";
@@ -72,7 +72,6 @@ import {
   kindOf,
   listWorkspaceRoots,
   loadWorkspaces,
-  moveRoot,
   rootContaining,
   roots,
 } from "./workspaces";
@@ -98,21 +97,6 @@ import {
 import { buildRemoteSpawn } from "./remoteSpawn";
 import { readFileSync, statSync } from "node:fs";
 import { isHostName, LOCAL_HOST, type NoteParams } from "../shared/frontmatter";
-
-// The one native seam the server still has. The pasteboard and the menu bar
-// moved to the client (remote.md §10, bun/clientSeams.ts). The folder dialog
-// could not follow: the folder it picks has to exist on the machine that will
-// hold the notes, and a picker on the client would return a path from the
-// wrong filesystem.
-//
-// The field is optional, and absent is not the same as failed. A server with no
-// dialog says so (NO_DIALOG below) instead of returning what a cancelled dialog
-// returns, which would leave a button that does nothing.
-export interface NativeDeps {
-  // The native folder picker, behind workspaceAttach/workspaceMove. Returns
-  // null when the user cancelled.
-  pickFolder?(startingFolder: string): Promise<string | null>;
-}
 
 /**
  * Who a push is for (remote.md §7).
@@ -193,12 +177,6 @@ const BUNDLED_BUN = bundledBun(process.execPath);
 const CLI_ENTRY = resolve(import.meta.dir, "cli.js");
 const CAN_INSTALL_CLI = statSync(CLI_ENTRY, { throwIfNoEntry: false })?.isFile() === true;
 
-// What workspaceAttach and workspaceMove answer with when there is no dialog
-// to show. Data, not an exception: the schema gives both calls an `error`
-// string so a refusal can reach the user as a sentence.
-const NO_DIALOG =
-  "A headless server cannot open a folder dialog. Attaching a folder needs the app running on the machine that holds the notes.";
-
 // What a handler that needs the vault answers a device that has not unlocked
 // (locking.md §3a). Thrown rather than returned: these calls have no `error`
 // field, and the view already shows a thrown message on a failed lock. The
@@ -228,10 +206,12 @@ async function refuseLockedFrom(device: string, path: string): Promise<void> {
   if (await isNoteLocked(path)) throw new Error(VAULT_SHUT_HERE);
 }
 
-// The same refusal for cliInstall, and it exists for the reason NO_DIALOG does.
-// The palette leaves the verb out (mainview/lib/shell.ts), and anything that
-// asks anyway gets a sentence instead of the shim's own "the CLI entry is
-// missing at /$bunfs/root/cli.js", which is true and unhelpful.
+// What cliInstall answers where there is no CLI beside this module. Data, not
+// an exception: the schema gives the call a message so the refusal reaches
+// the user as a sentence. The palette leaves the verb out
+// (mainview/lib/shell.ts), and anything that asks anyway gets this instead of
+// the shim's own "the CLI entry is missing at /$bunfs/root/cli.js", which is
+// true and unhelpful.
 const NO_CLI =
   "A server has no CLI to install. `ledge` ships with the app, so installing it needs the app running on the machine that holds the notes.";
 
@@ -249,6 +229,7 @@ function clientSeamRefusals(): Pick<RequestHandlers, ClientMethod> {
     clipboardReadRich: refuse("clipboardReadRich"),
     assetPaste: refuse("assetPaste"),
     assetPick: refuse("assetPick"),
+    folderPick: refuse("folderPick"),
     linkOpen: refuse("linkOpen"),
     menuSet: refuse("menuSet"),
     windowNew: refuse("windowNew"),
@@ -423,8 +404,8 @@ const fromB64 = (b64: string) => new Uint8Array(Buffer.from(b64, "base64"));
  * load registered, before the first noteList can arrive. `loadVault` lands the
  * salt, so vaultState answers "locked" vs "none" from the first call.
  */
-export async function createServer(deps: { push: Audience; native: NativeDeps }): Promise<LedgeServer> {
-  const { push, native } = deps;
+export async function createServer(deps: { push: Audience }): Promise<LedgeServer> {
+  const { push } = deps;
 
   // loadSettings parses settings.jsonc once, and this value serves for the
   // life of the process. Everything below reads it: the shell, the block
@@ -846,16 +827,13 @@ export async function createServer(deps: { push: Audience; native: NativeDeps })
     // --- workspaces --------------------------------------------------------
     // The registry lives server-side (workspaces.ts): the view only ever
     // passes back roots it was handed. The one way an arbitrary folder gets
-    // in is the native dialog below, never a view-supplied path.
+    // in is workspaceAttach below, which checks the path it is sent.
     workspaceList: () => ({
       workspaces: listWorkspaceRoots(),
       dailyRoot: resolveConfiguredWorkspace(settings.daily.workspace, roots()),
-      // The same condition the two verbs below check before refusing.
-      // Reported once at boot so the view can leave them out of the palette,
-      // rather than have the user run one and get NO_DIALOG back.
-      folderDialog: !!native.pickFolder,
-      // The same for Install Shell Command: a server can only ever refuse it
-      // (CLI_ENTRY above).
+      // The condition cliInstall checks before refusing, reported once at
+      // boot so the view can leave Install Shell Command out of the palette
+      // rather than have the user run it and get NO_CLI back (CLI_ENTRY above).
       cliShim: CAN_INSTALL_CLI,
     }),
     workspaceCreate: async ({ name }) => {
@@ -863,11 +841,8 @@ export async function createServer(deps: { push: Audience; native: NativeDeps })
       refreshWatchers();
       return { root };
     },
-    workspaceAttach: async () => {
-      if (!native.pickFolder) return { root: null, kind: null, error: NO_DIALOG };
-      const picked = await native.pickFolder(homedir());
-      if (!picked) return { root: null, kind: null, error: null }; // cancelled
-      const res = await attachExternal(picked);
+    workspaceAttach: async ({ path }) => {
+      const res = await attachExternal(path);
       if ("error" in res) return { root: null, kind: null, error: res.error };
       refreshWatchers();
       // Never "docs": attachExternal refuses the docs folder before the
@@ -878,24 +853,6 @@ export async function createServer(deps: { push: Audience; native: NativeDeps })
       const ok = await detachRoot(root);
       refreshWatchers();
       return { ok };
-    },
-    workspaceMove: async ({ root, home }) => {
-      const from = assertRegisteredRoot(root);
-      // `home` moves the folder into APP_HOME with no dialog (the schema
-      // comment says why). Otherwise the same dialog as workspaceAttach
-      // above. The pick is the destination parent the folder moves into.
-      let picked: string | null;
-      if (home) picked = APP_HOME;
-      else if (native.pickFolder) picked = await native.pickFolder(homedir());
-      else return { root: null, kind: null, error: NO_DIALOG };
-      if (!picked) return { root: null, kind: null, error: null }; // cancelled
-      const res = await moveRoot(from, picked);
-      if ("error" in res) return { root: null, kind: null, error: res.error };
-      refreshWatchers();
-      // Never "docs": moveRoot refuses the docs root outright, and no
-      // destination can become it. The docs folder sits inside the app home,
-      // and invalidRootReason bars anything there that is not managed.
-      return { root: res.root, kind: kindOf(res.root) as "managed" | "external", error: null };
     },
 
     // --- note store --------------------------------------------------------

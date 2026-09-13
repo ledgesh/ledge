@@ -53,7 +53,7 @@ Every shell the note spawns now starts in that directory with that environment. 
 
 [[Frontmatter and Environments]] covers the block in full.
 
-To skip frontmatter entirely, attach a project folder as a workspace: run "Attach Folder as Workspace…" from the command palette (⇧⌘P). Its `.md` files become the workspace's notes, and their shells start in the project folder automatically.
+To skip frontmatter entirely, attach a project folder as a workspace: run "Attach Folder as Workspace…" from the command palette (⇧⌘P) and give the folder's path, or press Choose Folder… to pick it. Its `.md` files become the workspace's notes, and their shells start in the project folder automatically.
 
 ## Write, link, and find
 

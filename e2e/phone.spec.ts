@@ -798,7 +798,7 @@ test.describe("the v1 features, by tap", () => {
 //
 // These rows have to be missing from the palette, not merely disabled. A
 // palette that lists Toggle Terminal and then answers with an error strip is
-// worse than one that omits it (§8 makes the same case for Attach Folder).
+// worse than one that omits it (§8 makes the same case for a picker button).
 //
 // `?shell=ios` makes the harness answer as the Swift shell rather than the
 // Electrobun one (harness.tsx). Without it these same rows are present,
@@ -827,15 +827,20 @@ test.describe("the iOS client, and what it does not have", () => {
     await expect(page.getByText("Toggle Terminal")).toHaveCount(0);
   });
 
-  test("no folder verbs, because the server has nobody at it to pick one", async ({
+  test("attaching a folder asks for its path on the server, with no picker to fill it", async ({
     page,
   }) => {
-    // A different reason from the terminal's, and a different flag: here the
-    // server says it is headless (workspaceList folderDialog), so a Mac
-    // pointed at a VPS loses these two as well.
-    await palette(page, "folder");
-    await expect(page.getByText("Attach Folder as Workspace…")).toHaveCount(0);
-    await expect(page.getByText("Move Workspace Folder…")).toHaveCount(0);
+    // The verb stays: the path is typed, and the server checks it. What a
+    // phone lacks is a folder dialog of its own, and its folders would be the
+    // wrong machine's anyway, so the dialog is the field alone (lib/shell.ts
+    // picksFolders).
+    await palette(page, "attach folder");
+    await page.keyboard.press("Enter");
+    const dialog = page.getByRole("dialog", { name: "Attach Folder as Workspace" });
+    await expect(dialog.getByTestId("attach-folder-field")).toBeVisible();
+    await expect(dialog.getByRole("button", { name: /Choose Folder/ })).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
   });
 
   test("a phone keeps its own list of servers, and adds to it here", async ({ page }) => {

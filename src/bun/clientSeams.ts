@@ -16,8 +16,7 @@
 // server's copy reports the wiring bug instead of returning an empty answer.
 //
 // This module imports no Electrobun. The native pieces arrive as optional
-// dependencies (ClientNative below), the way bun/server.ts takes its folder
-// dialog.
+// dependencies (ClientNative below), so clientSeams.test.ts can inject them.
 import { readClipboardHtml, readClipboardImage, readClipboardText, writeClipboard } from "./clipboard";
 import { loadClientSettings, readClientSettingsFile, writeClientSettingsFile } from "./clientSettings";
 import { mergeSettings, type Settings } from "../shared/settings";
@@ -56,6 +55,11 @@ export interface ClientNative {
   // no picker makes Insert Image… answer null. A cancelled picker answers null
   // too, and the view already handles that.
   pickImage?(): Promise<Uint8Array | null>;
+  // A folder chosen on this device, as its path, or null where the user
+  // cancelled. The macOS folder dialog (bun/index.ts). Absent on a shell with
+  // no picker, which then answers null and the Attach Folder dialog keeps
+  // only its field (mainview/lib/shell.ts picksFolders).
+  pickFolder?(): Promise<string | null>;
   // This app's own update (bun/updates.ts). Absent on a shell that does not
   // update itself, which then answers phase "off" and the view leaves the
   // update verbs out.
@@ -175,6 +179,10 @@ export function clientSeams(
       if (!bytes || bytes.length === 0) return { src: null };
       return server.assetWrite({ root, notePath, dataB64: Buffer.from(bytes).toString("base64") });
     },
+    // The folder dialog, for the Attach Folder field. Only the path crosses:
+    // the view sends it on to workspaceAttach, where the server checks it
+    // like a typed one (bun/workspaces.ts attachExternal).
+    folderPick: async () => ({ path: (await native.pickFolder?.()) ?? null }),
     // The native menu bar, shaped by the view (commands/menu.ts). The shell
     // passes `items` to the platform and interprets nothing in it: the
     // `action` strings are command ids, so the registry stays the one place a

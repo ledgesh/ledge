@@ -378,8 +378,8 @@ function newServerId(): string {
 }
 
 /**
- * The seventeen a client shell answers itself (wire.ts CLIENT_METHODS), for
- * iOS. Typed as the whole list rather than as a partial map, so a name added to
+ * The calls a client shell answers itself (wire.ts CLIENT_METHODS), for iOS.
+ * Typed as the whole list rather than as a partial map, so a name added to
  * CLIENT_METHODS fails to compile here until this shell answers it too. The
  * alternative is a method that quietly reaches the wire, where the server
  * refuses it (remote.md §10) and the refusal costs a round trip.
@@ -429,6 +429,10 @@ function clientSeams(
       if (!dataB64) return { src: null };
       return requests.assetWrite({ root, notePath, dataB64 });
     },
+    // No folder picker: a phone's folders are not the server's, and the
+    // Attach Folder dialog there is its field alone (lib/shell.ts
+    // picksFolders). Null answers anything that asks anyway.
+    folderPick: async () => ({ path: null }),
     linkOpen: async ({ url }) => (await shell.call("link.open", { url })) as { ok: boolean },
     // There is no menu bar on a phone (ios.md §11). The view builds one anyway.
     // The command registry is the menu's source and knows nothing about shells,

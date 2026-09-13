@@ -195,7 +195,6 @@ export const REQUEST_METHODS = [
   "workspaceCreate",
   "workspaceAttach",
   "workspaceDetach",
-  "workspaceMove",
   "noteList",
   "noteRead",
   "noteWrite",
@@ -250,6 +249,7 @@ export const REQUEST_METHODS = [
   "assetRead",
   "assetPaste",
   "assetPick",
+  "folderPick",
   "assetWrite",
   "connectionList",
   "connectionSelect",
@@ -310,9 +310,9 @@ export type ClientPush = (typeof CLIENT_PUSHES)[number];
 // added here without a matching refusal fails to compile.
 
 /**
- * The native thirteen: the pasteboard, the picture library, the browser, the
- * menu bar, the windows, and the app's own update. All of them belong to the
- * device in front of the user.
+ * The native fourteen: the pasteboard, the picture library, the folder
+ * dialog, the browser, the menu bar, the windows, and the app's own update.
+ * All of them belong to the device in front of the user.
  *
  * Answering them on the server reaches the wrong machine: a VPS's empty
  * pasteboard, a file dialog opened on a screen nobody is looking at, a link
@@ -326,6 +326,7 @@ export const NATIVE_METHODS = [
   "clipboardReadRich",
   "assetPaste",
   "assetPick",
+  "folderPick",
   "linkOpen",
   "menuSet",
   "windowNew",

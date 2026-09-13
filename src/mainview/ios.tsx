@@ -81,6 +81,9 @@ async function start(): Promise<void> {
     // is not editable on a phone (lib/shell.ts).
     softKeyboard: true,
     multiWindow: false,
+    // No folder dialog, and a phone's folders are never the server's. The
+    // Attach Folder dialog is its field alone here (lib/shell.ts).
+    picksFolders: false,
   });
 
   // Everything from here to the first paint waits on another machine, and a

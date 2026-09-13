@@ -96,13 +96,18 @@ test("a path outside the workspace roots is refused over the wire", async () => 
   await expect(client.requests.noteWrite({ path: "/etc/hosts", text: "x", baseMtimeMs: null })).rejects.toThrow();
 });
 
-// Absent is not the same as cancelled. A headless server says why it has no
-// dialog, while a dismissed dialog answers with a null root and no error
-// (remote.md §5).
-test("a headless server refuses to attach a folder, with a reason", async () => {
-  const res = (await client.requests.workspaceAttach({})) as { root: string | null; error: string | null };
-  expect(res.root).toBeNull();
-  expect(res.error).toContain("headless server");
+// A folder is attached by its path on the server (remote.md §5): the one
+// string a client sends that is not a handle it was given. The server checks
+// it, so a refusal is a sentence in `error` and never a root.
+test("a folder attaches by its path on the server, and a bad path is refused with a reason", async () => {
+  // Beside the app home, not under it: a direct child of the app home is a
+  // managed folder (bun/workspaces.ts kindOf).
+  const folder = await mkdtemp(join(tmpdir(), "ledge-typed-"));
+  const res = await client.requests.workspaceAttach({ path: folder });
+  expect(res).toEqual({ root: folder, kind: "external", error: null });
+  const bad = (await client.requests.workspaceAttach({ path: "typed" })) as { root: string | null; error: string | null };
+  expect(bad.root).toBeNull();
+  expect(bad.error).toContain("not an absolute path");
 });
 
 // The same shape one verb over. A server has no CLI to put on its PATH: the

@@ -104,7 +104,7 @@ async function mainViewUrl(): Promise<string> {
 // pasteboard, the picture library, the browser, and the menu bar are this
 // Mac's, local server or remote. AppKit supplies the native halves.
 //
-// The two here are the process's, one pasteboard and one picture library, so
+// The three here are the process's, one pasteboard and two file dialogs, so
 // every window shares them. The two that are a window's, the menu bar and New
 // Window, are added per window by `nativeFor` below.
 const sharedNative: ClientNative = {
@@ -135,6 +135,20 @@ const sharedNative: ClientNative = {
       })
     ).join(",");
     return picked ? imageFromFile(picked) : null;
+  },
+  // Attach Folder as Workspace…, on the machine with the screen: the same
+  // dialog, set to folders. It fills the dialog's field, and the path then
+  // goes to the server the way a typed one does (rpc-schema.ts folderPick).
+  pickFolder: async () => {
+    const picked = (
+      await Utils.openFileDialog({
+        startingFolder: homedir(),
+        canChooseFiles: false,
+        canChooseDirectory: true,
+        allowsMultipleSelection: false,
+      })
+    ).join(",");
+    return picked || null;
   },
   updates: {
     state: () => updates.state(),

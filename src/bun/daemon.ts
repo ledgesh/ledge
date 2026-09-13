@@ -32,7 +32,7 @@
 // looks the same as a client that is never coming back.
 import { chmodSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { createServer, type NativeDeps } from "./server";
+import { createServer } from "./server";
 import { fedDuplex, type Duplex } from "../shared/transport";
 import { serverConnection, socketWriter, type ServerConnection } from "./transport";
 import { audienceOf } from "./audience";
@@ -56,11 +56,6 @@ export const PID_PATH = join(APP_HOME, ".server.pid");
 /** The daemon's log basename, shared by the process's own console tee and by
  * the raw stderr its parent hands it. */
 export const DAEMON_LOG = "ledge-server";
-
-// A server has no window: no folder dialog, no pasteboard, no menu bar
-// (remote.md §5). The seams are absent rather than stubbed, so the handlers
-// that need one refuse with a reason instead of silently doing nothing.
-const HEADLESS: NativeDeps = {};
 
 /**
  * How long an idle daemon waits before exiting (remote.md §1, §7).
@@ -180,7 +175,7 @@ export async function startDaemon(opts: DaemonOpts = {}): Promise<Daemon> {
   // log and apply the write a second time (wire.ts `Hello.instance`).
   const instance = crypto.randomUUID();
 
-  const server = await createServer({ push, native: HEADLESS });
+  const server = await createServer({ push });
 
   let idleTimer: ReturnType<typeof setTimeout> | null = null;
   // The latest moment any departed client asked to still find its sessions

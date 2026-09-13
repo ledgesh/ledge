@@ -111,8 +111,9 @@ A phone and a Mac can be on one server at once. Each keeps its own tabs, and a n
 | On a phone | Not on a phone |
 | --- | --- |
 | Reading, editing, and creating notes, with live preview | The terminal drawer |
-| Quick open, full-text search, tags, backlinks, the outline | Attaching a folder as a workspace |
-| Daily notes, templates, wikilinks | Moving a workspace folder |
+| Quick open, full-text search, tags, backlinks, the outline | |
+| Daily notes, templates, wikilinks | |
+| Attaching a folder on the server as a workspace, by typing its path | |
 | Images, added from the photo library, the camera, or Files | |
 | Running a block inline, with the host picker and the confirmation | |
 | Editing a note's profile | |

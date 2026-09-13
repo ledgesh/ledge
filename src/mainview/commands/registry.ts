@@ -75,7 +75,7 @@ import { docIdsForPath, notesOf, trashOf } from "@/workspace/store";
 import { SCRATCH_DOC } from "@/workspace/seeds";
 import { parseFrontmatter } from "../../shared/frontmatter";
 import type { NoteMeta } from "../../shared/rpc-schema";
-import { canInstallCli, canPickFolder, hasTerminal, multiWindow, runsBlocks, spawnsSessions } from "../lib/shell";
+import { canInstallCli, hasTerminal, multiWindow, runsBlocks, spawnsSessions } from "../lib/shell";
 import { docsWindow } from "../lib/windows";
 import { offersCheck, updateState } from "../lib/updates";
 import { activeConnection, linkState, reconnectLink } from "../lib/connections";
@@ -530,21 +530,14 @@ export function buildCommands(deps: RegistryDeps): Command[] {
         }, failed(ctx));
       },
     }),
-    // Register an existing directory as a workspace, through the native
-    // folder picker: the view never names a path. No chord, since attaching
-    // a folder is not frequent enough to earn one.
+    // Register an existing directory on the server as a workspace, by its
+    // path there. The dialog App owns asks for it (App.tsx), and its submit
+    // is deps.attachWorkspace. No chord, since attaching a folder is not
+    // frequent enough to earn one.
     cmd("workspace.attach", {
       icon: FolderOpen,
-      // Absent where the picker cannot open, rather than present and
-      // answering with NO_DIALOG (bun/server.ts). A headless server has
-      // nobody at it to choose a folder, and a phone is that case for good
-      // (ios.md §8, lib/shell.ts canPickFolder).
-      when: () => canPickFolder() && !docsWindow(),
-      run: (ctx) => {
-        void deps.attachWorkspace(ctx.dispatch).then((err) => {
-          if (err) ctx.ui.showError?.(err);
-        }, failed(ctx));
-      },
+      when: () => !docsWindow(),
+      run: (ctx) => ctx.ui.attachFolder?.(),
     }),
     // Enter on a focused workspace row. Not in the palette: the generated
     // "Switch to Workspace: …" entries are the palette's form of this.
@@ -558,10 +551,10 @@ export function buildCommands(deps: RegistryDeps): Command[] {
           ctx.dispatch({ type: "selectWorkspace", id: ctx.target.id });
       },
     }),
-    // Rename, icon, and move are all withheld for the docs workspace. It has
-    // no strip row to anchor them, and its name, icon, and folder belong to
-    // the app rather than the user. A docs target reaches them through the
-    // palette forms, which fall back to the selected workspace.
+    // Rename and icon are both withheld for the docs workspace. It has no
+    // strip row to anchor them, and its name and icon belong to the app
+    // rather than the user. A docs target reaches them through the palette
+    // forms, which fall back to the selected workspace.
     cmd("workspace.rename", {
       icon: Pencil,
       targetKind: "workspace",
@@ -573,33 +566,6 @@ export function buildCommands(deps: RegistryDeps): Command[] {
       targetKind: "workspace",
       when: (ctx) => !docsTargeted(ctx),
       run: (ctx) => ctx.ui.pickWorkspaceIcon?.(targetWorkspaceId(ctx)),
-    }),
-    // Relocate the workspace's folder on disk: Bun renames it, so the
-    // destination has to be on the same volume and everything inside travels.
-    // Open tabs close, which is arrangement loss and takes no confirm
-    // (interactions.md §4). A managed workspace goes straight to the native
-    // destination picker; an external one stops at the in-app chooser first
-    // (Sidebar's MoveWorkspaceDialog). interactions.md §3 (Move Workspace
-    // Folder…) has the cloud-backup case and why the return trip to ~/.ledge
-    // asks for no path.
-    cmd("workspace.move", {
-      icon: FolderInput,
-      targetKind: "workspace",
-      // Both faces end at the same native picker: the in-app chooser an
-      // external workspace stops at first only offers "back to the app home"
-      // beside it. So workspace.attach's condition gates this verb too.
-      when: (ctx) => !docsTargeted(ctx) && canPickFolder(),
-      run: (ctx) => {
-        const id = targetWorkspaceId(ctx);
-        const ws = ctx.state.workspaces.find((w) => w.id === id);
-        if (ws && deps.workspaceKind(ws.folder) === "external") {
-          ctx.ui.pickMoveDestination?.(id);
-          return;
-        }
-        void deps.moveWorkspace(id, ctx.state, ctx.dispatch).then((err) => {
-          if (err) ctx.ui.showError?.(err);
-        }, failed(ctx));
-      },
     }),
     cmd("workspace.close", {
       icon: Trash2,

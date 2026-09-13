@@ -25,7 +25,6 @@ function stubDeps(over: Partial<RegistryDeps> = {}): RegistryDeps {
     createWorkspace: async () => null,
     attachWorkspace: async () => null,
     closeWorkspace: noop,
-    moveWorkspace: async () => null,
     workspaceKind: () => "external",
     docsFolder: () => null,
     openDocs: async () => {},

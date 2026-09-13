@@ -83,10 +83,10 @@ export interface UiHooks {
   beginRenameFolder(folder: string): void;
   // Open the icon picker on a workspace, anchored to its row in the strip.
   pickWorkspaceIcon(id: string): void;
-  // Open the move-destination chooser (Sidebar's dialog) on an external
-  // workspace: back to ~/.ledge, or on to the native picker. workspace.move
-  // sends managed workspaces straight to the picker without this stop.
-  pickMoveDestination(id: string): void;
+  // Open the Attach Folder dialog (components/AttachFolderDialog.tsx), which
+  // asks for the folder's path on the server. App owns it, so it opens with
+  // the sidebar closed too, which on a phone it always is.
+  attachFolder(): void;
   // Trash the note and offer the Undo strip. The same path as the note list's
   // Delete, so ⌘⌫ and the menu item behave alike.
   deleteNoteWithUndo(note: NoteMeta): void;
@@ -179,19 +179,15 @@ export interface RegistryDeps {
   // §8a). Returns nothing: the new window is the feedback.
   newWindow(): void;
   // Workspace lifecycle (workspace/actions.ts). Each needs a Bun round trip
-  // (create a folder, open the native picker, detach the registry entry), so
-  // the reducer cannot do it alone. The two async ones resolve to an error
-  // message to surface, or null.
+  // (create a folder, register a path, detach the registry entry), so the
+  // reducer cannot do it alone. The two async ones resolve to an error
+  // message to surface, or null. `attachWorkspace` is the dialog's submit
+  // (ui.attachFolder above opens it), so its error goes back into the dialog.
   createWorkspace(state: AppState, dispatch: (a: Action) => void): Promise<string | null>;
-  attachWorkspace(dispatch: (a: Action) => void): Promise<string | null>;
+  attachWorkspace(path: string, dispatch: (a: Action) => void): Promise<string | null>;
   closeWorkspace(id: string, state: AppState, dispatch: (a: Action) => void): void;
-  // Relocate a workspace's folder on disk. The native destination picker and
-  // the rename are both Bun-side. `home` skips the picker and targets the app
-  // home. Resolves to an error message to surface, or null.
-  moveWorkspace(id: string, state: AppState, dispatch: (a: Action) => void, home?: boolean): Promise<string | null>;
   // The recorded kind of a workspace folder, mirrored view-side from what Bun
-  // derives. It gates the Move Home face to external workspaces, and gates
-  // every verb the read-only docs workspace does not allow.
+  // derives. It gates every verb the read-only docs workspace does not allow.
   workspaceKind(folder: string): "managed" | "external" | "docs" | null;
   // The built-in documentation's folder handle, null when Bun reported none.
   // The docs.toggle command hides while it is null. openDocs below selects

@@ -38,15 +38,11 @@ function stubDeps(
       calls.push("createWorkspace");
       return null;
     },
-    attachWorkspace: async () => {
-      calls.push("attachWorkspace");
+    attachWorkspace: async (path) => {
+      calls.push(`attachWorkspace:${path}`);
       return null;
     },
     closeWorkspace: (id) => calls.push(`closeWorkspace:${id}`),
-    moveWorkspace: async (id, _state, _dispatch, home) => {
-      calls.push(`moveWorkspace:${id}${home ? ":home" : ""}`);
-      return null;
-    },
     workspaceKind: () => "external",
     docsFolder: () => null,
     openDocs: async (_state, _dispatch, page) => {
@@ -596,39 +592,28 @@ describe("registry", () => {
   });
 
   test("run: workspace commands route through the action deps, not the reducer", () => {
-    // Creating and attaching need a Bun round trip (folder, native dialog).
-    // Closing must detach the folder after the reducer closes the view. All
-    // three go through deps so the registry stays pure.
+    // Creating needs a Bun round trip (the folder). Closing must detach the
+    // folder after the reducer closes the view. Both go through deps so the
+    // registry stays pure.
     const calls: string[] = [];
     const cmds = buildCommands(stubDeps(calls));
     const state = apply(initialState(FOLDER, []), secondWs);
     find(cmds, "workspace.new").run(makeCtx(state));
-    find(cmds, "workspace.attach").run(makeCtx(state));
     find(cmds, "workspace.close").run(makeCtx(state));
-    expect(calls).toEqual(["createWorkspace", "attachWorkspace", `closeWorkspace:${state.selectedId}`]);
+    expect(calls).toEqual(["createWorkspace", `closeWorkspace:${state.selectedId}`]);
   });
 
-  test("workspace.move forks on kind: managed goes straight to the move action, external stops at the chooser", async () => {
-    // A managed folder goes straight to the native picker, which answers its
-    // only question, "where?". An external folder stops at the in-app chooser
-    // first. Its natural destination is back under the hidden ~/.ledge, and
-    // the native dialog cannot offer that. The chooser owns whatever happens
-    // next.
-    const managedCalls: string[] = [];
-    const state = initialState(FOLDER, []);
-    const managed = buildCommands({ ...stubDeps(managedCalls), workspaceKind: () => "managed" });
-    find(managed, "workspace.move").run(makeCtx(state));
-    await Promise.resolve();
-    expect(managedCalls).toEqual([`moveWorkspace:${state.selectedId}`]);
-
-    const externalCalls: string[] = [];
-    const external = buildCommands(stubDeps(externalCalls)); // stub kind: external
-    const picked: string[] = [];
-    const ctx = makeCtx(state);
-    ctx.ui = { pickMoveDestination: (id: string) => picked.push(id) };
-    find(external, "workspace.move").run(ctx);
-    expect(picked).toEqual([state.selectedId]);
-    expect(externalCalls).toEqual([]);
+  test("workspace.attach opens the dialog, which asks for the path", () => {
+    // The path is the dialog's to collect and deps.attachWorkspace's to send
+    // (App.tsx). The command only opens it, so nothing is attached here.
+    const calls: string[] = [];
+    const cmds = buildCommands(stubDeps(calls));
+    const opened: string[] = [];
+    const ctx = makeCtx(initialState(FOLDER, []));
+    ctx.ui = { attachFolder: () => opened.push("attach") };
+    find(cmds, "workspace.attach").run(ctx);
+    expect(opened).toEqual(["attach"]);
+    expect(calls).toEqual([]);
   });
 
   test("profile.open follows the current note's frontmatter, and only that", () => {
@@ -1078,7 +1063,6 @@ describe("registry", () => {
       "frontmatter.edit",
       "workspace.rename",
       "workspace.icon",
-      "workspace.move",
     ]) {
       expect({ id, when: find(cmds, id).when!(ctx) }).toEqual({ id, when: false });
     }
@@ -1178,39 +1162,30 @@ describe("what this client has a surface for", () => {
   });
 
   // The same cut, one machine out: not what this client has a surface for but
-  // what the machine holding the notes has at all. Both answers arrive on the
-  // boot handshake (workspaceList), and both are false on a headless server
+  // what the machine holding the notes has at all. The answer arrives on the
+  // boot handshake (workspaceList), and it is false on a compiled server
   // whether a Mac or a phone is looking at it.
-  function serverCaps(next: { folderDialog: boolean; cliShim: boolean }, check: (visible: (id: string) => boolean) => void): void {
+  function serverCaps(next: { cliShim: boolean }, check: (visible: (id: string) => boolean) => void): void {
     recordServerCaps(next);
     try {
       const cmds = buildCommands(stubDeps());
       const ctx = makeCtx(initialState(FOLDER, []));
       check((id) => find(cmds, id).when?.(ctx) ?? true);
     } finally {
-      recordServerCaps({ folderDialog: true, cliShim: true });
+      recordServerCaps({ cliShim: true });
     }
   }
 
-  test("notes on this Mac: the verbs that write to the notes machine are all offered", () => {
-    serverCaps({ folderDialog: true, cliShim: true }, (visible) => {
-      for (const id of ["workspace.attach", "workspace.move", "cli.install"]) shows(visible, id, true);
-    });
+  test("notes on this Mac: the CLI installs there, so the verb is offered", () => {
+    serverCaps({ cliShim: true }, (visible) => shows(visible, "cli.install", true));
   });
 
-  test("notes on a server: no dialog to open there, and no CLI to install there", () => {
-    serverCaps({ folderDialog: false, cliShim: false }, (visible) => {
-      for (const id of ["workspace.attach", "workspace.move", "cli.install"]) shows(visible, id, false);
-    });
-  });
-
-  // Two facts, not one: a machine can have a person at it to answer a folder
-  // dialog and still have no CLI to install. The notes machine refuses each of
-  // the two separately (serve.fs.test.ts).
-  test("the two server facts are independent", () => {
-    serverCaps({ folderDialog: true, cliShim: false }, (visible) => {
-      shows(visible, "workspace.attach", true);
+  // Attaching a folder stays: the path is typed, so no dialog is needed on
+  // the far end (bun/workspaces.ts attachExternal).
+  test("notes on a server: no CLI to install there, but a folder still attaches by path", () => {
+    serverCaps({ cliShim: false }, (visible) => {
       shows(visible, "cli.install", false);
+      shows(visible, "workspace.attach", true);
     });
   });
 });

@@ -1,7 +1,7 @@
 // The kind map behind the per-workspace default cwd: this module is the one
 // place roots enter the view, so it records a root's kind as the handle
 // passes through listWorkspaceRoots, createWorkspaceFolder,
-// attachWorkspaceFolder or moveWorkspaceFolder. boot.tsx and the harness
+// attachWorkspaceFolder. boot.tsx and the harness
 // fetch the registry directly and record with recordWorkspaceKinds. Only an
 // external root yields a default cwd.
 import { afterEach, describe, expect, test } from "bun:test";
@@ -11,7 +11,6 @@ import {
   createWorkspaceFolder,
   dailyWorkspaceRoot,
   listWorkspaceRoots,
-  moveWorkspaceFolder,
   recordDailyRoot,
   recordWorkspaceKinds,
   resetWorkspaceKinds,
@@ -27,7 +26,7 @@ const attachResult = (res: Partial<AttachResult>): AttachResult => ({
   ...res,
 });
 
-function fakeBridge(attach: AttachResult = attachResult({}), move: AttachResult = attachResult({})) {
+function fakeBridge(attach: AttachResult = attachResult({})) {
   configureWorkspaces({
     list: async () => ({
       workspaces: [
@@ -39,8 +38,7 @@ function fakeBridge(attach: AttachResult = attachResult({}), move: AttachResult 
     create: async () => "/ws/created",
     attach: async () => attach,
     detach: async () => true,
-    move: async (_root, home) =>
-      home ? attachResult({ root: "/ws/homed", kind: "managed" }) : move,
+    pickFolder: async () => null,
   });
 }
 
@@ -65,13 +63,13 @@ describe("workspaceDefaultCwd", () => {
 
   test("an attached folder carries the kind the attach reported", async () => {
     fakeBridge(attachResult({ root: "/ext/attached", kind: "external" }));
-    await attachWorkspaceFolder();
+    await attachWorkspaceFolder("/ext/attached");
     expect(workspaceDefaultCwd("/ext/attached")).toBe("/ext/attached");
   });
 
-  test("a cancelled attach records nothing", async () => {
-    fakeBridge(attachResult({}));
-    await attachWorkspaceFolder();
+  test("a refused attach records nothing", async () => {
+    fakeBridge(attachResult({ error: "not a directory: /ext/attached" }));
+    await attachWorkspaceFolder("/ext/attached");
     expect(workspaceDefaultCwd("/ext/attached")).toBeNull();
   });
 
@@ -80,32 +78,6 @@ describe("workspaceDefaultCwd", () => {
     expect(workspaceDefaultCwd("/ext/boot")).toBe("/ext/boot");
   });
 
-  test("a move re-records the kind under the new handle — the flip is what the default-cwd consumer must see", async () => {
-    // A managed folder moved out of the app home becomes external: its notes'
-    // shells now anchor to it, where before they had no default.
-    fakeBridge(attachResult({}), attachResult({ root: "/synced/managed", kind: "external" }));
-    await listWorkspaceRoots(); // records /ws/managed as managed
-    await moveWorkspaceFolder("/ws/managed");
-    expect(workspaceDefaultCwd("/synced/managed")).toBe("/synced/managed");
-    expect(workspaceDefaultCwd("/ws/managed")).toBeNull(); // old handle forgotten
-  });
-
-  test("a cancelled move records nothing and forgets nothing", async () => {
-    fakeBridge(attachResult({}), attachResult({}));
-    await listWorkspaceRoots();
-    await moveWorkspaceFolder("/ext/project");
-    expect(workspaceDefaultCwd("/ext/project")).toBe("/ext/project");
-  });
-
-  test("the home trip flips the kind back to managed, and workspaceKind mirrors it", async () => {
-    fakeBridge();
-    await listWorkspaceRoots();
-    expect(workspaceKind("/ext/project")).toBe("external");
-    await moveWorkspaceFolder("/ext/project", true);
-    expect(workspaceKind("/ws/homed")).toBe("managed");
-    expect(workspaceKind("/ext/project")).toBeNull(); // old handle forgotten
-    expect(workspaceDefaultCwd("/ws/homed")).toBeNull(); // managed: no default cwd
-  });
 });
 
 describe("dailyWorkspaceRoot", () => {

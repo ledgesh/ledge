@@ -23,9 +23,9 @@ import {
   createManaged,
   detachRoot,
   ensureDefault,
+  expandHome,
   listWorkspaceRoots,
   loadWorkspaces,
-  moveRoot,
   rootContaining,
   roots,
   writableRoots,
@@ -140,7 +140,7 @@ describe("attachExternal", () => {
   });
 
   test("a directory with commas in its name attaches whole", async () => {
-    // The native dialog's FFI splits its result on commas, and index.ts
+    // The Mac picker's FFI splits its result on commas, and index.ts
     // pickFolder joins it back into one path. This test covers the registry
     // half: a path with commas in it is an ordinary path here.
     const dir = await externalDir();
@@ -157,6 +157,21 @@ describe("attachExternal", () => {
     await mkdir(sibling);
     await attachExternal(dir);
     expect(await attachExternal(sibling)).toEqual({ root: resolve(sibling) });
+  });
+
+  // The path is typed now (rpc-schema.ts workspaceAttach), so the forms a
+  // person types have to land: a home-relative one, and stray whitespace
+  // from a paste. A relative path stays refused, since "notes" would resolve
+  // against the daemon's cwd, which no one typed.
+  test("a typed path: ~ means home, whitespace is trimmed, relative is refused", async () => {
+    const dir = await externalDir();
+    expect(await attachExternal(`  ${dir}\n`)).toEqual({ root: resolve(dir) });
+    expect(await attachExternal("notes")).toEqual({ error: "not an absolute path: notes" });
+    expect(await attachExternal("~nobody/notes")).toHaveProperty("error");
+    expect(expandHome("~", "/Users/me")).toBe("/Users/me");
+    expect(expandHome("~/notes", "/Users/me")).toBe("/Users/me/notes");
+    expect(expandHome("~nobody/notes", "/Users/me")).toBe("~nobody/notes");
+    expect(expandHome("/abs", "/Users/me")).toBe("/abs");
   });
 
   test("a detached managed folder re-attaches, with its notes intact", async () => {
@@ -201,97 +216,6 @@ describe("detachRoot", () => {
 
   test("detaching an unknown root is false, not a throw", async () => {
     expect(await detachRoot("/nowhere/at/all")).toBe(false);
-  });
-});
-
-describe("moveRoot", () => {
-  test("relocates the folder — notes, trash, assets and all — and persists the new registration", async () => {
-    const root = await createManaged("Scratch");
-    await writeFile(join(root, "kept.md"), "# Kept\n", "utf8");
-    await mkdir(join(root, ".ledge-trash"));
-    await writeFile(join(root, ".ledge-trash", "gone.md"), "# Gone\n", "utf8");
-    const dest = await externalDir();
-    const res = await moveRoot(root, dest);
-    expect(res).toEqual({ root: join(resolve(dest), "scratch") });
-    const next = (res as { root: string }).root;
-    // Everything moved with the folder, and the old path is gone.
-    expect(await readFile(join(next, "kept.md"), "utf8")).toBe("# Kept\n");
-    expect(await readFile(join(next, ".ledge-trash", "gone.md"), "utf8")).toBe("# Gone\n");
-    expect(await stat(root).catch(() => null)).toBeNull();
-    // The registry line followed, with its kind re-derived from the new
-    // location. The change survives a reload from disk.
-    expect(userList()).toEqual([{ root: next, kind: "external", available: true }]);
-    await loadWorkspaces();
-    expect(userRoots()).toEqual([next]);
-  });
-
-  test("moving into the app home makes the root managed", async () => {
-    const dir = await externalDir();
-    await attachExternal(dir);
-    const res = await moveRoot(dir, APP_HOME);
-    const next = (res as { root: string }).root;
-    expect(next).toBe(join(resolve(APP_HOME), dir.split(sep).pop()!));
-    expect(userList()).toEqual([{ root: next, kind: "managed", available: true }]);
-  });
-
-  test("a taken name at the destination enumerates instead of clobbering", async () => {
-    const root = await createManaged("Scratch");
-    const dest = await externalDir();
-    await mkdir(join(dest, "scratch"));
-    await writeFile(join(dest, "scratch", "theirs.md"), "# Theirs\n", "utf8");
-    const res = await moveRoot(root, dest);
-    expect(res).toEqual({ root: join(resolve(dest), "scratch-2") });
-    // scratch/theirs.md is untouched: the move went to scratch-2 instead.
-    expect(await readFile(join(dest, "scratch", "theirs.md"), "utf8")).toBe("# Theirs\n");
-  });
-
-  test("its own parent is a no-op, not a rename to a -2 twin", async () => {
-    const root = await createManaged("Scratch");
-    expect(await moveRoot(root, APP_HOME)).toEqual({ root });
-    expect((await stat(root)).isDirectory()).toBe(true);
-    expect(userRoots()).toEqual([root]);
-  });
-
-  test("registration order is preserved — a move is a relocation, not a re-registration", async () => {
-    const a = await createManaged("Alpha");
-    const b = await createManaged("Beta");
-    const c = await createManaged("Gamma");
-    const dest = await externalDir();
-    const next = ((await moveRoot(b, dest)) as { root: string }).root;
-    expect(userRoots()).toEqual([a, next, c]);
-  });
-
-  test("refusals: unregistered, into itself, into another root, deeper into the app home", async () => {
-    const root = await createManaged("Scratch");
-    const other = await externalDir();
-    await attachExternal(other);
-    expect(await moveRoot("/nowhere/at/all", other)).toHaveProperty("error");
-    expect(await moveRoot(root, root)).toHaveProperty("error"); // into itself
-    expect(await moveRoot(root, other)).toHaveProperty("error"); // nested with a registered root
-    const deep = join(APP_HOME, "scratch-2", "deeper"); // not a direct child of the app home
-    await mkdir(deep, { recursive: true });
-    expect(await moveRoot(root, deep)).toHaveProperty("error");
-    // Every refusal left the folder and the registry untouched.
-    expect((await stat(root)).isDirectory()).toBe(true);
-    expect(userRoots()).toEqual([root, resolve(other)]);
-  });
-
-  test("a missing destination, or a plain file, is refused", async () => {
-    const root = await createManaged("Scratch");
-    const dir = await externalDir();
-    expect(await moveRoot(root, join(dir, "never-existed"))).toHaveProperty("error");
-    const file = join(dir, "a-file");
-    await writeFile(file, "x", "utf8");
-    expect(await moveRoot(root, file)).toHaveProperty("error");
-  });
-
-  test("an unavailable root refuses — there is no folder here to move", async () => {
-    const dir = await externalDir();
-    await attachExternal(dir);
-    await rm(dir, { recursive: true });
-    await loadWorkspaces();
-    const dest = await externalDir();
-    expect(await moveRoot(dir, dest)).toHaveProperty("error");
   });
 });
 
@@ -382,11 +306,9 @@ describe("the docs root", () => {
     expect(file.roots).not.toContain(docs);
   });
 
-  test("detach, move, and attach all refuse it", async () => {
+  test("detach and attach both refuse it", async () => {
     expect(await detachRoot(docs)).toBe(false);
     expect(roots()).toContain(docs); // still registered
-    const dest = await externalDir();
-    expect(await moveRoot(docs, dest)).toHaveProperty("error");
     expect(await attachExternal(docs)).toHaveProperty("error");
   });
 

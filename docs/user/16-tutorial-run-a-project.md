@@ -53,7 +53,7 @@ envFile: .env
 
 ## When the project should be the workspace
 
-A project that deserves many notes rather than one can become a workspace itself. Run "Attach Folder as Workspace…" from the command palette (⇧⌘P) and pick the project's folder. Every `.md` file already in it, such as the README and the docs folder, becomes a note, and every note's shells start in the project folder with no `cwd` needed.
+A project that deserves many notes rather than one can become a workspace itself. Run "Attach Folder as Workspace…" from the command palette (⇧⌘P) and give the project's folder: type its path, or press Choose Folder… to pick it. Every `.md` file already in it, such as the README and the docs folder, becomes a note, and every note's shells start in the project folder with no `cwd` needed.
 
 Vendor and build directories such as `node_modules` are ignored. If the listing still shows Markdown you do not want as notes, add a `.ledgeignore` file in the folder root with one gitignore-style pattern per line. See [[Notes and Workspaces]].
 

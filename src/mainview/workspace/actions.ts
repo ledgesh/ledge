@@ -1,7 +1,7 @@
 // The workspace operations that need a Bun round trip before the reducer can
 // act, mirroring notes/actions.ts. The reducer stays pure, so creating a
-// folder, opening the attach dialog, and detaching a closed workspace's
-// folder all orchestrate here.
+// folder, attaching one, and detaching a closed workspace's folder all
+// orchestrate here.
 import { listNotes, listTrash } from "../notes/channel";
 import { flushAllNow } from "../notes/store";
 import {
@@ -9,7 +9,6 @@ import {
   createWorkspaceFolder,
   detachWorkspaceFolder,
   docsFolder,
-  moveWorkspaceFolder,
   workspaceKind,
 } from "./channel";
 import { docsLanding, notesOf, type Action, type AppState } from "./store";
@@ -35,24 +34,25 @@ export async function createWorkspace(
   }
 }
 
-// Attach Folder as Workspace. The native picker runs Bun-side, and the view
-// gets back a root handle, a refusal, or null for a cancel. An already
-// attached folder selects its existing workspace (one workspace per folder,
-// in the reducer). The new workspace takes the folder's last path segment,
-// the name the user just picked it by, and its lists load now, not at the
-// next refresh.
+// Attach Folder as Workspace. `path` is what the dialog's field holds
+// (components/AttachFolderDialog.tsx), and the server checks it and answers
+// with a root handle or a refusal, which comes back here as the sentence the
+// dialog shows. An already attached folder selects its existing workspace
+// (one workspace per folder, in the reducer). The new workspace takes the
+// folder's last path segment, the name the user just named it by, and its
+// lists load now, not at the next refresh.
 export async function attachWorkspace(
+  path: string,
   dispatch: (action: Action) => void,
 ): Promise<string | null> {
   let res: Awaited<ReturnType<typeof attachFolder>>;
   try {
-    res = await attachFolder();
+    res = await attachFolder(path);
   } catch (err) {
     console.error("[workspace] attach failed", err);
     return err instanceof Error ? err.message : String(err);
   }
-  if (res.error !== null) return res.error;
-  if (res.root === null) return null; // cancelled
+  if (res.root === null) return res.error ?? "the folder could not be attached";
   const folder = res.root;
   dispatch({ type: "addWorkspace", name: folder.split("/").pop() || folder, folder });
   await refreshFolder(folder, dispatch);
@@ -180,39 +180,6 @@ export function closeWorkspace(
     // stale registry line, which the next attach of the same folder reuses.
     console.error("[workspace] detach failed", err);
   });
-}
-
-// Move Workspace Folder… and its Home face (`home: true`). This flushes
-// pending saves first, so they land while the folder is still where their
-// paths say (⌘L's flush-then-act ordering). Bun then runs the destination
-// picker (or targets the app home directly) and the rename, and the reducer
-// swaps the workspace onto the new root.
-export async function moveWorkspace(
-  id: string,
-  state: AppState,
-  dispatch: (action: Action) => void,
-  home = false,
-): Promise<string | null> {
-  const ws = state.workspaces.find((w) => w.id === id);
-  if (!ws) return null;
-  await flushAllNow();
-  let res: Awaited<ReturnType<typeof moveWorkspaceFolder>>;
-  try {
-    res = await moveWorkspaceFolder(ws.folder, home);
-  } catch (err) {
-    console.error("[workspace] move failed", err);
-    return err instanceof Error ? err.message : String(err);
-  }
-  if (res.error !== null) return res.error;
-  // Cancelled, or the pick was the folder's own parent (Bun's no-op answer):
-  // nothing moved, so nothing closes.
-  if (res.root === null || res.root === ws.folder) return null;
-  // Open tabs close with the swap: their paths named the old location. Every
-  // note travels with the folder, so this loses an arrangement and asks for no
-  // confirmation (interactions.md §4).
-  dispatch({ type: "workspaceFolderMoved", id, folder: res.root });
-  await refreshFolder(res.root, dispatch);
-  return null;
 }
 
 // Re-fetch one folder's notes and trash. Each list dispatches on its own, so

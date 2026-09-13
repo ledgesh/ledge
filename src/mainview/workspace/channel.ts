@@ -2,7 +2,9 @@
 // workspace/actions.ts calls these, boot.tsx binds them to the server's RPC,
 // the harness binds an in-memory fake. The folder strings crossing here are
 // opaque root handles Bun handed out (workspaceList, create, attach); the
-// view never constructs one (architecture.md §2).
+// view never constructs one (architecture.md §2). The one string that is not
+// a handle is the path `attach` sends, typed or picked, which the server
+// checks before it becomes one.
 
 // This module also records each root's kind (managed, external, or docs) as
 // the handles pass through the wrappers below. workspaceDefaultCwd,
@@ -20,16 +22,14 @@ export interface AttachResult {
 interface WorkspaceHandlers {
   list: () => Promise<{ workspaces: WorkspaceRootInfo[]; dailyRoot: string | null }>;
   create: (name: string) => Promise<string>;
-  // Opens the native folder picker Bun-side. A null root with a null error
-  // means the user cancelled.
-  attach: () => Promise<AttachResult>;
+  // Registers the folder at `path` on the server, which checks the path. A
+  // null root comes with the refusal in `error`.
+  attach: (path: string) => Promise<AttachResult>;
   detach: (root: string) => Promise<boolean>;
-  // Runs the native picker again for the destination parent folder. Bun
-  // renames the root's folder into it. The result has the same shape as
-  // attach's: the new root handle, a refusal, or the cancelled nulls. `home`
-  // skips the picker and targets the app home (the Move Workspace Folder
-  // Home face).
-  move: (root: string, home: boolean) => Promise<AttachResult>;
+  // This client's own folder dialog, for the field `attach` sends. Null where
+  // the user cancelled, or where this client has none (lib/shell.ts
+  // picksFolders says so before this is called).
+  pickFolder: () => Promise<string | null>;
 }
 
 let handlers: WorkspaceHandlers | null = null;
@@ -105,11 +105,16 @@ export function createWorkspaceFolder(name: string): Promise<string> {
   });
 }
 
-export function attachWorkspaceFolder(): Promise<AttachResult> {
-  return bridge().attach().then((res) => {
+export function attachWorkspaceFolder(path: string): Promise<AttachResult> {
+  return bridge().attach(path).then((res) => {
     if (res.root !== null && res.kind !== null) kinds.set(res.root, res.kind);
     return res;
   });
+}
+
+/** A folder from this client's own dialog, as a path for the attach field. */
+export function pickFolderPath(): Promise<string | null> {
+  return bridge().pickFolder();
 }
 
 // Deregisters only. The folder and every note in it stay on disk.
@@ -117,26 +122,10 @@ export function detachWorkspaceFolder(root: string): Promise<boolean> {
   return bridge().detach(root);
 }
 
-// Bun runs the destination picker and the rename, handing back only the new
-// root handle. A move can flip the kind: into the app home makes it managed,
-// out of it makes it external. The map is re-recorded under the new handle so
-// workspaceDefaultCwd sees the flip, since a folder moved out of ~/.ledge now
-// anchors its notes' shells. `home` skips the picker and targets the app home.
-export function moveWorkspaceFolder(root: string, home = false): Promise<AttachResult> {
-  return bridge().move(root, home).then((res) => {
-    if (res.root !== null && res.kind !== null) {
-      kinds.delete(root);
-      kinds.set(res.root, res.kind);
-    }
-    return res;
-  });
-}
-
-// The recorded kind of a root, for the surfaces that show or gate per kind.
-// The Move Home face exists only for external workspaces, and every read-only
-// gate keys off "docs". Like workspaceDefaultCwd, this mirrors Bun-side truth
-// and guards nothing. Bun re-derives the kind on every move, and it refuses
-// every docs write whatever this map says.
+// The recorded kind of a root, for the surfaces that show or gate per kind:
+// every read-only gate keys off "docs". Like workspaceDefaultCwd, this mirrors
+// Bun-side truth and guards nothing. Bun refuses every docs write whatever
+// this map says.
 export function workspaceKind(folder: string): "managed" | "external" | "docs" | null {
   return kinds.get(folder) ?? null;
 }

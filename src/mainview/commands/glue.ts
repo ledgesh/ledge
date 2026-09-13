@@ -41,7 +41,7 @@ import { revealLog } from "@/lib/log";
 import { checkForUpdates, installUpdate } from "@/lib/updates";
 import { openDocsWindow, openWindow } from "@/lib/windows";
 import { restartSession } from "@/terminal/channel";
-import { attachWorkspace, closeDocs, closeWorkspace, createWorkspace, moveWorkspace, openDocs } from "@/workspace/actions";
+import { attachWorkspace, closeDocs, closeWorkspace, createWorkspace, openDocs } from "@/workspace/actions";
 import { dailyWorkspaceRoot, docsFolder, workspaceKind } from "@/workspace/channel";
 import type { RegistryDeps, UiHooks } from "./types";
 
@@ -77,7 +77,6 @@ export const registryDeps: RegistryDeps = {
   createWorkspace,
   attachWorkspace,
   closeWorkspace,
-  moveWorkspace,
   workspaceKind,
   docsFolder,
   openDocs,
