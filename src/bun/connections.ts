@@ -18,7 +18,7 @@ import { readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { isHostName } from "../shared/frontmatter";
-import { hostPart, isPort, LOCAL_ID, parseAuth, PORT_UNSET, type AuthMode } from "../shared/connections";
+import { hostPart, isPort, LOCAL_ID, parseAuth, PORT_UNSET, SERVE_COMMAND, type AuthMode } from "../shared/connections";
 import { CLIENT_HOME, ensureClientHome } from "./clientHome";
 import { ASKPASS_ACCOUNT_ENV } from "./secrets";
 
@@ -36,6 +36,7 @@ export {
   pinFitsHost,
   pinnedHost,
   PORT_UNSET,
+  SERVE_COMMAND,
   validateConnection,
   validatePassword,
   type AuthMode,
@@ -278,7 +279,9 @@ export function sshDial(
     }
   }
 
-  argv.push(conn.destination, "ledge-server", "serve");
+  // One argument: ssh joins what follows the destination with spaces anyway,
+  // and the remote login shell parses the result.
+  argv.push(conn.destination, SERVE_COMMAND);
   return { argv, env };
 }
 
@@ -333,6 +336,11 @@ export function explainDial(stderr: string): string | null {
       // connection, on the row or in front of this text, and repeating it
       // reads as two machines rather than one.
       return "Ledge's server is not installed on that machine. Install it there, then try again.";
+    }
+    // csh and tcsh reading SERVE_COMMAND's `PATH=` prefix as a command name
+    // (remote.md §4a). The server may well be installed.
+    if (/^PATH=.*: Command not found\.$/.test(line)) {
+      return "The account's login shell on that machine is csh or tcsh, which cannot start Ledge's server. Change it to bash or zsh with chsh there, then try again.";
     }
     return line;
   }

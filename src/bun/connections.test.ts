@@ -16,6 +16,7 @@ import {
   parseFingerprint,
   pickHostKey,
   PORT_UNSET,
+  SERVE_COMMAND,
   SSH_PATH,
   sshDial,
   type Connection,
@@ -44,7 +45,7 @@ describe("the ssh command", () => {
 
   test("runs the server on the other machine", () => {
     expect(argv[0]).toBe(SSH_PATH);
-    expect(argv.slice(-3)).toEqual(["dev@laptop", "ledge-server", "serve"]);
+    expect(argv.slice(-2)).toEqual(["dev@laptop", SERVE_COMMAND]);
   });
 
   // A connection that names no port passes none, so ssh's own configuration
@@ -343,6 +344,13 @@ describe("why the dial failed", () => {
     ]) {
       expect(explainDial(line)).toContain("is not installed on that machine");
     }
+  });
+
+  // From /bin/csh and /bin/tcsh on macOS, which print the same line.
+  test("a csh login shell refusing the PATH prefix is named, not reported as a missing server", () => {
+    const said = explainDial("PATH=/Users/ledge/.ledge-server/bin:/usr/bin:/bin:/usr/sbin:/sbin: Command not found.\n");
+    expect(said).toContain("login shell on that machine is csh or tcsh");
+    expect(said).not.toContain("not installed");
   });
 
   test("ssh's own diagnoses are passed through, not rewritten", () => {

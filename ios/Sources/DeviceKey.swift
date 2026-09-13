@@ -93,7 +93,7 @@ enum DeviceKey {
         // A comment that says which phone, because revoking is deleting the
         // right line out of a file that may have several.
         let label = "ledge-\(deviceName())-\(client.prefix(8).lowercased())"
-        return "restrict,command=\"ledge-server serve\" \(held.openSSHPublicKey) \(label)"
+        return "restrict,command=\"\(SSHTransport.serveCommand)\" \(held.openSSHPublicKey) \(label)"
     }
 
     /// Where the key is kept and its line, on the console. A Mac with a cable

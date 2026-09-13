@@ -72,6 +72,10 @@ final class PairingViewController: UIViewController {
     private var held: DeviceKey.Held?
     private var dialing: SSHTransport?
 
+    /// How long a started command that neither answers nor ends is waited on
+    /// before pairing goes ahead anyway. A server's hello takes well under it.
+    private static let answerGrace = 5.0
+
     init(
         client: String,
         start: Start,
@@ -481,35 +485,47 @@ final class PairingViewController: UIViewController {
             log: { print("[pair] \($0)") }
         )
         dialing = transport
-        transport.open(
-            ready: { [weak self] result in
-                DispatchQueue.main.async {
-                    guard let self else { return }
-                    self.busy(false)
-                    // Closed either way: this was a question, and the
-                    // connection the app runs on is the page's to open.
-                    transport.close()
-                    self.dialing = nil
-                    switch result {
-                    case .failure(let error):
-                        self.say(error.localizedDescription)
-                    case .success:
-                        guard let accepted = dial.accepted() else {
-                            return self.say("That server did not offer a host key.")
-                        }
-                        guard let record = dial.store(accepted, password == nil ? "key" : "password", password ?? "")
-                        else {
-                            if let code = self.code, case .conflict(let pinned) = code.match(ServerStore.known()) {
-                                return self.refuse(code, pinned: pinned)
-                            }
-                            return self.say("The server list changed while Ledge was connecting. Open the code again.")
-                        }
-                        self.onPaired(record)
+        // Main thread only, and the first call wins.
+        var settled = false
+        let settle: (Result<Void, Error>) -> Void = { [weak self] result in
+            guard let self, !settled else { return }
+            settled = true
+            self.busy(false)
+            // Closed either way: this was a question, and the
+            // connection the app runs on is the page's to open.
+            transport.close()
+            self.dialing = nil
+            switch result {
+            case .failure(let error):
+                self.say(error.localizedDescription)
+            case .success:
+                guard let accepted = dial.accepted() else {
+                    return self.say("That server did not offer a host key.")
+                }
+                guard let record = dial.store(accepted, password == nil ? "key" : "password", password ?? "")
+                else {
+                    if let code = self.code, case .conflict(let pinned) = code.match(ServerStore.known()) {
+                        return self.refuse(code, pinned: pinned)
                     }
+                    return self.say("The server list changed while Ledge was connecting. Open the code again.")
+                }
+                self.onPaired(record)
+            }
+        }
+        transport.open(
+            ready: { result in
+                DispatchQueue.main.async {
+                    // A started command is only a shell, which a machine with no
+                    // server starts too. The server's hello or the command ending
+                    // settles it, and `answerGrace` covers one that does neither.
+                    guard case .success = result else { return settle(result) }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + Self.answerGrace) { settle(result) }
                 }
             },
-            bytes: { _ in },
-            end: {}
+            bytes: { _ in DispatchQueue.main.async { settle(.success(())) } },
+            end: {
+                DispatchQueue.main.async { settle(.failure(transport.whyUnanswered() ?? SSHFailure.cancelled)) }
+            }
         )
     }
 

@@ -15,7 +15,7 @@ import NIOSSH
 ///
 /// | `sshDial`                        | here                            |
 /// | -------------------------------- | ------------------------------- |
-/// | `command="ledge-server serve"`   | the server's sshd, unchanged    |
+/// | `command=` in `authorized_keys`  | the server's sshd, unchanged    |
 /// | `StrictHostKeyChecking=yes`      | `PinnedHostKey`                 |
 /// | `UserKnownHostsFile`             | the stored record               |
 /// | `BatchMode=yes`                  | no prompt exists to suppress    |
@@ -46,6 +46,11 @@ final class SSHTransport {
     /// number, and the fixture testing.md §6 describes holds 127.0.0.1:22 so a
     /// record with nothing set still reaches it.
     static let defaultPort = 22
+
+    /// The command the exec request asks for, and the one `DeviceKey`'s line
+    /// forces. `SERVE_COMMAND` in shared/connections.ts, character for
+    /// character (shared/serveCommand.test.ts).
+    static let serveCommand = "PATH=$HOME/.ledge-server/bin:$PATH ledge-server serve"
 
     /// The whole dial: TCP, key exchange, host key, user auth, and the exec
     /// request. Bounded because a server that accepts a connection and then
@@ -125,6 +130,9 @@ final class SSHTransport {
     private var parent: Channel?
     private var child: Channel?
     private var ended = false
+    /// The exit status and last stderr line of a command that ended before
+    /// writing a byte of stdout. Nil for one that answered.
+    private var unanswered: (status: Int, said: String)?
 
     /// `password` chooses the door: a string offers it, nil offers the device
     /// key. Passed in rather than read from the keychain here, because the
@@ -262,9 +270,12 @@ final class SSHTransport {
                                 .flatMap {
                                     child.pipeline.addHandler(
                                         ExecHandler(
-                                            command: "ledge-server serve",
+                                            command: Self.serveCommand,
                                             ready: settle,
                                             bytes: bytes,
+                                            unanswered: { [weak self] status, said in
+                                                self?.lock.withLock { self?.unanswered = (status, said) }
+                                            },
                                             end: { [weak self] in self?.finish(end) },
                                             log: self.log
                                         )
@@ -307,6 +318,16 @@ final class SSHTransport {
 
     func close() {
         hangUp()
+    }
+
+    /// Why the command ended without the server answering, once the connection
+    /// has ended. 127 is a shell that found no `ledge-server` on the PATH
+    /// `serveCommand` gives it. Nil for a server that answered.
+    func whyUnanswered() -> SSHFailure? {
+        guard let quit = lock.withLock({ unanswered }) else { return nil }
+        return quit.status == 127
+            ? .notInstalled(server.destination)
+            : .quit(server.destination, quit.said)
     }
 
     // --- shutting down --------------------------------------------------------
@@ -362,6 +383,8 @@ enum SSHFailure: Error, LocalizedError {
     case outOfKeys
     case wrongChannel
     case commandRefused
+    case notInstalled(String)
+    case quit(String, String)
     case cancelled
 
     var errorDescription: String? {
@@ -396,6 +419,12 @@ enum SSHFailure: Error, LocalizedError {
             return "The server opened a channel Ledge did not ask for."
         case .commandRefused:
             return "The server refused to run ledge-server."
+        case .notInstalled(let where_):
+            return "Ledge's server is not installed on \(where_). Install it there, then try again."
+        case .quit(let where_, let said):
+            return said.isEmpty
+                ? "\(where_) closed the connection before Ledge's server answered."
+                : "\(where_) closed the connection before Ledge's server answered: \(said)"
         case .cancelled:
             return "The connection was closed while it was being made."
         }
@@ -555,19 +584,26 @@ private final class ExecHandler: ChannelDuplexHandler {
     private let command: String
     private let ready: (Result<Void, Error>) -> Void
     private let bytes: (Data) -> Void
+    private let unanswered: (Int, String) -> Void
     private let end: () -> Void
     private let log: (String) -> Void
+
+    /// Whether a byte of stdout has arrived, and the last stderr line before one did.
+    private var answered = false
+    private var said = ""
 
     init(
         command: String,
         ready: @escaping (Result<Void, Error>) -> Void,
         bytes: @escaping (Data) -> Void,
+        unanswered: @escaping (Int, String) -> Void,
         end: @escaping () -> Void,
         log: @escaping (String) -> Void
     ) {
         self.command = command
         self.ready = ready
         self.bytes = bytes
+        self.unanswered = unanswered
         self.end = end
         self.log = log
     }
@@ -590,8 +626,12 @@ private final class ExecHandler: ChannelDuplexHandler {
             // A server that exits is a server that said why on stderr a moment
             // ago, and the two lines together are the whole diagnosis.
             log("[ssh] ledge-server exited \(status.exitStatus)")
+            if !answered { unanswered(status.exitStatus, said) }
         case ChannelEvent.inputClosed:
-            end()
+            // A command that never answered ends at channelInactive instead.
+            // sshd can send EOF before the exit status, and hanging up here
+            // would lose the status that says why (`whyUnanswered`).
+            if answered { end() }
         default:
             break
         }
@@ -602,10 +642,14 @@ private final class ExecHandler: ChannelDuplexHandler {
         let payload = unwrapInboundIn(data)
         guard case .byteBuffer(let buffer) = payload.data else { return }
         if payload.type == .channel {
+            answered = true
             bytes(Data(buffer.readableBytesView))
         } else if payload.type == .stdErr {
             let text = String(decoding: buffer.readableBytesView, as: UTF8.self)
             log("[ssh] \(text.trimmingCharacters(in: .whitespacesAndNewlines))")
+            if let last = text.split(whereSeparator: \.isNewline).last(where: { !$0.allSatisfy(\.isWhitespace) }) {
+                said = last.trimmingCharacters(in: .whitespaces)
+            }
         }
     }
 

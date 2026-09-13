@@ -33,7 +33,7 @@ const SCRATCH = await mkdtemp(join(tmpdir(), "ledge-ssh-probe-"));
 // (testing.md §6).
 process.env["LEDGE_NOTES_ROOT"] = join(SCRATCH, "home");
 
-const { sshDial, pickHostKey, knownHostsText, parsePort, PORT_UNSET } = await import("../src/bun/connections");
+const { sshDial, pickHostKey, knownHostsText, parsePort, PORT_UNSET, SERVE_COMMAND } = await import("../src/bun/connections");
 const { ensureAskpass, forgetPassword, storePassword } = await import("../src/bun/secrets");
 type Connection = import("../src/bun/connections").Connection;
 const { clientConnection, reconnectingClient } = await import("../src/shared/transport");
@@ -202,7 +202,7 @@ try {
     ...["docker", "run", "-d", "--name", NAME, "--cap-add=NET_ADMIN"],
     ...["-p", SERVE ? `${PORT}:22` : `127.0.0.1:${PORT}:22`, "-e", `LEDGE_PUBKEY=${pub}`, FIXTURE],
   ]);
-  console.log(`  authorized_keys: restrict,command="ledge-server serve" ${pub.slice(0, 32)}…`);
+  console.log(`  authorized_keys: restrict,command="${SERVE_COMMAND}" ${pub.slice(0, 32)}…`);
 
   step("[pair] scan the host key and pin it, the way the app's pairing does");
   let scan = "";
@@ -303,11 +303,11 @@ try {
         // the restriction and this only catches someone who copied the key box
         // above it.
         const bare = /^(ssh-ed25519|ssh-rsa|ecdsa-sha2-\S+)\s+\S+/.test(text);
-        if (!bare && !text.includes('command="ledge-server serve"')) {
+        if (!bare && !text.includes(`command="${SERVE_COMMAND}"`)) {
           console.log("  that is not an authorized_keys line; copy the whole line the pairing screen shows");
           continue;
         }
-        authorize(bare ? `restrict,command="ledge-server serve" ${text}` : text);
+        authorize(bare ? `restrict,command="${SERVE_COMMAND}" ${text}` : text);
         const count = run(["docker", "exec", NAME, "sh", "-c", "grep -c . /home/ledge/.ssh/authorized_keys"], {
           quiet: true,
         }).out;
@@ -354,10 +354,10 @@ try {
   // would also be true if authentication had simply failed, which is how this
   // check first passed for the wrong reason. The server's own handshake in that
   // same output is what says the session opened and was then redirected.
-  const asked = run([...argv.slice(0, -2), "whoami"], { quiet: true });
+  const asked = run([...argv.slice(0, -1), "whoami"], { quiet: true });
   check("the session opened", asked.out.includes(BUILD_VERSION), asked.err.split("\n")[0]?.slice(0, 60));
   check("but ran the forced command, not the one asked for", !/^ledge$/m.test(asked.out));
-  const shell = run([...argv.slice(0, -2)], { quiet: true });
+  const shell = run([...argv.slice(0, -1)], { quiet: true });
   check("asking for a shell gets the protocol instead", shell.out.includes(BUILD_VERSION) && !/\$ $|# $/.test(shell.out));
 
   step("[pin] a changed host key is refused, with no way to say yes anyway");
@@ -1215,6 +1215,15 @@ try {
     const pinned = pickHostKey(scanned);
     if (!pinned) throw new Error(`the ${method} fixture's sshd never answered ssh-keyscan on ${port}`);
 
+    // One box keeps the server on sshd's PATH and the other moves it into the
+    // per-user directory, so between them both halves of SERVE_COMMAND's
+    // lookup start a server (remote.md §4a).
+    const where = suffix === "kbd" ? "/home/ledge/.ledge-server/bin" : "/usr/local/bin";
+    if (suffix === "kbd") {
+      const moved = `mkdir -p ${where} && mv /usr/local/bin/ledge-server /usr/local/bin/libledge_pty.so ${where}/ && chown -R ledge:ledge /home/ledge/.ledge-server`;
+      run(["docker", "exec", box, "sh", "-c", moved]);
+    }
+
     const pwConn: Connection = {
       id: right,
       name: `Probe (${method})`,
@@ -1241,7 +1250,7 @@ try {
       client: "probe-mac",
     });
     const pwHello = await viaPassword.ready;
-    ok(`the protocol comes up over ${method}`, `instance ${pwHello.instance.slice(0, 8)}`);
+    ok(`the protocol comes up over ${method}, with the server in ${where}`, `instance ${pwHello.instance.slice(0, 8)}`);
     viaPassword.close();
 
     // And the measurement that reversed §4. Same argv, same environment, one

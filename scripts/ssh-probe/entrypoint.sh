@@ -8,11 +8,13 @@ if [ -z "$LEDGE_PUBKEY" ] && [ -z "$LEDGE_PASSWORD" ]; then
 fi
 
 if [ -n "$LEDGE_PUBKEY" ]; then
-  # The authorized_keys line remote.md §4 specifies, verbatim. `restrict` turns
-  # off port forwarding, agent forwarding, X11 and pty allocation; `command=`
-  # means this key cannot ask for anything else. The probe checks both halves.
+  # The authorized_keys line remote.md §4a specifies. `restrict` turns off port
+  # forwarding, agent forwarding, X11 and pty allocation; `command=` means this
+  # key cannot ask for anything else. The probe checks both halves. The command
+  # is SERVE_COMMAND, and shared/serveCommand.test.ts keeps this copy the same.
+  command='PATH=$HOME/.ledge-server/bin:$PATH ledge-server serve'
   mkdir -p /home/ledge/.ssh
-  printf 'restrict,command="ledge-server serve" %s\n' "$LEDGE_PUBKEY" > /home/ledge/.ssh/authorized_keys
+  printf 'restrict,command="%s" %s\n' "$command" "$LEDGE_PUBKEY" > /home/ledge/.ssh/authorized_keys
   chown -R ledge:ledge /home/ledge/.ssh
   chmod 600 /home/ledge/.ssh/authorized_keys
 fi

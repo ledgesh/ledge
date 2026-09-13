@@ -18,7 +18,7 @@ import { collectHits, type SearchHit } from "../shared/search";
 import { folderContains, folderLeafProblem, folderScopeOf, notesUnder } from "../shared/folders";
 import { resolveWikiTitle, wikiRefsOf } from "../shared/wikilinks";
 import { normalizeTag, tagDirectoryOf, tagRefsOf, type TagInfo } from "../shared/tags";
-import { knownHostsHost, validatePassword } from "../shared/connections";
+import { knownHostsHost, SERVE_COMMAND, validatePassword } from "../shared/connections";
 import type { ConnectionInfo } from "../shared/rpc-schema";
 import { configureBridge, dispatchRunEvent, dispatchRunLink, reconcileRuns } from "./editor/bridge";
 import { sendRunKey } from "./editor/inlineTerm";
@@ -77,7 +77,7 @@ configureShell({
   // shows the line this client already has (components/ConnectionPicker.tsx).
   // `softKeyboard` decides whether the read-only editor is a text field the
   // software keyboard would rise over (editor/setup.ts).
-  deviceKey: FAKING_IOS ? 'restrict,command="ledge-server serve" ecdsa-sha2-nistp256 AAAAharness ledge-iphone-abc123' : "",
+  deviceKey: FAKING_IOS ? `restrict,command="${SERVE_COMMAND}" ecdsa-sha2-nistp256 AAAAharness ledge-iphone-abc123` : "",
   // The sheet is UIKit's and there is none here, so the fake records the ask on
   // the window instead. A spec can then see that the button is offered and that
   // it hands over the line. The view's half of this seam is all this can show.

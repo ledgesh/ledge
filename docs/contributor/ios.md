@@ -160,7 +160,7 @@ for:
 
 | `sshDial` | Enforced on the Mac by | On iOS |
 | --------- | ---------------------- | ------ |
-| `command="ledge-server serve"` | the server's sshd | the server's sshd, unchanged |
+| `command=` in `authorized_keys` (remote.md §4a) | the server's sshd | the server's sshd, unchanged |
 | `StrictHostKeyChecking=yes` | OpenSSH | the app's host-key delegate |
 | `UserKnownHostsFile` | OpenSSH | the app's own store |
 | `GlobalKnownHostsFile=/dev/null` | OpenSSH | nothing to exclude |
@@ -479,6 +479,16 @@ and refuses any other without asking, and a record already pinned dials with
 its pin. That is the one place a fingerprint decides which key gets pinned,
 because a code carries nothing else. Every connection after it compares the
 pinned bytes.
+
+**Pairing stores a server only once `ledge-server` has answered.** An accepted
+exec request means a shell started, and a machine with no server starts one too,
+which then exits 127. So the form waits for the server's hello (its first byte),
+the command ending, or `answerGrace` of neither, and only the first and last
+store the record. A command that ended reports `SSHTransport.whyUnanswered`:
+"Ledge's server is not installed on …" for 127, and otherwise the last line it
+wrote to stderr. `ExecHandler` ends a connection that never answered at the
+channel's close rather than at its EOF, since sshd can send the EOF before the
+exit status (remote.md §4a).
 
 **The camera is AVFoundation's QR reader, not VisionKit's.**
 `DataScannerViewController` refuses devices older than an A12, and iOS 17 still

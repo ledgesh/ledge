@@ -73,14 +73,16 @@ The first part is the machine: `user@host`, and a port when sshd is not on 22. A
 The second is how to sign in. With A key, the default, the form shows a key line. On its first launch the phone makes a key of its own in the Secure Enclave, and that key never leaves the phone: there is no file to copy in or out. What leaves is the public half, as one line for the server's `~/.ssh/authorized_keys`:
 
 ```
-restrict,command="ledge-server serve" ecdsa-sha2-nistp256 AAAA... ledge-iphone-3f2a91c0
+restrict,command="PATH=$HOME/.ledge-server/bin:$PATH ledge-server serve" ecdsa-sha2-nistp256 AAAA... ledge-iphone-3f2a91c0
 ```
 
 Copy line puts it on the phone's pasteboard. Share line hands it to AirDrop, Messages, or any app that can carry it to a machine with a shell on the server, which is where the pasteboard on a phone falls short. Add it to `~/.ssh/authorized_keys` there. The comment at the end names the phone, so the line is easy to find again when you want to revoke it.
 
-The line arrives already restricted, in the way "Restrict the key to Ledge" on [[Keep Notes on a Remote Server]] describes: the phone's key can speak Ledge's protocol and nothing else. It names `ledge-server` by its bare name, so the server has to be on the PATH an incoming ssh gets ("Check that ssh can find the server" on the same page). For the Docker deployment, change the command in the line to the `docker exec` form shown there.
+The line arrives already restricted, in the way "Restrict the key to Ledge" on [[Keep Notes on a Remote Server]] describes: the phone's key can speak Ledge's protocol and nothing else. It looks for `ledge-server` in `~/.ledge-server/bin` first and then on the PATH an incoming ssh gets, so a server installed in either place starts ("Check that ssh can find the server" on the same page). For the Docker deployment, change the command in the line to the `docker exec` form shown there.
 
 The third is Connect. The phone dials the server, shows its host key fingerprint, and asks "Is this the server?" alongside the command that prints the same fingerprint on the server. Trust pins the key, and a server that later presents a different one is refused, the same as on a Mac.
+
+Ledge adds the server only once `ledge-server` answers there. On a machine where ssh cannot find it, Connect says "Ledge's server is not installed" and adds nothing. Install it, then tap Connect again.
 
 ## Sign in with a password instead
 

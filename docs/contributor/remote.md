@@ -452,7 +452,7 @@ A connection can be narrowed to the protocol and nothing else, with an
 `authorized_keys` option on the key it authenticates with:
 
 ```
-restrict,command="ledge-server serve" ssh-ed25519 AAAA... ledge@laptop
+restrict,command="PATH=$HOME/.ledge-server/bin:$PATH ledge-server serve" ssh-ed25519 AAAA... ledge@laptop
 ```
 
 **Ledge documents that line and never writes it.** The reason is the file:
@@ -475,10 +475,38 @@ this".
 
 **It is hardening and not a gate, which is a fact about sshd rather than a
 policy.** A forced command OVERRIDES what the client asked to run; it does not
-enable it. `sshCommand` already ends with `ledge-server serve`
+enable it. `sshDial` already ends with the same command
 (`bun/connections.ts`), so sshd runs the requested command when there is no
 forced one and the forced one when there is, and the connection works either
 way. Nothing in `src/` reads or requires the option.
+
+**The command carries its own PATH.** Both clients ask for
+`PATH=$HOME/.ledge-server/bin:$PATH ledge-server serve`: `SERVE_COMMAND` in
+`shared/connections.ts`, and `SSHTransport.serveCommand` on a phone, which
+`shared/serveCommand.test.ts` holds to the same characters. A command run over
+ssh gets sshd's PATH and none of the startup files a terminal reads (§11). On
+macOS that PATH is `/usr/bin:/bin:/usr/sbin:/sbin`, all of it under SIP.
+`~/.ledge-server/bin` is where a per-user install goes, which needs neither
+`sudo` nor a line in a startup file. The `$PATH` after it still finds a server
+installed on sshd's own PATH, such as `/usr/local/bin` on Linux.
+
+**The prefix has to be in the forced command too.** A forced command replaces
+what the client asked for, prefix and all, so the line a phone shows
+(`DeviceKey.authorizedKeysLine`) forces the whole string.
+
+**sshd hands the string to the account's login shell as `$SHELL -c`.**
+`NAME=value command` is POSIX, and sh, bash, zsh, dash and ksh run it with no
+field splitting, so a PATH entry with a space survives. csh and tcsh read
+`PATH=…` as a command name and exit 1 with `Command not found.`, which
+`explainDial` names as the login shell rather than as a missing server. That is
+the same limit `bun/remoteSpawn.ts` accepts for a block's preamble
+(`architecture.md` §6a).
+
+**A shell that finds no server exits 127, and that is how a phone tells.** On a
+Mac, `explainDial` reads ssh's stderr. A phone reads the exit status of a
+command that ended without writing a byte (`SSHTransport.whyUnanswered`), and
+pairing waits for the server's hello, the command ending, or five seconds of
+neither before it stores anything (ios.md §4).
 
 **What it buys, stated accurately.** No port forwarding, which is the one that
 matters most: it is what stops a stolen client key from becoming a route into
