@@ -1,6 +1,6 @@
 // The spawned-process seam: `serve.ts` in a process of its own, driven over
 // its real stdin and stdout by the real client end. An ssh session launches
-// the compiled `ledge-server serve`, which is this same entry (remote.md §1).
+// the compiled `ledge serve`, which is this same entry (remote.md §1).
 // transport.test.ts covers the conversation and wire.test.ts the codec. Only
 // this covers the assembly: the daemon `serve` finds or starts, headless
 // handlers answering through the frame codec across two process boundaries,
@@ -223,7 +223,7 @@ test("stdout carries frames and nothing else; the server's own logging is on std
   expect(heard[0]).toMatchObject({ t: "hello", role: "server" });
   expect(heard).toContainEqual({ t: "res", id: 1, r: { state: "none" } });
 
-  expect(err).toContain("[serve] ledge-server");
+  expect(err).toContain("[serve] ledge ");
   // console.log is rerouted rather than dropped, because the server's own
   // diagnostics still have to be readable somewhere. The line lands in the
   // daemon's log, not on this process's stderr: `serve` is a byte pump and the

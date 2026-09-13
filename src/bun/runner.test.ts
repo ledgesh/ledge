@@ -50,8 +50,8 @@ describe("runnerFor", () => {
   });
 
   // The bug this "" convention exists for: a server passed its own
-  // process.execPath, which is `ledge-server` rather than a bun. A ```ts
-  // fence then ran `ledge-server run /tmp/ledge-run-x.ts`. The binary has no
+  // process.execPath, which is `ledge` rather than a bun. A ```ts
+  // fence then ran `ledge run /tmp/ledge-run-x.ts`. The binary has no
   // `run` verb, so the block got the server's usage text and exit 2 back.
   test("no bundled bun means the PATH's bun, the same answer a remote run gets", () => {
     const spec = runnerFor("b13", "ts", "1", INTERP, "");
@@ -122,11 +122,11 @@ describe("bundledBun", () => {
   });
 
   test("a compiled binary is not a bun, whatever it was built with", () => {
-    // `ledge-server` is bun with the server compiled into it, and its argv is
+    // a compiled `ledge` is bun with the server compiled into it, and its argv is
     // the server's own. serve.ts does not recognise `run` as a verb, so the
     // block gets a usage message, not a TypeScript run. The Docker image and
     // a VPS run the same binary.
-    expect(bundledBun("/usr/local/bin/ledge-server")).toBe("");
+    expect(bundledBun("/usr/local/bin/ledge")).toBe("");
   });
 
   test("the whole binary name has to be bun, not the end of one", () => {

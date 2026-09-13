@@ -258,7 +258,7 @@ final class PairingViewController: UIViewController {
         let machine: [UIView]
         switch startsFrom {
         case .typed:
-            machine = (onScan == nil ? [] : [scanButton(), footnote("ledge-server pair shows a code on the server.")])
+            machine = (onScan == nil ? [] : [scanButton(), footnote("ledge pair shows a code on the server.")])
                 + [step("1. Which machine, and which account on it."), field, portField]
         case .code(let code, let tapped):
             machine = (tapped ? [linkWarning()] : []) + [summary(of: code)]

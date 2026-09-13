@@ -100,7 +100,7 @@ Closing the last window quits Ledge.
 
 ## Install the server
 
-The other machine needs `ledge-server` on the PATH an incoming ssh gets. It is a package, so a few commands install it. [[Tutorial: Set Up a Ledge Server]] walks through them on a fresh VPS, with an account for Ledge and the sshd hardening this page describes further down.
+The other machine needs the `ledge` command on the PATH an incoming ssh gets. It comes from the `ledge-server` package, so a few commands install it. [[Tutorial: Set Up a Ledge Server]] walks through them on a fresh VPS, with an account for Ledge and the sshd hardening this page describes further down.
 
 The server runs on Bun, and where Bun goes decides where the server goes, because Bun puts global commands beside itself. On a Linux machine, install Bun into `/usr/local` and both names land in `/usr/local/bin`, which is where the short PATH of an ssh command looks:
 
@@ -127,7 +127,7 @@ bun add -g ledge-server
 
 Run them as the account Ledge signs in to. None of them needs `sudo`. The account's shell has to be zsh, which it is unless the account predates macOS Catalina.
 
-A Mac that runs the Ledge app needs none of this. "Install Shell Command (ledge)" in the app's command palette puts `ledge-server` in `~/.ledge-server/bin`, where an incoming ssh looks first, pointing at the app's own copy. Signing in as that account then reaches the notes the app shows, with the app's server answering both.
+A Mac that runs the Ledge app needs none of this. "Install Shell Command (ledge)" in the app's command palette puts `ledge` in `~/.ledge-server/bin`, where an incoming ssh looks first, pointing at the app's own copy. Signing in as that account then reaches the notes the app shows, with the app's server answering both.
 
 macOS and Linux are supported, on arm64 or x64. On Linux the floor is glibc 2.29, which means Debian 11, Ubuntu 20.04, RHEL 9, or anything newer. Alpine and other musl systems are not supported.
 
@@ -139,10 +139,10 @@ Blocks need zsh or bash on that machine. Ledge spawns the account's login shell 
 
 Worth doing once, because Ledge reports the failure it catches as a server that is not installed. A remote shell that cannot find a command says only that, so that is all the app has to go on.
 
-Ledge starts the server by running `ledge-server serve` over ssh. A command run that way gets a short PATH and skips the startup files a terminal reads, so both `ledge-server` and the `bun` its first line names have to be on that PATH already. From your Mac's own terminal:
+Ledge starts the server by running `ledge serve` over ssh. A command run that way gets a short PATH and skips the startup files a terminal reads, so both `ledge` and the `bun` its first line names have to be on that PATH already. From your Mac's own terminal:
 
 ```sh norun
-ssh you@machine 'command -v ledge-server; command -v bun'
+ssh you@machine 'command -v ledge; command -v bun'
 ```
 
 Two paths printed means the machine is ready to add.
@@ -150,7 +150,7 @@ Two paths printed means the machine is ready to add.
 On Linux, nothing printed means Bun is installed for one user rather than system-wide, which is what a machine that already had Bun before you started usually has. Its global commands are then in `~/.bun/bin`, which an incoming ssh does not search, and `bun pm bin -g` on that machine confirms where they went. Linking both names into a system directory, on that machine, fixes it without reinstalling anything:
 
 ```sh norun
-sudo ln -s "$(bun pm bin -g)/ledge-server" /usr/local/bin/ledge-server
+sudo ln -s "$(bun pm bin -g)/ledge" /usr/local/bin/ledge
 sudo ln -s "$(command -v bun)" /usr/local/bin/bun
 ```
 
@@ -162,10 +162,10 @@ Only if you want a build of your own. The package is the ordinary way. From a ch
 
 ```sh norun
 bun run build:native
-bun build src/bun/serve.ts --compile --outfile ledge-server
+bun build src/bun/serve.ts --compile --outfile ledge
 ```
 
-Copy `ledge-server` and `dist-native/libledge_pty.so` to the server, side by side, somewhere on the PATH. Build it on a machine of the same architecture as the one that will run it, since a compiled binary is one architecture and the package is the thing that carries all of them.
+Copy `ledge` and `dist-native/libledge_pty.so` to the server, side by side, somewhere on the PATH. Build it on a machine of the same architecture as the one that will run it, since a compiled binary is one architecture and the package is the thing that carries all of them.
 
 The `.so` holds two C functions the terminal needs. Without it beside the binary, resizing a terminal does nothing and a shell that stops reading can stall the server.
 
@@ -180,7 +180,7 @@ docker run -d --name ledge --restart unless-stopped -v ledge-data:/data -v ledge
 
 Mount both volumes. `/data` holds the notes, the workspace registry, the vault, and the logs. `/home/ledge` holds the account: your profiles and their secrets live in `~/.config/ledge/profiles`, and the keys `host:` frontmatter dials out with live in `~/.ssh`.
 
-Neither directory is the whole story on its own, and `docker rm` takes whatever you did not mount. Run `ledge-server backup-paths` in the container to see both, resolved. "Back up the server" below is what to do with them.
+Neither directory is the whole story on its own, and `docker rm` takes whatever you did not mount. Run `ledge backup-paths` in the container to see both, resolved. "Back up the server" below is what to do with them.
 
 The image has no ssh daemon in it. The machine's own sshd is the one that answers, and it reaches into the container (see below). Running a second sshd inside a container means a second set of host keys and a second published port, for nothing.
 
@@ -203,15 +203,15 @@ Optional, and worth doing on a server you care about. Ledge connects with an ord
 Restricting gives the server a key that can speak Ledge's protocol and nothing else. In that machine's `~/.ssh/authorized_keys`:
 
 ```
-restrict,command="/usr/local/bin/ledge-server serve" ssh-ed25519 AAAA... ledge@laptop
+restrict,command="/usr/local/bin/ledge serve" ssh-ed25519 AAAA... ledge@laptop
 ```
 
-Use the absolute path that `command -v ledge-server` printed above. sshd runs this line instead of whatever the client asked for, so naming the file outright settles where it is. It does not settle where Bun is, which is the other half of the check.
+Use the absolute path that `command -v ledge` printed above. sshd runs this line instead of whatever the client asked for, so naming the file outright settles where it is. It does not settle where Bun is, which is the other half of the check.
 
 For the Docker deployment, the forced command reaches into the container instead:
 
 ```
-restrict,command="docker exec -i ledge ledge-server serve" ssh-ed25519 AAAA... ledge@laptop
+restrict,command="docker exec -i ledge ledge serve" ssh-ed25519 AAAA... ledge@laptop
 ```
 
 That key cannot forward a port, run `scp`, or open a shell over ssh. What it limits is what the key is good for if it is ever stolen: no route into the network behind that server, and no file copying.
@@ -262,12 +262,12 @@ Each device unlocks for itself. Typing the passphrase on your Mac does not open 
 
 ## Back up the server
 
-Ledge backs nothing up. `ledge-server backup-paths` prints the paths a backup has to cover, and you point a backup tool at them.
+Ledge backs nothing up. `ledge backup-paths` prints the paths a backup has to cover, and you point a backup tool at them.
 
 Run it as the account the server runs as, on the machine the server runs on:
 
 ```sh norun
-ledge-server backup-paths
+ledge backup-paths
 ```
 
 One absolute path per line: the app home, every workspace folder you attached from elsewhere on the machine, and the profiles directory. Only the server can answer this, because only its registry knows where you attached those folders.
@@ -286,7 +286,7 @@ Everything on this page works the same whether the server is a package on a VPS,
 Ask the container for the image deployment, from its host:
 
 ```sh norun
-docker exec ledge ledge-server backup-paths
+docker exec ledge ledge backup-paths
 ```
 
 ## Back up with restic

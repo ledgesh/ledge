@@ -10,7 +10,7 @@
 # So the host's sshd is the one that answers, and the forced command
 # remote.md §4 describes reaches in:
 #
-#     restrict,command="docker exec -i ledge ledge-server serve" ssh-ed25519 AAAA...
+#     restrict,command="docker exec -i ledge ledge serve" ssh-ed25519 AAAA...
 #
 # -i and not -t, for remote.md §4's reason: this stdout carries the protocol,
 # and a pty would translate newlines inside a length-prefixed stream.
@@ -20,7 +20,7 @@
 # (remote.md §1).
 #
 # A container the user started is also why the daemon does not idle out here.
-# `ledge-server daemon` without --autostart stays until it is stopped, because
+# `ledge daemon` without --autostart stays until it is stopped, because
 # a supervisor would otherwise restart it every minute for correctly deciding
 # nobody was home.
 #
@@ -48,7 +48,7 @@ RUN apt-get update \
 
 WORKDIR /src
 
-# The server bundles one npm package, uqr, for `ledge-server pair`
+# The server bundles one npm package, uqr, for `ledge pair`
 # (architecture.md §8). The install is pinned by the lockfile and skips install
 # scripts, since the root package's postinstall sets up the Mac app's
 # toolchain. It stays in the build stages: the runtime stage copies the binary.
@@ -79,7 +79,7 @@ COPY --from=native /src/dist-native/libledge_pty.so /
 
 FROM native AS build
 
-RUN bun build src/bun/serve.ts --compile --outfile /out/ledge-server \
+RUN bun build src/bun/serve.ts --compile --outfile /out/ledge \
   && cp dist-native/libledge_pty.so /out/
 
 
@@ -106,7 +106,7 @@ RUN apt-get update \
 # Beside the executable, which is where pty.ts looks third: inside a compiled
 # binary `import.meta.dir` names a path in the embedded filesystem, where
 # nothing was ever copied.
-COPY --from=build /out/ledge-server /usr/local/bin/ledge-server
+COPY --from=build /out/ledge /usr/local/bin/ledge
 COPY --from=build /out/libledge_pty.so /usr/local/bin/libledge_pty.so
 
 # Two directories hold state, and only one of them is obvious.
@@ -133,11 +133,11 @@ COPY --from=build /out/libledge_pty.so /usr/local/bin/libledge_pty.so
 #
 #     -v ledge-data:/data -v ledge-home:/home/ledge
 #
-# `ledge-server backup-paths` (bun/backup.ts) prints both, resolved, from
+# `ledge backup-paths` (bun/backup.ts) prints both, resolved, from
 # inside the container.
 ENV LEDGE_NOTES_ROOT=/data
 VOLUME /data
 
 USER ledge
 WORKDIR /data
-CMD ["ledge-server", "daemon"]
+CMD ["ledge", "daemon"]

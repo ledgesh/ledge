@@ -9,7 +9,7 @@
 // knowing which it got, and the remote path is not a second implementation.
 //
 // The transport underneath is a duplex byte stream. A local server is a child
-// process's pipes. A remote one is `ssh <target> ledge-server serve`, the same
+// process's pipes. A remote one is `ssh <target> ledge serve`, the same
 // pipes over a longer wire. Neither end opens a port.
 import {
   BinaryHolder,
@@ -511,8 +511,8 @@ export function socketWriter(socket: { write(bytes: Uint8Array): number }): {
 
 /**
  * A child process's stdio. Both server commands are the same but for the
- * `ssh <target>` in front: `ssh <target> ledge-server serve` for another
- * machine and `ledge-server serve` for this one, so the remote path is not a
+ * `ssh <target>` in front: `ssh <target> ledge serve` for another
+ * machine and `ledge serve` for this one, so the remote path is not a
  * second, less-tested code path (remote.md §1).
  *
  * stderr is inherited, so the server's log lines land on this process's
@@ -579,7 +579,7 @@ export function spawnDuplex(
   });
 }
 
-/** This process's own stdin and stdout: what `ledge-server serve` is served
+/** This process's own stdin and stdout: what `ledge serve` is served
  * over, whether ssh or a parent process is holding the other end. */
 export function stdioDuplex(): Duplex {
   return duplexOver({

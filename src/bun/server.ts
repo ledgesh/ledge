@@ -9,7 +9,7 @@
 // concurrently. The terminal-drawer shell is raw and drives xterm.js.
 //
 // It imports nothing from electrobun (remote.md §1): it runs as
-// `ledge-server daemon` on every machine, the Mac included, and the app is
+// `ledge daemon` on every machine, the Mac included, and the app is
 // one of its clients over a socket. Nothing here touches a screen: every
 // dialog and pasteboard is a client's (bun/clientSeams.ts, remote.md §10).
 import { watch } from "node:fs";

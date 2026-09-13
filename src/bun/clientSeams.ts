@@ -60,7 +60,7 @@ export interface ClientNative {
   // no picker, which then answers null and the Attach Folder dialog keeps
   // only its field (mainview/lib/shell.ts picksFolders).
   pickFolder?(): Promise<string | null>;
-  // Put `ledge` and `ledge-server` on this machine's PATH, pointing at this
+  // Put `ledge` on this machine's PATH, pointing at this
   // app's own copy (bun/cliShim.ts installShims), and say where they went.
   // Absent on a shell with no PATH to put them on, which then answers a
   // refusal in a sentence and the view leaves the verb out
@@ -191,7 +191,7 @@ export function clientSeams(
     // like a typed one (bun/workspaces.ts attachExternal).
     folderPick: async () => ({ path: (await native.pickFolder?.()) ?? null }),
     // The shell command, written on this machine: a `ledge` that reads this
-    // Mac's notes and a `ledge-server` a phone reaches over ssh, both running
+    // Mac's notes and a `ledge serve` a phone reaches over ssh, both running
     // this app's own bundle (bun/cliShim.ts). On the server it would land on
     // a machine nobody types at, and point at a copy that is not this one.
     cliInstall: async () => (await native.installCli?.()) ?? NO_CLI,

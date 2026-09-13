@@ -11,7 +11,7 @@
 // that.
 //
 // It uses Ledge's own client to talk to it (`clientConnection` over
-// `docker exec -i ... ledge-server serve`), for probe-ssh.ts's reason: a probe
+// `docker exec -i ... ledge serve`), for probe-ssh.ts's reason: a probe
 // that hand-rolled the protocol would only prove that Docker works.
 //
 // Run it: `bun run probe:npm`, after `bun run build:npm`.
@@ -155,8 +155,8 @@ try {
   const SSH_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
   const onSshPath = (name: string) =>
     inside("env", "-i", `PATH=${SSH_PATH}`, "sh", "-c", `command -v ${name}`).out;
-  const server = onSshPath("ledge-server");
-  check("an ssh-shaped PATH finds ledge-server", server.endsWith("/ledge-server"), server || "not found");
+  const server = onSshPath("ledge");
+  check("an ssh-shaped PATH finds ledge", server.endsWith("/ledge"), server || "not found");
   const theBun = onSshPath("bun");
   check("and the bun its shebang names", theBun.endsWith("/bun"), theBun || "not found");
 
@@ -165,7 +165,7 @@ try {
   // `docker exec -d` rather than a backgrounded shell: a process left running
   // by an exec that has returned is not guaranteed to survive it.
   // --autostart off, because this daemon was asked for (remote.md §11).
-  run(["docker", "exec", "-d", NAME, "sh", "-c", "ledge-server daemon > /tmp/daemon.log 2>&1"]);
+  run(["docker", "exec", "-d", NAME, "sh", "-c", "ledge daemon > /tmp/daemon.log 2>&1"]);
   for (let i = 0; i < 100; i++) {
     if (inside("sh", "-c", "test -S /data/.server.sock && echo up").out === "up") break;
     await Bun.sleep(100);
@@ -180,11 +180,11 @@ try {
     PUSH_MESSAGES.map((m) => [m, (p: unknown) => heard.push([m, p])]),
   ) as unknown as ServerPush;
   const client = clientConnection(
-    spawnDuplex(["docker", "exec", "-i", NAME, "ledge-server", "serve"]),
+    spawnDuplex(["docker", "exec", "-i", NAME, "ledge", "serve"]),
     { push, build: BUILD_VERSION, client: "probe-npm", label: "Probe", hold: 60_000 },
   );
   const hello = await client.ready;
-  ok("handshake", `ledge-server ${hello.build}, instance ${hello.instance.slice(0, 8)}`);
+  ok("handshake", `server build ${hello.build}, instance ${hello.instance.slice(0, 8)}`);
   check("the package reports the version it was built from", hello.build === BUILD_VERSION, hello.build);
 
   step("[pty] the trampolines, which is what the package exists to carry");

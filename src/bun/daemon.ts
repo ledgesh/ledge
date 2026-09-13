@@ -1,7 +1,7 @@
 // The server as a process that outlives its clients (remote.md §1, §7).
 //
 // Up to phase 3 (remote.md §14) a server was its connection: `ssh host
-// ledge-server serve` ran a fresh one per ssh, so a dropped link killed the
+// ledge serve` ran a fresh one per ssh, so a dropped link killed the
 // shells with it. That made §7's "sessions outlive connections" false for the
 // case it was written for, a build running on a machine you are not sitting at.
 // The server now sits behind a unix socket in the app home, `serve` pumps bytes
@@ -455,7 +455,7 @@ export async function connectToDaemon(
       (opts.spawn ?? spawnDaemon)();
     }
     if (Date.now() >= deadline) {
-      throw new Error(`no ledge-server answered at ${socketPath} within ${Math.round(timeoutMs / 1000)}s`);
+      throw new Error(`no daemon answered at ${socketPath} within ${Math.round(timeoutMs / 1000)}s`);
     }
     await new Promise((r) => setTimeout(r, 50));
   }
@@ -509,7 +509,7 @@ async function tryConnect(socketPath: string): Promise<Fed | null> {
  * `process.execPath` is `bun` in a checkout, the npm package and a server.sh
  * install, and the binary itself for a `bun build --compile` server, so the
  * entry script goes back on the command line only in the first cases:
- * `bun bin/ledge-server.js daemon` there, `ledge-server daemon` here. The Mac
+ * `bun bin/ledge.js daemon` there, `ledge daemon` here. The Mac
  * app passes its own head instead: its `Bun.main` is the app, not the server
  * (bun/localServer.ts).
  */

@@ -1,21 +1,20 @@
-// The `ledge` and `ledge-server` shims: how this Mac's app gets both commands
-// onto a PATH. Each execs the exact runtime and entry that wrote it, the
-// bundle's own bun on its serve.js (`cli` for `ledge`, bare for
-// `ledge-server`), and discovers nothing at run time. A checkout writes the
-// dev machine's bun and src/bun/serve.ts. Re-running the install repoints a
-// moved app. The shim's own text says so, because sh's "not found" does not.
+// The `ledge` shim: how this Mac's app gets the command onto a PATH. It execs
+// the exact runtime and entry that wrote it, the bundle's own bun on its
+// serve.js, and discovers nothing at run time. A checkout writes the dev
+// machine's bun and src/bun/serve.ts. Re-running the install repoints a moved
+// app. The shim's own text says so, because sh's "not found" does not.
 //
-// Both go in ~/.ledge-server/bin, the directory the ssh command every client
+// It goes in ~/.ledge-server/bin, the directory the ssh command every client
 // runs puts first on PATH (shared/connections.ts SERVE_COMMAND). That is what
-// makes this Mac a server for a phone: `ledge-server serve` over ssh finds the
-// app's own copy and attaches to the app's own daemon. server.sh installs a
-// server into the same directory on a machine without the app (remote.md
-// §11), so the two installers overwrite each other's launchers and nothing
-// else's. A `ledge` from a Homebrew keg keeps its file.
+// makes this Mac a server for a phone: `ledge serve` over ssh finds the app's
+// own copy and attaches to the app's own daemon. server.sh installs a server
+// into the same directory on a machine without the app (remote.md §11), so
+// the two installers overwrite each other's launcher and nothing else's. A
+// `ledge` from a Homebrew keg keeps its file.
 //
-// The client's seam, not the server's (remote.md §10): the files land on the
-// machine with the screen, and they run that machine's copy. installShims
-// saves each the way every machine-owned file here is saved: temp file, then
+// The client's seam, not the server's (remote.md §10): the file lands on the
+// machine with the screen, and it runs that machine's copy. installShims
+// saves it the way every machine-owned file here is saved: temp file, then
 // rename (architecture.md §3).
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
@@ -27,11 +26,8 @@ export const SHIM_MARKER = "# Ledge shim";
 /** What server.sh writes into the same launcher; the app may replace it. */
 const SERVER_SH_MARKER = "ledge.sh/server.sh";
 
-/** The two commands, and the verb each one execs before the caller's arguments. */
-export const SHIMS: ReadonlyArray<{ name: string; verb: string | null }> = [
-  { name: "ledge", verb: "cli" },
-  { name: "ledge-server", verb: null },
-];
+/** The one command. */
+export const SHIM_NAME = "ledge";
 
 /** The line server.sh appends for the same purpose, spelled identically so
  * each installer recognizes the other's. */
@@ -46,7 +42,7 @@ export function tildify(p: string, home: string = homedir()): string {
   return r.startsWith(h + "/") ? `~${r.slice(h.length)}` : p;
 }
 
-/** Where the shims go, under `home`. */
+/** Where the shim goes, under `home`. */
 export function shimDir(home: string = homedir()): string {
   return join(home, ".ledge-server", "bin");
 }
@@ -59,13 +55,13 @@ function shQuote(p: string): string {
   return `"${p.replace(/[\\"$`]/g, (c) => `\\${c}`)}"`;
 }
 
-export function shimScript(execPath: string, entryPath: string, verb: string | null): string {
+export function shimScript(execPath: string, entryPath: string): string {
   return [
     "#!/bin/sh",
     `${SHIM_MARKER}, written by the Ledge app's Install Shell Command.`,
     "# It execs the exact runtime and entry that wrote it; if the app has",
     "# moved, run the install again to repoint it.",
-    `exec ${shQuote(execPath)} ${shQuote(entryPath)}${verb === null ? "" : ` ${verb}`} "$@"`,
+    `exec ${shQuote(execPath)} ${shQuote(entryPath)} "$@"`,
     "",
   ].join("\n");
 }
@@ -94,7 +90,7 @@ export function startupFile(shellVar: string, home: string, platform: string = p
 }
 
 export interface ShimInstall {
-  /** Where the shims landed. */
+  /** Where the shim landed. */
   dir: string;
   /** Whether that directory was on the caller's PATH already. */
   onPath: boolean;
@@ -124,26 +120,21 @@ export async function installShims(opts: {
   const dir = shimDir(home);
   await mkdir(dir, { recursive: true });
 
-  // Both are checked before either is written, so a refusal leaves the pair
-  // as it was rather than half replaced. A bin directory is shared ground,
-  // and rename(2) clobbers silently.
-  for (const { name } of SHIMS) {
-    const existing = await readFile(join(dir, name), "utf8").catch(() => null);
-    if (existing !== null && !isLedgeShim(existing)) {
-      throw new Error(`refusing to overwrite ${join(dir, name)}: it exists and is not a Ledge shim`);
-    }
+  // A bin directory is shared ground, and rename(2) clobbers silently, so a
+  // file that is not ours stays.
+  const target = join(dir, SHIM_NAME);
+  const existing = await readFile(target, "utf8").catch(() => null);
+  if (existing !== null && !isLedgeShim(existing)) {
+    throw new Error(`refusing to overwrite ${target}: it exists and is not a Ledge shim`);
   }
-  for (const { name, verb } of SHIMS) {
-    const target = join(dir, name);
-    const tmp = join(dir, `.${name}-tmp-${process.pid}`);
-    try {
-      await writeFile(tmp, shimScript(opts.execPath, opts.entryPath, verb), "utf8");
-      await chmod(tmp, 0o755); // explicit, not writeFile's mode: umask must not decide
-      await rename(tmp, target);
-    } catch (err) {
-      await unlink(tmp).catch(() => {}); // the dotted temp this call just wrote
-      throw err;
-    }
+  const tmp = join(dir, `.${SHIM_NAME}-tmp-${process.pid}`);
+  try {
+    await writeFile(tmp, shimScript(opts.execPath, opts.entryPath), "utf8");
+    await chmod(tmp, 0o755); // explicit, not writeFile's mode: umask must not decide
+    await rename(tmp, target);
+  } catch (err) {
+    await unlink(tmp).catch(() => {}); // the dotted temp this call just wrote
+    throw err;
   }
 
   const onPath = dirOnPath(dir, opts.pathVar);

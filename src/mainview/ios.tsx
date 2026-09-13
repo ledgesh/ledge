@@ -194,7 +194,7 @@ async function start(): Promise<void> {
   mark("view");
   await painted();
   mark("paint");
-  shell.log(`[boot] ${destination}, ledge-server ${peer.build}, hold ${Math.round(held / 1000)}s: ${marks.join(" ")}`);
+  shell.log(`[boot] ${destination}, server build ${peer.build}, hold ${Math.round(held / 1000)}s: ${marks.join(" ")}`);
 }
 
 /**

@@ -20,7 +20,7 @@ final class ServerSetupViewController: UIViewController {
                 return [
                     "curl -fsSL https://bun.sh/install | sudo BUN_INSTALL=/usr/local bash",
                     "sudo BUN_INSTALL=/usr/local bun add -g ledge-server",
-                    "ledge-server pair",
+                    "ledge pair",
                 ]
             case .mac:
                 return [
@@ -28,7 +28,7 @@ final class ServerSetupViewController: UIViewController {
                     "echo 'export PATH=\"$HOME/.bun/bin:$PATH\"' >> ~/.zshenv",
                     "source ~/.zshenv",
                     "bun add -g ledge-server",
-                    "ledge-server pair",
+                    "ledge pair",
                 ]
             }
         }

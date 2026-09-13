@@ -129,7 +129,7 @@ function release(w: World, version: string, opts: ReleaseOptions = {}): string {
   const native = Object.fromEntries(
     NATIVE_TARGETS.filter((t) => (opts.targets ?? [key]).includes(targetKey(t))).map((t) => [nativePath(t), "trampolines"]),
   );
-  const serverSum = npmTarball(w, serverTarball(version), { "bin/ledge-server.js": "// entry\n", "lib/serve.js": "// bundle\n", ...native });
+  const serverSum = npmTarball(w, serverTarball(version), { "bin/ledge.js": "// entry\n", "lib/serve.js": "// bundle\n", ...native });
   const name = BUN_PACKAGES[key]!.name;
   const bunFile = tarballPath(name, BUN_VERSION).split("/").pop()!;
   const bunSum = existsSync(join(w.release, bunFile))
@@ -224,22 +224,22 @@ describe("rendering server.sh", () => {
 });
 
 describe("server.sh", () => {
-  test.each(SHELLS)("%s installs the package and its Bun into versions/<version>, with a launcher that runs that Bun", (shell) => {
+  test.each(SHELLS)("%s installs the package and its Bun into versions/<version>, with a ledge launcher that runs that Bun", (shell) => {
     const w = world();
     const run = install(w, release(w, "0.1.0"), LINUX, [], shell, true);
     expect(run.err).toBe("");
     expect(run.code).toBe(0);
     const version = join(installed(w), "versions", "0.1.0");
     expect(run.out).toContain(`ledge-server 0.1.0 is installed in ${installed(w)}.`);
-    expect(run.out).toContain("~/.ledge-server/bin/ledge-server pair");
+    expect(run.out).toContain("~/.ledge-server/bin/ledge pair");
     expect(w.downloads()).toEqual([serverUrl("0.1.0"), bunUrl("linux-arm64")]);
 
-    const launched = Bun.spawnSync([join(installed(w), "bin", "ledge-server"), "pair"], { stdout: "pipe" });
-    expect(launched.stdout.toString()).toBe(`bun ${version}/bun|${version}/bin/ledge-server.js pair`);
-    // The CLI by its own name: the same launcher, running the cli verb.
+    const launched = Bun.spawnSync([join(installed(w), "bin", "ledge"), "pair"], { stdout: "pipe" });
+    expect(launched.stdout.toString()).toBe(`bun ${version}/bun|${version}/bin/ledge.js pair`);
+    // The notes CLI is the same launcher: the caller's first word is the verb.
     const cli = Bun.spawnSync([join(installed(w), "bin", "ledge"), "ls", "--all"], { stdout: "pipe" });
-    expect(cli.stdout.toString()).toBe(`bun ${version}/bun|${version}/bin/ledge-server.js cli ls --all`);
-    expect(listing(join(installed(w), "bin"))).toEqual(["ledge", "ledge-server"]);
+    expect(cli.stdout.toString()).toBe(`bun ${version}/bun|${version}/bin/ledge.js ls --all`);
+    expect(listing(join(installed(w), "bin"))).toEqual(["ledge"]);
     expect(listing(installed(w))).toEqual(["bin", "versions"]);
     expect(listing(version)).toEqual(["bin", "bun", "lib"]);
   });
@@ -251,14 +251,14 @@ describe("server.sh", () => {
     expect(install(w, release(w, "0.1.0"), LINUX).code).toBe(0);
     const served = Bun.spawnSync(["/bin/sh", "-c", SERVE_COMMAND], { env: { HOME: w.home, PATH: "/usr/bin:/bin" }, stdout: "pipe" });
     const version = join(installed(w), "versions", "0.1.0");
-    expect(served.stdout.toString()).toBe(`bun ${version}/bun|${version}/bin/ledge-server.js serve`);
+    expect(served.stdout.toString()).toBe(`bun ${version}/bun|${version}/bin/ledge.js serve`);
   });
 
   test("a home directory with a space and a quote in its name still gets a launcher that runs", () => {
     const w = world("it's a home");
     expect(install(w, release(w, "0.1.0"), LINUX).code).toBe(0);
-    const launched = Bun.spawnSync([join(installed(w), "bin", "ledge-server"), "serve"], { stdout: "pipe" });
-    expect(launched.stdout.toString()).toEndWith("/versions/0.1.0/bin/ledge-server.js serve");
+    const launched = Bun.spawnSync([join(installed(w), "bin", "ledge"), "serve"], { stdout: "pipe" });
+    expect(launched.stdout.toString()).toEndWith("/versions/0.1.0/bin/ledge.js serve");
   });
 
   test.each([
@@ -296,7 +296,7 @@ describe("server.sh", () => {
       expect(run.code).toBe(1);
       expect(run.err).toContain(said);
       expect(listing(join(installed(w), "versions"))).toEqual([]);
-      expect(existsSync(join(installed(w), "bin", "ledge-server"))).toBe(false);
+      expect(existsSync(join(installed(w), "bin", "ledge"))).toBe(false);
       expect(listing(installed(w)).filter((f) => f.startsWith(".download."))).toEqual([]);
     };
 
@@ -380,7 +380,7 @@ describe("server.sh", () => {
       expect(listing(join(installed(w), "versions"))).toEqual(["0.1.0", "0.2.0"]);
       expect(install(w, texts[2]!, LINUX).code).toBe(0);
       expect(listing(join(installed(w), "versions"))).toEqual(["0.2.0", "0.3.0"]);
-      const launched = Bun.spawnSync([join(installed(w), "bin", "ledge-server")], { stdout: "pipe" });
+      const launched = Bun.spawnSync([join(installed(w), "bin", "ledge")], { stdout: "pipe" });
       expect(launched.stdout.toString()).toContain("/versions/0.3.0/bun|");
     });
   });
@@ -416,7 +416,7 @@ describe("server.sh", () => {
   describe("warnings after an install", () => {
     test("a csh login shell, which cannot run what ssh is asked to run", () => {
       const w = world();
-      expect(install(w, release(w, "0.1.0"), { ...LINUX, shell: "/bin/tcsh" }).out).toContain("login shell is tcsh, which cannot start ledge-server over ssh");
+      expect(install(w, release(w, "0.1.0"), { ...LINUX, shell: "/bin/tcsh" }).out).toContain("login shell is tcsh, which cannot start ledge over ssh");
     });
 
     test("a Mac with Remote Login off", () => {

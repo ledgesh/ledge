@@ -60,7 +60,7 @@ Nothing else needs installing and no service needs starting. Ledge starts the se
 From your Mac, as the new account, with the new key:
 
 ```sh norun
-ssh -i ~/.ssh/ledge ledge@vps 'command -v ledge-server; command -v bun'
+ssh -i ~/.ssh/ledge ledge@vps 'command -v ledge; command -v bun'
 ```
 
 Two paths printed means the machine is ready. Keep the first one; step 7 needs it.
@@ -104,7 +104,7 @@ hostname; whoami
 Edit `/home/ledge/.ssh/authorized_keys` on the VPS and put a prefix in front of the key, using the path step 4 printed:
 
 ```
-restrict,command="/usr/local/bin/ledge-server serve" ssh-ed25519 AAAA... ledge@laptop
+restrict,command="/usr/local/bin/ledge serve" ssh-ed25519 AAAA... ledge@laptop
 ```
 
 That key can now speak Ledge's protocol and nothing else: no shell, no port forwarding, no file copying. sshd runs the named command whatever the client asks for, so the terminal check in step 4 stops working for this key. That is expected. Your own account is the one for terminals.

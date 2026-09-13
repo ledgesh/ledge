@@ -4,6 +4,8 @@ The server half of [Ledge](https://github.com/ledgesh/ledge), the macOS notebook
 
 Install this on a machine whose notes and shells you want to reach from the Ledge app on your Mac or iPhone. The machine keeps the notes, runs the commands, and holds the vault. Your client keeps nothing but the window.
 
+The package installs one command, `ledge`. Its server verbs are what the apps run over ssh, and its other verbs are your notes from that machine's own shell.
+
 ## Install
 
 The server runs on [Bun](https://bun.sh), and where Bun goes decides where the server goes: Bun puts global commands beside itself. Installing Bun into `/usr/local` puts both names in `/usr/local/bin`, which is where the short PATH of an ssh command looks.
@@ -24,18 +26,18 @@ macOS and Linux, on arm64 or x64. On Linux the floor is glibc 2.29, which means 
 
 ## Check that an incoming ssh can find it
 
-This is the one step worth not skipping, because Ledge reports what it catches as a server that is not installed: a remote shell that cannot find a command says only that. Ledge starts the server by running `ledge-server serve` over ssh, and a command run that way gets a short PATH and no shell profile. Both `ledge-server` and the `bun` its shebang names have to be on that PATH.
+This is the one step worth not skipping, because Ledge reports what it catches as a server that is not installed: a remote shell that cannot find a command says only that. Ledge starts the server by running `ledge serve` over ssh, and a command run that way gets a short PATH and no shell profile. Both `ledge` and the `bun` its shebang names have to be on that PATH.
 
 From your Mac:
 
 ```sh
-ssh you@machine 'command -v ledge-server; command -v bun'
+ssh you@machine 'command -v ledge; command -v bun'
 ```
 
 Two paths printed means you are done. Nothing printed means the install landed somewhere an incoming ssh does not look, which is what a machine with a per-user Bun on it already gives you. Bun puts global commands beside itself, so `bun pm bin -g` on that machine says where they went, and linking both into a system directory fixes it without reinstalling:
 
 ```sh
-sudo ln -s "$(bun pm bin -g)/ledge-server" /usr/local/bin/ledge-server
+sudo ln -s "$(bun pm bin -g)/ledge" /usr/local/bin/ledge
 sudo ln -s "$(command -v bun)" /usr/local/bin/bun
 ```
 
@@ -44,7 +46,7 @@ sudo ln -s "$(command -v bun)" /usr/local/bin/bun
 You do not normally run this yourself. Add the machine in the Ledge app under Servers, and the app opens a connection with your own ssh credentials:
 
 ```sh
-ssh you@machine ledge-server serve
+ssh you@machine ledge serve
 ```
 
 No port is opened and no daemon is installed. Ledge speaks its protocol over ssh's stdin and stdout, so the machine's own sshd is the only thing listening, and the key you already use is the credential.
@@ -53,12 +55,12 @@ The verbs, if you want them:
 
 | Verb | What it does |
 | --- | --- |
-| `ledge-server serve` | Move the protocol between stdin, stdout, and this machine's daemon. Starts the daemon if nothing answers. |
-| `ledge-server daemon` | Be this machine's server. Holds the notes, the shells, and the watchers, and runs until stopped. |
-| `ledge-server backup-paths` | Print the paths a backup of this machine has to cover. |
-| `ledge-server pair` | Print a pairing code a phone scans to add this server. |
-| `ledge-server cli` | The `ledge` command, which the package also installs under that name: notes from this machine's own shell. `ledge help` lists its verbs. |
-| `ledge-server mcp` | The Ledge MCP server on stdin and stdout, for an agent running on this machine. `ledge mcp` is the same thing. |
+| `ledge serve` | Move the protocol between stdin, stdout, and this machine's daemon. Starts the daemon if nothing answers. |
+| `ledge daemon` | Be this machine's server. Holds the notes, the shells, and the watchers, and runs until stopped. |
+| `ledge backup-paths` | Print the paths a backup of this machine has to cover. |
+| `ledge pair` | Print a pairing code a phone scans to add this server. |
+| `ledge mcp` | The Ledge MCP server on stdin and stdout, for an agent running on this machine. |
+| `ledge ls`, `ledge cat`, ... | Notes from this machine's own shell. `ledge help` lists them. |
 
 The daemon outlives the connections to it, which is what lets a build keep running after your laptop closes and lets a reconnecting client pick the output back up.
 
@@ -67,7 +69,7 @@ The daemon outlives the connections to it, which is what lets a build keep runni
 Optional, and worth doing on a server you care about. In that machine's `~/.ssh/authorized_keys`:
 
 ```
-restrict,command="/usr/local/bin/ledge-server serve" ssh-ed25519 AAAA... ledge@laptop
+restrict,command="/usr/local/bin/ledge serve" ssh-ed25519 AAAA... ledge@laptop
 ```
 
 That key can then speak Ledge's protocol and nothing else. No shell, no port forwarding, no file transfer.

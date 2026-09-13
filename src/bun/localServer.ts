@@ -1,4 +1,4 @@
-// This Mac's server: `ledge-server daemon`, started from this app's own
+// This Mac's server: `ledge daemon`, started from this app's own
 // bundle and dialled over its socket (remote.md §1).
 //
 // The app is a client of it the way a phone is: the same socket the ssh pump
@@ -84,7 +84,7 @@ export function localServer(opts: LocalServerOpts): LocalServer {
       if (peer.instance === reviewed) return "kept";
       reviewed = peer.instance;
       if (peer.build === opts.build) return "kept";
-      console.warn(`[local] this Mac's daemon is ledge-server ${peer.build} and this app is ${opts.build}; it restarts when idle`);
+      console.warn(`[local] this Mac's daemon is build ${peer.build} and this app is ${opts.build}; it restarts when idle`);
       daemon.retire();
       return "retired";
     },

@@ -38,7 +38,7 @@ interface Shell {
   multiWindow: boolean;
   /** Whether this client has a folder dialog of its own to open. */
   picksFolders: boolean;
-  /** Whether this client has a PATH to put `ledge` and `ledge-server` on. */
+  /** Whether this client has a PATH to put `ledge` on. */
   installsCli: boolean;
 }
 
@@ -175,12 +175,12 @@ export function picksFolders(): boolean {
 }
 
 /**
- * Whether this client can put `ledge` and `ledge-server` on its own PATH, for
+ * Whether this client can put `ledge` on its own PATH, for
  * Install Shell Command (interactions.md §8).
  *
  * This client's answer, whichever server its window is showing: the shims
  * land on this machine and run this app's own copy, so the `ledge` they
- * install reads this Mac's notes, and the `ledge-server` is how a phone
+ * install reads this Mac's notes, and `ledge serve` is how a phone
  * reaches them (bun/cliShim.ts). A phone has no PATH to write to, so there
  * the verb is absent rather than present and failing.
  */

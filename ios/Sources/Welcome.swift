@@ -123,13 +123,13 @@ final class WelcomeViewController: UIViewController {
         return label
     }
 
-    /// The note under the scan button, with `ledge-server pair` set as code on
+    /// The note under the scan button, with `ledge pair` set as code on
     /// a fill so it reads as a command to type rather than part of the sentence.
     private func commandNote() -> UILabel {
         let note = label("", style: .footnote)
         note.textAlignment = .center
         let text = NSMutableAttributedString(
-            string: "\u{2009}ledge-server pair\u{2009}",
+            string: "\u{2009}ledge pair\u{2009}",
             attributes: [
                 .font: UIFontMetrics(forTextStyle: .footnote).scaledFont(
                     for: .monospacedSystemFont(ofSize: 13, weight: .medium)

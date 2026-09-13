@@ -1,6 +1,6 @@
 // The Ledge MCP server: how agents read and write the user's notes. Agent
 // CLIs (Claude Code, Codex, Gemini, anything speaking MCP) run it as
-// `ledge-server mcp` (or `ledge mcp`, serve.ts), a process beside the daemon.
+// `ledge mcp` (serve.ts hands it to cli.ts), a process beside the daemon.
 // They talk JSON-RPC 2.0 over stdio, one message per line. Its tools route
 // through bun/notes.ts and bun/workspaces.ts (mcpTools.ts). An agent's paths
 // go through the same registry and assertNote guards the webview's do, so the

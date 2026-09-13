@@ -34,7 +34,7 @@ describe("the release build config", () => {
   });
 
   // npm carries a fourth copy. The handshake's refusal names the build the peer
-  // is running (remote.md §11), and a `ledge-server` published under any other
+  // is running (remote.md §11), and a `ledge-server` package published under any other
   // version would put a build nobody can install into that message. The
   // published package.json is generated from `manifest` by scripts/build-npm.ts
   // rather than checked in, which is what stops that drift (npmPackage.ts,

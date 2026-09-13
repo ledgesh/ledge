@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import {
+  BIN_NAME,
   BUN_FLOOR,
   dockerPlatform,
   ELF_MACHINE,
@@ -31,8 +32,9 @@ describe("the published manifest", () => {
     expect(m["version"]).toBe("1.2.3");
   });
 
-  test("installs two commands: the package's own name, and ledge for its cli verb", () => {
-    expect(manifest("0.0.0").bin).toEqual({ [PACKAGE_NAME]: "bin/ledge-server.js", ledge: "bin/ledge.js" });
+  test("installs one command, ledge, whatever the package is called", () => {
+    expect(manifest("0.0.0").bin).toEqual({ [BIN_NAME]: "bin/ledge.js" });
+    expect(BIN_NAME).toBe("ledge");
   });
 
   // npm enforces os and cpu at install time, so those two fields state where
@@ -51,7 +53,7 @@ describe("the published manifest", () => {
 
   // The manifest's `bin` field points at files inside the package, and
   // scripts/build-npm.ts copies these repo files there. A rename that misses
-  // one of the two publishes a package whose command is a dangling bin link.
+  // one side publishes a package whose command is a dangling bin link.
   const BINS = Object.values(manifest("0.0.0").bin).map((rel) => join(ROOT, "npm", ...rel.split("/")));
 
   test("each bin it points at is a file in the repo", () => {
@@ -74,8 +76,8 @@ describe("the published manifest", () => {
     }
   });
 
-  test("the ledge bin runs the cli verb ahead of the caller's arguments", () => {
-    expect(readFileSync(join(ROOT, "npm", "bin", "ledge.js"), "utf8")).toContain('"cli", ...process.argv.slice(2)');
+  test("the ledge bin hands the caller's argv to the bundle as it is: the first word is the verb", () => {
+    expect(readFileSync(join(ROOT, "npm", "bin", "ledge.js"), "utf8")).toContain("main(process.argv)");
   });
 });
 

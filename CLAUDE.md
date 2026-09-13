@@ -33,7 +33,7 @@ the app as its built-in docs, via `src/bun/docsContent.ts`) lives in
   behavior, live WKWebView probe recipe for the native seams (always against
   a scratch `LEDGE_NOTES_ROOT`). Read before writing tests or calling work
   done.
-- **[remote.md](docs/contributor/remote.md)** — `ledge-server` and remote
+- **[remote.md](docs/contributor/remote.md)** — the `ledge-server` package and remote
   notes: the client is the least-trusted end, the framed protocol over ssh
   stdin/stdout, forced-command keys and host-key pinning, what state belongs
   to a server and what to a client, sessions that outlive connections, the

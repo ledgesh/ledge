@@ -2,7 +2,7 @@
 
 **§14 phases 1 to 4 are code. There is Swift, it runs, and it reaches a server
 over ssh.** `ios/` is an app that loads this repository's React view in a
-WKWebView, authenticates to `ledge-server` with a key minted in the Secure
+WKWebView, authenticates to a Ledge server with a key minted in the Secure
 Enclave, and pins the host key it was paired with; what it does not yet have is
 a phone-shaped screen (phase 5) or the rest of v1 (phase 6).
 This is phase 6 of `docs/contributor/remote.md`, which built the server the
@@ -424,7 +424,7 @@ suggestion (testing.md §6). The welcome screen loads the device key, so a first
 launch mints it and prints the `[pair]` line whichever screen ends up on top.
 
 **The setup screen hands over commands the phone cannot run.** They are
-`docs/user/09`'s install commands, then `ledge-server pair`, which prints a
+`docs/user/09`'s install commands, then `ledge pair`, which prints a
 code for the account that ran it and ends at the same scan as every other code.
 They leave by Copy or by the share sheet, since the terminal they belong in is
 on another machine. Add an existing server at the bottom opens the typed form in
@@ -480,7 +480,7 @@ its pin. That is the one place a fingerprint decides which key gets pinned,
 because a code carries nothing else. Every connection after it compares the
 pinned bytes.
 
-**Pairing stores a server only once `ledge-server` has answered.** An accepted
+**Pairing stores a server only once `ledge serve` has answered.** An accepted
 exec request means a shell started, and a machine with no server starts one too,
 which then exits 127. So the form waits for the server's hello (its first byte),
 the command ending, or `answerGrace` of neither, and only the first and last
@@ -769,7 +769,7 @@ handshake is what phase 4 cost**, and the prediction was right about the row
 and low about the size: `socket` went from 14ms to 69, a key exchange and a
 P-256 signature in the Secure Enclave in place of a `connect(2)`. **And
 `server` is not a round trip**, it is a process launch: every ssh session runs
-`ledge-server serve` on the far side, and Bun starting is most of the 50ms —
+`ledge serve` on the far side, and Bun starting is most of the 50ms —
 120ms when the daemon behind it has to start too. The number to distrust is
 `bridge`: a first launch after install measured 1548ms to paint, so any figure
 taken from a cold Simulator is measuring the Simulator.
@@ -1095,7 +1095,7 @@ reasons a phone has none.
 **Attaching a workspace is typed.** The dialog asks for the folder's path on
 the server and the server checks it, so a phone attaches a folder the way a
 Mac connected to a server does. A refusal shows under the field, the same
-sentence `ledge-server` would give anyone. What a phone does without is the
+sentence the server would give anyone. What a phone does without is the
 Choose Folder… button, since it has no folder dialog and its folders are not
 the server's (`picksFolders`, §8 above).
 
@@ -1434,7 +1434,7 @@ a bug.
 **`--serve`'s `stall` is the way around it, and it is a better instrument than
 the cut.** It sends SIGSTOP to the daemon in the container and leaves everything
 else running: TCP is established, Docker's proxy is healthy, sshd answers its
-own keepalives, and `ledge-server serve` goes on pumping bytes into a socket
+own keepalives, and `ledge serve` goes on pumping bytes into a socket
 whose reader is not scheduled. Every mechanism under the protocol therefore
 reports a working connection, correctly. The phone's bar reaches "reconnecting"
 in about twenty seconds anyway, because the heartbeat's pong has to come from
@@ -1549,7 +1549,7 @@ inside the Mac app.
    What it proved, against `scripts/ssh-probe`'s container: the enclave signs
    the authentication (`SecKeyCreateSignature` reaches the SEP even in a
    Simulator); the forced command holds, checked by asking for `whoami` and
-   getting `ledge-server serve`; a key removed from `authorized_keys` is
+   getting `ledge serve`; a key removed from `authorized_keys` is
    refused in two seconds with the line to install; a host key that changed is
    refused in one, **before the phone's key is ever offered**, with both
    fingerprints on screen and no way to continue anyway; the fingerprints match

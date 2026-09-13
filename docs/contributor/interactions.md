@@ -1341,10 +1341,10 @@ secret written to a synced file — because focus never moved.
   spawn the shells it kills.
 
   `installsCli` is the client's answer because the install writes on this
-  machine: `ledge` and `ledge-server` into `~/.ledge-server/bin`, execing
-  this app's own bundle (`bun/cliShim.ts`). The `ledge` it writes reads this
-  Mac's notes whichever server the window is showing, and the `ledge-server`
-  is how a phone reaches them (remote.md §11). A phone has no PATH to write
+  machine: `ledge` into `~/.ledge-server/bin`, execing this app's own bundle
+  (`bun/cliShim.ts`). The `ledge` it writes reads this Mac's notes whichever
+  server the window is showing, and its `serve` verb is how a phone reaches
+  them (remote.md §11). A phone has no PATH to write
   to, so there the verb is absent.
 
   Attaching a folder is gated by nothing: the path is typed and the server
@@ -1368,10 +1368,13 @@ verb table (`src/bun/cli.ts`), governed here so it stays coherent with the
 app rather than growing its own dialect.
 
 - **Verbs are unix-shaped and few**: `ls`, `cat`, `search`, `tags`, `new`,
-  `today`, `append`, `workspaces`, `open`, `mcp`, `help`. A bare
-  `ledge` opens the app; a bare non-verb argument is a title to open
-  (`ledge open <title>` is the spelled-out escape for a note titled like a
-  verb — including one literally titled "today"). New verbs argue for
+  `today`, `append`, `workspaces`, `open`, `mcp`, `help`, plus the four
+  server verbs `serve`, `daemon`, `pair` and `backup-paths`, which
+  `src/bun/serve.ts` answers before this table sees the arguments and
+  remote.md governs. A bare `ledge` opens the app; a bare non-verb argument
+  is a title to open (`ledge open <title>` is the spelled-out escape for a
+  note titled like a verb — including one literally titled "today" or
+  "pair"). New verbs argue for
   themselves the way new commands do (§1): every verb is surface users must
   learn and help text must carry. `ledge tags` prints the directory
   (`#tag  count` rows); `ledge tags <tag>` prints occurrences grep-shaped
@@ -1407,10 +1410,11 @@ app rather than growing its own dialect.
   from lists, the created path from `new`, handler JSON under `--json`;
   confirmations, errors, and truncation notes go to stderr. Exit codes:
   0 ok, 1 failure (including a hitless `search`, grep's contract), 2 usage.
-- **`ledge` is `ledge-server cli`** (`src/bun/serve.ts`), so every machine
-  with a server has the CLI: the npm package installs both names, `server.sh`
-  writes both launchers, and on a Mac **Install Shell Command (ledge)** is
-  the palette entry that writes both shims into `~/.ledge-server/bin`
+- **`ledge` is one command, on every machine** (`src/bun/serve.ts` hands
+  the CLI everything but the server verbs), so every machine with a server
+  has the CLI: the npm package installs it, `server.sh` writes the launcher,
+  and on a Mac **Install Shell Command (ledge)** is the palette entry that
+  writes the shim into `~/.ledge-server/bin`
   (bun/cliShim.ts, the client's seam per remote.md §10). Its outcome always
   surfaces: success in the browser's notice strip, failure in the error
   strip (§4's surface, neutral tone). There is no `install` verb: each

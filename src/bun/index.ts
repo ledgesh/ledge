@@ -7,7 +7,7 @@
 // updater, and the pasteboard's flavor list. It also owns the two things that
 // belong to the process rather than to one window: the connection list, and
 // the daemon this Mac's windows dial (bun/localServer.ts). No server runs in
-// this process. This Mac's own is `ledge-server daemon`, started from the
+// this process. This Mac's own is `ledge daemon`, started from the
 // bundle and reached over its socket, so a window on this Mac and a window on
 // a VPS are the same code path with a different wire underneath (remote.md
 // §1).
@@ -151,7 +151,7 @@ const sharedNative: ClientNative = {
     ).join(",");
     return picked || null;
   },
-  // Install Shell Command: `ledge` and `ledge-server` in ~/.ledge-server/bin,
+  // Install Shell Command: `ledge` in ~/.ledge-server/bin,
   // execing this bundle's bun on the serve.js the daemon runs from
   // (bun/cliShim.ts). The same entry and runtime as the daemon's, so the
   // shims and the app can never run two different servers. Failure is a
@@ -164,7 +164,7 @@ const sharedNative: ClientNative = {
         pathVar: process.env["PATH"] ?? "",
         shellVar: process.env["SHELL"] ?? "",
       });
-      const where = `ledge and ledge-server installed in ${tildify(res.dir)}`;
+      const where = `ledge installed in ${tildify(res.dir)}`;
       if (res.pathAdded) return { ok: true, message: `${where}; a PATH line was added to ${tildify(res.pathAdded)}, so new terminals find them` };
       if (!res.onPath) return { ok: true, message: `${where}; add it to your PATH: export PATH="$HOME/.ledge-server/bin:$PATH"` };
       return { ok: true, message: where };
@@ -273,7 +273,7 @@ function withoutLayout(base: RequestHandlers): RequestHandlers {
  *
  * One code path for both kinds of connection (remote.md §1). What differs is
  * the dial underneath the reconnecting client: this Mac's daemon over its
- * socket, or `ssh <target> ledge-server serve`. Everything above the dial, the
+ * socket, or `ssh <target> ledge serve`. Everything above the dial, the
  * handshake, the ladder, the client overlay, the blank second window, is the
  * same, so the local case exercises the remote path rather than bypassing it.
  */
@@ -432,7 +432,7 @@ async function attachFor(win: Win, conn: Connection): Promise<Attached> {
   // Which window is which client of which server. Every later log line that
   // names a client id names one of these.
   console.log(`[window] ${label} on ${conn.name} as ${client}${blank ? " (blank; the layout on file is another window's)" : ""}`);
-  console.log(`[connect] ${conn.name}${here ? "" : ` (${conn.destination})`}: ledge-server ${peer.build}`);
+  console.log(`[connect] ${conn.name}${here ? "" : ` (${conn.destination})`}: server build ${peer.build}`);
   // A daemon of another build makes way once it is idle (bun/localServer.ts).
   // The window stays on it until then: it answers this build's protocol, and
   // a run it is executing is worth more than a restart now.

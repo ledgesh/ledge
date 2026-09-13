@@ -1,6 +1,7 @@
-// The Ledge CLI: notes from a shell prompt. `ledge` is `ledge-server cli`
-// (serve.ts), a separate process from the daemon that reads the same store,
-// and it dispatches through the same McpTool handlers agents call
+// The Ledge CLI: notes from a shell prompt. `ledge` is one command (serve.ts
+// answers the four server verbs and hands everything else here), a separate
+// process from the daemon that reads the same store, and it dispatches
+// through the same McpTool handlers agents call
 // (architecture.md §1). Title resolution, workspace deixis, H1-slug naming and
 // the divergence guard therefore have one definition, so `ledge append` and an
 // agent's append_note cannot drift apart. The running app sees a CLI write as
@@ -165,7 +166,7 @@ export function resolveWorkspaceArg(value: string, registered: readonly string[]
 
 // --- the verbs ---------------------------------------------------------------
 
-const USAGE = `ledge — notes from the shell
+const USAGE = `ledge: notes from the shell, and this machine's server
 
 usage:
   ledge                        open the Ledge app
@@ -189,8 +190,20 @@ usage:
   ledge mcp                    serve the Ledge MCP server on stdio
   ledge help                   this text
 
-\`ledge\` is \`ledge-server cli\`. The Ledge app puts both on your PATH with
-Install Shell Command; on a server, https://ledge.sh/server.sh does.
+server verbs (what the Ledge apps reach over ssh):
+  ledge serve                  the protocol on stdin and stdout, attached to
+                               this machine's daemon; what a client runs
+  ledge daemon [--autostart]   be this machine's server; runs until stopped
+                               (--autostart: exit when idle)
+  ledge pair                   a QR code a phone scans to add this server
+                               (--user, --host, --port, --keys; \`ledge pair --help\`)
+  ledge backup-paths           the paths a backup of this machine must cover
+         --exclude             print the exclusions instead of the inclusions
+         --no-secrets          leave out the profiles dir
+         --json                both lists, plus any root that is not on disk
+
+The Ledge app puts \`ledge\` on your PATH with Install Shell Command; on a
+server, https://ledge.sh/server.sh or \`bun add -g ledge-server\` does.
 
 flags:
   -w, --workspace <root>       scope to one workspace (path or folder name)
@@ -275,8 +288,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
   }
   if (verb === "") return openApp(io);
   if (verb === "mcp") {
-    // `ledge-server mcp` by its shorter name, for the `claude mcp add` line
-    // the manual gives: load once so a misconfigured launch says so
+    // The MCP server, for the `claude mcp add` line the manual gives: load once so a misconfigured launch says so
     // immediately, then serve stdin until the client hangs up.
     await loadWorkspaces();
     console.error("[mcp] ledge server on stdio");
@@ -475,7 +487,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
   }
 }
 
-/** The real process seams, for `ledge-server cli` (serve.ts). */
+/** The real process seams, for `ledge` (serve.ts). */
 export function processIo(): CliIo {
   return {
     out: (line) => process.stdout.write(line + "\n"),

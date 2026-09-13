@@ -293,7 +293,7 @@ export function sshDial(
  *
  * The banner is why this list exists. It is the last thing on stderr whenever
  * the dial succeeded and the protocol then failed. A handshake refused over the
- * version once reached the user as "Could not reach v1: [serve] ledge-server
+ * version once reached the user as "Could not reach v1: [serve] ledge
  * 0.1.0 attached to …", which quoted a line saying the far end was up. The
  * transport's own verdict wins that case now (shared/transport.ts `Refused`),
  * and filtering the banner covers every later failure that has no wording of
@@ -331,7 +331,7 @@ export function explainDial(stderr: string): string | null {
     // Every shell's way of saying it, since the remote's login shell is one
     // thing about a server this app never chose. bash and zsh say "command not
     // found", dash and ash say "not found", and zsh puts the name last.
-    if (/(^|[: ])ledge-server: (command )?not found|command not found: ledge-server/.test(line)) {
+    if (/(^|[: ])ledge: (command )?not found|command not found: ledge$/.test(line)) {
       // No connection name in the sentence. Every caller already names the
       // connection, on the row or in front of this text, and repeating it
       // reads as two machines rather than one.

@@ -1,7 +1,7 @@
 // SERVE_COMMAND as the far end's login shell reads it, and the Swift copy the
 // phone sends and forces (remote.md §4a). sshd hands the string to `$SHELL -c`,
 // so each shell below runs it the way a server's would, against a fake
-// `ledge-server` that reports where it was found. The Swift file and the ssh
+// `ledge` that reports where it was found. The Swift file and the ssh
 // fixture hold copies of the string, and are checked against it last.
 import { describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -12,10 +12,10 @@ import { SERVE_COMMAND } from "./connections";
 const SHELLS = ["/bin/sh", "/bin/bash", "/bin/zsh", "/bin/dash", "/bin/ksh"].filter((s) => existsSync(s));
 const SOURCES = join(import.meta.dir, "..", "..", "ios", "Sources");
 
-/** A `ledge-server` in `dir` that prints its own path, its arguments and its PATH. */
+/** A `ledge` in `dir` that prints its own path, its arguments and its PATH. */
 function fakeServer(dir: string): void {
   mkdirSync(dir, { recursive: true });
-  const file = join(dir, "ledge-server");
+  const file = join(dir, "ledge");
   writeFileSync(file, '#!/bin/sh\nprintf "%s|%s|%s" "$0" "$*" "$PATH"\n');
   chmodSync(file, 0o755);
 }
@@ -38,7 +38,7 @@ describe("the command a client starts the server with", () => {
       const path = `${join(home, "elsewhere")}:/usr/bin:/bin:/opt/with space/bin`;
       const { out, code } = run(shell, { HOME: home, PATH: path });
       expect(code).toBe(0);
-      expect(out).toBe(`${join(home, ".ledge-server", "bin", "ledge-server")}|serve|${join(home, ".ledge-server", "bin")}:${path}`);
+      expect(out).toBe(`${join(home, ".ledge-server", "bin", "ledge")}|serve|${join(home, ".ledge-server", "bin")}:${path}`);
     } finally {
       rmSync(home, { recursive: true, force: true });
     }
@@ -50,7 +50,7 @@ describe("the command a client starts the server with", () => {
       fakeServer(join(home, "usr-local-bin"));
       const { out, code } = run(shell, { HOME: home, PATH: `${join(home, "usr-local-bin")}:/usr/bin:/bin` });
       expect(code).toBe(0);
-      expect(out.split("|")[0]).toBe(join(home, "usr-local-bin", "ledge-server"));
+      expect(out.split("|")[0]).toBe(join(home, "usr-local-bin", "ledge"));
     } finally {
       rmSync(home, { recursive: true, force: true });
     }
@@ -85,7 +85,7 @@ describe("the copies that cannot import it", () => {
     const key = readFileSync(join(SOURCES, "DeviceKey.swift"), "utf8");
     expect(transport).toContain("command: Self.serveCommand");
     expect(key).toContain('restrict,command=\\"\\(SSHTransport.serveCommand)\\"');
-    const spelled = /"[^"\n]*ledge-server serve[^"\n]*"/g;
+    const spelled = /"[^"\n]*ledge serve[^"\n]*"/g;
     expect(transport.match(spelled)).toEqual([`"${SERVE_COMMAND}"`]);
     expect(key.match(spelled)).toBeNull();
   });

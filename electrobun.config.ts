@@ -38,7 +38,7 @@ export default {
   build: {
     // Bun, not the 2.x default of Cottontail. The server the app starts calls
     // into libledge_pty.dylib through bun:ffi (ptyNative.ts) and runs on
-    // Contents/MacOS/bun, as do the `ledge` and `ledge-server` shims against
+    // Contents/MacOS/bun, as does the `ledge` shim against
     // serve.js (cliShim.ts), so the runtime is part of the native seam here.
     // Moving to Cottontail is a separate project rather than a config edit.
     mainProcess: "bun",
@@ -57,7 +57,7 @@ export default {
       // The server, prebuilt by `bun run build:serve` (electrobun bundles only
       // the one bun entrypoint), landing beside index.js. The app runs its own
       // server from it, `bun serve.js daemon`, then dials it over the socket
-      // (src/bun/localServer.ts), and the `ledge` and `ledge-server` shims
+      // (src/bun/localServer.ts), and the `ledge` shim
       // exec <bundle>/MacOS/bun against the same file (src/bun/cliShim.ts).
       "dist-cli/serve.js": "bun/serve.js",
       // The PTY trampolines, beside index.js for the same reason: pty.ts finds

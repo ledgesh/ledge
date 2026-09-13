@@ -50,7 +50,7 @@ final class SSHTransport {
     /// The command the exec request asks for, and the one `DeviceKey`'s line
     /// forces. `SERVE_COMMAND` in shared/connections.ts, character for
     /// character (shared/serveCommand.test.ts).
-    static let serveCommand = "PATH=$HOME/.ledge-server/bin:$PATH ledge-server serve"
+    static let serveCommand = "PATH=$HOME/.ledge-server/bin:$PATH ledge serve"
 
     /// The whole dial: TCP, key exchange, host key, user auth, and the exec
     /// request. Bounded because a server that accepts a connection and then
@@ -321,7 +321,7 @@ final class SSHTransport {
     }
 
     /// Why the command ended without the server answering, once the connection
-    /// has ended. 127 is a shell that found no `ledge-server` on the PATH
+    /// has ended. 127 is a shell that found no `ledge` on the PATH
     /// `serveCommand` gives it. Nil for a server that answered.
     func whyUnanswered() -> SSHFailure? {
         guard let quit = lock.withLock({ unanswered }) else { return nil }
@@ -418,7 +418,7 @@ enum SSHFailure: Error, LocalizedError {
         case .wrongChannel:
             return "The server opened a channel Ledge did not ask for."
         case .commandRefused:
-            return "The server refused to run ledge-server."
+            return "The server refused to run the Ledge command."
         case .notInstalled(let where_):
             return "Ledge's server is not installed on \(where_). Install it there, then try again."
         case .quit(let where_, let said):
@@ -625,7 +625,7 @@ private final class ExecHandler: ChannelDuplexHandler {
         case let status as SSHChannelRequestEvent.ExitStatus:
             // A server that exits is a server that said why on stderr a moment
             // ago, and the two lines together are the whole diagnosis.
-            log("[ssh] ledge-server exited \(status.exitStatus)")
+            log("[ssh] the server command exited \(status.exitStatus)")
             if !answered { unanswered(status.exitStatus, said) }
         case ChannelEvent.inputClosed:
             // A command that never answered ends at channelInactive instead.

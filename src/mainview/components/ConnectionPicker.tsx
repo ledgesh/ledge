@@ -571,7 +571,7 @@ function ConnectionForm({
       )}
       {/* No prose under the fields: a paragraph here is read by everyone every
           time to be useful to somebody once (interactions.md §4-1). A missing
-          ledge-server on the far machine is reported instead by the connection
+          the server on the far machine is reported instead by the connection
           that failed, in the words of the machine that refused it
           (bun/connections.ts explainDial). */}
       {error && <p className="text-[12px] leading-snug text-destructive">{error}</p>}

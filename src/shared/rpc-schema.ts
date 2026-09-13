@@ -817,7 +817,7 @@ export type LedgeRPC = {
       // a thing with a screen.
       settingsRead: { params: { home: SettingsHome }; response: { text: string } };
       settingsWrite: { params: { home: SettingsHome; text: string }; response: { ok: boolean } };
-      // Put `ledge` and `ledge-server` on this Mac's PATH (the Install Shell
+      // Put `ledge` on this Mac's PATH (the Install Shell
       // Command palette entry). The client's, not the server's (remote.md
       // §10): the shims land on the machine with the screen and run its own
       // copy (bun/cliShim.ts), whichever server the window is showing. The

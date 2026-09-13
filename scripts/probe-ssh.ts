@@ -127,7 +127,7 @@ const cutWire = () => {
  * The instrument is SIGSTOP on the daemon, and it is the cut's opposite in
  * every way that matters. Nothing between the two ends breaks: the TCP
  * connection is established and its keepalives are answered, sshd answers
- * `ServerAliveInterval` from its own process, and `ledge-server serve` goes on
+ * `ServerAliveInterval` from its own process, and `ledge serve` goes on
  * pumping bytes into a unix socket whose reader is not running. Every
  * mechanism below the protocol therefore reports a healthy connection,
  * correctly, because from where each of them sits it is one.
@@ -403,7 +403,7 @@ try {
   });
   const t0 = Date.now();
   const hello = await client.ready;
-  ok("handshake", `ledge-server ${hello.build}, instance ${hello.instance.slice(0, 8)}, ${Date.now() - t0}ms`);
+  ok("handshake", `server build ${hello.build}, instance ${hello.instance.slice(0, 8)}, ${Date.now() - t0}ms`);
   check("the server is the build we shipped in the image", hello.build === BUILD_VERSION, hello.build);
 
   const trips: number[] = [];
@@ -1068,7 +1068,7 @@ try {
 
   step("[stop] the daemon stopped politely, which is what a person actually does");
   // The other way a server goes away, and the one a person is most likely to
-  // cause: `pkill ledge-server`, `systemctl restart`, or the daemon's own idle
+  // cause: `pkill ledge`, `systemctl restart`, or the daemon's own idle
   // exit. Unlike the kill above it says goodbye on the way out, and a goodbye
   // used to end the client, so a server stopped politely was unrecoverable in
   // that window while a server killed outright came back by itself (remote.md
@@ -1220,7 +1220,7 @@ try {
     // lookup start a server (remote.md §4a).
     const where = suffix === "kbd" ? "/home/ledge/.ledge-server/bin" : "/usr/local/bin";
     if (suffix === "kbd") {
-      const moved = `mkdir -p ${where} && mv /usr/local/bin/ledge-server /usr/local/bin/libledge_pty.so ${where}/ && chown -R ledge:ledge /home/ledge/.ledge-server`;
+      const moved = `mkdir -p ${where} && mv /usr/local/bin/ledge /usr/local/bin/libledge_pty.so ${where}/ && chown -R ledge:ledge /home/ledge/.ledge-server`;
       run(["docker", "exec", box, "sh", "-c", moved]);
     }
 
@@ -1283,7 +1283,7 @@ try {
   run(["docker", "rm", "-f", `${NAME}-plain`], { quiet: true });
   run(["docker", "run", "-d", "--name", `${NAME}-plain`, IMAGE]);
   await Bun.sleep(1500);
-  const viaExec = clientConnection(spawnDuplex(["docker", "exec", "-i", `${NAME}-plain`, "ledge-server", "serve"]), {
+  const viaExec = clientConnection(spawnDuplex(["docker", "exec", "-i", `${NAME}-plain`, "ledge", "serve"]), {
     push: mac.push,
     build: BUILD_VERSION,
     client: "probe-mac",

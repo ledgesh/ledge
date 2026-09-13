@@ -182,8 +182,8 @@ async function linuxMachine(image: string, shell: string, update: boolean) {
     const shipped = asLedge(`${home}/versions/${version}/bun --version`).out;
     check("the private Bun runs here", shipped === BUN_VERSION, `${shipped || "did not run"} on ${libc}`);
     const rc = shell.endsWith("zsh") ? ".zshrc" : ".bashrc";
-    const found = run(["docker", "exec", "-u", "ledge", "-e", "HOME=/home/ledge", "-w", "/home/ledge", name, shell, "-ic", "command -v ledge-server"], { quiet: true }).out.split("\n").pop();
-    check(`a new ${shell.split("/").pop()} terminal finds ledge-server through ~/${rc}`, found === `${home}/bin/ledge-server`, found);
+    const found = run(["docker", "exec", "-u", "ledge", "-e", "HOME=/home/ledge", "-w", "/home/ledge", name, shell, "-ic", "command -v ledge"], { quiet: true }).out.split("\n").pop();
+    check(`a new ${shell.split("/").pop()} terminal finds ledge through ~/${rc}`, found === `${home}/bin/ledge`, found);
 
     step(`[${image}] Ledge's clients, through sshd`);
     const port = Number(run(["docker", "port", name, "22/tcp"]).out.split("\n")[0]!.split(":").pop());
@@ -208,13 +208,13 @@ async function linuxMachine(image: string, shell: string, update: boolean) {
     };
     const macArgv = dial("mac");
     // What makes the prefix necessary: the PATH sshd gives a command does not have it.
-    const bare = run([...macArgv.slice(0, -1), "command -v ledge-server || echo not-found"], { quiet: true }).out;
-    check("sshd's own PATH does not find ledge-server", bare === "not-found", bare);
+    const bare = run([...macArgv.slice(0, -1), "command -v ledge || echo not-found"], { quiet: true }).out;
+    check("sshd's own PATH does not find ledge", bare === "not-found", bare);
 
     const mac = await connect("probe-mac", macArgv);
-    check("the Mac's command reaches the installed server", mac.hello.build === BUILD_VERSION, `ledge-server ${mac.hello.build}`);
+    check("the Mac's command reaches the installed server", mac.hello.build === BUILD_VERSION, `build ${mac.hello.build}`);
     const phone = await connect("probe-phone", dial("phone"));
-    check("and so does a phone's forced command", phone.hello.build === BUILD_VERSION, `ledge-server ${phone.hello.build}`);
+    check("and so does a phone's forced command", phone.hello.build === BUILD_VERSION, `build ${phone.hello.build}`);
     phone.client.close();
 
     const daemon = () => {
@@ -223,7 +223,7 @@ async function linuxMachine(image: string, shell: string, update: boolean) {
       return line ? { pid: line.split(" ")[0]!, args: line.slice(line.indexOf(" ") + 1).trim() } : null;
     };
     const first = daemon();
-    const expected = (v: string) => `${home}/versions/${v}/bun ${home}/versions/${v}/bin/ledge-server.js daemon --autostart`;
+    const expected = (v: string) => `${home}/versions/${v}/bun ${home}/versions/${v}/bin/ledge.js daemon --autostart`;
     check("the daemon started itself, from the private Bun", first?.args === expected(version), first?.args ?? "no daemon");
 
     await drive(image, mac);
@@ -233,7 +233,7 @@ async function linuxMachine(image: string, shell: string, update: boolean) {
     // The flags are the fixture's: in a container `pair` refuses to guess the
     // account, address and host keys (pair.ts, containerRefusal).
     const flags = "--user ledge --host 192.0.2.10 --keys /etc/ssh/ssh_host_ed25519_key.pub";
-    const paired = run([...macArgv.slice(0, -1), `~/.ledge-server/bin/ledge-server pair ${flags}`], { quiet: true });
+    const paired = run([...macArgv.slice(0, -1), `~/.ledge-server/bin/ledge pair ${flags}`], { quiet: true });
     check("the pair command the script prints works over ssh", paired.code === 0 && paired.out.includes("SHA256:"), (paired.err || "").split("\n")[0]?.slice(0, 80));
 
     if (update) {
@@ -243,7 +243,7 @@ async function linuxMachine(image: string, shell: string, update: boolean) {
       check("and says the running server stays until it exits", next.out.includes(`A ledge-server ${version} that is already running goes on serving`));
       const versions = asLedge(`ls ${home}/versions`).out.split("\n");
       check("both versions are on disk", versions.includes(version) && versions.includes(NEXT), versions.join(", "));
-      check("the launcher names the new one", asLedge(`cat ${home}/bin/ledge-server`).out.includes(`/versions/${NEXT}/bun`));
+      check("the launcher names the new one", asLedge(`cat ${home}/bin/ledge`).out.includes(`/versions/${NEXT}/bun`));
 
       const during = await connect("probe-during", macArgv);
       check("a connection during the update still gets a server", during.hello.build === BUILD_VERSION);
@@ -280,7 +280,7 @@ async function macMachine(target: NativeTarget) {
     check("and adds the PATH line to ~/.zshrc", readFileSync(join(home, ".zshrc"), "utf8").includes('export PATH="$HOME/.ledge-server/bin:$PATH"'));
 
     const mac = await connect("probe-mac", ["/bin/zsh", "-c", SERVE_COMMAND], env);
-    check("zsh -c with sshd's PATH reaches it", mac.hello.build === BUILD_VERSION, `ledge-server ${mac.hello.build}`);
+    check("zsh -c with sshd's PATH reaches it", mac.hello.build === BUILD_VERSION, `build ${mac.hello.build}`);
     await drive("this Mac", mac);
     pid = readFileSync(join(home, ".ledge", ".server.pid"), "utf8").trim();
     const args = run(["ps", "-o", "command=", "-p", pid], { quiet: true }).out;

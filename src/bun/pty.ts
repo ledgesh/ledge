@@ -130,7 +130,7 @@ type NativeSymbols = ReturnType<typeof dlopen<typeof NATIVE_SYMBOLS>>["symbols"]
 //      Resources/app/bun. That is serve.js's placement, for serve.js's reason:
 //      import.meta.dir reads the same in the bundle as in a checkout
 //      (electrobun.config.ts).
-//   2. under native/<target>/ in an installed `ledge-server` package, which
+//   2. under native/<target>/ in an installed `ledge-server` package (whose command is `ledge`), which
 //      holds all four targets at once (ptyNative.ts, nativeDir).
 //   3. in dist-native/ in a checkout, where `scripts/build-native.ts` writes
 //      it.

@@ -128,7 +128,7 @@ get() {
 
 # Whether a directory holds a ledge-server whose Bun runs on this machine.
 usable() {
-  [ -f "$1/bin/ledge-server.js" ] && [ -f "$1/lib/serve.js" ] && "$1/bun" --version >/dev/null 2>&1
+  [ -f "$1/bin/ledge.js" ] && [ -f "$1/lib/serve.js" ] && "$1/bun" --version >/dev/null 2>&1
 }
 
 # Adds ~/.ledge-server/bin to PATH for new terminals. ssh does not need it: the
@@ -183,7 +183,7 @@ main() {
   server_url="$registry/ledge-server/-/ledge-server-$version.tgz"
   bun_url="$registry/$bun_package/-/${bun_package##*/}-$bun_version.tgz"
   target="$root/versions/$version"
-  launcher="$root/bin/ledge-server"
+  launcher="$root/bin/ledge"
   previous=$(sed -n 's/^# ledge-server version //p' "$launcher" 2>/dev/null || true)
 
   if [ "$dry_run" -eq 1 ]; then
@@ -218,20 +218,17 @@ main() {
   fi
 
   # Written beside the old launcher and renamed over it, so a connection
-  # arriving mid-install runs one version or the other. `ledge` is the same
-  # launcher with the cli verb in front of the caller's arguments.
-  launcher_text() {
+  # arriving mid-install runs one version or the other. The one command is
+  # `ledge`: the apps run `ledge serve` over ssh, and a shell on this machine
+  # gets its notes from the same file.
+  {
     printf '#!/bin/sh\n'
-    printf '# Written by https://ledge.sh/server.sh. Runs ledge-server on the Bun installed beside it.\n'
+    printf '# Written by https://ledge.sh/server.sh. Runs ledge on the Bun installed beside it.\n'
     printf '# ledge-server version %s\n' "$version"
-    printf 'exec %s %s%s "$@"\n' "$(quote "$target/bun")" "$(quote "$target/bin/ledge-server.js")" "$1"
-  }
-  launcher_text "" >"$launcher.tmp"
+    printf 'exec %s %s "$@"\n' "$(quote "$target/bun")" "$(quote "$target/bin/ledge.js")"
+  } >"$launcher.tmp"
   chmod 755 "$launcher.tmp"
   mv -f "$launcher.tmp" "$launcher"
-  launcher_text " cli" >"$root/bin/ledge.tmp"
-  chmod 755 "$root/bin/ledge.tmp"
-  mv -f "$root/bin/ledge.tmp" "$root/bin/ledge"
 
   # The previous version stays, since a server started from it may still be
   # running. Anything older goes.
@@ -254,7 +251,7 @@ main() {
     say "A ledge-server $previous that is already running goes on serving until it exits on its own, a minute or more after the last app disconnects. The next connection after that starts $version."
   fi
   case "${SHELL:-}" in
-    */csh | */tcsh) say "Warning: this account's login shell is ${SHELL##*/}, which cannot start ledge-server over ssh. Change it with: chsh -s /bin/bash" ;;
+    */csh | */tcsh) say "Warning: this account's login shell is ${SHELL##*/}, which cannot start ledge over ssh. Change it with: chsh -s /bin/bash" ;;
   esac
   if [ "$os" = darwin ]; then
     case "$(launchctl print-disabled system 2>/dev/null | grep '"com.openssh.sshd"' || true)" in
@@ -264,12 +261,12 @@ main() {
     say "Warning: no ssh server was found in /usr/sbin or /usr/bin, and Ledge connects over ssh. Install openssh-server."
   fi
   if [ -n "$path_added" ]; then
-    say "New terminals find it as ledge-server, and its notes as ledge (a PATH line was added to $path_added)."
+    say "New terminals find it as ledge (a PATH line was added to $path_added)."
   fi
   say ""
   say "To pair Ledge on a phone with this machine, run:"
   say ""
-  say "  ~/.ledge-server/bin/ledge-server pair"
+  say "  ~/.ledge-server/bin/ledge pair"
 }
 
 # Everything runs from here, so a download cut short runs nothing.

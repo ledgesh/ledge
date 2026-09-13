@@ -2,7 +2,7 @@
 
 Put an encrypted copy of your notes, and everything Ledge keeps beside them on your server, into an S3-compatible bucket every hour.
 
-This builds on [[Keep Notes on a Remote Server]], where `ledge-server backup-paths` is described, and on [[Profiles and Secrets]]. It assumes a server set up as in [[Tutorial: Set Up a Ledge Server]]: the package on a Debian or Ubuntu VPS, running as an account named `ledge`, with your own `sudo` account beside it.
+This builds on [[Keep Notes on a Remote Server]], where `ledge backup-paths` is described, and on [[Profiles and Secrets]]. It assumes a server set up as in [[Tutorial: Set Up a Ledge Server]]: the package on a Debian or Ubuntu VPS, running as an account named `ledge`, with your own `sudo` account beside it.
 
 The backup tool is restic. It reads the two lists `backup-paths` prints, encrypts on the server before anything leaves it, and keeps versions, so one note from last Tuesday is something you can ask for.
 
@@ -61,7 +61,7 @@ restic init
 ```
 
 ```sh
-restic backup --files-from <(ledge-server backup-paths) --exclude-file <(ledge-server backup-paths --exclude)
+restic backup --files-from <(ledge backup-paths) --exclude-file <(ledge backup-paths --exclude)
 ```
 
 ```sh
@@ -87,7 +87,7 @@ Description=Ledge backup
 Type=oneshot
 User=ledge
 EnvironmentFile=/home/ledge/.config/ledge/profiles/backup.env
-ExecStart=/bin/bash -c 'restic backup --files-from <(ledge-server backup-paths) --exclude-file <(ledge-server backup-paths --exclude)'
+ExecStart=/bin/bash -c 'restic backup --files-from <(ledge backup-paths) --exclude-file <(ledge backup-paths --exclude)'
 ExecStart=restic forget --keep-hourly 24 --keep-daily 30 --keep-weekly 12 --keep-monthly 24 --prune
 ```
 
@@ -145,4 +145,4 @@ The paths inside the backup are absolute, so restoring to `/` puts the app home,
 
 - **Check the repository now and then.** A `restic check` block in the Backups note reads the bucket and reports anything missing or corrupt.
 - **Keep the provider's snapshots too.** A snapshot restores the machine, and this backup restores your notes to any machine. [[Keep Notes on a Remote Server]] compares the two.
-- **Back up a laptop the same way.** A Mac that runs the app answers `ledge-server backup-paths` too, once "Install Shell Command (ledge)" has put the command on its PATH ([[The ledge CLI]]). Its notes are plain folders as well ([[Tutorial: Keep Notes Synced]]).
+- **Back up a laptop the same way.** A Mac that runs the app answers `ledge backup-paths` too, once "Install Shell Command (ledge)" has put the command on its PATH ([[The ledge CLI]]). Its notes are plain folders as well ([[Tutorial: Keep Notes Synced]]).

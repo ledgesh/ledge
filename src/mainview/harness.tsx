@@ -1248,7 +1248,7 @@ applyAppearance();
 // The shim write is a native seam. The harness answers with a canned success,
 // so the palette command and its notice strip are drivable end to end.
 configureCli({
-  install: async () => ({ ok: true, message: "ledge and ledge-server installed in ~/.ledge-server/bin" }),
+  install: async () => ({ ok: true, message: "ledge installed in ~/.ledge-server/bin" }),
 });
 
 // The app's update is the shell's, and this fake plays the shell: it holds the

@@ -1,4 +1,4 @@
-// `ledge-server pair` in a process of its own, describing keys with the real
+// `ledge pair` in a process of its own, describing keys with the real
 // ssh-keygen. pair.test.ts covers the rules; this covers the flags reaching
 // them, stdin as the key source a container uses, and the exit statuses.
 import { expect, test } from "bun:test";
@@ -55,8 +55,8 @@ test("stdin with no keys in it says so", async () => {
 test("a bad flag exits 2 with the usage, and --help prints it to stdout", async () => {
   const bad = await pair(["--hots", "atlas"]);
   expect(bad.status).toBe(2);
-  expect(bad.stderr).toContain("usage: ledge-server pair");
+  expect(bad.stderr).toContain("usage: ledge pair");
   const help = await pair(["--help"]);
   expect(help.status).toBe(0);
-  expect(help.stdout).toStartWith("usage: ledge-server pair");
+  expect(help.stdout).toStartWith("usage: ledge pair");
 });

@@ -777,7 +777,7 @@ export function buildCommands(deps: RegistryDeps): Command[] {
       when: () => multiWindow(),
       run: () => deps.newWindow(),
     }),
-    // Put `ledge` and `ledge-server` on this Mac's PATH. The outcome always
+    // Put `ledge` on this Mac's PATH. The outcome always
     // surfaces, so nobody has to go hunting in a bin dir: success (where they
     // landed, what was done about PATH) in the neutral strip, failure (a
     // foreign file holding a name) in the error strip. This client's act,

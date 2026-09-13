@@ -12,7 +12,7 @@ Three processes, one contract. (A connection to another machine swaps one of
 them for a process across the network, and changes nothing here: the boundary
 is the same one, allowed to be a wire. `remote.md` is where that lives.)
 
-- **The server** (`ledge-server daemon`, `src/bun/serve.ts` over
+- **The server** (`ledge daemon`, `src/bun/serve.ts` over
   `src/bun/server.ts`) owns everything with side effects on the notes: the
   filesystem (`notes.ts`), the PTYs (`pty.ts` via bun:ffi), the watchers, the
   vault. It has no UI and no window. On a Mac it is a process the app starts
@@ -60,9 +60,9 @@ channel to the server: it is ten strings between the page and the Swift around
 it, for the socket and for what only a device can answer. It carries frames as
 opaque bytes and understands none of them.
 
-Two more entry points exist beside the app, both verbs of `ledge-server`
-(`src/bun/serve.ts`). The first is **the MCP server** (`src/bun/mcp.ts`,
-`ledge-server mcp` or `ledge mcp`, `bun run mcp`), a separate process that
+Two more entry points exist beside the app, both verbs of the one `ledge`
+command (`src/bun/serve.ts`). The first is **the MCP server** (`src/bun/mcp.ts`,
+`ledge mcp`, `bun run mcp`), a separate process that
 agent CLIs spawn over stdio to read and write notes. It is not a third participant in the RPC —
 it never talks to the running app — but it is Bun-side code under Bun-side
 rules: every tool routes through `bun/notes.ts` and the workspace registry, so
@@ -131,8 +131,8 @@ can hold a prompt that reads and writes notes. No new machinery earned its
 keep here — it is one default entry in an existing map (the settings comment
 documents the redirect trick and how to point it at another CLI).
 
-The second is **the CLI** (`src/bun/cli.ts`, `ledge-server cli`, `bun run
-cli`, `ledge` once a shim is installed) — the same third-process pattern taken
+The second is **the CLI** (`src/bun/cli.ts`; `bun run cli` from a checkout,
+`ledge` once a shim is installed) — the same third-process pattern taken
 one step further:
 its note verbs dispatch through the MCP server's own tool handlers
 (`bun/mcpTools.ts`), so the CLI cannot acquire semantics the tools lack, and
@@ -156,17 +156,17 @@ socket, deliberately: external actors already reach the app through the
 filesystem (the watcher), and a request file needs no always-listening
 ingress. Requests expire (60s) — "open this now" is not a standing
 instruction — and every invalid request costs exactly itself. On a Mac the
-app's Install Shell Command palette entry writes a `ledge` shim and a
-`ledge-server` shim into `~/.ledge-server/bin` (`bun/cliShim.ts`, a client
-seam per remote.md §10): each execs the exact runtime and entry that wrote
+app's Install Shell Command palette entry writes a `ledge` shim into
+`~/.ledge-server/bin` (`bun/cliShim.ts`, a client seam per remote.md §10):
+it execs the exact runtime and entry that wrote
 it — the bundle's own bun against `Resources/app/bun/serve.js` (prebuilt by
 `build:serve`, placed by `build.copy`), or the dev machine's bun against the
 checkout — and refuses to overwrite anything that is not recognizably a
 Ledge launcher. On a server the npm package and `server.sh` install the same
-two names. Verb conventions, deixis, and output discipline are
+name. Verb conventions, deixis, and output discipline are
 interactions.md §9's.
 
-The third is **`ledge-server`** itself (`src/bun/serve.ts`,
+The third is **the server** itself (`src/bun/serve.ts`,
 `src/bun/daemon.ts`), the same handler map with a frame codec where the
 Electrobun RPC would be. It has two verbs that matter here: `daemon`, which
 holds the notes and the shells
@@ -1113,7 +1113,7 @@ SDK rather than to the throwing stub. Both must be updated together if a new
 `electrobun/*` import ever appears.
 
 **uqr draws QR codes, and it is the one dependency outside those families.**
-`ledge-server pair` prints a pairing code as a QR code in a terminal (`remote.md`
+`ledge pair` prints a pairing code as a QR code in a terminal (`remote.md`
 §4b), and nothing in the approved set encodes one. An encoder is Reed-Solomon
 error correction, version selection and mask scoring: about 600 lines, where a
 mistake produces a code that looks right and does not scan. uqr is a port of

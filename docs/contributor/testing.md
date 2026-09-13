@@ -535,8 +535,8 @@ What this probe reaches that no other does is every refusal. Overwrite
 `authorized_keys` in the container to see a key turned away; `rm
 /etc/ssh/ssh_host_* && ssh-keygen -A` and restart it to see a changed host key
 refused before the phone's key is ever offered; change the exec request to
-`whoami`, rebuild, and watch the forced command hand back `ledge-server serve`
-anyway. Move `/usr/local/bin/ledge-server` out of the container's PATH with
+`whoami`, rebuild, and watch the forced command hand back `ledge serve`
+anyway. Move `/usr/local/bin/ledge` out of the container's PATH with
 `docker exec` and pair to see Connect refuse a machine with no server on it
 (ios.md §4). `docker stop` and `docker start` is a wire that really drops. And
 `simctl launch com.apple.mobilesafari` then relaunching Ledge is the suspension

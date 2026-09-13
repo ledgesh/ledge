@@ -1,19 +1,22 @@
-// `ledge-server`: this machine's notes, reachable over ssh (remote.md §3).
+// `ledge`: the one command, on every machine that has Ledge (remote.md §3).
 //
-// Six verbs. `serve` is what a client runs (`ssh <target> ledge-server
-// serve`), and what an `authorized_keys` forced command names (§4). It pumps
-// bytes between stdio and the daemon's socket and parses no frames, so an ssh
-// session cannot desynchronize the protocol. `daemon` holds the notes, the
-// shells and the watchers. It outlives every connection to it (§7). A run
-// survives the wire dropping, and a reconnecting client can replay safely.
-// Phase 4 split the two (§14). The Mac app ships this file beside its own
-// entry and runs `daemon` from it, then dials the socket itself with no pump
-// in between (bun/localServer.ts). `backup-paths` prints the paths a backup has
-// to cover and exits (backup.ts, §11). `pair` prints a pairing code (§4b).
-// `cli` is the `ledge` command (cli.ts; a `ledge` on a PATH is a shim that
-// execs this verb) and `mcp` the MCP server (mcp.ts). Both read the notes
-// straight from disk, beside whatever daemon is running, so a shell and an
-// agent on this machine need no connection to it.
+// Four verbs are the server's and are answered here. `serve` is what a client
+// runs (`ssh <target> ledge serve`), and what an `authorized_keys` forced
+// command names (§4). It pumps bytes between stdio and the daemon's socket and
+// parses no frames, so an ssh session cannot desynchronize the protocol.
+// `daemon` holds the notes, the shells and the watchers. It outlives every
+// connection to it (§7). A run survives the wire dropping, and a reconnecting
+// client can replay safely. Phase 4 split the two (§14). The Mac app ships
+// this file beside its own entry and runs `daemon` from it, then dials the
+// socket itself with no pump in between (bun/localServer.ts). `backup-paths`
+// prints the paths a backup has to cover and exits (backup.ts, §11). `pair`
+// prints a pairing code (§4b).
+//
+// Every other verb, and a bare `ledge`, is the notes CLI (cli.ts; the MCP
+// server is its `mcp` verb, mcp.ts). Those read the notes straight from disk,
+// beside whatever daemon is running, so a shell and an agent on this machine
+// need no connection to it. A `ledge` on a PATH is a launcher that execs this
+// file (cliShim.ts, npmPackage.ts, release/server.sh).
 //
 // stdout belongs to the protocol: one stray byte in a length-prefixed stream
 // desynchronizes it with no way back. `main` points `console.log`,
@@ -81,7 +84,7 @@ export async function serve(): Promise<void> {
   mine.onData = (chunk) => upstream.write(chunk);
   mine.onClose = end;
 
-  console.error(`[serve] ledge-server ${BUILD_VERSION} attached to ${SOCKET_PATH}`);
+  console.error(`[serve] ledge ${BUILD_VERSION} attached to ${SOCKET_PATH}`);
   await done;
   // The daemon's last frame is its `bye`, and `main` exits right after this
   // returns. stdout is a pipe here, written asynchronously, so the exit is
@@ -103,7 +106,7 @@ export async function daemon(autostart = false): Promise<void> {
   const idleMs = autostart ? IDLE_EXIT_MS : IDLE_EXIT_NEVER;
   const d = await startDaemon({ idleMs });
   const life = idleMs > 0 ? `idle exit in ${idleMs}ms` : "staying until stopped";
-  console.error(`[daemon] ledge-server ${BUILD_VERSION} on ${SOCKET_PATH}; app home: ${APP_HOME}; ${life}`);
+  console.error(`[daemon] ledge ${BUILD_VERSION} on ${SOCKET_PATH}; app home: ${APP_HOME}; ${life}`);
   // A supervisor stops this with a signal, and so does the live probe.
   for (const sig of ["SIGTERM", "SIGINT"] as const) process.on(sig, () => d.stop());
   // An updated Mac app asks its previous version's daemon to make way, once
@@ -128,8 +131,8 @@ export async function daemon(autostart = false): Promise<void> {
  * The include and exclude lists come out of separate invocations. That is the
  * shape the consumer wants:
  *
- *     restic backup --files-from <(ledge-server backup-paths) \
- *                   --exclude-file <(ledge-server backup-paths --exclude)
+ *     restic backup --files-from <(ledge backup-paths) \
+ *                   --exclude-file <(ledge backup-paths --exclude)
  */
 export async function backupPaths(argv: readonly string[]): Promise<void> {
   await loadWorkspaces();
@@ -225,7 +228,7 @@ export async function pair(argv: readonly string[]): Promise<number> {
 }
 
 const PAIR_USAGE = [
-  "usage: ledge-server pair [--user NAME] [--host ADDRESS] [--port N] [--keys FILE]",
+  "usage: ledge pair [--user NAME] [--host ADDRESS] [--port N] [--keys FILE]",
   "  --user   the account a phone signs in as (default: whoever runs pair)",
   "  --host   the name or IPv4 address a phone dials (default: this ssh session's address, or the machine's name)",
   "  --port   sshd's port (default: this ssh session's port, or 22)",
@@ -233,39 +236,28 @@ const PAIR_USAGE = [
 ].join("\n");
 
 /**
- * Run the command line. Exported so `bin/ledge-server.js` can call it.
+ * Run the command line. Exported so `bin/ledge.js` can call it.
  *
  * That launcher (npmPackage.ts) is its own module and imports this one, so
  * `import.meta.main` is false in here. The guard on the last line covers only
- * `bun src/bun/serve.ts`; a package leaning on it would install a
- * `ledge-server` that exits 0 having done nothing. `argv` is shaped like
- * `process.argv` from either entry: the launcher passes its own
- * `process.argv`, where index 1 is the launcher and the verb is still index 2.
+ * `bun src/bun/serve.ts`; a package leaning on it would install a `ledge`
+ * that exits 0 having done nothing. `argv` is shaped like `process.argv`
+ * from either entry: the launcher passes its own `process.argv`, where index
+ * 1 is the launcher and the verb is still index 2.
+ *
+ * The server verbs are taken before the CLI sees the arguments, so a note
+ * titled "pair" is reached as `ledge open pair` (interactions.md §9). There
+ * is no default verb: a bare `ledge` opens the app, and `serve` is spelled
+ * out everywhere a client runs it (shared/connections.ts SERVE_COMMAND).
  */
 export async function main(argv: readonly string[]): Promise<never> {
   console.log = console.error;
   console.info = console.error;
   console.debug = console.error;
 
-  const verb = argv[2] ?? "serve";
-  const VERBS = ["serve", "daemon", "backup-paths", "pair", "cli", "mcp"];
-  if (!VERBS.includes(verb)) {
-    console.error("usage: ledge-server [serve|daemon [--autostart]|backup-paths [options]|pair [options]|cli [args]|mcp]");
-    console.error("  serve         the protocol on stdin and stdout, attached to this machine's daemon");
-    console.error("  daemon        BE this machine's server; runs until stopped");
-    console.error("                  --autostart   exit when idle; what serve passes to the one it starts");
-    console.error("  backup-paths  the paths a backup of this machine must cover, one per line");
-    console.error("                  --exclude     print the exclusions instead of the inclusions");
-    console.error("                  --no-secrets  leave out the profiles dir");
-    console.error("                  --json        both lists, plus any root that is not on disk");
-    console.error("  pair          a QR code a phone scans to add this server");
-    console.error("                  --user, --host, --port, --keys   see `ledge-server pair --help`");
-    console.error("  cli           the `ledge` command: notes from a shell (`ledge-server cli help`)");
-    console.error("  mcp           the Ledge MCP server on stdin and stdout, for an agent");
-    process.exit(2);
-  }
+  const verb = argv[2];
 
-  // `backup-paths`, `pair`, `cli` and `mcp` read the disk and print. They
+  // `backup-paths` and `pair` read the disk and print, as the CLI does. They
   // start no daemon and touch none, so they need no log file of their own and
   // must not rotate the ones a running server is writing.
   if (verb === "backup-paths") {
@@ -273,17 +265,18 @@ export async function main(argv: readonly string[]): Promise<never> {
     process.exit(0);
   }
   if (verb === "pair") process.exit(await pair(argv));
-  if (verb === "cli") process.exit(await runCli(argv.slice(3), processIo()));
-  if (verb === "mcp") process.exit(await runCli(["mcp"], processIo()));
 
   // `serve` and `daemon` log to separate files. Both can be running at once on
   // one machine, and two processes appending to one log interleave their lines
   // and race each other's rotation.
-  startLogging(verb === "daemon" ? DAEMON_LOG : "ledge-serve");
+  if (verb === "serve" || verb === "daemon") {
+    startLogging(verb === "daemon" ? DAEMON_LOG : "ledge-serve");
+    if (verb === "daemon") await daemon(argv.includes("--autostart"));
+    else await serve();
+    process.exit(0);
+  }
 
-  if (verb === "daemon") await daemon(argv.includes("--autostart"));
-  else await serve();
-  process.exit(0);
+  process.exit(await runCli(argv.slice(2), processIo()));
 }
 
 if (import.meta.main) await main(process.argv);

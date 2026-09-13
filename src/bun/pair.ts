@@ -1,4 +1,4 @@
-// `ledge-server pair`: this machine's pairing code, drawn as a QR code in the
+// `ledge pair`: this machine's pairing code, drawn as a QR code in the
 // terminal (remote.md §4b). serve.ts reads the environment, the host key files
 // and ssh-keygen's output; every decision about them is a pure function here.
 import { encode } from "uqr";
@@ -80,13 +80,13 @@ export function phoneHostKeys(keygenOutput: string): HostKey[] {
 
 /** The host-side command for a server in a container, which has no host keys or account of its own to read. */
 export const CONTAINER_COMMAND =
-  'cat /etc/ssh/ssh_host_*_key.pub | docker exec -i ledge ledge-server pair --user "$USER" --host <address> --keys -';
+  'cat /etc/ssh/ssh_host_*_key.pub | docker exec -i ledge ledge pair --user "$USER" --host <address> --keys -';
 
 /** Why `pair` cannot use a container's own account, name and keys, or null when the flags replace all three. */
 export function containerRefusal(args: PairArgs): string | null {
   if (args.user !== undefined && args.host !== undefined && args.keys !== undefined) return null;
   return [
-    "ledge-server is running in a container, so its account, name and host keys are the container's.",
+    "The server is running in a container, so its account, name and host keys are the container's.",
     "A phone signs in to the machine that runs the container. On that machine, run:",
     "",
     `  ${CONTAINER_COMMAND}`,

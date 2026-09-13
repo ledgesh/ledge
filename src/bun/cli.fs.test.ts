@@ -437,7 +437,7 @@ describe("spawned process", () => {
 
       const server = join(import.meta.dir, "serve.ts");
       const cat = Bun.spawn({
-        cmd: [process.execPath, server, "cli", "cat", "hello shell"],
+        cmd: [process.execPath, server, "cat", "hello shell"],
         env: { ...process.env, LEDGE_NOTES_ROOT: HOME },
         stdout: "pipe",
         stderr: "pipe",

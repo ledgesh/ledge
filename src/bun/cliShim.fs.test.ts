@@ -1,5 +1,5 @@
 // installShims against a real filesystem. Every home is a scratch one, so the
-// shims and the PATH line land under it and never in the developer's own
+// shim and the PATH line land under it and never in the developer's own
 // ~/.ledge-server or ~/.zshrc.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
@@ -26,17 +26,14 @@ const install = (over: Partial<Parameters<typeof installShims>[0]> = {}) =>
   installShims({ execPath: "/runtime/bun", entryPath: ENTRY, pathVar: "/usr/bin", shellVar: "/bin/zsh", home: HOME, platform: "darwin", ...over });
 
 describe("installShims", () => {
-  test("writes both executable shims into ~/.ledge-server/bin: ledge runs the cli verb, ledge-server the caller's", async () => {
+  test("writes one executable shim, ledge, into ~/.ledge-server/bin, passing the caller's words through", async () => {
     const res = await install({ pathVar: `/usr/bin:${BIN}` });
     expect(res).toEqual({ dir: BIN, onPath: true, pathAdded: null });
     const ledge = await readFile(join(BIN, "ledge"), "utf8");
-    const server = await readFile(join(BIN, "ledge-server"), "utf8");
-    expect(isLedgeShim(ledge) && isLedgeShim(server)).toBe(true);
-    expect(ledge).toContain(`exec "/runtime/bun" "${ENTRY}" cli "$@"`);
-    expect(server).toContain(`exec "/runtime/bun" "${ENTRY}" "$@"`);
-    for (const name of ["ledge", "ledge-server"]) {
-      expect(((await stat(join(BIN, name))).mode & 0o111) !== 0).toBe(true);
-    }
+    expect(isLedgeShim(ledge)).toBe(true);
+    expect(ledge).toContain(`exec "/runtime/bun" "${ENTRY}" "$@"`);
+    expect(((await stat(join(BIN, "ledge"))).mode & 0o111) !== 0).toBe(true);
+    await expect(stat(join(BIN, "ledge-server"))).rejects.toThrow(); // one command, not two
   });
 
   test("off PATH, the line goes into the login shell's startup file once, and a second install leaves it", async () => {
@@ -61,29 +58,26 @@ describe("installShims", () => {
     expect(res.onPath).toBe(false);
   });
 
-  test("reinstalling over its own shims repoints them", async () => {
+  test("reinstalling over its own shim repoints it", async () => {
     await install({ execPath: "/old/bun" });
     await install({ execPath: "/new/bun" });
-    for (const name of ["ledge", "ledge-server"]) {
-      const text = await readFile(join(BIN, name), "utf8");
-      expect(text).toContain("/new/bun");
-      expect(text).not.toContain("/old/bun");
-    }
+    const text = await readFile(join(BIN, "ledge"), "utf8");
+    expect(text).toContain("/new/bun");
+    expect(text).not.toContain("/old/bun");
   });
 
   test("replaces server.sh's launcher, which is Ledge's too", async () => {
     await mkdir(BIN, { recursive: true });
-    await writeFile(join(BIN, "ledge-server"), "#!/bin/sh\n# Written by https://ledge.sh/server.sh. Runs ledge-server on the Bun installed beside it.\nexec x\n");
+    await writeFile(join(BIN, "ledge"), "#!/bin/sh\n# Written by https://ledge.sh/server.sh. Runs ledge on the Bun installed beside it.\nexec x\n");
     await install();
-    expect(await readFile(join(BIN, "ledge-server"), "utf8")).toContain(`"${ENTRY}"`);
+    expect(await readFile(join(BIN, "ledge"), "utf8")).toContain(`"${ENTRY}"`);
   });
 
-  test("refuses to overwrite a file that is not a Ledge shim, leaving both names untouched", async () => {
+  test("refuses to overwrite a file that is not a Ledge shim", async () => {
     await mkdir(BIN, { recursive: true });
-    await writeFile(join(BIN, "ledge-server"), "#!/bin/sh\nsomebody else's server\n");
+    await writeFile(join(BIN, "ledge"), "#!/bin/sh\nsomebody else's ledge\n");
     await expect(install()).rejects.toThrow(/not a Ledge shim/);
-    expect(await readFile(join(BIN, "ledge-server"), "utf8")).toContain("somebody else's");
-    await expect(stat(join(BIN, "ledge"))).rejects.toThrow(); // the other was not written either
+    expect(await readFile(join(BIN, "ledge"), "utf8")).toContain("somebody else's");
   });
 
   test("a missing entry fails the install up front, not at a shim's first use", async () => {

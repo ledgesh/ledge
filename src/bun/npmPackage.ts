@@ -10,8 +10,13 @@
 // needed nothing installed there (docs/contributor/remote.md §11).
 import { nativeDir, nativeLibName } from "./ptyNative";
 
-/** The name on npm, and the command it installs. */
+/** The name on npm. The command it installs is `ledge` (BIN_NAME): the
+ * unscoped `ledge` on npm belongs to someone else, and the package is the
+ * server half of Ledge, so its name says which half you are installing. */
 export const PACKAGE_NAME = "ledge-server";
+
+/** The one command the package installs. */
+export const BIN_NAME = "ledge";
 
 /**
  * The minimum Bun the package declares: the version the suite runs on, not
@@ -172,10 +177,10 @@ export function manifest(version: string): Manifest {
     description: "The Ledge server: your notes and shells on another machine, reached over ssh.",
     license: "Apache-2.0",
     type: "module",
-    // Two commands: the server, and its `cli` verb by the name a shell user
-    // types. `ledge` on a server is the same file the Mac app's shim runs
+    // One command, and it is the same file the Mac app's shim runs
     // (bun/cliShim.ts), so notes on a VPS read the same from its prompt.
-    bin: { [PACKAGE_NAME]: "bin/ledge-server.js", ledge: "bin/ledge.js" },
+    // `bunx ledge-server` runs a package's only bin whatever its name.
+    bin: { [BIN_NAME]: "bin/ledge.js" },
     files: ["bin", "lib", "README.md", "LICENSE"],
     engines: { bun: BUN_FLOOR },
     os: ["darwin", "linux"],

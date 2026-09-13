@@ -331,16 +331,16 @@ describe("reading what a host answered", () => {
 // paraphrase.
 describe("why the dial failed", () => {
   test("the shell's word for a server that was never installed becomes the sentence that says so", () => {
-    const said = explainDial("bash: line 1: ledge-server: command not found\n");
+    const said = explainDial("bash: line 1: ledge: command not found\n");
     expect(said).toBe("Ledge's server is not installed on that machine. Install it there, then try again.");
   });
 
   test("every login shell's way of saying it, because the far machine's shell is not ours to choose", () => {
     for (const line of [
-      "bash: line 1: ledge-server: command not found",
-      "sh: 1: ledge-server: not found",
-      "zsh:1: command not found: ledge-server",
-      "ksh: ledge-server: not found",
+      "bash: line 1: ledge: command not found",
+      "sh: 1: ledge: not found",
+      "zsh:1: command not found: ledge",
+      "ksh: ledge: not found",
     ]) {
       expect(explainDial(line)).toContain("is not installed on that machine");
     }
@@ -382,12 +382,12 @@ describe("why the dial failed", () => {
   // contradicts itself. It is the last line on stderr whenever the dial
   // worked and the protocol then refused. A version mismatch does that.
   test("the server's own startup banner is not a diagnosis either", () => {
-    expect(explainDial("[serve] ledge-server 0.1.0 attached to /home/linuxuser/.ledge/.server.sock\n")).toBeNull();
+    expect(explainDial("[serve] ledge 0.1.0 attached to /home/linuxuser/.ledge/.server.sock\n")).toBeNull();
     expect(
       explainDial(
         [
           "Warning: Permanently added '10.0.0.4' to the list of known hosts.",
-          "[serve] ledge-server 0.1.0 attached to /home/linuxuser/.ledge/.server.sock",
+          "[serve] ledge 0.1.0 attached to /home/linuxuser/.ledge/.server.sock",
         ].join("\n"),
       ),
     ).toBeNull();
@@ -396,7 +396,7 @@ describe("why the dial failed", () => {
   // Dropping the banner must not drop what came after it. A server that
   // attached and then exited prints both lines, and the second is the answer.
   test("a fault after the banner is still the fault", () => {
-    const said = ["[serve] ledge-server 0.1.0 attached to /home/linuxuser/.ledge/.server.sock", "Killed"].join("\n");
+    const said = ["[serve] ledge 0.1.0 attached to /home/linuxuser/.ledge/.server.sock", "Killed"].join("\n");
     expect(explainDial(said)).toBe("Killed");
   });
 

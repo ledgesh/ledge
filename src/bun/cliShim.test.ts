@@ -5,31 +5,26 @@ import { describe, expect, test } from "bun:test";
 import { dirOnPath, isLedgeShim, shimDir, shimScript, startupFile } from "./cliShim";
 
 describe("shimScript", () => {
-  test("execs the given runtime and entry, the verb, then every argument", () => {
-    const s = shimScript("/App/Contents/MacOS/bun", "/App/Contents/Resources/app/bun/serve.js", "cli");
+  test("execs the given runtime and entry, then every argument: the caller's first word is the verb", () => {
+    const s = shimScript("/App/Contents/MacOS/bun", "/App/Contents/Resources/app/bun/serve.js");
     expect(s.startsWith("#!/bin/sh\n")).toBe(true);
-    expect(s).toContain('exec "/App/Contents/MacOS/bun" "/App/Contents/Resources/app/bun/serve.js" cli "$@"');
+    expect(s).toContain('exec "/App/Contents/MacOS/bun" "/App/Contents/Resources/app/bun/serve.js" "$@"');
     expect(s.endsWith("\n")).toBe(true);
   });
 
-  test("with no verb the caller's first argument is the verb, which is what ledge-server is", () => {
-    const s = shimScript("/bundle/bun", "/bundle/serve.js", null);
-    expect(s).toContain('exec "/bundle/bun" "/bundle/serve.js" "$@"');
-  });
-
   test("a path with sh-meaningful characters stays one quoted word", () => {
-    const s = shimScript("/odd path/bu\"n", "/odd$dir/serve.js", "cli");
-    expect(s).toContain('exec "/odd path/bu\\"n" "/odd\\$dir/serve.js" cli "$@"');
+    const s = shimScript("/odd path/bu\"n", "/odd$dir/serve.js");
+    expect(s).toContain('exec "/odd path/bu\\"n" "/odd\\$dir/serve.js" "$@"');
   });
 
   test("recognizes its own output and server.sh's launcher, and not a stranger's script", () => {
-    expect(isLedgeShim(shimScript("/bin/bun", "/x/serve.js", null))).toBe(true);
-    expect(isLedgeShim("#!/bin/sh\n# Written by https://ledge.sh/server.sh. Runs ledge-server on the Bun installed beside it.\n")).toBe(true);
+    expect(isLedgeShim(shimScript("/bin/bun", "/x/serve.js"))).toBe(true);
+    expect(isLedgeShim("#!/bin/sh\n# Written by https://ledge.sh/server.sh. Runs ledge on the Bun installed beside it.\n")).toBe(true);
     expect(isLedgeShim("#!/bin/sh\nexec something else\n")).toBe(false);
   });
 });
 
-test("the shims go where the ssh command looks first", () => {
+test("the shim goes where the ssh command looks first", () => {
   expect(shimDir("/Users/u")).toBe("/Users/u/.ledge-server/bin");
 });
 
