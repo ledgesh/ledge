@@ -11,8 +11,8 @@ The first launch opens on "Connect to your Ledge server", which offers three way
 | Control | Use it when |
 | --- | --- |
 | Scan a pairing code | The server can show a code with `ledge-server pair` ("Pair with a code") |
-| I don't have a server yet | You have a Linux machine with ssh, and Ledge is not installed on it ("Set up a server") |
-| Enter an address instead | You would rather type the account and address ("Pair by address") |
+| I don't have a server yet | You have a Mac or Linux machine with ssh, and Ledge is not installed on it ("Set up a server") |
+| Add an existing server | Ledge is already installed on the server, and you would rather type its account and address ("Pair by address") |
 
 ## Pair with a code
 
@@ -36,7 +36,7 @@ When the server runs in Docker, run `pair` on the machine that runs the containe
 
 ## Set up a server
 
-I don't have a server yet opens "Set up a server", which shows the three commands that make a Linux machine a Ledge server:
+I don't have a server yet opens "Set up a server", which shows the commands that make a machine a Ledge server. Choose Linux or Mac above them. On Linux:
 
 ```sh norun
 curl -fsSL https://bun.sh/install | sudo BUN_INSTALL=/usr/local bash
@@ -44,15 +44,29 @@ sudo BUN_INSTALL=/usr/local bun add -g ledge-server
 ledge-server pair
 ```
 
-Run them in a terminal on that machine, signed in as the account the phone should use. The first two install Bun and the server, and need `sudo`. The last prints a pairing code for that account, and Scan the pairing code on the same screen reads it.
+On a Mac:
+
+```sh norun
+curl -fsSL https://bun.sh/install | bash
+echo 'export PATH="$HOME/.bun/bin:$PATH"' >> ~/.zshenv
+source ~/.zshenv
+bun add -g ledge-server
+ledge-server pair
+```
+
+Run them in a terminal on that machine, signed in as the account the phone should use. They install Bun and the server where a command run over ssh can find them, which on Linux needs `sudo` and on a Mac needs the `~/.zshenv` line instead. The last command prints a pairing code for that account, and Scan the pairing code on the same screen reads it.
 
 Copy commands puts them on the phone's pasteboard. Share commands hands them to AirDrop, Messages, or any app that can carry them to a computer with a terminal open on that machine.
 
+On a Mac, turn on Remote Login first, in System Settings under General, then Sharing. Use an account that does not also run the Ledge app on that Mac, since the app already serves that account's notes.
+
 The machine needs sshd running and an address the phone can reach. [[Keep Notes on a Remote Server]] has the details of the install, including a machine that already has Bun, and [[Tutorial: Set Up a Ledge Server]] walks through a fresh VPS.
+
+If you already have a server, Add an existing server at the bottom of the screen opens the form from "Pair by address", and Back from there returns to the first screen.
 
 ## Pair by address
 
-Enter an address instead opens "Pair with a server", a form with three parts. The same form opens from Add a server in the Servers list, with Scan a pairing code at its top.
+Add an existing server opens "Pair with a server", a form with three parts. The same form opens from Add a server in the Servers list, with Scan a pairing code at its top.
 
 The first part is the machine: `user@host`, and a port when sshd is not on 22. A phone reads no `~/.ssh/config`, so write the address out.
 

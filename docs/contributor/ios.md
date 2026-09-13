@@ -405,7 +405,7 @@ is what a failed boot never reaches. Four screens cover it:
 | `WelcomeViewController` | The root of the stack on a phone with no servers |
 | `ServerListViewController` | The root otherwise. Lists the stored servers, marks the one that will be dialled, and carries a row that adds another. |
 | `PairingViewController` | The form, pushed off either root |
-| `ServerSetupViewController` | The commands that make a Linux machine a server, pushed off the welcome screen |
+| `ServerSetupViewController` | The commands that make a Mac or a Linux machine a server, pushed off the welcome screen |
 
 **A first launch opens on the welcome screen, not on the form.** The form asked
 for an address before anything had said what the app is, and its second step
@@ -416,7 +416,7 @@ then offers three ways in, the one that asks least first:
 | --- | --- |
 | Scan a pairing code | The camera, then the form filled in from the code |
 | I don't have a server yet | The setup screen |
-| Enter an address instead | The typed form, without the scan button the list's form has |
+| Add an existing server | The typed form, without the scan button the list's form has |
 
 The form still comes up over the welcome screen when there is an address to
 show: a record `repair` handed back, a reason from the page, or a launch
@@ -424,13 +424,24 @@ suggestion (testing.md §6). The welcome screen loads the device key, so a first
 launch mints it and prints the `[pair]` line whichever screen ends up on top.
 
 **The setup screen hands over commands the phone cannot run.** They are
-`docs/user/09`'s two install commands, then `ledge-server pair`, which prints a
+`docs/user/09`'s install commands, then `ledge-server pair`, which prints a
 code for the account that ran it and ends at the same scan as every other code.
 They leave by Copy or by the share sheet, since the terminal they belong in is
-on another machine. The screen names Linux and not a Mac. A Mac running the
-app already has a server in its process, and a daemon started over ssh beside
-it would be a second server over the same notes root, with the two watchers and
-two vaults remote.md §8a describes.
+on another machine. Add an existing server at the bottom opens the typed form in
+place of the setup screen, so Back from it returns to the welcome screen.
+
+A Linux / Mac switch picks the set, because the two install differently:
+
+| | Linux | Mac |
+| --- | --- | --- |
+| Bun and the server go in | `/usr/local/bin`, with `sudo` | `~/.bun/bin`, without it |
+| ssh finds them by | sshd's default PATH | a line in `~/.zshenv` (remote.md §11) |
+| Also on screen | glibc 2.29 and the distributions that meet it | Remote Login, and an account whose shell is zsh |
+
+The Mac set also says to use an account that does not run the app. The app
+already has a server in its process for that account's notes, and a daemon
+started over ssh beside it would be a second server over the same notes root,
+with the two watchers and two vaults remote.md §8a describes.
 
 These screens come up on a first launch, after a host key changes under a record
 that still exists, after the last server is removed, and from a button on the

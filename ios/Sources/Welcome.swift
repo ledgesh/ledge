@@ -4,19 +4,19 @@ import UIKit
 ///
 /// It says what Ledge on a phone is before asking for anything, then offers the
 /// ways in: a pairing code first, the setup commands for someone with no server
-/// yet, and the address form last.
+/// yet, and the address form for an existing server last.
 final class WelcomeViewController: UIViewController {
     private let client: String
     private let onScan: () -> Void
-    private let onAddress: () -> Void
+    private let onExisting: () -> Void
 
     private let scroll = UIScrollView()
     private let stack = UIStackView()
 
-    init(client: String, onScan: @escaping () -> Void, onAddress: @escaping () -> Void) {
+    init(client: String, onScan: @escaping () -> Void, onExisting: @escaping () -> Void) {
         self.client = client
         self.onScan = onScan
-        self.onAddress = onAddress
+        self.onExisting = onExisting
         super.init(nibName: nil, bundle: nil)
         // No title, so the bar stays empty over the heading below it.
         navigationItem.largeTitleDisplayMode = .never
@@ -48,10 +48,7 @@ final class WelcomeViewController: UIViewController {
             for: .systemFont(ofSize: 32, weight: .bold)
         )
         heading.accessibilityTraits = .header
-        let lede = label(
-            "Your notes live on a server, and Ledge reaches them over ssh. None of them are stored on this device.",
-            style: .body
-        )
+        let lede = label("Your notes live on a server, and Ledge reaches them over ssh.", style: .body)
         lede.textColor = .secondaryLabel
 
         let scan = UIButton(configuration: .filled())
@@ -60,29 +57,27 @@ final class WelcomeViewController: UIViewController {
         scan.configuration?.imagePadding = 8
         scan.configuration?.buttonSize = .large
         scan.addAction(UIAction { [weak self] _ in self?.onScan() }, for: .touchUpInside)
-        let scanNote = label("ledge-server pair shows one in a terminal on the server.", style: .footnote)
-        scanNote.textColor = .secondaryLabel
-        scanNote.textAlignment = .center
+        let scanNote = commandNote()
 
         let setup = row(
             title: "I don't have a server yet",
-            subtitle: "Set one up on a Linux machine",
+            subtitle: "Set one up on a Mac or Linux machine",
             symbol: "server.rack"
         )
         setup.addAction(
             UIAction { [weak self] _ in
                 guard let self else { return }
                 self.navigationController?.pushViewController(
-                    ServerSetupViewController(onScan: self.onScan),
+                    ServerSetupViewController(onScan: self.onScan, onExisting: self.onExisting),
                     animated: true
                 )
             },
             for: .touchUpInside
         )
 
-        let address = UIButton(configuration: .plain())
-        address.configuration?.title = "Enter an address instead"
-        address.addAction(UIAction { [weak self] _ in self?.onAddress() }, for: .touchUpInside)
+        let existing = UIButton(configuration: .plain())
+        existing.configuration?.title = "Add an existing server"
+        existing.addAction(UIAction { [weak self] _ in self?.onExisting() }, for: .touchUpInside)
 
         // The mark in a row of its own, so the labels below it fill the width
         // and wrap rather than taking the width of one long line.
@@ -92,7 +87,7 @@ final class WelcomeViewController: UIViewController {
         hero.spacing = 12
         hero.setCustomSpacing(18, after: markRow)
 
-        for view in [hero, scan, scanNote, setup, address] {
+        for view in [hero, scan, scanNote, setup, existing] {
             stack.addArrangedSubview(view)
         }
         stack.setCustomSpacing(28, after: hero)
@@ -126,6 +121,34 @@ final class WelcomeViewController: UIViewController {
         label.adjustsFontForContentSizeCategory = true
         label.numberOfLines = 0
         return label
+    }
+
+    /// The note under the scan button, with `ledge-server pair` set as code on
+    /// a fill so it reads as a command to type rather than part of the sentence.
+    private func commandNote() -> UILabel {
+        let note = label("", style: .footnote)
+        note.textAlignment = .center
+        let text = NSMutableAttributedString(
+            string: "\u{2009}ledge-server pair\u{2009}",
+            attributes: [
+                .font: UIFontMetrics(forTextStyle: .footnote).scaledFont(
+                    for: .monospacedSystemFont(ofSize: 13, weight: .medium)
+                ),
+                .foregroundColor: UIColor.label,
+                .backgroundColor: UIColor.tertiarySystemFill,
+            ]
+        )
+        text.append(
+            NSAttributedString(
+                string: " shows one in a terminal on the server.",
+                attributes: [
+                    .font: UIFont.preferredFont(forTextStyle: .footnote),
+                    .foregroundColor: UIColor.secondaryLabel,
+                ]
+            )
+        )
+        note.attributedText = text
+        return note
     }
 
     /// A grouped-table row as a button: a symbol, a title over a subtitle, and

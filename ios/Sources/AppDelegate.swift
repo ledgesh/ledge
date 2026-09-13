@@ -105,12 +105,12 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
                 client: ShellConfig.current().client,
                 onScan: { [weak self] in self?.scan() },
                 // No scan button on this form: the person chose it instead of one.
-                onAddress: { [weak self] in
-                    guard let self else { return }
-                    self.chooser?.pushViewController(
-                        self.pairingScreen(suggest: "", port: 0, because: nil, scannable: false),
-                        animated: true
-                    )
+                // It replaces the setup screen when opened from there, so Back
+                // returns to the welcome screen.
+                onExisting: { [weak self] in
+                    guard let self, let chooser = self.chooser, let welcome = chooser.viewControllers.first else { return }
+                    let form = self.pairingScreen(suggest: "", port: 0, because: nil, scannable: false)
+                    chooser.setViewControllers([welcome, form], animated: true)
                 }
             )
             formOnTop = refused != nil || because != nil || !ShellConfig.suggestion.isEmpty

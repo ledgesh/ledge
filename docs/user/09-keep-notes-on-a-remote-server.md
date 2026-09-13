@@ -100,9 +100,9 @@ Closing the last window quits Ledge.
 
 ## Install the server
 
-The other machine needs `ledge-server` on the PATH an incoming ssh gets. It is a package, so two commands install it. [[Tutorial: Set Up a Ledge Server]] walks through them on a fresh VPS, with an account for Ledge and the sshd hardening this page describes further down.
+The other machine needs `ledge-server` on the PATH an incoming ssh gets. It is a package, so a few commands install it. [[Tutorial: Set Up a Ledge Server]] walks through them on a fresh VPS, with an account for Ledge and the sshd hardening this page describes further down.
 
-The server runs on Bun, and where Bun goes decides where the server goes, because Bun puts global commands beside itself. On that machine, install Bun into `/usr/local` and both names land in `/usr/local/bin`, which is where the short PATH of an ssh command looks:
+The server runs on Bun, and where Bun goes decides where the server goes, because Bun puts global commands beside itself. On a Linux machine, install Bun into `/usr/local` and both names land in `/usr/local/bin`, which is where the short PATH of an ssh command looks:
 
 ```sh norun
 curl -fsSL https://bun.sh/install | sudo BUN_INSTALL=/usr/local bash
@@ -116,6 +116,17 @@ sudo BUN_INSTALL=/usr/local bun add -g ledge-server
 
 The variable on the second command is not optional. Without it the package installs into the home directory of whoever ran it, which is not a directory an incoming ssh searches.
 
+A Mac is different: an ssh command there searches only `/usr/bin`, `/bin`, `/usr/sbin`, and `/sbin`, and none of those can take new files. Install Bun for the account instead, and add its directory to `~/.zshenv`, which zsh reads for commands run over ssh:
+
+```sh norun
+curl -fsSL https://bun.sh/install | bash
+echo 'export PATH="$HOME/.bun/bin:$PATH"' >> ~/.zshenv
+source ~/.zshenv
+bun add -g ledge-server
+```
+
+Run them as the account Ledge signs in to. None of them needs `sudo`. The account's shell has to be zsh, which it is unless the account predates macOS Catalina. Use a Mac, or an account on it, that does not also run the Ledge app, since the app already serves that account's notes.
+
 macOS and Linux are supported, on arm64 or x64. On Linux the floor is glibc 2.29, which means Debian 11, Ubuntu 20.04, RHEL 9, or anything newer. Alpine and other musl systems are not supported.
 
 Nothing else has to be installed and no port is opened. Ledge speaks its protocol over ssh's stdin and stdout.
@@ -126,7 +137,7 @@ Blocks need zsh or bash on that machine. Ledge spawns the account's login shell 
 
 Worth doing once, because Ledge reports the failure it catches as a server that is not installed. A remote shell that cannot find a command says only that, so that is all the app has to go on.
 
-Ledge starts the server by running `ledge-server serve` over ssh. A command run that way gets a short PATH and reads no shell profile, so both `ledge-server` and the `bun` its first line names have to be on that PATH already. From your Mac's own terminal:
+Ledge starts the server by running `ledge-server serve` over ssh. A command run that way gets a short PATH and skips the startup files a terminal reads, so both `ledge-server` and the `bun` its first line names have to be on that PATH already. From your Mac's own terminal:
 
 ```sh norun
 ssh you@machine 'command -v ledge-server; command -v bun'
@@ -134,12 +145,14 @@ ssh you@machine 'command -v ledge-server; command -v bun'
 
 Two paths printed means the machine is ready to add.
 
-Nothing printed means Bun is installed for one user rather than system-wide, which is what a machine that already had Bun before you started usually has. Its global commands are then in `~/.bun/bin`, which an incoming ssh does not search, and `bun pm bin -g` on that machine confirms where they went. Linking both names into a system directory, on that machine, fixes it without reinstalling anything:
+On Linux, nothing printed means Bun is installed for one user rather than system-wide, which is what a machine that already had Bun before you started usually has. Its global commands are then in `~/.bun/bin`, which an incoming ssh does not search, and `bun pm bin -g` on that machine confirms where they went. Linking both names into a system directory, on that machine, fixes it without reinstalling anything:
 
 ```sh norun
 sudo ln -s "$(bun pm bin -g)/ledge-server" /usr/local/bin/ledge-server
 sudo ln -s "$(command -v bun)" /usr/local/bin/bun
 ```
+
+On a Mac, nothing printed means the `~/.zshenv` line is missing, or the account's shell is not zsh. The symlinks do not help there, since ssh on a Mac does not search `/usr/local/bin`.
 
 ## Build the server from a checkout
 

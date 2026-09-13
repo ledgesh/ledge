@@ -2069,6 +2069,16 @@ place. The same PATH has to hold `bun` too, since the package's bin begins
 `#!/usr/bin/env bun`; a forced command with an absolute path settles the first
 half and not the second.
 
+**A Mac needs a line in `~/.zshenv`, wherever Bun goes.** sshd on macOS gives a
+command the PATH `/usr/bin:/bin:/usr/sbin:/sbin` (measured over ssh on macOS
+26.6), which holds neither `/usr/local/bin` nor `~/.bun/bin`, and every
+directory on it is under System Integrity Protection. zsh reads `~/.zshenv` for
+every command ssh runs, a forced one included, and `~/.zshrc`, where Bun's
+installer adds itself, only for an interactive shell. Since a Mac needs the
+line either way, its commands keep Bun's own per-user install, which needs no
+`sudo`, and put `~/.bun/bin` in `~/.zshenv`. That holds for an account whose
+shell is zsh, the default since macOS 10.15.
+
 **The `command -v` check stays in the manual** because the install line cannot
 reach a machine that already had a per-user Bun on it, which is the field
 report this rule came from: an install that was completely fine, reported by
