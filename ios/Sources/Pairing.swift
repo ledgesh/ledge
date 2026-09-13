@@ -3,9 +3,9 @@ import UIKit
 
 /// The form that adds a server (ios.md §4).
 ///
-/// The root of the shell's stack on a phone with no servers at all, and a step
-/// pushed off `ServerListViewController` otherwise. Which of the two it is
-/// decides only whether there is a Back button: the form is the same either way.
+/// A step pushed off `WelcomeViewController` on a phone with no servers, and off
+/// `ServerListViewController` otherwise. The form is the same either way, and
+/// only the scan button at its top depends on where it came from.
 ///
 /// Started from a pairing code, the address fields become the code's account,
 /// host, port and fingerprints, and the host key is checked against the code
@@ -87,6 +87,8 @@ final class PairingViewController: UIViewController {
         // The navigation bar's, not a label in the stack: this screen sits
         // inside a navigation stack, which draws the title itself.
         title = "Pair with a server"
+        // `.automatic` would take the welcome screen's `.never`.
+        navigationItem.largeTitleDisplayMode = .always
         reason.text = because.map(HostKeyOffer.wrappable)
         reason.isHidden = because == nil
     }
@@ -99,20 +101,13 @@ final class PairingViewController: UIViewController {
         view.backgroundColor = .systemBackground
         build()
 
-        // The key is minted on the first launch that reaches this screen, which
-        // is the first launch. A failure here is not something a user can fix,
-        // so it is reported rather than retried.
+        // The welcome screen usually minted the key already. A failure here is
+        // not something a user can fix, so it is reported rather than retried.
         do {
             let key = try DeviceKey.load()
             held = key
             keyBox.text = DeviceKey.authorizedKeysLine(key, client: client)
-            // Also on the console, which is the other way off the phone: a
-            // public key, and the one string this screen exists to hand over.
-            // A Mac with a cable can read it without retyping base64. Where it
-            // is kept goes with it, because "which key is this" is the first
-            // question about anything that signs.
-            print("[pair] key in \(key.isEnclave ? "the Secure Enclave" : "software")")
-            print("[pair] \(keyBox.text ?? "")")
+            DeviceKey.log(key, client: client)
             if !key.isEnclave {
                 say("This build is using a software key: the Simulator has no Secure Enclave.")
             }

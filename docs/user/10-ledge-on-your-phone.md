@@ -2,7 +2,17 @@
 
 Ledge runs on an iPhone or iPad as a window onto a server. The phone holds no notes: it reaches a server over ssh, the way a Mac does in [[Keep Notes on a Remote Server]], and shows you what is there.
 
-Set the server up first. "Install the server" on that page is the whole of it, and a server that already serves your Mac needs nothing more.
+A server that already serves your Mac needs nothing more. A machine without one needs the server installed first, as "Install the server" on that page describes, and the phone shows the same commands ("Set up a server" below).
+
+## The first screen
+
+The first launch opens on "Connect to your Ledge server", which offers three ways to add a server:
+
+| Control | Use it when |
+| --- | --- |
+| Scan a pairing code | The server can show a code with `ledge-server pair` ("Pair with a code") |
+| I don't have a server yet | You have a Linux machine with ssh, and Ledge is not installed on it ("Set up a server") |
+| Enter an address instead | You would rather type the account and address ("Pair by address") |
 
 ## Pair with a code
 
@@ -14,7 +24,7 @@ ledge-server pair
 
 It prints the code as a QR code, then the account, host, port, and host keys it holds, then the same code as a link. It reads the address from your ssh session, or uses the machine's name when there is no session. When the phone cannot reach the server by that name, give the address yourself with `--host`. `ledge-server pair --help` lists the other flags.
 
-On the phone, tap Scan a pairing code at the top of "Pair with a server" and point the camera at the QR code. Scan it from Ledge rather than the Camera app, which opens the code in Safari. Ledge shows what the code names and connects only when you tap Connect. Choose how to sign in first, the same way as on the form below: with a key, whose line still has to be in the server's `authorized_keys`, or with a password. Ledge signs in only if the server offers one of the host keys in the code, so there is no fingerprint to check by eye.
+On the phone, tap Scan a pairing code on the first screen and point the camera at the QR code. Scan it from Ledge rather than the Camera app, which opens the code in Safari. Ledge shows what the code names and connects only when you tap Connect. Choose how to sign in first, the same way as in "Pair by address": with a key, whose line still has to be in the server's `authorized_keys`, or with a password. Ledge signs in only if the server offers one of the host keys in the code, so there is no fingerprint to check by eye.
 
 The code holds no password and no key. Someone who photographs it learns where the server is and which account to try, and nothing that signs them in.
 
@@ -24,11 +34,29 @@ A code never replaces a host key the phone already has. When Ledge has a differe
 
 When the server runs in Docker, run `pair` on the machine that runs the container, since the host keys and the account the phone signs in to belong to that machine. Run inside the container, `ledge-server pair` prints the command to use instead.
 
-## Pair with a server
+## Set up a server
 
-The first launch opens on "Pair with a server". Scan a pairing code, at the top, opens the camera ("Pair with a code" above). Below it, the screen has three parts for adding a server by hand.
+I don't have a server yet opens "Set up a server", which shows the three commands that make a Linux machine a Ledge server:
 
-The first is a key line. On its first launch the phone makes a key of its own in the Secure Enclave, and that key never leaves the phone: there is no file to copy in or out. What leaves is the public half, as one line for the server's `~/.ssh/authorized_keys`:
+```sh norun
+curl -fsSL https://bun.sh/install | sudo BUN_INSTALL=/usr/local bash
+sudo BUN_INSTALL=/usr/local bun add -g ledge-server
+ledge-server pair
+```
+
+Run them in a terminal on that machine, signed in as the account the phone should use. The first two install Bun and the server, and need `sudo`. The last prints a pairing code for that account, and Scan the pairing code on the same screen reads it.
+
+Copy commands puts them on the phone's pasteboard. Share commands hands them to AirDrop, Messages, or any app that can carry them to a computer with a terminal open on that machine.
+
+The machine needs sshd running and an address the phone can reach. [[Keep Notes on a Remote Server]] has the details of the install, including a machine that already has Bun, and [[Tutorial: Set Up a Ledge Server]] walks through a fresh VPS.
+
+## Pair by address
+
+Enter an address instead opens "Pair with a server", a form with three parts. The same form opens from Add a server in the Servers list, with Scan a pairing code at its top.
+
+The first part is the machine: `user@host`, and a port when sshd is not on 22. A phone reads no `~/.ssh/config`, so write the address out.
+
+The second is how to sign in. With A key, the default, the form shows a key line. On its first launch the phone makes a key of its own in the Secure Enclave, and that key never leaves the phone: there is no file to copy in or out. What leaves is the public half, as one line for the server's `~/.ssh/authorized_keys`:
 
 ```
 restrict,command="ledge-server serve" ecdsa-sha2-nistp256 AAAA... ledge-iphone-3f2a91c0
@@ -37,8 +65,6 @@ restrict,command="ledge-server serve" ecdsa-sha2-nistp256 AAAA... ledge-iphone-3
 Copy line puts it on the phone's pasteboard. Share line hands it to AirDrop, Messages, or any app that can carry it to a machine with a shell on the server, which is where the pasteboard on a phone falls short. Add it to `~/.ssh/authorized_keys` there. The comment at the end names the phone, so the line is easy to find again when you want to revoke it.
 
 The line arrives already restricted, in the way "Restrict the key to Ledge" on [[Keep Notes on a Remote Server]] describes: the phone's key can speak Ledge's protocol and nothing else. It names `ledge-server` by its bare name, so the server has to be on the PATH an incoming ssh gets ("Check that ssh can find the server" on the same page). For the Docker deployment, change the command in the line to the `docker exec` form shown there.
-
-The second part is the machine: `user@host`, and a port when sshd is not on 22. A phone reads no `~/.ssh/config`, so write the address out.
 
 The third is Connect. The phone dials the server, shows its host key fingerprint, and asks "Is this the server?" alongside the command that prints the same fingerprint on the server. Trust pins the key, and a server that later presents a different one is refused, the same as on a Mac.
 
@@ -56,7 +82,7 @@ A server that cannot be reached shows "Ledge could not reach a server." with the
 
 A host key that has changed, or a key or password the server no longer accepts, lands you back on the pairing form with the address filled in. Retrying cannot fix either, so the pin is dropped and you compare the fingerprint again.
 
-Removing the last server returns the phone to the pairing screen. Deleting the app deletes its key with it, so a reinstalled phone is a new device to every server and needs its line installed again.
+Removing the last server returns the phone to the first screen. Deleting the app deletes its key with it, so a reinstalled phone is a new device to every server and needs its line installed again.
 
 ## More than one server
 

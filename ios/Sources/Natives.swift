@@ -68,11 +68,9 @@ enum Natives {
     /// Put a string in front of the system share sheet: AirDrop, Messages,
     /// Mail, Notes, whatever the device has (ios.md §4).
     ///
-    /// One caller's worth of generality, and no more. What crosses it is the
-    /// `authorized_keys` line, which has to reach a machine that is not this
-    /// one, and the pasteboard cannot carry it there. Nothing else in the app
-    /// shares anything, so this takes a string rather than an activity item
-    /// protocol for a case that does not exist yet.
+    /// A string and no more. What crosses it is text that has to reach a
+    /// machine that is not this one, where the pasteboard cannot carry it: the
+    /// `authorized_keys` line, and the setup commands (ServerSetup.swift).
     ///
     /// `from` is not decoration. On an iPad the sheet is a popover and UIKit
     /// traps on one with no anchor, so a caller with a button hands it over and

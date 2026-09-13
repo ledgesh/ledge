@@ -11,11 +11,9 @@ import UIKit
 final class AppDelegate: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
     private var host: WebHost?
-    /// The shell's own screens, the server list and the pairing form, when they
-    /// are what the window is showing. A navigation controller because adding a
-    /// server is a step off the list and needs a way back. The form pushed onto
-    /// it is the same form that roots the stack on a phone with no servers at
-    /// all, where there is nothing to go back to.
+    /// The shell's own screens, when they are what the window is showing: the
+    /// welcome screen or the server list at the root, and the pairing form as a
+    /// step off either of them.
     private var chooser: UINavigationController?
 
     func application(
@@ -54,18 +52,16 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         window?.rootViewController = screen
     }
 
-    /// The server list, and the pairing form when the list has nothing in it.
+    /// The server list, or the welcome screen when the list has nothing in it.
     ///
     /// Asked for by name rather than reached by re-reading the configuration,
     /// because `repair` below has to terminate: a stored record that survives
     /// being forgotten would otherwise build another web view, which would fail
     /// the same way and ask for repair again.
     ///
-    /// A phone with no servers roots the stack at the form, so a first launch
-    /// is one screen and has no Back button pointing at an empty list. Every
-    /// other case roots it at the list, which is the screen that can get a
-    /// phone out of a saved server that stopped answering. `pairing` pushes
-    /// the form pre-filled with that record, the one `repair` was handed.
+    /// `pairing` pushes the form pre-filled with the record `repair` was handed.
+    /// Over the welcome screen, a reason or a launch suggestion pushes it too,
+    /// since both are about an address the form can show (testing.md §6).
     private func showServers(because: String?, pairing refused: ServerRecord? = nil) {
         ServerStore.setLaunchAside()
         let stored = ServerStore.load()
@@ -102,9 +98,29 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
                 because: because
             )
         }
-        let nav = UINavigationController(rootViewController: stored.servers.isEmpty ? form() : list)
+        let root: UIViewController
+        let formOnTop: Bool
+        if stored.servers.isEmpty {
+            root = WelcomeViewController(
+                client: ShellConfig.current().client,
+                onScan: { [weak self] in self?.scan() },
+                // No scan button on this form: the person chose it instead of one.
+                onAddress: { [weak self] in
+                    guard let self else { return }
+                    self.chooser?.pushViewController(
+                        self.pairingScreen(suggest: "", port: 0, because: nil, scannable: false),
+                        animated: true
+                    )
+                }
+            )
+            formOnTop = refused != nil || because != nil || !ShellConfig.suggestion.isEmpty
+        } else {
+            root = list
+            formOnTop = refused != nil
+        }
+        let nav = UINavigationController(rootViewController: root)
         nav.navigationBar.prefersLargeTitles = true
-        if !stored.servers.isEmpty, refused != nil { nav.pushViewController(form(), animated: false) }
+        if formOnTop { nav.pushViewController(form(), animated: false) }
         host = nil
         chooser = nav
         window?.rootViewController = nav
@@ -113,12 +129,17 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     /// The pairing form, pre-filled. A pin dropped by `repair` comes back to a
     /// screen that already knows the address: the key is the thing to look at
     /// again, not the machine.
-    private func pairingScreen(suggest: String, port: Int, because: String?) -> PairingViewController {
+    private func pairingScreen(
+        suggest: String,
+        port: Int,
+        because: String?,
+        scannable: Bool = true
+    ) -> PairingViewController {
         PairingViewController(
             client: ShellConfig.current().client,
             start: .typed(suggest: suggest, port: port),
             because: because,
-            onScan: { [weak self] in self?.scan() }
+            onScan: scannable ? { [weak self] in self?.scan() } : nil
         ) { [weak self] _ in
             self?.show()
         }

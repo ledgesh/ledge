@@ -398,22 +398,49 @@ below is how they install it.
 **The native screens are for the state where there is no page.** A phone with
 no server has no web view to render the connection dialog in, and neither does a
 phone whose saved server has stopped answering: the dialog is React, and React
-is what a failed boot never reaches. Two screens cover it.
-`ServerListViewController` lists the stored servers, marks the one that will be
-dialled, and carries a row that adds another; `PairingViewController` is that
-form. The form is the ROOT of the stack rather than a step off the list when
-there are no servers at all, so a first launch is one screen and has no Back
-button pointing at an empty list.
+is what a failed boot never reaches. Four screens cover it:
 
-They are reached on a first launch, after a host key changes under a record that
-still exists, after the last server is removed, and from a button on the page's
-own refusal (`servers.choose`, `mainview/ios.tsx`). **The last of those is the
-case a single pairing screen missed.** A phone could only manage its servers
-from a connection it had already made, so an address that stopped answering — a
-server moved, turned off, or behind a network the phone is no longer on — left
-one control on the screen, and it was a retry that would fail the same way for
-as long as anyone pressed it. Deleting the app was the way out, which takes the
-enclave key with it.
+| Screen | What it is |
+| --- | --- |
+| `WelcomeViewController` | The root of the stack on a phone with no servers |
+| `ServerListViewController` | The root otherwise. Lists the stored servers, marks the one that will be dialled, and carries a row that adds another. |
+| `PairingViewController` | The form, pushed off either root |
+| `ServerSetupViewController` | The commands that make a Linux machine a server, pushed off the welcome screen |
+
+**A first launch opens on the welcome screen, not on the form.** The form asked
+for an address before anything had said what the app is, and its second step
+was a 180-character key line. The welcome screen says what Ledge on a phone is,
+then offers three ways in, the one that asks least first:
+
+| Control | Leads to |
+| --- | --- |
+| Scan a pairing code | The camera, then the form filled in from the code |
+| I don't have a server yet | The setup screen |
+| Enter an address instead | The typed form, without the scan button the list's form has |
+
+The form still comes up over the welcome screen when there is an address to
+show: a record `repair` handed back, a reason from the page, or a launch
+suggestion (testing.md §6). The welcome screen loads the device key, so a first
+launch mints it and prints the `[pair]` line whichever screen ends up on top.
+
+**The setup screen hands over commands the phone cannot run.** They are
+`docs/user/09`'s two install commands, then `ledge-server pair`, which prints a
+code for the account that ran it and ends at the same scan as every other code.
+They leave by Copy or by the share sheet, since the terminal they belong in is
+on another machine. The screen names Linux and not a Mac. A Mac running the
+app already has a server in its process, and a daemon started over ssh beside
+it would be a second server over the same notes root, with the two watchers and
+two vaults remote.md §8a describes.
+
+These screens come up on a first launch, after a host key changes under a record
+that still exists, after the last server is removed, and from a button on the
+page's own refusal (`servers.choose`, `mainview/ios.tsx`). **The last of those
+is the case a single pairing screen missed.** A phone could only manage its
+servers from a connection it had already made, so an address that stopped
+answering (a server moved, turned off, or behind a network the phone is no
+longer on) left one control on the screen, and it was a retry that would fail
+the same way for as long as anyone pressed it. Deleting the app was the way
+out, which takes the enclave key with it.
 
 **The native side selects and adds; it does not rename, edit or remove.**
 Selecting is what Swift already does at every launch, and adding is the pairing
@@ -989,7 +1016,7 @@ is the step before any new connection can work. One string rather than a
 boolean, because "which key" is the whole of the difference.
 
 Two rules follow from a phone having no local server to fall back to. Removing
-the last one is allowed and returns the app to the pairing screen, because
+the last one is allowed and returns the app to the welcome screen, because
 otherwise a phone could never forget an address it typed wrong; and there is no
 boot-time fallback to report in `connectionList`, because a phone that cannot
 reach its server never renders the dialog at all — it shows `ios.tsx`'s sentence.

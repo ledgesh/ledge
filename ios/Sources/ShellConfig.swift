@@ -328,7 +328,7 @@ enum ServerStore {
     /// Written back on the first `save`, and the old keys are cleared here so
     /// that `LedgeServer` means only what a launch argument put there
     /// afterwards. An install with nothing stored lands on the same empty list,
-    /// which is the pairing screen.
+    /// which is the welcome screen.
     private static func migrated() -> Stored {
         let defaults = UserDefaults.standard
         // The persistent domain and not `string(forKey:)`, because a probe

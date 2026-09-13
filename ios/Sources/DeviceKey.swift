@@ -96,6 +96,14 @@ enum DeviceKey {
         return "restrict,command=\"ledge-server serve\" \(held.openSSHPublicKey) \(label)"
     }
 
+    /// Where the key is kept and its line, on the console. A Mac with a cable
+    /// reads the line there without retyping base64, and a probe reads it at
+    /// first launch (testing.md §6).
+    static func log(_ held: Held, client: String) {
+        print("[pair] key in \(held.isEnclave ? "the Secure Enclave" : "software")")
+        print("[pair] \(authorizedKeysLine(held, client: client))")
+    }
+
     private static func deviceName() -> String {
         // The idiom, not `UIDevice.name`: since iOS 16 the name is the model
         // unless the app holds an entitlement, and asking for one in order to

@@ -723,7 +723,7 @@ the failure it prevents, which is running a command on the wrong box.
   cannot be removed, and neither can the connection currently being served. A
   phone has no local server to fall back to, so there the second refusal holds
   only while another server exists — removing the last one returns it to the
-  pairing screen, which is the only way a phone can forget an address it typed
+  welcome screen, which is the only way a phone can forget an address it typed
   wrong (ios.md §4).
 - **A switch will not run over unsaved writing.** The switch reloads the page,
   so text that never reached the server it belongs to is gone afterwards and is

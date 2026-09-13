@@ -503,7 +503,8 @@ Simulator probe can consider itself paired without a human; on a phone it skips
 one of the things worth watching. The phone also mints its own key regardless,
 so the Simulator's line in `authorized_keys` will never authenticate it: copy
 the line off the pairing screen, which has a button for it, and paste it into
-the terminal `--serve` is running in.
+the terminal `--serve` is running in. A phone with no servers opens on the
+welcome screen, where Enter an address instead leads to that form.
 
 **The first install always fails, and it cannot be prevented.** It fails on
 Developer Mode, under Settings > Privacy & Security on the phone, and that
