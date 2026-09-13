@@ -80,6 +80,51 @@ struct PairingCode: Equatable {
         return .code(code)
     }
 
+    /// A stored server, reduced to what the pin rule reads.
+    struct Known: Equatable {
+        let id: String
+        let destination: String
+        let port: Int
+        /// The pinned key's `SHA256:…`, or "" for a record whose pin was dropped.
+        let fingerprint: String
+    }
+
+    /// What the stored servers make of this code (remote.md §4b, the first rule).
+    enum Match: Equatable {
+        /// No record for this account at this host and port. The key the server
+        /// offers has to be one the code names, and it is pinned.
+        case new
+        /// This account's record, pinned to a key the code names. The pin
+        /// decides the dial, and nothing is pinned again.
+        case pinned(id: String)
+        /// This account's record with its pin dropped. The code's key is pinned.
+        case unpinned(id: String)
+        /// A record at this host and port is pinned to a key the code does not
+        /// name. The code is refused, the way a changed host key is.
+        case conflict(pinned: String)
+    }
+
+    /// A host key belongs to a host and a port rather than to an account, so a
+    /// pin on any account there can refuse the code. A host name compares
+    /// without regard to ASCII case, since DNS ignores it.
+    func match(_ known: [Known]) -> Match {
+        let host = Self.asciiLowercased(self.host)
+        let here = known.filter { Self.asciiLowercased(Self.host(of: $0.destination)) == host && $0.port == port }
+        if let stale = here.first(where: { !$0.fingerprint.isEmpty && !fingerprints.contains($0.fingerprint) }) {
+            return .conflict(pinned: stale.fingerprint)
+        }
+        guard let mine = here.first(where: { Self.user(of: $0.destination) == user }) else { return .new }
+        return mine.fingerprint.isEmpty ? .unpinned(id: mine.id) : .pinned(id: mine.id)
+    }
+
+    private static func user(of destination: String) -> String {
+        String(destination.unicodeScalars.prefix(while: { $0 != "@" }))
+    }
+
+    private static func host(of destination: String) -> String {
+        String(String.UnicodeScalarView(destination.unicodeScalars.drop(while: { $0 != "@" }).dropFirst()))
+    }
+
     /// The first problem with the fields, checked in `pairingProblem`'s order.
     var problem: String? {
         if !Self.isName(user, maxLength: 64) { return Problem.user }

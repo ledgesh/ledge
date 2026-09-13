@@ -429,6 +429,25 @@ to 65535 refuses the launch pairing rather than dialling 22. With no
 `-LedgeHostKey`, `-LedgeServer` and `-LedgePort` pre-fill the pairing form,
 which `bun run ios -- --server ledge@127.0.0.1 --port 2222` also passes.
 
+**A pairing code is probed as a link, because a Simulator has no camera.** Its
+scan button answers with an alert, which is itself worth one screenshot. The
+fixture's own keys make the code, piped from a scan into `pair` on this Mac:
+
+```
+ssh-keyscan -p 2222 127.0.0.1 | bun src/bun/serve.ts pair --user ledge --host 127.0.0.1 --port 2222 --keys -
+xcrun simctl openurl <dev> 'ledge://pair#v=1&u=ledge&h=127.0.0.1&p=2222&k=…'
+```
+
+Use the `ledge://` form of the link `pair` prints, since the `https` one opens
+Safari. A link opened from outside a Simulator's frontmost app first raises iOS's
+"Open in Ledge?" prompt, which needs a tap, so this half of the probe needs a
+panel with access to the device. Every row of remote.md §4b's table is reachable
+here: the first code adds a record, the same code again dials the pin, a code
+with a made-up fingerprint for the same address is refused before dialling, and
+one for `localhost`, which is not stored, dials and is refused at key exchange
+with `offered: false` in the `[pair] [ssh]` line. The camera itself needs a
+device.
+
 **A refused launch pairing leaves the stored servers alone.** A host key or
 device key the fixture refuses sends the app to the pairing form, pre-filled
 with the launch address and port. The pin it drops is the refused record's,

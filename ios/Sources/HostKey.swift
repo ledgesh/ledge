@@ -16,9 +16,9 @@ import NIOSSH
 /// test on a blob is not a parser, and "no blind accept, no continue-anyway
 /// that remembers" is a property of the UI: there is no button for it.
 ///
-/// The fingerprint below is for a human to read at pairing. It is rendered from
-/// the same bytes and never used to decide anything, because a truncated hash
-/// is a worse comparison than the thing it summarizes.
+/// The fingerprint below is what a human reads at pairing. It decides one thing:
+/// which key a pairing code lets the phone pin, because a code carries only
+/// fingerprints (`CodeHostKey`). Every dial after that compares the pinned bytes.
 struct HostKeyOffer {
     /// `ssh-ed25519 AAAAC3…`, the two fields that identify a key. The same
     /// shape `ssh-keyscan` prints after the hostname, which is what makes a pin
@@ -48,6 +48,7 @@ struct HostKeyOffer {
 enum HostKeyError: Error, LocalizedError {
     case changed(expected: HostKeyOffer, offered: HostKeyOffer)
     case declined
+    case notInCode(offered: HostKeyOffer, code: [String])
 
     var errorDescription: String? {
         switch self {
@@ -63,6 +64,12 @@ enum HostKeyError: Error, LocalizedError {
                 """
         case .declined:
             return "The host key was not accepted."
+        case .notInCode(let offered, let code):
+            return """
+                This server offered a host key that is not in the pairing code, so Ledge did not sign in.
+                Offered: \(offered.fingerprint)
+                In the code: \(code.joined(separator: "\n"))
+                """
         }
     }
 }
@@ -101,6 +108,28 @@ final class CapturingHostKey: NIOSSHClientServerAuthenticationDelegate {
     func validateHostKey(hostKey: NIOSSHPublicKey, validationCompletePromise: EventLoopPromise<Void>) {
         offered = HostKeyOffer(hostKey)
         validationCompletePromise.fail(HostKeyError.declined)
+    }
+}
+
+/// The pairing code case: accept a key the code names, and refuse any other
+/// without asking. The person already confirmed the code's fingerprints on the
+/// pairing screen (remote.md §4b).
+final class CodeHostKey: NIOSSHClientServerAuthenticationDelegate {
+    private let fingerprints: [String]
+    private(set) var accepted: HostKeyOffer?
+
+    init(fingerprints: [String]) {
+        self.fingerprints = fingerprints
+    }
+
+    func validateHostKey(hostKey: NIOSSHPublicKey, validationCompletePromise: EventLoopPromise<Void>) {
+        let offered = HostKeyOffer(hostKey)
+        if fingerprints.contains(offered.fingerprint) {
+            accepted = offered
+            validationCompletePromise.succeed(())
+        } else {
+            validationCompletePromise.fail(HostKeyError.notInCode(offered: offered, code: fingerprints))
+        }
     }
 }
 

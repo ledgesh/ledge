@@ -4,9 +4,29 @@ Ledge runs on an iPhone or iPad as a window onto a server. The phone holds no no
 
 Set the server up first. "Install the server" on that page is the whole of it, and a server that already serves your Mac needs nothing more.
 
+## Pair with a code
+
+A pairing code names a server and its host keys, so the phone can add it without anyone typing an address or comparing a fingerprint. On the server, run:
+
+```sh norun
+ledge-server pair
+```
+
+It prints the code as a QR code, then the account, host, port, and host keys it holds, then the same code as a link. It reads the address from your ssh session, or uses the machine's name when there is no session. When the phone cannot reach the server by that name, give the address yourself with `--host`. `ledge-server pair --help` lists the other flags.
+
+On the phone, tap Scan a pairing code at the top of "Pair with a server" and point the camera at the QR code. Scan it from Ledge rather than the Camera app, which opens the code in Safari. Ledge shows what the code names and connects only when you tap Connect. Choose how to sign in first, the same way as on the form below: with a key, whose line still has to be in the server's `authorized_keys`, or with a password. Ledge signs in only if the server offers one of the host keys in the code, so there is no fingerprint to check by eye.
+
+The code holds no password and no key. Someone who photographs it learns where the server is and which account to try, and nothing that signs them in.
+
+Opening a `ledge://pair` link on the phone shows the same screen, with a warning. A link can come from anyone, including someone running a server that only looks like yours, so connect only if the link came from your own server.
+
+A code never replaces a host key the phone already has. When Ledge has a different key pinned for the same address, it refuses the code and keeps that key. If the server's key really changed, connect to it from the Servers list, where Ledge shows you the new key to check.
+
+When the server runs in Docker, run `pair` on the machine that runs the container, since the host keys and the account the phone signs in to belong to that machine. Run inside the container, `ledge-server pair` prints the command to use instead.
+
 ## Pair with a server
 
-The first launch opens on "Pair with a server", and the screen has three parts.
+The first launch opens on "Pair with a server". Scan a pairing code, at the top, opens the camera ("Pair with a code" above). Below it, the screen has three parts for adding a server by hand.
 
 The first is a key line. On its first launch the phone makes a key of its own in the Secure Enclave, and that key never leaves the phone: there is no file to copy in or out. What leaves is the public half, as one line for the server's `~/.ssh/authorized_keys`:
 

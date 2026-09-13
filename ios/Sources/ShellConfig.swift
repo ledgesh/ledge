@@ -213,26 +213,70 @@ enum ServerStore {
 
     /// Add a freshly pinned server, or re-pin the one already at that address.
     ///
-    /// By destination and not by id, because the pairing screen has no id to
-    /// carry: it is reached on a first launch, and again when a host key
-    /// changed under a record that still exists. Matching on the address keeps
-    /// that record's name and id rather than leaving a duplicate beside it.
+    /// By destination and not by id, because the typed form has no id to carry.
+    /// Matching on the address keeps that record's name and id rather than
+    /// leaving a duplicate beside it. Only a key a person confirmed by eye comes
+    /// here: a pairing code's goes to `pair(code:)`, which never re-pins.
     @discardableResult
     static func pair(destination: String, port: Int, hostKey: String, auth: String = "key", password: String = "") -> ServerRecord {
-        var stored = load()
+        let stored = load()
         // By address and by port, since that pair is what a host key belongs to:
         // two sshd instances on one machine really can offer different keys
         // (shared/connections.ts).
         if let at = stored.servers.firstIndex(where: { $0.destination == destination && $0.port == port }) {
-            stored.servers[at].hostKey = hostKey
-            stored.servers[at].auth = auth
-            stored.selected = stored.servers[at].id
-            // The credential before the record, so a list that has been saved
-            // never names a password door with nothing behind it.
-            if auth == "password" { ServerPassword.write(stored.servers[at].id, password) }
-            save(servers: stored.servers, selected: stored.selected)
-            return stored.servers[at]
+            return update(stored, at: at, hostKey: hostKey, auth: auth, password: password)
         }
+        return append(stored, destination: destination, port: port, hostKey: hostKey, auth: auth, password: password)
+    }
+
+    /// Add or update the server a pairing code names, or nil when the stored
+    /// list now refuses the code. The rule is `PairingCode.match`, checked again
+    /// here because the page can save the list while the dial is out.
+    /// `hostKey` is the key that dial accepted.
+    static func pair(code: PairingCode, hostKey: String, auth: String, password: String = "") -> ServerRecord? {
+        let stored = load()
+        switch code.match(known(stored)) {
+        case .conflict:
+            return nil
+        case .pinned(let id):
+            // A code never re-pins, so a record already pinned keeps its key.
+            guard let at = stored.servers.firstIndex(where: { $0.id == id }), stored.servers[at].hostKey == hostKey
+            else { return nil }
+            return update(stored, at: at, hostKey: hostKey, auth: auth, password: password)
+        case .unpinned(let id):
+            guard let at = stored.servers.firstIndex(where: { $0.id == id }) else { return nil }
+            return update(stored, at: at, hostKey: hostKey, auth: auth, password: password)
+        case .new:
+            return append(stored, destination: code.destination, port: code.port, hostKey: hostKey, auth: auth, password: password)
+        }
+    }
+
+    /// The stored list as `PairingCode.match` reads it.
+    static func known(_ stored: Stored = load()) -> [PairingCode.Known] {
+        stored.servers.map { record in
+            PairingCode.Known(
+                id: record.id,
+                destination: record.destination,
+                port: record.port,
+                fingerprint: record.hostKey.isEmpty ? "" : HostKeyOffer(line: record.hostKey).fingerprint
+            )
+        }
+    }
+
+    private static func update(_ stored: Stored, at: Int, hostKey: String, auth: String, password: String) -> ServerRecord {
+        var servers = stored.servers
+        servers[at].hostKey = hostKey
+        servers[at].auth = auth
+        // The credential before the record, so a list that has been saved
+        // never names a password door with nothing behind it.
+        if auth == "password" { ServerPassword.write(servers[at].id, password) }
+        save(servers: servers, selected: servers[at].id)
+        return servers[at]
+    }
+
+    private static func append(
+        _ stored: Stored, destination: String, port: Int, hostKey: String, auth: String, password: String
+    ) -> ServerRecord {
         // Named after the machine, because pairing asks one question and a
         // second field for a label it can guess would be a second question. It
         // is editable from the connection list afterwards.
@@ -246,8 +290,7 @@ enum ServerStore {
             auth: auth
         )
         if auth == "password" { ServerPassword.write(record.id, password) }
-        stored.servers.append(record)
-        save(servers: stored.servers, selected: record.id)
+        save(servers: stored.servers + [record], selected: record.id)
         return record
     }
 

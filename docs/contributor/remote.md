@@ -550,9 +550,11 @@ https://ledge.sh/pair#v=1&u=dan&h=atlas.example.net&p=2222&k=SHA256:TC7eh5uTmsVc
 | `k` | A host key fingerprint, as `ssh-keygen -lf` prints it | Required and repeatable: one per host key the server offers, at most four different ones. |
 
 `shared/pairing.ts` makes and reads the link, and `ios/Sources/PairingCode.swift`
-reads it on the phone. `ledge-server pair` prints a code on the server. A Mac
-command that shows the code for a connection, and the phone's scanner, are still
-to build, so `docs/user/` does not describe `pair` yet.
+reads it on the phone. `ledge-server pair` prints a code on the server, and the
+phone scans it or opens it as a `ledge://pair` link (ios.md §4). A Mac command
+that shows the code for a connection is still to build. Until ledge.sh serves
+`/pair` and the app claims it as a universal link, the `https` form opens only
+from Ledge's own scanner: the Camera app hands it to Safari.
 
 **The fields travel in the fragment.** A browser never sends the part after `#`,
 so opening the link tells ledge.sh nothing about the server. A script on the
@@ -601,13 +603,31 @@ hands that server the password. A reader therefore follows three rules:
 
 - A code never replaces the pin of a server the phone already has. A code for a
   known address whose fingerprints do not include the pinned key is handled as a
-  changed host key (§4). `ServerStore.pair` re-pins a record at the same address
-  today, so the scanner cannot call it with a code's key.
+  changed host key (§4).
 - A code never dials by itself. The phone shows the account, the host and the
   fingerprint, and pairs only when the person holding it confirms.
 - A tapped link says so on that screen, and asks the person to continue only if
   the link came from their own server. A scanned code came from a screen in
   front of them, and a tapped one could have come from anyone.
+
+**The phone applies the first rule per host and port, not per record.** A host
+key belongs to sshd at an address, so a pin on any account there can refuse a
+code. `PairingCode.match` decides, and `shared/pairing.swift.test.ts` holds it
+to its cases:
+
+| Stored at the code's host and port | What the code does |
+| --- | --- |
+| Nothing | Adds a record. The dial accepts only a key whose fingerprint the code names, and pins it. |
+| This account, pinned to a key the code names | Dials with the pin, as any connection to that record does, and pins nothing. |
+| This account, with its pin dropped | Pins the key the dial accepted, by the same check as a new record. |
+| Any account, pinned to a key the code does not name | Refused before any dial. The screen shows the pinned fingerprint, and the record keeps its pin. |
+
+A host name compares without regard to ASCII case and an account name exactly,
+as DNS and sshd compare them. `ServerStore.pair(code:)` checks the table again
+when it writes, because the page can save the list while the dial is out. The
+typed form's `ServerStore.pair(destination:)` re-pins a record at the same
+address, which is right for a key a person confirmed by eye and is why a code
+never goes through it.
 
 ### `ledge-server pair`
 

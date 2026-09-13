@@ -59,10 +59,26 @@
        A usage string here would describe something this app does not do, and
        would make the App Store ask about a capability it does not use. -->
   <!-- The camera is the other case. Take Photo in Insert Image… runs the system
-       camera in this process, iOS shows this sentence the first time, and an
-       app that opens the camera without it is terminated. -->
+       camera in this process, and so does the pairing code scanner
+       (ios/Sources/CodeScanner.swift). iOS shows this sentence the first time
+       either one asks, and an app that opens the camera without it is
+       terminated. -->
   <key>NSCameraUsageDescription</key>
-  <string>Ledge uses the camera to take a photo for your note.</string>
+  <string>Ledge uses the camera to scan a server's pairing code and to take photos for your notes.</string>
+  <!-- ledge://pair#… opens a pairing code (remote.md §4b). The web view's own
+       ledge://app/ scheme (BundleScheme.swift) never reaches the system, so the
+       two do not meet. -->
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key>
+      <string>dev.ledge.ios.pair</string>
+      <key>CFBundleURLSchemes</key>
+      <array>
+        <string>ledge</string>
+      </array>
+    </dict>
+  </array>
   <!-- What the pairing screen starts with, and only that: a destination is not
        a pin, and the host key still has to be confirmed on the phone. Overridden
        per launch by `simctl launch … -LedgeServer user@host`, which is how a

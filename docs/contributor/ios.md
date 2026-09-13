@@ -413,6 +413,7 @@ address need pinning again — and a rule written twice in two languages has two
 answers. A phone that can reach any server at all can reach the dialog that
 holds them, so every server after the first is still added from the connection
 dialog like a Mac's (remote.md §8): the same list, the same fingerprint step.
+A pairing code is the exception, below.
 The key line the pairing screen hands over is the same line that dialog's form
 shows, carried across on `@hello` because it is a fact about the device rather
 than about any connection to one.
@@ -421,6 +422,37 @@ than about any connection to one.
 screen that has no page, so `PairingCode.swift` reads it in Swift beside
 `shared/pairing.ts`. The two are held to one answer by a shared file of vectors
 that `bun test` runs through both (remote.md §4b).
+
+**A code opens the pairing form rather than a screen of its own.** The address
+fields become the code's account, host, port and fingerprints, and the sign-in
+half is the same controls. The host key is judged by `PairingCode.match`
+against the stored list (remote.md §4b's table): a new record or a dropped pin
+dials with `CodeHostKey`, which accepts a key whose fingerprint the code names
+and refuses any other without asking, and a record already pinned dials with
+its pin. That is the one place a fingerprint decides which key gets pinned,
+because a code carries nothing else. Every connection after it compares the
+pinned bytes.
+
+**The camera is AVFoundation's QR reader, not VisionKit's.**
+`DataScannerViewController` refuses devices older than an A12, and iOS 17 still
+runs on A10 iPads. `CodeScannerViewController` asks for the camera the first
+time, sends a refusal to Settings, and ends on the first frame that reads as a
+code. A QR code that is not one leaves the camera running with its problem as
+the hint. The Simulator has no camera, so the scan button answers there with an
+alert, and a probe opens a link instead (testing.md §6).
+
+**A link arrives through `application(_:open:options:)`, under the `ledge` URL
+scheme.** The web view's `ledge://app/` scheme is WebKit's and never reaches the
+system, so the two do not meet. A link opens over whatever the window shows.
+Over the shell's screens the form is pushed onto the stack. Over the app it is a
+sheet, and the page keeps its connection until Connect succeeds and `show`
+rebuilds around the new selection. That makes a code the one way a server is
+added natively while a page is up: a link can open the app at any moment, and
+the page may not exist to answer it. The pairing dial uses this install's client
+id, so a code for the server the page is on displaces the page's connection a
+moment before the rebuild (remote.md §7). A `https://ledge.sh/pair` link reaches
+the app the same way once the site and the Associated Domains entitlement exist
+(§12), and until then only the scanner reads that form.
 
 The same call carries what this phone calls itself, which every other client on
 the server it dials is pushed (remote.md §7): it is what a Mac's notice says when
@@ -1280,8 +1312,8 @@ Per `testing.md`'s categories:
   and the `authorized_keys` line the pairing screen generates, which must
   match what remote.md §4 specifies character for character. The one Swift
   file with a unit test is `PairingCode.swift`: `shared/pairing.swift.test.ts`
-  compiles it with `swiftc` and runs it over the pairing code vectors
-  (remote.md §4b).
+  compiles it with `swiftc` and runs it over the pairing code vectors and the
+  cases of the rule that keeps a code from replacing a pin (remote.md §4b).
 - **e2e (headless WebKit)**: a phone is the same view at a phone's viewport,
   so the harness gained a mobile project at 390x844 rather than a second
   harness (phase 2, done). WebKit at that size is what catches a palette

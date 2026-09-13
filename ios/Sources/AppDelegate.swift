@@ -116,12 +116,66 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     private func pairingScreen(suggest: String, port: Int, because: String?) -> PairingViewController {
         PairingViewController(
             client: ShellConfig.current().client,
-            suggest: suggest,
-            suggestPort: port,
-            because: because
+            start: .typed(suggest: suggest, port: port),
+            because: because,
+            onScan: { [weak self] in self?.scan() }
         ) { [weak self] _ in
             self?.show()
         }
+    }
+
+    /// The camera, over the shell's screens. A code it reads opens that code's
+    /// pairing screen on top of the form the scan started from.
+    private func scan() {
+        guard let nav = chooser else { return }
+        CodeScannerViewController.open(over: nav) { [weak self] code in
+            nav.dismiss(animated: true) { self?.openCode(code, tapped: false) }
+        }
+    }
+
+    /// A `ledge://pair#…` link. Universal links on ledge.sh arrive the same way
+    /// once the site and the Associated Domains entitlement exist (ios.md §12).
+    func application(_ app: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey: Any] = [:]) -> Bool {
+        switch PairingCode.read(url.absoluteString) {
+        case .code(let code):
+            openCode(code, tapped: true)
+        case .problem(let problem):
+            let alert = UIAlertController(title: "Ledge cannot open this link", message: problem, preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "OK", style: .cancel))
+            topmost()?.present(alert, animated: true)
+        }
+        return true
+    }
+
+    /// A pairing code's screen, which dials only when the person holding the
+    /// phone presses Connect (remote.md §4b). Over the app when the app is what
+    /// the window shows, so the connection it has stays up until a pairing
+    /// replaces it.
+    private func openCode(_ code: PairingCode, tapped: Bool) {
+        let screen = PairingViewController(
+            client: ShellConfig.current().client,
+            start: .code(code, tapped: tapped),
+            because: nil
+        ) { [weak self] _ in
+            // The launch arguments would otherwise shadow the record just paired.
+            ServerStore.setLaunchAside()
+            self?.window?.rootViewController?.dismiss(animated: false)
+            self?.show()
+        }
+        if let chooser { return chooser.pushViewController(screen, animated: true) }
+        let sheet = UINavigationController(rootViewController: screen)
+        screen.navigationItem.leftBarButtonItem = UIBarButtonItem(
+            systemItem: .cancel,
+            primaryAction: UIAction { [weak sheet] _ in sheet?.dismiss(animated: true) }
+        )
+        topmost()?.present(sheet, animated: true)
+    }
+
+    /// The view controller a new alert or sheet can be presented from.
+    private func topmost() -> UIViewController? {
+        var top = window?.rootViewController
+        while let next = top?.presentedViewController { top = next }
+        return top
     }
 
     /// A failure retrying cannot fix. The refused record's pin is dropped and
