@@ -6,6 +6,9 @@ import {
   dockerPlatform,
   ELF_MACHINE,
   elfMachine,
+  GLIBC_FLOOR,
+  glibcNeeded,
+  glibcNewer,
   manifest,
   missingTargets,
   NATIVE_TARGETS,
@@ -182,5 +185,26 @@ describe("elfMachine", () => {
 
   test("a truncated read is not an architecture", () => {
     expect(elfMachine(new Uint8Array([0x7f, 0x45, 0x4c, 0x46]))).toBeNull();
+  });
+});
+
+describe("glibcNeeded", () => {
+  const bytes = (text: string) => new TextEncoder().encode(`\x7fELF\0${text}\0`);
+
+  // What objdump -T showed in the trampolines linked on Debian 12, before the C
+  // stopped calling login_tty: GLIBC_2.17 for everything else.
+  test("names the newest version a library requires", () => {
+    expect(glibcNeeded(bytes("GLIBC_2.17\0login_tty\0GLIBC_2.34"))).toBe("2.34");
+    expect(glibcNewer("2.34", GLIBC_FLOOR)).toBe(true);
+  });
+
+  test("compares minor versions as numbers", () => {
+    expect(glibcNeeded(bytes("GLIBC_2.9\0GLIBC_2.17"))).toBe("2.17");
+    expect(glibcNewer("2.9", GLIBC_FLOOR)).toBe(false);
+    expect(glibcNewer(GLIBC_FLOOR, GLIBC_FLOOR)).toBe(false);
+  });
+
+  test("a library that names no glibc version needs none", () => {
+    expect(glibcNeeded(bytes("GLIBC_PRIVATE"))).toBeNull();
   });
 });

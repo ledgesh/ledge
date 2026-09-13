@@ -85,6 +85,8 @@ bun run ios          # the iOS client in the Simulator (`-- --phone` for a devic
 bun run probe:ssh    # the ssh hop against a real sshd in Docker (`-- --serve` for a phone)
 bun run build:npm    # assemble the publishable `ledge-server` package (Mac + Docker; remote.md §11)
 bun run probe:npm    # install that package on a toolchain-free container and drive it
+bun run build:server # a server release: a tarball per target with its own Bun, and server.sh (remote.md §11)
+bun run probe:install # run that server.sh on Debian, Ubuntu and Alpine, dial it over sshd, update it
 ```
 
 Done means: tsc clean, build clean, tests green (e2e too when UI behavior

@@ -51,14 +51,11 @@ const arches = !MAC
 mkdirSync(OUT_DIR, { recursive: true });
 writeFileSync(SRC, NATIVE_C);
 
-// -lutil is the one link flag the port needs. It is a no-op on a modern glibc,
-// which folded libutil into libc.so.6 in 2.34, and stays for older ones, where
-// login_tty and openpty are still in libutil.
 function compile(archFlags: string[]): { ok: boolean; stderr: string } {
   const flags = MAC
     ? [...archFlags, `-mmacosx-version-min=${MIN_MACOS}`, "-dynamiclib"]
     : ["-shared", "-fPIC"];
-  const p = Bun.spawnSync(["cc", ...flags, "-O2", "-o", OUT, SRC, ...(MAC ? [] : ["-lutil"])], {
+  const p = Bun.spawnSync(["cc", ...flags, "-O2", "-o", OUT, SRC], {
     stdout: "pipe",
     stderr: "pipe",
   });

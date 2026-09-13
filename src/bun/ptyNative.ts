@@ -87,8 +87,8 @@ export const PLATFORM = process.platform === "darwin"
     POSIX_SPAWN_SETSID: 0x0080,
   };
 
-// ledge_spawn_tty runs login_tty (setsid, TIOCSCTTY, dup onto 0/1/2) in the
-// child, between fork and exec. That gives the shell a controlling terminal,
+// ledge_spawn_tty does login_tty's work (setsid, TIOCSCTTY, dup onto 0/1/2) in
+// the child, between fork and exec. That gives the shell a controlling terminal,
 // which is what makes ^C reach it: a tty turns ^C into SIGINT only for its
 // foreground process group, and it has such a group only once some process has
 // claimed it. On macOS the claim needs an explicit ioctl(TIOCSCTTY), since the
@@ -117,18 +117,13 @@ export const PLATFORM = process.platform === "darwin"
 // long line. O_NONBLOCK turns that wait into EAGAIN, which pty.ts can queue
 // and retry.
 //
-// The one `#if` in the includes is login_tty's two homes: <util.h> on BSD, and
-// <utmp.h> on glibc, whose <pty.h> holds openpty and forkpty instead
-// (architecture.md §8).
+// It makes those calls itself, the ones Apple's and glibc's login_tty make,
+// rather than calling login_tty. glibc 2.34 moved login_tty from libutil into
+// libc, so a library that calls it and is linked on 2.34 or later does not load
+// on an older glibc, and the server there ran without trampolines (remote.md §11).
 export const NATIVE_C = `#include <fcntl.h>
 #include <sys/ioctl.h>
 #include <termios.h>
-#if defined(__linux__)
-#include <pty.h>
-#include <utmp.h>
-#else
-#include <util.h>
-#endif
 #include <unistd.h>
 
 int ledge_spawn_tty(int slave_fd, int master_fd, const char *cwd,
@@ -136,7 +131,10 @@ int ledge_spawn_tty(int slave_fd, int master_fd, const char *cwd,
   pid_t pid = fork();
   if (pid != 0) return (int)pid;
   close(master_fd);
-  if (login_tty(slave_fd) < 0) _exit(126);
+  setsid();
+  if (ioctl(slave_fd, TIOCSCTTY, 0) < 0) _exit(126);
+  if (dup2(slave_fd, 0) < 0 || dup2(slave_fd, 1) < 0 || dup2(slave_fd, 2) < 0) _exit(126);
+  if (slave_fd > 2) close(slave_fd);
   if (cwd && cwd[0] && chdir(cwd) != 0) _exit(125);
   execve(path, argv, envp);
   _exit(127);

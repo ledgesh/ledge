@@ -11,12 +11,15 @@
 // Publishing is not here. `npm publish` has no undo, so it stays in the release
 // runbook (releasing.md §6), next to the signing credentials and read by a
 // person.
-import { chmodSync, copyFileSync, existsSync, mkdirSync, openSync, readSync, closeSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, readSync, closeSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import {
   dockerPlatform,
   ELF_MACHINE,
   elfMachine,
+  GLIBC_FLOOR,
+  glibcNeeded,
+  glibcNewer,
   manifest,
   missingTargets,
   NATIVE_TARGETS,
@@ -156,6 +159,12 @@ for (const t of targets.filter((x) => x.platform === "linux")) {
         `expected 0x${want!.toString(16)} for ${t.arch}.`,
     );
     console.error(`[npm] docker built for the wrong architecture; check that ${dockerPlatform(t)} can be emulated.`);
+    process.exit(1);
+  }
+  const needs = glibcNeeded(readFileSync(lib));
+  if (needs && glibcNewer(needs, GLIBC_FLOOR)) {
+    console.error(`[npm] ${nativePath(t)} requires glibc ${needs}, and servers down to glibc ${GLIBC_FLOOR} are supported.`);
+    console.error("[npm] it calls a function whose symbol version moved; objdump -T names it (ptyNative.ts).");
     process.exit(1);
   }
 }

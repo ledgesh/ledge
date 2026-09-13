@@ -5,8 +5,8 @@
 //
 // This is the one test file that is also the Linux port's proof. `pty.ts`
 // reaches libc by name and by flag value, and both differ between libSystem
-// and glibc (`ptyNative.ts`, PLATFORM). The C reaches login_tty through a
-// different header on each. A mistake there is invisible in the source and
+// and glibc (`ptyNative.ts`, PLATFORM), and the C claims a controlling terminal
+// with an ioctl on both. A mistake there is invisible in the source and
 // fails quietly: a terminal that runs commands fine and has no Ctrl-C. The
 // suite runs in the container too (`Dockerfile`, `docs/contributor/remote.md`
 // §13), so the same assertions answer for both libcs.
@@ -150,7 +150,7 @@ describe("a shell on a pty", () => {
     }
   });
 
-  // The claim that separates a pty from a pipe. login_tty ran, so the child is
+  // The claim that separates a pty from a pipe. TIOCSCTTY ran, so the child is
   // a session leader whose session holds this terminal, and `tty` can name it.
   test("the child holds the terminal as its controlling one", async () => {
     const pty = shell();

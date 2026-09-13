@@ -14,6 +14,11 @@ dist-ios/
 dist-npm/
 build/
 
+# A server release (scripts/build-server.ts): a tarball per target and the
+# install script, and the pinned Bun downloads those tarballs are packed from.
+dist-server/
+dist-bun/
+
 # What `npm pack ./dist-npm` drops in the current directory, on the way to a
 # publish or to a test machine.
 ledge-server-*.tgz

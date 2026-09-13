@@ -435,9 +435,10 @@ async function tryConnect(socketPath: string): Promise<Fed | null> {
  * writes, so a crash Bun reports before any app code runs is not lost. Both
  * writers open that file O_APPEND, the one interleaving guarantee POSIX gives.
  *
- * `process.execPath` is the compiled binary in a shipped build and `bun` in a
- * checkout, so the script path goes back on the command line only in the second
- * case: `bun serve.ts daemon` there, `ledge-server daemon` here.
+ * `process.execPath` is `bun` in a checkout, the npm package and a server.sh
+ * install, and the binary itself for a `bun build --compile` server, so the
+ * entry script goes back on the command line only in the first cases:
+ * `bun bin/ledge-server.js daemon` there, `ledge-server daemon` here.
  */
 function spawnDaemon(): void {
   // --autostart is what makes the idle timeout apply: this daemon exists

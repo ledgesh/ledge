@@ -113,6 +113,32 @@ export function elfMachine(header: Uint8Array): number | null {
   return little ? lo | (hi << 8) : hi | (lo << 8);
 }
 
+/** The oldest glibc a Linux server supports, set by posix_spawn_file_actions_addchdir_np (remote.md §11). */
+export const GLIBC_FLOOR = "2.29";
+
+/**
+ * The newest glibc symbol version an ELF requires, like "2.34", or null when it
+ * names none. The `GLIBC_x.y` strings in a library are the versions the dynamic
+ * linker checks, so one above GLIBC_FLOOR leaves the trampolines unloadable on
+ * the older servers the floor promises. Linking on a newer glibc is how that
+ * happens, with no error at build time.
+ */
+export function glibcNeeded(bytes: Uint8Array): string | null {
+  let newest: [number, number] | null = null;
+  for (const m of new TextDecoder("latin1").decode(bytes).matchAll(/GLIBC_(\d+)\.(\d+)/g)) {
+    const v: [number, number] = [Number(m[1]), Number(m[2])];
+    if (!newest || v[0] > newest[0] || (v[0] === newest[0] && v[1] > newest[1])) newest = v;
+  }
+  return newest ? `${newest[0]}.${newest[1]}` : null;
+}
+
+/** Whether glibc `a` is newer than `b`, both spelled "2.34". */
+export function glibcNewer(a: string, b: string): boolean {
+  const [am = 0, an = 0] = a.split(".").map(Number);
+  const [bm = 0, bn = 0] = b.split(".").map(Number);
+  return am > bm || (am === bm && an > bn);
+}
+
 export interface Manifest {
   name: string;
   version: string;

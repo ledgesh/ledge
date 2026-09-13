@@ -15,6 +15,7 @@
     "build:cli": "bun build src/bun/cli.ts --target=bun --outdir=dist-cli",
     "build:native": "bun scripts/build-native.ts",
     "build:npm": "bun scripts/build-npm.ts",
+    "build:server": "bun scripts/build-server.ts",
     "icon": "bun scripts/make-icon.ts",
     "mcp": "bun src/bun/mcp.ts",
     "serve": "bun src/bun/serve.ts serve",
@@ -25,6 +26,7 @@
     "test:e2e": "caffeinate -dimsu playwright test",
     "probe:ssh": "bun scripts/probe-ssh.ts",
     "probe:npm": "bun scripts/probe-npm.ts",
+    "probe:install": "bun scripts/probe-install.ts",
     "ios": "bun scripts/ios-build.ts",
     "licenses": "bun scripts/licenses.ts"
   },

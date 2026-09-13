@@ -1958,14 +1958,24 @@ four. The architecture each container produced is read back out of the ELF
 header before it is packaged, because `docker build --platform` is a request a
 daemon without that emulator can answer with the host's architecture.
 
-**The port is three names and one value.** `pty.ts` reaches libc by name, and
+**The port is two names and one value.** `pty.ts` reaches libc by name, and
 almost nothing else about it differs: `O_RDWR`, `POLLIN` and `struct pollfd`
-agree, and every function in the table is POSIX. What does not agree is where
-`openpty` lives (libutil below glibc 2.34, libc at and above it, so it gets a
-handle of its own because `dlopen` resolves a table all at once), which header
-declares `login_tty` (`<util.h>` on BSD, `<utmp.h>` on glibc), and
-`POSIX_SPAWN_SETSID` (0x0400 against 0x0080, a value whose divergence is
-silent). `TIOCSWINSZ` differs too and never reaches TypeScript, because the
+agree, and every function in the table is POSIX. What does not agree is the C
+library's own name, where `openpty` lives (libutil below glibc 2.34, libc at
+and above it, so it gets a handle of its own because `dlopen` resolves a table
+all at once), and `POSIX_SPAWN_SETSID` (0x0400 against 0x0080, a value whose
+divergence is silent).
+
+**The trampolines do not call `login_tty`.** glibc 2.34 moved it from libutil
+into libc under a new symbol version, so the `.so` built in the Debian 12
+container required `GLIBC_2.34` and did not load on Debian 11 or Ubuntu 20.04,
+which the floor above promises. Nothing failed at build time. The server ran
+there without its trampolines: no resize, and a warning in the daemon log.
+`bun run probe:install` found it on `ubuntu:20.04`. The child now makes the
+calls `login_tty` makes in Apple's libc and in glibc: `setsid`,
+`ioctl(TIOCSCTTY)` and three `dup2`s. `build-npm.ts` reads
+the `GLIBC_x.y` versions each Linux library requires (`npmPackage.ts`,
+`glibcNeeded`) and refuses one above the floor. `TIOCSWINSZ` differs too and never reaches TypeScript, because the
 `ioctl` goes through the trampoline and the compiler substitutes the right
 one; that is a second reason for the trampoline beyond the variadic one. The
 table is `ptyNative.ts`'s `PLATFORM`, and the rest of `src/bun/` is `node:fs`,
@@ -2117,6 +2127,35 @@ stderr is that the binary is sitting in `~/.bun/bin`. Diagnosing that from the
 client was considered and rejected — a probe that goes looking for an install
 the PATH denies is scaffolding around a broken install line, and the install
 line was the thing to fix.
+
+**`server.sh` installs a release that carries its own Bun.** `curl -fsSL
+https://ledge.sh/server.sh | sh` needs no npm, no Bun of the user's and no
+`sudo`. `scripts/build-server.ts` packs the npm package's bundle and one
+target's trampolines with a pinned Bun (`bun/serverRelease.ts`) into a tarball
+per target, and renders `release/server.sh` with that release's version and
+checksums written in, so the script never reads a manifest. The script:
+
+| Step | What it does |
+| --- | --- |
+| Account | Refuses root. The server belongs in the home of the account Ledge signs in to, and `curl … \| sudo -iu ledge sh` is the command for a service account. |
+| Platform | Picks darwin or linux and arm64 or x64, treats a Rosetta shell as arm64, and refuses musl and glibc below 2.29 before downloading anything. |
+| Download | Checks the tarball's SHA-256 and runs the Bun inside it before anything is moved into place, so a Bun that cannot run here is refused with its own error. |
+| Layout | Unpacks into `~/.ledge-server/versions/<version>` and renames a new `~/.ledge-server/bin/ledge-server` over the old one: a two-line `sh` launcher that execs that version's `bun` on its `bin/ledge-server.js`. |
+| Update | Keeps the previous version and deletes older ones. |
+| PATH | Appends one line to the login shell's startup file, for the user's own terminals. ssh does not need it, because §4a's prefix is in the command. |
+
+The private Bun is why this beats a compiled binary. The file is named `bun`,
+so `runner.ts`'s `bundledBun` gives a ```ts fence that Bun and `daemon.ts`'s
+`spawnDaemon` restarts the daemon on it: a fence runs on a machine with no Bun
+installed, where a compiled server would have fallen back to the PATH's.
+
+**An update does not stop a running server.** The launcher changes and the
+daemon an ssh started does not: it goes on serving new connections from the old
+version until its idle exit (`IDLE_EXIT_MS`, §7), and the next connection
+starts the new one. Keeping the previous version on disk is what keeps that
+daemon's fences and its own restart working in the meantime. The script says so
+after an update rather than stopping the daemon, which would end shells somebody
+is using.
 
 **Clients that install the server themselves are still not built.** The design
 is VS Code's: connect, read the server's version from the handshake, offer to
@@ -2304,6 +2343,24 @@ Per `testing.md`'s categories:
   acquires a controlling terminal anyway. `pty.ts` had claimed the opposite in
   two comments and a warning string, and the probe had a check that passed
   either way.
+- **The install script, on machines with no Bun** (`bun run probe:install`,
+  after `bun run build:server`). `server.sh` runs on `debian:12` and
+  `ubuntu:20.04` (glibc 2.31) as the manual will say, `curl … | sudo -iu ledge
+  sh`, after root has been refused and before anything else is installed. Then
+  Ledge's own client dials the installed server through a real sshd twice: with
+  the command `sshDial` builds, and under a phone's forced-command key. The
+  first assertion over ssh is that sshd's own PATH does NOT find
+  `ledge-server`, so the connections that follow prove §4a's prefix. It drives a
+  shell, a resize, Ctrl-C and a ```ts block (the private Bun's reason to exist),
+  checks the daemon started itself from `versions/<version>/bun`, and runs
+  `ledge-server pair` the way the script's last line says. On Debian it then
+  installs a second version with a client still connected: the running daemon
+  keeps serving, exits on its own once nothing is connected, and the next
+  connection starts the new one. Ubuntu 20.04 is there for its glibc, and its
+  first run found trampolines that did not load below glibc 2.34 (§11), which
+  `probe:npm`'s Debian 12 could not see. `alpine:3` is refused as musl, and on a Mac
+  the darwin tarball goes into a scratch HOME and is started as macOS's sshd
+  would start it, `zsh -c` with `/usr/bin:/bin:/usr/sbin:/sbin`.
 - **Live probe (`testing.md` §6, scratch `LEDGE_NOTES_ROOT`)**: a real ssh
   round trip, `bun run probe:ssh`, since ssh, the forced command, and
   host-key pinning are native seams the harness cannot fake. It builds the

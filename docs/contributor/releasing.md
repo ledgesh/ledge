@@ -258,6 +258,51 @@ that has never existed also decides the account that owns it forever. Neither
 is a step that can be rehearsed, so `npm publish --dry-run ./dist-npm` is the
 rehearsal: it prints the exact file list and the tarball size without uploading.
 
+### The install script and its tarballs
+
+`curl -fsSL https://ledge.sh/server.sh | sh` installs the server without npm or
+a Bun of the user's own (`remote.md` §11). ledge.sh redirects `/server.sh` to
+`https://github.com/ledgesh/ledge/releases/latest/download/server.sh`, so a user
+gets the script attached to the newest published GitHub release. The redirect
+lives in `ledgesh/ledge-www`.
+
+Build the files on this Mac, with Docker running:
+
+```
+bun run build:server
+```
+
+It runs `build:npm` first, then writes `dist-server/`:
+
+| File | What it is |
+| --- | --- |
+| `ledge-server-<version>-<os>-<arch>.tar.gz` | One per target: the pinned Bun, the bundle, that target's trampolines, and the license texts. |
+| `server.sh` | The install script, `release/server.sh` with this version and each tarball's SHA-256 written in. |
+| `SHA256SUMS` | The SHA-256 of every file above. |
+
+Then install those files on machines that could not have built them:
+
+```
+bun run probe:install
+```
+
+It needs the host's two targets, so on an Apple silicon Mac build with
+`--targets=darwin-arm64,linux-arm64` for a quick check, and without `--targets`
+before a release. Its update step waits for a daemon's idle exit, so it takes a
+few minutes.
+
+Upload all six files to the `v<version>` release alongside the app's (§4).
+`server.sh` downloads its tarball from the tag it was built for, so a script
+and tarballs from different builds fail at the checksum. GitHub's `latest`
+skips drafts and pre-releases, so publishing the release is what gives
+`curl … | sh` the new version.
+
+**The Bun inside is pinned in `src/bun/serverRelease.ts`**, as a version and
+the SHA-256 of each Bun download, and `serverRelease.test.ts` fails when that
+version differs from the one CI runs the suite on. Raising it means copying
+the four zips' hashes from that Bun release's `SHASUMS256.txt`, and the hash of
+its `LICENSE.md`.
+
 ## 7. Updates
 
 Every stable build checks `https://ledge.sh/updates` for a newer one: ten
@@ -333,12 +378,12 @@ it before relying on it.
 
 ## 8. What is not automated
 
-- **Publishing.** Nothing uploads `artifacts/`, nothing publishes a tag to the
-  update server (§7), and nothing runs `npm publish` (§6). CI builds the app but
-  does not release it.
-- **The server package in `bun run release`.** The release script builds the Mac
-  app and stops; `bun run build:npm` is a second command, run by hand. Folding
-  it in means the release depends on Docker being up, which is a fair trade to
-  make later and not one to discover mid-release.
+- **Publishing.** Nothing uploads `artifacts/` or `dist-server/`, nothing
+  publishes a tag to the update server (§7), and nothing runs `npm publish`
+  (§6). CI builds the app but does not release it.
+- **The server in `bun run release`.** The release script builds the Mac app and
+  stops; `bun run build:server` (which runs `build:npm`) is a second command,
+  run by hand. Folding it in means the release depends on Docker being up,
+  which is a fair trade to make later and not one to discover mid-release.
 - **The signed build in CI.** Signing needs the certificate and the credentials,
   and both live on this machine only.

@@ -39,12 +39,11 @@ const EXT: Record<string, string> = {
 /**
  * Returns what to pass as `bunPath` for a run on this machine: `execPath` when
  * the running binary is a bun, and "" when it is not. The app's main process
- * is a bun (Electrobun ships one as `Ledge.app/Contents/MacOS/bun`), so a
- * ```ts fence runs there with nothing installed. `ledge-server` is that same
- * bun with the server compiled into it, and a compiled binary runs only its
- * embedded program. It gets "" instead, so its fences use the PATH's `bun`:
- * they run where one is installed, and say "command not found" where none is
- * (remote.md §11).
+ * is a bun (Electrobun ships one as `Ledge.app/Contents/MacOS/bun`), and so is
+ * a server installed by server.sh, which runs on the Bun its release carries.
+ * A ```ts fence runs on either with nothing else installed. A server built with
+ * `bun build --compile` runs only its embedded program, so it gets "" and its
+ * fences use the PATH's `bun` (remote.md §11).
  *
  * The check is the binary's name. A compiled binary is named after the program
  * inside it, never `bun`. daemon.ts checks the same way, for the same reason.

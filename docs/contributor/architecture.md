@@ -1094,7 +1094,7 @@ Bun-side: prefer `bun:ffi` and POSIX over native modules — node-pty is out for
 exactly this reason; the PTY is posix_spawn + poll.
 
 **The one compiled artifact: `libledge_pty`.** Two things the PTY cannot do
-through `bun:ffi` alone are C trampolines — `login_tty` between fork and exec
+through `bun:ffi` alone are C trampolines: `login_tty`'s work between fork and exec
 (a controlling terminal, hence Ctrl-C) and a fixed-arity `ioctl(TIOCSWINSZ)`
 (resize, since bun:ffi mis-marshals variadics on arm64, and since the constant
 itself differs between the two kernels). Their source and signatures live in
@@ -1104,9 +1104,11 @@ same text in-process with bun:ffi's TinyCC.
 
 One artifact, two spellings of it: a signed universal `.dylib` the copy map
 ships beside `index.js` in the Mac bundle, and a plain `.so` beside the server
-binary on Linux (`remote.md` §11). One C source with one `#if defined(__linux__)`
-in its includes, because `login_tty` is declared in `<util.h>` on BSD and
-`<utmp.h>` on glibc. There is no fat ELF, so the Linux side has no universal
+binary on Linux (`remote.md` §11). One C source with no `#if`: the child makes
+`login_tty`'s four calls itself (`setsid`, `ioctl(TIOCSCTTY)`, three `dup2`s)
+rather than calling it, since a library that calls it and is linked on glibc
+2.34 or later does not load on an older one. There is no fat ELF, so the Linux
+side has no universal
 build and no `-arch` flags: the server is compiled in a container of its
 target's architecture instead.
 

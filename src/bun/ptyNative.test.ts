@@ -31,16 +31,12 @@ int wanted(int fd) {
     expect(NATIVE_LIB).toBe(process.platform === "darwin" ? "libledge_pty.dylib" : "libledge_pty.so");
   });
 
-  // login_tty is declared in <util.h> on BSD and in <utmp.h> on glibc. A
-  // source that includes only one of them compiles on one platform and fails
-  // on the other. On the in-process compile path nobody sees a build error:
-  // the failure shows up at first spawn, as the console warning pty.ts's
-  // loadNative prints when it has no trampolines.
-  test("the C reaches login_tty on both libcs", () => {
-    expect(NATIVE_C).toContain("#if defined(__linux__)");
-    expect(NATIVE_C).toContain("#include <pty.h>");
-    expect(NATIVE_C).toContain("#include <utmp.h>");
-    expect(NATIVE_C).toContain("#include <util.h>");
+  // A call to login_tty binds to login_tty@GLIBC_2.34 when the library is
+  // linked on a newer glibc, and that library does not load below 2.34
+  // (ptyNative.ts). npmPackage.ts's glibcFloor catches it in a built .so too.
+  test("the C does login_tty's work without calling it", () => {
+    expect(NATIVE_C).not.toMatch(/\blogin_tty\s*\(/);
+    expect(NATIVE_C).toContain("ioctl(slave_fd, TIOCSCTTY, 0)");
   });
 
   // Every other constant pty.ts defines has the same value on both libcs, so
