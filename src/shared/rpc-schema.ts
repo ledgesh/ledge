@@ -264,17 +264,11 @@ export type LedgeRPC = {
       // when it is unset or names a root that is gone. It says where ⌘J acts,
       // and the Edit Daily Template faces need that root to aim at. Read at
       // boot like the setting itself, so a change applies at the next launch.
-      // `cliShim` rides along for the same reason: it is a fact about the
-      // machine this registry lives on, namely whether it has a CLI to put on
-      // a PATH for Install Shell Command. The app's daemon carries one beside
-      // its entry; a compiled `ledge-server` does not. The view leaves the
-      // verb out where it is false (mainview/lib/shell.ts).
       workspaceList: {
         params: {};
         response: {
           workspaces: WorkspaceRootInfo[];
           dailyRoot: string | null;
-          cliShim: boolean;
         };
       };
       // Create a managed workspace folder from a display name. Bun slugs the
@@ -790,11 +784,14 @@ export type LedgeRPC = {
       // a thing with a screen.
       settingsRead: { params: { home: SettingsHome }; response: { text: string } };
       settingsWrite: { params: { home: SettingsHome; text: string }; response: { ok: boolean } };
-      // Write the `ledge` CLI shim onto the PATH (the Install Shell Command
-      // palette entry). Bun composes the whole `message`, because it alone
-      // knows the shim's landing dir, the PATH answer, and the failure. The
-      // view only surfaces the text: a notice strip when `ok`, an error strip
-      // otherwise. This never throws across the RPC, and failure is data.
+      // Put `ledge` and `ledge-server` on this Mac's PATH (the Install Shell
+      // Command palette entry). The client's, not the server's (remote.md
+      // §10): the shims land on the machine with the screen and run its own
+      // copy (bun/cliShim.ts), whichever server the window is showing. The
+      // shell composes the whole `message`, because it alone knows where the
+      // shims went, the PATH answer, and the failure. The view only surfaces
+      // the text: a notice strip when `ok`, an error strip otherwise. This
+      // never throws across the RPC, and failure is data.
       cliInstall: { params: {}; response: { ok: boolean; message: string } };
       // Put a view-side failure in the session log (bun/log.ts). The webview
       // has no console anyone can read in a shipped build, since WKWebView's

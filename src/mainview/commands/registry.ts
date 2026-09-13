@@ -75,7 +75,7 @@ import { docIdsForPath, notesOf, trashOf } from "@/workspace/store";
 import { SCRATCH_DOC } from "@/workspace/seeds";
 import { parseFrontmatter } from "../../shared/frontmatter";
 import type { NoteMeta } from "../../shared/rpc-schema";
-import { canInstallCli, hasTerminal, multiWindow, runsBlocks, spawnsSessions } from "../lib/shell";
+import { hasTerminal, installsCli, multiWindow, runsBlocks, spawnsSessions } from "../lib/shell";
 import { docsWindow } from "../lib/windows";
 import { offersCheck, updateState } from "../lib/updates";
 import { activeConnection, linkState, reconnectLink } from "../lib/connections";
@@ -731,14 +731,15 @@ export function buildCommands(deps: RegistryDeps): Command[] {
       when: () => multiWindow(),
       run: () => deps.newWindow(),
     }),
-    // Put `ledge` on the PATH. The outcome always surfaces, so nobody has to
-    // go hunting in a bin dir: success (where it landed, whether PATH sees it)
-    // in the neutral strip, failure (a foreign file holding the name) in the
-    // error strip. The PATH is the notes machine's, and a compiled server has
-    // no CLI to install, so canInstallCli hides the verb there (lib/shell.ts).
+    // Put `ledge` and `ledge-server` on this Mac's PATH. The outcome always
+    // surfaces, so nobody has to go hunting in a bin dir: success (where they
+    // landed, what was done about PATH) in the neutral strip, failure (a
+    // foreign file holding a name) in the error strip. This client's act,
+    // whichever server the window shows, and absent on a client with no PATH
+    // to write to (lib/shell.ts installsCli).
     cmd("cli.install", {
       icon: TerminalSquare,
-      when: () => canInstallCli(),
+      when: () => installsCli(),
       run: (ctx) => {
         void deps.installCli().then((r) => {
           if (r.ok) ctx.ui.showNotice?.(r.message);

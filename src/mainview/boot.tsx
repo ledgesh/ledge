@@ -31,7 +31,6 @@ import { captureFailures, configureLog } from "./lib/log";
 import { hideBooting, showBooting } from "./lib/booting";
 import { configureAssets } from "./lib/assets";
 import { configureSettings } from "./lib/settings";
-import { recordServerCaps } from "./lib/shell";
 import { configureConnections, reconnectLink, recordLinkState, recordPresence, type ConnectionStatus } from "./lib/connections";
 import { holdSaves } from "./notes/store";
 import { resolveStrandedNotes } from "./workspace/editorPool";
@@ -373,11 +372,6 @@ async function boot(requests: RequestClient): Promise<void> {
     // Edit Daily Template faces (workspace/channel.ts).
     recordWorkspaceKinds(roots);
     recordDailyRoot(registry.dailyRoot);
-    // What the machine holding the notes can do for itself: hand over a CLI
-    // to install (lib/shell.ts). Recorded here for the same reason the two
-    // above are: this fetch bypasses the channel wrapper, and it is the first
-    // round trip, so the answer is in place before the first palette opens.
-    recordServerCaps(registry);
     // The manual's window lists one folder, its own. It can show nothing else,
     // and listing a workspace over a big external folder would slow a window
     // that opened only to read the manual.

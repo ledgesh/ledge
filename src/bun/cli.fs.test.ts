@@ -385,19 +385,6 @@ describe("workspaces", () => {
   });
 });
 
-describe("install", () => {
-  test("an explicit dir gets the shim, path on stdout, PATH hint on stderr", async () => {
-    const bin = join(APP_HOME, "shim-bin"); // scratch by construction, never a real bin dir
-    const r = await run(["install", bin]);
-    expect(r.code).toBe(0);
-    expect(r.out).toEqual([join(bin, "ledge")]);
-    expect(r.err.join("\n")).toContain("not on your PATH");
-    const text = await Bun.file(join(bin, "ledge")).text();
-    expect(text).toContain('"$@"'); // the shim execs this entry, forwarding the caller's arguments
-    expect(text).toContain("cli.ts");
-  });
-});
-
 describe("open (the bare-title form)", () => {
   test("a title writes the request file and launches the app", async () => {
     await run(["new", "Meeting", "Notes"], { cwd: ROOT });
@@ -433,11 +420,12 @@ describe("open (the bare-title form)", () => {
   });
 });
 
-// The spawned seam: the `bun src/bun/cli.ts` a shim would exec. The spawn env
-// below sets LEDGE_NOTES_ROOT to a temp home, overriding the scratch root the
-// child would otherwise inherit from the preload (workspaces.ts reads APP_HOME
-// from that variable). Only this test covers the assembly: import.meta.main
-// runs, the env the shell set is honored, and stdout carries the result alone.
+// The spawned seam: the `bun serve.js cli` a `ledge` shim execs (cliShim.ts),
+// and `serve.js mcp` beside it. The spawn env below sets LEDGE_NOTES_ROOT to a
+// temp home, overriding the scratch root the child would otherwise inherit
+// from the preload (workspaces.ts reads APP_HOME from that variable). Only this
+// test covers the assembly: the verbs reach runCli, the env the shell set is
+// honored, and stdout carries the result alone.
 describe("spawned process", () => {
   test("cat by title, and mcp answering initialize", async () => {
     const HOME = await mkdtemp(join(tmpdir(), "ledge-cli-proc-"));
@@ -447,9 +435,9 @@ describe("spawned process", () => {
       await writeFile(join(HOME, ".workspaces.json"), JSON.stringify({ version: 1, roots: [WS] }));
       await writeFile(join(WS, "hello-shell.md"), "# Hello Shell\n\nsecret word: xyzzy\n");
 
-      const cli = join(import.meta.dir, "cli.ts");
+      const server = join(import.meta.dir, "serve.ts");
       const cat = Bun.spawn({
-        cmd: [process.execPath, cli, "cat", "hello shell"],
+        cmd: [process.execPath, server, "cli", "cat", "hello shell"],
         env: { ...process.env, LEDGE_NOTES_ROOT: HOME },
         stdout: "pipe",
         stderr: "pipe",
@@ -459,7 +447,7 @@ describe("spawned process", () => {
       expect(catOut).toBe("# Hello Shell\n\nsecret word: xyzzy\n");
 
       const mcp = Bun.spawn({
-        cmd: [process.execPath, cli, "mcp"],
+        cmd: [process.execPath, server, "mcp"],
         env: { ...process.env, LEDGE_NOTES_ROOT: HOME },
         stdin: "pipe",
         stdout: "pipe",

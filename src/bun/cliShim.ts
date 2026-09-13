@@ -1,26 +1,41 @@
-// The `ledge` shim: how the CLI gets onto a PATH. It execs the exact runtime
-// and entry that wrote it (process.execPath plus the CLI module's own path)
-// and discovers nothing at run time: no bundle lookup, no PATH probe. The
-// packaged app writes Contents/MacOS/bun and Resources/app/bun/cli.js, a
-// checkout the dev machine's bun and src/bun/cli.ts (architecture.md §1).
-// Re-running the install repoints a moved app. The shim's own text says so,
-// because sh's "not found" error does not.
+// The `ledge` and `ledge-server` shims: how this Mac's app gets both commands
+// onto a PATH. Each execs the exact runtime and entry that wrote it, the
+// bundle's own bun on its serve.js (`cli` for `ledge`, bare for
+// `ledge-server`), and discovers nothing at run time. A checkout writes the
+// dev machine's bun and src/bun/serve.ts. Re-running the install repoints a
+// moved app. The shim's own text says so, because sh's "not found" does not.
 //
-// The CLI's `install` verb and the app's cliInstall RPC both call installShim,
-// so it lives apart from cli.ts. The app must not import the CLI's verb table
-// (and the MCP server behind it) to write two lines of sh.
+// Both go in ~/.ledge-server/bin, the directory the ssh command every client
+// runs puts first on PATH (shared/connections.ts SERVE_COMMAND). That is what
+// makes this Mac a server for a phone: `ledge-server serve` over ssh finds the
+// app's own copy and attaches to the app's own daemon. server.sh installs a
+// server into the same directory on a machine without the app (remote.md
+// §11), so the two installers overwrite each other's launchers and nothing
+// else's. A `ledge` from a Homebrew keg keeps its file.
 //
-// installShim saves the shim the way every machine-owned file in this repo is
-// saved: temp file, then rename (architecture.md §3). It refuses to write over
-// a file that is not a Ledge shim. A bin directory is shared ground, and
-// rename(2) clobbers silently.
+// The client's seam, not the server's (remote.md §10): the files land on the
+// machine with the screen, and they run that machine's copy. installShims
+// saves each the way every machine-owned file here is saved: temp file, then
+// rename (architecture.md §3).
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { chmod, mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
-import { constants, promises } from "node:fs";
+import { appendFile, chmod, mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 
-/** First line of the shim's comment; how a later install recognizes its own. */
-export const SHIM_MARKER = "# Ledge CLI shim";
+/** First line of a shim's comment; how a later install recognizes its own. */
+export const SHIM_MARKER = "# Ledge shim";
+
+/** What server.sh writes into the same launcher; the app may replace it. */
+const SERVER_SH_MARKER = "ledge.sh/server.sh";
+
+/** The two commands, and the verb each one execs before the caller's arguments. */
+export const SHIMS: ReadonlyArray<{ name: string; verb: string | null }> = [
+  { name: "ledge", verb: "cli" },
+  { name: "ledge-server", verb: null },
+];
+
+/** The line server.sh appends for the same purpose, spelled identically so
+ * each installer recognizes the other's. */
+export const PATH_LINE = 'export PATH="$HOME/.ledge-server/bin:$PATH"';
 
 /** ~-shorten a path for human eyes. Lives here (not cli.ts) so the app's
  * install handler can compose messages without importing the verb table. */
@@ -31,6 +46,11 @@ export function tildify(p: string, home: string = homedir()): string {
   return r.startsWith(h + "/") ? `~${r.slice(h.length)}` : p;
 }
 
+/** Where the shims go, under `home`. */
+export function shimDir(home: string = homedir()): string {
+  return join(home, ".ledge-server", "bin");
+}
+
 // Double-quote a path for sh. The escapes cover what the double quotes do
 // not: backslash, double quote, dollar and backtick. Machine-derived paths
 // never need them, but a shim that silently broke on a space or a dollar sign
@@ -39,19 +59,19 @@ function shQuote(p: string): string {
   return `"${p.replace(/[\\"$`]/g, (c) => `\\${c}`)}"`;
 }
 
-export function shimScript(execPath: string, entryPath: string): string {
+export function shimScript(execPath: string, entryPath: string, verb: string | null): string {
   return [
     "#!/bin/sh",
-    `${SHIM_MARKER} — written by \`ledge install\` (or the app's Install Shell Command).`,
+    `${SHIM_MARKER}, written by the Ledge app's Install Shell Command.`,
     "# It execs the exact runtime and entry that wrote it; if the app has",
     "# moved, run the install again to repoint it.",
-    `exec ${shQuote(execPath)} ${shQuote(entryPath)} "$@"`,
+    `exec ${shQuote(execPath)} ${shQuote(entryPath)}${verb === null ? "" : ` ${verb}`} "$@"`,
     "",
   ].join("\n");
 }
 
 export function isLedgeShim(text: string): boolean {
-  return text.includes(SHIM_MARKER);
+  return text.includes(SHIM_MARKER) || text.includes(SERVER_SH_MARKER);
 }
 
 /** Is `dir` one of PATH's entries? The onPath answer in an install result. */
@@ -60,77 +80,84 @@ export function dirOnPath(dir: string, pathVar: string): boolean {
   return pathVar.split(":").some((p) => p !== "" && resolve(p) === d);
 }
 
-// Where a shim goes when the caller names no dir, most-visible first. The
-// Homebrew bins are on a mac user's PATH when they exist at all, so they come
-// before ~/.local/bin. installShim creates ~/.local/bin when it is missing and
-// creates none of the others: /usr/local is not this app's to create.
-export function shimDirCandidates(home: string): string[] {
-  return ["/opt/homebrew/bin", "/usr/local/bin", join(home, ".local", "bin")];
-}
-
-async function writableDir(d: string): Promise<boolean> {
-  try {
-    if (!(await stat(d)).isDirectory()) return false;
-    await promises.access(d, constants.W_OK);
-    return true;
-  } catch {
-    return false;
-  }
+/**
+ * The startup file a login shell reads for a new terminal, or null for a
+ * shell whose file the PATH line's syntax would not suit. The same table as
+ * server.sh's add_to_path, so the two installers edit the same file.
+ */
+export function startupFile(shellVar: string, home: string, platform: string = process.platform): string | null {
+  const shell = shellVar.split("/").pop() ?? "";
+  if (shell === "zsh") return join(home, ".zshrc");
+  if (shell === "bash") return join(home, platform === "darwin" ? ".bash_profile" : ".bashrc");
+  if (shell === "fish" || shell === "csh" || shell === "tcsh") return null;
+  return join(home, ".profile");
 }
 
 export interface ShimInstall {
-  /** Where the shim landed. */
-  path: string;
-  /** Whether that directory is on the caller's PATH right now. */
+  /** Where the shims landed. */
+  dir: string;
+  /** Whether that directory was on the caller's PATH already. */
   onPath: boolean;
+  /** The startup file the PATH line was appended to, or null when it was not:
+   * the directory was on PATH, the file already named it, or the login shell
+   * is one the line cannot go in. */
+  pathAdded: string | null;
 }
 
-export async function installShim(opts: {
+export async function installShims(opts: {
   execPath: string;
   entryPath: string;
   /** The caller's $PATH, for the onPath answer. */
   pathVar: string;
-  /** Explicit target directory; null picks from the candidates. */
-  dir?: string | null;
+  /** The caller's $SHELL, for which startup file gets the PATH line. */
+  shellVar: string;
   home?: string;
-  /** Candidate dirs to pick from. Tests inject their own so the pick never
-   * probes the real /opt/homebrew/bin, which on a dev machine is writable, so
-   * the test would write into it. */
-  candidates?: readonly string[];
+  platform?: string;
 }): Promise<ShimInstall> {
   const home = opts.home ?? homedir();
-  // installShim stats the entry before it writes anything. A shim whose entry
-  // is missing still execs the runtime, which then reports the missing module
-  // at first use, long after the install reported success.
+  // The entry is checked before anything is written. A shim whose entry is
+  // missing still execs the runtime, which then reports the missing module at
+  // first use, long after the install reported success.
   const entryOk = await stat(opts.entryPath).then((s) => s.isFile()).catch(() => false);
-  if (!entryOk) throw new Error(`the CLI entry is missing at ${opts.entryPath} — rebuild the app`);
+  if (!entryOk) throw new Error(`the server entry is missing at ${opts.entryPath}: rebuild the app`);
 
-  let dir = opts.dir ?? null;
-  if (dir === null) {
-    for (const c of opts.candidates ?? shimDirCandidates(home)) {
-      if (await writableDir(c)) {
-        dir = c;
-        break;
-      }
-    }
-    dir ??= join(home, ".local", "bin"); // nothing writable: create ~/.local/bin
-  }
+  const dir = shimDir(home);
   await mkdir(dir, { recursive: true });
 
-  const target = join(dir, "ledge");
-  const existing = await readFile(target, "utf8").catch(() => null);
-  if (existing !== null && !isLedgeShim(existing)) {
-    throw new Error(`refusing to overwrite ${target} — it exists and is not a Ledge shim`);
+  // Both are checked before either is written, so a refusal leaves the pair
+  // as it was rather than half replaced. A bin directory is shared ground,
+  // and rename(2) clobbers silently.
+  for (const { name } of SHIMS) {
+    const existing = await readFile(join(dir, name), "utf8").catch(() => null);
+    if (existing !== null && !isLedgeShim(existing)) {
+      throw new Error(`refusing to overwrite ${join(dir, name)}: it exists and is not a Ledge shim`);
+    }
+  }
+  for (const { name, verb } of SHIMS) {
+    const target = join(dir, name);
+    const tmp = join(dir, `.${name}-tmp-${process.pid}`);
+    try {
+      await writeFile(tmp, shimScript(opts.execPath, opts.entryPath, verb), "utf8");
+      await chmod(tmp, 0o755); // explicit, not writeFile's mode: umask must not decide
+      await rename(tmp, target);
+    } catch (err) {
+      await unlink(tmp).catch(() => {}); // the dotted temp this call just wrote
+      throw err;
+    }
   }
 
-  const tmp = join(dir, `.ledge-shim-tmp-${process.pid}`);
-  try {
-    await writeFile(tmp, shimScript(opts.execPath, opts.entryPath), "utf8");
-    await chmod(tmp, 0o755); // explicit, not writeFile's mode: umask must not decide
-    await rename(tmp, target);
-  } catch (err) {
-    await unlink(tmp).catch(() => {}); // the dotted temp this call just wrote
-    throw err;
-  }
-  return { path: target, onPath: dirOnPath(dir, opts.pathVar) };
+  const onPath = dirOnPath(dir, opts.pathVar);
+  return { dir, onPath, pathAdded: onPath ? null : await addPathLine(opts.shellVar, home, opts.platform) };
+}
+
+// Appends PATH_LINE to the login shell's startup file, once. The grep is
+// server.sh's: any line naming the directory counts, so a user's own line or
+// the other installer's is left alone.
+async function addPathLine(shellVar: string, home: string, platform?: string): Promise<string | null> {
+  const file = startupFile(shellVar, home, platform);
+  if (file === null) return null;
+  const text = await readFile(file, "utf8").catch(() => "");
+  if (text.includes(".ledge-server/bin")) return null;
+  await appendFile(file, `\n# ledge (the Ledge app's Install Shell Command)\n${PATH_LINE}\n`, "utf8");
+  return file;
 }

@@ -127,7 +127,7 @@ type NativeSymbols = ReturnType<typeof dlopen<typeof NATIVE_SYMBOLS>>["symbols"]
 // layouts:
 //
 //   1. beside this module, where the app bundle's copy map puts it in
-//      Resources/app/bun. That is cli.js's placement, for cli.js's reason:
+//      Resources/app/bun. That is serve.js's placement, for serve.js's reason:
 //      import.meta.dir reads the same in the bundle as in a checkout
 //      (electrobun.config.ts).
 //   2. under native/<target>/ in an installed `ledge-server` package, which

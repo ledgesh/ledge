@@ -1,9 +1,10 @@
 // The Install Shell Command bridge, one of the configureX bridges
-// (architecture.md §5). boot.tsx binds `install` to the cliInstall RPC and the
-// harness binds a stub. The command registry calls installCli without
-// importing either. Bun composes the finished message: only it knows where the
-// shim landed and whether that folder is on PATH. The view only picks the
-// strip, neutral on success and error on failure.
+// (architecture.md §5). boot.tsx binds `install` to the cliInstall RPC, which
+// the client shell answers for itself (remote.md §10), and the harness binds
+// a stub. The command registry calls installCli without importing either. The
+// shell composes the finished message: only it knows where the shims landed
+// and what it did about PATH. The view only picks the strip, neutral on
+// success and error on failure.
 export interface CliHandlers {
   install(): Promise<{ ok: boolean; message: string }>;
 }

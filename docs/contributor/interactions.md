@@ -1316,16 +1316,15 @@ secret written to a synced file — because focus never moved.
   seconds and regrows is its own kind of untruth. `when` already hides what
   does not apply to the target;
   registry-wide facts do the same for what does not apply to the CLIENT
-  (`mainview/lib/shell.ts`). Three of them, two the shell's own answers about
-  itself and one the notes machine's, plus one that withholds a button
-  rather than a verb:
+  (`mainview/lib/shell.ts`). Three of them, all the shell's own answers about
+  itself, plus one that withholds a button rather than a verb:
 
-  | Fact | Whose | Withholds |
-  | ---- | ----- | --------- |
-  | `runsBlocks` | shell | Run Block Inline and its chord, the ▶ on every runnable fence, the profile editor |
-  | `hasTerminal` | shell | Toggle Terminal, Close Terminal, the chrome's button, Run Block in Terminal and its chord |
-  | `canInstallCli` | server | Install Shell Command (ledge) |
-  | `picksFolders` | shell | the Choose Folder… button in the Attach Folder dialog |
+  | Fact | Withholds |
+  | ---- | --------- |
+  | `runsBlocks` | Run Block Inline and its chord, the ▶ on every runnable fence, the profile editor |
+  | `hasTerminal` | Toggle Terminal, Close Terminal, the chrome's button, Run Block in Terminal and its chord |
+  | `installsCli` | Install Shell Command (ledge) |
+  | `picksFolders` | the Choose Folder… button in the Attach Folder dialog |
 
   Running a block and having a drawer are separate surfaces, which is why they
   are separate facts: a phone runs blocks inline before it has a terminal
@@ -1335,11 +1334,12 @@ secret written to a synced file — because focus never moved.
   puts it in the drawer. Restart Note Shell needs either, because both surfaces
   spawn the shells it kills.
 
-  The server's arrives on `workspaceList`'s first round trip. `canInstallCli`
-  is the notes machine's answer rather than the client's because the install
-  writes a file over there, and the `ledge` it writes reads the notes over
-  there. A compiled `ledge-server` has no CLI beside it to exec
-  (`bun/cliShim.ts`), so the verb is absent on every connection to one.
+  `installsCli` is the client's answer because the install writes on this
+  machine: `ledge` and `ledge-server` into `~/.ledge-server/bin`, execing
+  this app's own bundle (`bun/cliShim.ts`). The `ledge` it writes reads this
+  Mac's notes whichever server the window is showing, and the `ledge-server`
+  is how a phone reaches them (remote.md §11). A phone has no PATH to write
+  to, so there the verb is absent.
 
   Attaching a folder is gated by nothing: the path is typed and the server
   checks it, so the verb works against every server. What a phone lacks is a
@@ -1362,7 +1362,7 @@ verb table (`src/bun/cli.ts`), governed here so it stays coherent with the
 app rather than growing its own dialect.
 
 - **Verbs are unix-shaped and few**: `ls`, `cat`, `search`, `tags`, `new`,
-  `today`, `append`, `workspaces`, `open`, `install`, `mcp`, `help`. A bare
+  `today`, `append`, `workspaces`, `open`, `mcp`, `help`. A bare
   `ledge` opens the app; a bare non-verb argument is a title to open
   (`ledge open <title>` is the spelled-out escape for a note titled like a
   verb — including one literally titled "today"). New verbs argue for
@@ -1401,10 +1401,14 @@ app rather than growing its own dialect.
   from lists, the created path from `new`, handler JSON under `--json`;
   confirmations, errors, and truncation notes go to stderr. Exit codes:
   0 ok, 1 failure (including a hitless `search`, grep's contract), 2 usage.
-- **Install Shell Command (ledge)** is the palette entry that writes the
-  shim (bun/cliShim.ts); its outcome always surfaces — success in the
-  browser's notice strip, failure in the error strip (§4's surface, neutral
-  tone). `ledge install [dir]` is the same act from a terminal.
+- **`ledge` is `ledge-server cli`** (`src/bun/serve.ts`), so every machine
+  with a server has the CLI: the npm package installs both names, `server.sh`
+  writes both launchers, and on a Mac **Install Shell Command (ledge)** is
+  the palette entry that writes both shims into `~/.ledge-server/bin`
+  (bun/cliShim.ts, the client's seam per remote.md §10). Its outcome always
+  surfaces: success in the browser's notice strip, failure in the error
+  strip (§4's surface, neutral tone). There is no `install` verb: each
+  installer already put `ledge` where it belongs.
 
 ## 10. The menu bar
 

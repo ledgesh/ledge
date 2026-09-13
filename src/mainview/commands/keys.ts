@@ -152,8 +152,9 @@ export const COMMANDS = {
   // workspace, so the shift rule would want ⇧⌘N, but the smaller scope holds
   // it. N goes to notes here rather than to windows (interactions.md §2).
   "window.new": { title: "New Window" },
-  // Writes the `ledge` shim so the notes are reachable from any terminal
-  // (bun/cliShim.ts). Palette-only: a once-per-machine act earns no chord.
+  // Writes the `ledge` and `ledge-server` shims so this Mac's notes are
+  // reachable from any terminal, and from a phone (bun/cliShim.ts).
+  // Palette-only: a once-per-machine act earns no chord.
   "cli.install": { title: "Install Shell Command (ledge)" },
   // Opens the log folder, so the previous session's copy sits next to the
   // current one. After a crash the previous one is the copy worth sending.

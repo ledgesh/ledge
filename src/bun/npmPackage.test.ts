@@ -31,8 +31,8 @@ describe("the published manifest", () => {
     expect(m["version"]).toBe("1.2.3");
   });
 
-  test("installs one command, and it is the package's own name", () => {
-    expect(manifest("0.0.0").bin).toEqual({ [PACKAGE_NAME]: "bin/ledge-server.js" });
+  test("installs two commands: the package's own name, and ledge for its cli verb", () => {
+    expect(manifest("0.0.0").bin).toEqual({ [PACKAGE_NAME]: "bin/ledge-server.js", ledge: "bin/ledge.js" });
   });
 
   // npm enforces os and cpu at install time, so those two fields state where
@@ -49,26 +49,33 @@ describe("the published manifest", () => {
     expect(manifest("0.0.0").engines).toEqual({ bun: BUN_FLOOR });
   });
 
-  // The manifest's `bin` field points at bin/ledge-server.js inside the
-  // package, and scripts/build-npm.ts copies this repo file there. A rename
-  // that misses one of the two publishes a package whose only command is a
-  // dangling bin link.
-  test("the bin it points at is a file in the repo", () => {
-    expect(existsSync(join(ROOT, "npm", "bin", "ledge-server.js"))).toBe(true);
+  // The manifest's `bin` field points at files inside the package, and
+  // scripts/build-npm.ts copies these repo files there. A rename that misses
+  // one of the two publishes a package whose command is a dangling bin link.
+  const BINS = Object.values(manifest("0.0.0").bin).map((rel) => join(ROOT, "npm", ...rel.split("/")));
+
+  test("each bin it points at is a file in the repo", () => {
+    for (const bin of BINS) expect({ bin, exists: existsSync(bin) }).toEqual({ bin, exists: true });
   });
 
-  test("the bin refuses a runtime that is not Bun before importing the bundle", () => {
-    const src = readFileSync(join(ROOT, "npm", "bin", "ledge-server.js"), "utf8");
-    const guard = src.indexOf(`typeof Bun === "undefined"`);
-    const load = src.indexOf("../lib/serve.js");
-    expect(guard).toBeGreaterThan(-1);
-    // The guard has to come first, and the bin has to reach the bundle
-    // through `await import`. The bundle statically imports bun:ffi, an
-    // unresolvable specifier under any other runtime. A static import runs
-    // before the guard whatever its position, so it would fail there and the
-    // guard's message would never print.
-    expect(load).toBeGreaterThan(guard);
-    expect(src).toContain("await import(");
+  test("each bin refuses a runtime that is not Bun before importing the bundle", () => {
+    for (const bin of BINS) {
+      const src = readFileSync(bin, "utf8");
+      const guard = src.indexOf(`typeof Bun === "undefined"`);
+      const load = src.indexOf("../lib/serve.js");
+      expect(guard).toBeGreaterThan(-1);
+      // The guard has to come first, and the bin has to reach the bundle
+      // through `await import`. The bundle statically imports bun:ffi, an
+      // unresolvable specifier under any other runtime. A static import runs
+      // before the guard whatever its position, so it would fail there and the
+      // guard's message would never print.
+      expect(load).toBeGreaterThan(guard);
+      expect(src).toContain("await import(");
+    }
+  });
+
+  test("the ledge bin runs the cli verb ahead of the caller's arguments", () => {
+    expect(readFileSync(join(ROOT, "npm", "bin", "ledge.js"), "utf8")).toContain('"cli", ...process.argv.slice(2)');
   });
 });
 

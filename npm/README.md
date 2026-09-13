@@ -49,12 +49,16 @@ ssh you@machine ledge-server serve
 
 No port is opened and no daemon is installed. Ledge speaks its protocol over ssh's stdin and stdout, so the machine's own sshd is the only thing listening, and the key you already use is the credential.
 
-Two verbs exist if you want them:
+The verbs, if you want them:
 
 | Verb | What it does |
 | --- | --- |
 | `ledge-server serve` | Move the protocol between stdin, stdout, and this machine's daemon. Starts the daemon if nothing answers. |
 | `ledge-server daemon` | Be this machine's server. Holds the notes, the shells, and the watchers, and runs until stopped. |
+| `ledge-server backup-paths` | Print the paths a backup of this machine has to cover. |
+| `ledge-server pair` | Print a pairing code a phone scans to add this server. |
+| `ledge-server cli` | The `ledge` command, which the package also installs under that name: notes from this machine's own shell. `ledge help` lists its verbs. |
+| `ledge-server mcp` | The Ledge MCP server on stdin and stdout, for an agent running on this machine. `ledge mcp` is the same thing. |
 
 The daemon outlives the connections to it, which is what lets a build keep running after your laptop closes and lets a reconnecting client pick the output back up.
 

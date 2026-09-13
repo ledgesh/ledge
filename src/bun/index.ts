@@ -39,7 +39,8 @@ import { stopDaemon } from "./daemon";
 import { ASKPASS_PATH, ensureAskpass, hasPassword } from "./secrets";
 import { reconnectingClient, Refused, SESSION_HOLD_MS, type Duplex } from "../shared/transport";
 import { spawnDuplex } from "./transport";
-import { localServer } from "./localServer";
+import { localServer, SERVE_ENTRY } from "./localServer";
+import { installShims, tildify } from "./cliShim";
 import { BUILD_VERSION } from "../shared/version";
 import type { LedgeRPC, UpdateState } from "../shared/rpc-schema";
 
@@ -104,9 +105,9 @@ async function mainViewUrl(): Promise<string> {
 // pasteboard, the picture library, the browser, and the menu bar are this
 // Mac's, local server or remote. AppKit supplies the native halves.
 //
-// The three here are the process's, one pasteboard and two file dialogs, so
-// every window shares them. The two that are a window's, the menu bar and New
-// Window, are added per window by `nativeFor` below.
+// The four here are the process's, one pasteboard, two file dialogs and the
+// shell command, so every window shares them. The two that are a window's,
+// the menu bar and New Window, are added per window by `nativeFor` below.
 const sharedNative: ClientNative = {
   clipboardFormats: () => {
     try {
@@ -149,6 +150,27 @@ const sharedNative: ClientNative = {
       })
     ).join(",");
     return picked || null;
+  },
+  // Install Shell Command: `ledge` and `ledge-server` in ~/.ledge-server/bin,
+  // execing this bundle's bun on the serve.js the daemon runs from
+  // (bun/cliShim.ts). The same entry and runtime as the daemon's, so the
+  // shims and the app can never run two different servers. Failure is a
+  // sentence, since the view shows whatever comes back and cannot see a file.
+  installCli: async () => {
+    try {
+      const res = await installShims({
+        execPath: process.execPath,
+        entryPath: SERVE_ENTRY,
+        pathVar: process.env["PATH"] ?? "",
+        shellVar: process.env["SHELL"] ?? "",
+      });
+      const where = `ledge and ledge-server installed in ${tildify(res.dir)}`;
+      if (res.pathAdded) return { ok: true, message: `${where}; a PATH line was added to ${tildify(res.pathAdded)}, so new terminals find them` };
+      if (!res.onPath) return { ok: true, message: `${where}; add it to your PATH: export PATH="$HOME/.ledge-server/bin:$PATH"` };
+      return { ok: true, message: where };
+    } catch (err) {
+      return { ok: false, message: `Install failed: ${err instanceof Error ? err.message : String(err)}` };
+    }
   },
   updates: {
     state: () => updates.state(),

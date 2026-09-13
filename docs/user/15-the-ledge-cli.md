@@ -4,11 +4,11 @@ The `ledge` command lists, reads, searches, creates, and appends to notes from a
 
 ## Install
 
-Run "Install Shell Command (ledge)" from the command palette, or `ledge install` if you already have the binary somewhere.
+Run "Install Shell Command (ledge)" from the command palette.
 
-It writes a small shim onto your PATH (Homebrew's bin, `/usr/local/bin`, or `~/.local/bin`, whichever works) pointing at this copy of Ledge. If you move the app, run it again.
+It writes two small launchers into `~/.ledge-server/bin`, `ledge` and `ledge-server`, both pointing at this copy of Ledge, and adds that folder to your PATH in your shell's startup file if it is not there yet. Open a new terminal afterwards. If you move the app, run it again.
 
-The palette offers this only while your notes are on this Mac. `ledge` ships with the app and a server carries no copy of it, so the command is absent whenever Ledge is pointed at a remote server ([[Keep Notes on a Remote Server]]).
+The second launcher is what lets your phone reach this Mac's notes ([[Ledge on Your Phone]]). `ledge` is `ledge-server cli` by a shorter name, so it reads the notes on the machine it runs on: this Mac's from a terminal here, and a server's from a terminal there, where the server install already put both names on the PATH ([[Keep Notes on a Remote Server]]).
 
 ## The verbs
 

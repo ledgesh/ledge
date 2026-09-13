@@ -433,6 +433,9 @@ function clientSeams(
     // Attach Folder dialog there is its field alone (lib/shell.ts
     // picksFolders). Null answers anything that asks anyway.
     folderPick: async () => ({ path: null }),
+    // No PATH to put a shell command on, and the verb is absent here
+    // (lib/shell.ts installsCli). A sentence answers anything that asks anyway.
+    cliInstall: async () => ({ ok: false, message: "A phone has no shell to install ledge into." }),
     linkOpen: async ({ url }) => (await shell.call("link.open", { url })) as { ok: boolean },
     // There is no menu bar on a phone (ios.md §11). The view builds one anyway.
     // The command registry is the menu's source and knows nothing about shells,

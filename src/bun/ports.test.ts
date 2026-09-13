@@ -91,7 +91,7 @@ describe("nothing in this repository opens a port", () => {
 });
 
 // The build boundary points one way. Nothing in `scripts/` ships: not through
-// electrobun.config.ts's copy map, not through `build:cli`, not into the
+// electrobun.config.ts's copy map, not through `build:serve`, not into the
 // Docker image. A tool may import the app's modules (`scripts/licenses.ts`
 // calls `src/bun/licenses.ts`, which is what makes that logic testable). The
 // app may never import a tool, because that would quietly make a developer's

@@ -5,7 +5,7 @@ import { buildCommands, paletteItems } from "./registry";
 import { EDITOR_MENU_COMMANDS } from "./editorMenu";
 import { parseKey, resolveChord, DEFAULT_DOMAINS, type FocusDomain } from "./keymap";
 import type { Command, CommandCtx, RegistryDeps } from "./types";
-import { configureShell, recordServerCaps } from "@/lib/shell";
+import { configureShell } from "@/lib/shell";
 import { recordWindowRole } from "@/lib/windows";
 import { recordUpdateState } from "@/lib/updates";
 
@@ -1161,29 +1161,28 @@ describe("what this client has a surface for", () => {
     });
   });
 
-  // The same cut, one machine out: not what this client has a surface for but
-  // what the machine holding the notes has at all. The answer arrives on the
-  // boot handshake (workspaceList), and it is false on a compiled server
-  // whether a Mac or a phone is looking at it.
-  function serverCaps(next: { cliShim: boolean }, check: (visible: (id: string) => boolean) => void): void {
-    recordServerCaps(next);
+  // The shell command is this client's too: the shims land on this machine
+  // and run this app's copy (bun/cliShim.ts), so a Mac offers the verb
+  // whichever server its window shows, and a phone, with no PATH, never does.
+  // Attaching a folder is gated by nothing: the path is typed and the server
+  // checks it (bun/workspaces.ts attachExternal).
+  function installs(next: boolean, check: (visible: (id: string) => boolean) => void): void {
+    configureShell({ installsCli: next });
     try {
       const cmds = buildCommands(stubDeps());
       const ctx = makeCtx(initialState(FOLDER, []));
       check((id) => find(cmds, id).when?.(ctx) ?? true);
     } finally {
-      recordServerCaps({ cliShim: true });
+      configureShell({ installsCli: true });
     }
   }
 
-  test("notes on this Mac: the CLI installs there, so the verb is offered", () => {
-    serverCaps({ cliShim: true }, (visible) => shows(visible, "cli.install", true));
+  test("a Mac puts the shell command on its own PATH, so the verb is offered", () => {
+    installs(true, (visible) => shows(visible, "cli.install", true));
   });
 
-  // Attaching a folder stays: the path is typed, so no dialog is needed on
-  // the far end (bun/workspaces.ts attachExternal).
-  test("notes on a server: no CLI to install there, but a folder still attaches by path", () => {
-    serverCaps({ cliShim: false }, (visible) => {
+  test("a phone has no PATH for it, but a folder still attaches by path", () => {
+    installs(false, (visible) => {
       shows(visible, "cli.install", false);
       shows(visible, "workspace.attach", true);
     });

@@ -125,7 +125,12 @@ describe("the schema's shape against the protocol version", () => {
   // sends and answers its no-dialog refusal, which the new dialog shows under
   // its field. Move was a verb no server-side client could reach. The pin
   // moves and the version does not.
-  const PINNED = { protocol: 5, shape: "3d4ccca78a3dd191" };
+  // Then the shell command became the client's (remote.md §10): cliInstall
+  // moved into NATIVE_METHODS, so no frame carries it, and workspaceList lost
+  // `cliShim`. An old client reads the missing flag as false and hides the
+  // verb; a new client never sends the call to any server. The pin moves and
+  // the version does not.
+  const PINNED = { protocol: 5, shape: "48941c3905ad15b7" };
 
   test("a payload shape does not change without someone deciding whether it breaks", async () => {
     const shape = digest(shapeOf(await Bun.file(SCHEMA).text()));

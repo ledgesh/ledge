@@ -84,6 +84,8 @@ async function start(): Promise<void> {
     // No folder dialog, and a phone's folders are never the server's. The
     // Attach Folder dialog is its field alone here (lib/shell.ts).
     picksFolders: false,
+    // No PATH to put a shell command on (lib/shell.ts installsCli).
+    installsCli: false,
   });
 
   // Everything from here to the first paint waits on another machine, and a

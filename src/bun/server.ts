@@ -79,7 +79,6 @@ import { createFromTemplatePath, openDaily, resolveConfiguredWorkspace } from ".
 import { syncDocs } from "./docs";
 import { readLayout, writeLayout } from "./layout";
 import { revealLog, write as writeLog } from "./log";
-import { installShim, tildify } from "./cliShim";
 import { OPEN_REQUEST_PATH, takeOpenRequest } from "./openRequest";
 import { syncWatchers } from "./watch";
 import { readAsset, writePastedImage } from "./assets";
@@ -167,16 +166,6 @@ export function holdRunEvent(held: HeldRuns, ev: InlineEvent, cap: number): void
 // module load, since it is a fact about this process.
 const BUNDLED_BUN = bundledBun(process.execPath);
 
-// The CLI entry a `ledge` shim would exec, beside this module. The app's
-// build.copy puts dist-cli/cli.js next to index.js for that
-// (electrobun.config.ts, cliShim.ts). A compiled `ledge-server` has no
-// neighbour to find: `bun build --compile` embeds one program and the CLI is
-// not it, so on a server this names a path inside /$bunfs that never existed.
-// Answered once at load, since a file that shipped beside the binary does not
-// appear later. The boot handshake reports the answer (workspaceList below).
-const CLI_ENTRY = resolve(import.meta.dir, "cli.js");
-const CAN_INSTALL_CLI = statSync(CLI_ENTRY, { throwIfNoEntry: false })?.isFile() === true;
-
 // What a handler that needs the vault answers a device that has not unlocked
 // (locking.md §3a). Thrown rather than returned: these calls have no `error`
 // field, and the view already shows a thrown message on a failed lock. The
@@ -206,15 +195,6 @@ async function refuseLockedFrom(device: string, path: string): Promise<void> {
   if (await isNoteLocked(path)) throw new Error(VAULT_SHUT_HERE);
 }
 
-// What cliInstall answers where there is no CLI beside this module. Data, not
-// an exception: the schema gives the call a message so the refusal reaches
-// the user as a sentence. The palette leaves the verb out
-// (mainview/lib/shell.ts), and anything that asks anyway gets this instead of
-// the shim's own "the CLI entry is missing at /$bunfs/root/cli.js", which is
-// true and unhelpful.
-const NO_CLI =
-  "A server has no CLI to install. `ledge` ships with the app, so installing it needs the app running on the machine that holds the notes.";
-
 // The other half of bun/clientSeams.ts: the same names, refusing. Typed as the
 // full Pick, so adding a name there without adding it here does not compile.
 // The two lists cannot drift into a hole where a call reaches a server with no
@@ -230,6 +210,7 @@ function clientSeamRefusals(): Pick<RequestHandlers, ClientMethod> {
     assetPaste: refuse("assetPaste"),
     assetPick: refuse("assetPick"),
     folderPick: refuse("folderPick"),
+    cliInstall: refuse("cliInstall"),
     linkOpen: refuse("linkOpen"),
     menuSet: refuse("menuSet"),
     windowNew: refuse("windowNew"),
@@ -831,10 +812,6 @@ export async function createServer(deps: { push: Audience }): Promise<LedgeServe
     workspaceList: () => ({
       workspaces: listWorkspaceRoots(),
       dailyRoot: resolveConfiguredWorkspace(settings.daily.workspace, roots()),
-      // The condition cliInstall checks before refusing, reported once at
-      // boot so the view can leave Install Shell Command out of the palette
-      // rather than have the user run it and get NO_CLI back (CLI_ENTRY above).
-      cliShim: CAN_INSTALL_CLI,
     }),
     workspaceCreate: async ({ name }) => {
       const root = await createManaged(name);
@@ -1291,31 +1268,6 @@ export async function createServer(deps: { push: Audience }): Promise<LedgeServe
       if (home !== "server") throw new Error(`the ${home} settings file is not this server's (remote.md §5)`);
       await writeSettingsFile(text);
       return { ok: true };
-    },
-    // The CLI installer, from the app side. The entry is cli.js beside this
-    // module in the bundle (build.copy in electrobun.config.ts puts it there)
-    // and execPath is the bundle's own bun: the exact pair the shim will exec
-    // (bun/cliShim.ts). The message is composed here because the landing dir,
-    // the PATH verdict, and any failure are server-side facts. A machine with
-    // no such pair refuses with NO_CLI. The view already leaves the verb out
-    // (workspaceList's `cliShim`), so a call arriving here asked anyway.
-    cliInstall: async () => {
-      if (!CAN_INSTALL_CLI) return { ok: false, message: NO_CLI };
-      try {
-        const res = await installShim({
-          execPath: process.execPath,
-          entryPath: CLI_ENTRY,
-          pathVar: process.env["PATH"] ?? "",
-        });
-        return {
-          ok: true,
-          message: res.onPath
-            ? `ledge installed: ${tildify(res.path)}`
-            : `ledge installed: ${tildify(res.path)} — its folder is not on your PATH yet`,
-        };
-      } catch (err) {
-        return { ok: false, message: `Install failed: ${err instanceof Error ? err.message : String(err)}` };
-      }
     },
     // The cold-start half of `ledge <title>`: the view pulls once at boot,
     // after its subscriber wiring is up. Consume-and-validate lives in

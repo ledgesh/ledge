@@ -218,15 +218,20 @@ main() {
   fi
 
   # Written beside the old launcher and renamed over it, so a connection
-  # arriving mid-install runs one version or the other.
-  {
+  # arriving mid-install runs one version or the other. `ledge` is the same
+  # launcher with the cli verb in front of the caller's arguments.
+  launcher_text() {
     printf '#!/bin/sh\n'
     printf '# Written by https://ledge.sh/server.sh. Runs ledge-server on the Bun installed beside it.\n'
     printf '# ledge-server version %s\n' "$version"
-    printf 'exec %s %s "$@"\n' "$(quote "$target/bun")" "$(quote "$target/bin/ledge-server.js")"
-  } >"$launcher.tmp"
+    printf 'exec %s %s%s "$@"\n' "$(quote "$target/bun")" "$(quote "$target/bin/ledge-server.js")" "$1"
+  }
+  launcher_text "" >"$launcher.tmp"
   chmod 755 "$launcher.tmp"
   mv -f "$launcher.tmp" "$launcher"
+  launcher_text " cli" >"$root/bin/ledge.tmp"
+  chmod 755 "$root/bin/ledge.tmp"
+  mv -f "$root/bin/ledge.tmp" "$root/bin/ledge"
 
   # The previous version stays, since a server started from it may still be
   # running. Anything older goes.
@@ -259,7 +264,7 @@ main() {
     say "Warning: no ssh server was found in /usr/sbin or /usr/bin, and Ledge connects over ssh. Install openssh-server."
   fi
   if [ -n "$path_added" ]; then
-    say "New terminals find it as ledge-server (a PATH line was added to $path_added)."
+    say "New terminals find it as ledge-server, and its notes as ledge (a PATH line was added to $path_added)."
   fi
   say ""
   say "To pair Ledge on a phone with this machine, run:"

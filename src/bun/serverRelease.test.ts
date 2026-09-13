@@ -236,6 +236,10 @@ describe("server.sh", () => {
 
     const launched = Bun.spawnSync([join(installed(w), "bin", "ledge-server"), "pair"], { stdout: "pipe" });
     expect(launched.stdout.toString()).toBe(`bun ${version}/bun|${version}/bin/ledge-server.js pair`);
+    // The CLI by its own name: the same launcher, running the cli verb.
+    const cli = Bun.spawnSync([join(installed(w), "bin", "ledge"), "ls", "--all"], { stdout: "pipe" });
+    expect(cli.stdout.toString()).toBe(`bun ${version}/bun|${version}/bin/ledge-server.js cli ls --all`);
+    expect(listing(join(installed(w), "bin"))).toEqual(["ledge", "ledge-server"]);
     expect(listing(installed(w))).toEqual(["bin", "versions"]);
     expect(listing(version)).toEqual(["bin", "bun", "lib"]);
   });

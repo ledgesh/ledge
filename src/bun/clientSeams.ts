@@ -60,6 +60,12 @@ export interface ClientNative {
   // no picker, which then answers null and the Attach Folder dialog keeps
   // only its field (mainview/lib/shell.ts picksFolders).
   pickFolder?(): Promise<string | null>;
+  // Put `ledge` and `ledge-server` on this machine's PATH, pointing at this
+  // app's own copy (bun/cliShim.ts installShims), and say where they went.
+  // Absent on a shell with no PATH to put them on, which then answers a
+  // refusal in a sentence and the view leaves the verb out
+  // (mainview/lib/shell.ts installsCli).
+  installCli?(): Promise<{ ok: boolean; message: string }>;
   // This app's own update (bun/updates.ts). Absent on a shell that does not
   // update itself, which then answers phase "off" and the view leaves the
   // update verbs out.
@@ -71,6 +77,7 @@ export interface ClientNative {
 }
 
 const NO_UPDATES: UpdateState = { phase: "off", version: "", detail: "This app does not update itself." };
+const NO_CLI = { ok: false, message: "This app has no shell command to install." };
 
 // NATIVE_METHODS, CONNECTION_METHODS and CLIENT_METHODS live in
 // shared/wire.ts, not here. This module implements the first group for the Mac
@@ -183,6 +190,11 @@ export function clientSeams(
     // the view sends it on to workspaceAttach, where the server checks it
     // like a typed one (bun/workspaces.ts attachExternal).
     folderPick: async () => ({ path: (await native.pickFolder?.()) ?? null }),
+    // The shell command, written on this machine: a `ledge` that reads this
+    // Mac's notes and a `ledge-server` a phone reaches over ssh, both running
+    // this app's own bundle (bun/cliShim.ts). On the server it would land on
+    // a machine nobody types at, and point at a copy that is not this one.
+    cliInstall: async () => (await native.installCli?.()) ?? NO_CLI,
     // The native menu bar, shaped by the view (commands/menu.ts). The shell
     // passes `items` to the platform and interprets nothing in it: the
     // `action` strings are command ids, so the registry stays the one place a

@@ -58,7 +58,7 @@ Run them in a terminal on that machine, signed in as the account the phone shoul
 
 Copy commands puts them on the phone's pasteboard. Share commands hands them to AirDrop, Messages, or any app that can carry them to a computer with a terminal open on that machine.
 
-On a Mac, turn on Remote Login first, in System Settings under General, then Sharing. Use an account that does not also run the Ledge app on that Mac, since the app already serves that account's notes.
+On a Mac, turn on Remote Login first, in System Settings under General, then Sharing. A Mac that runs the Ledge app needs only "Install Shell Command (ledge)" from the app's command palette in place of the first four commands: it puts `ledge-server` where the phone's ssh looks, pointing at the app's own copy, so the phone sees the same notes the app shows. `ledge-server pair` in a new terminal then prints the code.
 
 The machine needs sshd running and an address the phone can reach. [[Keep Notes on a Remote Server]] has the details of the install, including a machine that already has Bun, and [[Tutorial: Set Up a Ledge Server]] walks through a fresh VPS.
 

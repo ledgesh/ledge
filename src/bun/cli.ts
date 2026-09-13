@@ -1,10 +1,10 @@
-// The Ledge CLI: notes from a shell prompt. Like the MCP server, `ledge` is a
-// separate process that reuses the bun-side store, and it dispatches through
-// the same McpTool handlers agents call (architecture.md §1). Title
-// resolution, workspace deixis, H1-slug naming and the divergence guard
-// therefore have one definition, so `ledge append` and an agent's append_note
-// cannot drift apart. The running app sees a CLI write as an ordinary
-// external edit, through its watcher.
+// The Ledge CLI: notes from a shell prompt. `ledge` is `ledge-server cli`
+// (serve.ts), a separate process from the daemon that reads the same store,
+// and it dispatches through the same McpTool handlers agents call
+// (architecture.md §1). Title resolution, workspace deixis, H1-slug naming and
+// the divergence guard therefore have one definition, so `ledge append` and an
+// agent's append_note cannot drift apart. The running app sees a CLI write as
+// an ordinary external edit, through its watcher.
 //
 // Deixis: inside a note's terminal, $LEDGE_NOTE and $LEDGE_WORKSPACE name
 // "here" (architecture.md §2) and the handlers honor them. The CLI adds the
@@ -27,10 +27,10 @@
 // search with no hits, grep's contract), 2 usage. interactions.md §9 governs
 // the verb table.
 import { homedir } from "node:os";
-import { basename, dirname, join, relative, resolve, sep } from "node:path";
+import { basename, join, relative, resolve, sep } from "node:path";
 import { serve } from "./mcp";
 import { ledgeTools, resolveNoteForOpen } from "./mcpTools";
-import { installShim, tildify } from "./cliShim";
+import { tildify } from "./cliShim";
 import { writeOpenRequest } from "./openRequest";
 import { loadWorkspaces, rootContaining, roots, workspaceMatches } from "./workspaces";
 
@@ -38,10 +38,6 @@ export { tildify }; // display formatting; defined in cliShim.ts so the app's in
 
 /** The app's bundle identifier: how `open -b` finds it without a path. */
 export const BUNDLE_ID = "sh.ledge.app";
-
-// This module's own location: what an installed shim execs. Resolves to
-// src/bun/cli.ts in a checkout and Resources/app/bun/cli.js in the bundle.
-const CLI_ENTRY = import.meta.path;
 
 // --- pure helpers (unit-tested in cli.test.ts) -------------------------------
 
@@ -191,8 +187,10 @@ usage:
          --heading <h>         append at the end of that heading's section
   ledge workspaces             list workspace roots
   ledge mcp                    serve the Ledge MCP server on stdio
-  ledge install [dir]          put a \`ledge\` shim on your PATH
   ledge help                   this text
+
+\`ledge\` is \`ledge-server cli\`. The Ledge app puts both on your PATH with
+Install Shell Command; on a server, https://ledge.sh/server.sh does.
 
 flags:
   -w, --workspace <root>       scope to one workspace (path or folder name)
@@ -277,35 +275,13 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
   }
   if (verb === "") return openApp(io);
   if (verb === "mcp") {
-    // Exactly mcp.ts's main: load once so a misconfigured launch says so
+    // `ledge-server mcp` by its shorter name, for the `claude mcp add` line
+    // the manual gives: load once so a misconfigured launch says so
     // immediately, then serve stdin until the client hangs up.
     await loadWorkspaces();
     console.error("[mcp] ledge server on stdio");
     await serve(ledgeTools);
     return 0;
-  }
-  if (verb === "install") {
-    try {
-      const arg = positionals.join(" ");
-      const dir =
-        arg === ""
-          ? null
-          : resolve(io.cwd(), arg === "~" ? homedir() : arg.startsWith("~/") ? join(homedir(), arg.slice(2)) : arg);
-      const res = await installShim({
-        execPath: process.execPath,
-        entryPath: CLI_ENTRY,
-        pathVar: process.env["PATH"] ?? "",
-        dir,
-      });
-      io.out(res.path);
-      if (!res.onPath) {
-        io.err(`ledge: ${dirname(res.path)} is not on your PATH — add: export PATH="${dirname(res.path)}:$PATH"`);
-      }
-      return 0;
-    } catch (err) {
-      io.err(`ledge: ${err instanceof Error ? err.message : String(err)}`);
-      return 1;
-    }
   }
 
   try {
@@ -499,8 +475,9 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
   }
 }
 
-if (import.meta.main) {
-  const io: CliIo = {
+/** The real process seams, for `ledge-server cli` (serve.ts). */
+export function processIo(): CliIo {
+  return {
     out: (line) => process.stdout.write(line + "\n"),
     err: (line) => process.stderr.write(line + "\n"),
     stdin: async () => (process.stdin.isTTY ? null : await Bun.stdin.text()),
@@ -511,5 +488,4 @@ if (import.meta.main) {
       return (await proc.exited) === 0;
     },
   };
-  process.exit(await runCli(process.argv.slice(2), io));
 }

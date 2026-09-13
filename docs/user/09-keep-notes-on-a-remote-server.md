@@ -125,7 +125,9 @@ source ~/.zshenv
 bun add -g ledge-server
 ```
 
-Run them as the account Ledge signs in to. None of them needs `sudo`. The account's shell has to be zsh, which it is unless the account predates macOS Catalina. Use a Mac, or an account on it, that does not also run the Ledge app, since the app already serves that account's notes.
+Run them as the account Ledge signs in to. None of them needs `sudo`. The account's shell has to be zsh, which it is unless the account predates macOS Catalina.
+
+A Mac that runs the Ledge app needs none of this. "Install Shell Command (ledge)" in the app's command palette puts `ledge-server` in `~/.ledge-server/bin`, where an incoming ssh looks first, pointing at the app's own copy. Signing in as that account then reaches the notes the app shows, with the app's server answering both.
 
 macOS and Linux are supported, on arm64 or x64. On Linux the floor is glibc 2.29, which means Debian 11, Ubuntu 20.04, RHEL 9, or anything newer. Alpine and other musl systems are not supported.
 

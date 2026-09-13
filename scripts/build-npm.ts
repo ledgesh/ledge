@@ -90,10 +90,12 @@ run(
 );
 
 // --- the hand-written files --------------------------------------------------
-copyInto(join(ROOT, "npm", "bin", "ledge-server.js"), join(OUT, "bin", "ledge-server.js"));
-// npm preserves the executable bit from the tarball; without it the shebang
-// never gets a chance to choose Bun.
-chmodSync(join(OUT, "bin", "ledge-server.js"), 0o755);
+for (const bin of ["ledge-server.js", "ledge.js"]) {
+  copyInto(join(ROOT, "npm", "bin", bin), join(OUT, "bin", bin));
+  // npm preserves the executable bit from the tarball; without it the shebang
+  // never gets a chance to choose Bun.
+  chmodSync(join(OUT, "bin", bin), 0o755);
+}
 copyInto(join(ROOT, "npm", "README.md"), join(OUT, "README.md"));
 copyInto(join(ROOT, "LICENSE"), join(OUT, "LICENSE"));
 

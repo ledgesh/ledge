@@ -113,11 +113,12 @@ enough to provoke it — see testing.md §6.
 
 **Your Mac is a server, and the app is one of its clients.** The bundle
 carries `serve.js` beside the shell's own entry (`electrobun.config.ts`
-`copy`, built by `bun run build:cli`), and the first window to want this Mac
+`copy`, built by `bun run build:serve`), and the first window to want this Mac
 runs `bun serve.js daemon --autostart` from the bundle's own Bun, then dials
 `.server.sock` the way `serve` does (`bun/localServer.ts`). A second window
 finds the daemon already there. A phone reaching this Mac over ssh finds the
-same one. There is no in-process server, no folder-dialog seam the daemon
+same one, through the `ledge-server` shim Install Shell Command writes into
+`~/.ledge-server/bin` (§11), which execs that same `serve.js`. There is no in-process server, no folder-dialog seam the daemon
 lacks and the app has, and no answer to "who is connected" that the app keeps
 for itself: presence, routing and the vault are the daemon's for every client
 alike.
@@ -1946,23 +1947,24 @@ no notion of who is asking beyond the client id in a hello, which is why
   the path `workspaceAttach` takes, which the server checks before it is a
   root.
 
-**Fourteen RPC entries are the client's outright** and never become frames
+**Fifteen RPC entries are the client's outright** and never become frames
 (`NATIVE_METHODS` in `shared/wire.ts`, served on a Mac by `bun/clientSeams.ts`):
 `clipboardWrite`, `clipboardRead`, `clipboardReadRich`, `assetPaste`,
-`assetPick`, `folderPick`, `linkOpen`, `menuSet`, `windowNew`, `windowDocs`,
-`windowRole`, `updateState`, `updateCheck`, and `updateInstall`. Opening a URL
-happens on the device the user is holding, not on the VPS; the picture you
-want to insert is in that device's photo library, in its files, or in front of
-its camera (ios.md §11); the folder dialog is that device's too, and only fills
-the Attach Folder field, since the path it holds is checked by the server like
-a typed one (§5); a headless
+`assetPick`, `folderPick`, `cliInstall`, `linkOpen`, `menuSet`, `windowNew`,
+`windowDocs`, `windowRole`, `updateState`, `updateCheck`, and `updateInstall`.
+Opening a URL happens on the device the user is holding, not on the VPS; the
+picture you want to insert is in that device's photo library, in its files, or
+in front of its camera (ios.md §11); the folder dialog is that device's too,
+and only fills the Attach Folder field, since the path it holds is checked by
+the server like a typed one (§5); the shell command goes on the PATH of the
+machine somebody types at, and runs that machine's own copy (§11); a headless
 server handed the view's menu would swallow ⌘Q with it; a machine with no
 screen has nowhere to put a window (§8a); and the update is this app's, where a
 server is a different program installed by whoever runs it (releasing.md §7).
 The seven connection entries (§8) join them for a different reason: a server has
 no business knowing which servers this client can reach.
 
-The server implements all twenty-one as REFUSALS rather than omitting them,
+The server implements all twenty-two as REFUSALS rather than omitting them,
 because the handler map is total by construction; reaching one means a client
 forgot its overlay, and `{text: ""}` back from a clipboard read would look
 exactly like an empty clipboard until somebody went looking. `bun/server.ts` now has no
@@ -2098,19 +2100,24 @@ falls back to the PATH's `bun`: it runs where an admin installed one and says
 "command not found" where nobody did, which is what every other language on
 that machine was saying all along.
 
-**The CLI is not in that binary either, and the palette says so first.** A
-`ledge` shim execs the exact runtime and entry that wrote it (`bun/cliShim.ts`),
-which in the app is `Contents/MacOS/bun` plus the `cli.js` that
-`electrobun.config.ts` copies beside `index.js`. A compiled `ledge-server` has
-no such neighbour, so `cliInstall` there could only fail, and it used to fail by
-naming a path inside `/$bunfs` and advising a rebuild. `workspaceList` now
-reports `cliShim` on its first round trip, so Install Shell Command is absent
-on a connection to a server rather than present and failing (interactions.md
-§8). The call still refuses if it
-arrives, in a sentence about where the CLI lives. Giving a server a CLI is a
-different piece of work than hiding a verb that cannot run — it needs the CLI
-compiled into the server binary behind a verb of its own, which is the same
-restructuring `serve.ts`'s argv guard would need to run a file.
+**The CLI and the MCP server are verbs of `ledge-server`**, `cli` and `mcp`
+(`bun/serve.ts`), so every machine with a server has both: they read the
+notes straight from disk beside whatever daemon is running, as they did
+beside the app. `ledge` is a launcher that execs `ledge-server cli`, and
+three installers write it. The npm package installs `ledge` and
+`ledge-server` as its two bins; `server.sh` writes both launchers into
+`~/.ledge-server/bin`; and on a Mac the app's Install Shell Command writes
+both shims into the same directory, execing `Contents/MacOS/bun` on the
+bundle's own `serve.js` (`bun/cliShim.ts`). That last one is a CLIENT seam
+(§10, `cliInstall` in `NATIVE_METHODS`): the files land on the machine with
+the screen and run that machine's copy, whichever server the window is
+showing, so the verb is the client's to offer (`mainview/lib/shell.ts`
+`installsCli`) and a server refuses the call by name. The shim directory is
+the one §4a's command puts first on PATH, which is what makes a Mac running
+the app a server for a phone with no second install and no second account:
+`ssh mac ledge-server serve` runs the app's `serve.js` and attaches to the
+app's daemon. The two installers recognize each other's launchers and
+replace them, and refuse any other file holding either name.
 
 **The install is a package, and the reason is that npm already solves both
 problems the compiled binary had.** Two commands ending in `bun add -g
@@ -2194,7 +2201,7 @@ explicitly, and the checksums still hold. The script:
 | Account | Refuses root. The server belongs in the home of the account Ledge signs in to, and `curl … \| sudo -iu ledge sh` is the command for a service account. |
 | Platform | Picks darwin or linux and arm64 or x64, treats a Rosetta shell as arm64, and refuses musl and glibc below 2.29 before downloading anything. |
 | Download | Checks each tarball's SHA-256. The server comes first, and a package with no trampolines for this target is refused before Bun is fetched. Bun is run before anything is moved into place, so one that cannot run here is refused with its own error. |
-| Layout | Unpacks the package into `~/.ledge-server/versions/<version>` with `bun` beside it, and renames a new `~/.ledge-server/bin/ledge-server` over the old one: a two-line `sh` launcher that execs that version's `bun` on its `bin/ledge-server.js`. |
+| Layout | Unpacks the package into `~/.ledge-server/versions/<version>` with `bun` beside it, and renames a new `~/.ledge-server/bin/ledge-server` over the old one: a two-line `sh` launcher that execs that version's `bun` on its `bin/ledge-server.js`. A `ledge` launcher beside it does the same with `cli` in front of the arguments. |
 | Update | Keeps the previous version and deletes older ones. |
 | PATH | Appends one line to the login shell's startup file, for the user's own terminals. ssh does not need it, because §4a's prefix is in the command. |
 
@@ -2606,7 +2613,11 @@ Each phase leaves the app shippable.
    (`workspaceAttach`, `bun/workspaces.ts` attachExternal), and the Mac's
    picker is a client seam that fills the dialog's field (`folderPick`, §10).
    Move Workspace Folder went with it: moving a folder is Finder's job, then
-   close and attach again.
+   close and attach again. The CLI and the MCP server became `ledge-server`
+   verbs (§11), and Install Shell Command became a client seam (§10) that
+   writes `ledge` and `ledge-server` into `~/.ledge-server/bin`, so a phone
+   reaches a Mac running the app through the app's own daemon; the
+   `cliShim` handshake flag went with the in-process server's CLI.
 7. **The iOS client**, which is `docs/contributor/ios.md` and depends on
    nothing above being redone. That document is written and none of it is code
    yet; its own §14 phases the work, starting with a move of this transport's

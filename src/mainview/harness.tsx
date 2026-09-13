@@ -44,7 +44,7 @@ import {
   type Theme,
 } from "../shared/settings";
 import { applyAppearance } from "./lib/theme";
-import { configureShell, recordServerCaps } from "./lib/shell";
+import { configureShell } from "./lib/shell";
 import { configureLayout, restoredState } from "./workspace/persist";
 import { holdSaves } from "./notes/store";
 import { resolveStrandedNotes } from "./workspace/editorPool";
@@ -75,6 +75,9 @@ configureShell({
   // A phone has no folder dialog, so its Attach Folder dialog is the field
   // alone (components/AttachFolderDialog.tsx).
   picksFolders: !FAKING_IOS,
+  // A phone has no PATH to put a shell command on, so Install Shell Command
+  // is absent there (lib/shell.ts installsCli).
+  installsCli: !FAKING_IOS,
   // The whole set ios.tsx sets, because two of them decide what a spec can see.
   // `deviceKey` decides whether the connection form asks for a key file or
   // shows the line this client already has (components/ConnectionPicker.tsx).
@@ -105,12 +108,6 @@ configureShell({
 // below).
 const DOCS_WINDOW = new URLSearchParams(window.location.search).get("docs") === "1";
 recordWindowRole({ docs: DOCS_WINDOW });
-// The server's half of the same picture: what the machine holding the notes can
-// do for itself. Set here rather than arriving with workspaceList, because this
-// harness renders without boot.tsx's bootView(), which is where the real shells
-// record it. The answer follows the faked shell. The ios one stands in for a
-// phone against a compiled server, which has no CLI to hand over.
-recordServerCaps({ cliShim: !FAKING_IOS });
 import "./index.css";
 import App from "./App";
 
@@ -829,13 +826,9 @@ recordVaultState(store.vault.state);
 // picker always chooses EXTERNAL, the way a Mac with somebody at it answers.
 // create mirrors createManaged's slug-and-enumerate.
 configureWorkspaces({
-  // cliShim follows the faked shell: the Mac's daemon has the app's CLI
-  // beside it, and a compiled server has none. The ios shell stands in for
-  // that server, so specs see the verb absent.
   list: async () => ({
     workspaces: store.workspaceList(),
     dailyRoot: null,
-    cliShim: !FAKING_IOS,
   }),
   create: async (name) => store.createManaged(name),
   attach: async (path) => {
@@ -1201,7 +1194,7 @@ applyAppearance();
 // The shim write is a native seam. The harness answers with a canned success,
 // so the palette command and its notice strip are drivable end to end.
 configureCli({
-  install: async () => ({ ok: true, message: "ledge installed: ~/.local/bin/ledge" }),
+  install: async () => ({ ok: true, message: "ledge and ledge-server installed in ~/.ledge-server/bin" }),
 });
 
 // The app's update is the shell's, and this fake plays the shell: it holds the

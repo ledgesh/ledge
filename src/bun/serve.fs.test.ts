@@ -110,18 +110,13 @@ test("a folder attaches by its path on the server, and a bad path is refused wit
   expect(bad.error).toContain("not an absolute path");
 });
 
-// The same shape one verb over. A server has no CLI to put on its PATH: the
-// shim execs the runtime and entry that wrote it, and neither a checkout nor
-// a compiled `ledge-server` has a cli.js beside server.ts (its CLI_ENTRY).
-// The boot handshake carries the answer, so the palette can leave the verb
-// out (mainview/lib/shell.ts). A call that asks anyway gets a sentence rather
-// than the shim's error about a path no user has seen (NO_CLI in server.ts).
-test("a server has no CLI to install, and says so on the handshake and again if asked", async () => {
-  const { cliShim } = (await client.requests.workspaceList({})) as { cliShim: boolean };
-  expect(cliShim).toBe(false);
-  const res = (await client.requests.cliInstall({})) as { ok: boolean; message: string };
-  expect(res.ok).toBe(false);
-  expect(res.message).toContain("no CLI to install");
+// The shell command is the client's to install (remote.md §10): the shims
+// land on the machine with the screen and run its own copy (bun/cliShim.ts).
+// The server refuses the call by name like the pasteboard's, and the
+// handshake carries no fact about it: the CLI is a verb of every server.
+test("the shell command is not the server's to install", async () => {
+  await expect(client.requests.cliInstall({})).rejects.toThrow("remote.md §10");
+  expect(Object.keys(await client.requests.workspaceList({})).sort()).toEqual(["dailyRoot", "workspaces"]);
 });
 
 // The other half of remote.md §10. The refusals throw because a server that

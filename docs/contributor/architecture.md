@@ -60,9 +60,10 @@ channel to the server: it is ten strings between the page and the Swift around
 it, for the socket and for what only a device can answer. It carries frames as
 opaque bytes and understands none of them.
 
-Two more entry points exist beside the app. The first is **the MCP server**
-(`src/bun/mcp.ts`, `bun run mcp`), a separate process that agent CLIs spawn
-over stdio to read and write notes. It is not a third participant in the RPC —
+Two more entry points exist beside the app, both verbs of `ledge-server`
+(`src/bun/serve.ts`). The first is **the MCP server** (`src/bun/mcp.ts`,
+`ledge-server mcp` or `ledge mcp`, `bun run mcp`), a separate process that
+agent CLIs spawn over stdio to read and write notes. It is not a third participant in the RPC —
 it never talks to the running app — but it is Bun-side code under Bun-side
 rules: every tool routes through `bun/notes.ts` and the workspace registry, so
 the path guards and filesystem invariants have one definition however a caller
@@ -130,8 +131,9 @@ can hold a prompt that reads and writes notes. No new machinery earned its
 keep here — it is one default entry in an existing map (the settings comment
 documents the redirect trick and how to point it at another CLI).
 
-The second is **the CLI** (`src/bun/cli.ts`, `bun run cli`, `ledge` once the
-shim is installed) — the same third-process pattern taken one step further:
+The second is **the CLI** (`src/bun/cli.ts`, `ledge-server cli`, `bun run
+cli`, `ledge` once a shim is installed) — the same third-process pattern taken
+one step further:
 its note verbs dispatch through the MCP server's own tool handlers
 (`bun/mcpTools.ts`), so the CLI cannot acquire semantics the tools lack, and
 both stay gated by the registry and `assertNote` with one definition. It
@@ -153,18 +155,21 @@ because a boot-time push could fire before the view listens). A file, not a
 socket, deliberately: external actors already reach the app through the
 filesystem (the watcher), and a request file needs no always-listening
 ingress. Requests expire (60s) — "open this now" is not a standing
-instruction — and every invalid request costs exactly itself. The `ledge`
-shim on PATH (`bun/cliShim.ts`; `ledge install`, or the app's Install Shell
-Command palette entry) execs the exact runtime and entry that wrote it —
-the bundle's own bun against `Resources/app/bun/cli.js` (prebuilt by
-`build:cli`, placed by `build.copy`), or the dev machine's bun against the
-checkout — and refuses to overwrite anything that is not recognizably its
-own output. Verb conventions, deixis, and output discipline are
+instruction — and every invalid request costs exactly itself. On a Mac the
+app's Install Shell Command palette entry writes a `ledge` shim and a
+`ledge-server` shim into `~/.ledge-server/bin` (`bun/cliShim.ts`, a client
+seam per remote.md §10): each execs the exact runtime and entry that wrote
+it — the bundle's own bun against `Resources/app/bun/serve.js` (prebuilt by
+`build:serve`, placed by `build.copy`), or the dev machine's bun against the
+checkout — and refuses to overwrite anything that is not recognizably a
+Ledge launcher. On a server the npm package and `server.sh` install the same
+two names. Verb conventions, deixis, and output discipline are
 interactions.md §9's.
 
-The third is **`ledge-server`** (`src/bun/serve.ts`, `src/bun/daemon.ts`), the
-same handler map with a frame codec where the Electrobun RPC would be. It has
-two verbs that matter here: `daemon`, which holds the notes and the shells
+The third is **`ledge-server`** itself (`src/bun/serve.ts`,
+`src/bun/daemon.ts`), the same handler map with a frame codec where the
+Electrobun RPC would be. It has two verbs that matter here: `daemon`, which
+holds the notes and the shells
 behind a unix socket in the app home and outlives every connection to it, and
 `serve`, which pumps bytes between stdio and that socket for a client arriving
 over ssh. It is not a third entry point beside the app so much as the server

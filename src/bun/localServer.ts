@@ -13,7 +13,8 @@ import { connectToDaemon, retireDaemon, spawnDaemon, stopDaemon } from "./daemon
 import type { Duplex } from "../shared/transport";
 
 /** The server's entry, beside this file: `bun/serve.js` in the bundle
- * (electrobun.config.ts `copy`), built by `bun run build:cli`. */
+ * (electrobun.config.ts `copy`), built by `bun run build:serve`. The shims
+ * Install Shell Command writes exec the same file (bun/cliShim.ts). */
 export const SERVE_ENTRY = join(import.meta.dir, "serve.js");
 
 export interface LocalServerOpts {

@@ -1,8 +1,8 @@
-// The spawned-process seam: this test runs `bun src/bun/mcp.ts` as its own
-// process and talks JSON-RPC over its real stdin and stdout, as an agent CLI
-// does with an MCP server. mcp.test.ts covers the dispatcher and
+// The spawned-process seam: this test runs `bun src/bun/serve.ts mcp` as its
+// own process and talks JSON-RPC over its real stdin and stdout, as an agent
+// CLI does with an MCP server. mcp.test.ts covers the dispatcher and
 // mcpTools.fs.test.ts the tools. Only this file covers the assembly:
-//   - import.meta.main fires
+//   - the `mcp` verb reaches the dispatcher
 //   - the registry loads from the env the client set
 //   - each reply is one JSON line
 //   - nothing else reaches stdout, where a stray log line would corrupt every
@@ -32,7 +32,7 @@ test("a full client session: initialize, list, call — one JSON line per reply"
   await writeFile(join(WS, "hello-agent.md"), "# Hello Agent\n\nsecret word: xyzzy\n");
 
   const proc = Bun.spawn({
-    cmd: [process.execPath, join(import.meta.dir, "mcp.ts")],
+    cmd: [process.execPath, join(import.meta.dir, "serve.ts"), "mcp"],
     env: { ...process.env, LEDGE_NOTES_ROOT: HOME },
     stdin: "pipe",
     stdout: "pipe",

@@ -1,10 +1,10 @@
 // The Ledge MCP server: how agents read and write the user's notes. Agent
-// CLIs (Claude Code, Codex, Gemini, anything speaking MCP) spawn this file as
-// a third process beside the running app. They talk JSON-RPC 2.0 over stdio,
-// one message per line. Its tools route through bun/notes.ts and
-// bun/workspaces.ts (mcpTools.ts). An agent's paths go through the same
-// registry and assertNote guards the webview's do, so the invariants have one
-// definition rather than a copy per client.
+// CLIs (Claude Code, Codex, Gemini, anything speaking MCP) run it as
+// `ledge-server mcp` (or `ledge mcp`, serve.ts), a process beside the daemon.
+// They talk JSON-RPC 2.0 over stdio, one message per line. Its tools route
+// through bun/notes.ts and bun/workspaces.ts (mcpTools.ts). An agent's paths
+// go through the same registry and assertNote guards the webview's do, so the
+// invariants have one definition rather than a copy per client.
 //
 // Hand-rolled, not @modelcontextprotocol/sdk (architecture.md §8). A
 // tools-only server needs initialize, tools/list, and tools/call, and that is
@@ -15,8 +15,6 @@
 // the stream, so logging here and in every module this imports must go to
 // stderr. console.error and console.warn do; console.log would not, and
 // nothing on this import path calls it.
-import { loadWorkspaces } from "./workspaces";
-import { ledgeTools } from "./mcpTools";
 
 /** One MCP tool: what tools/list advertises and tools/call dispatches to.
  * Handlers return any JSON-serializable value, which is stringified into the
@@ -177,12 +175,3 @@ export async function serve(tools: readonly McpTool[]): Promise<void> {
   }
 }
 
-if (import.meta.main) {
-  // Load the registry once up front so a misconfigured launch (a wrong
-  // LEDGE_NOTES_ROOT, say) reports the problem on stderr immediately. Every
-  // tool that needs the registry reloads it (mcpTools.ts), so this snapshot
-  // going stale does not matter.
-  await loadWorkspaces();
-  console.error("[mcp] ledge server on stdio");
-  await serve(ledgeTools);
-}

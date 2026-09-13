@@ -10,6 +10,8 @@ Ledge ships an MCP server. `ledge mcp` serves it on stdio, so install the `ledge
 claude mcp add ledge -- ledge mcp
 ```
 
+The MCP server reads the notes on the machine it runs on. For an agent running on a server, the same line works there, since the server install puts `ledge` on that machine's PATH too (`ledge-server mcp` is the same thing spelled out).
+
 The server exposes eleven tools:
 
 | Read | Write |

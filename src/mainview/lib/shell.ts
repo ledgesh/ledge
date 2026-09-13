@@ -1,18 +1,17 @@
-// What the client in front of the user can do, and what the machine holding
-// the notes can do. Two different questions, and the view needs both.
-// Everything else in the app is a fact about the notes and belongs to the
-// server. These are not.
+// What the client in front of the user can do. Everything else in the app is
+// a fact about the notes and belongs to the server. These are not.
 //
 // Whether a note's blocks run here is the shell's answer about itself. A phone
 // has no terminal drawer, and v1 cut inline runs as well until the surfaces
-// they need had a touch column (ios.md §8). Whether a CLI can be installed is
-// a fact about the machine at the other end: a compiled `ledge-server` has
-// none beside it, which is true of a VPS reached from a Mac exactly as it is
-// of one reached from a phone.
+// they need had a touch column (ios.md §8). Whether a shell command can be
+// installed is the shell's answer too: the command lands on this machine and
+// runs this app's own copy (bun/cliShim.ts), so a Mac offers it whichever
+// server its window is showing, and a phone, with no PATH to put it on, never
+// does.
 //
 // Three of the flags here withhold a verb that cannot work on this client, so
 // it is absent rather than present and failing: `runsBlocks`, `hasTerminal`
-// and `canInstallCli` (interactions.md §8). `picksFolders` withholds a button
+// and `installsCli` (interactions.md §8). `picksFolders` withholds a button
 // inside a dialog the same way. `softKeyboard` changes an editor rather than
 // a verb, and `deviceKey` says which key authenticates (ios.md §8).
 //
@@ -39,6 +38,8 @@ interface Shell {
   multiWindow: boolean;
   /** Whether this client has a folder dialog of its own to open. */
   picksFolders: boolean;
+  /** Whether this client has a PATH to put `ledge` and `ledge-server` on. */
+  installsCli: boolean;
 }
 
 let shell: Shell = {
@@ -49,6 +50,7 @@ let shell: Shell = {
   softKeyboard: false,
   multiWindow: true,
   picksFolders: true,
+  installsCli: true,
 };
 
 export function configureShell(next: Partial<Shell>): void {
@@ -172,34 +174,16 @@ export function picksFolders(): boolean {
   return shell.picksFolders;
 }
 
-// The server's half. Not part of `Shell` above because it arrives from a
-// different place at a different time: the shell knows its own answers at boot,
-// and this comes back with `workspaceList` on the first round trip. It
-// defaults to true, so the desktop's verb is present during the one paint
-// before `workspaceList` answers.
-interface ServerCaps {
-  /** Whether that machine has a `ledge` CLI to put on its own PATH. */
-  cliShim: boolean;
-}
-
-let server: ServerCaps = { cliShim: true };
-
-/** Record what the machine holding the notes can do, from `workspaceList` at
- * boot. Copied field by field, so a response carrying more than this leaves
- * no extras here. */
-export function recordServerCaps(caps: ServerCaps): void {
-  server = { cliShim: caps.cliShim };
-}
-
 /**
- * Whether the machine holding the notes can put `ledge` on its own PATH.
+ * Whether this client can put `ledge` and `ledge-server` on its own PATH, for
+ * Install Shell Command (interactions.md §8).
  *
- * The server's answer and not this client's, because the install writes a file
- * over there and the CLI it points at reads the notes over there
- * (interactions.md §8). A `ledge` installed on the Mac in front of the user
- * reads that Mac's notes, not the notes on screen. False on a server, where a
- * compiled `ledge-server` has no CLI beside it to exec (bun/cliShim.ts).
+ * This client's answer, whichever server its window is showing: the shims
+ * land on this machine and run this app's own copy, so the `ledge` they
+ * install reads this Mac's notes, and the `ledge-server` is how a phone
+ * reaches them (bun/cliShim.ts). A phone has no PATH to write to, so there
+ * the verb is absent rather than present and failing.
  */
-export function canInstallCli(): boolean {
-  return server.cliShim;
+export function installsCli(): boolean {
+  return shell.installsCli;
 }

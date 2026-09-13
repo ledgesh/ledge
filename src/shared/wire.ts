@@ -310,15 +310,16 @@ export type ClientPush = (typeof CLIENT_PUSHES)[number];
 // added here without a matching refusal fails to compile.
 
 /**
- * The native fourteen: the pasteboard, the picture library, the folder
- * dialog, the browser, the menu bar, the windows, and the app's own update.
- * All of them belong to the device in front of the user.
+ * The native fifteen: the pasteboard, the picture library, the folder
+ * dialog, the browser, the menu bar, the windows, the app's own update, and
+ * the shell command. All of them belong to the device in front of the user.
  *
  * Answering them on the server reaches the wrong machine: a VPS's empty
  * pasteboard, a file dialog opened on a screen nobody is looking at, a link
  * opened in a browser nobody is looking at, a menu bar that does not exist and
  * takes ⌘Q with it (remote.md §10), a window on a machine with no screen, an
- * update for a program that is not the one running over there.
+ * update for a program that is not the one running over there, a `ledge` on
+ * a PATH nobody types at.
  */
 export const NATIVE_METHODS = [
   "clipboardRead",
@@ -327,6 +328,7 @@ export const NATIVE_METHODS = [
   "assetPaste",
   "assetPick",
   "folderPick",
+  "cliInstall",
   "linkOpen",
   "menuSet",
   "windowNew",

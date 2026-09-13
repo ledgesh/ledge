@@ -1,6 +1,6 @@
 // `ledge-server`: this machine's notes, reachable over ssh (remote.md §3).
 //
-// Four verbs. `serve` is what a client runs (`ssh <target> ledge-server
+// Six verbs. `serve` is what a client runs (`ssh <target> ledge-server
 // serve`), and what an `authorized_keys` forced command names (§4). It pumps
 // bytes between stdio and the daemon's socket and parses no frames, so an ssh
 // session cannot desynchronize the protocol. `daemon` holds the notes, the
@@ -10,12 +10,18 @@
 // entry and runs `daemon` from it, then dials the socket itself with no pump
 // in between (bun/localServer.ts). `backup-paths` prints the paths a backup has
 // to cover and exits (backup.ts, §11). `pair` prints a pairing code (§4b).
+// `cli` is the `ledge` command (cli.ts; a `ledge` on a PATH is a shim that
+// execs this verb) and `mcp` the MCP server (mcp.ts). Both read the notes
+// straight from disk, beside whatever daemon is running, so a shell and an
+// agent on this machine need no connection to it.
 //
 // stdout belongs to the protocol: one stray byte in a length-prefixed stream
 // desynchronizes it with no way back. `main` points `console.log`,
 // `console.info` and `console.debug` at stderr before anything logs. The
 // session log keeps a copy of the first two (log.ts `startLogging`).
-// bun/mcp.ts holds stdout for its own protocol the same way.
+// bun/mcp.ts holds stdout for its own protocol the same way, and the CLI
+// writes its results to stdout itself (cli.ts `CliIo`).
+import { processIo, runCli } from "./cli";
 import {
   connectToDaemon,
   DAEMON_LOG,
@@ -242,8 +248,9 @@ export async function main(argv: readonly string[]): Promise<never> {
   console.debug = console.error;
 
   const verb = argv[2] ?? "serve";
-  if (verb !== "serve" && verb !== "daemon" && verb !== "backup-paths" && verb !== "pair") {
-    console.error("usage: ledge-server [serve|daemon [--autostart]|backup-paths [options]|pair [options]]");
+  const VERBS = ["serve", "daemon", "backup-paths", "pair", "cli", "mcp"];
+  if (!VERBS.includes(verb)) {
+    console.error("usage: ledge-server [serve|daemon [--autostart]|backup-paths [options]|pair [options]|cli [args]|mcp]");
     console.error("  serve         the protocol on stdin and stdout, attached to this machine's daemon");
     console.error("  daemon        BE this machine's server; runs until stopped");
     console.error("                  --autostart   exit when idle; what serve passes to the one it starts");
@@ -253,17 +260,21 @@ export async function main(argv: readonly string[]): Promise<never> {
     console.error("                  --json        both lists, plus any root that is not on disk");
     console.error("  pair          a QR code a phone scans to add this server");
     console.error("                  --user, --host, --port, --keys   see `ledge-server pair --help`");
+    console.error("  cli           the `ledge` command: notes from a shell (`ledge-server cli help`)");
+    console.error("  mcp           the Ledge MCP server on stdin and stdout, for an agent");
     process.exit(2);
   }
 
-  // `backup-paths` and `pair` read and print. They start no daemon and touch
-  // none, so they need no log file of their own and must not rotate the ones
-  // a running server is writing.
+  // `backup-paths`, `pair`, `cli` and `mcp` read the disk and print. They
+  // start no daemon and touch none, so they need no log file of their own and
+  // must not rotate the ones a running server is writing.
   if (verb === "backup-paths") {
     await backupPaths(argv);
     process.exit(0);
   }
   if (verb === "pair") process.exit(await pair(argv));
+  if (verb === "cli") process.exit(await runCli(argv.slice(3), processIo()));
+  if (verb === "mcp") process.exit(await runCli(["mcp"], processIo()));
 
   // `serve` and `daemon` log to separate files. Both can be running at once on
   // one machine, and two processes appending to one log interleave their lines

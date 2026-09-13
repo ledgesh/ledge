@@ -172,7 +172,10 @@ export function manifest(version: string): Manifest {
     description: "The Ledge server: your notes and shells on another machine, reached over ssh.",
     license: "Apache-2.0",
     type: "module",
-    bin: { [PACKAGE_NAME]: "bin/ledge-server.js" },
+    // Two commands: the server, and its `cli` verb by the name a shell user
+    // types. `ledge` on a server is the same file the Mac app's shim runs
+    // (bun/cliShim.ts), so notes on a VPS read the same from its prompt.
+    bin: { [PACKAGE_NAME]: "bin/ledge-server.js", ledge: "bin/ledge.js" },
     files: ["bin", "lib", "README.md", "LICENSE"],
     engines: { bun: BUN_FLOOR },
     os: ["darwin", "linux"],

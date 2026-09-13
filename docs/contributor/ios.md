@@ -1065,10 +1065,9 @@ Workspace… asks for the folder's path on the server, which checks it
 adds a Choose Folder… button that fills the field from its own folder dialog,
 and only where the notes are on that Mac. A phone has no such dialog, and its
 folders are never the server's, so the flag is false and the field stands
-alone. `cliShim` is the one fact that is the SERVER's, riding back on
-`workspaceList` at boot: a compiled `ledge-server` has no CLI to install, so
-Install Shell Command is absent on every connection to one, from a Mac as
-from a phone.
+alone. `installsCli` withholds Install Shell Command the same way: the
+shims land on the client's own machine and run its own copy (`bun/cliShim.ts`),
+and a phone has no PATH to put them on.
 
 The harness can be either shell. `harness.html?shell=ios` is a phone's, and
 `e2e/phone.spec.ts` uses it to hold both halves of the claim — the cut verbs

@@ -173,8 +173,8 @@ that all other testing uses:
   which is an Apple-events path TCC can refuse.
 - `views://` still serves the view (it loads at all, so this is implied, but a
   scheme handler is exactly the sort of thing hardening breaks).
-- Install the CLI shim and run `ledge ls`. The shim execs the bundle's own
-  `bun`, from outside the bundle.
+- Run Install Shell Command (ledge), then `ledge ls` in a new terminal. The
+  shim execs the bundle's own `bun`, from outside the bundle.
 - Open a workspace under `~/Documents` or `~/Desktop` and confirm the TCC prompt
   appears and, once granted, that notes read and write.
 - Ledge > Check for Updates… answers "Ledge <version> is the latest version."

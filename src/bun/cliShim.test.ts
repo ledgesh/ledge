@@ -1,26 +1,36 @@
 // The pure half of cliShim: the script's shape, the self-recognition marker,
-// and the PATH answer. cliShim.fs.test.ts covers what installShim does to a
-// real bin dir.
+// the PATH answer and the startup-file table. cliShim.fs.test.ts covers what
+// installShims does to a real directory.
 import { describe, expect, test } from "bun:test";
-import { dirOnPath, isLedgeShim, shimDirCandidates, shimScript } from "./cliShim";
+import { dirOnPath, isLedgeShim, shimDir, shimScript, startupFile } from "./cliShim";
 
 describe("shimScript", () => {
-  test("execs the given runtime and entry, forwarding every argument", () => {
-    const s = shimScript("/App/Contents/MacOS/bun", "/App/Contents/Resources/app/bun/cli.js");
+  test("execs the given runtime and entry, the verb, then every argument", () => {
+    const s = shimScript("/App/Contents/MacOS/bun", "/App/Contents/Resources/app/bun/serve.js", "cli");
     expect(s.startsWith("#!/bin/sh\n")).toBe(true);
-    expect(s).toContain('exec "/App/Contents/MacOS/bun" "/App/Contents/Resources/app/bun/cli.js" "$@"');
+    expect(s).toContain('exec "/App/Contents/MacOS/bun" "/App/Contents/Resources/app/bun/serve.js" cli "$@"');
     expect(s.endsWith("\n")).toBe(true);
   });
 
-  test("a path with sh-meaningful characters stays one quoted word", () => {
-    const s = shimScript("/odd path/bu\"n", "/odd$dir/cli.js");
-    expect(s).toContain('exec "/odd path/bu\\"n" "/odd\\$dir/cli.js" "$@"');
+  test("with no verb the caller's first argument is the verb, which is what ledge-server is", () => {
+    const s = shimScript("/bundle/bun", "/bundle/serve.js", null);
+    expect(s).toContain('exec "/bundle/bun" "/bundle/serve.js" "$@"');
   });
 
-  test("recognizes its own output, and not a stranger's script", () => {
-    expect(isLedgeShim(shimScript("/bin/bun", "/x/cli.js"))).toBe(true);
+  test("a path with sh-meaningful characters stays one quoted word", () => {
+    const s = shimScript("/odd path/bu\"n", "/odd$dir/serve.js", "cli");
+    expect(s).toContain('exec "/odd path/bu\\"n" "/odd\\$dir/serve.js" cli "$@"');
+  });
+
+  test("recognizes its own output and server.sh's launcher, and not a stranger's script", () => {
+    expect(isLedgeShim(shimScript("/bin/bun", "/x/serve.js", null))).toBe(true);
+    expect(isLedgeShim("#!/bin/sh\n# Written by https://ledge.sh/server.sh. Runs ledge-server on the Bun installed beside it.\n")).toBe(true);
     expect(isLedgeShim("#!/bin/sh\nexec something else\n")).toBe(false);
   });
+});
+
+test("the shims go where the ssh command looks first", () => {
+  expect(shimDir("/Users/u")).toBe("/Users/u/.ledge-server/bin");
 });
 
 describe("dirOnPath", () => {
@@ -32,6 +42,19 @@ describe("dirOnPath", () => {
   });
 });
 
-test("candidate dirs prefer the shared bins and end at the user's own", () => {
-  expect(shimDirCandidates("/home/u")).toEqual(["/opt/homebrew/bin", "/usr/local/bin", "/home/u/.local/bin"]);
+// server.sh's add_to_path, line for line: the two installers must edit the
+// same file, or a Mac that ran both gets the line twice.
+describe("startupFile", () => {
+  test("zsh reads .zshrc, bash reads .bash_profile on a Mac and .bashrc elsewhere", () => {
+    expect(startupFile("/bin/zsh", "/h", "darwin")).toBe("/h/.zshrc");
+    expect(startupFile("/bin/bash", "/h", "darwin")).toBe("/h/.bash_profile");
+    expect(startupFile("/bin/bash", "/h", "linux")).toBe("/h/.bashrc");
+    expect(startupFile("/bin/sh", "/h", "darwin")).toBe("/h/.profile");
+    expect(startupFile("", "/h", "darwin")).toBe("/h/.profile");
+  });
+
+  test("fish and the csh family get no line, since the syntax is not theirs", () => {
+    expect(startupFile("/opt/homebrew/bin/fish", "/h")).toBeNull();
+    expect(startupFile("/bin/tcsh", "/h")).toBeNull();
+  });
 });

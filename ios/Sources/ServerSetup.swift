@@ -105,9 +105,11 @@ final class ServerSetupViewController: UIViewController {
 
         style(steps, .body)
         style(macNote, .body)
-        // Remote Login is off on a new Mac, and the app's own account already
-        // has a server over its notes (remote.md §8a).
-        macNote.text = "Turn on Remote Login first, in System Settings under General, then Sharing. Use an account that doesn't also run the Ledge app on that Mac."
+        // Remote Login is off on a new Mac. A Mac with the app has a server
+        // already, and the app's Install Shell Command puts it where the
+        // phone's ssh looks (remote.md §11), so the four install lines are
+        // for a Mac without the app.
+        macNote.text = "Turn on Remote Login first, in System Settings under General, then Sharing. If the Ledge app runs on that Mac, choose Install Shell Command (ledge) in the app instead of the first four commands, then run the last one in a new terminal."
 
         buttons.addArrangedSubview(copy)
         buttons.addArrangedSubview(share)
