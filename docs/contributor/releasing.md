@@ -219,32 +219,62 @@ that page describing a package that does not exist.
 Assemble it on this Mac, and only on this Mac:
 
 ```
-bun run build:npm
+bun run build:server
 ```
 
-The Mach-O trampolines need a Mac and the ELF ones need a container per
-architecture, so a complete package cannot be assembled anywhere else
-(`remote.md` §11). Docker has to be running. The script refuses rather than
-shipping three targets out of four, and it writes `dist-npm/package.json` last
-so a half-assembled tree cannot be packed.
+It runs `build:npm` first. The Mach-O trampolines need a Mac and the ELF ones
+need a container per architecture, so a complete package cannot be assembled
+anywhere else (`remote.md` §11). Docker has to be running. `build:npm` refuses
+rather than shipping three targets out of four, and it writes
+`dist-npm/package.json` last so a half-assembled tree cannot be packed. Then
+`build:server` packs that tree and writes `dist-server/`:
+
+| File | What it is |
+| --- | --- |
+| `ledge-server-<version>.tgz` | The package, packed by `npm pack`. This file is what gets published. |
+| `server.sh` | The install script: `release/server.sh` with this version, the tarball's SHA-256 and the pinned Bun written in. |
+| `SHA256SUMS` | The SHA-256 of both files above. |
+
+It also downloads each target's pinned Bun tarball into `dist-bun/` and stops
+when one does not match its pin, so a script cannot ship naming a Bun the
+registry does not serve.
 
 Then prove the thing you are about to publish actually works:
 
 ```
 bun run probe:npm
+bun run probe:install
 ```
 
-It packs the tarball, installs it on a container with no compiler and no libc
-headers, and drives a terminal on it. That fixture is the point: it is the
-machine a user has, and the one this checkout is least like.
+`probe:npm` packs the tree, installs it with `bun add -g` on a container with no
+compiler and no libc headers, and drives a terminal on it. `probe:install` runs
+`server.sh` on Debian, Ubuntu and Alpine against a directory laid out like the
+registry, dials the result through sshd, and updates it. Those fixtures are the
+point: they are the machines a user has, and the ones this checkout is least
+like. `probe:install` needs the host's two targets, so on an Apple silicon Mac
+`--targets=darwin-arm64,linux-arm64` is enough for a quick check; build without
+`--targets` before a release. Its update step waits for a daemon's idle exit, so
+it takes a few minutes.
 
-Publishing is deliberately not a script:
+Publishing is deliberately not a script, and it publishes the packed file:
 
 ```
-npm publish ./dist-npm
+npm publish ./dist-server/ledge-server-<version>.tgz
 ```
 
-The `./` is not decoration. npm reads a bare `dist-npm` as a package name to
+`server.sh` carries that file's SHA-256. `npm publish` uploads a `.tgz` as it
+is and records its sha512, which every npm client checks what it downloads
+against, so the registry serves those bytes unchanged. `npm publish ./dist-npm`
+would pack the directory again, and
+nothing promises a second pack compresses to the same bytes. A script whose
+checksum names different bytes refuses every install. Check it once the
+publish returns; the hash has to equal the tarball's line in `SHA256SUMS`:
+
+```
+curl -fsSL https://registry.npmjs.org/ledge-server/-/ledge-server-<version>.tgz | shasum -a 256
+```
+
+The `./` is not decoration. npm reads a bare path as a package name to
 resolve against the registry and fails with a 404 for a package nobody has
 published, which is a confusing way to learn that an argument was a path.
 
@@ -255,53 +285,33 @@ but never replaced, so the version has to be right before the command runs, and
 Two things to know before the first publish. The name `ledge-server` has to be
 available or owned by the publishing account, and `npm publish` on a package
 that has never existed also decides the account that owns it forever. Neither
-is a step that can be rehearsed, so `npm publish --dry-run ./dist-npm` is the
-rehearsal: it prints the exact file list and the tarball size without uploading.
+is a step that can be rehearsed, so `npm publish --dry-run
+./dist-server/ledge-server-<version>.tgz` is the rehearsal: it prints the exact
+file list and the tarball size without uploading.
 
-### The install script and its tarballs
+### The install script
 
-`curl -fsSL https://ledge.sh/server.sh | sh` installs the server without npm or
-a Bun of the user's own (`remote.md` §11). ledge.sh redirects `/server.sh` to
+`curl -fsSL https://ledge.sh/server.sh | sh` installs the published package with
+a Bun of its own, without npm or a Bun of the user's (`remote.md` §11). ledge.sh
+redirects `/server.sh` to
 `https://github.com/ledgesh/ledge/releases/latest/download/server.sh`, so a user
 gets the script attached to the newest published GitHub release. The redirect
 lives in `ledgesh/ledge-www`.
 
-Build the files on this Mac, with Docker running:
-
-```
-bun run build:server
-```
-
-It runs `build:npm` first, then writes `dist-server/`:
-
-| File | What it is |
-| --- | --- |
-| `ledge-server-<version>-<os>-<arch>.tar.gz` | One per target: the pinned Bun, the bundle, that target's trampolines, and the license texts. |
-| `server.sh` | The install script, `release/server.sh` with this version and each tarball's SHA-256 written in. |
-| `SHA256SUMS` | The SHA-256 of every file above. |
-
-Then install those files on machines that could not have built them:
-
-```
-bun run probe:install
-```
-
-It needs the host's two targets, so on an Apple silicon Mac build with
-`--targets=darwin-arm64,linux-arm64` for a quick check, and without `--targets`
-before a release. Its update step waits for a daemon's idle exit, so it takes a
-few minutes.
-
-Upload all six files to the `v<version>` release alongside the app's (§4).
-`server.sh` downloads its tarball from the tag it was built for, so a script
-and tarballs from different builds fail at the checksum. GitHub's `latest`
+Upload `server.sh` and `SHA256SUMS` to the `v<version>` release alongside the
+app's (§4), after the npm publish: the script downloads the package from npm,
+so a script published first fails for everyone who runs it. GitHub's `latest`
 skips drafts and pre-releases, so publishing the release is what gives
 `curl … | sh` the new version.
 
-**The Bun inside is pinned in `src/bun/serverRelease.ts`**, as a version and
-the SHA-256 of each Bun download, and `serverRelease.test.ts` fails when that
-version differs from the one CI runs the suite on. Raising it means copying
-the four zips' hashes from that Bun release's `SHASUMS256.txt`, and the hash of
-its `LICENSE.md`.
+**The Bun it installs is pinned in `src/bun/serverRelease.ts`**, as a version
+and the SHA-256 of each target's `@oven/bun-<target>` tarball, and
+`serverRelease.test.ts` fails when that version differs from the one CI runs
+the suite on. npm lists a sha512 rather than a SHA-256, so raising it means
+downloading the four tarballs at the new version, checking each against `npm
+view @oven/bun-<target>@<version> dist.integrity`, and copying in their
+SHA-256s. `build:server` then checks the pins against the registry on every
+build.
 
 ## 7. Updates
 

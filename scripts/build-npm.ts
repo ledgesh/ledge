@@ -192,4 +192,4 @@ if (missing.length > 0) {
 // `./dist-npm` and not `dist-npm`: npm reads a bare word as a name to look up
 // in the registry, and answers a directory that happens to look like one with
 // a 404 for a package nobody has published.
-console.log("[npm] complete. `npm pack ./dist-npm` to build the tarball; releasing.md publishes it.");
+console.log("[npm] complete. `bun run build:server` packs the tarball; releasing.md §6 publishes that file.");

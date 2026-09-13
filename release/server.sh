@@ -2,17 +2,23 @@
 # Installs ledge-server @VERSION@, the server Ledge's apps connect to over ssh,
 # into ~/.ledge-server for the account that runs it:
 #   curl -fsSL https://ledge.sh/server.sh | sh
-# The download carries its own Bun and is checked against the checksums below.
-# Built from release/server.sh in github.com/ledgesh/ledge (remote.md §11).
+# Downloads the npm package and a private Bun from the npm registry, checked
+# against the checksums below. Built from release/server.sh (remote.md §11).
 
 set -eu
 
 version='@VERSION@'
-download="${LEDGE_SERVER_DOWNLOAD:-@DOWNLOAD@}"
-sum_darwin_arm64='@SUM_DARWIN_ARM64@'
-sum_darwin_x64='@SUM_DARWIN_X64@'
-sum_linux_arm64='@SUM_LINUX_ARM64@'
-sum_linux_x64='@SUM_LINUX_X64@'
+registry="${LEDGE_SERVER_REGISTRY:-@REGISTRY@}"
+server_sum='@SERVER_SUM@'
+bun_version='@BUN_VERSION@'
+bun_package_darwin_arm64='@BUN_PACKAGE_DARWIN_ARM64@'
+bun_sum_darwin_arm64='@BUN_SUM_DARWIN_ARM64@'
+bun_package_darwin_x64='@BUN_PACKAGE_DARWIN_X64@'
+bun_sum_darwin_x64='@BUN_SUM_DARWIN_X64@'
+bun_package_linux_arm64='@BUN_PACKAGE_LINUX_ARM64@'
+bun_sum_linux_arm64='@BUN_SUM_LINUX_ARM64@'
+bun_package_linux_x64='@BUN_PACKAGE_LINUX_X64@'
+bun_sum_linux_x64='@BUN_SUM_LINUX_X64@'
 
 say() {
   printf '%s\n' "$*"
@@ -31,6 +37,8 @@ usage() {
   say ""
   say "  --dry-run          say what would be installed, and change nothing"
   say "  --no-modify-path   leave shell startup files alone"
+  say ""
+  say "LEDGE_SERVER_REGISTRY=<url> downloads from an npm mirror instead of $registry."
 }
 
 # A value in single quotes, for the line of shell the launcher is.
@@ -101,6 +109,23 @@ sha256_of() {
   fi
 }
 
+# Downloads a package tarball into $tmp/<name>.tgz, checks it against its
+# checksum and unpacks it into $tmp/<name>, where npm puts it under package/.
+get() {
+  url=$1
+  file=${url##*/}
+  fetch "$url" "$tmp/$2.tgz" || refuse "could not download $url"
+  got=$(sha256_of "$tmp/$2.tgz")
+  if [ "$got" = none ]; then
+    refuse "checking the download needs sha256sum or shasum, and this machine has neither."
+  fi
+  if [ "$got" != "$3" ]; then
+    refuse "$file does not match its checksum, so nothing was installed. Expected $3, got $got."
+  fi
+  mkdir "$tmp/$2"
+  tar -xzf "$tmp/$2.tgz" -C "$tmp/$2" || refuse "could not unpack $file"
+}
+
 # Whether a directory holds a ledge-server whose Bun runs on this machine.
 usable() {
   [ -f "$1/bin/ledge-server.js" ] && [ -f "$1/lib/serve.js" ] && "$1/bun" --version >/dev/null 2>&1
@@ -148,20 +173,23 @@ main() {
   fi
 
   detect_platform
-  eval "sum=\$sum_${os}_${arch}"
-  if [ -z "$sum" ]; then
-    refuse "ledge-server $version has no build for $os-$arch."
-  fi
+  eval "bun_package=\$bun_package_${os}_${arch} bun_sum=\$bun_sum_${os}_${arch}"
+  case "$os" in
+    darwin) native="lib/native/$os-$arch/libledge_pty.dylib" ;;
+    *) native="lib/native/$os-$arch/libledge_pty.so" ;;
+  esac
 
   root="$HOME/.ledge-server"
-  name="ledge-server-$version-$os-$arch"
+  server_url="$registry/ledge-server/-/ledge-server-$version.tgz"
+  bun_url="$registry/$bun_package/-/${bun_package##*/}-$bun_version.tgz"
   target="$root/versions/$version"
   launcher="$root/bin/ledge-server"
   previous=$(sed -n 's/^# ledge-server version //p' "$launcher" 2>/dev/null || true)
 
   if [ "$dry_run" -eq 1 ]; then
     say "Would install ledge-server $version for $os-$arch"
-    say "  from $download/$name.tar.gz"
+    say "  from $server_url"
+    say "  with Bun $bun_version from $bun_url"
     say "  into $target"
     exit 0
   fi
@@ -170,32 +198,30 @@ main() {
   if usable "$target"; then
     say "ledge-server $version is already in $target."
   else
-    say "Downloading ledge-server $version for $os-$arch..."
+    say "Downloading ledge-server $version and Bun $bun_version for $os-$arch..."
     tmp=$(mktemp -d "$root/.download.XXXXXX")
     trap 'rm -rf "$tmp"' EXIT
     trap 'exit 1' HUP INT TERM
-    fetch "$download/$name.tar.gz" "$tmp/$name.tar.gz" || refuse "could not download $download/$name.tar.gz"
-    got=$(sha256_of "$tmp/$name.tar.gz")
-    if [ "$got" = none ]; then
-      refuse "checking the download needs sha256sum or shasum, and this machine has neither."
+    # The server first: it is small, and it is what says whether this release
+    # was built for this machine at all.
+    get "$server_url" server "$server_sum"
+    [ -f "$tmp/server/package/$native" ] || refuse "ledge-server $version has no build for $os-$arch."
+    get "$bun_url" bun "$bun_sum"
+    mv "$tmp/bun/package/bin/bun" "$tmp/server/package/bun"
+    chmod 755 "$tmp/server/package/bun"
+    if ! said=$("$tmp/server/package/bun" --version 2>&1); then
+      refuse "Bun $bun_version does not run on this machine: $said"
     fi
-    if [ "$got" != "$sum" ]; then
-      refuse "the download does not match its checksum, so nothing was installed. Expected $sum, got $got."
-    fi
-    tar -xzf "$tmp/$name.tar.gz" -C "$tmp" || refuse "could not unpack $name.tar.gz"
-    if ! said=$("$tmp/$name/bun" --version 2>&1); then
-      refuse "the Bun inside ledge-server $version does not run on this machine: $said"
-    fi
-    usable "$tmp/$name" || refuse "$name.tar.gz is missing files, so nothing was installed."
+    usable "$tmp/server/package" || refuse "ledge-server-$version.tgz is missing files, so nothing was installed."
     rm -rf "$target"
-    mv "$tmp/$name" "$target"
+    mv "$tmp/server/package" "$target"
   fi
 
   # Written beside the old launcher and renamed over it, so a connection
   # arriving mid-install runs one version or the other.
   {
     printf '#!/bin/sh\n'
-    printf '# Written by https://ledge.sh/server.sh. Runs ledge-server with the Bun it came with.\n'
+    printf '# Written by https://ledge.sh/server.sh. Runs ledge-server on the Bun installed beside it.\n'
     printf '# ledge-server version %s\n' "$version"
     printf 'exec %s %s "$@"\n' "$(quote "$target/bun")" "$(quote "$target/bin/ledge-server.js")"
   } >"$launcher.tmp"

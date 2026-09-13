@@ -1964,7 +1964,11 @@ agree, and every function in the table is POSIX. What does not agree is the C
 library's own name, where `openpty` lives (libutil below glibc 2.34, libc at
 and above it, so it gets a handle of its own because `dlopen` resolves a table
 all at once), and `POSIX_SPAWN_SETSID` (0x0400 against 0x0080, a value whose
-divergence is silent).
+divergence is silent). `TIOCSWINSZ` differs too and never reaches TypeScript,
+because the `ioctl` goes through the trampoline and the compiler substitutes
+the right one; that is a second reason for the trampoline beyond the variadic
+one. The table is `ptyNative.ts`'s `PLATFORM`, and the rest of `src/bun/` is
+`node:fs`, `node:crypto`, and TypeScript.
 
 **The trampolines do not call `login_tty`.** glibc 2.34 moved it from libutil
 into libc under a new symbol version, so the `.so` built in the Debian 12
@@ -1973,13 +1977,9 @@ which the floor above promises. Nothing failed at build time. The server ran
 there without its trampolines: no resize, and a warning in the daemon log.
 `bun run probe:install` found it on `ubuntu:20.04`. The child now makes the
 calls `login_tty` makes in Apple's libc and in glibc: `setsid`,
-`ioctl(TIOCSCTTY)` and three `dup2`s. `build-npm.ts` reads
-the `GLIBC_x.y` versions each Linux library requires (`npmPackage.ts`,
-`glibcNeeded`) and refuses one above the floor. `TIOCSWINSZ` differs too and never reaches TypeScript, because the
-`ioctl` goes through the trampoline and the compiler substitutes the right
-one; that is a second reason for the trampoline beyond the variadic one. The
-table is `ptyNative.ts`'s `PLATFORM`, and the rest of `src/bun/` is `node:fs`,
-`node:crypto`, and TypeScript.
+`ioctl(TIOCSCTTY)` and three `dup2`s. `build-npm.ts` reads the `GLIBC_x.y`
+versions each Linux library requires (`npmPackage.ts`, `glibcNeeded`) and
+refuses one above the floor.
 
 Two things the port found that reading could not, both of which shipped
 broken and neither of which is visible from macOS. A pty master whose child
@@ -2128,19 +2128,29 @@ client was considered and rejected — a probe that goes looking for an install
 the PATH denies is scaffolding around a broken install line, and the install
 line was the thing to fix.
 
-**`server.sh` installs a release that carries its own Bun.** `curl -fsSL
+**`server.sh` installs the npm package with a private Bun.** `curl -fsSL
 https://ledge.sh/server.sh | sh` needs no npm, no Bun of the user's and no
-`sudo`. `scripts/build-server.ts` packs the npm package's bundle and one
-target's trampolines with a pinned Bun (`bun/serverRelease.ts`) into a tarball
-per target, and renders `release/server.sh` with that release's version and
-checksums written in, so the script never reads a manifest. The script:
+`sudo`. It downloads two tarballs from the npm registry with `curl` and unpacks
+them with `tar`: `ledge-server-<version>.tgz`, and Oven's own
+`@oven/bun-<target>` package, which holds only `bin/bun` (the binary in
+Bun's GitHub zip, byte for byte). `scripts/build-server.ts` packs `dist-npm/`
+and renders `release/server.sh` with that tarball's SHA-256 and the Bun pins in
+`bun/serverRelease.ts` written in, so the script reads no manifest. A release
+publishes that packed file rather than the directory, so the bytes npm serves
+are the bytes the checksum names (`releasing.md` §6).
+
+No package manager runs. Bun's installer needs `unzip`, which the `debian:12`
+and `ubuntu:20.04` images do not have, and `bun add` reads the account's
+`.npmrc` and `bunfig.toml`, so a mirror configured for other work would change
+what got installed. `LEDGE_SERVER_REGISTRY` points both downloads at a mirror
+explicitly, and the checksums still hold. The script:
 
 | Step | What it does |
 | --- | --- |
 | Account | Refuses root. The server belongs in the home of the account Ledge signs in to, and `curl … \| sudo -iu ledge sh` is the command for a service account. |
 | Platform | Picks darwin or linux and arm64 or x64, treats a Rosetta shell as arm64, and refuses musl and glibc below 2.29 before downloading anything. |
-| Download | Checks the tarball's SHA-256 and runs the Bun inside it before anything is moved into place, so a Bun that cannot run here is refused with its own error. |
-| Layout | Unpacks into `~/.ledge-server/versions/<version>` and renames a new `~/.ledge-server/bin/ledge-server` over the old one: a two-line `sh` launcher that execs that version's `bun` on its `bin/ledge-server.js`. |
+| Download | Checks each tarball's SHA-256. The server comes first, and a package with no trampolines for this target is refused before Bun is fetched. Bun is run before anything is moved into place, so one that cannot run here is refused with its own error. |
+| Layout | Unpacks the package into `~/.ledge-server/versions/<version>` with `bun` beside it, and renames a new `~/.ledge-server/bin/ledge-server` over the old one: a two-line `sh` launcher that execs that version's `bun` on its `bin/ledge-server.js`. |
 | Update | Keeps the previous version and deletes older ones. |
 | PATH | Appends one line to the login shell's startup file, for the user's own terminals. ssh does not need it, because §4a's prefix is in the command. |
 
@@ -2359,8 +2369,11 @@ Per `testing.md`'s categories:
   connection starts the new one. Ubuntu 20.04 is there for its glibc, and its
   first run found trampolines that did not load below glibc 2.34 (§11), which
   `probe:npm`'s Debian 12 could not see. `alpine:3` is refused as musl, and on a Mac
-  the darwin tarball goes into a scratch HOME and is started as macOS's sshd
-  would start it, `zsh -c` with `/usr/bin:/bin:/usr/sbin:/sbin`.
+  the script installs into a scratch HOME and the server is started as macOS's sshd
+  would start it, `zsh -c` with `/usr/bin:/bin:/usr/sbin:/sbin`. The registry
+  is a directory served as `file://`, laid out the way npm serves one, holding
+  the packed tarball and the Bun tarballs `build:server` checked against their
+  pins.
 - **Live probe (`testing.md` §6, scratch `LEDGE_NOTES_ROOT`)**: a real ssh
   round trip, `bun run probe:ssh`, since ssh, the forced command, and
   host-key pinning are native seams the harness cannot fake. It builds the

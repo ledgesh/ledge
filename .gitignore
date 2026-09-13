@@ -14,8 +14,8 @@ dist-ios/
 dist-npm/
 build/
 
-# A server release (scripts/build-server.ts): a tarball per target and the
-# install script, and the pinned Bun downloads those tarballs are packed from.
+# A server release (scripts/build-server.ts): the packed package and the
+# install script, and the pinned Bun tarballs it checks and probe:install serves.
 dist-server/
 dist-bun/
 

@@ -40,7 +40,7 @@ const EXT: Record<string, string> = {
  * Returns what to pass as `bunPath` for a run on this machine: `execPath` when
  * the running binary is a bun, and "" when it is not. The app's main process
  * is a bun (Electrobun ships one as `Ledge.app/Contents/MacOS/bun`), and so is
- * a server installed by server.sh, which runs on the Bun its release carries.
+ * a server installed by server.sh, which runs on the Bun installed beside it.
  * A ```ts fence runs on either with nothing else installed. A server built with
  * `bun build --compile` runs only its embedded program, so it gets "" and its
  * fences use the PATH's `bun` (remote.md §11).
