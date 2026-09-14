@@ -9,6 +9,15 @@ import { runnableBlockAt } from "./blocks";
 import { followableAt, taskMarkerAt } from "./livePreview";
 import { barFaceOf } from "../lib/nativeBridge";
 import { keepsSelection, type EditorClickContext } from "../commands/editorMenu";
+import { spellableWordAt, type SpellableWord } from "./spelling";
+import { settings } from "../lib/settings";
+
+/** The click's context before the dictionary has answered: `guesses` is still
+ * null, and `word` is what to ask it about (null in code, off a word, on a
+ * read-only page, and with the editor.spellCheck setting off). */
+export interface PreparedClick extends EditorClickContext {
+  word: SpellableWord | null;
+}
 
 /**
  * The element the pointer is really over.
@@ -42,7 +51,7 @@ export function prepareEditorMenu(
   x: number,
   y: number,
   readOnly: boolean,
-): EditorClickContext | null {
+): PreparedClick | null {
   if (!el || !view.dom.contains(el) || barFaceOf(el) !== "note") return null;
   // The `false` asks posAtCoords for the nearest position rather than an exact
   // one. A click in the empty space under a short note is still a click in the
@@ -61,6 +70,8 @@ export function prepareEditorMenu(
     onLink: followableAt(view.state, pos) !== null,
     onTask: taskMarkerAt(view.state, pos) !== null,
     onRunnableBlock: runnableBlockAt(view.state, pos),
+    guesses: null,
+    word: readOnly || !settings().editor.spellCheck ? null : spellableWordAt(view.state, pos),
     readOnly,
   };
 }

@@ -217,9 +217,14 @@ test.describe("a tap changes nothing but what it acts on", () => {
 
 test("the editor refuses iOS's corrections", async ({ page }) => {
   // ios.md §7: an autocorrected fence is a broken one. CodeMirror sets all
-  // three on its contentDOM and Ledge adds no contentAttributes entry, so this
-  // passes today. It is here to fail the day one is added.
+  // three on its contentDOM, and the Mac's spell checking is left out on a
+  // phone (interactions.md §12), so this is the phone shell, not the Mac's at
+  // phone size. It is here to fail the day an override reaches the phone.
+  await page.goto("/harness.html?shell=ios");
+  await page.getByRole("button", { name: /Toggle Sidebar/ }).tap();
+  await page.locator('[data-target-kind="note"]', { hasText: "Alpha" }).tap();
   const content = page.locator(".cm-content").first();
+  await expect(content).toContainText("alpha body");
   await expect(content).toHaveAttribute("spellcheck", "false");
   await expect(content).toHaveAttribute("autocorrect", "off");
   await expect(content).toHaveAttribute("autocapitalize", "off");

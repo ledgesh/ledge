@@ -1959,12 +1959,14 @@ no notion of who is asking beyond the client id in a hello, which is why
   the path `workspaceAttach` takes, which the server checks before it is a
   root.
 
-**Fifteen RPC entries are the client's outright** and never become frames
+**Seventeen RPC entries are the client's outright** and never become frames
 (`NATIVE_METHODS` in `shared/wire.ts`, served on a Mac by `bun/clientSeams.ts`):
-`clipboardWrite`, `clipboardRead`, `clipboardReadRich`, `assetPaste`,
+`clipboardWrite`, `clipboardRead`, `clipboardReadRich`, `spellingCheck`,
+`spellingLearn`, `assetPaste`,
 `assetPick`, `folderPick`, `cliInstall`, `linkOpen`, `menuSet`, `windowNew`,
 `windowDocs`, `windowRole`, `updateState`, `updateCheck`, and `updateInstall`.
 Opening a URL happens on the device the user is holding, not on the VPS; the
+spelling dictionary is the one WebKit draws that device's squiggles from; the
 picture you want to insert is in that device's photo library, in its files, or
 in front of its camera (ios.md §11); the folder dialog is that device's too,
 and only fills the Attach Folder field, since the path it holds is checked by

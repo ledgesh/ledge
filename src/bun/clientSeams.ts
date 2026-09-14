@@ -42,6 +42,12 @@ export interface ClientNative {
   // Whether this window is the manual's, and the page it was opened to show.
   // Absent on a shell whose one window is never the manual's.
   windowRole?(): { docs: boolean; page: string };
+  // This device's spelling dictionary (bun/spelling.ts on a Mac). Absent on a
+  // shell with none, where every word answers correct and Learn does nothing.
+  spelling?: {
+    check(word: string, context: string): Promise<{ misspelled: boolean; guesses: string[] }>;
+    learn(word: string): Promise<boolean>;
+  };
   // The pasteboard's image, as PNG bytes. Defaults to the osascript route
   // (bun/clipboard.ts). Optional for two reasons: a client that is not a Mac
   // reads its pasteboard some other way, and the tests must not read the
@@ -162,6 +168,11 @@ export function clientSeams(
       ]);
       return { text, html };
     },
+    // The dictionary is this device's: a server's would judge the words in
+    // whatever language its account happens to be set up for.
+    spellingCheck: async ({ word, context }) =>
+      (await native.spelling?.check(word, context)) ?? { misspelled: false, guesses: [] },
+    spellingLearn: async ({ word }) => ({ ok: (await native.spelling?.learn(word)) ?? false }),
     // ⌘V of an image. This device reads the pasteboard (a VPS has none) and
     // the server writes the file. The schema declares base64, and the wire
     // sends it as a binary frame. The name comes back. Neither the view nor

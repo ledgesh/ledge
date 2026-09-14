@@ -4,7 +4,7 @@
 // widgets are built after boot and read settings as they are constructed.
 // Settings apply at launch, never live (architecture.md §6), so there is no
 // subscribe call here.
-import { DEFAULT_SETTINGS, type Settings, type SettingsHome } from "../../shared/settings";
+import { DEFAULT_SETTINGS, withDefaults, type Settings, type SettingsHome } from "../../shared/settings";
 
 interface SettingsHandlers {
   // The settings editor dialog's load and save: the raw settings.jsonc text,
@@ -26,8 +26,10 @@ interface SettingsHandlers {
 let current: Settings = DEFAULT_SETTINGS;
 let handlers: SettingsHandlers | null = null;
 
+// Filled, because the snapshot may come from an older server (shared/settings.ts
+// withDefaults).
 export function configureSettings(snapshot: Settings, h: SettingsHandlers): void {
-  current = snapshot;
+  current = withDefaults(snapshot);
   handlers = h;
 }
 

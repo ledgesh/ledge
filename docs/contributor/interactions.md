@@ -1513,7 +1513,8 @@ the editor's verbs too.
   is `menu.ts`'s move for the menu bar, with the difference that the bar is one
   fixed list (it has no pointer and nothing to point at) and this is one fixed
   list per click.
-- **Three groups, in the order a pointer meets them.** What you clicked on
+- **Four groups, in the order a pointer meets them.** A misspelled word's
+  guesses and Learn Spelling (§12), what you clicked on
   (Open Link, Toggle Checkbox, the two run verbs), the clipboard (Cut, Copy,
   Paste, Paste as Plain Text, Select All), then the writing verbs (Bold,
   Italic, Insert Link, Link to Note, Code Block, Insert Image…). The first
@@ -1564,3 +1565,53 @@ the editor's verbs too.
   of the manual's blocks is marked `norun` (§4e).
 - **No touch form** (§1a): a long press in text is the selection gesture, and
   every verb in this menu is in the palette or on the accessory bar already.
+
+## 12. Spell checking
+
+WebKit draws the squiggles and the editor's context menu offers the fixes. Ledge
+decides only which text is checked.
+
+| Piece | Where | What it does |
+| --- | --- | --- |
+| Continuous checking | `bun/index.ts`, `spellCheck: true` on every window | Turns on WKWebView's spell checking, which is off by default. |
+| Checked text | `editor/spelling.ts` `spelling()` | Sets `spellcheck="true"` on the content, with `autocorrect` and `autocapitalize` off, so nothing is rewritten as you type. |
+| Skipped text | `editor/spelling.ts` `uncheckedRanges` | Marks code, URLs, HTML, frontmatter, wikilinks and tags `spellcheck="false"`, which WebKit honours on any element inside the editable region. |
+| Guesses and Learn | `bun/spelling.ts`, `spellingCheck` / `spellingLearn` | Ask `NSSpellChecker` through osascript. |
+
+- **What is skipped is a syntax question.** Fenced and indented code, HTML
+  blocks and comments take whole lines. Inline code, URLs, autolinks, HTML
+  tags, link labels, `[[wikilinks]]` and `#tags` take their span. The
+  frontmatter block is measured by `frontmatterEnd`, the parser's own measure,
+  because the markdown tree reads it as a rule and headings. A link's text is
+  prose and is checked. The right-click asks the same function
+  (`isUnchecked`), so a menu opened in a fence offers no spelling.
+- **The page cannot ask WebKit what it flagged.** There is no DOM API for
+  spelling markers, so the menu asks the dictionary again. `NSSpellChecker`'s
+  automatic mode accepts a word that is correct in any language the Mac has
+  enabled ("paragraf" passes as Polish), so `bun/spelling.ts` names the
+  line's dominant language first and checks the word alone in that language.
+- **The menu waits for the dictionary, up to 400ms.** A warm lookup takes
+  about 70ms. The spelling group draws with the rest of the menu rather than
+  arriving under a pointer already moving to Copy, and a slow lookup opens the
+  menu without it (`lookUpWord`).
+- **Two commands, both menu-only.** `spelling.replace` is titled by the guess it
+  puts in place, one item per guess, with a `misspelling` target carrying the
+  word and its positions. It re-checks the word is still at those positions
+  before it edits, because the document is live under an open menu.
+  `spelling.learn` adds the word to the Mac's dictionary, shared by every app.
+  Neither is in the palette: both act on a word only a right-click names.
+- **The dictionary is the client's** (remote.md §10). A server's would judge
+  words in whatever language its account is set up for.
+- **Not on a phone.** `spelling()` is left out where `softKeyboard()` is true,
+  so the editor keeps CodeMirror's `spellcheck="false"` there, and the iOS
+  bridge answers every word correct. iOS draws underlines only in an editor
+  that also autocorrects, and it autocorrects code blocks too (ios.md §7). The
+  menu has no touch form (§1a) either.
+- **The manual is not checked.** A read-only page gets no `spelling()`, so it
+  keeps CodeMirror's `spellcheck="false"`, and its menu has no spelling group.
+- **`editor.spellCheck` turns it off** (architecture.md §6), a client setting
+  read at launch. Off, the editor gets no `spelling()` and a right-click names
+  no word, so the menu never asks the dictionary. The window's continuous
+  checking stays on: with no `spellcheck="true"` in the page, WebKit checks
+  nothing.
+

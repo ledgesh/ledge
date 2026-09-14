@@ -36,8 +36,9 @@ export interface Settings {
   // way; only the fence marks are. The knob is an escape hatch, not a
   // preference: the raw view is the app's original stance, and precise syntax
   // editing (or a concealment bug) needs a way back to
-  // text-on-screen-is-text-on-disk.
-  editor: { fontSize: number; livePreview: boolean };
+  // text-on-screen-is-text-on-disk. `spellCheck` underlines misspelled prose
+  // and offers fixes in the right-click menu (editor/spelling.ts).
+  editor: { fontSize: number; livePreview: boolean; spellCheck: boolean };
   terminal: { fontSize: number };
   // Light or dark. "system" (the default) follows the Mac's appearance, which
   // is what the app has always done and what almost everyone wants. The two
@@ -201,9 +202,23 @@ export function mergeSettings(server: Settings, client: Settings): Settings {
   };
 }
 
+/**
+ * `snapshot` with any field it lacks taken from this build's defaults. A
+ * snapshot from an older build lacks the fields added since, and a phone reads
+ * every section from the server, so a missing boolean would read as
+ * false. Fills one level deep: a field that is present is kept whole.
+ */
+export function withDefaults(snapshot: Settings): Settings {
+  const filled = { ...DEFAULT_SETTINGS } as Record<string, unknown>;
+  for (const key of Object.keys(DEFAULT_SETTINGS) as Array<keyof Settings>) {
+    filled[key] = { ...DEFAULT_SETTINGS[key], ...snapshot[key] };
+  }
+  return filled as unknown as Settings;
+}
+
 export const DEFAULT_SETTINGS: Settings = Object.freeze({
   shell: { path: "/bin/zsh", args: ["-i"] },
-  editor: { fontSize: 14, livePreview: true },
+  editor: { fontSize: 14, livePreview: true, spellCheck: true },
   terminal: { fontSize: 12 },
   appearance: { theme: "system" as Theme },
   updates: { automatic: true },
@@ -381,7 +396,11 @@ export function clientSettingsTemplate(s: Settings): string {
     // Conceal markdown syntax away from the caret (bold shows bold, not
     // **bold**). Set false to always see exactly the text on disk: the
     // escape hatch for precise syntax editing.
-    "livePreview": ${s.editor.livePreview}
+    "livePreview": ${s.editor.livePreview},
+    // Underline misspelled words in a note's prose, using your Mac's
+    // dictionary, and offer fixes when you right-click one. Code, URLs and
+    // frontmatter are never checked. Set false to turn it off.
+    "spellCheck": ${s.editor.spellCheck}
   },
 
   "terminal": {
@@ -464,6 +483,7 @@ export function parseSettings(raw: unknown, home: SettingsHome): { settings: Set
       editor: {
         fontSize: num(editor, "fontSize", "editor.fontSize", d.editor.fontSize, 6, 72, problems),
         livePreview: bool(editor, "livePreview", "editor.livePreview", d.editor.livePreview, problems),
+        spellCheck: bool(editor, "spellCheck", "editor.spellCheck", d.editor.spellCheck, problems),
       },
       terminal: { fontSize: num(terminal, "fontSize", "terminal.fontSize", d.terminal.fontSize, 6, 72, problems) },
       appearance: {

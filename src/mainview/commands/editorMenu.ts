@@ -26,6 +26,11 @@ export interface EditorClickContext {
   // (runnableBlockAt in editor/blocks.ts). An unterminated fence has no agreed
   // body and offers no run (interactions.md §4c).
   onRunnableBlock: boolean;
+  // The dictionary's guesses when the word under the pointer is misspelled,
+  // null when it is not or there is no word. Filled in after the click, by a
+  // lookup on this device (editor/spelling.ts lookUpWord; interactions.md §12).
+  // An empty list is still a misspelling: Learn Spelling applies to it.
+  guesses: readonly string[] | null;
   // The note cannot be edited: the built-in manual (architecture.md §3b).
   // Every writing verb is absent rather than greyed, matching the note row's
   // menu in that workspace. A verb that can never apply to any note here is
@@ -33,7 +38,9 @@ export interface EditorClickContext {
   readOnly: boolean;
 }
 
-export type EditorMenuItem = CommandId | "---";
+/** A command, a divider, or one of the dictionary's guesses. A guess renders
+ * as `spelling.replace` aimed at that guess. */
+export type EditorMenuItem = CommandId | "---" | { guess: string };
 
 /**
  * Whether a right-click at `pos` should leave the selection where it is.
@@ -48,6 +55,14 @@ export function keepsSelection(
   pos: number,
 ): boolean {
   return ranges.some((r) => !r.empty && pos >= r.from && pos <= r.to);
+}
+
+// A misspelled word under the pointer: the guesses, then Learn Spelling. The
+// top of the menu, where macOS puts them, because a misspelling is the most
+// specific thing a click can land on. A read-only page is never checked.
+function spelling(ctx: EditorClickContext): EditorMenuItem[] {
+  if (ctx.readOnly || ctx.guesses === null) return [];
+  return [...ctx.guesses.map((guess) => ({ guess })), "spelling.learn"];
 }
 
 // What the pointer landed on. This group goes first, so the item the click
@@ -90,7 +105,9 @@ function writing(ctx: EditorClickContext): CommandId[] {
  * to the same rule (menu.ts): a hidden item must not leave a visible gap.
  */
 export function editorMenu(ctx: EditorClickContext): EditorMenuItem[] {
-  const groups = [pointedAt(ctx), clipboard(ctx), writing(ctx)].filter((g) => g.length > 0);
+  const groups: EditorMenuItem[][] = [spelling(ctx), pointedAt(ctx), clipboard(ctx), writing(ctx)].filter(
+    (g) => g.length > 0,
+  );
   return groups.flatMap((group, i) => (i === 0 ? group : ["---" as const, ...group]));
 }
 
@@ -100,8 +117,8 @@ export function editorMenu(ctx: EditorClickContext): EditorMenuItem[] {
 export const EDITOR_MENU_COMMANDS: readonly CommandId[] = [
   ...new Set(
     [true, false].flatMap((readOnly) =>
-      editorMenu({ onLink: true, onTask: true, onRunnableBlock: true, readOnly }).filter(
-        (item): item is CommandId => item !== "---",
+      editorMenu({ onLink: true, onTask: true, onRunnableBlock: true, guesses: ["guess"], readOnly }).flatMap(
+        (item): CommandId[] => (item === "---" ? [] : typeof item === "object" ? ["spelling.replace"] : [item]),
       ),
     ),
   ),

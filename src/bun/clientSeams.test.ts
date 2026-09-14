@@ -81,6 +81,33 @@ describe("the native halves", () => {
     await clientSeams({ setMenu: (i) => seen.push(i) }).menuSet({ items });
     expect(seen).toEqual([items]);
   });
+
+  // A shell with no dictionary must not offer a fix. Every word answers
+  // correct, so the editor menu shows no spelling group at all.
+  test("with no dictionary every word is spelled right and nothing is learned", async () => {
+    const seams = clientSeams({});
+    expect(await seams.spellingCheck({ word: "recieve", context: "" })).toEqual({ misspelled: false, guesses: [] });
+    expect(await seams.spellingLearn({ word: "recieve" })).toEqual({ ok: false });
+  });
+
+  test("the dictionary is asked with the word's paragraph", async () => {
+    const asked: string[][] = [];
+    const seams = clientSeams({
+      spelling: {
+        check: async (word, context) => {
+          asked.push([word, context]);
+          return { misspelled: true, guesses: ["receive"] };
+        },
+        learn: async () => true,
+      },
+    });
+    expect(await seams.spellingCheck({ word: "recieve", context: "I recieve mail." })).toEqual({
+      misspelled: true,
+      guesses: ["receive"],
+    });
+    expect(asked).toEqual([["recieve", "I recieve mail."]]);
+    expect(await seams.spellingLearn({ word: "Ledge" })).toEqual({ ok: true });
+  });
 });
 
 // A pasted image splits across two machines (remote.md §10): the image is read

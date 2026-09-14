@@ -9,6 +9,7 @@ import {
   settingsTemplate,
   type Settings,
   type SettingsHome,
+  withDefaults,
 } from "./settings";
 import { stripJsonc } from "./jsonc";
 
@@ -52,7 +53,7 @@ describe("parseSettings", () => {
 
   test("a full valid client file round-trips", () => {
     const input = {
-      editor: { fontSize: 16, livePreview: false },
+      editor: { fontSize: 16, livePreview: false, spellCheck: false },
       terminal: { fontSize: 13 },
       appearance: { theme: "dark" },
     };
@@ -84,6 +85,14 @@ describe("parseSettings", () => {
       expect(settings.editor.fontSize).toBe(DEFAULT_SETTINGS.editor.fontSize);
       expect(problems).toHaveLength(1);
     }
+  });
+
+  test("spellCheck defaults on and takes only booleans", () => {
+    expect(DEFAULT_SETTINGS.editor.spellCheck).toBe(true);
+    expect(parseSettings({ editor: { spellCheck: false } }, "client").settings.editor.spellCheck).toBe(false);
+    const { settings, problems } = parseSettings({ editor: { spellCheck: "off" } }, "client");
+    expect(settings.editor.spellCheck).toBe(true);
+    expect(problems).toEqual(['"editor.spellCheck" must be true or false']);
   });
 
   test("livePreview takes only booleans — a truthy string is a typo", () => {
@@ -346,11 +355,11 @@ describe("the two homes", () => {
       ...DEFAULT_SETTINGS,
       shell: { path: "/bin/bash", args: [] },
       trash: { ttlDays: 3 },
-      editor: { fontSize: 99, livePreview: false },
+      editor: { fontSize: 99, livePreview: false, spellCheck: true },
     };
     const client: Settings = {
       ...DEFAULT_SETTINGS,
-      editor: { fontSize: 18, livePreview: false },
+      editor: { fontSize: 18, livePreview: false, spellCheck: false },
       appearance: { theme: "dark" },
       shell: { path: "/never/read", args: ["-x"] },
     };
@@ -362,6 +371,20 @@ describe("the two homes", () => {
     // without tracing the loop above.
     expect(merged.shell.path).toBe("/bin/bash");
     expect(merged.editor.fontSize).toBe(18);
+  });
+});
+
+describe("a snapshot from an older build", () => {
+  test("a field it lacks takes this build's default, and a field it has is kept", () => {
+    const old = { ...DEFAULT_SETTINGS, editor: { fontSize: 18, livePreview: false } } as unknown as Settings;
+    const filled = withDefaults(old);
+    expect(filled.editor).toEqual({ fontSize: 18, livePreview: false, spellCheck: true });
+    expect(filled.shell).toEqual(DEFAULT_SETTINGS.shell);
+  });
+
+  test("a whole snapshot comes back equal", () => {
+    const whole: Settings = { ...DEFAULT_SETTINGS, editor: { fontSize: 18, livePreview: false, spellCheck: false } };
+    expect(withDefaults(whole)).toEqual(whole);
   });
 });
 
@@ -397,14 +420,14 @@ describe("the seeded templates", () => {
   test("the client template carries the values it is given, comments intact", () => {
     const text = clientSettingsTemplate({
       ...DEFAULT_SETTINGS,
-      editor: { fontSize: 17, livePreview: false },
+      editor: { fontSize: 17, livePreview: false, spellCheck: false },
       terminal: { fontSize: 11 },
       appearance: { theme: "dark" },
       updates: { automatic: false },
     });
     const { settings, problems } = parseSettings(JSON.parse(stripJsonc(text)), "client");
     expect(problems).toEqual([]);
-    expect(settings.editor).toEqual({ fontSize: 17, livePreview: false });
+    expect(settings.editor).toEqual({ fontSize: 17, livePreview: false, spellCheck: false });
     expect(settings.terminal).toEqual({ fontSize: 11 });
     expect(settings.appearance).toEqual({ theme: "dark" });
     expect(settings.updates).toEqual({ automatic: false });

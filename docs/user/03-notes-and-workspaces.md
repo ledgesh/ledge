@@ -142,6 +142,7 @@ Right-click anywhere in a note to get a menu of what you can do there.
 
 Cut, Copy, Paste, Paste as Plain Text and Select All are always in it, followed by Bold, Italic, Insert Link, Link to Note, Code Block and Insert Image.
 Above those sits whatever you clicked on: Open Link on a link, a `[[wikilink]]` or a `#tag`, Toggle Checkbox on a task, and both run verbs inside a runnable code block.
+On a misspelled word, its suggested spellings and Learn Spelling come first ([[Notes and Workspaces#Spell checking]]).
 
 The click moves the cursor to where you clicked, so the menu acts on that spot.
 Right-clicking inside a selection keeps the selection, which is how you cut, copy or bold the text you just selected.
@@ -149,6 +150,18 @@ Right-clicking inside a selection keeps the selection, which is how you cut, cop
 Every item shows its keyboard shortcut beside it, so the menu is also where you find them.
 
 The sidebar answers a right-click too. On a row you get that row's menu, and on the empty space below a list you get the list's own: New Workspace and Attach Folder as Workspace… under the workspaces, New Note and New Folder… under the notes. Those two are the menus the small chevrons beside the New Workspace and New Note buttons drop.
+
+## Spell checking
+
+Ledge underlines misspelled words in a note with a red squiggle, using your Mac's spelling dictionary and its languages.
+
+Only prose is checked. Code blocks, `inline code`, URLs, HTML, the frontmatter block, `[[wikilinks]]` and `#tags` are never underlined. The built-in documentation is not checked, and neither is a note on your phone.
+
+Right-click a misspelled word to fix it. The dictionary's suggestions sit at the top of the menu: choose one to replace the word. "Learn Spelling" adds the word to your Mac's dictionary, which every app on the Mac shares, so it stops being underlined here and elsewhere.
+
+Words are judged in the language of the line they are on, so a German paragraph is checked as German.
+
+Set `editor.spellCheck` to `false` under This app in Settings (⌘,) and relaunch to turn spell checking off. The right-click menu then offers no suggestions either.
 
 ## Pasting formatted text
 

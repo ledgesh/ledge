@@ -135,8 +135,20 @@ test("a task renders a checkbox; clicking it toggles the [x] in the text", async
   // one is larger, out to the line's height and into the gutter beside it
   // (e2e/phone.spec.ts), and the same padding here would swallow clicks meant
   // for the caret in the text around the box.
-  const spot = (await page.locator(".ledge-hotspot").boundingBox())!;
-  const drawn = (await box.boundingBox())!;
+  // The link layer replaces every hotspot each time it measures, so a read can
+  // land on one that has just been removed. Poll until a read gets both boxes.
+  type Box = { x: number; y: number; width: number; height: number };
+  let spot: Box | null = null;
+  let drawn: Box | null = null;
+  await expect
+    .poll(async () => {
+      spot = await page.locator(".ledge-hotspot").boundingBox();
+      drawn = await box.boundingBox();
+      return spot !== null && drawn !== null;
+    })
+    .toBe(true);
+  spot = spot!;
+  drawn = drawn!;
   expect(spot.width).toBeCloseTo(drawn.width, 1);
   expect(spot.height).toBeCloseTo(drawn.height, 1);
   expect(spot.x).toBeCloseTo(drawn.x, 1);

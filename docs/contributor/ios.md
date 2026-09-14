@@ -966,10 +966,25 @@ Four decisions follow:
   Markdown is not prose to iOS's dictionary, and an autocorrected fence is a
   broken one. This needed no code: CodeMirror sets `spellcheck="false"`,
   `autocorrect="off"` and `autocapitalize="off"` on its `contentDOM` itself,
-  and Ledge adds no `contentAttributes` entry that would override them. The
+  and on a phone Ledge adds no `contentAttributes` entry that would override
+  them: the Mac's spell checking (interactions.md §12) is left out where
+  `softKeyboard()` is true. The
   decision is pinned by an assertion in `e2e/phone.spec.ts` rather than by an
   implementation, so it fails the day someone adds one — and the two table rows
   above are the evidence that iOS honors all three.
+
+  Spell checking without autocorrect was tried on iOS 26.5 in the Simulator,
+  and iOS does not offer it:
+
+  | Content attributes | On iOS 26.5 |
+  | --- | --- |
+  | `spellcheck="true"`, `autocorrect="off"` | No underlines at all, on typed words or loaded ones |
+  | `spellcheck="true"`, `autocorrect="on"` | Words typed this session are underlined; words loaded from disk are not |
+  | The same, with `spellcheck="false"` and `autocorrect="off"` on a fence's lines | `teh` typed in the fence is saved as `the` |
+
+  The keyboard reads `autocorrect` from the editor as a whole, not from the
+  line under the caret. So a phone gets underlines only by accepting
+  rewritten code, and it keeps all three off.
 - **Nothing is deleted from the keymap to make touch work.** An iPad with a
   hardware keyboard is a Mac-shaped client and the existing keymap is already
   right for it. Serving it is not a v1 goal; breaking it would be a v1

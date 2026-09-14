@@ -61,6 +61,7 @@ import {
   Shapes,
   Star,
   SquareCheck,
+  SpellCheck,
   SquareX,
   TableOfContents,
   AppWindow,
@@ -1237,6 +1238,33 @@ export function buildCommands(deps: RegistryDeps): Command[] {
     // the accelerator. Always visible and a no-op off target, the same contract
     // link.open has above.
     cmd("task.toggle", editorCommand(deps, SquareCheck, (ed, docId) => ed.toggleTask(docId))),
+    // The editor menu's spelling group (interactions.md §12). Menu-only: both
+    // act on the word a right-click landed on, which only the menu's target
+    // carries. A guess is the item's own title, the way macOS lists them.
+    {
+      ...cmd("spelling.replace", {
+        domains: [],
+        palette: false,
+        targetKind: "misspelling",
+        when: (ctx) => ctx.target?.kind === "misspelling",
+        run: (ctx) => {
+          const t = ctx.target;
+          if (t?.kind === "misspelling") deps.editor.replaceWord(t.docId, t.from, t.to, t.word, t.guess);
+        },
+      }),
+      title: (ctx) => (ctx.target?.kind === "misspelling" ? ctx.target.guess : titleOf("spelling.replace")),
+    },
+    cmd("spelling.learn", {
+      icon: SpellCheck,
+      domains: [],
+      palette: false,
+      targetKind: "misspelling",
+      when: (ctx) => ctx.target?.kind === "misspelling",
+      run: (ctx) => {
+        const t = ctx.target;
+        if (t?.kind === "misspelling") deps.editor.learnWord(t.docId, t.word);
+      },
+    }),
     // Markdown formatting (editor/formatting.ts): the ⌘B/⌘I/⌘K trio, bound in
     // CodeMirror like every editor-internal chord.
     cmd("format.bold", editorCommand(deps, Bold, (ed, docId) => ed.bold(docId))),

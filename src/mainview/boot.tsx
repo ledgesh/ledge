@@ -23,6 +23,7 @@ import { configureNotes, dispatchExternalOpen, dispatchNotesChanged, dispatchNot
 import { configureVault, recordVaultState, refreshVaultState } from "./vault/channel";
 import { configureWorkspaces, recordDailyRoot, recordWorkspaceKinds } from "./workspace/channel";
 import { configureClipboard } from "./lib/clipboard";
+import { configureSpelling } from "./editor/spelling";
 import { configureMenu, dispatchNativeCommand } from "./lib/menu";
 import { configureCli } from "./lib/cli";
 import { configureWindows, dispatchDocsShow, recordWindowRole } from "./lib/windows";
@@ -227,6 +228,13 @@ export function bootView(requests: RequestClient): Promise<void> {
     },
     read: () => requests.clipboardRead({}).then((r) => r.text),
     readRich: () => requests.clipboardReadRich({}),
+  });
+
+  // This device's dictionary, for the editor menu's spelling group. The client
+  // shell answers it on either kind of connection (bun/clientSeams.ts).
+  configureSpelling({
+    check: (word, context) => requests.spellingCheck({ word, context }),
+    learn: (word) => requests.spellingLearn({ word }).then((r) => r.ok),
   });
 
   // The native menu bar. Fire-and-forget: a push that loses a race with another

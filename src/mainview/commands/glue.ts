@@ -12,6 +12,7 @@ import { revealSelection } from "@/workspace/reveal";
 import { openReplace } from "@/editor/find";
 import { runBlock } from "@/editor/blocks";
 import { openLinkAtCursor, toggleTaskAt } from "@/editor/livePreview";
+import { learnWord, replaceWord } from "@/editor/spelling";
 import { insertCodeBlock } from "@/editor/fences";
 import { insertLink, toggleBold, toggleItalic } from "@/editor/formatting";
 import { editFrontmatter } from "@/editor/frontmatterEdit";
@@ -215,6 +216,8 @@ export const registryDeps: RegistryDeps = {
     copy: (docId) => withView(docId, (view) => void copySelection(view)),
     paste: (docId) => withView(docId, (view) => void pasteHere(view)),
     pastePlain: (docId) => withView(docId, (view) => void pastePlain(view)),
+    replaceWord: (docId, from, to, word, guess) => withView(docId, (view) => void replaceWord(view, from, to, word, guess)),
+    learnWord: (docId, word) => withView(docId, (view) => void learnWord(view, word)),
     selectAll: (docId) => withView(docId, (view) => void selectAll(view)),
   },
 };

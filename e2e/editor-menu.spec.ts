@@ -199,3 +199,81 @@ test("the manual keeps reading and loses writing", async ({ page }) => {
   // manual. Everything that would write is absent, not greyed.
   expect(await labels(page)).toEqual(["Copy", "Select All"]);
 });
+
+// Spell checking (interactions.md §12). The harness dictionary knows one
+// misspelling, "recieve". WebKit's squiggles are not observable from a page, so
+// these cover the attributes that decide what WebKit checks, and the menu.
+test.describe("spelling", () => {
+  // The line holding `text`, and the right-click on the word itself.
+  const lineWith = (page: Page, text: string) => page.locator(".cm-line", { hasText: text });
+  async function rightClickWord(page: Page, word: string): Promise<void> {
+    const box = await page.evaluate((w) => {
+      const walker = document.createTreeWalker(document.querySelector(".cm-content")!, NodeFilter.SHOW_TEXT);
+      for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+        const i = n.textContent!.indexOf(w);
+        if (i < 0) continue;
+        const r = document.createRange();
+        r.setStart(n, i + 1);
+        r.setEnd(n, i + 2);
+        const b = r.getBoundingClientRect();
+        return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+      }
+      return null;
+    }, word);
+    expect(box, `no "${word}" in the note`).not.toBeNull();
+    await page.mouse.click(box!.x, box!.y, { button: "right" });
+  }
+
+  test("prose is checked, and code, URLs and tags are marked out of it", async ({ page }) => {
+    await write(page, "I recieve mail at https://exampel.com with #tagg.\n\n```bash\necho recieve\n```\n");
+    await expect(page.locator(".cm-content").first()).toHaveAttribute("spellcheck", "true");
+    await expect(page.locator(".cm-content").first()).toHaveAttribute("autocorrect", "off");
+    await expect(lineWith(page, "echo recieve")).toHaveAttribute("spellcheck", "false");
+    await expect(lineWith(page, "I recieve")).not.toHaveAttribute("spellcheck", "false");
+    await expect(page.locator('.cm-content [spellcheck="false"]', { hasText: "https://exampel.com" })).toHaveCount(1);
+    await expect(page.locator('.cm-content [spellcheck="false"]', { hasText: "#tagg" })).toHaveCount(1);
+  });
+
+  test("a misspelled word offers its guesses first, and a guess replaces it", async ({ page }) => {
+    await write(page, "I recieve mail");
+    await rightClickWord(page, "recieve");
+    await expect(menu(page)).toBeVisible();
+    expect((await labels(page)).slice(0, 4)).toEqual(["receive", "relieve", "Learn Spelling", "Cut"]);
+    await pick(page, "receive");
+    expect(await raw(page)).toBe("I receive mail");
+  });
+
+  test("Learn Spelling adds the word to the dictionary and changes nothing in the note", async ({ page }) => {
+    await write(page, "I recieve mail");
+    await rightClickWord(page, "recieve");
+    await pick(page, "Learn Spelling");
+    expect(await page.evaluate(() => window.__harness.learnedWords())).toEqual(["recieve"]);
+    expect(await raw(page)).toBe("I recieve mail");
+  });
+
+  test("a correct word, and a misspelling inside a fence, offer no spelling", async ({ page }) => {
+    await write(page, "I receive mail\n\n```bash\necho recieve\n```\n");
+    await rightClickWord(page, "receive");
+    await expect(menu(page)).toBeVisible();
+    expect((await labels(page))[0]).toBe("Cut");
+    await page.keyboard.press("Escape");
+    await rightClickWord(page, "recieve");
+    await expect(menu(page)).toBeVisible();
+    expect(await labels(page)).not.toContain("Learn Spelling");
+    // The fence's word never reached the dictionary at all.
+    expect(await page.evaluate(() => window.__harness.spellingAsks())).not.toContain("recieve");
+  });
+
+  test("with editor.spellCheck off, nothing is checked and the menu never asks", async ({ page }) => {
+    await page.goto("/harness.html?spellCheck=off");
+    await expect(noteRow(page, "Alpha")).toBeVisible();
+    await page.keyboard.press("Meta+n");
+    await expect(page.locator(".cm-line").first()).toHaveText("# Untitled");
+    await write(page, "I recieve mail");
+    await expect(page.locator(".cm-content").first()).toHaveAttribute("spellcheck", "false");
+    await rightClickWord(page, "recieve");
+    await expect(menu(page)).toBeVisible();
+    expect((await labels(page))[0]).toBe("Cut");
+    expect(await page.evaluate(() => window.__harness.spellingAsks())).toEqual([]);
+  });
+});

@@ -23,6 +23,7 @@ import { hashtagExtension } from "./tags";
 import { wrapping } from "./wrap";
 import { formatting } from "./formatting";
 import { findReplace } from "./find";
+import { spelling } from "./spelling";
 import { fromDisk, sessionIdFacet } from "./session";
 import { noteChanged, saveNow } from "../notes/store";
 import { copySelection, cutSelection, pasteEvent, pasteHere, pastePlain } from "./clipboard";
@@ -432,6 +433,12 @@ export function createEditor(parent: HTMLElement, doc: string, sessionId: string
         // livePreview: raw markdown styles its headings too.
         nascentBullet(),
         findReplace(),
+        // Squiggles under misspelled prose, drawn by WebKit; code, URLs and
+        // frontmatter are marked out of it (editor/spelling.ts). Off with the
+        // editor.spellCheck setting, and never on a phone, which keeps
+        // CodeMirror's spellcheck="false": iOS underlines only where it also
+        // autocorrects, code blocks included (ios.md §7).
+        readOnly || softKeyboard() || !settings().editor.spellCheck ? [] : spelling(),
         appKeymap,
         clipboardKeymap,
         // The platform's paste event, which a phone's callout Paste raises and

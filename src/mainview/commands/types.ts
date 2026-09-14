@@ -59,6 +59,11 @@ export type CommandTarget =
   // from "note": the verbs (Restore, Delete Permanently) differ from a live
   // workspace's.
   | { kind: "trashedWorkspace"; id: string }
+  // The misspelled word a right-click in a note landed on, and the guess one
+  // menu item puts in its place ("" for Learn Spelling). Positions are the
+  // note's at the click; replaceWord re-checks the word is still there. Never
+  // a row, so it has no dataset form.
+  | { kind: "misspelling"; docId: string; from: number; to: number; word: string; guess: string }
   | { kind: "tab"; paneId: string; tabId: string }
   | { kind: "pane"; paneId: string };
 
@@ -364,6 +369,11 @@ export interface RegistryDeps {
     // CodeMirror's own selectAll, the ⌘A its defaultKeymap already binds.
     // Named here so the context menu has something to render.
     selectAll(docId: string): void;
+    // The spelling group's two verbs (editor/spelling.ts): put a guess in
+    // place of the misspelled word, or add the word to this device's
+    // dictionary.
+    replaceWord(docId: string, from: number, to: number, word: string, guess: string): void;
+    learnWord(docId: string, word: string): void;
   };
 }
 

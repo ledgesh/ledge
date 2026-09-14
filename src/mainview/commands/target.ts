@@ -75,6 +75,9 @@ export function targetAttrs(target: CommandTarget): Record<string, string> {
       };
     case "pane":
       return { "data-target-kind": "pane", "data-target-pane": target.paneId };
+    case "misspelling":
+      // A menu item's target, never a row's. Only the kind is published.
+      return { "data-target-kind": "misspelling" };
   }
 }
 

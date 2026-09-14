@@ -11,6 +11,7 @@ const PROSE: EditorClickContext = {
   onLink: false,
   onTask: false,
   onRunnableBlock: false,
+  guesses: null,
   readOnly: false,
 };
 
@@ -76,6 +77,25 @@ describe("the editor's context menu", () => {
     }
   });
 
+  test("a misspelled word puts its guesses and Learn Spelling at the top", () => {
+    expect(at({ guesses: ["receive", "relieve"], onLink: true }).slice(0, 5)).toEqual([
+      { guess: "receive" },
+      { guess: "relieve" },
+      "spelling.learn",
+      "---",
+      "link.open",
+    ]);
+  });
+
+  test("a misspelling with no guesses still offers Learn Spelling", () => {
+    expect(at({ guesses: [] }).slice(0, 2)).toEqual(["spelling.learn", "---"]);
+  });
+
+  test("a correct word, and any word in the manual, offer no spelling", () => {
+    expect(verbs()).not.toContain("spelling.learn");
+    expect(at({ readOnly: true, guesses: ["receive"] })).toEqual(["editor.copy", "editor.selectAll"]);
+  });
+
   test("no menu opens, closes, or doubles a separator", () => {
     // Every one of the sixteen contexts, not just the interesting ones. A
     // group that came back empty takes its divider with it, because a gap
@@ -85,11 +105,13 @@ describe("the editor's context menu", () => {
       for (const onTask of [true, false])
         for (const onRunnableBlock of [true, false])
           for (const readOnly of [true, false]) {
-            const items = editorMenu({ onLink, onTask, onRunnableBlock, readOnly });
+            for (const guesses of [null, [], ["receive"]]) {
+            const items = editorMenu({ onLink, onTask, onRunnableBlock, guesses, readOnly });
             expect(items[0]).not.toBe("---");
             expect(items[items.length - 1]).not.toBe("---");
             for (let i = 1; i < items.length; i += 1) {
               expect(items[i] === "---" && items[i - 1] === "---").toBe(false);
+            }
             }
           }
   });

@@ -41,6 +41,7 @@ import { reconnectingClient, Refused, SESSION_HOLD_MS, type Duplex } from "../sh
 import { spawnDuplex } from "./transport";
 import { localServer, SERVE_ENTRY } from "./localServer";
 import { installShims, tildify } from "./cliShim";
+import { checkWord, learnWord } from "./spelling";
 import { BUILD_VERSION } from "../shared/version";
 import type { LedgeRPC, UpdateState } from "../shared/rpc-schema";
 
@@ -118,6 +119,8 @@ const sharedNative: ClientNative = {
       return null;
     }
   },
+  // The Mac's dictionary, the one WebKit draws the squiggles from.
+  spelling: { check: checkWord, learn: learnWord },
   // Insert Image…, on the machine with the screen. This one is the file
   // dialog; the phone's answer to the same verb is PHPicker (ios.md §11).
   // bun/clipboard.ts imageFromFile turns the picked file into bytes assetWrite
@@ -689,7 +692,9 @@ async function buildWindow(want: string, frame?: Rect, docs?: { page: string }):
   }
 
   rpc = defineLedgeRPC(win.manager.requests);
-  const browser = new BrowserWindow({ title: win.title, url: await mainViewUrl(), rpc, frame: start });
+  // spellCheck turns on WKWebView's continuous spell checking, which is off by
+  // default. The editor decides which text it applies to (editor/spelling.ts).
+  const browser = new BrowserWindow({ title: win.title, url: await mainViewUrl(), rpc, frame: start, spellCheck: true });
   win.window = browser;
   win.id = browser.id;
 

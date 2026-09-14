@@ -739,6 +739,11 @@ snapshot at construction time through `lib/settings.ts`.
   (`editor.livePreview`: it exists as the escape hatch, not a preference —
   raw markdown is the app's original deliberate stance, and precise syntax
   editing demonstrably needs a way back to text-on-screen-is-text-on-disk),
+  spell checking (`editor.spellCheck`: on by default; a developer's notes are
+  dense with identifiers, product names and shell words no dictionary knows,
+  and underlines under every one of them are noise some people will not work
+  in. It is a client setting because the dictionary is the device's,
+  interactions.md §12),
   automatic update checks (`updates.automatic`: the launch and daily request
   to ledge.sh stays the default, because an install that never checks keeps
   its bugs. The off switch exists because an unprompted request demonstrably

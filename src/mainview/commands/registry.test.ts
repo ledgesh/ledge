@@ -119,6 +119,8 @@ function stubDeps(
       insertImage: record("insertImage"),
       toggleTemplate: record("toggleTemplate"),
       editFrontmatter: record("editFrontmatter"),
+      replaceWord: (docId, from, to, word, guess) => calls.push(`replaceWord:${docId}:${from}:${to}:${word}:${guess}`),
+      learnWord: (docId, word) => calls.push(`learnWord:${docId}:${word}`),
     },
   };
 }
@@ -736,6 +738,24 @@ describe("registry", () => {
     };
     find(cmds, "outline.jump").run(ctx);
     expect(calls).toEqual(["jumpToHeading:doc1:7:Setup"]);
+  });
+
+  test("the spelling pair acts on the menu's misspelling, and is titled by its guess", () => {
+    const calls: string[] = [];
+    const cmds = buildCommands(stubDeps(calls));
+    const target = { kind: "misspelling", docId: "doc1", from: 4, to: 11, word: "recieve", guess: "receive" } as const;
+    const ctx: CommandCtx = { ...makeCtx(initialState(FOLDER, [])), target };
+    const replace = find(cmds, "spelling.replace");
+    expect(typeof replace.title === "function" && replace.title(ctx)).toBe("receive");
+    expect(replace.palette).toBe(false);
+    replace.run(ctx);
+    find(cmds, "spelling.learn").run(ctx);
+    expect(calls).toEqual(["replaceWord:doc1:4:11:recieve:receive", "learnWord:doc1:recieve"]);
+    // With no misspelling to act on, neither is enabled or does anything.
+    const bare = makeCtx(initialState(FOLDER, []));
+    expect(replace.when?.(bare)).toBe(false);
+    find(cmds, "spelling.learn").run(bare);
+    expect(calls).toHaveLength(2);
   });
 
   test("run: tags.toggle and tag.open route through the ui hooks", () => {

@@ -58,6 +58,8 @@ function stubDeps(over: Partial<RegistryDeps> = {}): RegistryDeps {
       save: noop,
       cut: noop,
       copy: noop,
+      replaceWord: noop,
+      learnWord: noop,
       paste: noop,
       pastePlain: noop,
       selectAll: noop,

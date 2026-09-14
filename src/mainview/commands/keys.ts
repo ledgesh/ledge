@@ -341,6 +341,11 @@ export const COMMANDS = {
   // (editor/livePreview.ts TaskWidget); this is the keyboard path for a
   // caret already on the task's line.
   "task.toggle": { title: "Toggle Checkbox" },
+  // The editor menu's spelling group (interactions.md §12). Replace is shown
+  // under the guess it puts in place, so this title is the palette-less
+  // command's name rather than anything a menu prints.
+  "spelling.replace": { title: "Replace Misspelled Word" },
+  "spelling.learn": { title: "Learn Spelling" },
 
   // Per-block hover buttons (editor/blocks.ts). They act on the hovered block,
   // so they are not palette commands, but their tooltips derive from here like

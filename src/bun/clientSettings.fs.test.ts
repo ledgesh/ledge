@@ -56,7 +56,8 @@ describe("the split", () => {
       }`,
     );
     const s = await loadClientSettings();
-    expect(s.editor).toEqual({ fontSize: 19, livePreview: false });
+    // An older file names no spellCheck, so it takes the default.
+    expect(s.editor).toEqual({ fontSize: 19, livePreview: false, spellCheck: true });
     expect(s.terminal).toEqual({ fontSize: 11 });
     expect(s.appearance).toEqual({ theme: "dark" });
   });

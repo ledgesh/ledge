@@ -735,6 +735,14 @@ export type LedgeRPC = {
       // costs an osascript spawn (bun/clipboard.ts). The terminal and the
       // settings dialog want only text and stay on clipboardRead, a pbpaste.
       clipboardReadRich: { params: {}; response: { text: string; html: string } };
+      // The editor's right-click menu asks about the word under the pointer:
+      // whether this device's dictionary calls it misspelled, in the language
+      // of `context` (its paragraph), and what it would suggest. Learn adds the
+      // word to that dictionary. Both are the client's (bun/spelling.ts;
+      // interactions.md §12). A shell with no dictionary answers not
+      // misspelled.
+      spellingCheck: { params: { word: string; context: string }; response: { misspelled: boolean; guesses: string[] } };
+      spellingLearn: { params: { word: string }; response: { ok: boolean } };
       // Install the native menu bar. The view builds `items` from the command
       // registry and re-pushes whenever the state a `when` predicate reads
       // changes, so enablement stays correct without Bun learning what a

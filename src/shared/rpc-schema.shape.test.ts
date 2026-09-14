@@ -138,7 +138,11 @@ describe("the schema's shape against the protocol version", () => {
   // section stays empty. An old client against a new server keeps sending
   // workspaceDetach, which still detaches. No existing payload changed. The
   // pin moves and the version does not.
-  const PINNED = { protocol: 5, shape: "df8eb6b4ca6fa69d" };
+  // Then spelling (interactions.md §12): spellingCheck and spellingLearn, both
+  // client-only (NATIVE_METHODS), so no frame carries them and no server's
+  // view of the wire changes. The iOS bridge answers them in the view's own
+  // bundle. Nothing existing moved. The pin moves and the version does not.
+  const PINNED = { protocol: 5, shape: "0c084465dde5bb12" };
 
   test("a payload shape does not change without someone deciding whether it breaks", async () => {
     const shape = digest(shapeOf(await Bun.file(SCHEMA).text()));

@@ -28,6 +28,7 @@ import { configureNotes, dispatchExternalOpen, dispatchNotesChanged, dispatchNot
 import { configureVault, recordVaultState, refreshVaultState } from "./vault/channel";
 import { configureWorkspaces, recordWorkspaceKinds } from "./workspace/channel";
 import { configureClipboard } from "./lib/clipboard";
+import { configureSpelling } from "./editor/spelling";
 import { configureCli } from "./lib/cli";
 import { configureUpdates, loadUpdateState, recordUpdateState } from "./lib/updates";
 import { configureWindows, dispatchDocsShow, recordWindowRole } from "./lib/windows";
@@ -1004,6 +1005,24 @@ configureClipboard({
   readRich: async () => ({ text: clip, html: clipHtml }),
 });
 
+// A one-word dictionary standing in for NSSpellChecker (bun/spelling.ts): only
+// "recieve" is misspelled, until it is learned. Specs read what was asked and
+// learned through window.__harness.
+const learned: string[] = [];
+const spellingAsks: string[] = [];
+configureSpelling({
+  check: async (word) => {
+    spellingAsks.push(word);
+    return word === "recieve" && !learned.includes(word)
+      ? { misspelled: true, guesses: ["receive", "relieve"] }
+      : { misspelled: false, guesses: [] };
+  },
+  learn: async (word) => {
+    learned.push(word);
+    return true;
+  },
+});
+
 // In-memory image assets, mirroring bun/assets.ts: read serves a seeded map
 // (a missing entry gives null, which draws the broken placeholder), and
 // pasteImage allocates a fresh name and returns a markdown reference like the
@@ -1062,10 +1081,12 @@ configureAssets({
 // apply at launch and this one has no control of its own (the settings file is
 // where it is edited), so a query param is the only way a spec can boot the
 // harness with an override in place. It stands in for the real app's relaunch.
+// `?spellCheck=off` does the same for editor.spellCheck.
 const themeParam = new URLSearchParams(window.location.search).get("theme");
+const spellCheckOff = new URLSearchParams(window.location.search).get("spellCheck") === "off";
 const HARNESS_SETTINGS = {
   ...DEFAULT_SETTINGS,
-  editor: { ...DEFAULT_SETTINGS.editor, fontSize: 18 },
+  editor: { ...DEFAULT_SETTINGS.editor, fontSize: 18, spellCheck: !spellCheckOff },
   appearance: {
     theme: THEMES.includes(themeParam as Theme) ? (themeParam as Theme) : DEFAULT_SETTINGS.appearance.theme,
   },
@@ -1298,6 +1319,10 @@ declare global {
   interface Window {
     __harness: {
       clipboard: () => string;
+      // Every word the editor menu asked the dictionary about, and every word
+      // Learn Spelling added to it.
+      spellingAsks: () => string[];
+      learnedWords: () => string[];
       // The fake server's workspace trash, as workspaceTrashList answers it.
       deletedWorkspaces: () => TrashedWorkspace[];
       // Put both pasteboard flavors up, the way another app's copy does: the
@@ -1408,6 +1433,8 @@ declare global {
 }
 window.__harness = {
   clipboard: () => clip,
+  spellingAsks: () => [...spellingAsks],
+  learnedWords: () => [...learned],
   deletedWorkspaces: () => store.trashedWorkspaces(),
   setClipboard: (text, html) => {
     clip = text;

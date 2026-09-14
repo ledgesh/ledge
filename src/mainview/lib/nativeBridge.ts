@@ -407,6 +407,11 @@ function clientSeams(
     },
     clipboardRead: async () => ({ text: (await shell.call("clipboard.read", {})) as string }),
     clipboardReadRich: async () => (await shell.call("clipboard.readRich", {})) as { text: string; html: string },
+    // The only caller is the editor's right-click menu, which has no touch
+    // form (interactions.md §1a), and a phone's editor is not spell checked
+    // (ios.md §7). So the bridge carries no spelling strings.
+    spellingCheck: async () => ({ misspelled: false, guesses: [] }),
+    spellingLearn: async () => ({ ok: false }),
     // The pasteboard is this device's and the file is the server's, which are
     // two machines' jobs the schema gives one method (remote.md §5). Swift
     // answers with the image's bytes or "" for no image, and the name comes

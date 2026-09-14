@@ -212,6 +212,8 @@ function clientSeamRefusals(): Pick<RequestHandlers, ClientMethod> {
     clipboardRead: refuse("clipboardRead"),
     clipboardWrite: refuse("clipboardWrite"),
     clipboardReadRich: refuse("clipboardReadRich"),
+    spellingCheck: refuse("spellingCheck"),
+    spellingLearn: refuse("spellingLearn"),
     assetPaste: refuse("assetPaste"),
     assetPick: refuse("assetPick"),
     folderPick: refuse("folderPick"),
