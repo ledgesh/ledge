@@ -207,7 +207,7 @@ A connection between an app and a server that cannot understand each other is re
 
 ## Where to go next
 
-- **Back it up.** The notes now live on one disk that belongs to one provider. [[Tutorial: Back Up Your Notes to S3]] puts an encrypted copy in a bucket every hour.
+- **Back it up.** The notes now live on one disk that belongs to one provider. [[Tutorial: Back Up Your Notes to S3]] puts an encrypted copy in a bucket every hour, with one `ledge backup setup`.
 - **Add your phone.** Its pairing screen hands you a line for this same `authorized_keys`, already restricted ([[Ledge on Your Phone]]).
 - **Install what your notes run.** `git`, a language, a cloud CLI: whatever a block on this machine needs, installed as your own account with `apt-get`.
 - **Reach other machines from it.** A note on the VPS can carry `host: prod`, and the VPS makes that ssh connection with a key in `/home/ledge/.ssh` ([[Run Code on Remote Hosts]]).

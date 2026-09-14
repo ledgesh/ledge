@@ -169,33 +169,6 @@ Copy `ledge` and `dist-native/libledge_pty.so` to the server, side by side, some
 
 The `.so` holds two C functions the terminal needs. Without it beside the binary, resizing a terminal does nothing and a shell that stops reading can stall the server.
 
-## Run the server in Docker
-
-The repository ships a `Dockerfile`. Build and run it from a checkout on the machine that will host the container:
-
-```sh norun
-docker build -t ledge-server .
-docker run -d --name ledge --restart unless-stopped -v ledge-data:/data -v ledge-home:/home/ledge ledge-server
-```
-
-Mount both volumes. `/data` holds the notes, the workspace registry, the vault, and the logs. `/home/ledge` holds the account: your profiles and their secrets live in `~/.config/ledge/profiles`, and the keys `host:` frontmatter dials out with live in `~/.ssh`.
-
-Neither directory is the whole story on its own, and `docker rm` takes whatever you did not mount. Run `ledge backup-paths` in the container to see both, resolved. "Back up the server" below is what to do with them.
-
-The image has no ssh daemon in it. The machine's own sshd is the one that answers, and it reaches into the container (see below). Running a second sshd inside a container means a second set of host keys and a second published port, for nothing.
-
-The image carries zsh, `ssh`, and nothing else your notes might want. Add what you need in an image of your own:
-
-```dockerfile
-FROM ledge-server
-USER root
-RUN apt-get update && apt-get install -y --no-install-recommends git python3
-COPY --from=oven/bun:1-debian /usr/local/bin/bun /usr/local/bin/bun
-USER ledge
-```
-
-The `bun` line is there for `ts` blocks. The app carries its own copy of that runtime and a server carries none ([[Running Code]]).
-
 ## Restrict the key to Ledge
 
 Optional, and worth doing on a server you care about. Ledge connects with an ordinary key either way and never edits this file for you.
@@ -207,12 +180,6 @@ restrict,command="/usr/local/bin/ledge serve" ssh-ed25519 AAAA... ledge@laptop
 ```
 
 Use the absolute path that `command -v ledge` printed above. sshd runs this line instead of whatever the client asked for, so naming the file outright settles where it is. It does not settle where Bun is, which is the other half of the check.
-
-For the Docker deployment, the forced command reaches into the container instead:
-
-```
-restrict,command="docker exec -i ledge ledge serve" ssh-ed25519 AAAA... ledge@laptop
-```
 
 That key cannot forward a port, run `scp`, or open a shell over ssh. What it limits is what the key is good for if it is ever stolen: no route into the network behind that server, and no file copying.
 
@@ -262,43 +229,40 @@ Each device unlocks for itself. Typing the passphrase on your Mac does not open 
 
 ## Back up the server
 
-Ledge backs nothing up. `ledge backup-paths` prints the paths a backup has to cover, and you point a backup tool at them.
+`ledge backup` puts an encrypted copy of everything the server holds into an S3-compatible bucket, on a schedule the server keeps itself. [[Tutorial: Back Up Your Notes to S3]] sets it up with one command. This section is what the verbs do.
 
-Run it as the account the server runs as, on the machine the server runs on:
+Run them as the account the server runs as, on the machine the server runs on.
 
-```sh norun
-ledge backup-paths
-```
+| Verb | What it does |
+| --- | --- |
+| `ledge backup setup` | Asks for the bucket and its key, fetches restic if none is installed, writes the credentials to the `backup` profile, creates the repository, and takes the first backup. `--existing` joins a repository that already has backups in it. |
+| `ledge backup now` | Takes a backup and thins old snapshots. |
+| `ledge backup status` | When the last backup ran and how it went, when the next is due, and any attached folder the last run could not find. |
+| `ledge backup snapshots` | The snapshots in the repository, newest first. |
+| `ledge backup restore` | Puts files back from a snapshot, into a fresh folder under your home or, with `--in-place`, where they were. |
+| `ledge backup paths` | The paths a backup of this machine covers, for a backup tool of your own. |
+| `ledge backup restic` | Runs restic itself with the backup's repository and credentials. |
 
-One absolute path per line: the app home, every workspace folder you attached from elsewhere on the machine, and the profiles directory. Only the server can answer this, because only its registry knows where you attached those folders.
+What a backup covers is decided at every run, because only the server knows it: the app home, every workspace folder you attached from elsewhere on the machine, and the profiles directory. Inside the app home it skips the daemon's socket and pidfile, the logs, the copy of this manual, and the installed server in `.server`. An attached folder that is not on disk at the time, on an unmounted volume say, is skipped, said on stderr, and shown by `status` until it is back.
+
+Backups run every hour while the server is up, and once more before it exits: after the app closes on a Mac, or after the last device disconnects from a VPS. The repository keeps 24 hourly, 30 daily, 12 weekly, and 24 monthly snapshots, and the rest are dropped.
+
+Three things to know before you rely on it:
+
+- Keep the restic password somewhere other than this machine. `setup` prints it once. A restore starts on a machine that has nothing on it, and a password stored only inside the backup is a backup you cannot open.
+- The backup holds secrets. Profile values are plain text on disk and so are unlocked notes, which is why restic encrypts before uploading. The bucket sees ciphertext only.
+- Locked notes and the vault travel together. `.vault.json` is inside the app home, so it is always in the backup, and a restore opens locked notes with the passphrase they had ([[Note Locking]]).
+
+The repository and its credentials live in the `backup` profile, `~/.config/ledge/profiles/backup.env`, outside the app home ([[Profiles and Secrets]]). A note with `profile: backup` runs restic by hand with the same variables.
+
+For a backup tool of your own, `ledge backup paths` prints one absolute path per line:
 
 | Flag | What it prints |
 | --- | --- |
 | none | The paths to back up. |
-| `--exclude` | What to skip inside them: the daemon's socket and pidfile, the logs, the copy of this manual, and the installed server in `.server`. |
+| `--exclude` | What to skip inside them. |
 | `--no-secrets` | The same list without the profiles directory. |
 | `--json` | Both lists, plus any registered folder that is not on disk. |
-
-A registered folder that is missing right now is left out, with a line on stderr saying so. Naming a path that is not there fails the whole backup run, and dropping it without a word is how a workspace stops being backed up until you notice at a restore.
-
-Everything on this page works the same whether the server is a package on a VPS, a build of your own, or the image. The paths differ, so ask the machine rather than assuming them. On a VPS they are all under the account's home. In the image the app home is `/data` and the profiles are under `/home/ledge`, which is why that deployment mounts two volumes.
-
-Ask the container for the image deployment, from its host:
-
-```sh norun
-docker exec ledge ledge backup-paths
-```
-
-## Back up with restic
-
-restic reads both lists, encrypts on the server before anything leaves it, and keeps versions. Any S3-compatible bucket works: S3, R2, B2, Wasabi, MinIO. [[Tutorial: Back Up Your Notes to S3]] sets it up on an hourly systemd timer, with the repository credentials in a profile so a note can run the same backup by hand.
-
-Three things to know before you rely on any backup of a server:
-
-- Keep the backup's password somewhere other than this server. A restore starts on a machine that has nothing on it, and a password stored only inside the backup is a backup you cannot open.
-- The backup holds secrets in plain text. Profile values are plain text and so are unlocked notes, so the tool has to encrypt. restic does. `aws s3 sync` and `rclone sync` do not, unless you configure them to.
-- Locked notes and the vault travel together or not at all. `.vault.json` is inside the app home, so the printed list already does this. A hand-written list that takes the notes and leaves the vault restores notes Ledge refuses to open ([[Note Locking]]).
-- Credentials do not belong in `settings.jsonc`, which is inside the app home and therefore inside the backup. A profile is outside it ([[Profiles and Secrets]]).
 
 ## What a provider snapshot does not do
 

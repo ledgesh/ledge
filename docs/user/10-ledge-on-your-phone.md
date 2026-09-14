@@ -32,8 +32,6 @@ Opening a `ledge://pair` link on the phone shows the same screen, with a warning
 
 A code never replaces a host key the phone already has. When Ledge has a different key pinned for the same address, it refuses the code and keeps that key. If the server's key really changed, connect to it from the Servers list, where Ledge shows you the new key to check.
 
-When the server runs in Docker, run `pair` on the machine that runs the container, since the host keys and the account the phone signs in to belong to that machine. Run inside the container, `ledge pair` prints the command to use instead.
-
 ## Set up a server
 
 I don't have a server yet opens "Set up a server", which shows the commands that make a machine a Ledge server. Choose Linux or Mac above them. On Linux:
@@ -78,7 +76,7 @@ restrict,command="PATH=$HOME/.ledge/.server/bin:$PATH ledge serve" ecdsa-sha2-ni
 
 Copy line puts it on the phone's pasteboard. Share line hands it to AirDrop, Messages, or any app that can carry it to a machine with a shell on the server, which is where the pasteboard on a phone falls short. Add it to `~/.ssh/authorized_keys` there. The comment at the end names the phone, so the line is easy to find again when you want to revoke it.
 
-The line arrives already restricted, in the way "Restrict the key to Ledge" on [[Keep Notes on a Remote Server]] describes: the phone's key can speak Ledge's protocol and nothing else. It looks for `ledge` in `~/.ledge/.server/bin` first and then on the PATH an incoming ssh gets, so a server installed in either place starts ("Check that ssh can find the server" on the same page). For the Docker deployment, change the command in the line to the `docker exec` form shown there.
+The line arrives already restricted, in the way "Restrict the key to Ledge" on [[Keep Notes on a Remote Server]] describes: the phone's key can speak Ledge's protocol and nothing else. It looks for `ledge` in `~/.ledge/.server/bin` first and then on the PATH an incoming ssh gets, so a server installed in either place starts ("Check that ssh can find the server" on the same page).
 
 The third is Connect. The phone dials the server, shows its host key fingerprint, and asks "Is this the server?" alongside the command that prints the same fingerprint on the server. Trust pins the key, and a server that later presents a different one is refused, the same as on a Mac.
 

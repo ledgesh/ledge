@@ -57,7 +57,7 @@ The verbs, if you want them:
 | --- | --- |
 | `ledge serve` | Move the protocol between stdin, stdout, and this machine's daemon. Starts the daemon if nothing answers. |
 | `ledge daemon` | Be this machine's server. Holds the notes, the shells, and the watchers, and runs until stopped. |
-| `ledge backup-paths` | Print the paths a backup of this machine has to cover. |
+| `ledge backup` | Back this machine up to an S3-compatible bucket: `setup`, `now`, `status`, `snapshots`, `restore`, `paths`, `restic`. |
 | `ledge pair` | Print a pairing code a phone scans to add this server. |
 | `ledge mcp` | The Ledge MCP server on stdin and stdout, for an agent running on this machine. |
 | `ledge ls`, `ledge cat`, ... | Notes from this machine's own shell. `ledge help` lists them. |
@@ -78,11 +78,11 @@ An absolute path here settles half of the PATH question above, since sshd runs t
 
 ## Where the data lives
 
-Everything the server owns sits under one directory: the notes, the workspace registry, the vault, the layout, and the logs. It is `~/.ledge` by default, and `LEDGE_NOTES_ROOT` moves it. That directory is the whole backup.
+Most of what the server owns sits under one directory: the notes, the workspace registry, the vault, the layout, and the logs. It is `~/.ledge` by default, and `LEDGE_NOTES_ROOT` moves it. Two things live outside it: the profiles, at `~/.config/ledge/profiles`, so credentials stay out of the folder people sync; and any workspace folder attached from elsewhere on the machine.
 
-## Docker
+## Back it up
 
-The Ledge repository ships a `Dockerfile` for the container deployment, where the image's PID 1 is the daemon and the host's sshd reaches in with `docker exec`. See [Keep Notes on a Remote Server](https://github.com/ledgesh/ledge/blob/main/docs/user/09-keep-notes-on-a-remote-server.md) in the manual.
+`ledge backup setup` asks for an S3-compatible bucket and its key, then keeps an encrypted copy of all of the above there: every hour while the server is up, and once more before it exits. `ledge backup status` says how it is going, and `ledge backup restore` brings files back. See [Back Up Your Notes to S3](https://github.com/ledgesh/ledge/blob/main/docs/user/21-tutorial-back-up-your-notes-to-s3.md) in the manual.
 
 ## License
 

@@ -1059,7 +1059,7 @@ palette answer with a notice instead of executing (`editor/fenceInfo.ts`
 
 ````markdown
 ```sh norun
-sudo systemctl enable --now ledge-backup.timer
+sudo apt-get install -y fail2ban
 ```
 ````
 
@@ -1369,9 +1369,12 @@ app rather than growing its own dialect.
 
 - **Verbs are unix-shaped and few**: `ls`, `cat`, `search`, `tags`, `new`,
   `today`, `append`, `workspaces`, `open`, `mcp`, `help`, plus the four
-  server verbs `serve`, `daemon`, `pair` and `backup-paths`, which
+  server verbs `serve`, `daemon`, `pair` and `backup`, which
   `src/bun/serve.ts` answers before this table sees the arguments and
-  remote.md governs. A bare `ledge` opens the app; a bare non-verb argument
+  remote.md governs. `backup` has verbs of its own (`setup`, `now`,
+  `status`, `snapshots`, `restore`, `paths`, `restic`; `src/bun/backupCli.ts`,
+  remote.md §11), and `backup-paths` is kept as the 0.1 spelling of
+  `backup paths`. A bare `ledge` opens the app; a bare non-verb argument
   is a title to open (`ledge open <title>` is the spelled-out escape for a
   note titled like a verb — including one literally titled "today" or
   "pair"). New verbs argue for

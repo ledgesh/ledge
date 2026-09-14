@@ -18,6 +18,8 @@ Profile names may contain letters, digits, `-`, and `_`. The name resolves to a 
 
 A note names at most one profile, and any number of notes can share one. Every deploy-related note can say `profile: deploy` and pick up the same credentials.
 
+One name is taken. `backup` is the profile `ledge backup setup` writes, holding the backup repository and its credentials ([[Keep Notes on a Remote Server]]). A note that says `profile: backup` runs with those variables, which is how a note runs restic by hand.
+
 ## Edit a profile
 
 Click the profile name in the frontmatter block, or run "Edit Note Profile…" from the command palette. The command appears whenever the current note names a profile.

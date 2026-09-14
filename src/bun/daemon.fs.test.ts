@@ -656,6 +656,46 @@ describe("a daemon nobody is using", () => {
     await d.done; // and the last one leaving does end it
   });
 
+  // The backup's last act (backupRun.ts): the hook runs after the timer has
+  // found nothing to keep the daemon, and before the socket goes.
+  test("runs the idle-exit hook first, and stays if a client arrives meanwhile", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "ledge-daemon-unit-"));
+    dirs.push(dir);
+    const socketPath = join(dir, "server.sock");
+    const order: string[] = [];
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    const d = await startDaemon({
+      socketPath,
+      pidPath: join(dir, "server.pid"),
+      idleMs: 150,
+      build: BUILD_VERSION,
+      beforeIdleExit: async () => {
+        order.push("hook");
+        await held;
+      },
+    });
+    started.push(d);
+    void d.done.then(() => order.push("done"));
+
+    expect(await until(() => order.includes("hook"))).toBe(true);
+    // A client that connects while the hook runs finds the socket still there,
+    // and its presence cancels the exit once the hook returns. Registered, not
+    // only greeted (see the retire test below): the presence push follows.
+    const { conn: late, seen } = await joined(socketPath, "mac-1");
+    expect(await until(() => company(seen) !== null)).toBe(true);
+    release();
+    const raced = await Promise.race([d.done.then(() => "exited"), new Promise((r) => setTimeout(() => r("still up"), 400))]);
+    expect(raced).toBe("still up");
+    expect(order).toEqual(["hook"]);
+
+    // With the client gone, the timer fires again, the hook runs again, and
+    // this time nothing interrupts the exit.
+    late.close();
+    await d.done;
+    expect(order).toEqual(["hook", "hook", "done"]);
+  });
+
   // The daemon a person started rather than one an ssh started for them: a
   // systemd unit, or the container's PID 1. It has to survive having no client
   // at all, or a supervisor would restart it every minute for correctly

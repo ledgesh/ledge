@@ -25,6 +25,7 @@ The same launcher is what lets your phone reach this Mac's notes ([[Ledge on You
 | `ledge append <title>` | Appends to a note, or to one heading's section with `--heading`. |
 | `ledge today` | Opens today's daily note in the app. |
 | `ledge <title>` | Opens the app at that note. `ledge` alone just opens the app. |
+| `ledge backup` | Backs this machine up to a bucket: `setup`, `now`, `status`, `snapshots`, `restore`, `paths`, `restic` ([[Keep Notes on a Remote Server]]). |
 
 In a terminal, once the shim is on your PATH:
 

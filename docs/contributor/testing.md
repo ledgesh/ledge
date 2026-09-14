@@ -288,6 +288,20 @@ be read while it is being written and shows how far the probe got; and prefer
 a claim provable without the page rendering at all — `daemon.fs.test.ts` drives
 real PTYs over a real socket, and `probe:ssh` drives them over a real wire.
 
+**The backup** needs a bucket, and `bun run probe:backup` stands one up: an
+S3 server in Docker, a scratch app home with a managed and an attached
+workspace, and `ledge backup setup --from-env` against it, which fetches and
+checksums the pinned restic where none is on the PATH. It then claims what
+only a real restic against a real bucket can say: that a changed note makes
+a snapshot and an unchanged tree does not (restic's own check is fooled by a
+busy parent folder, `bun/backup.ts` `parseDiffChanges`), that an attached
+folder that is not on disk is skipped and shown by `status`, that a
+one-note restore and a whole restore bring back what they should and not the
+logs, that the daemon's idle exit backs up first, and that a used repository
+is joined with `--existing` and refused with the wrong password.
+`backupRun.fs.test.ts` covers the same command lines against a fake restic,
+so `bun test` needs neither Docker nor the network.
+
 **The ssh transport** needs a machine to connect to, and "I have a server"
 is not a test setup anyone else can repeat. Run one.
 

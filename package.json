@@ -27,6 +27,7 @@
     "probe:ssh": "bun scripts/probe-ssh.ts",
     "probe:npm": "bun scripts/probe-npm.ts",
     "probe:install": "bun scripts/probe-install.ts",
+    "probe:backup": "bun scripts/probe-backup.ts",
     "ios": "bun scripts/ios-build.ts",
     "licenses": "bun scripts/licenses.ts"
   },

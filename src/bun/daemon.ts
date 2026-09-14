@@ -98,6 +98,10 @@ export interface DaemonOpts {
    * ended; `RETIRE_POLL_MS` by default. */
   retirePollMs?: number;
   build?: string;
+  /** Run before an idle exit, after the timer has fired and found nothing to
+   * keep the daemon: the backup's last act (backupRun.ts). A client that
+   * connects while it runs keeps the daemon; the exit is re-armed instead. */
+  beforeIdleExit?: () => Promise<void>;
 }
 
 export interface Daemon {
@@ -317,8 +321,11 @@ export async function startDaemon(opts: DaemonOpts = {}): Promise<Daemon> {
     });
   }
 
+  // True while `beforeIdleExit` runs. `armIdleExit` stays quiet meanwhile,
+  // and the exit path re-checks the clients once the hook returns.
+  let leaving = false;
   function armIdleExit(): void {
-    if (stopped || idleTimer || idleMs <= 0) return;
+    if (stopped || idleTimer || leaving || idleMs <= 0) return;
     // A hold applies only where there is something to hold. A client that asked
     // for one and opened no shell has nothing to come back to, and a process
     // kept for it is the daemon nobody asked for that this timer exists to end
@@ -334,13 +341,24 @@ export async function startDaemon(opts: DaemonOpts = {}): Promise<Daemon> {
     if (wait !== idleMs) {
       console.error(`[daemon] holding sessions for ${wait >= 10_000 ? `${Math.round(wait / 1000)}s` : `${wait}ms`}`);
     }
-    idleTimer = setTimeout(() => {
+    idleTimer = setTimeout(async () => {
       idleTimer = null;
       if (clients.size > 0) return;
       // Asked at the deadline rather than when the client left: a run that
       // finishes in the meantime should not hold the process, and one that
       // starts cannot (nobody is here to start it).
       if (server.running()) return armIdleExit();
+      if (opts.beforeIdleExit) {
+        leaving = true;
+        try {
+          await opts.beforeIdleExit();
+        } catch (err) {
+          console.error(`[daemon] before idle exit: ${err instanceof Error ? err.message : String(err)}`);
+        }
+        leaving = false;
+        if (stopped) return;
+        if (clients.size > 0 || server.running()) return armIdleExit();
+      }
       console.error(`[daemon] no client and nothing running; exiting (${socketPath})`);
       stop();
     }, wait);

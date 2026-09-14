@@ -586,11 +586,6 @@ shape uses `Match User` with `ForceCommand` in `sshd_config`, which is a fact
 about how they run their servers and not something this app should be steering.
 Both belong in `docs/user/` as optional hardening for somebody who wants it.
 
-**The Docker deployment needs a different line**, `docker exec -i ledge
-ledge serve`, because the forced command reaches into the container
-(§11). Since the only thing Ledge does with the line is show it, the whole cost
-of that difference is showing the right one.
-
 **Considered and dropped: an enrollment window with a QR.** The server would
 open a short window, hand out a QR carrying the destination, its own host key
 line and a one-shot credential, and write the real key when the client presented
@@ -742,9 +737,9 @@ the code. A server with neither kind is refused with `sudo ssh-keygen -A` as the
 fix.
 
 **In a container, `pair` needs all three of `--user`, `--host` and `--keys`.**
-The container's account, name and host keys are not the server's: the image
-ships no sshd (§11), and a phone signs in to the machine that runs the
-container. `pair` detects a container by `/.dockerenv` or `/run/.containerenv`
+The container's account, name and host keys are not the server's: the probe
+fixture's image ships no sshd (§13), and a phone signs in to the machine that
+runs the container. `pair` detects a container by `/.dockerenv` or `/run/.containerenv`
 and refuses with the command to run on that machine instead:
 
 ```
@@ -1995,14 +1990,16 @@ mistake waiting to be made.
 
 ## 11. Deployment and portability
 
-**The server ships three ways, and the package is the ordinary one.**
+**The server ships two ways, and the package is the ordinary one.**
 `ledge-server` on npm carries a bundle and a prebuilt trampoline per target
-(`scripts/build-npm.ts`); `bun build --compile` still produces one binary per
-target for anyone who wants a build of their own; and a Docker image serves the
-hosts that want one. All three are the same `src/bun/`, and the targets are the
-same four: macOS and Linux, arm64 and x64.
+(`scripts/build-npm.ts`), and `bun build --compile` still produces one binary
+per target for anyone who wants a build of their own. Both are the same
+`src/bun/`, and the targets are the same four: macOS and Linux, arm64 and x64.
+The `Dockerfile` builds the Linux trampolines the package carries (its
+`native-lib` stage) and a container the probes use (§13); it is not a third way
+to ship.
 
-Build the image on debian-slim rather than alpine: the PTY layer is `bun:ffi`
+Build the Linux stages on debian rather than alpine: the PTY layer is `bun:ffi`
 over `posix_spawn` and `forkpty`, and musl is a fight that buys nothing. musl
 also has no `posix_spawn_file_actions_addchdir_np` at all, which is the same
 rule seen from the other side. The floor is glibc 2.29 (Debian 11, Ubuntu
@@ -2050,61 +2047,108 @@ forever. The portable answer is POLLHUP, which both kernels raise and which
 every closed drawer left a zombie — invisible in a window's lifetime, a pid
 leak in a server's.
 
-**Two deployments, and the image is built for one of them.** The binary on a
-VPS is reached by ssh, and `serve` autostarts the daemon on the first
-connection. The container's PID 1 IS the daemon and `docker exec` runs the
-pump, so the image ships no sshd: §3's argument for ssh is that Ledge
-inherits the most-audited daemon on the machine rather than writing an
-authentication system, and a second sshd inside a container gives that back
-for a second set of host keys and a second published port. The forced command
-§4 describes names `docker exec -i ledge ledge serve` instead.
+**One deployment: the package on a machine reached by ssh**, where `serve`
+autostarts the daemon on the first connection. The Dockerfile's last stage
+still builds a container image, and it is a test fixture: `probe:ssh` adds an
+sshd to it, and the glibc run of the suite happens inside `--target build`
+(§13). It was a deployment once, with the daemon as PID 1 and a forced command
+of `docker exec -i ledge ledge serve`, and it left the manual because a Ledge
+server runs the code in the user's notes: the image carried zsh and ssh and
+nothing else, the answer was "write your own image on top", and every feature
+grew a container special case (the forced command, pairing, and a backup whose
+paths, printed from inside the container, were not paths a restic on the host
+could read). `pair` still detects a container and says what to run instead,
+since the fixture is one.
 
 A daemon somebody STARTED does not idle out, which is what `--autostart`
 distinguishes: the timeout exists for the daemon an ssh conjured, and a
-supervisor restarting a container every minute for correctly deciding nobody
-was home is not a design anyone would choose.
+supervisor restarting a unit every minute for correctly deciding nobody was
+home is not a design anyone would choose.
 
-**What an operator has to back up is a question only the server can answer,
-and `backup-paths` is the verb that answers it.** `bun/backup.ts` is the whole
-of the policy: include the app home WHOLE, add every registered root the app
-home does not already contain, add `PROFILES_DIR`, and subtract the socket, the
-pidfile, `logs/`, and `.ledge-docs`. Subtracting from the app home rather than
-enumerating inside it is the load-bearing choice: a file added to the app home
-next year is then backed up by default, where the other order fails silently
-and is discovered at a restore.
+**Backups: restic is the engine, and `ledge backup` is everything around it.**
+Ledge ships no backup engine and should not grow one. restic already does
+client-side encryption, deduplication, versions, restore and repository
+checking against every S3-compatible service, and an uploader is not a backup
+engine (Bun's S3 client was looked at and passed over). What Ledge owns is
+everything that was crunchy around it: the paths, the credentials, the binary,
+the schedule, the state, and the restore. `bun/backup.ts` is the policy, pure;
+`bun/backupRun.ts` the I/O; `bun/backupCli.ts` the verbs (`setup`, `now`,
+`status`, `snapshots`, `restore`, `paths`, `restic`; interactions.md §9).
 
-Two things made this a verb rather than a sentence in the manual, and both were
-bugs in what shipped:
+- **What to back up** is a runtime question only the server can answer
+  (`backupSet`): include the app home WHOLE, add every registered root the app
+  home does not already contain, add `PROFILES_DIR`, and subtract the socket,
+  the pidfile, `logs/`, `.ledge-docs` and `.server`. Subtracting from the app
+  home rather than enumerating inside it is the load-bearing choice: a file
+  added to the app home next year is then backed up by default, where the
+  other order fails silently and is discovered at a restore. Profiles are
+  outside the app home (architecture.md §6a), so "back up `~/.ledge`" takes
+  every note that says `profile: prod` and none of the values; that was the
+  bug that made this a verb. External roots are wherever the user attached
+  them, and the registry is the only thing that knows. Whether a root is on
+  disk is asked of the disk at every run (`rootsOnDisk`, not the load-time
+  `availableRoots`); one that is not is skipped, said on stderr, and recorded
+  in the state so `status` shows it. Naming it fails the whole restic run, and
+  dropping it silently is how a workspace leaves the backup set unnoticed.
+- **Where the credentials live**: the `backup` profile
+  (`~/.config/ledge/profiles/backup.env`), written 0600 by `setup` through
+  `profiles.ts`. It is outside the app home, it is the file a note with
+  `profile: backup` already gets, and it holds restic's own variable names
+  (`RESTIC_REPOSITORY`, `RESTIC_PASSWORD`, the `AWS_*` pair for `s3:`), so
+  `ledge backup restic <args>` and a restic block in a note both just work.
+  Not settings.jsonc, which is synced and shared. The profile is itself inside
+  the backup, encrypted with the password it holds; the password is the only
+  key, and `setup` prints it once, alone on stdout, and says to keep it
+  elsewhere.
+- **Which restic**: one on the PATH at `RESTIC_MIN_VERSION` or newer, else
+  the release pinned in `backup.ts` (`RESTIC_VERSION`, four SHA-256 sums from
+  that release's SHA256SUMS), downloaded by `setup` into `.server/backup/`,
+  verified, and unpacked with the system's bzip2 (`fetchRestic`). The
+  precedent is `server.sh`'s pinned Bun, and architecture.md §8 has the
+  dependency-policy sentence. `LEDGE_RESTIC_RELEASES` points the download at
+  a mirror.
+- **When**: the daemon keeps the schedule (`backupScheduler`), because it is
+  the one long-running process on every machine and the same on a Mac and a
+  VPS: hourly while up, an overdue run soon after start, and once more before
+  an idle exit (`DaemonOpts.beforeIdleExit`), which on a Mac is the minute
+  after the app closes and on a VPS the minute after the last device leaves.
+  No launchd agent, no systemd unit, no lingering, no PATH problem. The gap is
+  a machine whose notes change while nothing is connected (the CLI, an
+  agent), and the manual gives the one-line cron for it. The hook runs after
+  the idle timer has found nothing to keep the daemon; a client that connects
+  meanwhile finds the socket still there, and the exit re-arms.
+- **Nothing overlaps**: a pid lock in `.server/backup/` (`withBackupLock`)
+  covers the hourly run, the idle-exit run and a `now` typed by hand, and a
+  dead holder's lock is taken.
+- **Retention** is fixed (`KEEP`: 24 hourly, 30 daily, 12 weekly, 24
+  monthly), `forget` every run and `--prune` once a day (`PRUNE_EVERY_MS`),
+  over snapshots tagged `ledge` only, so a repository shared with another
+  tool's backups is not thinned by Ledge's policy. No setting: a knob is
+  earned when the hardcoded value demonstrably fails someone (architecture.md
+  §7), and `ledge backup restic forget` is there meanwhile.
+- **"Nothing changed" is decided by a diff, not by restic.**
+  `--skip-if-unchanged` compares whole trees, and a tree carries the metadata
+  of every ancestor of a target: a home directory whose mtime moved (zsh
+  rewriting its history file, say) makes an unchanged `~/.ledge` snapshot
+  again, every hour. `probe:backup` found it under `/var/folders`. So a
+  snapshot that `diff --json` against the last recorded one lists no change
+  for is forgotten on the spot (`parseDiffChanges`), and `now` says so.
+- **State** is `.server/backup/state.json` (`BackupState`: last run, last
+  good run, last error, last snapshot, last prune, and the skipped roots with
+  the first time each was missed), written atomically after every run, and it
+  is what `status` reads. The lock, the state, the fetched restic and its
+  cache all live under `.server`, which the backup excludes.
 
-- **Profiles are outside the app home** (`architecture.md` §6a), so "back up
-  `/data`" takes every note that says `profile: prod` and none of the values.
-  The image made it worse than a documentation gap: `~/.config/ledge/profiles`
-  and `~/.ssh` are on the container's own filesystem, so `docker rm` took the
-  secrets and the `host:` credentials with it. The fix is a second mount
-  (`-v ledge-home:/home/ledge`) rather than a second `VOLUME` line, because a
-  declared volume silently discards a derived image's `RUN` writes and
-  `FROM ledge-server` is the recipe §11 tells people to write.
-- **External roots are wherever the user attached them.** The registry is the
-  only thing that knows, which is what makes the path list a runtime question.
-
-An unavailable root goes to stderr and stays out of stdout. Naming a path that
-is not there fails the whole restic run; dropping it silently is how a
-workspace leaves the backup set without anybody noticing. stdout is written
+`backup paths` stays for a backup tool of the user's own, and `backup-paths`
+stays as the 0.1 spelling since shipped manuals name it. Everything prints
 with `process.stdout.write` rather than `console.log`, since `main` reroutes
 every console method to stderr for `serve`'s sake and must keep doing so.
-
-Ledge ships no backup engine and should not grow one. restic and rclone exist;
-what they cannot compute is which paths, and that is the whole of what this
-adds. The manual's recipe puts the repository credentials in a PROFILE rather
-than `settings.jsonc`, which is inside the app home and therefore inside the
-backup.
+Prompts go to stderr too, so `--json` stays clean.
 
 **A server's toolchain is the user's, and TypeScript was not the exception it
-looked like.** The image carries zsh because that is settings.jsonc's default
-shell, and openssh-client because `host:` frontmatter dials out from the SERVER
-(§6); every language a note actually runs is added in a `FROM ledge-server` of
-the user's own, since guessing at that list is a maintenance claim on somebody
-else's toolchain. `blocks.interpreters` maps `ts` to the token "bun", which the
+looked like.** The package installs no language: every language a note
+actually runs is the user's to install on that machine, since guessing at that
+list is a maintenance claim on somebody else's toolchain. `blocks.interpreters` maps `ts` to the token "bun", which the
 app resolves to `process.execPath` because its main process IS a bun — and a
 server's `process.execPath` is a compiled `ledge`, that same bun with the
 server compiled into it, whose verbs are the server's and the notes CLI's. So
@@ -2115,7 +2159,7 @@ falls back to the PATH's `bun`: it runs where an admin installed one and says
 that machine was saying all along.
 
 **There is one command, `ledge`, and the server verbs are four of its verbs.**
-`bun/serve.ts` answers `serve`, `daemon`, `backup-paths` and `pair` itself and
+`bun/serve.ts` answers `serve`, `daemon`, `backup` and `pair` itself and
 hands every other argument line to the notes CLI (`bun/cli.ts`, whose `mcp`
 verb is the MCP server), so every machine with a server has the CLI and the
 agent seam: they read the notes straight from disk beside whatever daemon is
@@ -2405,6 +2449,11 @@ Per `testing.md`'s categories:
   `bun test src/bun src/shared` inside it. It found the two Linux bugs §11
   records, and a latent flake in `notes.fs.test.ts` that had put a pause
   AFTER the write it was meant to separate rather than before it.
+- **The backup against a bucket** (`bun run probe:backup`, testing.md §6):
+  an S3 server in Docker, the pinned restic fetched and checksummed by
+  `setup` itself, then every verb and the daemon's idle-exit backup against a
+  scratch app home. It is where restic's own unchanged check was found to be
+  fooled by a busy parent folder (§11).
 - **The published package, on a machine that could not have built it**
   (`bun run probe:npm`). `npm pack` the assembled tree, install it with the
   README's own two commands inside a container that has NO Bun, NO compiler

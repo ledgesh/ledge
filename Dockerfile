@@ -1,5 +1,8 @@
-# A Ledge server as an image, for the machine that is always on when a laptop
-# is not (remote.md §11).
+# The Linux build stages the npm package needs (`native-lib`, remote.md §11)
+# and, in the last stage, the container the probes use (testing.md §6):
+# `probe:ssh` adds an sshd to it, and the glibc run of the suite happens
+# inside `--target build`. The image was a deployment once, and remote.md §11
+# says why it left the manual. The rest of this header describes the fixture.
 #
 # The image ships no sshd. remote.md §3's argument for ssh is that Ledge
 # inherits the most-audited daemon on the machine instead of writing an
@@ -93,10 +96,8 @@ FROM debian:trixie-slim
 # decision and have to move together.
 #
 # openssh-client is for `host:` frontmatter, where the server makes the
-# outbound connection (remote.md §6). Everything a user's notes actually run,
-# meaning git, a language or a cloud CLI, is theirs to add in a
-# `FROM ledge-server` of their own. Guessing at that list here would be a
-# maintenance claim on somebody else's toolchain.
+# outbound connection (remote.md §6). Nothing a user's notes actually run is
+# here: the fixture proves the transport and the PTY, not a toolchain.
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates openssh-client zsh \
   && rm -rf /var/lib/apt/lists/* \
@@ -109,32 +110,11 @@ RUN apt-get update \
 COPY --from=build /out/ledge /usr/local/bin/ledge
 COPY --from=build /out/libledge_pty.so /usr/local/bin/libledge_pty.so
 
-# Two directories hold state, and only one of them is obvious.
-#
-# /data is the app home: notes, workspace registry, vault, layout, logs
-# (remote.md §5). That is the one this file used to claim was the whole backup,
-# and it is not.
-#
-# The account's home is the other. Profiles live at ~/.config/ledge/profiles,
-# outside the app home, because the app home is the folder people sync and
-# keeping credentials out of a synced notes folder is what that layout is for
-# (architecture.md §6a). ~/.ssh is there too, and it is what `host:`
-# frontmatter dials out with (remote.md §6).
-#
-# Neither is on a volume, so `docker rm` took both: notes that say
-# `profile: prod` came back without the values, and every `host:` target came
-# back unreachable.
-#
-# The fix is a second mount rather than a second VOLUME line, because of the
-# recipe this image tells people to write. A `FROM ledge-server` that runs
-# `pip install --user` or `npm i -g` into a declared volume has its writes
-# discarded at build time, silently. So the run command in
-# docs/user/09-keep-notes-on-a-remote-server.md names both:
-#
-#     -v ledge-data:/data -v ledge-home:/home/ledge
-#
-# `ledge backup-paths` (bun/backup.ts) prints both, resolved, from
-# inside the container.
+# Two directories hold state. /data is the app home: notes, workspace
+# registry, vault, layout, logs (remote.md §5). The account's home is the
+# other: profiles live at ~/.config/ledge/profiles, outside the app home
+# (architecture.md §6a), and ~/.ssh is what `host:` frontmatter dials out with
+# (remote.md §6). `ledge backup paths` prints both, resolved.
 ENV LEDGE_NOTES_ROOT=/data
 VOLUME /data
 

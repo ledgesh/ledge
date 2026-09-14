@@ -79,7 +79,7 @@ Add `norun` after the language and the block gets no Run button. ⌘↩ on it sa
 
 ````markdown
 ```sh norun
-sudo systemctl enable --now ledge-backup.timer
+sudo apt-get install -y fail2ban
 ```
 ````
 

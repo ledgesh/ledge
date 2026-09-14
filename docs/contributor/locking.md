@@ -467,14 +467,14 @@ is the reason the salt rides in every header and every sealed asset.
 | --- | --- |
 | Onto a machine with no vault yet | Opens. `vaultUnlock` probes `firstLockedHeader`, derives from the note's own salt, and adopts it as the vault's. |
 | Onto a machine that already minted a vault, same passphrase | **Does not open.** The probe runs only at `vaultState() === "none"`, and a fresh vault has a different salt, so the same passphrase yields a different master key. |
-| Restore that includes `.vault.json` (what `backup-paths` produces) | Opens, whatever the machine had before. |
+| Restore that includes `.vault.json` (what `ledge backup` produces) | Opens, whatever the machine had before. |
 
 **So the order matters, and only the user can get it right: restore before
 locking anything new on the new machine.** The middle row is the trap, it is
 silent, and the passphrase being correct is what makes it convincing. Two
-things answer it and both are cheap: `backup-paths` already carries
-`.vault.json` (`bun/backup.ts` excludes only the socket, the pid, the logs
-and the docs mirror), and `unwrapDataKey`'s error names the case instead of
+things answer it and both are cheap: `ledge backup` already carries
+`.vault.json` (`bun/backup.ts` excludes only the socket, the pid, the logs,
+the docs mirror and `.server`), and `unwrapDataKey`'s error names the case instead of
 saying "damaged". A code fix that re-derived per note header would mean
 holding more than one master key, which is §3's model, not a patch.
 

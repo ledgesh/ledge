@@ -197,7 +197,9 @@ server verbs (what the Ledge apps reach over ssh):
                                (--autostart: exit when idle)
   ledge pair                   a QR code a phone scans to add this server
                                (--user, --host, --port, --keys; \`ledge pair --help\`)
-  ledge backup-paths           the paths a backup of this machine must cover
+  ledge backup <verb>          back this machine up to a bucket: setup, now,
+                               status, snapshots, restore, paths, restic
+                               (\`ledge backup help\`)
          --exclude             print the exclusions instead of the inclusions
          --no-secrets          leave out the profiles dir
          --json                both lists, plus any root that is not on disk

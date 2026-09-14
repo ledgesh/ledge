@@ -1,148 +1,114 @@
 # Tutorial: Back Up Your Notes to S3
 
-Put an encrypted copy of your notes, and everything Ledge keeps beside them on your server, into an S3-compatible bucket every hour.
+Put an encrypted copy of your notes, and everything Ledge keeps beside them, into an S3-compatible bucket, every hour, from the machine that holds them.
 
-This builds on [[Keep Notes on a Remote Server]], where `ledge backup-paths` is described, and on [[Profiles and Secrets]]. It assumes a server set up as in [[Tutorial: Set Up a Ledge Server]]: the package on a Debian or Ubuntu VPS, running as an account named `ledge`, with your own `sudo` account beside it.
+This works the same on a Mac that runs the app and on a server set up as in [[Tutorial: Set Up a Ledge Server]]. Every command below runs on that machine, as the account Ledge runs as, and needs the `ledge` command on its PATH: a server has it from the install, and a Mac gets it from "Install Shell Command (ledge)" in the command palette ([[The ledge CLI]]).
 
-The backup tool is restic. It reads the two lists `backup-paths` prints, encrypts on the server before anything leaves it, and keeps versions, so one note from last Tuesday is something you can ask for.
+The backup tool is restic, and `ledge backup` does everything around it: it fetches restic, keeps the credentials, creates the repository, computes what to back up, and keeps the schedule. restic encrypts on the machine before anything leaves it, and keeps versions, so one note from last Tuesday is something you can ask for.
 
 ## 1. Make a bucket and a key for it
 
 In your provider's console, create a bucket for the backup and an access key pair that can read and write that bucket and nothing else. Any S3-compatible service works.
 
-Write down four things: the bucket's endpoint, its name, the access key ID, and the secret. The endpoint becomes a restic repository address:
+Write down four things: the bucket's endpoint, its name, the access key ID, and the secret.
 
-| Service | `RESTIC_REPOSITORY` |
+| Service | Endpoint |
 | --- | --- |
-| Amazon S3 | `s3:s3.amazonaws.com/BUCKET` |
-| Cloudflare R2 | `s3:https://ACCOUNT.r2.cloudflarestorage.com/BUCKET` |
-| Backblaze B2 | `s3:https://s3.REGION.backblazeb2.com/BUCKET` |
-| Wasabi | `s3:https://s3.REGION.wasabisys.com/BUCKET` |
-| MinIO or another self-hosted service | `s3:https://HOST:9000/BUCKET` |
+| Amazon S3 | `s3.amazonaws.com` |
+| Cloudflare R2 | `https://ACCOUNT.r2.cloudflarestorage.com` |
+| Backblaze B2 | `https://s3.REGION.backblazeb2.com` |
+| Wasabi | `https://s3.REGION.wasabisys.com` |
+| MinIO or another self-hosted service | `https://HOST:9000` |
 
-## 2. Install restic on the server
+## 2. Set it up
 
-On the VPS, as your own account:
+On the machine, in any shell:
 
 ```sh norun
-sudo apt-get install -y restic
+ledge backup setup
 ```
 
-## 3. Put the credentials in a profile
+It asks for the endpoint, the bucket, the access key ID, and the secret. Then it does five things:
 
-In Ledge, on the server, press ⌘N and make a note called Backups with this frontmatter:
-
-```
----
-profile: backup
----
-```
-
-Run "Edit Note Profile…" from the command palette and add four rows:
-
-| Key | Value |
+| Step | What happens |
 | --- | --- |
-| `RESTIC_REPOSITORY` | The address from step 1 |
-| `RESTIC_PASSWORD` | A long random string with no spaces |
-| `AWS_ACCESS_KEY_ID` | The access key ID |
-| `AWS_SECRET_ACCESS_KEY` | The secret |
+| restic | Uses a restic already on the PATH, or downloads the release Ledge pins into `~/.ledge/.server`, checked against its published SHA-256. |
+| Credentials | Writes the four values and a generated restic password to the `backup` profile, `~/.config/ledge/profiles/backup.env`, readable by this account alone ([[Profiles and Secrets]]). |
+| Repository | Creates the restic repository in the bucket. |
+| First backup | Backs up everything `ledge backup paths` lists: the app home, every folder attached from elsewhere on the machine, and the profiles. |
+| Password | Prints the password on its last line. |
 
-The password encrypts the backup. Make one with `openssl rand -base64 32`, and keep a copy somewhere that is not this server: a restore starts on a machine with nothing on it, and a password stored only inside the backup is a backup you cannot open.
+The password is what encrypts the backup, and it is the only key. Copy it somewhere that is not this machine, such as a password manager. A restore starts on a machine with nothing on it, and a password stored only inside the backup is a backup you cannot open.
 
-Saving writes `/home/ledge/.config/ledge/profiles/backup.env` on the server, readable by that account alone. Every block in this note now runs with those four variables set, and the timer in step 5 reads the same file.
+## 3. Leave it running
 
-## 4. Create the repository and take the first backup
+Backups run every hour while this machine's Ledge server is up, and once more before it exits.
 
-Add three blocks to the Backups note:
+On a Mac, the server is up while the app is open and for a minute after it closes. On a VPS, it is up while a device is connected and for a minute after. Quitting the app or closing your laptop's connection is followed by a backup of whatever changed. A machine you open Ledge on after a week away backs up as soon as the server starts.
 
-````
-```sh
-restic init
-```
-
-```sh
-restic backup --files-from <(ledge backup-paths) --exclude-file <(ledge backup-paths --exclude)
-```
-
-```sh
-restic snapshots
-```
-````
-
-Run the first once. It creates the repository in the bucket and prints its ID.
-
-Run the second. `backup-paths` lists the app home, every workspace folder attached from elsewhere on the machine, and the profiles directory, and the `--exclude` list drops the daemon's socket and pidfile, the logs, the copy of this manual, and the installed server itself. restic reads both, uploads, and prints how much went.
-
-Run the third. One snapshot, with a time and a hostname. The note is now a button for a backup of the machine it lives on, run before an upgrade or whenever you want to know the last one worked.
-
-## 5. Run it every hour
-
-On the VPS, as your own account, create `/etc/systemd/system/ledge-backup.service`:
-
-```ini
-[Unit]
-Description=Ledge backup
-
-[Service]
-Type=oneshot
-User=ledge
-EnvironmentFile=/home/ledge/.config/ledge/profiles/backup.env
-ExecStart=/bin/bash -c 'restic backup --files-from <(ledge backup-paths) --exclude-file <(ledge backup-paths --exclude)'
-ExecStart=restic forget --keep-hourly 24 --keep-daily 30 --keep-weekly 12 --keep-monthly 24 --prune
-```
-
-`User=ledge` runs it as the server's account, which is the account whose registry `backup-paths` reads. `ExecStart` names `/bin/bash` because systemd runs no shell of its own and the two `<(...)` substitutions need one. The second `ExecStart` thins old snapshots to a day of hourlies, a month of dailies, a quarter of weeklies, and two years of monthlies.
-
-Then `/etc/systemd/system/ledge-backup.timer`:
-
-```ini
-[Unit]
-Description=Ledge backup, hourly
-
-[Timer]
-OnCalendar=hourly
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-```
-
-`Persistent=true` runs a backup that was missed while the machine was off. Start it:
+Nothing else needs installing: no timer, no unit file, no line in a crontab. One line is worth adding on a server where notes are written while no device is connected, by the `ledge` command or by an agent, since those do not start the server:
 
 ```sh norun
-sudo systemctl enable --now ledge-backup.timer
-sudo systemctl start ledge-backup.service
-sudo journalctl -u ledge-backup --no-pager | tail
+0 * * * * /usr/local/bin/ledge backup now
 ```
 
-The second line runs one backup now instead of waiting for the hour, and the third shows what it printed. `systemctl list-timers ledge-backup.timer` says when the next one is due.
+`ledge backup now` takes a backup at any time and is safe to run beside the schedule.
 
-## 6. Get a note back
+## 4. Check on it
 
-Add one more block to the Backups note:
-
-````
-```sh
-restic restore latest --target /tmp/restored --include '*/shipping-notes.md'
+```sh norun
+ledge backup status
 ```
-````
 
-It puts that one file, from the newest snapshot, under `/tmp/restored` with its original path beneath. `restic snapshots` lists older ones, and any snapshot's ID goes where `latest` is.
+It prints the repository, the restic in use, when the last backup ran and whether it succeeded, when the next is due, and any attached folder the last run could not find:
+
+```
+repository   s3:https://acct.r2.cloudflarestorage.com/ledge-notes
+restic       0.19.1 at /home/ledge/.ledge/.server/backup/restic-0.19.1
+last backup  12 min ago, ok (snapshot 2d55744c)
+next backup  in 48 min (the server is running)
+```
+
+A folder on an unmounted volume is skipped rather than failing the run, and shows here as a `SKIPPED` line until it is back. `ledge backup snapshots` lists what is in the repository, newest first.
+
+## 5. Get a note back
+
+```sh norun
+ledge backup restore '*/shipping-notes.md'
+```
+
+It puts that one file, from the newest snapshot, into a fresh folder under your home, with its original path beneath, and prints the folder. `--snapshot ID` names an older snapshot from the `snapshots` list, and `--to DIR` names the folder.
 
 Do this once now, with a note you have, before you need it.
 
-## 7. Restore everything onto a new server
+## 6. Restore everything onto a new machine
 
-On a fresh machine set up through step 4 of [[Tutorial: Set Up a Ledge Server]], with restic installed and the four variables in `/home/ledge/.config/ledge/profiles/backup.env` again by hand:
+On a fresh machine with Ledge installed, the app on a Mac or the server on a VPS, and the four values and the password at hand:
 
 ```sh norun
-restic restore latest --target /
+ledge backup setup --existing
 ```
 
-The paths inside the backup are absolute, so restoring to `/` puts the app home, the attached folders, and the profiles back where they were. Then connect from Ledge. Your workspaces, images, trash, profiles, and vault are all there, and locked notes open with the passphrase they had ([[Note Locking]]).
+It asks the same questions plus the password, opens the repository instead of creating one, and writes the profile. Then, with the app quit or the daemon stopped:
+
+```sh norun
+ledge backup restore --in-place
+```
+
+The paths inside the backup are absolute, so this puts the app home, the attached folders, and the profiles back where they were. Then open Ledge, or connect to the server. Your workspaces, images, trash, profiles, and vault are all there, and locked notes open with the passphrase they had ([[Note Locking]]). Backups continue on the new machine with the same repository.
+
+## Run restic yourself
+
+`ledge backup restic` runs restic with the backup's repository and credentials, for anything the verbs above do not cover:
+
+```sh norun
+ledge backup restic check
+```
+
+A note with `profile: backup` in its frontmatter gets the same variables in its shells, so a Backups note can hold restic blocks of its own.
 
 ## Where to go next
 
-- **Check the repository now and then.** A `restic check` block in the Backups note reads the bucket and reports anything missing or corrupt.
+- **Check the repository now and then.** `ledge backup restic check` reads the bucket and reports anything missing or corrupt.
 - **Keep the provider's snapshots too.** A snapshot restores the machine, and this backup restores your notes to any machine. [[Keep Notes on a Remote Server]] compares the two.
-- **Back up a laptop the same way.** A Mac that runs the app answers `ledge backup-paths` too, once "Install Shell Command (ledge)" has put the command on its PATH ([[The ledge CLI]]). Its notes are plain folders as well ([[Tutorial: Keep Notes Synced]]).
+- **Use a backup tool of your own.** `ledge backup paths` prints what to back up and `ledge backup paths --exclude` what to skip, for any tool that reads a path list.

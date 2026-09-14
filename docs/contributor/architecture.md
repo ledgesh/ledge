@@ -1199,6 +1199,18 @@ id and a pointer, not the standard wording under a guessed copyright holder.
 `licenses.test.ts` re-renders and compares, so a stale file fails the suite
 instead of shipping.
 
+**A pinned external binary is a dependency too, and two are allowed.** The
+server install fetches a pinned Bun (`bun/serverRelease.ts`, remote.md §11),
+and `ledge backup setup` fetches a pinned restic (`bun/backup.ts`
+`RESTIC_VERSION`, remote.md §11) when none new enough is on the PATH. Both are
+single static binaries from their projects' own release channels, both are
+verified against a SHA-256 written into this repository before they run, both
+land under `.server` where nothing else reads them, and each replaces a
+runtime Ledge would otherwise have to write (a JavaScript engine; an
+encrypting, deduplicating backup engine). A third needs the same shape and the
+same argument: something Ledge should not write, one file, a published
+checksum, and a pin a person bumps.
+
 ## 9. Comments
 
 Comments in this repo state *why* — the constraint, the rejected alternative,

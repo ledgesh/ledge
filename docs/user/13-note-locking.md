@@ -56,7 +56,7 @@ One rule makes that true, and it is about order:
 
 Ledge derives its key from your passphrase and a random salt. Restored notes carry the salt they were locked under. A machine that has never locked anything adopts that salt from the notes themselves, which is what lets them open. A machine that locked something first has already minted a salt of its own, and then the same passphrase produces a different key: your restored notes stay shut, and the passphrase being right is what makes that confusing.
 
-If it happens, nothing is lost. Restore `.vault.json` from the same backup into `~/.ledge`, which puts the original salt back, and the notes open. Backups made with the `ledge backup-paths` recipe include that file already ([[Tutorial: Back Up Your Notes to S3]]).
+If it happens, nothing is lost. Restore `.vault.json` from the same backup into `~/.ledge`, which puts the original salt back, and the notes open. A `ledge backup` backup includes that file already ([[Tutorial: Back Up Your Notes to S3]]).
 
 Locked notes from someone else's Ledge are a different matter, and they do not open. The next section says why.
 

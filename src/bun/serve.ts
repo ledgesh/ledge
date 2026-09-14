@@ -8,9 +8,9 @@
 // connection to it (§7). A run survives the wire dropping, and a reconnecting
 // client can replay safely. Phase 4 split the two (§14). The Mac app ships
 // this file beside its own entry and runs `daemon` from it, then dials the
-// socket itself with no pump in between (bun/localServer.ts). `backup-paths`
-// prints the paths a backup has to cover and exits (backup.ts, §11). `pair`
-// prints a pairing code (§4b).
+// socket itself with no pump in between (bun/localServer.ts). `backup` is the
+// backup verbs (backupCli.ts, §11), and the daemon keeps their schedule
+// (backupRun.ts). `pair` prints a pairing code (§4b).
 //
 // Every other verb, and a bare `ledge`, is the notes CLI (cli.ts; the MCP
 // server is its `mcp` verb, mcp.ts). Those read the notes straight from disk,
@@ -35,9 +35,9 @@ import {
 } from "./daemon";
 import { stdioDuplex } from "./transport";
 import { startLogging } from "./log";
-import { APP_HOME, availableRoots, loadWorkspaces, roots } from "./workspaces";
-import { PROFILES_DIR } from "./spawnParams";
-import { backupSet } from "./backup";
+import { APP_HOME } from "./workspaces";
+import { backupCli } from "./backupCli";
+import { backupScheduler } from "./backupRun";
 import {
   containerRefusal,
   HOST_KEY_DIR,
@@ -104,7 +104,11 @@ export async function serve(): Promise<void> {
  */
 export async function daemon(autostart = false): Promise<void> {
   const idleMs = autostart ? IDLE_EXIT_MS : IDLE_EXIT_NEVER;
-  const d = await startDaemon({ idleMs });
+  // The backup schedule lives here, in the one long-running process on the
+  // machine: hourly while up, and once more before an idle exit (remote.md §11).
+  const backups = backupScheduler({ log: console.error });
+  const d = await startDaemon({ idleMs, beforeIdleExit: () => backups.beforeIdleExit() });
+  backups.start();
   const life = idleMs > 0 ? `idle exit in ${idleMs}ms` : "staying until stopped";
   console.error(`[daemon] ledge ${BUILD_VERSION} on ${SOCKET_PATH}; app home: ${APP_HOME}; ${life}`);
   // A supervisor stops this with a signal, and so does the live probe.
@@ -113,52 +117,12 @@ export async function daemon(autostart = false): Promise<void> {
   // nothing is running (daemon.ts `retireDaemon`).
   process.on("SIGUSR1", () => d.retireWhenIdle());
   await d.done;
-}
-
-/**
- * Print the paths a backup of this machine has to cover (backup.ts).
- *
- * A verb rather than a documented path list, because only the server can
- * answer it: external workspace roots are wherever the user attached them,
- * and the registry is the only thing that knows. It prints paths and uploads
- * nothing. restic and rclone already exist, and what they cannot compute is
- * which paths (remote.md §11).
- *
- * The answer goes to `process.stdout` directly, not through a console method.
- * `main` has sent the console to stderr and must keep doing so (one stray
- * byte desynchronizes `serve`'s stream).
- *
- * The include and exclude lists come out of separate invocations. That is the
- * shape the consumer wants:
- *
- *     restic backup --files-from <(ledge backup-paths) \
- *                   --exclude-file <(ledge backup-paths --exclude)
- */
-export async function backupPaths(argv: readonly string[]): Promise<void> {
-  await loadWorkspaces();
-
-  // Registered but not on disk: an unmounted volume, or a folder someone moved
-  // from underneath the registry. Naming the path fails the whole restic run.
-  // Dropping it silently takes a workspace out of the backup set, and nobody
-  // finds out until a restore. `backup-paths` warns on stderr instead, so a
-  // pipe still gets clean paths.
-  const missing = roots().filter((r) => !availableRoots().includes(r));
-  for (const r of missing) console.error(`[backup-paths] skipping ${r}: not on disk (unmounted volume?)`);
-
-  const secrets = !argv.includes("--no-secrets");
-  const set = backupSet({ appHome: APP_HOME, profilesDir: PROFILES_DIR, roots: availableRoots(), secrets });
-
-  if (argv.includes("--json")) {
-    process.stdout.write(`${JSON.stringify({ ...set, skipped: missing }, null, 2)}\n`);
-    return;
-  }
-  const lines = argv.includes("--exclude") ? set.exclude : set.include;
-  if (lines.length > 0) process.stdout.write(`${lines.join("\n")}\n`);
+  backups.stop();
 }
 
 /**
  * Print this machine's pairing code as a QR code, with the link beneath it
- * (pair.ts, remote.md §4b). Returns the exit status. Like `backup-paths`, it
+ * (pair.ts, remote.md §4b). Returns the exit status. Like `backup`, it
  * writes to `process.stdout` directly and starts no daemon.
  */
 export async function pair(argv: readonly string[]): Promise<number> {
@@ -257,13 +221,12 @@ export async function main(argv: readonly string[]): Promise<never> {
 
   const verb = argv[2];
 
-  // `backup-paths` and `pair` read the disk and print, as the CLI does. They
+  // `backup` and `pair` read the disk and print, as the CLI does. They
   // start no daemon and touch none, so they need no log file of their own and
   // must not rotate the ones a running server is writing.
-  if (verb === "backup-paths") {
-    await backupPaths(argv);
-    process.exit(0);
-  }
+  if (verb === "backup") process.exit(await backupCli(argv));
+  // The 0.1 spelling of `backup paths`, kept because shipped manuals name it.
+  if (verb === "backup-paths") process.exit(await backupCli([...argv.slice(0, 2), "backup", "paths", ...argv.slice(3)]));
   if (verb === "pair") process.exit(await pair(argv));
 
   // `serve` and `daemon` log to separate files. Both can be running at once on
