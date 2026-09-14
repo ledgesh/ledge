@@ -6,7 +6,7 @@ The `ledge` command lists, reads, searches, creates, and appends to notes from a
 
 Run "Install Shell Command (ledge)" from the command palette.
 
-It writes one small launcher, `ledge`, into `~/.ledge-server/bin`, pointing at this copy of Ledge, and adds that folder to your PATH in your shell's startup file if it is not there yet. Open a new terminal afterwards. If you move the app, run it again.
+It writes one small launcher, `ledge`, into `~/.ledge/.server/bin`, pointing at this copy of Ledge, and adds that folder to your PATH in your shell's startup file if it is not there yet. Open a new terminal afterwards. If you move the app, run it again.
 
 The same launcher is what lets your phone reach this Mac's notes ([[Ledge on Your Phone]]): `ledge serve` over ssh is how a Ledge app reaches any machine, and `ledge` reads the notes on the machine it runs on. That is this Mac's from a terminal here, and a server's from a terminal there, where the server install already put `ledge` on the PATH ([[Keep Notes on a Remote Server]]). `ledge help` lists the server verbs beside the notes verbs.
 

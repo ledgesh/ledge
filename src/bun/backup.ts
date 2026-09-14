@@ -60,9 +60,10 @@ export function backupSet(input: BackupInput): BackupSet {
  * | `.server.pid` | Names a process on the machine being backed up, so it is wrong once it is restored anywhere. |
  * | `logs/` | One session's diagnostics, rotated and size-capped (log.ts). A restore has no use for old console output. |
  * | `.ledge-docs/` | The built-in manual, written out of the compiled-in corpus at every launch (bun/docs.ts). Backing it up stores a second copy of bytes that ship inside the binary. |
+ * | `.server/` | The installed server and its private Bun (remote.md §11), hundreds of megabytes that server.sh downloads again. On a Mac it holds only the app's `ledge` launcher. |
  */
 function excludesFor(appHome: string): string[] {
-  return [".server.sock", ".server.pid", "logs", ".ledge-docs"].map((name) => join(appHome, name));
+  return [".server.sock", ".server.pid", "logs", ".ledge-docs", ".server"].map((name) => join(appHome, name));
 }
 
 function unique(paths: readonly string[]): string[] {

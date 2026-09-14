@@ -872,7 +872,7 @@ test.describe("the iOS client, and what it does not have", () => {
     // The sheet is UIKit's. The view offers the button and hands over the line.
     await dialog.getByRole("button", { name: "Share Line" }).tap();
     expect(await page.evaluate(() => (window as unknown as { harnessShared?: string[] }).harnessShared ?? [])).toEqual([
-      'restrict,command="PATH=$HOME/.ledge-server/bin:$PATH ledge serve" ecdsa-sha2-nistp256 AAAAharness ledge-iphone-abc123',
+      'restrict,command="PATH=$HOME/.ledge/.server/bin:$PATH ledge serve" ecdsa-sha2-nistp256 AAAAharness ledge-iphone-abc123',
     ]);
 
     await dialog.getByLabel("Name").fill("Studio");

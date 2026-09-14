@@ -348,7 +348,7 @@ describe("why the dial failed", () => {
 
   // From /bin/csh and /bin/tcsh on macOS, which print the same line.
   test("a csh login shell refusing the PATH prefix is named, not reported as a missing server", () => {
-    const said = explainDial("PATH=/Users/ledge/.ledge-server/bin:/usr/bin:/bin:/usr/sbin:/sbin: Command not found.\n");
+    const said = explainDial("PATH=/Users/ledge/.ledge/.server/bin:/usr/bin:/bin:/usr/sbin:/sbin: Command not found.\n");
     expect(said).toContain("login shell on that machine is csh or tcsh");
     expect(said).not.toContain("not installed");
   });

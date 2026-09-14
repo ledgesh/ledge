@@ -151,7 +151,7 @@ const sharedNative: ClientNative = {
     ).join(",");
     return picked || null;
   },
-  // Install Shell Command: `ledge` in ~/.ledge-server/bin,
+  // Install Shell Command: `ledge` in ~/.ledge/.server/bin,
   // execing this bundle's bun on the serve.js the daemon runs from
   // (bun/cliShim.ts). The same entry and runtime as the daemon's, so the
   // shims and the app can never run two different servers. Failure is a
@@ -166,7 +166,7 @@ const sharedNative: ClientNative = {
       });
       const where = `ledge installed in ${tildify(res.dir)}`;
       if (res.pathAdded) return { ok: true, message: `${where}; a PATH line was added to ${tildify(res.pathAdded)}, so new terminals find them` };
-      if (!res.onPath) return { ok: true, message: `${where}; add it to your PATH: export PATH="$HOME/.ledge-server/bin:$PATH"` };
+      if (!res.onPath) return { ok: true, message: `${where}; add it to your PATH: export PATH="$HOME/.ledge/.server/bin:$PATH"` };
       return { ok: true, message: where };
     } catch (err) {
       return { ok: false, message: `Install failed: ${err instanceof Error ? err.message : String(err)}` };

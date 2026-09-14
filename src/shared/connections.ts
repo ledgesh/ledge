@@ -94,11 +94,11 @@ export const DEFAULT_PORT = 22;
 
 /**
  * What both clients ask sshd to run, and what a phone's `authorized_keys` line
- * forces. The PATH prefix finds a per-user install in `~/.ledge-server/bin`
+ * forces. The PATH prefix finds a per-user install in `~/.ledge/.server/bin`
  * before anything on sshd's own PATH (remote.md §4a). SSHTransport.swift and the
  * ssh fixture's entrypoint hold copies, which shared/serveCommand.test.ts checks.
  */
-export const SERVE_COMMAND = "PATH=$HOME/.ledge-server/bin:$PATH ledge serve";
+export const SERVE_COMMAND = "PATH=$HOME/.ledge/.server/bin:$PATH ledge serve";
 
 export function isPort(port: number): boolean {
   return Number.isInteger(port) && port >= 1 && port <= 65535;

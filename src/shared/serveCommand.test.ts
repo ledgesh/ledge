@@ -33,12 +33,12 @@ describe("the command a client starts the server with", () => {
   test.each(SHELLS)("%s finds a per-user install first, and keeps the rest of the PATH", (shell) => {
     const home = mkdtempSync(join(tmpdir(), "ledge serve home "));
     try {
-      fakeServer(join(home, ".ledge-server", "bin"));
+      fakeServer(join(home, ".ledge", ".server", "bin"));
       fakeServer(join(home, "elsewhere"));
       const path = `${join(home, "elsewhere")}:/usr/bin:/bin:/opt/with space/bin`;
       const { out, code } = run(shell, { HOME: home, PATH: path });
       expect(code).toBe(0);
-      expect(out).toBe(`${join(home, ".ledge-server", "bin", "ledge")}|serve|${join(home, ".ledge-server", "bin")}:${path}`);
+      expect(out).toBe(`${join(home, ".ledge", ".server", "bin", "ledge")}|serve|${join(home, ".ledge", ".server", "bin")}:${path}`);
     } finally {
       rmSync(home, { recursive: true, force: true });
     }

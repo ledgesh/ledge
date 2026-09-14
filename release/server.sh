@@ -1,6 +1,6 @@
 #!/bin/sh
 # Installs ledge-server @VERSION@, the server Ledge's apps connect to over ssh,
-# into ~/.ledge-server for the account that runs it:
+# into ~/.ledge/.server for the account that runs it:
 #   curl -fsSL https://ledge.sh/server.sh | sh
 # Downloads the npm package and a private Bun from the npm registry, checked
 # against the checksums below. Built from release/server.sh (remote.md §11).
@@ -30,7 +30,7 @@ refuse() {
 }
 
 usage() {
-  say "Installs ledge-server $version into ~/.ledge-server for this account."
+  say "Installs ledge-server $version into ~/.ledge/.server for this account."
   say ""
   say "  curl -fsSL https://ledge.sh/server.sh | sh"
   say "  curl -fsSL https://ledge.sh/server.sh | sh -s -- --dry-run"
@@ -131,7 +131,7 @@ usable() {
   [ -f "$1/bin/ledge.js" ] && [ -f "$1/lib/serve.js" ] && "$1/bun" --version >/dev/null 2>&1
 }
 
-# Adds ~/.ledge-server/bin to PATH for new terminals. ssh does not need it: the
+# Adds ~/.ledge/.server/bin to PATH for new terminals. ssh does not need it: the
 # apps put that directory on PATH in the command they run (remote.md §4a).
 add_to_path() {
   case ":${PATH:-}:" in
@@ -143,10 +143,10 @@ add_to_path() {
     */fish | */csh | */tcsh) return 0 ;;
     *) rc="$HOME/.profile" ;;
   esac
-  if [ -f "$rc" ] && grep -q '\.ledge-server/bin' "$rc"; then
+  if [ -f "$rc" ] && grep -q '\.ledge/\.server/bin' "$rc"; then
     return 0
   fi
-  printf '\n# ledge-server (https://ledge.sh/server.sh)\nexport PATH="$HOME/.ledge-server/bin:$PATH"\n' >>"$rc"
+  printf '\n# ledge-server (https://ledge.sh/server.sh)\nexport PATH="$HOME/.ledge/.server/bin:$PATH"\n' >>"$rc"
   path_added="$rc"
 }
 
@@ -179,7 +179,7 @@ main() {
     *) native="lib/native/$os-$arch/libledge_pty.so" ;;
   esac
 
-  root="$HOME/.ledge-server"
+  root="$HOME/.ledge/.server"
   server_url="$registry/ledge-server/-/ledge-server-$version.tgz"
   bun_url="$registry/$bun_package/-/${bun_package##*/}-$bun_version.tgz"
   target="$root/versions/$version"
@@ -266,7 +266,7 @@ main() {
   say ""
   say "To pair Ledge on a phone with this machine, run:"
   say ""
-  say "  ~/.ledge-server/bin/ledge pair"
+  say "  ~/.ledge/.server/bin/ledge pair"
 }
 
 # Everything runs from here, so a download cut short runs nothing.

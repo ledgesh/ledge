@@ -157,7 +157,7 @@ async function linuxMachine(image: string, shell: string, update: boolean) {
   const name = `ledge-install-probe-${image.replace(/[^a-z0-9]/g, "-")}`;
   const inside = (cmd: string, opts: { stdin?: string } = {}) => run(["docker", "exec", ...(opts.stdin ? ["-i"] : []), name, "sh", "-c", cmd], { quiet: true, ...opts });
   const asLedge = (cmd: string) => run(["docker", "exec", "-u", "ledge", "-e", "HOME=/home/ledge", name, "sh", "-c", cmd], { quiet: true });
-  const home = "/home/ledge/.ledge-server";
+  const home = "/home/ledge/.ledge/.server";
   try {
     step(`[${image}] a machine with sshd and no Bun`);
     run(["docker", "rm", "-f", name], { quiet: true });
@@ -174,7 +174,7 @@ async function linuxMachine(image: string, shell: string, update: boolean) {
     step(`[${image}] the install`);
     const asRoot = inside("curl -fsSL file:///release/server.sh | sh");
     check("root is refused", asRoot.code !== 0 && asRoot.err.includes("not as root"), asRoot.err.split("\n")[0]?.slice(0, 70));
-    check("and nothing was written for root", inside("test -e /root/.ledge-server && echo yes").out === "");
+    check("and nothing was written for root", inside("test -e /root/.ledge/.server && echo yes").out === "");
     // The command the refusal itself suggests, so the sentence is known to work.
     const installed = inside("curl -fsSL file:///release/server.sh | sudo -iu ledge sh");
     check("`curl … | sudo -iu ledge sh` installs it", installed.code === 0 && installed.out.includes(`ledge-server ${version} is installed in ${home}.`), (installed.err || installed.out.split("\n").pop() || "").slice(0, 80));
@@ -233,7 +233,7 @@ async function linuxMachine(image: string, shell: string, update: boolean) {
     // The flags are the fixture's: in a container `pair` refuses to guess the
     // account, address and host keys (pair.ts, containerRefusal).
     const flags = "--user ledge --host 192.0.2.10 --keys /etc/ssh/ssh_host_ed25519_key.pub";
-    const paired = run([...macArgv.slice(0, -1), `~/.ledge-server/bin/ledge pair ${flags}`], { quiet: true });
+    const paired = run([...macArgv.slice(0, -1), `~/.ledge/.server/bin/ledge pair ${flags}`], { quiet: true });
     check("the pair command the script prints works over ssh", paired.code === 0 && paired.out.includes("SHA256:"), (paired.err || "").split("\n")[0]?.slice(0, 80));
 
     if (update) {
@@ -277,7 +277,7 @@ async function macMachine(target: NativeTarget) {
     step(`[${target.platform}-${target.arch}] this Mac, into a scratch HOME`);
     const installed = run(["/bin/sh", "-c", `curl -fsSL 'file://${RELEASE}/server-mac.sh' | sh`], { quiet: true, env });
     check("server.sh installs it", installed.code === 0 && installed.out.includes(`ledge-server ${version} is installed`), (installed.err || "").slice(0, 80));
-    check("and adds the PATH line to ~/.zshrc", readFileSync(join(home, ".zshrc"), "utf8").includes('export PATH="$HOME/.ledge-server/bin:$PATH"'));
+    check("and adds the PATH line to ~/.zshrc", readFileSync(join(home, ".zshrc"), "utf8").includes('export PATH="$HOME/.ledge/.server/bin:$PATH"'));
 
     const mac = await connect("probe-mac", ["/bin/zsh", "-c", SERVE_COMMAND], env);
     check("zsh -c with sshd's PATH reaches it", mac.hello.build === BUILD_VERSION, `build ${mac.hello.build}`);
@@ -285,8 +285,8 @@ async function macMachine(target: NativeTarget) {
     pid = readFileSync(join(home, ".ledge", ".server.pid"), "utf8").trim();
     const args = run(["ps", "-o", "command=", "-p", pid], { quiet: true }).out;
     // realpath, because process.execPath resolves /var to /private/var.
-    const bun = `${realpathSync(home)}/.ledge-server/versions/${version}/bun `;
-    check("the daemon runs on the private Bun", args.startsWith(bun), args.slice(args.indexOf(".ledge-server")));
+    const bun = `${realpathSync(home)}/.ledge/.server/versions/${version}/bun `;
+    check("the daemon runs on the private Bun", args.startsWith(bun), args.slice(args.indexOf(".ledge", ".server")));
     const log = run(["sh", "-c", `cat '${home}/.ledge/logs/'*.log`], { quiet: true }).out;
     check("and loaded its trampolines", !log.includes("[pty]"), log.split("\n").find((l) => l.includes("[pty]"))?.slice(0, 80));
     mac.client.close();

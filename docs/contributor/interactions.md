@@ -1341,7 +1341,7 @@ secret written to a synced file — because focus never moved.
   spawn the shells it kills.
 
   `installsCli` is the client's answer because the install writes on this
-  machine: `ledge` into `~/.ledge-server/bin`, execing this app's own bundle
+  machine: `ledge` into `~/.ledge/.server/bin`, execing this app's own bundle
   (`bun/cliShim.ts`). The `ledge` it writes reads this Mac's notes whichever
   server the window is showing, and its `serve` verb is how a phone reaches
   them (remote.md §11). A phone has no PATH to write
@@ -1414,7 +1414,7 @@ app rather than growing its own dialect.
   the CLI everything but the server verbs), so every machine with a server
   has the CLI: the npm package installs it, `server.sh` writes the launcher,
   and on a Mac **Install Shell Command (ledge)** is the palette entry that
-  writes the shim into `~/.ledge-server/bin`
+  writes the shim into `~/.ledge/.server/bin`
   (bun/cliShim.ts, the client's seam per remote.md §10). Its outcome always
   surfaces: success in the browser's notice strip, failure in the error
   strip (§4's surface, neutral tone). There is no `install` verb: each

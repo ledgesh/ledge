@@ -1218,9 +1218,9 @@ try {
     // One box keeps the server on sshd's PATH and the other moves it into the
     // per-user directory, so between them both halves of SERVE_COMMAND's
     // lookup start a server (remote.md §4a).
-    const where = suffix === "kbd" ? "/home/ledge/.ledge-server/bin" : "/usr/local/bin";
+    const where = suffix === "kbd" ? "/home/ledge/.ledge/.server/bin" : "/usr/local/bin";
     if (suffix === "kbd") {
-      const moved = `mkdir -p ${where} && mv /usr/local/bin/ledge /usr/local/bin/libledge_pty.so ${where}/ && chown -R ledge:ledge /home/ledge/.ledge-server`;
+      const moved = `mkdir -p ${where} && mv /usr/local/bin/ledge /usr/local/bin/libledge_pty.so ${where}/ && chown -R ledge:ledge /home/ledge/.ledge`;
       run(["docker", "exec", box, "sh", "-c", moved]);
     }
 

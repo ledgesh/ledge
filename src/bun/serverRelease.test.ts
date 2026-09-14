@@ -172,7 +172,7 @@ function install(w: World, text: string, machine: Machine, args: string[] = [], 
   return { code: done.exitCode, out: done.stdout.toString(), err: done.stderr.toString() };
 }
 
-const installed = (w: World) => join(w.home, ".ledge-server");
+const installed = (w: World) => join(w.home, ".ledge", ".server");
 const listing = (dir: string) => (existsSync(dir) ? readdirSync(dir).sort() : []);
 const serverUrl = (version: string) => `${REGISTRY}/${tarballPath("ledge-server", version)}`;
 const bunUrl = (key: string, registry = REGISTRY) => `${registry}/${tarballPath(BUN_PACKAGES[key]!.name, BUN_VERSION)}`;
@@ -231,7 +231,7 @@ describe("server.sh", () => {
     expect(run.code).toBe(0);
     const version = join(installed(w), "versions", "0.1.0");
     expect(run.out).toContain(`ledge-server 0.1.0 is installed in ${installed(w)}.`);
-    expect(run.out).toContain("~/.ledge-server/bin/ledge pair");
+    expect(run.out).toContain("~/.ledge/.server/bin/ledge pair");
     expect(w.downloads()).toEqual([serverUrl("0.1.0"), bunUrl("linux-arm64")]);
 
     const launched = Bun.spawnSync([join(installed(w), "bin", "ledge"), "pair"], { stdout: "pipe" });
@@ -386,7 +386,7 @@ describe("server.sh", () => {
   });
 
   describe("the PATH line for new terminals", () => {
-    const LINE = 'export PATH="$HOME/.ledge-server/bin:$PATH"';
+    const LINE = 'export PATH="$HOME/.ledge/.server/bin:$PATH"';
 
     test.each([
       ["/bin/zsh", LINUX, ".zshrc"],

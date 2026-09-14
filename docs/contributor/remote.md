@@ -118,7 +118,7 @@ runs `bun serve.js daemon --autostart` from the bundle's own Bun, then dials
 `.server.sock` the way `serve` does (`bun/localServer.ts`). A second window
 finds the daemon already there. A phone reaching this Mac over ssh finds the
 same one, through the `ledge` shim Install Shell Command writes into
-`~/.ledge-server/bin` (§11), which execs that same `serve.js`. There is no in-process server, no folder-dialog seam the daemon
+`~/.ledge/.server/bin` (§11), which execs that same `serve.js`. There is no in-process server, no folder-dialog seam the daemon
 lacks and the app has, and no answer to "who is connected" that the app keeps
 for itself: presence, routing and the vault are the daemon's for every client
 alike.
@@ -494,7 +494,7 @@ A connection can be narrowed to the protocol and nothing else, with an
 `authorized_keys` option on the key it authenticates with:
 
 ```
-restrict,command="PATH=$HOME/.ledge-server/bin:$PATH ledge serve" ssh-ed25519 AAAA... ledge@laptop
+restrict,command="PATH=$HOME/.ledge/.server/bin:$PATH ledge serve" ssh-ed25519 AAAA... ledge@laptop
 ```
 
 **Ledge documents that line and never writes it.** The reason is the file:
@@ -523,14 +523,25 @@ forced one and the forced one when there is, and the connection works either
 way. Nothing in `src/` reads or requires the option.
 
 **The command carries its own PATH.** Both clients ask for
-`PATH=$HOME/.ledge-server/bin:$PATH ledge serve`: `SERVE_COMMAND` in
+`PATH=$HOME/.ledge/.server/bin:$PATH ledge serve`: `SERVE_COMMAND` in
 `shared/connections.ts`, and `SSHTransport.serveCommand` on a phone, which
 `shared/serveCommand.test.ts` holds to the same characters. A command run over
 ssh gets sshd's PATH and none of the startup files a terminal reads (§11). On
 macOS that PATH is `/usr/bin:/bin:/usr/sbin:/sbin`, all of it under SIP.
-`~/.ledge-server/bin` is where a per-user install goes, which needs neither
+`~/.ledge/.server/bin` is where a per-user install goes, which needs neither
 `sudo` nor a line in a startup file. The `$PATH` after it still finds a server
 installed on sshd's own PATH, such as `/usr/local/bin` on Linux.
+
+**`.server` is inside the app home**, beside `.client` (§5), because both are
+this machine's role-specific state and one `~/.ledge` is the whole of Ledge on
+a disk. It is dotted because managed workspace folders are created directly in
+the app home under `[a-z0-9-]` slugs, so `server/` or `bin/` could be a
+workspace. `backup.ts` excludes it, and the root watcher and note listing skip
+dotted entries already. The path is spelled literally in `SERVE_COMMAND` and
+in the forced command on every paired server, so `LEDGE_NOTES_ROOT` moves
+everything in the app home except this: a run with it set still finds its
+server under `$HOME/.ledge/.server`, which is why the install probe moves
+`HOME` as well.
 
 **The prefix has to be in the forced command too.** A forced command replaces
 what the client asked for, prefix and all, so the line a phone shows
@@ -2112,7 +2123,7 @@ launcher. The npm package installs the one bin `ledge` (the package itself is
 named `ledge-server`, since the unscoped `ledge` on npm is someone else's and
 the package is the server half; `bunx ledge-server` runs a package's only bin
 whatever its name); `server.sh` writes the one launcher into
-`~/.ledge-server/bin`; and on a Mac the app's Install Shell Command writes the
+`~/.ledge/.server/bin`; and on a Mac the app's Install Shell Command writes the
 one shim into the same directory, execing `Contents/MacOS/bun` on the
 bundle's own `serve.js` (`bun/cliShim.ts`). That last one is a CLIENT seam
 (§10, `cliInstall` in `NATIVE_METHODS`): the file lands on the machine with
@@ -2207,7 +2218,7 @@ explicitly, and the checksums still hold. The script:
 | Account | Refuses root. The server belongs in the home of the account Ledge signs in to, and `curl … \| sudo -iu ledge sh` is the command for a service account. |
 | Platform | Picks darwin or linux and arm64 or x64, treats a Rosetta shell as arm64, and refuses musl and glibc below 2.29 before downloading anything. |
 | Download | Checks each tarball's SHA-256. The server comes first, and a package with no trampolines for this target is refused before Bun is fetched. Bun is run before anything is moved into place, so one that cannot run here is refused with its own error. |
-| Layout | Unpacks the package into `~/.ledge-server/versions/<version>` with `bun` beside it, and renames a new `~/.ledge-server/bin/ledge` over the old one: a two-line `sh` launcher that execs that version's `bun` on its `bin/ledge.js`. |
+| Layout | Unpacks the package into `~/.ledge/.server/versions/<version>` with `bun` beside it, and renames a new `~/.ledge/.server/bin/ledge` over the old one: a two-line `sh` launcher that execs that version's `bun` on its `bin/ledge.js`. |
 | Update | Keeps the previous version and deletes older ones. |
 | PATH | Appends one line to the login shell's startup file, for the user's own terminals. ssh does not need it, because §4a's prefix is in the command. |
 
@@ -2621,7 +2632,7 @@ Each phase leaves the app shippable.
    Move Workspace Folder went with it: moving a folder is Finder's job, then
    close and attach again. The CLI and the MCP server became verbs of the
    one `ledge` command (§11), and Install Shell Command became a client seam
-   (§10) that writes `ledge` into `~/.ledge-server/bin`, so a phone
+   (§10) that writes `ledge` into `~/.ledge/.server/bin`, so a phone
    reaches a Mac running the app through the app's own daemon; the
    `cliShim` handshake flag went with the in-process server's CLI.
 7. **The iOS client**, which is `docs/contributor/ios.md` and depends on

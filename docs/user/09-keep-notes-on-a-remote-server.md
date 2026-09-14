@@ -127,7 +127,7 @@ bun add -g ledge-server
 
 Run them as the account Ledge signs in to. None of them needs `sudo`. The account's shell has to be zsh, which it is unless the account predates macOS Catalina.
 
-A Mac that runs the Ledge app needs none of this. "Install Shell Command (ledge)" in the app's command palette puts `ledge` in `~/.ledge-server/bin`, where an incoming ssh looks first, pointing at the app's own copy. Signing in as that account then reaches the notes the app shows, with the app's server answering both.
+A Mac that runs the Ledge app needs none of this. "Install Shell Command (ledge)" in the app's command palette puts `ledge` in `~/.ledge/.server/bin`, where an incoming ssh looks first, pointing at the app's own copy. Signing in as that account then reaches the notes the app shows, with the app's server answering both.
 
 macOS and Linux are supported, on arm64 or x64. On Linux the floor is glibc 2.29, which means Debian 11, Ubuntu 20.04, RHEL 9, or anything newer. Alpine and other musl systems are not supported.
 
@@ -275,7 +275,7 @@ One absolute path per line: the app home, every workspace folder you attached fr
 | Flag | What it prints |
 | --- | --- |
 | none | The paths to back up. |
-| `--exclude` | What to skip inside them: the daemon's socket and pidfile, the logs, and the copy of this manual. |
+| `--exclude` | What to skip inside them: the daemon's socket and pidfile, the logs, the copy of this manual, and the installed server in `.server`. |
 | `--no-secrets` | The same list without the profiles directory. |
 | `--json` | Both lists, plus any registered folder that is not on disk. |
 

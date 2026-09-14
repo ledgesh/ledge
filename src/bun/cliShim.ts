@@ -4,7 +4,7 @@
 // machine's bun and src/bun/serve.ts. Re-running the install repoints a moved
 // app. The shim's own text says so, because sh's "not found" does not.
 //
-// It goes in ~/.ledge-server/bin, the directory the ssh command every client
+// It goes in ~/.ledge/.server/bin, the directory the ssh command every client
 // runs puts first on PATH (shared/connections.ts SERVE_COMMAND). That is what
 // makes this Mac a server for a phone: `ledge serve` over ssh finds the app's
 // own copy and attaches to the app's own daemon. server.sh installs a server
@@ -31,7 +31,7 @@ export const SHIM_NAME = "ledge";
 
 /** The line server.sh appends for the same purpose, spelled identically so
  * each installer recognizes the other's. */
-export const PATH_LINE = 'export PATH="$HOME/.ledge-server/bin:$PATH"';
+export const PATH_LINE = 'export PATH="$HOME/.ledge/.server/bin:$PATH"';
 
 /** ~-shorten a path for human eyes. Lives here (not cli.ts) so the app's
  * install handler can compose messages without importing the verb table. */
@@ -44,7 +44,7 @@ export function tildify(p: string, home: string = homedir()): string {
 
 /** Where the shim goes, under `home`. */
 export function shimDir(home: string = homedir()): string {
-  return join(home, ".ledge-server", "bin");
+  return join(home, ".ledge", ".server", "bin");
 }
 
 // Double-quote a path for sh. The escapes cover what the double quotes do
@@ -148,7 +148,7 @@ async function addPathLine(shellVar: string, home: string, platform?: string): P
   const file = startupFile(shellVar, home, platform);
   if (file === null) return null;
   const text = await readFile(file, "utf8").catch(() => "");
-  if (text.includes(".ledge-server/bin")) return null;
+  if (text.includes(".ledge/.server/bin")) return null;
   await appendFile(file, `\n# ledge (the Ledge app's Install Shell Command)\n${PATH_LINE}\n`, "utf8");
   return file;
 }

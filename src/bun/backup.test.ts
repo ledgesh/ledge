@@ -40,12 +40,13 @@ test("the docs root is not included: it is inside the app home and then excluded
   expect(exclude).toContain(`${HOME}/.ledge-docs`);
 });
 
-test("the socket, the pidfile and the logs are excluded", () => {
+test("the socket, the pidfile, the logs and the installed server are excluded", () => {
   expect(set().exclude).toEqual([
     `${HOME}/.server.sock`,
     `${HOME}/.server.pid`,
     `${HOME}/logs`,
     `${HOME}/.ledge-docs`,
+    `${HOME}/.server`,
   ]);
 });
 

@@ -157,7 +157,7 @@ filesystem (the watcher), and a request file needs no always-listening
 ingress. Requests expire (60s) — "open this now" is not a standing
 instruction — and every invalid request costs exactly itself. On a Mac the
 app's Install Shell Command palette entry writes a `ledge` shim into
-`~/.ledge-server/bin` (`bun/cliShim.ts`, a client seam per remote.md §10):
+`~/.ledge/.server/bin` (`bun/cliShim.ts`, a client seam per remote.md §10):
 it execs the exact runtime and entry that wrote
 it — the bundle's own bun against `Resources/app/bun/serve.js` (prebuilt by
 `build:serve`, placed by `build.copy`), or the dev machine's bun against the
@@ -540,7 +540,7 @@ Bun therefore validates everything and derives anything derivable:
   `ledge.log`.
 - **`LEDGE_NOTES_ROOT`** overrides the APP HOME (`~/.ledge` — where
   `settings.jsonc`, `.layout.json`, `.workspaces.json`, `.client/`,
-  `logs/`, the deleted workspaces' `.ledge-trash`, and
+  `.server/`, `logs/`, the deleted workspaces' `.ledge-trash`, and
   the managed workspace folders live; `APP_HOME` in `bun/workspaces.ts`) for tests and
   throwaway runs. The env name predates the per-workspace split and is kept:
   every preload and probe already speaks it. Nothing in the app sets it;

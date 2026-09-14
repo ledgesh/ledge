@@ -50,7 +50,7 @@ final class SSHTransport {
     /// The command the exec request asks for, and the one `DeviceKey`'s line
     /// forces. `SERVE_COMMAND` in shared/connections.ts, character for
     /// character (shared/serveCommand.test.ts).
-    static let serveCommand = "PATH=$HOME/.ledge-server/bin:$PATH ledge serve"
+    static let serveCommand = "PATH=$HOME/.ledge/.server/bin:$PATH ledge serve"
 
     /// The whole dial: TCP, key exchange, host key, user auth, and the exec
     /// request. Bounded because a server that accepts a connection and then

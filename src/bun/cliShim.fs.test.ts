@@ -1,6 +1,6 @@
 // installShims against a real filesystem. Every home is a scratch one, so the
 // shim and the PATH line land under it and never in the developer's own
-// ~/.ledge-server or ~/.zshrc.
+// ~/.ledge/.server or ~/.zshrc.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -13,7 +13,7 @@ let ENTRY = "";
 
 beforeEach(async () => {
   HOME = await mkdtemp(join(tmpdir(), "ledge-shim-"));
-  BIN = join(HOME, ".ledge-server", "bin");
+  BIN = join(HOME, ".ledge", ".server", "bin");
   ENTRY = join(HOME, "serve.js");
   await writeFile(ENTRY, "// pretend bundle\n");
 });
@@ -26,7 +26,7 @@ const install = (over: Partial<Parameters<typeof installShims>[0]> = {}) =>
   installShims({ execPath: "/runtime/bun", entryPath: ENTRY, pathVar: "/usr/bin", shellVar: "/bin/zsh", home: HOME, platform: "darwin", ...over });
 
 describe("installShims", () => {
-  test("writes one executable shim, ledge, into ~/.ledge-server/bin, passing the caller's words through", async () => {
+  test("writes one executable shim, ledge, into ~/.ledge/.server/bin, passing the caller's words through", async () => {
     const res = await install({ pathVar: `/usr/bin:${BIN}` });
     expect(res).toEqual({ dir: BIN, onPath: true, pathAdded: null });
     const ledge = await readFile(join(BIN, "ledge"), "utf8");
@@ -47,7 +47,7 @@ describe("installShims", () => {
   });
 
   test("a startup file that already names the directory, in the user's own words, is left alone", async () => {
-    await writeFile(join(HOME, ".zshrc"), 'path=("$HOME/.ledge-server/bin" $path)\n');
+    await writeFile(join(HOME, ".zshrc"), 'path=("$HOME/.ledge/.server/bin" $path)\n');
     expect((await install()).pathAdded).toBeNull();
     expect(await readFile(join(HOME, ".zshrc"), "utf8")).not.toContain(PATH_LINE);
   });

@@ -71,7 +71,7 @@ restic snapshots
 
 Run the first once. It creates the repository in the bucket and prints its ID.
 
-Run the second. `backup-paths` lists the app home, every workspace folder attached from elsewhere on the machine, and the profiles directory, and the `--exclude` list drops the daemon's socket and pidfile, the logs, and the copy of this manual. restic reads both, uploads, and prints how much went.
+Run the second. `backup-paths` lists the app home, every workspace folder attached from elsewhere on the machine, and the profiles directory, and the `--exclude` list drops the daemon's socket and pidfile, the logs, the copy of this manual, and the installed server itself. restic reads both, uploads, and prints how much went.
 
 Run the third. One snapshot, with a time and a hostname. The note is now a button for a backup of the machine it lives on, run before an upgrade or whenever you want to know the last one worked.
 

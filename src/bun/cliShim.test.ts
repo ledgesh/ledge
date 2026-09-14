@@ -25,7 +25,7 @@ describe("shimScript", () => {
 });
 
 test("the shim goes where the ssh command looks first", () => {
-  expect(shimDir("/Users/u")).toBe("/Users/u/.ledge-server/bin");
+  expect(shimDir("/Users/u")).toBe("/Users/u/.ledge/.server/bin");
 });
 
 describe("dirOnPath", () => {
