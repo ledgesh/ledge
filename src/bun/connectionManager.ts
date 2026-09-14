@@ -250,7 +250,7 @@ export async function createConnectionManager(deps: {
 
     connectionRemove: async ({ id }) => store.remove(id),
 
-    connectionProbe: async ({ destination, port }) => store.probe(destination, port),
+    connectionProbe: async ({ destination, port, expect }) => store.probe(destination, port, expect),
   };
 
   return {

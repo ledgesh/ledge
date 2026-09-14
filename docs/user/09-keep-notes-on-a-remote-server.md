@@ -44,6 +44,16 @@ A pinned key belongs to one address and one port. Change either and Ledge asks f
 
 Add as many as you like. The list is this app's own and lives on this machine, so nothing about it is stored on any server.
 
+## Add a server from a pairing code
+
+A pairing code saves the typing and the fingerprint check. On the server, run `ledge pair` ([[Ledge on Your Phone]] describes what it prints). Copy the link under the QR code, open Add Server here, and paste it into "Pairing code (optional)".
+
+The account, host and port fill in from the code, and the host keys it names appear under the field. The button reads "Add" instead of "Continue": Ledge asks the server for its key and pins it only if it is one the code names, so there is nothing to compare by eye. A server that answers with a different key is refused, with the key it offered, and nothing is added.
+
+A code never replaces a key you already pinned. If a server in your list at that address is pinned to a key the code does not name, the code is refused, and the message names that server. The code is for a different machine, or the server's key has changed: use "Check Key Again" on that server instead.
+
+Paste the link only if it came from your own server. A code holds no password or key, but one made for a lookalike server would point Ledge at that server ([[Ledge on Your Phone]] says the same of a tapped link).
+
 ## Edit or remove a server
 
 Every row in the picker carries two controls: a pencil to change it and a bin to remove it. Press ⌫ on a focused row to remove it without reaching for either.

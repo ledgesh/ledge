@@ -50,6 +50,8 @@ interface ConnectionHandlers {
   probe: (
     destination: string,
     port: number,
+    /** A pairing code's fingerprints: the answer must be one of them (rpc-schema connectionProbe). */
+    expect?: string[],
   ) => Promise<{ hostKey: string; fingerprint: string; keyType: string; error: string }>;
 }
 
@@ -246,7 +248,8 @@ export async function removeConnection(id: string): Promise<string | null> {
 export function probeConnection(
   destination: string,
   port: number,
+  expect?: string[],
 ): Promise<{ hostKey: string; fingerprint: string; keyType: string; error: string }> {
   if (!handlers) return Promise.resolve({ hostKey: "", fingerprint: "", keyType: "", error: "Not connected." });
-  return handlers.probe(destination, port);
+  return handlers.probe(destination, port, expect);
 }

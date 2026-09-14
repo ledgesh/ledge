@@ -883,7 +883,7 @@ test.describe("the iOS client, and what it does not have", () => {
     await dialog.getByLabel("Name").fill("Studio");
     await dialog.getByLabel("SSH destination").fill("dev@studio");
     await dialog.getByRole("button", { name: "Continue" }).tap();
-    await expect(dialog.getByText("SHA256:harness+fake+key")).toBeVisible();
+    await expect(dialog.getByText("SHA256:harnessfakekeyharnessfakekeyharnessfakekey0")).toBeVisible();
     await dialog.getByRole("button", { name: "It Matches, Add" }).tap();
     await expect(dialog.getByRole("option")).toHaveCount(3);
   });

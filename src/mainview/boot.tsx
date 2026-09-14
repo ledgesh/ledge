@@ -426,7 +426,7 @@ async function boot(requests: RequestClient): Promise<void> {
       add: (fields) => requests.connectionAdd(fields),
       update: (fields) => requests.connectionUpdate(fields),
       remove: (id) => requests.connectionRemove({ id }),
-      probe: (destination, port) => requests.connectionProbe({ destination, port }),
+      probe: (destination, port, expect) => requests.connectionProbe(expect ? { destination, port, expect } : { destination, port }),
     });
   }
   configureSettings(settings, {

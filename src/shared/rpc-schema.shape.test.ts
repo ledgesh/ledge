@@ -142,7 +142,11 @@ describe("the schema's shape against the protocol version", () => {
   // client-only (NATIVE_METHODS), so no frame carries them and no server's
   // view of the wire changes. The iOS bridge answers them in the view's own
   // bundle. Nothing existing moved. The pin moves and the version does not.
-  const PINNED = { protocol: 5, shape: "0c084465dde5bb12" };
+  // Then the pairing code on a Mac (remote.md §4b): connectionProbe's params
+  // gained an optional `expect`. A CONNECTION_METHOD, answered by the client
+  // shell and refused by every server, so no frame ever carried it and none
+  // does now. The pin moves and the version does not.
+  const PINNED = { protocol: 5, shape: "b2c25cd60583ab52" };
 
   test("a payload shape does not change without someone deciding whether it breaks", async () => {
     const shape = digest(shapeOf(await Bun.file(SCHEMA).text()));

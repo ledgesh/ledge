@@ -24,6 +24,8 @@ ledge pair
 
 It prints the code as a QR code, then the account, host, port, and host keys it holds, then the same code as a link. It reads the address from your ssh session, or uses the machine's name when there is no session. When the phone cannot reach the server by that name, give the address yourself with `--host`. `ledge pair --help` lists the other flags.
 
+The same link pastes into the Mac app's Add Server form ("Add a server from a pairing code" on [[Keep Notes on a Remote Server]]).
+
 On the phone, tap Scan a pairing code on the first screen and point the camera at the QR code. Scan it from Ledge rather than the Camera app, which opens the code in Safari. Ledge shows what the code names and connects only when you tap Connect. Choose how to sign in first, the same way as in "Pair by address": with a key, whose line still has to be in the server's `authorized_keys`, or with a password. Ledge signs in only if the server offers one of the host keys in the code, so there is no fingerprint to check by eye.
 
 The code holds no password and no key. Someone who photographs it learns where the server is and which account to try, and nothing that signs them in.

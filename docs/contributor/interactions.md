@@ -717,6 +717,18 @@ the failure it prevents, which is running a command on the wrong box.
   deliberately no "connect anyway": that button is the thing pinning exists to
   prevent, and an app that offers it has taught the click-through §4 warns
   about.
+- **A pairing code makes adding one step, without a click-through.** The add
+  form takes the link `ledge pair` prints, pasted into "Pairing code
+  (optional)" (remote.md §4b). It fills the address, shows the fingerprints the
+  code names, and the primary button reads "Add": the shell scans the host and
+  pins only a key the code names, so there is no fingerprint for a person to
+  compare and no step asking them to. A host answering with a key outside the
+  code, or a pin already held at that address outside it, is a refusal in the
+  red line with the fingerprint in it, and nothing is added. Text that is not
+  a code is refused in the reader's words and leaves the fields alone. Editing
+  the address after pasting puts the form back on Continue: the code described
+  one machine. A server already in the list for that account is named rather
+  than added twice. The field is a Mac's: a phone scans (ios.md §4).
 - **Editing is the same form, and the same second step when it is earned.** A
   pin belongs to one host, so moving an address onto another one asks the
   fingerprint question again and the primary button says "Continue" rather than

@@ -68,7 +68,7 @@ test("adding a server shows the host key's fingerprint before anything is pinned
   await dialog(page).getByLabel("SSH destination").fill("dev@laptop");
   await dialog(page).getByRole("button", { name: "Continue" }).click();
 
-  await expect(dialog(page).getByText("SHA256:harness+fake+key")).toBeVisible();
+  await expect(dialog(page).getByText("SHA256:harnessfakekeyharnessfakekeyharnessfakekey0")).toBeVisible();
   // No "connect anyway" button. The button that continues says what accepting
   // the key means.
   await expect(dialog(page).getByRole("button", { name: "It Matches, Add" })).toBeVisible();
@@ -114,7 +114,7 @@ test("a server can be added with a password instead of a key", async ({ page }) 
   await dialog(page).getByRole("button", { name: "Continue" }).click();
 
   // Still two steps. The host key is read and confirmed whichever door is used.
-  await expect(dialog(page).getByText("SHA256:harness+fake+key")).toBeVisible();
+  await expect(dialog(page).getByText("SHA256:harnessfakekeyharnessfakekeyharnessfakekey0")).toBeVisible();
   await dialog(page).getByRole("button", { name: "It Matches, Add" }).click();
 
   const options = dialog(page).getByRole("option");
@@ -184,7 +184,7 @@ test("re-addressing a server onto another host asks for its fingerprint", async 
   await dialog(page).getByLabel("SSH destination").fill("ledge@frankfurt");
   await expect(dialog(page).getByRole("button", { name: "Save" })).toHaveCount(0);
   await dialog(page).getByRole("button", { name: "Continue" }).click();
-  await expect(dialog(page).getByText("SHA256:harness+fake+key")).toBeVisible();
+  await expect(dialog(page).getByText("SHA256:harnessfakekeyharnessfakekeyharnessfakekey0")).toBeVisible();
   await dialog(page).getByRole("button", { name: "It Matches, Save" }).click();
 
   await expect(dialog(page).getByRole("option").nth(1)).toHaveText(/ledge@frankfurt/);
@@ -201,7 +201,7 @@ test("a port is a field of its own, and it travels into the pin", async ({ page 
   await dialog(page).getByLabel("SSH destination").fill("ledge@box");
   await dialog(page).getByLabel("Port (optional)").fill("2222");
   await dialog(page).getByRole("button", { name: "Continue" }).click();
-  await expect(dialog(page).getByText("SHA256:harness+fake+key")).toBeVisible();
+  await expect(dialog(page).getByText("SHA256:harnessfakekeyharnessfakekeyharnessfakekey0")).toBeVisible();
   await dialog(page).getByRole("button", { name: "It Matches, Add" }).click();
   await expect(dialog(page).getByRole("option", { name: /Box/ })).toBeVisible();
 });
@@ -215,7 +215,7 @@ test("a port that is not a port is refused before anything is dialled", async ({
   await dialog(page).getByLabel("Port (optional)").fill("22x");
   await dialog(page).getByRole("button", { name: "Continue" }).click();
   await expect(dialog(page).getByText(/1 to 65535/)).toBeVisible();
-  await expect(dialog(page).getByText("SHA256:harness+fake+key")).toHaveCount(0);
+  await expect(dialog(page).getByText("SHA256:harnessfakekeyharnessfakekeyharnessfakekey0")).toHaveCount(0);
 });
 
 // Blank is the ordinary answer and means "ssh decides", so it is not a typo and
@@ -226,7 +226,7 @@ test("a blank port adds without complaint", async ({ page }) => {
   await dialog(page).getByLabel("Name").fill("Plain");
   await dialog(page).getByLabel("SSH destination").fill("ledge@plain");
   await dialog(page).getByRole("button", { name: "Continue" }).click();
-  await expect(dialog(page).getByText("SHA256:harness+fake+key")).toBeVisible();
+  await expect(dialog(page).getByText("SHA256:harnessfakekeyharnessfakekeyharnessfakekey0")).toBeVisible();
 });
 
 // Moving a connection to another port on the same machine is moving it to
@@ -485,4 +485,85 @@ test("a switch whose answer never arrives leaves the list clickable", async ({ p
   // enabled row that swallowed clicks would still be stuck.
   await row.click();
   await expect(dialog(page).getByText(/RPC request timed out/)).toBeVisible();
+});
+
+// A pairing code (remote.md §4b) is the one way to add a server in one step.
+// The code names the host keys, so there is no fingerprint to compare by eye;
+// the shell compares, and the form pins what it answered with.
+const FAKE_FP = "SHA256:harnessfakekeyharnessfakekeyharnessfakekey0";
+const OTHER_FP = "SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w";
+const codeFor = (user: string, host: string, fp: string, port?: number) =>
+  `https://ledge.sh/pair#v=1&u=${user}&h=${host}${port ? `&p=${port}` : ""}&k=${fp}`;
+
+test("a pasted pairing code fills the form and adds the server in one step", async ({ page }) => {
+  await bar(page).click();
+  await dialog(page).getByRole("button", { name: "Add Server…" }).click();
+  await dialog(page).getByLabel("Pairing code (optional)").fill(codeFor("ledge", "box.example", FAKE_FP, 2222));
+
+  await expect(dialog(page).getByLabel("SSH destination")).toHaveValue("ledge@box.example");
+  await expect(dialog(page).getByLabel("Port (optional)")).toHaveValue("2222");
+  await expect(dialog(page).getByLabel("Name")).toHaveValue("box.example");
+  // The code shows what it names before anything dials.
+  await expect(dialog(page).locator("[data-code-fingerprints]")).toHaveText(FAKE_FP);
+  // One step: the button says Add, and there is no Continue.
+  await expect(dialog(page).getByRole("button", { name: "Continue" })).toHaveCount(0);
+  await dialog(page).getByRole("button", { name: "Add", exact: true }).click();
+
+  await expect(dialog(page).getByRole("button", { name: "It Matches, Add" })).toHaveCount(0);
+  const options = dialog(page).getByRole("option");
+  await expect(options).toHaveCount(3);
+  await expect(options.nth(2)).toHaveText(/box\.example/);
+  await expect(options.nth(2)).toHaveText(/pinned/);
+});
+
+test("a code naming a key the host does not offer is refused, and nothing is added", async ({ page }) => {
+  await bar(page).click();
+  await dialog(page).getByRole("button", { name: "Add Server…" }).click();
+  await dialog(page).getByLabel("Pairing code (optional)").fill(codeFor("ledge", "box.example", OTHER_FP));
+  await dialog(page).getByRole("button", { name: "Add", exact: true }).click();
+
+  await expect(dialog(page).getByText(/does not name/)).toBeVisible();
+  await expect(dialog(page).getByText(FAKE_FP)).toBeVisible();
+  // Still on the form, with nothing pinned behind it.
+  await expect(dialog(page).getByLabel("SSH destination")).toHaveValue("ledge@box.example");
+  await dialog(page).getByRole("button", { name: "Cancel" }).click();
+  await expect(dialog(page).getByRole("option")).toHaveCount(2);
+});
+
+test("a code for a server already in the list names the row instead of adding a second", async ({ page }) => {
+  await bar(page).click();
+  await dialog(page).getByRole("button", { name: "Add Server…" }).click();
+  await dialog(page).getByLabel("Pairing code (optional)").fill(codeFor("ledge", "vps", FAKE_FP));
+  await dialog(page).getByRole("button", { name: "Add", exact: true }).click();
+
+  await expect(dialog(page).getByText('already in the list as "VPS"')).toBeVisible();
+  await dialog(page).getByRole("button", { name: "Cancel" }).click();
+  await expect(dialog(page).getByRole("option")).toHaveCount(2);
+});
+
+test("text that is not a code is refused in the reader's words, and the form stays on two steps", async ({ page }) => {
+  await bar(page).click();
+  await dialog(page).getByRole("button", { name: "Add Server…" }).click();
+  await dialog(page).getByLabel("Pairing code (optional)").fill("https://example.com/pair#v=1&u=ledge&h=vps");
+  await expect(dialog(page).getByText("This is not a Ledge pairing code.")).toBeVisible();
+  await expect(dialog(page).getByLabel("SSH destination")).toHaveValue("");
+  await expect(dialog(page).getByRole("button", { name: "Continue" })).toBeVisible();
+
+  // Clearing the field clears the refusal.
+  await dialog(page).getByLabel("Pairing code (optional)").fill("");
+  await expect(dialog(page).getByText("This is not a Ledge pairing code.")).toHaveCount(0);
+});
+
+test("editing the address after pasting puts the form back on the fingerprint step", async ({ page }) => {
+  await bar(page).click();
+  await dialog(page).getByRole("button", { name: "Add Server…" }).click();
+  await dialog(page).getByLabel("Pairing code (optional)").fill(codeFor("ledge", "box.example", FAKE_FP));
+  await expect(dialog(page).getByRole("button", { name: "Add", exact: true })).toBeVisible();
+
+  await dialog(page).getByLabel("Port (optional)").fill("2200");
+  await expect(dialog(page).getByRole("button", { name: "Continue" })).toBeVisible();
+  await expect(dialog(page).locator("[data-code-fingerprints]")).toHaveCount(0);
+  // Back to the code's port, and the code applies again.
+  await dialog(page).getByLabel("Port (optional)").fill("22");
+  await expect(dialog(page).getByRole("button", { name: "Add", exact: true })).toBeVisible();
 });

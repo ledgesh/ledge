@@ -1177,6 +1177,9 @@ const unreachable = FAKING_IOS ? new Set<string>() : new Set(["ledge@vps"]);
 // message is electrobun's own, verbatim, since it is the one a user gets when
 // this happens.
 const WEDGED_PROBE = "ledge@wedged";
+// Shaped like a real SHA256 fingerprint (43 base64 characters), so a pairing
+// code in a spec can name it (shared/pairing.ts FINGERPRINT).
+const FAKE_FINGERPRINT = "SHA256:harnessfakekeyharnessfakekeyharnessfakekey0";
 const WEDGED_SELECT = "ledge@wedged-later";
 const RPC_GAVE_UP = "RPC request timed out.";
 // How many times this client has been asked to dial now rather than wait for
@@ -1249,14 +1252,24 @@ configureConnections(
     // The pinned line carries the port the way keyscan's does, so a spec can
     // see that a non-default port becomes part of what is pinned
     // (shared/connections.ts knownHostsHost).
-    probe: async (destination, port) =>
+    // With `expect`, a pairing code's fingerprints, the fake answers as the
+    // shell does (bun/connectionStore.ts probe): the line only when its key is
+    // among them, a refusal otherwise.
+    probe: async (destination, port, expect) =>
       destination === WEDGED_PROBE
         ? Promise.reject(new Error(RPC_GAVE_UP))
         : destination.includes("nowhere")
         ? { hostKey: "", fingerprint: "", keyType: "", error: `No answer from ${destination}.` }
+        : expect && !expect.includes(FAKE_FINGERPRINT)
+        ? {
+            hostKey: "",
+            fingerprint: "",
+            keyType: "",
+            error: `${destination} answered with a host key this code does not name (${FAKE_FINGERPRINT}). Nothing was added.`,
+          }
         : {
             hostKey: `${knownHostsHost(destination, port)} ssh-ed25519 AAAA`,
-            fingerprint: "SHA256:harness+fake+key",
+            fingerprint: FAKE_FINGERPRINT,
             keyType: "ED25519",
             error: "",
           },

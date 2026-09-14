@@ -8,7 +8,9 @@
 // arrows move, Enter switches, ⌫ removes.
 //
 // Pinning takes two steps (remote.md §4). There is no "connect anyway" that
-// remembers, because that button is what pinning exists to prevent.
+// remembers, because that button is what pinning exists to prevent. A pasted
+// pairing code is the one way to pin in a single step, because the code
+// already names the key and the shell does the comparing (remote.md §4b).
 import { useEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { Check, Laptop, Loader2, Pencil, Server, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -25,7 +27,8 @@ import {
 import { flushAllNow } from "@/notes/store";
 import { copyText } from "@/lib/clipboard";
 import { deviceKeyLine, shareSheet } from "@/lib/shell";
-import { hostPart, parsePort, type AuthMode } from "../../shared/connections";
+import { DEFAULT_PORT, hostPart, parsePort, PORT_UNSET, type AuthMode } from "../../shared/connections";
+import { parsePairingLink, type PairingCode } from "../../shared/pairing";
 import type { ConnectionInfo } from "../../shared/rpc-schema";
 
 // Turns a thrown value into a sentence to show. Every action here is an RPC,
@@ -369,6 +372,11 @@ function ConnectionForm({
   // password, which is what every rename sends.
   const [password, setPassword] = useState("");
   const [probed, setProbed] = useState<Probed | null>(null);
+  // A pasted pairing code (remote.md §4b): the text as typed, and what it
+  // parsed to. The fields it filled stay ordinary fields, so `codeApplies`
+  // below decides whether the code still describes them.
+  const [codeText, setCodeText] = useState("");
+  const [code, setCode] = useState<PairingCode | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -396,6 +404,71 @@ function ConnectionForm({
     existing !== null &&
     (hostPart(destination.trim()) !== hostPart(existing.destination) || (port !== null && port !== existing.port));
   const mustPin = existing === null || moved;
+
+  // A code that parses fills the address fields and holds its fingerprints.
+  // Text that is not a code is refused in the reader's own words, and the
+  // fields are left as they were.
+  const applyCode = (text: string) => {
+    setCodeText(text);
+    if (text.trim() === "") {
+      setCode(null);
+      setError("");
+      return;
+    }
+    const parsed = parsePairingLink(text);
+    if ("problem" in parsed) {
+      setCode(null);
+      setError(parsed.problem);
+      return;
+    }
+    setCode(parsed.code);
+    setError("");
+    setDestination(`${parsed.code.user}@${parsed.code.host}`);
+    setPortText(parsed.code.port === PORT_UNSET ? "" : String(parsed.code.port));
+    if (!name.trim()) setName(parsed.code.host);
+  };
+
+  // A code stores 22 as unset, and a typed "22" is 22 (shared/pairing.ts).
+  const asStored = (p: number) => (p === DEFAULT_PORT ? PORT_UNSET : p);
+  // Whether the code still describes the address on the form. Editing the
+  // destination or the port after pasting puts the form back on the two-step
+  // path: the fingerprints belong to the machine the code named.
+  const codeApplies =
+    code !== null &&
+    existing === null &&
+    destination.trim() === `${code.user}@${code.host}` &&
+    port !== null &&
+    asStored(port) === code.port;
+
+  // The code's one-step add (remote.md §4b's table, as a Mac reads it). A
+  // server already listed for this account is named rather than added twice.
+  // The shell refuses a pin held at that host outside the code and a host
+  // answering outside it; the check here repeats the second, so a shell that
+  // ignored `expect` could not get a key past this form.
+  const pairAdd = async () => {
+    if (!code || port === null) return;
+    const dest = destination.trim();
+    const listed = connectionStatus().connections.find(
+      (c) => c.destination.trim().toLowerCase() === dest.toLowerCase() && asStored(c.port) === code.port,
+    );
+    if (listed) return setError(`This server is already in the list as "${listed.name}".`);
+    setBusy(true);
+    setError("");
+    let res;
+    try {
+      res = await probeConnection(dest, port, code.fingerprints);
+    } catch (err) {
+      setError(reasonOf(err));
+      return;
+    } finally {
+      setBusy(false);
+    }
+    if (res.error) return setError(res.error);
+    if (!code.fingerprints.includes(res.fingerprint)) {
+      return setError(`${hostPart(dest)} answered with a host key this code does not name (${res.fingerprint}). Nothing was added.`);
+    }
+    await save(res.hostKey);
+  };
 
   const probe = async () => {
     if (port === null) return setError(BAD_PORT);
@@ -549,6 +622,21 @@ function ConnectionForm({
           </div>
         </div>
       )}
+      {/* Only when adding, and only on a client with no reader of its own: a
+          phone scans a code or opens its link natively (ios.md §4), and the
+          shell behind this form's probe is what checks the key against the
+          code (rpc-schema connectionProbe `expect`). */}
+      {existing === null && !ownKey && (
+        <Field label="Pairing code (optional)" value={codeText} onChange={applyCode} placeholder="https://ledge.sh/pair#…" mono />
+      )}
+      {codeApplies && (
+        <code
+          data-code-fingerprints
+          className="select-text whitespace-pre-wrap break-all rounded-md border border-input bg-muted/40 p-2 font-mono text-[11px]"
+        >
+          {code.fingerprints.join("\n")}
+        </code>
+      )}
       <Field label="Name" value={name} onChange={setName} placeholder="Laptop" inputRef={firstRef} />
       <Field label="SSH destination" value={destination} onChange={setDestination} placeholder="dev@laptop" mono />
       {/* Its own field rather than a `host:port` destination: ssh takes the
@@ -590,10 +678,10 @@ function ConnectionForm({
         <Button
           size="sm"
           disabled={busy || !name.trim() || !destination.trim() || needsPassword}
-          onClick={() => void (mustPin ? probe() : save(null))}
+          onClick={() => void (codeApplies ? pairAdd() : mustPin ? probe() : save(null))}
         >
           {busy && <Loader2 className="mr-1 size-3.5 animate-spin" />}
-          {mustPin ? "Continue" : "Save"}
+          {codeApplies ? "Add" : mustPin ? "Continue" : "Save"}
         </Button>
       </div>
     </div>

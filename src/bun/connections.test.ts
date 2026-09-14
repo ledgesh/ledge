@@ -9,12 +9,14 @@
 import { describe, expect, test } from "bun:test";
 import {
   explainDial,
+  fingerprintOf,
   knownHostsText,
   LOCAL_CONNECTION,
   LOCAL_ID,
   parseConnections,
   parseFingerprint,
   pickHostKey,
+  pinConflict,
   PORT_UNSET,
   SERVE_COMMAND,
   SSH_PATH,
@@ -403,5 +405,78 @@ describe("why the dial failed", () => {
   test("a server that accepted the connection and then went quiet has nothing to add", () => {
     expect(explainDial("")).toBeNull();
     expect(explainDial("   \n\n  \n")).toBeNull();
+  });
+});
+
+// Three keys made with ssh-keygen, and the fingerprints `ssh-keygen -lf` printed
+// for them. A pairing code names a server by these strings, so the pin a
+// Mac holds has to reduce to the same one.
+const ED25519 = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIH4gtGU1Qpf7awmnQOJhHzN6hMBNoKsW9/ct5DqH0ZRA";
+const ED25519_FP = "SHA256:BXpXO6sHG27GzsazPCtX96hhrTdt3zxtPG4pKqKfdZM";
+const ECDSA =
+  "ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBNk+ckaJGKpCQ9SIkZIYC6xbCjnW9oAWM5MBvKcoeSODUB/Vb9sfP7mkTanCJzB9jbaYRjVDNs93L69z+jScNoU=";
+const ECDSA_FP = "SHA256:5tssrUt7Dr8lDpicM8oP4EmNTw9QKhF8QLB3eWV1QK4";
+const RSA =
+  "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCrLBdL0rYlU8Otu/L7eFbsy5VGoRrBiB85skHI8Zer+s1etTXq7aybwxRCoulja5vdAqfXvp+ndf68Q8BOW55c8/NyoG9NEfCMMkqmIftsDvOEYKUupi8j5IdIMN8O6gkgv60mRJfr5+Kuno1JNdwRoIQ+lWnjr+2PM6Yrw1OIlu86UDrjQ+LMEsgYRSGNeituiq9jp0bm/KnHIo1lkepIuYVtcanSHbHlGAed0pLQf4xlkju+EhsgTrtF6RqroyefGYJBD4M2wb4nnk9VhxWB19GZZv6o/v3ObniKMdlxOsygvgJUDRrmWtVgGFuMFur7Bm94lVDDJXN11SyU9Ovb";
+const RSA_FP = "SHA256:+ycPI0n62z4CngVM/lcEyvEcdWpQ1MhHhvg2VwiOlK8";
+
+describe("the fingerprint of a pinned line", () => {
+  test("is what ssh-keygen -lf prints, for every key type a host offers", () => {
+    expect(fingerprintOf(`vps ${ED25519}`)).toBe(ED25519_FP);
+    expect(fingerprintOf(`[vps]:2222 ${ECDSA}`)).toBe(ECDSA_FP);
+    expect(fingerprintOf(`vps ${RSA} comment here`)).toBe(RSA_FP);
+  });
+
+  test("is null for a line with no key in it", () => {
+    expect(fingerprintOf("")).toBeNull();
+    expect(fingerprintOf("vps ssh-ed25519")).toBeNull();
+    expect(fingerprintOf("vps ssh-ed25519 not*base64")).toBeNull();
+  });
+});
+
+// remote.md §4b's first rule, as the shell applies it before a pairing code
+// dials: a pin held on any account at the code's host and port refuses a code
+// that does not name it.
+describe("whether a pairing code may dial past the pins", () => {
+  const conn = (name: string, destination: string, port: number, hostKey: string): Connection => ({
+    id: name,
+    name,
+    destination,
+    port,
+    keyPath: "",
+    auth: "key",
+    hostKey,
+    lastReached: 0,
+  });
+  const pinned = conn("VPS", "ledge@vps", PORT_UNSET, `vps ${ED25519}`);
+  const other = conn("Pi", "dev@pi", 2222, `[pi]:2222 ${ECDSA}`);
+
+  test("nothing pinned at that host: the code may dial", () => {
+    expect(pinConflict([other], "ledge@vps", PORT_UNSET, [ED25519_FP])).toBeNull();
+    expect(pinConflict([], "ledge@vps", PORT_UNSET, [ED25519_FP])).toBeNull();
+  });
+
+  test("a pin the code names, on this account or another: the code may dial", () => {
+    expect(pinConflict([pinned], "ledge@vps", PORT_UNSET, [ED25519_FP])).toBeNull();
+    expect(pinConflict([pinned], "deploy@vps", PORT_UNSET, [ECDSA_FP, ED25519_FP])).toBeNull();
+    // A code writes 22 as unset; a record may hold it either way.
+    expect(pinConflict([conn("VPS", "ledge@vps", 22, `vps ${ED25519}`)], "ledge@vps", PORT_UNSET, [ED25519_FP])).toBeNull();
+  });
+
+  test("a pin the code does not name refuses, naming the pin and the record", () => {
+    const why = pinConflict([pinned], "deploy@vps", PORT_UNSET, [ECDSA_FP]);
+    expect(why).toContain(ED25519_FP);
+    expect(why).toContain('"VPS"');
+  });
+
+  test("the rule is per host and port, and the host compares without regard to case", () => {
+    expect(pinConflict([pinned], "ledge@vps", 2222, [ECDSA_FP])).toBeNull();
+    expect(pinConflict([other], "dev@pi", 2222, [ED25519_FP])).toContain(ECDSA_FP);
+    expect(pinConflict([other], "dev@pi", PORT_UNSET, [ED25519_FP])).toBeNull();
+    expect(pinConflict([pinned], "ledge@VPS", PORT_UNSET, [ECDSA_FP])).toContain(ED25519_FP);
+  });
+
+  test("a record that pins nothing has no say", () => {
+    expect(pinConflict([conn("VPS", "ledge@vps", PORT_UNSET, "")], "ledge@vps", PORT_UNSET, [ECDSA_FP])).toBeNull();
   });
 });

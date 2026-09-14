@@ -1030,8 +1030,13 @@ export type LedgeRPC = {
       // line that comes back is the line that gets pinned: known_hosts indexes
       // a non-default port as `[host]:port`, and a pin taken on the wrong
       // shape matches nothing at connect time.
+      // `expect` is the fingerprints a pairing code names (remote.md §4b).
+      // With it the shell answers the line only when the host's key is one
+      // of them, and refuses first when a pin already held at that host and
+      // port is not: the caller then pins without a fingerprint step, because
+      // the code did the comparing.
       connectionProbe: {
-        params: { destination: string; port: number };
+        params: { destination: string; port: number; expect?: string[] };
         response: { hostKey: string; fingerprint: string; keyType: string; error: string };
       };
       // The persisted session layout (.layout.json in the app home): which

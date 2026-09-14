@@ -626,11 +626,12 @@ https://ledge.sh/pair#v=1&u=dan&h=atlas.example.net&p=2222&k=SHA256:TC7eh5uTmsVc
 | `k` | A host key fingerprint, as `ssh-keygen -lf` prints it | Required and repeatable: one per host key the server offers, at most four different ones. |
 
 `shared/pairing.ts` makes and reads the link, and `ios/Sources/PairingCode.swift`
-reads it on the phone. `ledge pair` prints a code on the server, and the
-phone scans it or opens it as a `ledge://pair` link (ios.md §4). A Mac command
-that shows the code for a connection is still to build. Until ledge.sh serves
-`/pair` and the app claims it as a universal link, the `https` form opens only
-from Ledge's own scanner: the Camera app hands it to Safari.
+reads it on the phone. `ledge pair` prints a code on the server. The phone
+scans it or opens it as a `ledge://pair` link (ios.md §4), and the Mac takes it
+pasted into the Add Server form (below). A Mac command that shows the code for
+a connection is still to build. Until the app claims `/pair` as a universal
+link, the `https` form opens on a phone only from Ledge's own scanner: the
+Camera app hands it to Safari.
 
 **The fields travel in the fragment.** A browser never sends the part after `#`,
 so opening the link tells ledge.sh nothing about the server. A script on the
@@ -685,6 +686,24 @@ hands that server the password. A reader therefore follows three rules:
 - A tapped link says so on that screen, and asks the person to continue only if
   the link came from their own server. A scanned code came from a screen in
   front of them, and a tapped one could have come from anyone.
+
+**The Mac reads a code in the Add Server form, and the shell does the
+comparing.** `ConnectionPicker.tsx` parses the pasted link with
+`parsePairingLink`, fills the destination and port from it, shows its
+fingerprints, and turns the two-step add into one button, "Add". That button
+calls `connectionProbe` with `expect`, the code's fingerprints, and
+`connectionStore.ts` answers the scanned line only when its fingerprint is one
+of them, after first refusing when a pin already held at that host and port is
+not (`pinConflict`, with `fingerprintOf` reducing a pinned line to the string a
+code carries). The form repeats the second check on what came back, so a shell
+that ignored `expect` could not get a key past it. Editing the address or the
+port after pasting takes the form back to the fingerprint step, since the
+fingerprints belong to the machine the code named. The field is absent on a
+phone, which has the native reader, and on an edit, which has a record already.
+Two rows of the table below read differently on a Mac: a code for an account
+already in the list names that row instead of dialling it, because a Mac
+selects a server from the list rather than pairing again, and a record with no
+pin is one the user's own ssh already trusts, so it is named the same way.
 
 **The phone applies the first rule per host and port, not per record.** A host
 key belongs to sshd at an address, so a pin on any account there can refuse a
@@ -2014,7 +2033,8 @@ compile for itself with `cc`. `npmPackage.ts`'s `routeFor` states it and
 `build-npm.ts` refuses rather than shipping three targets out of four. A Linux
 checkout installing the server on its own machine therefore needs no Docker:
 `bun run build:npm -- --targets=linux-<arch>` followed by `bun add -g
-./dist-npm`. The architecture each container produced is read back out of the ELF
+"$PWD/dist-npm"`: absolute, because `bun add -g` resolves a relative path
+against its global directory rather than the shell's. The architecture each container produced is read back out of the ELF
 header before it is packaged, because `docker build --platform` is a request a
 daemon without that emulator can answer with the host's architecture.
 

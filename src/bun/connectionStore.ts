@@ -11,9 +11,11 @@
 // opened. Two windows each holding a copy of the list would hide a connection
 // added in one from the other.
 import {
+  hostPart,
   loadConnections,
   LOCAL_CONNECTION,
   LOCAL_ID,
+  pinConflict,
   pinFitsHost,
   probeHostKey,
   saveConnections,
@@ -93,7 +95,14 @@ export interface ConnectionStore {
   /** Store an edit that `reviewUpdate` passed and the caller has committed to. */
   write(conn: Connection): Promise<void>;
   remove(id: string): Promise<{ ok: boolean; error: string }>;
-  probe(destination: string, port: number): Promise<{ hostKey: string; fingerprint: string; keyType: string; error: string }>;
+  /**
+   * A host's key, described (bun/connections.ts probeHostKey). With `expect`,
+   * the fingerprints a pairing code names (remote.md §4b), the answer is the
+   * line to pin only when it is one of them: a pin already held at that host
+   * and port outside the list refuses before anything is scanned, and a host
+   * answering with a key outside it refuses after. Both come back as `error`.
+   */
+  probe(destination: string, port: number, expect?: readonly string[]): Promise<{ hostKey: string; fingerprint: string; keyType: string; error: string }>;
   /**
    * Which connections the windows are pointed at right now, so `remove` can
    * refuse one that any window is using rather than only the one asking.
@@ -295,9 +304,20 @@ export async function createConnectionStore(deps: {
       return { ok: true, error: "" };
     },
 
-    probe: async (destination, port) => {
+    probe: async (destination, port, expect) => {
+      const refused = (error: string) => ({ hostKey: "", fingerprint: "", keyType: "", error });
+      if (expect && expect.length > 0) {
+        const conflict = pinConflict(connections, destination.trim(), port, expect);
+        if (conflict) return refused(conflict);
+      }
       const probed = await probeHostKey(destination.trim(), port);
-      return "error" in probed ? { hostKey: "", fingerprint: "", keyType: "", error: probed.error } : { ...probed, error: "" };
+      if ("error" in probed) return refused(probed.error);
+      if (expect && expect.length > 0 && !expect.includes(probed.fingerprint)) {
+        return refused(
+          `${hostPart(destination.trim())} answered with a host key this code does not name (${probed.fingerprint}). Nothing was added.`,
+        );
+      }
+      return { ...probed, error: "" };
     },
   };
 }

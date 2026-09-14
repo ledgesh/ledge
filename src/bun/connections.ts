@@ -18,7 +18,7 @@ import { readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { isHostName } from "../shared/frontmatter";
-import { hostPart, isPort, LOCAL_ID, parseAuth, PORT_UNSET, SERVE_COMMAND, type AuthMode } from "../shared/connections";
+import { hostPart, isPort, knownHostsHost, LOCAL_ID, parseAuth, pinnedHost, PORT_UNSET, SERVE_COMMAND, type AuthMode } from "../shared/connections";
 import { CLIENT_HOME, ensureClientHome } from "./clientHome";
 import { ASKPASS_ACCOUNT_ENV } from "./secrets";
 
@@ -390,6 +390,44 @@ export function parseFingerprint(keygenOutput: string): { fingerprint: string; k
   if (!hash) return null;
   const bracketed = /\(([^)]+)\)\s*$/.exec(keygenOutput.trim())?.[1] ?? "";
   return { fingerprint: hash, keyType: bracketed };
+}
+
+/**
+ * The `SHA256:…` fingerprint of a known_hosts line, as `ssh-keygen -lf` would
+ * print it: the digest of the key's bytes, base64 without padding. Computed
+ * here rather than by spawning ssh-keygen, because it is asked of every pin at
+ * an address before a pairing code is allowed to dial (`pinConflict`). Null
+ * for a line with no key field or one that is not base64.
+ */
+export function fingerprintOf(hostKeyLine: string): string | null {
+  const key = hostKeyLine.trim().split(/\s+/)[2];
+  if (!key || !/^[A-Za-z0-9+/]+=*$/.test(key)) return null;
+  const digest = new Bun.CryptoHasher("sha256").update(Buffer.from(key, "base64")).digest("base64");
+  return `SHA256:${digest.replace(/=+$/, "")}`;
+}
+
+/**
+ * Why a pairing code may not dial `destination` at `port`, or null when it may
+ * (remote.md §4b's first rule). A code never replaces a pin: a pin held on ANY
+ * account at that host and port names sshd there, and a code whose
+ * fingerprints do not include it is a code for some other machine, or for a
+ * server whose key has changed. The phone applies the same rule per host and
+ * port (`PairingCode.match`).
+ */
+export function pinConflict(
+  connections: readonly Connection[],
+  destination: string,
+  port: number,
+  fingerprints: readonly string[],
+): string | null {
+  const where = knownHostsHost(destination, port).toLowerCase();
+  for (const conn of connections) {
+    if (conn.hostKey === "" || pinnedHost(conn.hostKey).toLowerCase() !== where) continue;
+    const pinned = fingerprintOf(conn.hostKey);
+    if (pinned === null || fingerprints.includes(pinned)) continue;
+    return `"${conn.name}" already pins a host key for ${knownHostsHost(destination, port)} that this code does not name (${pinned}). The code is for a different machine, or that server's key has changed: check it from "${conn.name}" instead.`;
+  }
+  return null;
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {
