@@ -53,19 +53,20 @@ export function nativePath(target: NativeTarget): string {
   return `lib/native/${nativeDir(target.platform, target.arch)}/${nativeLibName(target.platform)}`;
 }
 
-export type BuildRoute = "universal-dylib" | "docker" | "unavailable";
+export type BuildRoute = "universal-dylib" | "host-cc" | "docker" | "unavailable";
 
 /**
- * How one target's trampolines get built on `hostPlatform`. Both Mach-O
- * slices come from one universal dylib, which on a Mac is one `cc` call with
- * two `-arch` flags. Each ELF slice comes from its own container, because ELF
- * has no fat binary and a second architecture on Linux means a cross
- * toolchain (scripts/build-native.ts and docs/contributor/remote.md §11 say
- * the same). So only a Mac can assemble a complete package. A Linux host
- * builds both Linux slices, and cannot produce a Mach-O at all.
+ * How one target's trampolines get built on a `hostPlatform`/`hostArch`
+ * machine. Both Mach-O slices come from one universal dylib, which on a Mac is
+ * one `cc` call with two `-arch` flags. An ELF slice for the host's own
+ * architecture is one `cc` call too (scripts/build-native.ts); any other ELF
+ * slice comes from a container, because ELF has no fat binary and a second
+ * architecture on Linux means a cross toolchain (docs/contributor/remote.md
+ * §11). So only a Mac can assemble a complete package, and a Linux checkout
+ * can build the package for itself with no Docker.
  */
-export function routeFor(target: NativeTarget, hostPlatform: string): BuildRoute {
-  if (target.platform !== "darwin") return "docker";
+export function routeFor(target: NativeTarget, hostPlatform: string, hostArch?: string): BuildRoute {
+  if (target.platform === "linux") return hostPlatform === "linux" && hostArch === target.arch ? "host-cc" : "docker";
   return hostPlatform === "darwin" ? "universal-dylib" : "unavailable";
 }
 

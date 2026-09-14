@@ -223,8 +223,9 @@ bun run build:server
 ```
 
 It runs `build:npm` first. The Mach-O trampolines need a Mac and the ELF ones
-need a container per architecture, so a complete package cannot be assembled
-anywhere else (`remote.md` §11). Docker has to be running. `build:npm` refuses
+need a container per architecture (a Linux host compiles its own without one),
+so a complete package cannot be assembled anywhere else (`remote.md` §11).
+Docker has to be running. `build:npm` refuses
 rather than shipping three targets out of four, and it writes
 `dist-npm/package.json` last so a half-assembled tree cannot be packed. Then
 `build:server` packs that tree and writes `dist-server/`:

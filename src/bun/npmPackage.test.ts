@@ -142,11 +142,20 @@ describe("routeFor", () => {
     expect(routeFor({ platform: "darwin", arch: "arm64" }, "win32")).toBe("unavailable");
   });
 
-  test("the ELF ones always come from a container, whatever the host", () => {
+  test("the ELF ones come from a container, whatever the host", () => {
     for (const host of ["darwin", "linux"]) {
       expect(routeFor({ platform: "linux", arch: "x64" }, host)).toBe("docker");
       expect(routeFor({ platform: "linux", arch: "arm64" }, host)).toBe("docker");
     }
+    expect(routeFor({ platform: "linux", arch: "x64" }, "darwin", "x64")).toBe("docker");
+  });
+
+  // A Linux checkout installing the server on itself has cc and no Docker
+  // (remote.md §11), so its own architecture is compiled in place.
+  test("except the Linux host's own architecture, which its cc builds", () => {
+    expect(routeFor({ platform: "linux", arch: "x64" }, "linux", "x64")).toBe("host-cc");
+    expect(routeFor({ platform: "linux", arch: "arm64" }, "linux", "arm64")).toBe("host-cc");
+    expect(routeFor({ platform: "linux", arch: "arm64" }, "linux", "x64")).toBe("docker");
   });
 
   test("docker spells x64 amd64", () => {

@@ -2009,9 +2009,12 @@ rule seen from the other side. The floor is glibc 2.29 (Debian 11, Ubuntu
 Mach-O's rather than a limitation of the script. `cc -arch arm64 -arch x86_64`
 is a flag, so both Mach-O slices come from one build; ELF has no fat binary, so
 each Linux slice comes from its own container (`Dockerfile`'s `native-lib`
-stage, exported with `--output type=local`). `npmPackage.ts`'s `routeFor`
-states it and `build-npm.ts` refuses rather than shipping three targets out of
-four. The architecture each container produced is read back out of the ELF
+stage, exported with `--output type=local`), except the one a Linux host can
+compile for itself with `cc`. `npmPackage.ts`'s `routeFor` states it and
+`build-npm.ts` refuses rather than shipping three targets out of four. A Linux
+checkout installing the server on its own machine therefore needs no Docker:
+`bun run build:npm -- --targets=linux-<arch>` followed by `bun add -g
+./dist-npm`. The architecture each container produced is read back out of the ELF
 header before it is packaged, because `docker build --platform` is a request a
 daemon without that emulator can answer with the host's architecture.
 

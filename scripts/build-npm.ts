@@ -127,10 +127,19 @@ if (darwin.length > 0) {
   }
 }
 
-// The ELF ones come out of a container per architecture, because ELF has no fat
+// A Linux host's own architecture is one cc call, like the Mac's dylib: the
+// case of a checkout installing the server on the machine it sits on.
+const linux = targets.filter((x) => x.platform === "linux");
+const own = linux.find((t) => routeFor(t, host, process.arch) === "host-cc");
+if (own) {
+  run([process.execPath, "scripts/build-native.ts"], `building the ${own.platform}-${own.arch} trampolines`);
+  copyInto(join(ROOT, "dist-native", nativeLibName("linux")), join(OUT, nativePath(own)));
+}
+
+// Every other ELF slice comes out of a container, because ELF has no fat
 // binary. `--output type=local` needs BuildKit, which is the default in every
 // Docker that also understands `--platform`.
-for (const t of targets.filter((x) => x.platform === "linux")) {
+for (const t of linux.filter((t) => t !== own)) {
   const dest = join(OUT, dirname(nativePath(t)));
   mkdirSync(dest, { recursive: true });
   run(
