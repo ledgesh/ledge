@@ -705,7 +705,8 @@ the failure it prevents, which is running a command on the wrong box.
   row verb has no touch form, and this dialog is the only surface either verb
   appears on — there is no palette entry for "rename the VPS". So the two
   controls sit at the end of every row that is a record, in the tab order beside
-  it, and this Mac's row has neither because there is nothing about this Mac's
+  it, with the pairing code control ahead of them on a Mac (below), and this
+  Mac's row has none of the three because there is nothing about this Mac's
   own server to change.
 - **No confirmation, by §4's arrangement-loss rule.** Nothing is destroyed:
   the tabs are on the other machine and come back when you switch back. What
@@ -729,6 +730,18 @@ the failure it prevents, which is running a command on the wrong box.
   the address after pasting puts the form back on Continue: the code described
   one machine. A server already in the list for that account is named rather
   than added twice. The field is a Mac's: a phone scans (ios.md §4).
+- **A row shows its own pairing code, for the phone to scan.** The third
+  control on a record's row, "Pairing code for …", replaces the list with the
+  code for that server: the QR code, what it names in words, the link and
+  Copy Link, then Done (remote.md §4b). It is made from the record and the key
+  this Mac pinned, and dials nothing, so the button is never busy and never
+  a refusal from the network. A record a code cannot be made from gets the
+  sentence saying why, in place of the code: no pin, a key a phone cannot
+  check, an address with no account. It sits between the switch and Edit,
+  since a miss on it changes nothing (§1a), and This Mac's row has none:
+  the code for this Mac's own server is `ledge pair` in a terminal, because
+  which address a phone should dial this Mac by is not a fact the app holds.
+  A phone's rows have none either: a phone scans codes and shows none.
 - **Editing is the same form, and the same second step when it is earned.** A
   pin belongs to one host, so moving an address onto another one asks the
   fingerprint question again and the primary button says "Continue" rather than

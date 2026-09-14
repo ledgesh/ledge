@@ -54,9 +54,21 @@ A code never replaces a key you already pinned. If a server in your list at that
 
 Paste the link only if it came from your own server. A code holds no password or key, but one made for a lookalike server would point Ledge at that server ([[Ledge on Your Phone]] says the same of a tapped link).
 
+## Show a pairing code for a server
+
+A server in your list can hand its code to your phone without a terminal. Open Notes On…, and click the QR code icon on the server's row.
+
+Ledge shows the code, then the account, host, port and host key it names, then the same code as a link. Scan the QR code with Ledge on your phone ("Pair with a code" on [[Ledge on Your Phone]]), or use Copy Link and paste it into another Mac's Add Server form.
+
+The code is made from what this Mac already has: the address it dials and the host key you pinned. Nothing is sent to the server to make it, and it holds no password or key. The phone still signs in with its own key, which has to be in the server's `authorized_keys`, or with a password.
+
+The phone has to reach the host by the same address this Mac does. A server on your home network or tailnet works from a phone on that network or tailnet, and not from elsewhere. A destination that is an alias from your `~/.ssh/config` means nothing to a phone: give the server its real address here first.
+
+A server with no pinned key has no code, since the code names the key. Edit the server and use "Check Key Again" to pin one. A phone checks only Ed25519 and ECDSA host keys, so a server pinned to an RSA key has no code either.
+
 ## Edit or remove a server
 
-Every row in the picker carries two controls: a pencil to change it and a bin to remove it. Press ⌫ on a focused row to remove it without reaching for either.
+Every row in the picker carries three controls: a QR code icon to show its pairing code, a pencil to change it and a bin to remove it. Press ⌫ on a focused row to remove it without reaching for either.
 
 Editing opens the same form. A rename, or a change of account on the same machine, saves in one step, because neither changes which machine the pinned key belongs to.
 

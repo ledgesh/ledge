@@ -626,12 +626,29 @@ https://ledge.sh/pair#v=1&u=dan&h=atlas.example.net&p=2222&k=SHA256:TC7eh5uTmsVc
 | `k` | A host key fingerprint, as `ssh-keygen -lf` prints it | Required and repeatable: one per host key the server offers, at most four different ones. |
 
 `shared/pairing.ts` makes and reads the link, and `ios/Sources/PairingCode.swift`
-reads it on the phone. `ledge pair` prints a code on the server. The phone
-scans it or opens it as a `ledge://pair` link (ios.md §4), and the Mac takes it
-pasted into the Add Server form (below). A Mac command that shows the code for
-a connection is still to build. Until the app claims `/pair` as a universal
-link, the `https` form opens on a phone only from Ledge's own scanner: the
-Camera app hands it to Safari.
+reads it on the phone. `ledge pair` prints a code on the server, and a Mac
+shows one for any server in its list (below). The phone scans either, or
+opens the link as a `ledge://pair` link (ios.md §4), and the Mac takes it
+pasted into the Add Server form (below). Until the app claims `/pair` as a
+universal link, the `https` form opens on a phone only from Ledge's own
+scanner: the Camera app hands it to Safari.
+
+**A code names an address, and the reader dials it as it is.** Nothing checks
+that the address is reachable from where the phone is, because nothing can: a
+machine on a home network or a tailnet has an address that works from inside
+and not from outside, and the code cannot know which side the phone will be
+on. So the two writers pick the address that is known to work from somewhere,
+and say which:
+
+| Writer | The address in the code | When it is wrong |
+| --- | --- | --- |
+| `ledge pair` over ssh | The one the session reached (`SSH_CONNECTION`), so a LAN or tailnet address when that is how the admin got in | Behind a router's port forward: the session's address is the inside one. `--host` and `--port` name the outside. |
+| `ledge pair` at the console | The machine's name, which a phone on the same network resolves | Any other network. `--host` names the address the phone should dial. |
+| A Mac's row | The destination this Mac dials | A phone that does not share the Mac's network or tailnet, or a destination that is an `~/.ssh/config` alias, which the phone cannot resolve |
+
+Each writer says so beside the host it printed. A tailnet's MagicDNS name and
+a LAN's `.local` name are both host names the grammar allows; a tailnet's
+IPv4 address is an address like any other. Only IPv6 is out, above.
 
 **The fields travel in the fragment.** A browser never sends the part after `#`,
 so opening the link tells ledge.sh nothing about the server. A script on the
@@ -704,6 +721,25 @@ Two rows of the table below read differently on a Mac: a code for an account
 already in the list names that row instead of dialling it, because a Mac
 selects a server from the list rather than pairing again, and a record with no
 pin is one the user's own ssh already trusts, so it is named the same way.
+
+**The Mac shows a code from the record, and dials nothing.** Every row that is
+a record carries a third control beside Edit and Remove, "Pairing code for
+…", which puts the code in place of the list: the QR code (`lib/qr.ts` draws
+uqr's grid as one SVG path, dark on light whatever the theme, as `bun/pair.ts`
+does in a terminal), the account, host, port and key in words, the link, and
+Copy Link. `connectionInfo` (`connectionStore.ts`) puts the pinned key's
+`fingerprint` and `keyType` on every `ConnectionInfo`, and `codeForRecord`
+(`shared/pairing.ts`) makes the code from the destination, the port and that
+fingerprint. The fingerprint is one a person compared when the pin was taken,
+which is why no scan happens here: a keyscan at this point would put an
+unverified key in a code that exists to spare the phone a comparison. The same
+function names what stops a code: no pin ("Check Key Again" pins one), a key
+type NIOSSH does not check (`PHONE_KEY_TYPES`, so an RSA-only server has no
+code), a destination with no account, or a host the grammar refuses. The
+control is absent on a phone, whose list carries no fingerprints
+(`nativeBridge.ts`): a phone scans, and the machine with the pin shows. The
+panel closes with a line the code cannot check for itself, that the phone has
+to reach the host as this Mac does (the table above).
 
 **The phone applies the first rule per host and port, not per record.** A host
 key belongs to sshd at an address, so a pin on any account there can refuse a

@@ -10,7 +10,7 @@ The first launch opens on "Connect to your Ledge server", which offers three way
 
 | Control | Use it when |
 | --- | --- |
-| Scan a pairing code | The server can show a code with `ledge pair` ("Pair with a code") |
+| Scan a pairing code | The server can show a code with `ledge pair`, or a Mac that already has the server can show one ("Pair with a code") |
 | I don't have a server yet | You have a Mac or Linux machine with ssh, and Ledge is not installed on it ("Set up a server") |
 | Add an existing server | Ledge is already installed on the server, and you would rather type its account and address ("Pair by address") |
 
@@ -24,7 +24,9 @@ ledge pair
 
 It prints the code as a QR code, then the account, host, port, and host keys it holds, then the same code as a link. It reads the address from your ssh session, or uses the machine's name when there is no session. When the phone cannot reach the server by that name, give the address yourself with `--host`. `ledge pair --help` lists the other flags.
 
-The same link pastes into the Mac app's Add Server form ("Add a server from a pairing code" on [[Keep Notes on a Remote Server]]).
+A Mac that already has the server in its list can show the same code without a terminal: the QR code icon on the server's row in Notes On… ("Show a pairing code for a server" on [[Keep Notes on a Remote Server]]). The same link pastes into the Mac app's Add Server form ("Add a server from a pairing code" on that page).
+
+The code names one address, and the phone dials exactly that. `ledge pair` over ssh names the address your session reached, so a machine you reached over your home network or tailnet gets that address, which works from a phone on the same network or tailnet. A machine behind a router's port forward needs `--host` and `--port` for the outside address, since the session only knows the inside one. A Mac's code names the address the Mac dials, with the same reach.
 
 On the phone, tap Scan a pairing code on the first screen and point the camera at the QR code. Scan it from Ledge rather than the Camera app, which opens the code in Safari. Ledge shows what the code names and connects only when you tap Connect. Choose how to sign in first, the same way as in "Pair by address": with a key, whose line still has to be in the server's `authorized_keys`, or with a password. Ledge signs in only if the server offers one of the host keys in the code, so there is no fingerprint to check by eye.
 

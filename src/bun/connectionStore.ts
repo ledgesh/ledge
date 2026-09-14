@@ -11,7 +11,9 @@
 // opened. Two windows each holding a copy of the list would hide a connection
 // added in one from the other.
 import {
+  fingerprintOf,
   hostPart,
+  keyTypeOf,
   loadConnections,
   LOCAL_CONNECTION,
   LOCAL_ID,
@@ -146,6 +148,8 @@ export function connectionInfo(c: Connection): ConnectionInfo {
     keyPath: c.keyPath,
     auth: c.auth,
     pinned: c.hostKey !== "",
+    fingerprint: fingerprintOf(c.hostKey) ?? "",
+    keyType: keyTypeOf(c.hostKey),
     lastReached: c.lastReached,
   };
 }

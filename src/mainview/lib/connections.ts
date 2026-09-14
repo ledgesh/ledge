@@ -60,7 +60,18 @@ interface ConnectionHandlers {
 // still names This Mac, which is where the app is running either way.
 const ALONE: ConnectionStatus = {
   connections: [
-    { id: "local", name: "This Mac", destination: "", port: 0, keyPath: "", auth: "key", pinned: false, lastReached: 0 },
+    {
+      id: "local",
+      name: "This Mac",
+      destination: "",
+      port: 0,
+      keyPath: "",
+      auth: "key",
+      pinned: false,
+      fingerprint: "",
+      keyType: "",
+      lastReached: 0,
+    },
   ],
   active: "local",
   wanted: "local",

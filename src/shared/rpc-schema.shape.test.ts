@@ -146,7 +146,15 @@ describe("the schema's shape against the protocol version", () => {
   // gained an optional `expect`. A CONNECTION_METHOD, answered by the client
   // shell and refused by every server, so no frame ever carried it and none
   // does now. The pin moves and the version does not.
-  const PINNED = { protocol: 5, shape: "b2c25cd60583ab52" };
+  // Then the other direction of that code: ConnectionInfo gained `fingerprint`
+  // and `keyType`, the pinned key as a Mac's row shows it in a code of its
+  // own. ConnectionInfo travels only in connectionList's response, a
+  // connection method (wire.ts CONNECTION_METHODS) that the client shell
+  // answers and no server ever sees, so a view and its own shell are the only
+  // two that have to agree, and they ship together. A phone's shell sends both
+  // empty and its view shows no code. Nothing was retyped or narrowed. The pin
+  // moves and the version does not.
+  const PINNED = { protocol: 5, shape: "aab72ab95a95982e" };
 
   test("a payload shape does not change without someone deciding whether it breaks", async () => {
     const shape = digest(shapeOf(await Bun.file(SCHEMA).text()));

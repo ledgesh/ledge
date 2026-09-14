@@ -14,6 +14,17 @@ export const PAIRING_SCHEME_LINK = "ledge://pair";
 
 export const MAX_FINGERPRINTS = 4;
 
+// The host key types NIOSSH checks (ios.md §3), as `ssh-keygen -lf` names
+// them. A code naming any other kind of key could never match on a phone.
+// Ed25519 first, as NIOSSH offers it.
+export const PHONE_KEY_TYPES = ["ED25519", "ECDSA"] as const;
+
+// How a code is drawn, in a terminal (bun/pair.ts) and on a Mac's screen
+// (mainview/lib/qr.ts). Error correction is boosted as far as the smallest
+// version allows, and the quiet zone is the four modules the QR standard asks
+// for, counted into the grid so both drawings paint it light.
+export const QR_OPTIONS = { ecc: "L", boostEcc: true, border: 4 } as const;
+
 export type PairingCode = {
   /** The account Ledge signs in as. */
   user: string;
@@ -123,6 +134,53 @@ export function parsePairingLink(text: string): PairingParse {
   };
   const problem = pairingProblem(code);
   return problem ? { problem } : { code };
+}
+
+/**
+ * The code a Mac shows for a server it already has (remote.md §4b), made from
+ * the record and the key it pinned, with no dial: the fingerprint was compared
+ * by a person when the pin was taken. The problem, when there is one, is a
+ * sentence for the screen showing it: nothing pinned, a key a phone cannot
+ * check, or a destination that leaves the account to ssh's config.
+ */
+export function codeForRecord(record: {
+  name: string;
+  destination: string;
+  port: number;
+  fingerprint: string;
+  keyType: string;
+}): { code: PairingCode } | { problem: string } {
+  const quoted = `"${record.name}"`;
+  if (record.fingerprint === "") {
+    return { problem: `No host key is pinned for ${quoted}, so there is nothing for a code to name. Edit it and use Check Key Again to pin one.` };
+  }
+  if (!(PHONE_KEY_TYPES as readonly string[]).includes(record.keyType)) {
+    return {
+      problem: `${quoted} is pinned to ${record.keyType ? `an ${record.keyType}` : "a"} host key. A phone checks only Ed25519 and ECDSA keys, so it could not check this one.`,
+    };
+  }
+  const destination = record.destination.trim();
+  const at = destination.lastIndexOf("@");
+  if (at < 0) return { problem: `${quoted} signs in as whoever ssh decides for "${destination}", and a code has to name the account. Edit it to user@host.` };
+  const code: PairingCode = {
+    user: destination.slice(0, at),
+    host: destination.slice(at + 1),
+    port: record.port === DEFAULT_PORT ? PORT_UNSET : record.port,
+    fingerprints: [record.fingerprint],
+  };
+  const P = PAIRING_PROBLEMS;
+  switch (pairingProblem(code)) {
+    case null:
+      return { code };
+    case P.user:
+      return { problem: `"${code.user}" is not an account name a code can carry: ASCII letters, digits, "_", "." and "-", not starting with "-" or ".".` };
+    case P.host:
+      return { problem: `"${code.host}" is not a host name or IPv4 address a code can carry. A phone dials a name or an IPv4 address, not an IPv6 one.` };
+    case P.fingerprint:
+      return { problem: `The key pinned for ${quoted} has a fingerprint a code cannot carry (${record.fingerprint}).` };
+    default:
+      return { problem: `A code cannot be made for ${quoted}.` };
+  }
 }
 
 // -1 for text that is not a port, so `pairingProblem` reports it in its turn

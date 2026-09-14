@@ -1131,9 +1131,16 @@ configureSettings(
 // A phone's list has no local row and cannot have one, since there is no
 // server in that process to fall back to (remote.md §8). That absence is why
 // its remove rule differs, so the fake carries it too.
+//
+// Every pin the fake takes is this one key, shaped like a real SHA256
+// fingerprint (43 base64 characters) so a pairing code in a spec can name it
+// (shared/pairing.ts FINGERPRINT), and so the code a row shows carries it.
+const FAKE_FINGERPRINT = "SHA256:harnessfakekeyharnessfakekeyharnessfakekey0";
+const PINNED = { pinned: true, fingerprint: FAKE_FINGERPRINT, keyType: "ED25519" } as const;
+const UNPINNED = { pinned: false, fingerprint: "", keyType: "" } as const;
 let connections: ConnectionInfo[] = FAKING_IOS
   ? [
-      { id: "vps-1", name: "VPS", destination: "ledge@vps", port: 0, keyPath: "", auth: "key", pinned: true, lastReached: 0 },
+      { id: "vps-1", name: "VPS", destination: "ledge@vps", port: 0, keyPath: "", auth: "key", ...PINNED, lastReached: 0 },
       {
         id: "pi-1",
         name: "Pi",
@@ -1144,12 +1151,12 @@ let connections: ConnectionInfo[] = FAKING_IOS
         // case where the field may be left blank
         // (components/ConnectionPicker.tsx).
         auth: "password",
-        pinned: true,
+        ...PINNED,
         lastReached: 0,
       },
     ]
   : [
-      { id: "local", name: "This Mac", destination: "", port: 0, keyPath: "", auth: "key", pinned: false, lastReached: 0 },
+      { id: "local", name: "This Mac", destination: "", port: 0, keyPath: "", auth: "key", ...UNPINNED, lastReached: 0 },
       {
         id: "vps-1",
         name: "VPS",
@@ -1157,7 +1164,7 @@ let connections: ConnectionInfo[] = FAKING_IOS
         port: 0,
         keyPath: "",
         auth: "key",
-        pinned: true,
+        ...PINNED,
         lastReached: 1_700_000_000_000,
       },
     ];
@@ -1177,9 +1184,6 @@ const unreachable = FAKING_IOS ? new Set<string>() : new Set(["ledge@vps"]);
 // message is electrobun's own, verbatim, since it is the one a user gets when
 // this happens.
 const WEDGED_PROBE = "ledge@wedged";
-// Shaped like a real SHA256 fingerprint (43 base64 characters), so a pairing
-// code in a spec can name it (shared/pairing.ts FINGERPRINT).
-const FAKE_FINGERPRINT = "SHA256:harnessfakekeyharnessfakekeyharnessfakekey0";
 const WEDGED_SELECT = "ledge@wedged-later";
 const RPC_GAVE_UP = "RPC request timed out.";
 // How many times this client has been asked to dial now rather than wait for
@@ -1210,7 +1214,7 @@ configureConnections(
       if (auth === "password") passwords.set(id, password);
       connections = [
         ...connections,
-        { id, name, destination, port, keyPath: "", auth, pinned: hostKey !== "", lastReached: 0 },
+        { id, name, destination, port, keyPath: "", auth, ...(hostKey !== "" ? PINNED : UNPINNED), lastReached: 0 },
       ];
       return { id, error: "" };
     },

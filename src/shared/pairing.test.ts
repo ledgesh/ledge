@@ -3,7 +3,7 @@
 // the same file.
 import { describe, expect, test } from "bun:test";
 import { PORT_UNSET } from "./connections";
-import { PAIRING_PROBLEMS, pairingLink, pairingProblem, parsePairingLink, type PairingCode } from "./pairing";
+import { codeForRecord, PAIRING_PROBLEMS, pairingLink, pairingProblem, parsePairingLink, type PairingCode } from "./pairing";
 import vectorFile from "./pairing.vectors.json";
 
 type Vector = { name: string; link: string; canonical?: boolean; code?: PairingCode; problem?: string };
@@ -56,5 +56,52 @@ describe("making a link", () => {
   test("a code has no field beyond the account, host, port and host keys", () => {
     const read = parsePairingLink(pairingLink(code)) as { code: PairingCode };
     expect(Object.keys(read.code).sort()).toEqual(["fingerprints", "host", "port", "user"]);
+  });
+});
+
+// The code a Mac shows for a server it has (remote.md §4b): the record and its
+// pin, and nothing dialled.
+describe("the code for a record", () => {
+  const FP = "SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w";
+  const vps = { name: "VPS", destination: "ledge@vps.example", port: PORT_UNSET, fingerprint: FP, keyType: "ED25519" };
+
+  test("names the account, the host, the port and the pinned key", () => {
+    expect(codeForRecord(vps)).toEqual({ code: { user: "ledge", host: "vps.example", port: PORT_UNSET, fingerprints: [FP] } });
+    expect(codeForRecord({ ...vps, port: 2222, keyType: "ECDSA" })).toEqual({
+      code: { user: "ledge", host: "vps.example", port: 2222, fingerprints: [FP] },
+    });
+  });
+
+  test("stores port 22 as the default, as a read code does", () => {
+    expect(codeForRecord({ ...vps, port: 22 })).toEqual(codeForRecord(vps));
+  });
+
+  test("a record with no pin has nothing for a code to name", () => {
+    const made = codeForRecord({ ...vps, fingerprint: "", keyType: "" });
+    expect("problem" in made && made.problem).toContain("No host key is pinned for \"VPS\"");
+    expect("problem" in made && made.problem).toContain("Check Key Again");
+  });
+
+  test("a pin a phone cannot check is refused, naming the key type", () => {
+    const made = codeForRecord({ ...vps, keyType: "RSA" });
+    expect("problem" in made && made.problem).toContain("an RSA host key");
+    expect("problem" in made && made.problem).toContain("Ed25519 and ECDSA");
+  });
+
+  test("a destination that leaves the account to ssh cannot become a code", () => {
+    const made = codeForRecord({ ...vps, destination: "vps" });
+    expect("problem" in made && made.problem).toContain("user@host");
+  });
+
+  test("a host a code cannot carry is refused in the record's terms", () => {
+    const made = codeForRecord({ ...vps, destination: "ledge@[fd7a::1]" });
+    expect("problem" in made && made.problem).toContain("IPv4");
+    const user = codeForRecord({ ...vps, destination: "-oProxyCommand=sh@vps" });
+    expect("problem" in user && user.problem).toContain("account name");
+  });
+
+  test("the code it makes is the one a reader gets back", () => {
+    const made = codeForRecord({ ...vps, port: 2222 }) as { code: PairingCode };
+    expect(parsePairingLink(pairingLink(made.code))).toEqual(made);
   });
 });

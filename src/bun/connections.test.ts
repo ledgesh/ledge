@@ -10,6 +10,7 @@ import { describe, expect, test } from "bun:test";
 import {
   explainDial,
   fingerprintOf,
+  keyTypeOf,
   knownHostsText,
   LOCAL_CONNECTION,
   LOCAL_ID,
@@ -431,6 +432,20 @@ describe("the fingerprint of a pinned line", () => {
     expect(fingerprintOf("")).toBeNull();
     expect(fingerprintOf("vps ssh-ed25519")).toBeNull();
     expect(fingerprintOf("vps ssh-ed25519 not*base64")).toBeNull();
+  });
+});
+
+describe("the type of a pinned line's key", () => {
+  test("is the word ssh-keygen -lf puts in its parenthesis", () => {
+    expect(keyTypeOf(`vps ${ED25519}`)).toBe("ED25519");
+    expect(keyTypeOf(`[vps]:2222 ${ECDSA}`)).toBe("ECDSA");
+    expect(keyTypeOf(`vps ${RSA} comment here`)).toBe("RSA");
+  });
+
+  test("is the raw type for one it has no word for, and empty for no key", () => {
+    expect(keyTypeOf("vps sk-ssh-ed25519@openssh.com AAAA")).toBe("sk-ssh-ed25519@openssh.com");
+    expect(keyTypeOf("")).toBe("");
+    expect(keyTypeOf("vps ssh-ed25519")).toBe("");
   });
 });
 

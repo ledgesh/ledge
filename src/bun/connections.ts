@@ -406,6 +406,26 @@ export function fingerprintOf(hostKeyLine: string): string | null {
   return `SHA256:${digest.replace(/=+$/, "")}`;
 }
 
+// known_hosts key types, as `ssh-keygen -lf` names them in its trailing
+// parenthesis. Anything else answers as the raw type, so a screen still has
+// a word for it.
+const KEY_TYPE_NAMES: Record<string, string> = {
+  "ssh-ed25519": "ED25519",
+  "ecdsa-sha2-nistp256": "ECDSA",
+  "ecdsa-sha2-nistp384": "ECDSA",
+  "ecdsa-sha2-nistp521": "ECDSA",
+  "ssh-rsa": "RSA",
+  "ssh-dss": "DSA",
+};
+
+/** The type of a known_hosts line's key as `ssh-keygen -lf` would name it, "" for a line with no key. */
+export function keyTypeOf(hostKeyLine: string): string {
+  const fields = hostKeyLine.trim().split(/\s+/);
+  if (fields.length < 3) return "";
+  const type = fields[1]!;
+  return KEY_TYPE_NAMES[type] ?? type;
+}
+
 /**
  * Why a pairing code may not dial `destination` at `port`, or null when it may
  * (remote.md §4b's first rule). A code never replaces a pin: a pin held on ANY

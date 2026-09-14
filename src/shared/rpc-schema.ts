@@ -221,6 +221,13 @@ export interface ConnectionInfo {
    * helper reads it from there, so nothing ever reads one back out. */
   auth: AuthMode;
   pinned: boolean;
+  /** The pinned key's `SHA256:` fingerprint as `ssh-keygen -lf` prints it, and
+   * its type as ssh-keygen names it (ED25519, ECDSA, RSA). Both "" when
+   * nothing is pinned. They are what a Mac makes a pairing code for this
+   * record from, without dialling (remote.md §4b). A phone's shell leaves both
+   * empty: a phone scans codes and shows none (mainview/lib/nativeBridge.ts). */
+  fingerprint: string;
+  keyType: string;
   /** ms epoch, 0 for never reached. */
   lastReached: number;
 }

@@ -491,6 +491,10 @@ function clientSeams(
           keyPath: "",
           auth: s.auth,
           pinned: s.hostKey !== "",
+          // Empty on every row: a phone scans a pairing code and shows none
+          // (remote.md §4b), so nothing here reads a pin's fingerprint.
+          fingerprint: "",
+          keyType: "",
           lastReached: 0,
         })),
         active: selected,

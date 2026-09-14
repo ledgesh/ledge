@@ -567,3 +567,59 @@ test("editing the address after pasting puts the form back on the fingerprint st
   await dialog(page).getByLabel("Port (optional)").fill("22");
   await expect(dialog(page).getByRole("button", { name: "Add", exact: true })).toBeVisible();
 });
+
+// The other direction (remote.md §4b): a row shows the code for a server this
+// Mac already has, made from its record and its pin, for a phone to scan.
+// Nothing is dialled, so the fake's probe is never asked.
+test("a row shows its pairing code, made from the record and the pinned key", async ({ page }) => {
+  await bar(page).click();
+  await dialog(page).getByRole("button", { name: "Pairing code for VPS" }).click();
+
+  await expect(dialog(page).getByRole("img", { name: "Pairing code for VPS" })).toBeVisible();
+  const link = dialog(page).locator("[data-pairing-link]");
+  await expect(link).toHaveText(`https://ledge.sh/pair#v=1&u=ledge&h=vps&k=${FAKE_FP}`);
+  await expect(dialog(page)).toContainText(`${FAKE_FP} (ED25519)`);
+  // The list is behind the panel, and Done brings it back.
+  await expect(dialog(page).getByRole("option")).toHaveCount(0);
+  await dialog(page).getByRole("button", { name: "Done" }).click();
+  await expect(dialog(page).getByRole("option")).toHaveCount(2);
+});
+
+test("the code's link copies, and pastes back into the add form as the same server", async ({ page }) => {
+  await bar(page).click();
+  await dialog(page).getByRole("button", { name: "Pairing code for VPS" }).click();
+  await dialog(page).getByRole("button", { name: "Copy Link" }).click();
+  await expect(dialog(page).getByRole("button", { name: "Copied" })).toBeVisible();
+  const copied = await page.evaluate(() => window.__harness.clipboard());
+  expect(copied).toBe(`https://ledge.sh/pair#v=1&u=ledge&h=vps&k=${FAKE_FP}`);
+
+  // The reader on the same Mac names the row rather than adding it twice.
+  await dialog(page).getByRole("button", { name: "Done" }).click();
+  await dialog(page).getByRole("button", { name: "Add Server…" }).click();
+  await dialog(page).getByLabel("Pairing code (optional)").fill(copied);
+  await dialog(page).getByRole("button", { name: "Add", exact: true }).click();
+  await expect(dialog(page).getByText(/already in the list as "VPS"/)).toBeVisible();
+});
+
+test("a code names the port it was added with", async ({ page }) => {
+  await bar(page).click();
+  await dialog(page).getByRole("button", { name: "Add Server…" }).click();
+  await dialog(page).getByLabel("Name").fill("Box");
+  await dialog(page).getByLabel("SSH destination").fill("dev@box.example");
+  await dialog(page).getByLabel("Port (optional)").fill("2222");
+  await dialog(page).getByRole("button", { name: "Continue" }).click();
+  await dialog(page).getByRole("button", { name: "It Matches, Add" }).click();
+
+  await dialog(page).getByRole("button", { name: "Pairing code for Box" }).click();
+  await expect(dialog(page).locator("[data-pairing-link]")).toHaveText(
+    `https://ledge.sh/pair#v=1&u=dev&h=box.example&p=2222&k=${FAKE_FP}`,
+  );
+  await expect(dialog(page)).toContainText("Port");
+  await expect(dialog(page)).toContainText("2222");
+});
+
+test("this Mac's row shows no code: there is no record to make one from", async ({ page }) => {
+  await bar(page).click();
+  await expect(dialog(page).getByRole("button", { name: /^Pairing code for/ })).toHaveCount(1);
+  await expect(dialog(page).getByRole("button", { name: "Pairing code for This Mac" })).toHaveCount(0);
+});

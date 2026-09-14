@@ -895,6 +895,9 @@ test.describe("the iOS client, and what it does not have", () => {
     await page.keyboard.press("Enter");
     const dialog = page.getByRole("dialog", { name: "Connections" });
 
+    // A phone scans a pairing code and shows none (remote.md §4b), so its
+    // rows carry the two verbs and not the Mac's third.
+    await expect(dialog.getByRole("button", { name: /^Pairing code for/ })).toHaveCount(0);
     await dialog.getByRole("button", { name: "Edit Pi" }).tap();
     await dialog.getByLabel("Name").fill("Shed");
     await dialog.getByRole("button", { name: "Save" }).tap();

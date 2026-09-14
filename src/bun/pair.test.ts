@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { encode } from "uqr";
 import { PORT_UNSET } from "../shared/connections";
-import { PAIRING_PROBLEMS, pairingLink, type PairingCode } from "../shared/pairing";
+import { PAIRING_PROBLEMS, pairingLink, QR_OPTIONS, type PairingCode } from "../shared/pairing";
 import {
   CONTAINER_COMMAND,
   containerRefusal,
@@ -10,7 +10,6 @@ import {
   pairReport,
   parsePairArgs,
   phoneHostKeys,
-  QR_OPTIONS,
   sshServerAddress,
   terminalQR,
   terminalQRWidth,

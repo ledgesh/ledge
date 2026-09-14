@@ -10,9 +10,11 @@
 // Pinning takes two steps (remote.md §4). There is no "connect anyway" that
 // remembers, because that button is what pinning exists to prevent. A pasted
 // pairing code is the one way to pin in a single step, because the code
-// already names the key and the shell does the comparing (remote.md §4b).
+// already names the key and the shell does the comparing (remote.md §4b). The
+// other direction is a row's own control: the code for a server this Mac has,
+// made from its record for a phone to scan.
 import { useEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react";
-import { Check, Laptop, Loader2, Pencil, Server, Plus, Trash2 } from "lucide-react";
+import { Check, Laptop, Loader2, Pencil, QrCode, Server, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { pushLayer } from "@/commands/layers";
 import {
@@ -27,8 +29,9 @@ import {
 import { flushAllNow } from "@/notes/store";
 import { copyText } from "@/lib/clipboard";
 import { deviceKeyLine, shareSheet } from "@/lib/shell";
+import { qrPath } from "@/lib/qr";
 import { DEFAULT_PORT, hostPart, parsePort, PORT_UNSET, type AuthMode } from "../../shared/connections";
-import { parsePairingLink, type PairingCode } from "../../shared/pairing";
+import { codeForRecord, pairingLink, parsePairingLink, type PairingCode } from "../../shared/pairing";
 import type { ConnectionInfo } from "../../shared/rpc-schema";
 
 // Turns a thrown value into a sentence to show. Every action here is an RPC,
@@ -60,6 +63,8 @@ export function ConnectionPicker({ onClose }: { onClose: () => void }) {
   const [status, setStatus] = useState<ConnectionStatus>(connectionStatus());
   // Null for the list, "new" for the add form, a connection for the edit form.
   const [form, setForm] = useState<ConnectionInfo | "new" | null>(null);
+  // The connection whose pairing code is on screen, in place of the list.
+  const [showing, setShowing] = useState<ConnectionInfo | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -139,12 +144,18 @@ export function ConnectionPicker({ onClose }: { onClose: () => void }) {
               setStatus(connectionStatus());
             }}
           />
+        ) : showing ? (
+          <PairingCodePanel conn={showing} onDone={() => setShowing(null)} />
         ) : (
           <>
             <ConnectionList
               status={status}
               busy={busy}
               onPick={switchTo}
+              onCode={(conn) => {
+                setError("");
+                setShowing(conn);
+              }}
               onEdit={(conn) => {
                 setError("");
                 setForm(conn);
@@ -173,12 +184,14 @@ function ConnectionList({
   status,
   busy,
   onPick,
+  onCode,
   onEdit,
   onRemove,
 }: {
   status: ConnectionStatus;
   busy: boolean;
   onPick: (id: string) => void;
+  onCode: (conn: ConnectionInfo) => void;
   onEdit: (conn: ConnectionInfo) => void;
   onRemove: (id: string) => void;
 }) {
@@ -199,8 +212,8 @@ function ConnectionList({
     e.preventDefault();
     const rows = Array.from(listRef.current?.querySelectorAll<HTMLButtonElement>("[role=option]") ?? []);
     // The index is of the row a focused control belongs to, not of the focused
-    // element itself. The edit and remove buttons sit in the tab order beside
-    // their row. An arrow pressed from one of them moves from that row.
+    // element itself. The code, edit and remove buttons sit in the tab order
+    // beside their row. An arrow pressed from one of them moves from that row.
     const at = rows.findIndex((row) => row.parentElement?.contains(document.activeElement));
     const next = e.key === "ArrowDown" ? at + 1 : at - 1;
     rows[(next + rows.length) % rows.length]?.focus();
@@ -225,6 +238,7 @@ function ConnectionList({
           failed={conn.id === status.wanted && status.wanted !== status.active ? status.error : ""}
           busy={busy}
           onPick={() => onPick(conn.id)}
+          onCode={() => onCode(conn)}
           onEdit={() => onEdit(conn)}
           onRemove={() => onRemove(conn.id)}
         />
@@ -239,6 +253,7 @@ function ConnectionRow({
   failed,
   busy,
   onPick,
+  onCode,
   onEdit,
   onRemove,
 }: {
@@ -247,11 +262,15 @@ function ConnectionRow({
   failed: string;
   busy: boolean;
   onPick: () => void;
+  onCode: () => void;
   onEdit: () => void;
   onRemove: () => void;
 }) {
   const local = conn.destination === "";
   const Icon = local ? Laptop : Server;
+  // A phone scans a pairing code and shows none (remote.md §4b): its list
+  // carries no fingerprint to make one from (lib/nativeBridge.ts).
+  const phone = deviceKeyLine() !== "";
   return (
     // Presentational, so the listbox's children are still options. The edit and
     // remove buttons are siblings of the row rather than inside it, because a
@@ -295,6 +314,11 @@ function ConnectionRow({
           there is nothing about its own server to change. */}
       {!local && (
         <>
+          {!phone && (
+            <RowButton label={`Pairing code for ${conn.name}`} disabled={busy} onClick={onCode}>
+              <QrCode className="size-3.5" />
+            </RowButton>
+          )}
           <RowButton label={`Edit ${conn.name}`} disabled={busy} onClick={onEdit}>
             <Pencil className="size-3.5" />
           </RowButton>
@@ -327,16 +351,108 @@ function RowButton({
       aria-label={label}
       disabled={disabled}
       onClick={onClick}
-      // 44 points on touch, and Remove is why. The row is three adjacent
-      // alternatives half a point apart: switch to the machine, edit it, remove
-      // it. Interactions.md §1a orders such a group by what a miss costs, so
-      // Edit sits between the switch and the destructive one.
+      // 44 points on touch, and Remove is why. The row is up to four adjacent
+      // alternatives half a point apart: switch to the machine, show its
+      // pairing code, edit it, remove it. Interactions.md §1a orders such a
+      // group by what a miss costs, so the two that open a panel and change
+      // nothing sit between the switch and the destructive one.
       className={`flex shrink-0 items-center justify-center rounded-md p-1.5 text-muted-foreground hover:bg-accent focus:bg-accent focus:outline-none disabled:opacity-60 touch:size-[44px] ${
         destructive ? "hover:text-destructive focus:text-destructive" : "hover:text-foreground focus:text-foreground"
       }`}
     >
       {children}
     </button>
+  );
+}
+
+/**
+ * The pairing code for a server this Mac already has (remote.md §4b), made from
+ * the record and nothing else: the address is the one this Mac dials, and the
+ * fingerprint is the key a person compared when the pin was taken, so nothing
+ * is dialled here. A phone scans it from this screen as it scans the one
+ * `ledge pair` prints, and the link beneath it pastes into another Mac's Add
+ * Server form. A record a code cannot be made from gets the sentence saying
+ * why (shared/pairing.ts codeForRecord).
+ */
+function PairingCodePanel({ conn, onDone }: { conn: ConnectionInfo; onDone: () => void }) {
+  const [copied, setCopied] = useState(false);
+  const made = codeForRecord(conn);
+  if ("problem" in made) {
+    return (
+      <div className="mt-3 flex flex-col gap-2">
+        <p data-code-problem className="text-[12px] leading-snug">
+          {made.problem}
+        </p>
+        <div className="mt-1 flex justify-end">
+          <Button size="sm" variant="ghost" onClick={onDone}>
+            Back
+          </Button>
+        </div>
+      </div>
+    );
+  }
+  const { code } = made;
+  const link = pairingLink(code);
+  const { size, d } = qrPath(link);
+  return (
+    <div className="mt-3 flex flex-col gap-2">
+      <p className="text-[12px] leading-snug">
+        Scan this with Ledge on your phone. It names {conn.name} and the host key this Mac pinned, and holds no
+        password or key.
+      </p>
+      {/* Dark on light whatever the theme, quiet zone included. A scanner wants
+          the contrast, and the page around the code may be dark, which is the
+          terminal's case too (bun/pair.ts terminalQR). */}
+      <svg
+        data-pairing-qr
+        role="img"
+        aria-label={`Pairing code for ${conn.name}`}
+        viewBox={`0 0 ${size} ${size}`}
+        shapeRendering="crispEdges"
+        className="mx-auto size-64 rounded-md bg-white"
+      >
+        <path d={d} fill="black" />
+      </svg>
+      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 font-mono text-[11px]">
+        <dt className="text-muted-foreground">Account</dt>
+        <dd>{code.user}</dd>
+        <dt className="text-muted-foreground">Host</dt>
+        <dd>{code.host}</dd>
+        <dt className="text-muted-foreground">Port</dt>
+        <dd>{code.port === PORT_UNSET ? DEFAULT_PORT : code.port}</dd>
+        <dt className="text-muted-foreground">Host key</dt>
+        <dd className="break-all">
+          {conn.fingerprint} ({conn.keyType})
+        </dd>
+      </dl>
+      {/* The one line of advice, because it is the one thing the code cannot
+          check: a code names an address, and the reader dials it as it is
+          (remote.md §4b). */}
+      <p className="text-[11px] text-muted-foreground">
+        The phone has to reach {code.host} the way this Mac does: on the same network, or the same tailnet.
+      </p>
+      <code
+        data-pairing-link
+        className="select-text break-all rounded-md border border-input bg-muted/40 p-2 font-mono text-[11px]"
+      >
+        {link}
+      </code>
+      <div className="mt-1 flex justify-end gap-2">
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => {
+            copyText(link);
+            setCopied(true);
+          }}
+        >
+          {copied ? "Copied" : "Copy Link"}
+        </Button>
+        <Button size="sm" onClick={onDone}>
+          Done
+        </Button>
+      </div>
+    </div>
   );
 }
 

@@ -3,7 +3,7 @@
 // and ssh-keygen's output; every decision about them is a pure function here.
 import { encode } from "uqr";
 import { DEFAULT_PORT, parsePort, PORT_UNSET } from "../shared/connections";
-import { pairingLink, pairingProblem, type PairingCode } from "../shared/pairing";
+import { pairingLink, pairingProblem, PHONE_KEY_TYPES, QR_OPTIONS, type PairingCode } from "../shared/pairing";
 
 export const KEYGEN_PATH = "/usr/bin/ssh-keygen";
 export const HOST_KEY_DIR = "/etc/ssh";
@@ -63,19 +63,20 @@ export function pairAddress(args: PairArgs, sshConnection: string | undefined, h
 
 export type HostKey = { fingerprint: string; keyType: string };
 
-// NIOSSH checks only these (ios.md §3), so an RSA fingerprint would make the
-// code bigger and could never match. Ed25519 comes first, as NIOSSH offers it.
-const PHONE_KEY_TYPES = ["ED25519", "ECDSA"];
-
-/** The host keys a phone can check, out of `ssh-keygen -lf` output: `256 SHA256:… comment (ED25519)`. */
+/**
+ * The host keys a phone can check (shared/pairing.ts PHONE_KEY_TYPES), out of
+ * `ssh-keygen -lf` output: `256 SHA256:… comment (ED25519)`. An RSA fingerprint
+ * would make the code bigger and could never match.
+ */
 export function phoneHostKeys(keygenOutput: string): HostKey[] {
   const keys: HostKey[] = [];
+  const types: readonly string[] = PHONE_KEY_TYPES;
   for (const line of keygenOutput.split("\n")) {
     const match = /^\d+ (SHA256:\S+) .*\(([A-Z0-9-]+)\)\s*$/.exec(line.trim());
-    if (!match || !PHONE_KEY_TYPES.includes(match[2]!)) continue;
+    if (!match || !types.includes(match[2]!)) continue;
     if (!keys.some((k) => k.fingerprint === match[1])) keys.push({ fingerprint: match[1]!, keyType: match[2]! });
   }
-  return keys.sort((a, b) => PHONE_KEY_TYPES.indexOf(a.keyType) - PHONE_KEY_TYPES.indexOf(b.keyType));
+  return keys.sort((a, b) => types.indexOf(a.keyType) - types.indexOf(b.keyType));
 }
 
 /** The host-side command for a server in a container, which has no host keys or account of its own to read. */
@@ -93,18 +94,14 @@ export function containerRefusal(args: PairArgs): string | null {
   ].join("\n");
 }
 
-// Error correction is boosted as far as the smallest version allows. The
-// quiet zone is the four modules the QR standard asks for, drawn in the light
-// color because the terminal around it may be dark.
-export const QR_OPTIONS = { ecc: "L", boostEcc: true, border: 4 } as const;
-
 const DARK_ON_LIGHT = "\x1b[30;107m";
 const RESET = "\x1b[0m";
 
 /**
  * A QR code as terminal lines, two modules to a line with half blocks. The
  * colors are set rather than left to the terminal's theme, so the code is dark
- * on light on every background.
+ * on light on every background, quiet zone included (shared/pairing.ts
+ * QR_OPTIONS).
  */
 export function terminalQR(text: string): string[] {
   const { data, size } = encode(text, QR_OPTIONS);
