@@ -200,8 +200,10 @@ const theme = EditorView.theme({
     border: "none",
   },
   ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--cursor)" },
-  "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection":
-    { backgroundColor: "var(--selection)" },
+  // The focused selector copies the base theme's full chain so it ties on
+  // specificity and wins on order; a shorter one loses to its pale #d7d4f0.
+  "&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection":
+    { background: "var(--selection)" },
   ".cm-activeLine": { backgroundColor: "transparent" },
   ".cm-activeLineGutter": { backgroundColor: "transparent", color: "var(--fg)" },
 

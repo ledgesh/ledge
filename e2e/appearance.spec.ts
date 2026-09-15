@@ -159,3 +159,29 @@ test.describe("pinned against the system, the other way", () => {
     expect(fg).toBe("#1d1d1f");
   });
 });
+
+// The regression: CodeMirror's base theme paints a focused selection #d7d4f0
+// through a longer selector than ours, so our --selection lost. On the dark
+// palette that put near-white text on a pale band. The selection is only drawn
+// in a focused editor, so this types into a new note and selects it.
+for (const theme of ["dark", "light"] as const) {
+  test(`the editor selection paints --selection (${theme})`, async ({ page }) => {
+    await page.goto(`/harness.html?theme=${theme}`);
+    await expect(page.locator('[data-target-kind="note"]', { hasText: "Alpha" })).toBeVisible();
+    await page.keyboard.press("Meta+n");
+    await page.keyboard.type("selected text");
+    await page.keyboard.press("Meta+a");
+    const band = page.locator(".cm-editor.cm-focused .cm-selectionBackground").first();
+    await expect(band).toBeVisible();
+    const painted = await band.evaluate((el) => getComputedStyle(el).backgroundColor);
+    const expected = await page.evaluate(() => {
+      const probe = document.createElement("div");
+      probe.style.backgroundColor = "var(--selection)";
+      document.body.appendChild(probe);
+      const color = getComputedStyle(probe).backgroundColor;
+      probe.remove();
+      return color;
+    });
+    expect(painted).toBe(expected);
+  });
+}

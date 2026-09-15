@@ -193,8 +193,9 @@ export function SettingsEditor({ onClose }: { onClose: () => void }) {
             },
             "&.cm-focused": { outline: "none" },
             ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--cursor)" },
-            "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection":
-              { backgroundColor: "var(--selection)" },
+            // The full chain ties the base theme's focused selector (editor/setup.ts).
+            "&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection":
+              { background: "var(--selection)" },
           }),
         ],
       }),
