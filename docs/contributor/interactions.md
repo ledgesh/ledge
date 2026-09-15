@@ -729,7 +729,9 @@ the failure it prevents, which is running a command on the wrong box.
   a code is refused in the reader's words and leaves the fields alone. Editing
   the address after pasting puts the form back on Continue: the code described
   one machine. A server already in the list for that account is named rather
-  than added twice. The field is a Mac's: a phone scans (ios.md §4).
+  than added twice. The field is a Mac's. A phone's form has Scan a pairing
+  code in its place, which opens the camera over the page and pairs on the
+  native screen a tapped link opens (ios.md §4).
 - **A row shows its own pairing code, for the phone to scan.** The third
   control on a record's row, "Pairing code for …", replaces the list with the
   code for that server: the QR code, what it names in words, the link and

@@ -22,7 +22,7 @@ enum BarFace: String {
 /// frame arrives from the page as base64 and goes down the socket as bytes, and
 /// bytes off the socket go up as base64.
 ///
-/// No frame is parsed here and no method name is understood except the nineteen
+/// No frame is parsed here and no method name is understood except the twenty
 /// in `SHELL_CALLS` (mainview/lib/nativeBridge.ts), which are the things only a
 /// device can answer.
 final class WebHost: UIViewController {
@@ -43,6 +43,10 @@ final class WebHost: UIViewController {
     /// to pick something else (`servers.choose`). The string is why, for the
     /// screen to show, and is empty when nobody was refused anything.
     private let onServers: (String) -> Void
+    /// Called when the page's Add Server form asks for the camera
+    /// (`pairing.scan`). The scanner and the pairing screen a code opens are
+    /// the app delegate's, since a pairing replaces this whole screen.
+    private let onScan: () -> Void
     private let scheme = BundleScheme()
     private var webView: WKWebView!
 
@@ -81,12 +85,14 @@ final class WebHost: UIViewController {
         config: ShellConfig,
         server: ServerRecord,
         onRepair: @escaping (ServerRecord, String) -> Void,
-        onServers: @escaping (String) -> Void
+        onServers: @escaping (String) -> Void,
+        onScan: @escaping () -> Void
     ) {
         self.config = config
         self.server = server
         self.onRepair = onRepair
         self.onServers = onServers
+        self.onScan = onScan
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -572,6 +578,12 @@ extension WebHost: WKScriptMessageHandler {
             // page is not waiting on what the user picks, and there is nothing
             // for it to do with the answer. Presenting is the whole call.
             reply(id, ["ok": Natives.share(params["text"] as? String ?? "", over: self, from: nil)])
+        case "pairing.scan":
+            // Answered as `share.text` is: the page is not waiting on what the
+            // camera reads. A code pairs on the native screen a link opens,
+            // and a pairing rebuilds the page (ios.md §4).
+            reply(id, ["ok": true])
+            onScan()
         case "menu.set":
             // There is no menu bar on a phone. The page answers this itself and
             // never gets here; the case exists so that a page which does ask

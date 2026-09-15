@@ -32,6 +32,9 @@ interface Shell {
   /** Hand a string to the device's own share sheet, or null on a client with
    * no such sheet to open. */
   shareSheet: ((text: string) => void) | null;
+  /** Open the device's camera on a pairing code, or null on a client with no
+   * reader of its own. */
+  codeScanner: (() => void) | null;
   /** Whether focusing text puts a keyboard on screen, over the page. */
   softKeyboard: boolean;
   /** Whether this client can open a second window. */
@@ -47,6 +50,7 @@ let shell: Shell = {
   hasTerminal: true,
   deviceKey: "",
   shareSheet: null,
+  codeScanner: null,
   softKeyboard: false,
   multiWindow: true,
   picksFolders: true,
@@ -123,6 +127,23 @@ export function deviceKeyLine(): string {
  */
 export function shareSheet(): ((text: string) => void) | null {
   return shell.shareSheet;
+}
+
+/**
+ * The device's pairing code reader, or null where there is none (ios.md §4).
+ *
+ * A Mac's Add Server form takes a code pasted as a link. A phone has a camera
+ * and a native screen that reads a code and pairs from it, so its form offers
+ * that screen instead of a field: the scanner opens over the page, and a code
+ * it reads pairs on the same native screen a tapped `ledge://pair` link opens.
+ * Nothing comes back to the form. A pairing rebuilds the page around the new
+ * server, and a cancel returns to the form as it was.
+ *
+ * A callback rather than a boolean, for the reason `shareSheet` gives: only
+ * the client with a camera reaches it, across the bridge (ios.tsx).
+ */
+export function codeScanner(): (() => void) | null {
+  return shell.codeScanner;
 }
 
 /**

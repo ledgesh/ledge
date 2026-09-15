@@ -498,6 +498,9 @@ const codeFor = (user: string, host: string, fp: string, port?: number) =>
 test("a pasted pairing code fills the form and adds the server in one step", async ({ page }) => {
   await bar(page).click();
   await dialog(page).getByRole("button", { name: "Add Server…" }).click();
+  await expect(dialog(page).getByRole("heading")).toHaveText("Add a server");
+  // The field is a Mac's, and the scan button a phone's (e2e/phone.spec.ts).
+  await expect(dialog(page).getByRole("button", { name: "Scan a pairing code" })).toHaveCount(0);
   await dialog(page).getByLabel("Pairing code (optional)").fill(codeFor("ledge", "box.example", FAKE_FP, 2222));
 
   await expect(dialog(page).getByLabel("SSH destination")).toHaveValue("ledge@box.example");

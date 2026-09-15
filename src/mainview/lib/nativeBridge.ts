@@ -14,7 +14,7 @@ import {
   type RequestClient,
 } from "../../shared/wire";
 
-/** What Swift implements: nineteen strings and a flat switch. The calls are
+/** What Swift implements: twenty strings and a flat switch. The calls are
  * their own vocabulary, `clipboard.read` and not `clipboardRead`: they are not
  * the schema's methods, and naming them as if they were is the invitation to
  * implement half the schema in Swift (ios.md §2). `clipboard.image` is the case
@@ -60,6 +60,12 @@ export const SHELL_CALLS = [
   // at the device holding it, so a copy button would leave that line to be
   // retyped. This call lets it leave by AirDrop instead.
   "share.text",
+  // The device's camera on a pairing code, for the connection dialog's Add
+  // Server form (ios.md §4). A Mac's form takes the code pasted as a link; a
+  // phone reads one with the native screen that already pairs from it, so
+  // this answers once the scanner is up and the pairing itself never crosses
+  // the bridge: it ends in a rebuilt page, or in a cancel.
+  "pairing.scan",
   "menu.set",
   // Which servers this phone knows (remote.md §8). Swift holds the bytes and
   // dials the selection. Every rule about what may be added, renamed or removed

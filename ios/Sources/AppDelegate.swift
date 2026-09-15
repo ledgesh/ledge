@@ -45,7 +45,10 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
             // anything (mainview/ios.tsx). A phone has no local server to fall
             // back to the way a Mac does (remote.md §8), so the screens before
             // any of this are the answer to both.
-            onServers: { [weak self] why in self?.showServers(because: why.isEmpty ? nil : why) }
+            onServers: { [weak self] why in self?.showServers(because: why.isEmpty ? nil : why) },
+            // The connection dialog's Add Server form has a scan button where a
+            // Mac's has a field for the pasted link (ios.md §4).
+            onScan: { [weak self] in self?.scan() }
         )
         chooser = nil
         host = screen
@@ -145,12 +148,14 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         }
     }
 
-    /// The camera, over the shell's screens. A code it reads opens that code's
-    /// pairing screen on top of the form the scan started from.
+    /// The camera, over whatever the window shows: the shell's screens, or the
+    /// app when the page's Add Server form asked (`pairing.scan`). A code it
+    /// reads opens that code's pairing screen where a link's opens: on top of
+    /// the form the scan started from, or as a sheet over the app.
     private func scan() {
-        guard let nav = chooser else { return }
-        CodeScannerViewController.open(over: nav) { [weak self] code in
-            nav.dismiss(animated: true) { self?.openCode(code, tapped: false) }
+        guard let over = topmost() else { return }
+        CodeScannerViewController.open(over: over) { [weak self] code in
+            over.dismiss(animated: true) { self?.openCode(code, tapped: false) }
         }
     }
 

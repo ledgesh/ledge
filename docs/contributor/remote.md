@@ -721,6 +721,10 @@ Two rows of the table below read differently on a Mac: a code for an account
 already in the list names that row instead of dialling it, because a Mac
 selects a server from the list rather than pairing again, and a record with no
 pin is one the user's own ssh already trusts, so it is named the same way.
+The field is absent on a phone, whose form has Scan a pairing code in its
+place: the camera opens over the page and the code pairs on the phone's native
+screen, by the table below (ios.md §4). Both are absent on an edit, which has a
+record already.
 
 **The Mac shows a code from the record, and dials nothing.** Every row that is
 a record carries a third control beside Edit and Remove, "Pairing code for

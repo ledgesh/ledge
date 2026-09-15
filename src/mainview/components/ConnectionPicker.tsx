@@ -28,7 +28,7 @@ import {
 } from "@/lib/connections";
 import { flushAllNow } from "@/notes/store";
 import { copyText } from "@/lib/clipboard";
-import { deviceKeyLine, shareSheet } from "@/lib/shell";
+import { codeScanner, deviceKeyLine, shareSheet } from "@/lib/shell";
 import { qrPath } from "@/lib/qr";
 import { DEFAULT_PORT, hostPart, parsePort, PORT_UNSET, type AuthMode } from "../../shared/connections";
 import { codeForRecord, pairingLink, parsePairingLink, type PairingCode } from "../../shared/pairing";
@@ -128,7 +128,18 @@ export function ConnectionPicker({ onClose }: { onClose: () => void }) {
         aria-label="Connections"
         className="flex w-full max-w-lg flex-col rounded-lg border bg-background p-4 shadow-xl"
       >
-        <h2 className="text-sm font-semibold">Notes on</h2>
+        {/* The heading names the face on screen. Three of the four are about
+            one server rather than the list, and "Notes on" over an add form
+            named nothing. */}
+        <h2 className="text-sm font-semibold">
+          {form === "new"
+            ? "Add a server"
+            : form
+              ? `Edit ${form.name}`
+              : showing
+                ? `Pairing code for ${showing.name}`
+                : "Connections"}
+        </h2>
 
         {form ? (
           <ConnectionForm
@@ -502,6 +513,7 @@ function ConnectionForm({
   // for a file (lib/shell.ts).
   const ownKey = deviceKeyLine();
   const share = shareSheet();
+  const scanner = codeScanner();
 
   useEffect(() => firstRef.current?.focus(), []);
 
@@ -694,6 +706,23 @@ function ConnectionForm({
 
   return (
     <div className="mt-3 flex flex-col gap-2">
+      {/* Only when adding, and only on a client with a camera to read one:
+          the scanner opens over the page, and the code pairs on the native
+          screen a tapped link opens, by PairingCode.match's rules (ios.md
+          §4). Not on an edit: a code never re-pins a server the phone has,
+          and a moved address is another machine (remote.md §4b). */}
+      {existing === null && scanner && (
+        <div className="flex flex-col gap-1">
+          <Button size="sm" variant="outline" className="touch:min-h-[44px]" onClick={scanner}>
+            <QrCode className="mr-1 size-3.5" />
+            Scan a pairing code
+          </Button>
+          <span className="text-[11px] text-muted-foreground">
+            <code className="font-mono">ledge pair</code> shows one on the server, and a Mac shows one for a server
+            in its list. Or type the address below.
+          </span>
+        </div>
+      )}
       {/* Only on the key door. The line installs a key, and a password
           connection offers none: ssh is sent `PubkeyAuthentication=no`
           (bun/connections.ts). Showing it here would ask the user to prepare
@@ -739,9 +768,9 @@ function ConnectionForm({
         </div>
       )}
       {/* Only when adding, and only on a client with no reader of its own: a
-          phone scans a code or opens its link natively (ios.md §4), and the
-          shell behind this form's probe is what checks the key against the
-          code (rpc-schema connectionProbe `expect`). */}
+          phone has the scan button above instead (ios.md §4). The shell
+          behind this form's probe is what checks the key against the code
+          (rpc-schema connectionProbe `expect`). */}
       {existing === null && !ownKey && (
         <Field label="Pairing code (optional)" value={codeText} onChange={applyCode} placeholder="https://ledge.sh/pair#…" mono />
       )}

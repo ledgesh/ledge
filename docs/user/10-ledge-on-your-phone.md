@@ -28,7 +28,7 @@ A Mac that already has the server in its list can show the same code without a t
 
 The code names one address, and the phone dials exactly that. `ledge pair` over ssh names the address your session reached, so a machine you reached over your home network or tailnet gets that address, which works from a phone on the same network or tailnet. A machine behind a router's port forward needs `--host` and `--port` for the outside address, since the session only knows the inside one. A Mac's code names the address the Mac dials, with the same reach.
 
-On the phone, tap Scan a pairing code on the first screen and point the camera at the QR code. Scan it from Ledge rather than the Camera app, which opens the code in Safari. Ledge shows what the code names and connects only when you tap Connect. Choose how to sign in first, the same way as in "Pair by address": with a key, whose line still has to be in the server's `authorized_keys`, or with a password. Ledge signs in only if the server offers one of the host keys in the code, so there is no fingerprint to check by eye.
+On the phone, tap Scan a pairing code on the first screen, or in Add Server… inside the app ("More than one server" below), and point the camera at the QR code. Scan it from Ledge rather than the Camera app, which opens the code in Safari. Ledge shows what the code names and connects only when you tap Connect. Choose how to sign in first, the same way as in "Pair by address": with a key, whose line still has to be in the server's `authorized_keys`, or with a password. Ledge signs in only if the server offers one of the host keys in the code, so there is no fingerprint to check by eye.
 
 The code holds no password and no key. Someone who photographs it learns where the server is and which account to try, and nothing that signs them in.
 
@@ -105,6 +105,8 @@ Removing the last server returns the phone to the first screen. Deleting the app
 ## More than one server
 
 Inside the app the connection bar works as on a Mac: tap it to add, edit, remove, or switch servers, with the same fingerprint step ([[Keep Notes on a Remote Server]]). The form shows the phone's key line where a Mac's shows a key path, with Share Line beside Copy Line.
+
+Add Server… starts with Scan a pairing code, where a Mac's form has a field for the pasted link. It opens the camera, then the same "Pair with a server" screen as the first launch, and the app reopens on the new server once you tap Connect there. Cancel returns you to the form, where you can type the address instead. Editing a server has no scan: a code never replaces a host key the phone already has.
 
 A phone and a Mac can be on one server at once. Each keeps its own tabs, and a note's terminal has one owner between them.
 

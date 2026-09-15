@@ -5,7 +5,7 @@
 // across `lib/nativeBridge.ts`. So the reconnect ladder, the op ids, the held
 // requests and the instance check are the same code the Mac runs over ssh
 // (ios.md §2). Only the socket, the pasteboard and the keys are a phone's own:
-// the nineteen calls in `SHELL_CALLS`.
+// the twenty calls in `SHELL_CALLS`.
 import { reconnectingClient, SESSION_HOLD_MS } from "../shared/transport";
 import { sessionHold } from "../shared/wire";
 import { BUILD_VERSION } from "../shared/version";
@@ -76,6 +76,10 @@ async function start(): Promise<void> {
     // beside Copy Line, because a copy on a phone can only be pasted on the
     // phone, and the server is somewhere else (ios.md §4).
     shareSheet: (text) => void shell.call("share.text", { text }).catch(() => {}),
+    // How a code reaches the connection form: the camera, then the native
+    // pairing screen over the page (ios.md §4). The page waits on nothing,
+    // for `share.text`'s reason.
+    codeScanner: () => void shell.call("pairing.scan", {}).catch(() => {}),
     // A fact about this shell rather than a cut. Focus here raises a keyboard
     // over a page that drops every edit, so the read-only documentation editor
     // is not editable on a phone (lib/shell.ts).

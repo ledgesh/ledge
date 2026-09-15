@@ -123,7 +123,7 @@ an optimization to reach for with a profile in hand, not a thing to build
 first. Phase 3 says it is not the bottleneck yet: a whole boot's frames cross
 it inside the 16ms between `server` and `view` in §5's measurement.
 
-**The bridge is nineteen strings, and it is written down twice.**
+**The bridge is twenty strings, and it is written down twice.**
 `mainview/lib/nativeBridge.ts` is the page's half and
 `ios/Sources/WebHost.swift` is Swift's; between them is a byte stream in both
 directions and a request/response channel for what only a device can answer.
@@ -461,6 +461,19 @@ answers. A phone that can reach any server at all can reach the dialog that
 holds them, so every server after the first is still added from the connection
 dialog like a Mac's (remote.md §8): the same list, the same fingerprint step.
 A pairing code is the exception, below.
+
+**The dialog's Add Server form scans too.** A Mac's form takes a code pasted
+as a link (remote.md §4b). A phone's has Scan a pairing code at its top
+instead, which asks the shell for the camera across `pairing.scan`, the
+bridge's twentieth string (§2). The shell answers as soon as the scanner is
+up, and the page waits on nothing more: a code the camera reads takes the
+route a tapped link takes, below, and pairs on the native screen as a sheet
+over the app. A pairing rebuilds the page around the new server, and a cancel
+returns to the form as it was. The form is not read from the code, because
+the rules a code is judged by, `PairingCode.match` and `CodeHostKey`, are
+Swift's, and a second reading of them in the dialog would be the rule written
+twice. The button is absent from an edit: a code never re-pins a server the
+phone has, and an address moved onto another host is another machine's code.
 The key line the pairing screen hands over is the same line that dialog's form
 shows, carried across on `@hello` because it is a fact about the device rather
 than about any connection to one.
@@ -503,9 +516,10 @@ scheme.** The web view's `ledge://app/` scheme is WebKit's and never reaches the
 system, so the two do not meet. A link opens over whatever the window shows.
 Over the shell's screens the form is pushed onto the stack. Over the app it is a
 sheet, and the page keeps its connection until Connect succeeds and `show`
-rebuilds around the new selection. That makes a code the one way a server is
-added natively while a page is up: a link can open the app at any moment, and
-the page may not exist to answer it. The pairing dial uses this install's client
+rebuilds around the new selection. A code the dialog's scan button reads
+arrives at the same sheet. That makes a code the one way a server is added
+natively while a page is up: a link can open the app at any moment, and the
+page may not exist to answer it. The pairing dial uses this install's client
 id, so a code for the server the page is on displaces the page's connection a
 moment before the rebuild (remote.md §7). A `https://ledge.sh/pair` link reaches
 the app the same way once the site and the Associated Domains entitlement exist

@@ -96,6 +96,14 @@ configureShell({
         ];
       }
     : null,
+  // The camera is UIKit's too, so the fake counts the ask. The view's half is
+  // the button and the call; the screen it opens has no page to be seen from.
+  codeScanner: FAKING_IOS
+    ? () => {
+        const w = window as unknown as { harnessScans?: number };
+        w.harnessScans = (w.harnessScans ?? 0) + 1;
+      }
+    : null,
   softKeyboard: FAKING_IOS,
   // A phone shows one app at a time, so a window and a client are the same
   // thing there. On the Mac they stopped being the same (remote.md §8a).

@@ -861,6 +861,12 @@ test.describe("the iOS client, and what it does not have", () => {
     await expect(dialog.getByRole("option")).toHaveCount(2);
 
     await dialog.getByRole("button", { name: "Add Server…" }).tap();
+    // Scan a pairing code where a Mac's form has the field for a pasted link
+    // (ios.md §4). The camera is UIKit's: the view offers the button and asks
+    // the shell for it, and the form stays as it was for a cancel.
+    await expect(dialog.getByLabel("Pairing code (optional)")).toHaveCount(0);
+    await dialog.getByRole("button", { name: "Scan a pairing code" }).tap();
+    expect(await page.evaluate(() => (window as unknown as { harnessScans?: number }).harnessScans ?? 0)).toBe(1);
     await expect(dialog).toContainText("authorized_keys");
     // The copy says what the line is before what the `restrict` prefix
     // narrows. It makes no claim that the key cannot open a shell: the
@@ -899,6 +905,9 @@ test.describe("the iOS client, and what it does not have", () => {
     // rows carry the two verbs and not the Mac's third.
     await expect(dialog.getByRole("button", { name: /^Pairing code for/ })).toHaveCount(0);
     await dialog.getByRole("button", { name: "Edit Pi" }).tap();
+    // No scan on an edit: a code never re-pins a server the phone already
+    // has, and a moved address is another machine's code (remote.md §4b).
+    await expect(dialog.getByRole("button", { name: "Scan a pairing code" })).toHaveCount(0);
     await dialog.getByLabel("Name").fill("Shed");
     await dialog.getByRole("button", { name: "Save" }).tap();
     await expect(dialog.getByRole("option").nth(1)).toHaveText(/Shed/);
