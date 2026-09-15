@@ -41,6 +41,31 @@ test("the panel reports its grid before the run has said anything", async ({ pag
   // opens at 2 columns (editor/inlineTerm.ts) and the fit grows it to the
   // editor's content width.
   expect(first.cols).toBeGreaterThan(20);
+  // The height is the whole grid, not the one row the panel shows first. A
+  // program draws to the tty it finds, and `top` given a one-row tty draws one
+  // row and never earns a second (editor/inlineTerm.ts RUN_ROWS).
+  expect(first.rows).toBe(24);
+});
+
+test("the live panel shows the rows the output reached, not the whole grid", async ({ page }) => {
+  const id = await runBlock(page);
+  await page.evaluate((r) => window.__harness.runOutput(r, "one\r\ntwo\r\n"), id);
+  const sizes = () =>
+    page.evaluate(() => {
+      const host = document.querySelector<HTMLElement>(".ledge-term-host")!;
+      const screen = host.querySelector<HTMLElement>(".xterm-screen")!;
+      return { host: host.clientHeight, screen: screen.offsetHeight, row: screen.offsetHeight / 24 };
+    });
+  // Two lines and the cursor's own line: three rows of a 24-row grid, clipped.
+  await expect.poll(async () => Math.round((await sizes()).host / (await sizes()).row)).toBe(3);
+  expect((await sizes()).host).toBeLessThan((await sizes()).screen);
+
+  // The end of the run shows the whole grid, resized down to what was used.
+  await page.evaluate((r) => window.__harness.runEnd(r, 0), id);
+  await expect.poll(async () => {
+    const s = await sizes();
+    return s.host === s.screen;
+  }).toBe(true);
 });
 
 test("the terminal is measurable before it is visible, and takes no height", async ({ page }) => {

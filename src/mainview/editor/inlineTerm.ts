@@ -22,11 +22,12 @@ import { isDarkAppearance, onAppearanceChange } from "../lib/theme";
 // That keeps the panel about as tall as the old <pre> cap. Past that the run
 // scrolls.
 //
-// A run grows into this rather than starting there, so a one-line `echo` does
-// not open a screen-high panel in the note and then collapse it when the
-// command finishes. A full-screen program (vim, htop, a pager) sizes itself to
-// the tty, so it gets the whole grid up front and keeps it (the
-// alternate-buffer pin below).
+// The grid is this size for the whole run, and so is the tty the command
+// finds. What grows is the part on show: the panel reveals rows as the output
+// reaches them (reveal below), so a one-line `echo` does not open a
+// screen-high panel and then collapse it. The grid cannot grow with the output
+// instead, because a program draws to the tty it was given. `top` in a one-row
+// tty draws one row, and never the second that would have earned it another.
 const RUN_ROWS = 24;
 const FONT = "ui-monospace, SFMono-Regular, Menlo, monospace";
 
@@ -45,7 +46,7 @@ function xtermTheme(dark: boolean) {
 }
 
 // Callbacks the widget wires so the terminal can reach the note's shell and
-// the editor. `onResize` reports the live grid so the shell's winsize tracks
+// the editor. `onResize` reports the grid so the shell's winsize matches
 // it. `onInput` forwards keystrokes from the running block to the note's
 // inline shell. `onHeightChange` asks CodeMirror to re-measure when the
 // panel's height changes out of band (freeze, shrink). `onFocusEditor` returns
@@ -78,8 +79,11 @@ export class InlineTerm {
   private readonly offAppearance: () => void;
   private shown = false;
   private disposed = false;
-  /** A full-screen program took the grid; hold it at RUN_ROWS and stop tracking. */
+  /** A full-screen program took the grid; show all of it and stop tracking. */
   private pinned = false;
+  /** Rows of the grid on show. Grows with the output while the run is live
+   * (reveal); the frozen grid is resized to fit and shows whole. */
+  private revealed = 1;
   /** True while the command is still running. Drives the grid size and the
    * input gate (`accepts`). */
   live = true;
@@ -224,10 +228,9 @@ export class InlineTerm {
     this.term = new Terminal({
       fontFamily: FONT,
       fontSize: settings().terminal.fontSize,
-      // Start at one row and grow with the output. xterm's default is 24, and
-      // liveRows() never shrinks a running grid, so the starting size is the
-      // smallest the panel can ever be.
-      rows: 1,
+      // The whole grid from the start, so the tty the command finds is this
+      // tall. The panel shows `revealed` rows of it (the clip in reveal).
+      rows: RUN_ROWS,
       // And the narrowest grid xterm allows, for a sharper version of the same
       // reason. The panel has no width of its own: it fills the editor's
       // content, and that content is as wide as its widest thing. An xterm
@@ -306,8 +309,7 @@ export class InlineTerm {
       if (this.disposed || this.term.buffer.active.type !== "alternate") return;
       this.pinned = true;
       this.setFocusHint();
-      this.refit();
-      this.opts.onHeightChange?.();
+      this.reveal();
     });
 
     // A "system" appearance still changes under a frozen panel (lib/theme.ts).
@@ -450,25 +452,39 @@ export class InlineTerm {
       this.opts.onHeightChange?.();
       this.honorClaim();
     }
-    // Grow on the write's callback, not now. xterm parses on its own queue,
+    // Reveal on the write's callback, not now. xterm parses on its own queue,
     // so the rows this output needs are not known until it has drained.
-    this.term.write(bytes, () => this.grow());
+    this.term.write(bytes, () => this.reveal());
   }
 
-  // Track the grid to the output as it arrives, up to RUN_ROWS. Growth only,
+  // Show the rows the output has reached, up to the whole grid. Growth only,
   // so a program that clears the screen mid-run does not collapse the panel
   // under it. freeze() does the one shrink, at the end.
-  private grow(): void {
-    if (this.disposed || !this.shown || this.pinned) return;
-    // Nothing to do once the grid is full. This is the hot path for streaming
-    // output, so bail before measuring: contentRows() would walk the
-    // scrollback (up to 5000 lines) on every chunk.
-    if (this.term.rows >= RUN_ROWS) return;
-    const rows = Math.min(this.neededRows(), RUN_ROWS);
-    if (rows <= this.term.rows) return;
-    this.term.resize(this.term.cols, rows);
-    if (this.live) this.opts.onResize?.(this.term.cols, rows);
+  private reveal(): void {
+    if (this.disposed || !this.shown || !this.live) return;
+    // Nothing to do once the grid is all on show. This is the hot path for
+    // streaming output, so bail before measuring: contentRows() would walk
+    // the scrollback (up to 5000 lines) on every chunk.
+    if (this.revealed >= RUN_ROWS) return;
+    const rows = shownRows(this.revealed, this.pinned ? RUN_ROWS : this.neededRows(), this.pinned);
+    if (rows <= this.revealed) return;
+    this.revealed = rows;
+    this.clip();
     this.opts.onHeightChange?.();
+  }
+
+  // Clip the host to `revealed` rows of the grid, or show the whole grid once
+  // it is all revealed. xterm sets `.xterm-screen` to the grid's height in
+  // pixels, so a row is that over `rows`. Before the renderer has measured a
+  // font the screen has no height; the clip then waits for the next write.
+  private clip(): void {
+    if (!this.live || this.revealed >= RUN_ROWS) {
+      this.host.style.height = "";
+      return;
+    }
+    const screen = this.host.querySelector<HTMLElement>(".xterm-screen");
+    const cell = screen ? screen.offsetHeight / this.term.rows : 0;
+    this.host.style.height = cell > 0 ? `${Math.round(this.revealed * cell)}px` : "";
   }
 
   // The command finished: stop tracking the live grid and shrink to the used
@@ -490,6 +506,7 @@ export class InlineTerm {
     // here, or a later re-fit would undo the shrink below.
     this.pinned = false;
     this.setFocusHint();
+    this.host.style.height = "";
     this.term.options.cursorBlink = false;
     // If the finished terminal held focus, hand it back to the prose editor so
     // keystrokes do not land in a now read-only terminal.
@@ -537,25 +554,21 @@ export class InlineTerm {
     this.term.dispose();
   }
 
-  // Rows for a run still in flight. Never fewer than it already has, so a
-  // re-fit for an unrelated reason (a pane resize) cannot shrink the grid
-  // under a running program.
-  private liveRows(): number {
-    return liveRows(this.term.rows, this.neededRows(), this.pinned);
-  }
-
   // Fit cols to the host width. Rows follow the run's own rules, so FitAddon's
-  // proposed rows are ignored: they derive from the host height, which is
-  // itself driven by the row count.
+  // proposed rows are ignored: they derive from the host height, which is the
+  // clip. A live run keeps the whole grid; a frozen one is sized to its output.
   private refit(): void {
     if (this.disposed || !this.host.isConnected || this.host.clientWidth === 0) return;
     const dims = this.fit.proposeDimensions();
     if (!dims || !Number.isFinite(dims.cols) || dims.cols < 2) return;
-    const rows = this.live ? this.liveRows() : Math.min(this.neededRows(), RUN_ROWS);
+    const rows = this.live ? RUN_ROWS : Math.min(this.neededRows(), RUN_ROWS);
     if (dims.cols !== this.term.cols || rows !== this.term.rows) {
       this.term.resize(dims.cols, rows);
       if (this.live) this.opts.onResize?.(dims.cols, rows);
     }
+    // A font that finished loading after the last reveal changed the row
+    // height under the clip; re-measure it.
+    if (this.shown) this.clip();
   }
 
   // Rows this run wants once it is finished, before the RUN_ROWS cap.
@@ -670,12 +683,12 @@ export function neededRows(contentRows: number, cursorRow: number): number {
   return Math.max(contentRows, cursorRow + 1);
 }
 
-// Rows for a run still in flight, given the grid it has now and what its
-// output wants. Grows toward RUN_ROWS and never shrinks, so a program that
+// Rows on show for a run still in flight, given the rows shown now and what
+// its output wants. Grows toward RUN_ROWS and never shrinks, so a program that
 // clears the screen mid-run does not collapse the box it is drawing into.
-// `pinned` is a full-screen program holding the whole grid regardless of what
-// it has drawn.
-export function liveRows(currentRows: number, needed: number, pinned: boolean): number {
+// `pinned` is a full-screen program that gets the whole grid regardless of
+// what it has drawn.
+export function shownRows(currentRows: number, needed: number, pinned: boolean): number {
   if (pinned) return RUN_ROWS;
   return Math.max(currentRows, Math.min(needed, RUN_ROWS));
 }
