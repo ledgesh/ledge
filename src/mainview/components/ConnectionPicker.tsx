@@ -16,6 +16,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { Check, Laptop, Loader2, Pencil, QrCode, Server, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { pushLayer } from "@/commands/layers";
 import {
   addConnection,
@@ -59,12 +60,27 @@ function unsavedRefusal(unsaved: number, machine: string): string {
   return `${what} that could not reach ${machine}. Switching would lose them, so wait for the connection to come back, or copy them out first.`;
 }
 
+// What removing a connection costs, which is what its confirmation answers
+// (interactions.md §4-1). The notes are on the far machine and stay there.
+// What goes is this end's, and nothing brings it back: the address, the pin
+// taken during pairing, and the password in the keychain. A record with no pin
+// costs only the typing, so it gets no second sentence.
+function removalCost(conn: ConnectionInfo): string {
+  const password = conn.auth === "password" ? " and the saved password" : "";
+  const pin = conn.pinned ? `${password ? "," : " and"} its pinned host key` : "";
+  const again = conn.pinned ? " Adding it back means comparing the fingerprint again." : "";
+  return `The notes stay on ${conn.destination} and nothing there is touched. Ledge forgets the address${pin}${password}.${again}`;
+}
+
 export function ConnectionPicker({ onClose }: { onClose: () => void }) {
   const [status, setStatus] = useState<ConnectionStatus>(connectionStatus());
   // Null for the list, "new" for the add form, a connection for the edit form.
   const [form, setForm] = useState<ConnectionInfo | "new" | null>(null);
   // The connection whose pairing code is on screen, in place of the list.
   const [showing, setShowing] = useState<ConnectionInfo | null>(null);
+  // The connection a removal was asked for, which is what raises the
+  // confirmation over this dialog (interactions.md §4-1).
+  const [removing, setRemoving] = useState<ConnectionInfo | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -109,10 +125,23 @@ export function ConnectionPicker({ onClose }: { onClose: () => void }) {
     setBusy(false);
   };
 
+  // Only the confirmation calls this, so the row verb and the row button
+  // cannot reach an unconfirmed path (interactions.md §4). Refusals and
+  // rejections end on the same red line as every other action here, through
+  // the same busy flag: the refusals are the store's three, and a rejection is
+  // Bun failing to answer at all.
   const remove = async (id: string) => {
-    const refusal = await removeConnection(id);
-    if (refusal) setError(refusal);
-    else setStatus(connectionStatus());
+    if (busy) return;
+    setBusy(true);
+    setRemoving(null);
+    try {
+      const refusal = await removeConnection(id);
+      if (refusal) setError(refusal);
+      else setStatus(connectionStatus());
+    } catch (err) {
+      setError(reasonOf(err));
+    }
+    setBusy(false);
   };
 
   return (
@@ -161,7 +190,11 @@ export function ConnectionPicker({ onClose }: { onClose: () => void }) {
           <>
             <ConnectionList
               status={status}
-              busy={busy}
+              // Inert while the confirmation is up as well as while an RPC is
+              // out. The rows behind it stay readable on purpose, and one of
+              // them switches machines and reloads the page, which is not an
+              // answer to the question on screen.
+              busy={busy || removing !== null}
               onPick={switchTo}
               onCode={(conn) => {
                 setError("");
@@ -171,7 +204,10 @@ export function ConnectionPicker({ onClose }: { onClose: () => void }) {
                 setError("");
                 setForm(conn);
               }}
-              onRemove={remove}
+              onRemove={(conn) => {
+                setError("");
+                setRemoving(conn);
+              }}
             />
             <div className="mt-3 flex items-center justify-between">
               <p className="text-[11px] text-muted-foreground">
@@ -187,6 +223,21 @@ export function ConnectionPicker({ onClose }: { onClose: () => void }) {
 
         {error && <p className="mt-2 text-[12px] leading-snug text-destructive">{error}</p>}
       </div>
+
+      {/* Over the chooser rather than in place of it: the list behind is what
+          says which row is about to go. It pushes its own layer, so Escape
+          answers this dialog and leaves the chooser open (commands/layers.ts),
+          and its backdrop click cancels without also closing the chooser,
+          since the guard above fires only on the backdrop itself. */}
+      {removing && (
+        <ConfirmDialog
+          title={`Remove ${removing.name}?`}
+          body={removalCost(removing)}
+          confirmLabel="Remove"
+          onConfirm={() => void remove(removing.id)}
+          onCancel={() => setRemoving(null)}
+        />
+      )}
     </div>
   );
 }
@@ -204,7 +255,7 @@ function ConnectionList({
   onPick: (id: string) => void;
   onCode: (conn: ConnectionInfo) => void;
   onEdit: (conn: ConnectionInfo) => void;
-  onRemove: (id: string) => void;
+  onRemove: (conn: ConnectionInfo) => void;
 }) {
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -251,7 +302,7 @@ function ConnectionList({
           onPick={() => onPick(conn.id)}
           onCode={() => onCode(conn)}
           onEdit={() => onEdit(conn)}
-          onRemove={() => onRemove(conn.id)}
+          onRemove={() => onRemove(conn)}
         />
       ))}
     </div>

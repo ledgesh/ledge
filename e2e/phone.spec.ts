@@ -913,6 +913,11 @@ test.describe("the iOS client, and what it does not have", () => {
     await expect(dialog.getByRole("option").nth(1)).toHaveText(/Shed/);
 
     await dialog.getByRole("button", { name: "Remove Shed" }).tap();
+    // The confirmation in front of it (interactions.md §4-1), whose buttons are
+    // 44 points apart on a client with no pointer (ConfirmDialog.tsx).
+    const asking = page.getByRole("alertdialog", { name: "Remove Shed?" });
+    await expect(asking).toBeVisible();
+    await asking.getByRole("button", { name: "Remove" }).tap();
     await expect(dialog.getByRole("option")).toHaveCount(1);
   });
 

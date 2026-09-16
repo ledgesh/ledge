@@ -9,6 +9,7 @@ import { expect, test, type Page } from "@playwright/test";
 const bar = (page: Page) => page.locator("[data-connection]");
 const switcher = (page: Page) => page.locator("[data-switch]");
 const dialog = (page: Page) => page.getByRole("dialog", { name: "Connections" });
+const confirm = (page: Page) => page.getByRole("alertdialog");
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/harness.html");
@@ -255,7 +256,7 @@ test("a host that does not answer is a sentence, not a spinner", async ({ page }
 // row button is rendered (ConnectionPicker.tsx). interactions.md §4-1 counts
 // the local server among the three refusals that keep the app somewhere it can
 // work from.
-test("⌫ removes a configured server, and the local one has no such verb", async ({ page }) => {
+test("⌫ asks before removing a server, and the local one has no such verb", async ({ page }) => {
   await bar(page).click();
   const options = dialog(page).getByRole("option");
   // The server in this process is not a record: there is nothing about it to
@@ -263,11 +264,40 @@ test("⌫ removes a configured server, and the local one has no such verb", asyn
   await expect(dialog(page).getByRole("button", { name: /Edit This Mac/ })).toHaveCount(0);
   await expect(dialog(page).getByRole("button", { name: /Remove This Mac/ })).toHaveCount(0);
   await options.first().press("Backspace");
+  await expect(confirm(page)).toHaveCount(0);
   await expect(options).toHaveCount(2);
 
   await options.nth(1).press("Backspace");
+  await expect(confirm(page)).toBeVisible();
+  await confirm(page).getByRole("button", { name: "Remove" }).click();
   await expect(options).toHaveCount(1);
   await expect(options.first()).toHaveText(/This Mac/);
+});
+
+// The pin and the password go with the record and come back from nowhere
+// (interactions.md §4-1), so the dialog in front of the removal says what is
+// lost and what is not. Cancel is where focus lands, and it leaves the list
+// exactly as it was.
+test("removing a server asks first, and says what removing it costs", async ({ page }) => {
+  await bar(page).click();
+  const options = dialog(page).getByRole("option");
+  await dialog(page).getByRole("button", { name: "Remove VPS" }).click();
+
+  await expect(confirm(page)).toHaveAttribute("aria-label", "Remove VPS?");
+  // The far machine keeps the notes, and this end loses the pin it took during
+  // pairing, which is what makes adding it back a two-step job again.
+  await expect(confirm(page)).toHaveText(/notes stay on ledge@vps/);
+  await expect(confirm(page)).toHaveText(/pinned host key/);
+  await expect(confirm(page)).toHaveText(/comparing the fingerprint again/);
+
+  await expect(confirm(page).getByRole("button", { name: "Cancel" })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(confirm(page)).toHaveCount(0);
+  // Escape answered the confirmation and not the chooser behind it, and the
+  // server it asked about is still in the list.
+  await expect(dialog(page)).toBeVisible();
+  await expect(options).toHaveCount(2);
+  await expect(options.nth(1)).toHaveText(/VPS/);
 });
 
 // The row verb has no touch form (interactions.md §1a), so the same two verbs
@@ -277,6 +307,7 @@ test("a server is removable without a keyboard", async ({ page }) => {
   await bar(page).click();
   const options = dialog(page).getByRole("option");
   await dialog(page).getByRole("button", { name: "Remove VPS" }).click();
+  await confirm(page).getByRole("button", { name: "Remove" }).click();
   await expect(options).toHaveCount(1);
   await expect(options.first()).toHaveText(/This Mac/);
 });

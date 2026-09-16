@@ -70,6 +70,8 @@ A server with no pinned key has no code, since the code names the key. Edit the 
 
 Every row in the picker carries three controls: a QR code icon to show its pairing code, a pencil to change it and a bin to remove it. Press ⌫ on a focused row to remove it without reaching for either.
 
+Removing asks first, and the dialog says what goes with the record: the address, the host key you pinned, and the password if that connection uses one. The notes on that machine stay where they are. Adding the server back means comparing its fingerprint again.
+
 Editing opens the same form. A rename, or a change of account on the same machine, saves in one step, because neither changes which machine the pinned key belongs to.
 
 Changing the address to a different machine does not. The button reads "Continue" instead of "Save", Ledge asks that machine for its host key, and you compare the fingerprint again before anything is stored. A key pinned for one machine says nothing about another, and carrying it across would refuse every later connection with a warning about a changed host key.

@@ -613,11 +613,14 @@ Row verbs, by row kind. Each fires only while a row of that kind has focus
   prompt in front of an undoable action teaches people to click through
   prompts. Delete Workspace is the same class one register up: the folder moves
   into the app home's `.ledge-trash`, and the same strip offers it back.
-- **Irreversible destruction → modal confirmation, focus on Cancel.** Three such
-  actions exist, each in a Trash section: **Empty Trash** and **Delete
+- **Irreversible destruction → modal confirmation, focus on Cancel.** Four such
+  actions exist. Three are in a Trash section: **Empty Trash** and **Delete
   Permanently** on a note row in the note browser's, and **Delete Permanently**
   on a deleted workspace in the strip's, which removes the folder and
-  everything in it and says how many notes that is. The confirmation *is* the command's behavior — the
+  everything in it and says how many notes that is. The fourth is **Remove** on
+  a connection's row (§4-1). It destroys no notes, and it does discard the host
+  key pinned during pairing and the password in the keychain, neither of which
+  anything in the app can put back. The confirmation *is* the command's behavior — the
   command opens the dialog rather than deleting, so the row verb (`d`), the
   menu item, and the button cannot diverge into an unconfirmed path. Anything
   that unlinks a file, rather than moving it aside, joins this list.
@@ -751,6 +754,20 @@ the failure it prevents, which is running a command on the wrong box.
   host, saves in one step. A server that rotated its key legitimately would
   otherwise cost a delete and a re-add, so the form carries "Check Key Again"
   for exactly that.
+- **Removing a server is confirmed, and the dialog says what removing it
+  costs.** The record is the only copy of two things: the host key pinned when
+  someone compared a fingerprint, and the password in the keychain. Removing it
+  drops both, and the `⌫` on a focused row that starts it is one key away from
+  the arrows that move through the list. So the verb opens a confirmation
+  instead of removing, on §4's second class, and both the row button and `⌫`
+  reach it rather than a path of their own. What it answers is the question a
+  person actually has at that moment, which is what is on the far machine: the
+  notes stay there and nothing there is touched, and what goes is this end's
+  address, pin and password. A record with a pin says that adding it back means
+  comparing a fingerprint again, and an unpinned one does not, since it costs
+  only the typing. The list behind the dialog is inert while it is up: one of
+  those rows switches machines and reloads the page, which is not an answer to
+  the question on screen.
 - **Three refusals keep the app somewhere it can work from**: the local server
   cannot be removed, and neither can the connection currently being served. A
   phone has no local server to fall back to, so there the second refusal holds

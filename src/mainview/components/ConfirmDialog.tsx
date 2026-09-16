@@ -7,10 +7,11 @@
 // moves the note to the trash, where Undo and Restore bring it back, and a
 // prompt in front of an undoable action costs a click every time.
 //
-// A run marked `confirm` on its fence is the remaining caller (§4b). It shares
-// this component so that every confirmation in the app looks alike. `detail` is
-// what that caller needed: the block's own code. A custom `confirm="…"`
-// question is a headline, not a substitute for reading what runs.
+// Two more callers share it, so that every confirmation in the app looks alike.
+// A run marked `confirm` on its fence is one (§4b), and `detail` is what it
+// needed: the block's own code. A custom `confirm="…"` question is a headline,
+// not a substitute for reading what runs. Removing a server is the other
+// (§4-1), over the chooser rather than in place of it.
 import { useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { pushLayer } from "@/commands/layers";
