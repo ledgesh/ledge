@@ -637,13 +637,11 @@ scanner: the Camera app hands it to Safari.
 that the address is reachable from where the phone is, because nothing can: a
 machine on a home network or a tailnet has an address that works from inside
 and not from outside, and the code cannot know which side the phone will be
-on. So the two writers pick the address that is known to work from somewhere,
-and say which:
+on. So each writer says what the address in its code reaches:
 
 | Writer | The address in the code | When it is wrong |
 | --- | --- | --- |
-| `ledge pair` over ssh | The one the session reached (`SSH_CONNECTION`), so a LAN or tailnet address when that is how the admin got in | Behind a router's port forward: the session's address is the inside one. `--host` and `--port` name the outside. |
-| `ledge pair` at the console | The machine's name, which a phone on the same network resolves | Any other network. `--host` names the address the phone should dial. |
+| `ledge pair` | The one picked from a menu of every address the machine has, each with its reach ("The candidates", below); without a terminal, the first of them | A phone on a network none of the candidates reach, such as the outside of a router's port forward. The address is typed at the menu, or given with `--host` and `--port`. |
 | A Mac's row | The destination this Mac dials | A phone that does not share the Mac's network or tailnet, or a destination that is an `~/.ssh/config` alias, which the phone cannot resolve |
 
 Each writer says so beside the host it printed. A tailnet's MagicDNS name and
@@ -774,14 +772,33 @@ the reading and the spawning.
 | Field | Where `pair` gets it | Flag |
 | --- | --- | --- |
 | `u` | The account running `pair` (`os.userInfo`) | `--user` |
-| `h` | The server address in `SSH_CONNECTION`, when that is IPv4 and not loopback. Otherwise the machine's name (`os.hostname`). | `--host` |
-| `p` | The server port in `SSH_CONNECTION`, otherwise 22 | `--port` |
+| `h` | One of the candidates below: on a terminal, the one picked from a menu of them; otherwise the first | `--host`, or a number or an address typed at the menu |
+| `p` | The server port in `SSH_CONNECTION`, otherwise 22 | `--port`, or the port after a colon in a typed address |
 | `k` | `/etc/ssh/ssh_host_*_key.pub`, described by `ssh-keygen -lf -` | `--keys FILE`, or `-` for stdin |
 
-**The address an ssh session reached comes before the machine's name.** Someone
-running `pair` over ssh has just proved that address reaches the server. A VPS's
-own name usually resolves nowhere. The report says which source it used, and
-suggests `--host` when it fell back to the name.
+**The candidates are every address the machine could be dialed at, best
+first** (`bun/pair.ts` `addressCandidates`). The machine cannot know where the
+phone will be, so `pair` does not guess: on a terminal it shows the list with a
+note on what each address reaches and asks for a number, or an address of its
+own as `host` or `host:port`, or Return for the first. Without a terminal it
+takes the first and lists the rest on stderr, so the next run can name one
+with `--host` and stdout stays the code: the list is the machine's network
+layout, which does not belong in output that gets copied to share the link.
+Keys on stdin (`--keys -`) leave no stdin to answer on, so that run is the
+same. `--host` skips the gathering.
+
+| Candidate | Where `pair` reads it (`serve.ts` `gatherCandidates`) | Reach |
+| --- | --- | --- |
+| The tailnet name, then the tailnet addresses | `tailscale status --json` (`Self.DNSName` and `Self.TailscaleIPs`), run from its install locations (`TAILSCALE_PATHS`) rather than the PATH, as ssh-keygen is; and any interface holding an address in 100.64/10 (RFC 6598), which nothing but a tailnet hands out | A phone on the tailnet, wherever it is |
+| The ssh session's address | The server half of `SSH_CONNECTION`, when that is IPv4 and not loopback | Whatever network the admin came in from. A session from a public address to a private one crossed a NAT (a cloud instance, a port forward), so that address moves below the cloud's and its note says a phone outside needs the outside address. |
+| The cloud's public address | The metadata service at 169.254.169.254, asked only when the DMI strings under `/sys/class/dmi/id` name a cloud (`inCloud`: the vendor for EC2, Google Cloud, DigitalOcean and Hetzner, Amazon in the BIOS version for Xen-era EC2, Azure's chassis asset tag). EC2 (IMDSv2 with a token, IMDSv1 without), Google Cloud, Azure, DigitalOcean and Hetzner are all asked at once, each bounded to 1.5 s, and only a public IPv4 answer counts. Off a cloud the request is never sent: the address is link-local, so anything on the LAN could answer it. | A phone anywhere, when sshd is reachable from outside |
+| Interface addresses, public before private | `os.networkInterfaces`, less loopback, link-local, and container and VM bridges (`docker*`, `br-*`, `veth*`, `vmnet*`, …) | Public: anywhere. Private: a phone on that network. |
+| The machine's name | `os.hostname` | A phone on a network that resolves it |
+
+The same address from two sources is listed once, under the first. ICE's
+answer to this problem is to put every candidate in the offer and let the
+reader try them all; a code carries one address (above), so the person picks,
+and the notes carry what ICE's connectivity checks would have found out.
 
 **The keys come from the `.pub` files rather than from `ssh-keyscan`.** A scan
 of this machine needs sshd listening on an address `pair` can reach, and

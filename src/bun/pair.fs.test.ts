@@ -40,6 +40,16 @@ test("keys on stdin become a link a phone reads back with the same fields", asyn
   });
 });
 
+test("without --host and without a terminal, the first of this machine's addresses is used and the rest go to stderr", async () => {
+  const run = await pair(["--user", "dan", "--keys", "-"], ED25519);
+  expect(run.status).toBe(0);
+  const parsed = parsePairingLink(run.stdout.trimEnd().split("\n").at(-1)!);
+  expect(parsed).toHaveProperty("code");
+  expect(run.stdout).toMatch(/  Host       \S+ \(/);
+  expect(run.stdout).not.toContain("Other addresses");
+  expect(run.stderr === "" || run.stderr.startsWith("Other addresses this machine has")).toBe(true);
+}, 15_000);
+
 test("keys a phone cannot check are refused with the fix", async () => {
   const run = await pair(["--user", "dan", "--host", "atlas", "--keys", "-"], RSA);
   expect(run.status).toBe(1);

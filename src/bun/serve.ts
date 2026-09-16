@@ -39,18 +39,35 @@ import { APP_HOME } from "./workspaces";
 import { backupCli } from "./backupCli";
 import { backupScheduler } from "./backupRun";
 import {
+  addressCandidates,
+  AWS_ADDRESS_PATH,
+  AWS_TOKEN_PATH,
+  type Candidate,
+  candidateMenu,
+  CHOICE_PROMPT,
   containerRefusal,
+  DMI_DIR,
+  DMI_FIELDS,
   HOST_KEY_DIR,
+  inCloud,
   KEYGEN_PATH,
+  METADATA_ORIGIN,
+  METADATA_PATHS,
+  othersNote,
   pairAddress,
   pairCode,
   pairReport,
   parsePairArgs,
   phoneHostKeys,
+  publicAddressAnswer,
+  TAILSCALE_PATHS,
+  tailscaleSelf,
+  type TailnetSelf,
 } from "./pair";
+import { ask } from "./ask";
 import { BUILD_VERSION } from "../shared/version";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { hostname, userInfo } from "node:os";
+import { hostname, networkInterfaces, userInfo } from "node:os";
 import { join } from "node:path";
 
 /**
@@ -140,8 +157,19 @@ export async function pair(argv: readonly string[]): Promise<number> {
     const refusal = containerRefusal(args);
     if (refusal) return fail(refusal);
   }
-  const address = pairAddress(args, process.env.SSH_CONNECTION, hostname());
+  // With --host there is nothing to find. Otherwise the candidates are
+  // gathered first, so a menu can be offered on a terminal; keys read from
+  // stdin leave no stdin to answer it on.
+  const candidates = args.host === undefined ? await gatherCandidates() : [];
+  const interactive = args.host === undefined && args.keys !== "-" && process.stdin.isTTY && process.stdout.isTTY;
+  let answer: string | undefined;
+  if (interactive) {
+    process.stderr.write(candidateMenu(candidates));
+    answer = await ask(CHOICE_PROMPT);
+  }
+  const address = pairAddress(args, process.env.SSH_CONNECTION, candidates, answer);
   if ("error" in address) return fail(address.error, 2);
+  if (!interactive) process.stderr.write(othersNote(candidates.filter((c) => c.host !== address.host)));
 
   let keyText = "";
   if (args.keys === "-") keyText = await Bun.stdin.text();
@@ -187,14 +215,88 @@ export async function pair(argv: readonly string[]): Promise<number> {
   const code = pairCode(args.user ?? userInfo().username, address, keys);
   if ("error" in code) return fail(code.error);
   const columns = process.stdout.isTTY ? process.stdout.columns : undefined;
-  process.stdout.write(pairReport({ code, keys, hostFrom: address.hostFrom, columns }));
+  process.stdout.write(pairReport({ code, keys, note: address.note, columns }));
   return 0;
+}
+
+/**
+ * The addresses this machine could be dialed at (pair.ts `addressCandidates`):
+ * its interfaces, what Tailscale says about it, and what its cloud says its
+ * public address is. The two lookups run together, each bounded by LOOKUP_MS.
+ */
+async function gatherCandidates(): Promise<Candidate[]> {
+  const interfaces: { name: string; address: string }[] = [];
+  for (const [name, list] of Object.entries(networkInterfaces())) {
+    for (const i of list ?? []) if (i.family === "IPv4" && !i.internal) interfaces.push({ name, address: i.address });
+  }
+  const [tailnet, cloud] = await Promise.all([tailnetSelf(), process.platform === "linux" && inCloud(dmi()) ? cloudAddress() : null]);
+  return addressCandidates({ sshConnection: process.env.SSH_CONNECTION, hostname: hostname(), tailnet, cloudAddress: cloud, interfaces });
+}
+
+const LOOKUP_MS = 1500;
+
+/** The DMI strings that name a cloud (pair.ts `inCloud`), each missing where Linux does not expose it. */
+function dmi(): Partial<Record<(typeof DMI_FIELDS)[number], string>> {
+  const out: Partial<Record<(typeof DMI_FIELDS)[number], string>> = {};
+  for (const field of DMI_FIELDS) {
+    try {
+      out[field] = readFileSync(join(DMI_DIR, field), "utf8");
+    } catch {
+      // Not exposed here, or not readable: the field says nothing.
+    }
+  }
+  return out;
+}
+
+/** What `tailscale status --json` says, or null when there is no tailscale here or it does not answer in time. */
+async function tailnetSelf(): Promise<TailnetSelf | null> {
+  const path = TAILSCALE_PATHS.find((p) => existsSync(p));
+  if (!path) return null;
+  try {
+    const p = Bun.spawn([path, "status", "--json"], { stdin: "ignore", stdout: "pipe", stderr: "ignore" });
+    const timer = setTimeout(() => p.kill(), LOOKUP_MS);
+    const json = await new Response(p.stdout).text();
+    clearTimeout(timer);
+    return tailscaleSelf(json);
+  } catch {
+    return null;
+  }
+}
+
+/** One metadata request, or null: the address never answers off a cloud, and each cloud's own path 404s on the others. */
+async function metadata(path: string, init: RequestInit = {}): Promise<string | null> {
+  try {
+    const res = await fetch(`${METADATA_ORIGIN}${path}`, { ...init, signal: AbortSignal.timeout(LOOKUP_MS) });
+    return res.ok ? await res.text() : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The instance's public IPv4 address, from whichever cloud's metadata service
+ * answers. Amazon's wants a token first (IMDSv2); an older instance answers
+ * without one.
+ */
+async function cloudAddress(): Promise<string | null> {
+  const aws = (async () => {
+    const token = await metadata(AWS_TOKEN_PATH, { method: "PUT", headers: { "X-aws-ec2-metadata-token-ttl-seconds": "60" } });
+    return metadata(AWS_ADDRESS_PATH, token ? { headers: { "X-aws-ec2-metadata-token": token } } : {});
+  })();
+  const others = METADATA_PATHS.map((m) => metadata(m.path, { headers: m.headers }));
+  const answers = await Promise.all([aws, ...others]);
+  for (const body of answers) {
+    const address = body === null ? null : publicAddressAnswer(body);
+    if (address) return address;
+  }
+  return null;
 }
 
 const PAIR_USAGE = [
   "usage: ledge pair [--user NAME] [--host ADDRESS] [--port N] [--keys FILE]",
   "  --user   the account a phone signs in as (default: whoever runs pair)",
-  "  --host   the name or IPv4 address a phone dials (default: this ssh session's address, or the machine's name)",
+  "  --host   the name or IPv4 address a phone dials (default: a menu of this machine's addresses on a terminal,",
+  "           else the first of them: its tailnet name, this ssh session's address, its public address, its name)",
   "  --port   sshd's port (default: this ssh session's port, or 22)",
   "  --keys   public host keys to describe, - for stdin (default: /etc/ssh/ssh_host_*_key.pub)",
 ].join("\n");

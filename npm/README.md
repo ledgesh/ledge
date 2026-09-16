@@ -28,8 +28,10 @@ Then print a pairing code:
 ledge pair
 ```
 
-Scan it with Ledge on a phone, or paste the link under it into the Mac app's
-Add Server form. The code carries the address, the account, and the host key.
+It lists the machine's addresses, with what each one reaches, and asks which
+one the phone should dial. Scan the code with Ledge on a phone, or paste the
+link under it into the Mac app's Add Server form. The code carries the
+address, the account, and the host key.
 
 If the machine already has Bun, the same package installs with it. On Linux,
 Bun has to live in `/usr/local` so that an incoming ssh finds both commands:
@@ -84,7 +86,7 @@ sudo ln -s "$(command -v bun)" /usr/local/bin/bun
 | --- | --- |
 | `ledge serve` | The protocol on stdin and stdout, attached to this machine's daemon. Starts the daemon if nothing answers. What a client runs. |
 | `ledge daemon` | Be this machine's server. Holds the notes, the shells, and the watchers, and runs until stopped. |
-| `ledge pair` | Print a pairing code for this machine. `--user`, `--host`, and `--port` override what it describes. |
+| `ledge pair` | Print a pairing code for this machine, after asking which of its addresses a phone should dial. `--user`, `--host`, and `--port` override what it describes. |
 | `ledge backup` | Back this machine up to an S3-compatible bucket: `setup`, `now`, `status`, `snapshots`, `restore`, `paths`, `restic`. |
 | `ledge mcp` | The Ledge MCP server on stdin and stdout, for an agent running on this machine. |
 | `ledge ls`, `ledge cat`, `ledge search`, ... | Notes from this machine's own shell. `ledge help` lists them all. |
