@@ -259,7 +259,7 @@ Run them as the account the server runs as, on the machine the server runs on.
 
 | Verb | What it does |
 | --- | --- |
-| `ledge backup setup` | Asks for the bucket and its key, fetches restic if none is installed, writes the credentials to the `backup` profile, creates the repository, and takes the first backup. `--existing` joins a repository that already has backups in it. |
+| `ledge backup setup` | Asks for the bucket and its key, fetches restic if none is installed, writes the credentials to the `backup` profile, creates the repository, and takes the first backup. `--existing` joins a repository that already has backups in it, and takes no first backup, since a machine that has just joined has nothing on it to back up. |
 | `ledge backup now` | Takes a backup and thins old snapshots. |
 | `ledge backup status` | When the last backup ran and how it went, when the next is due, and any attached folder the last run could not find. |
 | `ledge backup snapshots` | The snapshots in the repository, newest first. |

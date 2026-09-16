@@ -2200,12 +2200,23 @@ the schedule, the state, and the restore. `bun/backup.ts` is the policy, pure;
 - **Nothing overlaps**: a pid lock in `.server/backup/` (`withBackupLock`)
   covers the hourly run, the idle-exit run and a `now` typed by hand, and a
   dead holder's lock is taken.
-- **Retention** is fixed (`KEEP`: 24 hourly, 30 daily, 12 weekly, 24
-  monthly), `forget` every run and `--prune` once a day (`PRUNE_EVERY_MS`),
-  over snapshots tagged `ledge` only, so a repository shared with another
-  tool's backups is not thinned by Ledge's policy. No setting: a knob is
-  earned when the hardcoded value demonstrably fails someone (architecture.md
-  §7), and `ledge backup restic forget` is there meanwhile.
+- **Retention** is fixed (`KEEP`: the 10 newest, then 24 hourly, 30 daily, 12
+  weekly, 24 monthly), `forget` every run and `--prune` once a day
+  (`PRUNE_EVERY_MS`), over snapshots tagged `ledge` only, so a repository
+  shared with another tool's backups is not thinned by Ledge's policy. No
+  setting: a knob is earned when the hardcoded value demonstrably fails
+  someone (architecture.md §7), and `ledge backup restic forget` is there
+  meanwhile. The 10 are the restore window. Every other rule keeps one
+  snapshot per time bucket, so a backup taken beside a recent one thins that
+  one away, and the backup a joining machine takes is taken beside the
+  snapshot it came to restore.
+- **A machine thins nothing until it has a snapshot of its own here**
+  (`forgetDue`, `state.lastSnapshot`), and `setup --existing` takes no backup
+  at all: it opens the repository, writes the profile, prints the newest
+  snapshot and the `restore --in-place` line. A machine joining a repository
+  is a machine that has not restored yet, and both a backup of its empty disk
+  and the `forget` after it work against the restore. Its first backup is the
+  daemon's, after the restore has put the state file back.
 - **"Nothing changed" is decided by a diff, not by restic.**
   `--skip-if-unchanged` compares whole trees, and a tree carries the metadata
   of every ancestor of a target: a home directory whose mtime moved (zsh

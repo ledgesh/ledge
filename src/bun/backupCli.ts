@@ -202,6 +202,29 @@ async function setup(args: readonly string[]): Promise<number> {
     }
   }
 
+  // A machine that joins a repository is a machine that has not restored yet,
+  // so setup takes no backup here: a backup of a machine with nothing on it,
+  // and the `forget` that follows one, thin the snapshot the restore is about
+  // to ask for (backup.ts `KEEP`, `forgetDue`).
+  if (existing) {
+    const listed = await listSnapshots();
+    say("");
+    if ("error" in listed) say(`The repository opened, though its snapshots could not be listed: ${listed.error}`);
+    else if (listed.snapshots.length === 0) say("The repository opened. It holds no snapshots yet.");
+    else {
+      const newest = listed.snapshots[0]!;
+      say(`The repository opened. Its newest snapshot is ${newest.short_id}, from ${snapshotTime(newest.time)}; \`ledge backup snapshots\` lists the rest.`);
+    }
+    say("");
+    say("Nothing has been backed up from this machine yet. To put this machine back, with the app quit or the daemon stopped:");
+    say("");
+    say("    ledge backup restore --in-place");
+    say("");
+    say("Backups run every hour while this machine's Ledge server is up, and once more before it exits.");
+    say(`The repository and its credentials are in ${PROFILE_PATH}, the "${BACKUP_PROFILE}" profile.`);
+    return 0;
+  }
+
   say("Taking the first backup...");
   await loadWorkspaces();
   const result = await runBackup({ log: say, reason: "setup" });
@@ -267,8 +290,13 @@ async function snapshots(): Promise<number> {
     say("no snapshots yet");
     return 1;
   }
-  for (const s of r.snapshots) out(`${s.short_id}  ${s.time.replace(/\.\d+/, "").replace("T", " ")}  ${s.hostname}  ${s.paths.length} path${s.paths.length === 1 ? "" : "s"}`);
+  for (const s of r.snapshots) out(`${s.short_id}  ${snapshotTime(s.time)}  ${s.hostname}  ${s.paths.length} path${s.paths.length === 1 ? "" : "s"}`);
   return 0;
+}
+
+/** A snapshot's time as the verbs print it: seconds, a space, no fraction. */
+function snapshotTime(time: string): string {
+  return time.replace(/\.\d+/, "").replace("T", " ");
 }
 
 // --- restore -----------------------------------------------------------------

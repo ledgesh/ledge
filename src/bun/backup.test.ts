@@ -12,6 +12,7 @@ import {
   backupSet,
   EMPTY_STATE,
   forgetArgs,
+  forgetDue,
   idleExitWorthIt,
   isOverdue,
   KEEP,
@@ -222,6 +223,13 @@ describe("schedule and state", () => {
     expect(isOverdue(failed, at(30))).toBe(false);
   });
 
+  test("a machine with no snapshot of its own in the repository thins nothing", () => {
+    // Its first backup is a backup of a machine that has not restored yet.
+    expect(forgetDue(EMPTY_STATE)).toBe(false);
+    expect(forgetDue(recordRun(EMPTY_STATE, { at: t0, ok: true, snapshot: "abc", skipped: [] }))).toBe(true);
+    expect(forgetDue(recordRun(EMPTY_STATE, { at: t0, ok: false, error: "x", skipped: [] }))).toBe(false);
+  });
+
   test("pruning is due once a day", () => {
     expect(pruneDue(EMPTY_STATE, t0)).toBe(true);
     const pruned = recordRun(EMPTY_STATE, { at: t0, ok: true, pruned: true, skipped: [] });
@@ -259,6 +267,13 @@ describe("restic command lines", () => {
     expect(args[args.indexOf("--keep-monthly") + 1]).toBe(String(KEEP.monthly));
     expect(args).not.toContain("--prune");
     expect(forgetArgs(true)).toContain("--prune");
+  });
+
+  test("the policy keeps the newest snapshots whatever hour they fall in", () => {
+    // The hourly rule keeps one snapshot per hour, so without this a backup
+    // taken beside a recent one thins that one away.
+    expect(forgetArgs(false)[forgetArgs(false).indexOf("--keep-last") + 1]).toBe(String(KEEP.last));
+    expect(KEEP.last).toBeGreaterThan(1);
   });
 
   test("restore names the snapshot, the target and each include", () => {

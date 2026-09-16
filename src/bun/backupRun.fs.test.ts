@@ -109,12 +109,12 @@ describe("one run", () => {
     expect(existsSync(STATE_PATH)).toBe(false);
   });
 
-  test("a run hands restic both lists, tags and skips, thins with the policy, prunes the first time, and records the snapshot", async () => {
+  test("a run hands restic both lists, tags and skips, and records the snapshot", async () => {
     configure();
     process.env["FAKE_SNAPSHOT"] = "abc123";
     const log: string[] = [];
     const r = await runBackup({ reason: "test", log: (l) => log.push(l) });
-    expect(r).toMatchObject({ ok: true, snapshot: "abc123", changed: true, pruned: true, skipped: [] });
+    expect(r).toMatchObject({ ok: true, snapshot: "abc123", changed: true, skipped: [] });
 
     const backup = calls("backup")[0]!;
     expect(backup).toContain("--skip-if-unchanged");
@@ -126,16 +126,40 @@ describe("one run", () => {
     expect(backup[backup.indexOf("--exclude-file") + 1]).toStartWith(BACKUP_DIR);
     expect(existsSync(backup[backup.indexOf("--files-from") + 1]!)).toBe(false);
 
-    const forget = calls("forget")[0]!;
-    expect(forget).toContain("--prune");
-    expect(forget[forget.indexOf("--keep-hourly") + 1]).toBe(String(KEEP.hourly));
-    expect(forget.slice(forget.indexOf("--tag") + 1)[0]).toBe("ledge");
-
     const state = readState();
     expect(state.lastSnapshot).toBe("abc123");
     expect(state.lastOk).toBe(state.lastRun);
-    expect(state.lastPrune).toBe(state.lastRun);
     expect(log.some((l) => l.includes("snapshot abc123"))).toBe(true);
+  });
+
+  test("the first run from a machine with no snapshot of its own here leaves the older ones alone", async () => {
+    // The restore window: a machine that joined the repository backs up
+    // before it restores, and thinning around that would drop the snapshot
+    // it is about to ask for (backup.ts `forgetDue`).
+    configure();
+    process.env["FAKE_SNAPSHOT"] = "abc123";
+    const log: string[] = [];
+    const r = await runBackup({ reason: "test", log: (l) => log.push(l) });
+    expect(r).toMatchObject({ ok: true, snapshot: "abc123", pruned: false });
+    expect(calls("forget")).toHaveLength(0);
+    expect(readState().lastPrune).toBeNull();
+    expect(log.some((l) => l.includes("the first backup from this machine"))).toBe(true);
+  });
+
+  test("a later run thins with the policy and prunes the first time", async () => {
+    configure();
+    writeState(recordRun(EMPTY_STATE, { at: new Date(Date.now() - 3_600_000), ok: true, snapshot: "old1", skipped: [] }));
+    process.env["FAKE_SNAPSHOT"] = "abc123";
+    process.env["FAKE_DIFF"] = '{"message_type":"change","path":"/x/a.md","modifier":"M"}\n{"message_type":"statistics"}\n';
+    const r = await runBackup({ reason: "test" });
+    expect(r).toMatchObject({ ok: true, snapshot: "abc123", pruned: true });
+
+    const forget = calls("forget")[0]!;
+    expect(forget).toContain("--prune");
+    expect(forget[forget.indexOf("--keep-last") + 1]).toBe(String(KEEP.last));
+    expect(forget[forget.indexOf("--keep-hourly") + 1]).toBe(String(KEEP.hourly));
+    expect(forget.slice(forget.indexOf("--tag") + 1)[0]).toBe("ledge");
+    expect(readState().lastPrune).toBe(readState().lastRun);
   });
 
   test("the include list names the app home, the attached root and the profiles; the excludes name .server", async () => {
@@ -213,7 +237,9 @@ describe("one run", () => {
 
   test("a forget that fails after the snapshot landed records both", async () => {
     configure();
+    writeState(recordRun(EMPTY_STATE, { at: new Date(), ok: true, snapshot: "old1", pruned: true, skipped: [] }));
     process.env["FAKE_SNAPSHOT"] = "kept1";
+    process.env["FAKE_DIFF"] = '{"message_type":"change","path":"/x/a.md","modifier":"M"}\n{"message_type":"statistics"}\n';
     process.env["FAKE_FORGET_FAIL"] = "repository is already locked";
     const r = await runBackup({ reason: "test" });
     expect(r.ok).toBe(false);

@@ -14,6 +14,7 @@ import {
   type BackupState,
   diffArgs,
   forgetArgs,
+  forgetDue,
   forgetOneArgs,
   idleExitWorthIt,
   isOverdue,
@@ -324,7 +325,8 @@ export async function runBackup(o: { log?: Log; reason: string; secrets?: boolea
       // restic's own unchanged check is fooled by a busy parent folder
       // (backup.ts `parseDiffChanges`). A snapshot that differs from the last
       // one in nothing under the targets is dropped again.
-      const previous = readState().lastSnapshot;
+      const state = readState();
+      const previous = state.lastSnapshot;
       if (out.snapshot && previous && previous !== out.snapshot) {
         const diff = await runRestic(restic.path, diffArgs(previous, out.snapshot), env);
         if (diff.code === 0 && parseDiffChanges(diff.stdout) === 0) {
@@ -333,9 +335,14 @@ export async function runBackup(o: { log?: Log; reason: string; secrets?: boolea
           else out.snapshot = null;
         }
       }
-      const prune = pruneDue(readState(), at);
-      const forgot = await runRestic(restic.path, forgetArgs(prune), env);
-      if (forgot.code !== 0) {
+      // Old snapshots are left alone until this machine has one of its own
+      // here, so a machine that joined the repository can restore first
+      // (backup.ts `forgetDue`).
+      const thin = forgetDue(state);
+      const prune = thin && pruneDue(state, at);
+      if (!thin) log("[backup] the first backup from this machine: the snapshots already in the repository are left as they are");
+      const forgot = thin ? await runRestic(restic.path, forgetArgs(prune), env) : null;
+      if (forgot && forgot.code !== 0) {
         // The snapshot is in the repository. The failure is recorded so
         // `status` shows it; the snapshot is recorded so a restore finds it.
         const error = `snapshot ${out.snapshot?.slice(0, 8) ?? "kept"}, but restic forget failed: ${resticSaid(forgot)}`;

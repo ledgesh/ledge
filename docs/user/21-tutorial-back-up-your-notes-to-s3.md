@@ -54,6 +54,18 @@ Nothing else needs installing: no timer, no unit file, no line in a crontab. One
 
 `ledge backup now` takes a backup at any time and is safe to run beside the schedule.
 
+Old snapshots are thinned after each backup, and what survives is fixed:
+
+| Kept | For |
+| --- | --- |
+| The ten newest snapshots | however close together they were taken |
+| One an hour | a day |
+| One a day | a month |
+| One a week | a quarter |
+| One a month | two years |
+
+Only the snapshots Ledge took are thinned, so a bucket shared with another tool's backups keeps those whatever this policy says.
+
 ## 4. Check on it
 
 ```sh norun
@@ -89,13 +101,13 @@ On a fresh machine with Ledge installed, the app on a Mac or the server on a VPS
 ledge backup setup --existing
 ```
 
-It asks the same questions plus the password, opens the repository instead of creating one, and writes the profile. Then, with the app quit or the daemon stopped:
+It asks the same questions plus the password, opens the repository instead of creating one, writes the profile, and prints the newest snapshot in it. It takes no backup, since there is nothing on this machine to back up yet. Then, with the app quit or the daemon stopped:
 
 ```sh norun
 ledge backup restore --in-place
 ```
 
-The paths inside the backup are absolute, so this puts the app home, the attached folders, and the profiles back where they were. Then open Ledge, or connect to the server. Your workspaces, images, trash, profiles, and vault are all there, and locked notes open with the passphrase they had ([[Note Locking]]). Backups continue on the new machine with the same repository.
+The paths inside the backup are absolute, so this puts the app home, the attached folders, and the profiles back where they were. `--snapshot ID` restores an older one than the newest. Then open Ledge, or connect to the server. Your workspaces, images, trash, profiles, and vault are all there, and locked notes open with the passphrase they had ([[Note Locking]]). Backups continue on the new machine with the same repository.
 
 ## Run restic yourself
 

@@ -182,8 +182,12 @@ export const BACKUP_EVERY_MS = 60 * 60 * 1000;
 export const PRUNE_EVERY_MS = 24 * 60 * 60 * 1000;
 /** An idle-exit backup is skipped when the last good one is younger than this. */
 export const IDLE_EXIT_MIN_GAP_MS = 10 * 60 * 1000;
-/** Snapshots kept: a day of hourlies, a month of dailies, a quarter of weeklies, two years of monthlies. */
-export const KEEP = { hourly: 24, daily: 30, weekly: 12, monthly: 24 } as const;
+/** Snapshots kept: the ten newest whatever their times, then a day of
+ * hourlies, a month of dailies, a quarter of weeklies, two years of monthlies.
+ * The ten are there because the hourly rule keeps one snapshot per hour: a
+ * second backup in an hour that already has one would otherwise thin the
+ * first away, which a restore-time backup does to the snapshot being restored. */
+export const KEEP = { last: 10, hourly: 24, daily: 30, weekly: 12, monthly: 24 } as const;
 /** The tag on every snapshot Ledge takes, so `forget` thins only those. */
 export const SNAPSHOT_TAG = "ledge";
 
@@ -270,6 +274,14 @@ export function pruneDue(state: BackupState, now: Date, every = PRUNE_EVERY_MS):
   return !state.lastPrune || Date.parse(state.lastPrune) + every <= now.getTime();
 }
 
+/** Whether a run may thin the repository: not until this machine has a
+ * snapshot of its own in it. A machine that has just joined a repository
+ * (`setup --existing`) is a machine that has not restored yet, and thinning
+ * around its first backup drops the snapshot the restore is going to ask for. */
+export function forgetDue(state: BackupState): boolean {
+  return state.lastSnapshot !== null;
+}
+
 /** Whether an idle exit should back up first: yes unless a good run is recent. */
 export function idleExitWorthIt(state: BackupState, now: Date, gap = IDLE_EXIT_MIN_GAP_MS): boolean {
   return !state.lastOk || Date.parse(state.lastOk) + gap <= now.getTime();
@@ -296,6 +308,8 @@ export function forgetArgs(prune: boolean): string[] {
     "forget",
     "--tag",
     SNAPSHOT_TAG,
+    "--keep-last",
+    String(KEEP.last),
     "--keep-hourly",
     String(KEEP.hourly),
     "--keep-daily",

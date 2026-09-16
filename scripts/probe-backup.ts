@@ -147,6 +147,17 @@ try {
   const restic = ledge(["restic", "check", "--no-lock"]);
   check("the restic passthrough runs check against the repository", restic.code === 0);
 
+  step("two backups in the same hour both live through the thinning");
+  writeFileSync(join(managed, "probe-note.md"), "# Probe Note\n\nburst one\n");
+  const burst1 = ledge(["now"]);
+  writeFileSync(join(managed, "probe-note.md"), "# Probe Note\n\nburst two\n");
+  const burst2 = ledge(["now"]);
+  const burstIds = ledge(["snapshots"]).out.split("\n").map((l) => l.split("  ")[0]);
+  const idOf = (r: { out: string }) => r.out.replace("snapshot ", "").trim();
+  check("the earlier one survives the later one's forget (KEEP.last, not the hourly bucket)",
+    burst1.code === 0 && burst2.code === 0 && burstIds.includes(idOf(burst1)) && burstIds.includes(idOf(burst2)),
+    `${idOf(burst1)}, ${idOf(burst2)} of ${burstIds.join(", ")}`);
+
   step("the daemon backs up before an idle exit");
   writeFileSync(join(managed, "probe-note.md"), "# Probe Note\n\nthird version\n");
   const before = readState().lastSnapshot;
@@ -163,10 +174,20 @@ try {
   const restoredThird = ledge(["restore", "--to", join(SCRATCH, "restored-3"), "*/probe-note.md"]);
   check("and it holds the newest text", restoredThird.code === 0 && readFileSync(join(SCRATCH, "restored-3", managed, "probe-note.md"), "utf8").includes("third version"));
 
-  step("setup --existing --replace joins the repository with its password");
+  step("setup --existing --replace joins the repository with its password, and leaves it as it found it");
+  const snapsBeforeJoin = ledge(["snapshots"]).out;
+  const runBeforeJoin = readState().lastRun;
   const rejoin = ledge(["setup", "--from-env", "--existing", "--replace"], { ...S3, RESTIC_PASSWORD: password });
   check("rejoining succeeds", rejoin.code === 0, rejoin.err.split("\n").slice(-2).join(" | "));
   check("no new password is printed", rejoin.out === "");
+  // What the disaster-recovery flow depends on: the machine joining has
+  // nothing on it, so a backup of it here would thin what it came to restore.
+  check("joining takes no backup: the snapshots are the ones that were already there",
+    ledge(["snapshots"]).out === snapsBeforeJoin && readState().lastRun === runBeforeJoin,
+    ledge(["snapshots"]).out.split("\n").length + " listed");
+  check("and it names the newest snapshot and the restore to run",
+    /newest snapshot is [0-9a-f]{8}/.test(rejoin.err) && /ledge backup restore --in-place/.test(rejoin.err),
+    rejoin.err.split("\n").filter(Boolean).slice(-5).join(" | "));
   const wrong = ledge(["setup", "--from-env", "--existing", "--replace"], { ...S3, RESTIC_PASSWORD: "not-it" });
   check("the wrong password is refused", wrong.code === 1 && /Could not open/.test(wrong.err));
   const fresh = ledge(["setup", "--from-env", "--replace"], S3);
