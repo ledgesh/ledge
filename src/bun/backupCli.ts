@@ -7,13 +7,12 @@ import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { ask } from "./ask";
-import { BACKUP_PROFILE, backupProfileText, backupSet, restoreArgs, s3Repository, statusLines } from "./backup";
+import { BACKUP_PROFILE, backupProfileText, backupSet, parseBackupConfig, restoreArgs, s3Repository, statusLines } from "./backup";
 import {
   configured,
   findRestic,
   listSnapshots,
   PROFILE_PATH,
-  readConfig,
   readState,
   resticEnv,
   resticSaid,
@@ -172,35 +171,39 @@ async function setup(args: readonly string[]): Promise<number> {
     }
   }
 
-  await writeProfile(BACKUP_PROFILE, backupProfileText(vars));
-  const read = readConfig();
-  if (!("config" in read)) {
-    say(`${PROFILE_PATH} is missing ${read.missing.join(", ")}`);
+  // The repository is opened or created before the profile is written, so a
+  // setup that goes wrong (a mistyped password, a `--replace` that should
+  // have been `--existing`) leaves a working machine backing up as it was.
+  const proposed = parseBackupConfig(backupProfileText(vars));
+  if (!("config" in proposed)) {
+    say(`a backup needs ${proposed.missing.join(", ")}`);
     return 1;
   }
-  const env = resticEnv(read.config);
+  const env = resticEnv(proposed.config);
+  const unchanged = already
+    ? `\nNothing here changed: this machine still backs up to ${already.repository}.`
+    : "\nNothing was written.";
 
-  // Open or create the repository. Either proves the address, the credentials
-  // and (for --existing) the password before the first backup runs.
   if (existing) {
-    say(`Opening ${read.config.repository}...`);
+    say(`Opening ${proposed.config.repository}...`);
     const r = await runRestic(restic.path, ["cat", "config"], env);
     if (r.code !== 0) {
-      say(`Could not open the repository: ${resticSaid(r)}\nThe profile is written at ${PROFILE_PATH}; fix it and run setup again with --replace.`);
+      say(`Could not open the repository: ${resticSaid(r)}${unchanged}`);
       return 1;
     }
   } else {
-    say(`Creating the repository at ${read.config.repository}...`);
+    say(`Creating the repository at ${proposed.config.repository}...`);
     const r = await runRestic(restic.path, ["init"], env);
     if (r.code !== 0) {
       const said = resticSaid(r);
       const hint = /already (exists|initialized)/i.test(said)
         ? "\nThat repository already has backups in it. Run setup again with --existing and its password."
-        : `\nThe profile is written at ${PROFILE_PATH}; fix it and run setup again with --replace.`;
-      say(`Could not create the repository: ${said}${hint}`);
+        : "";
+      say(`Could not create the repository: ${said}${hint}${unchanged}`);
       return 1;
     }
   }
+  await writeProfile(BACKUP_PROFILE, backupProfileText(vars));
 
   // A machine that joins a repository is a machine that has not restored yet,
   // so setup takes no backup here: a backup of a machine with nothing on it,
@@ -216,7 +219,7 @@ async function setup(args: readonly string[]): Promise<number> {
       say(`The repository opened. Its newest snapshot is ${newest.short_id}, from ${snapshotTime(newest.time)}; \`ledge backup snapshots\` lists the rest.`);
     }
     say("");
-    say("Nothing has been backed up from this machine yet. To put this machine back, with the app quit or the daemon stopped:");
+    say("Nothing has been backed up from this machine yet. To restore this machine, with the app quit or the daemon stopped:");
     say("");
     say("    ledge backup restore --in-place");
     say("");
@@ -385,4 +388,3 @@ function valueOf(args: readonly string[], flag: string): string | null {
   const at = args.indexOf(flag);
   return at >= 0 ? (args[at + 1] ?? null) : null;
 }
-

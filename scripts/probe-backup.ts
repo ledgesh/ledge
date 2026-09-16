@@ -188,10 +188,19 @@ try {
   check("and it names the newest snapshot and the restore to run",
     /newest snapshot is [0-9a-f]{8}/.test(rejoin.err) && /ledge backup restore --in-place/.test(rejoin.err),
     rejoin.err.split("\n").filter(Boolean).slice(-5).join(" | "));
+
+  step("a setup that fails leaves the machine backing up as it did");
+  const goodProfile = readFileSync(profilePath, "utf8");
   const wrong = ledge(["setup", "--from-env", "--existing", "--replace"], { ...S3, RESTIC_PASSWORD: "not-it" });
   check("the wrong password is refused", wrong.code === 1 && /Could not open/.test(wrong.err));
+  check("and the working profile is still the working one", readFileSync(profilePath, "utf8") === goodProfile, wrong.err.split("\n").filter(Boolean).slice(-1)[0]);
+  // Forgetting --existing: restic refuses to init a repository that is
+  // already one, so this ends before anything is written or backed up.
   const fresh = ledge(["setup", "--from-env", "--replace"], S3);
   check("a fresh setup on a used repository points at --existing", fresh.code === 1 && /--existing/.test(fresh.err), fresh.err.split("\n").slice(-1)[0]);
+  check("and it leaves the password that opens the repository in place", readFileSync(profilePath, "utf8") === goodProfile);
+  const afterMistakes = ledge(["now"]);
+  check("a backup still runs after both mistakes", afterMistakes.code === 0, afterMistakes.out || afterMistakes.err.split("\n").slice(-1)[0]);
 } catch (err) {
   bad("probe aborted", err instanceof Error ? err.message : String(err));
 } finally {

@@ -2210,6 +2210,13 @@ the schedule, the state, and the restore. `bun/backup.ts` is the policy, pure;
   snapshot per time bucket, so a backup taken beside a recent one thins that
   one away, and the backup a joining machine takes is taken beside the
   snapshot it came to restore.
+- **Setup proves the repository before it writes the profile**: `restic init`
+  or `cat config` runs with the typed values, and only a repository that
+  opened gets a `backup.env` written for it. A setup that fails (a mistyped
+  password, a `--replace` that should have been `--existing`) therefore
+  leaves a working machine backing up exactly as it was, and says so.
+  Forgetting `--existing` is caught by `init` itself, which refuses a
+  repository that is already one.
 - **A machine thins nothing until it has a snapshot of its own here**
   (`forgetDue`, `state.lastSnapshot`), and `setup --existing` takes no backup
   at all: it opens the repository, writes the profile, prints the newest
