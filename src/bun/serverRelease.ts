@@ -9,7 +9,7 @@ import { NATIVE_TARGETS, PACKAGE_NAME } from "./npmPackage";
  * The Bun every install gets. The same version CI runs the suite on
  * (`.github/workflows/ci.yml`), which serverRelease.test.ts holds.
  */
-export const BUN_VERSION = "1.3.14";
+export const BUN_VERSION = "1.4.2";
 
 /** Where both downloads come from. `LEDGE_SERVER_REGISTRY` replaces it for a mirror. */
 export const REGISTRY = "https://registry.npmjs.org";
@@ -20,10 +20,10 @@ export const REGISTRY = "https://registry.npmjs.org";
  * for that version. x64 takes the baseline build, which runs on CPUs without AVX2.
  */
 export const BUN_PACKAGES: Readonly<Record<string, { name: string; sha256: string }>> = {
-  "darwin-arm64": { name: "@oven/bun-darwin-aarch64", sha256: "603d327a393c32fec5d9e7165c5f57afc28f1c84ef85593448870ccc41bda636" },
-  "darwin-x64": { name: "@oven/bun-darwin-x64-baseline", sha256: "43f555761d26b86da1b792de05d6f6486db163c9077426c47c92955e32ad48a7" },
-  "linux-arm64": { name: "@oven/bun-linux-aarch64", sha256: "97631ecfb616c248a4662599c555a59e2a18140a2ec1c0038a89bff08b815169" },
-  "linux-x64": { name: "@oven/bun-linux-x64-baseline", sha256: "1d58ab332bf81a31ef3d59d0ddaf2d60e8889b7da9e6a41762492bf5675a2be5" },
+  "darwin-arm64": { name: "@oven/bun-darwin-aarch64", sha256: "a9df486eaf7e9db9bdebb1fa425e8c9809abd783b1c518d1dbc5096a53b861ed" },
+  "darwin-x64": { name: "@oven/bun-darwin-x64-baseline", sha256: "625b1f4fd5460fcd62ef8e4b672f181ef22bcdf4a15275eeac790c708add4950" },
+  "linux-arm64": { name: "@oven/bun-linux-aarch64", sha256: "9ab3970a19660b5cd089f17fb021d900e1ca1b988dafd461d66d0a0ff4d6eac4" },
+  "linux-x64": { name: "@oven/bun-linux-x64-baseline", sha256: "129ae8dfaca565e8008735e3d6adae7515421c5b226d6f1f90c4bcb35803a647" },
 };
 
 /** `darwin-arm64`: how a target is spelled in `server.sh` and on the command line. */
@@ -33,7 +33,7 @@ export function targetKey(target: { platform: string; arch: string }): string {
 
 /**
  * Where a registry serves a package's tarball, relative to the registry:
- * `@oven/bun-linux-aarch64/-/bun-linux-aarch64-1.3.14.tgz`. `server.sh` builds
+ * `@oven/bun-linux-aarch64/-/bun-linux-aarch64-1.4.2.tgz`. `server.sh` builds
  * the same path in shell.
  */
 export function tarballPath(name: string, version: string): string {

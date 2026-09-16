@@ -25,7 +25,7 @@ export const BIN_NAME = "ledge";
  * surface is ordinary (dlopen, spawn, sockets), so lowering the floor means
  * testing an older Bun rather than changing the server.
  */
-export const BUN_FLOOR = ">=1.3.0";
+export const BUN_FLOOR = ">=1.4.0";
 
 export interface NativeTarget {
   platform: "darwin" | "linux";
