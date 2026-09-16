@@ -294,8 +294,8 @@ async function cloudAddress(): Promise<string | null> {
 
 const PAIR_USAGE = [
   "usage: ledge pair [--user NAME] [--host ADDRESS] [--port N] [--keys FILE]",
-  "  --user   the account a phone signs in as (default: whoever runs pair)",
-  "  --host   the name or IPv4 address a phone dials (default: a menu of this machine's addresses on a terminal,",
+  "  --user   the account Ledge signs in as (default: whoever runs pair)",
+  "  --host   the name or IPv4 address Ledge connects to (default: a menu of this machine's addresses on a terminal,",
   "           else the first of them: its tailnet name, this ssh session's address, its public address, its name)",
   "  --port   sshd's port (default: this ssh session's port, or 22)",
   "  --keys   public host keys to describe, - for stdin (default: /etc/ssh/ssh_host_*_key.pub)",

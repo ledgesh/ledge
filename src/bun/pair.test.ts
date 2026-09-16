@@ -220,7 +220,7 @@ describe("candidateMenu", () => {
       { host: "atlas.tail1234.ts.net", source: "tailnet", note: "tailnet" },
       { host: "203.0.113.7", source: "cloud", note: "cloud" },
     ]);
-    expect(menu).toBe("Which address should a phone dial?\n   1  atlas.tail1234.ts.net  tailnet\n   2  203.0.113.7            cloud\n");
+    expect(menu).toBe("Which address should Ledge on your other devices use to reach this server?\n   1  atlas.tail1234.ts.net  tailnet\n   2  203.0.113.7            cloud\n");
   });
 });
 

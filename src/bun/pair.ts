@@ -72,7 +72,7 @@ export function sshClientAddress(sshConnection: string | undefined): string | nu
 
 export type HostSource = "flag" | "tailnet" | "ssh" | "cloud" | "interface" | "name" | "typed";
 
-/** One address a phone might dial, with where `pair` found it and what that says about its reach. */
+/** One address Ledge on another device might reach this machine at, with where `pair` found it and what that says about its reach. */
 export type Candidate = { host: string; source: HostSource; note: string };
 
 /** What `tailscale status --json` says about this node, once `tailscaleSelf` has read it. */
@@ -91,14 +91,14 @@ export type CandidateInputs = {
 const VIRTUAL_INTERFACE = /^(docker|br-|veth|virbr|lxc|lxd|cni|flannel|podman|vmnet|vboxnet)/;
 
 const NOTES = {
-  tailnetName: "this machine's tailnet name; a phone on the tailnet reaches it from anywhere",
-  tailnetAddress: "this machine's tailnet address; a phone on the tailnet reaches it from anywhere",
+  tailnetName: "this machine's tailnet name, reachable from anywhere on the tailnet",
+  tailnetAddress: "this machine's tailnet address, reachable from anywhere on the tailnet",
   ssh: "the address this ssh session reached",
-  sshInside: "the address this ssh session reached, inside a NAT the session came through; a phone outside needs the outside address",
+  sshInside: "the address this ssh session reached, inside a NAT the session came through; a device outside needs the outside address",
   cloud: "this machine's public address, from the cloud's metadata service",
   public: (name: string) => `the public address on ${name}`,
-  private: (name: string) => `the local network address on ${name}; a phone on that network reaches it`,
-  name: "this machine's name; a phone on the same network may resolve it",
+  private: (name: string) => `the local network address on ${name}`,
+  name: "this machine's name",
 } as const;
 
 /**
@@ -209,7 +209,7 @@ export function publicAddressAnswer(body: string): string | null {
 /** The candidates as a numbered menu for the prompt, the note beside each host. */
 export function candidateMenu(candidates: readonly Candidate[]): string {
   const width = Math.max(...candidates.map((c) => c.host.length));
-  const lines = ["Which address should a phone dial?"];
+  const lines = ["Which address should Ledge on your other devices use to reach this server?"];
   candidates.forEach((c, i) => lines.push(`  ${String(i + 1).padStart(2)}  ${c.host.padEnd(width)}  ${c.note}`));
   return `${lines.join("\n")}\n`;
 }
@@ -219,7 +219,7 @@ export const CHOICE_PROMPT = "A number, or an address as host or host:port [1]";
 export type PairAddress = { host: string; port: number; source: HostSource; note: string } | { error: string };
 
 /**
- * Where a phone dials. `--host` first; then the answer to the menu, which is a
+ * The address the code names. `--host` first; then the answer to the menu, which is a
  * number from it or a typed address; then the first candidate. The port is
  * `--port`, else the one typed after a colon, else the ssh session's, else 22.
  */
@@ -255,7 +255,7 @@ export function pairAddress(
     }
   } else {
     const pick = candidates[0];
-    if (!pick) return { error: "This machine has no address a phone could dial. Run again with --host." };
+    if (!pick) return { error: "This machine has no address to put in the code. Run again with --host." };
     ({ host, source, note } = pick);
   }
   if (args.port !== undefined) {
@@ -351,7 +351,7 @@ export function pairReport({ code, keys, note, columns }: PairReport): string {
   }
   out.push(
     "",
-    "Scan the code with Ledge on your phone. It names this server and its host keys, and holds no password or key.",
+    "Scan the code with Ledge on your phone, or paste the link below into the Mac app's Add Server form. It names this server and its host keys, and holds no password or key.",
     "",
     `  Account    ${code.user}`,
     `  Host       ${code.host}${note === "" ? "" : ` (${note})`}`,
