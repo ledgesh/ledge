@@ -34,6 +34,7 @@ import {
   unquote,
 } from "../../shared/frontmatter";
 import { editProfile, openTag } from "./bridge";
+import { textPosAtCoords } from "./clickPos";
 import { sessionIdFacet } from "./session";
 
 // How much of a note to read to find the block's end. The same cap as
@@ -250,7 +251,7 @@ const field = StateField.define<DecorationSet>({
 const clickToEdit = EditorView.domEventHandlers({
   mousedown: (event, view) => {
     if (!event.metaKey || event.button !== 0) return false;
-    const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
+    const pos = textPosAtCoords(view, event.clientX, event.clientY);
     if (pos === null) return false;
     const span = frontmatterLineSpan(
       view.state.sliceDoc(0, Math.min(HEAD_BYTES, view.state.doc.length)),

@@ -47,6 +47,7 @@ import {
 import { openableUrl } from "../../shared/links";
 import { isTouchPointer } from "../lib/viewport";
 import { tooltip } from "../commands/format";
+import { textPosAtCoords } from "./clickPos";
 import { frontmatterRange } from "./frontmatter";
 import { openExternal, openTag, openWikiNote, wikiNotes } from "./bridge";
 import { sessionIdFacet } from "./session";
@@ -662,11 +663,13 @@ const concealPlugin = ViewPlugin.fromClass(
 // opens, the same grammar as the frontmatter profile name. Clicking beside a
 // rendered link, or arrowing into it, reveals it for editing. The event is
 // consumed only on an open, so CodeMirror's own ⌘-click (add a cursor) still
-// works elsewhere.
+// works elsewhere. The position comes from textPosAtCoords rather than
+// posAtCoords, so a click in the blank beside a line ending in a link is the
+// caret move it looks like.
 const clickToOpen = EditorView.domEventHandlers({
   mousedown: (event, view) => {
     if (event.button !== 0) return false;
-    const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
+    const pos = textPosAtCoords(view, event.clientX, event.clientY);
     if (pos === null) return false;
     // Wikilinks first: a WikiLink node can never nest a Link, so the first
     // hit wins. Same click grammar as URLs. A dangling one falls through to

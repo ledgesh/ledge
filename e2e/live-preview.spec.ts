@@ -94,6 +94,26 @@ test("a rendered link opens on plain click; a revealed one is caret territory", 
   await expect(page.locator(".ledge-hotspot")).toHaveCount(2);
 });
 
+test("clicking the blank right of a link places the caret, it does not open", async ({ page }) => {
+  // A link alone on its line, so the blank to its right runs to the window
+  // edge. posAtCoords clamps a click there to the end of the line, which is
+  // inside the link, and clickToOpen used to follow it from 100px away.
+  await page.keyboard.press("Meta+a");
+  await page.keyboard.insertText("# Untitled\n\n[Ledge docs](https://example.com/docs)\n");
+  await page.keyboard.press("Meta+ArrowUp");
+
+  const link = page.locator(".ledge-mdlink");
+  const box = (await link.boundingBox())!;
+  await page.mouse.click(box.x + box.width + 100, box.y + box.height / 2);
+
+  expect(await page.evaluate(() => window.__harness.linkOpens())).toEqual([]);
+  // The caret landed at the end of the line, which touches the link, so its
+  // raw syntax is showing: the click moved the caret rather than following.
+  await expect(page.locator(".cm-line", { hasText: "Ledge docs" })).toHaveText(
+    "[Ledge docs](https://example.com/docs)",
+  );
+});
+
 test("fence marks conceal outside the block; the language and code stay", async ({ page }) => {
   // Give the scratch note a ```sh block, then put the caret back at the top of
   // the note, outside it: the fences hide, the info string is the caption.
