@@ -36,9 +36,9 @@ It asks for the endpoint, the bucket, the access key ID, and the secret. Then it
 | Credentials | Writes the four values and a generated restic password to the `backup` profile, `~/.config/ledge/profiles/backup.env`, readable by this account alone ([[Profiles and Secrets]]). |
 | Repository | Creates the restic repository in the bucket. |
 | First backup | Backs up everything `ledge backup paths` lists: the app home, every folder attached from elsewhere on the machine, and the profiles. |
-| Password | Prints the password on its last line. |
+| Password | Prints the password, the one thing `setup` writes to stdout. |
 
-The password is what encrypts the backup, and it is the only key. Copy it somewhere that is not this machine, such as a password manager. A restore starts on a machine with nothing on it, and a password stored only inside the backup is a backup you cannot open.
+The password is what encrypts the backup, and it is the only key. Nothing can be restored without it. Copy it somewhere that is not this machine, such as a password manager.
 
 ## 3. Leave it running
 

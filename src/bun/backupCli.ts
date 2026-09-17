@@ -241,10 +241,14 @@ async function setup(args: readonly string[]): Promise<number> {
   say(`The repository and its credentials are in ${PROFILE_PATH}, the "${BACKUP_PROFILE}" profile.`);
   if (generated) {
     say("");
-    say("This is the password that encrypts the backup. Keep a copy somewhere that is not this machine:");
-    say("a restore starts on a machine with nothing on it, and a password stored only here is a backup you cannot open.");
-    say("");
+    // The password is the only thing `setup` writes to stdout, so that piping
+    // it keeps it. The label that heads its line is prose, and so is written
+    // to stderr, without the newline that `out` is about to supply.
+    process.stderr.write("SAVE THIS PASSWORD: ");
     out(generated);
+    say("");
+    say("It is the only key to the backup, and nothing can be restored without it.");
+    say("Keep a copy somewhere that is not this machine, such as a password manager.");
   }
   return 0;
 }

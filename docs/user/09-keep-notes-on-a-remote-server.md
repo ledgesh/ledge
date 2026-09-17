@@ -273,7 +273,7 @@ Backups run every hour while the server is up, and once more before it exits: af
 
 Three things to know before you rely on it:
 
-- Keep the restic password somewhere other than this machine. `setup` prints it once. A restore starts on a machine that has nothing on it, and a password stored only inside the backup is a backup you cannot open.
+- Keep the restic password somewhere other than this machine, such as a password manager. `setup` prints it once. It is the only key to the backup, and nothing can be restored without it.
 - The backup holds secrets. Profile values are plain text on disk and so are unlocked notes, which is why restic encrypts before uploading. The bucket sees ciphertext only.
 - Locked notes and the vault travel together. `.vault.json` is inside the app home, so it is always in the backup, and a restore opens locked notes with the passphrase they had ([[Note Locking]]).
 
