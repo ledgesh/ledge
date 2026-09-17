@@ -127,11 +127,50 @@ test("two drawers never stack", async ({ page }) => {
   await expect(page.getByText("OUTLINE")).toBeHidden();
 });
 
+test("a phone on its side is still one pane, and the tree still reaches its rows", async ({
+  page,
+}) => {
+  // iPhone 14 landscape, after the safe areas the shell takes off the sides
+  // (ios/Sources/WebHost.swift). 734 clears the 640 width rule; the screen
+  // this project emulates (390x844, playwright.config.ts) is what keeps it on
+  // the drawer branch (ios.md §9).
+  await page.setViewportSize({ width: 734, height: 372 });
+  await openSidebar(page);
+  await expectWidth(drawer(page), 280);
+  await expectWidth(page.locator("main"), 734);
+
+  // The app never scrolls as a document. At this height the sidebar cannot
+  // fit its two sections, so it stacks into one column that scrolls
+  // (workspace/Sidebar.tsx), and what does not fit scrolls inside the drawer
+  // rather than pushing the window taller than the screen.
+  await expect(drawer(page).locator("[data-stacked]")).toHaveCount(1);
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const doc = document.scrollingElement!;
+        return doc.scrollHeight - doc.clientHeight;
+      }),
+    )
+    .toBe(0);
+
+  // New Note is the last row of the column, below the fold at 372. Reachable
+  // by scrolling the drawer, and it still makes a note.
+  const newNote = drawer(page).getByRole("button", { name: /^New Note/ });
+  await newNote.scrollIntoViewIfNeeded();
+  await newNote.tap();
+  // The note opened in a tab, and opening it put the drawer away (the test
+  // above), so the proof is in the pane and not in the tree.
+  await expect(drawer(page)).toHaveCount(0);
+  await expect(page.locator("main")).toContainText("Untitled");
+});
+
 test("the breakpoint is a width, not a device", async ({ page }) => {
   // lib/viewport.ts subscribes to a media query, so the layout has to survive
-  // the window crossing the breakpoint: a Mac dragged narrow, a phone turned
-  // over. This is asserted here rather than by hand because a harness can
-  // dispatch a viewport change and a screenshot cannot.
+  // the window crossing the breakpoint: a Mac dragged narrow and wide again.
+  // This is asserted here rather than by hand because a harness can dispatch
+  // a viewport change and a screenshot cannot. Playwright's WebKit reports
+  // the viewport as the screen, so 1200x844 is a desktop screen to the rule's
+  // second clause as well, which is what lets this project cross at all.
   await openSidebar(page);
   await expectWidth(drawer(page), 280);
 

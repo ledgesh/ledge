@@ -120,6 +120,13 @@ test.describe("following the system", () => {
     await page.goto("/harness.html");
     await expect(theme(page)).toHaveAttribute("data-theme", "dark");
     expect(await bodyBg(page)).toBe("rgb(9, 9, 11)");
+    // Published for the iOS shell, which paints its own view with it beside
+    // the web view (lib/theme.ts). The token, not the computed rgb: the meta
+    // takes any CSS color and the palette stores bare hsl components.
+    await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute(
+      "content",
+      "hsl(240 10% 3.9%)",
+    );
   });
 });
 
@@ -130,6 +137,10 @@ test.describe("following the system, the other way", () => {
     await page.goto("/harness.html");
     await expect(theme(page)).toHaveAttribute("data-theme", "light");
     expect(await bodyBg(page)).toBe("rgb(255, 255, 255)");
+    await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute(
+      "content",
+      "hsl(0 0% 100%)",
+    );
   });
 });
 

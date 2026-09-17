@@ -199,9 +199,13 @@ enum AccessoryBar {
             stack.topAnchor.constraint(equalTo: bar.topAnchor),
             stack.bottomAnchor.constraint(equalTo: bar.bottomAnchor),
             // Inset, so the outermost buttons are not against the bezel where a
-            // thumb reaching for them catches the screen edge instead.
-            stack.leadingAnchor.constraint(equalTo: bar.leadingAnchor, constant: 4),
-            stack.trailingAnchor.constraint(equalTo: bar.trailingAnchor, constant: -4),
+            // thumb reaching for them catches the screen edge instead. From the
+            // safe area, not the bar's edges: the keyboard spans the screen, and
+            // with the phone on its side the bar's last 44 points sat under the
+            // Dynamic Island, which put Hide Keyboard out of sight on one
+            // rotation and Outdent on the other.
+            stack.leadingAnchor.constraint(equalTo: bar.safeAreaLayoutGuide.leadingAnchor, constant: 4),
+            stack.trailingAnchor.constraint(equalTo: bar.safeAreaLayoutGuide.trailingAnchor, constant: -4),
             trailing.widthAnchor.constraint(equalToConstant: 44),
         ])
         return bar

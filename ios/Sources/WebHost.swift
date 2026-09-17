@@ -49,6 +49,12 @@ final class WebHost: UIViewController {
     private let onScan: () -> Void
     private let scheme = BundleScheme()
     private var webView: WKWebView!
+    /// Keeps the root view the page's color (`themeColor`, which the page
+    /// publishes as `<meta name="theme-color">` from mainview/lib/theme.ts).
+    /// The web view is pinned inside the safe areas, so the root view shows
+    /// beside it when the phone is on its side and under the home indicator,
+    /// and `.systemBackground` there was a black band against the page's dark.
+    private var themeObservation: NSKeyValueObservation?
 
     private var socket: SSHTransport?
     /// The dial that asks a host for its key and hangs up. Held only so it is
@@ -123,6 +129,12 @@ final class WebHost: UIViewController {
 
         let root = UIView()
         root.backgroundColor = .systemBackground
+        themeObservation = web.observe(\.themeColor, options: [.initial, .new]) { web, _ in
+            root.backgroundColor = web.themeColor ?? .systemBackground
+            // On the console so a device log says whether the page's color
+            // arrived: the bands beside the web view are this color or black.
+            print("[shell] theme color \(web.themeColor.map { "\($0)" } ?? "none, system background")")
+        }
         root.addSubview(web)
         web.translatesAutoresizingMaskIntoConstraints = false
         // The safe areas are the shell's job, not the page's (ios.html says so

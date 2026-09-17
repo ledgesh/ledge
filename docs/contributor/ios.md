@@ -934,6 +934,13 @@ Four decisions follow:
   editor fills the window, so there is no blank page to tap, and tapping the
   chrome does not blur a contenteditable. Without that button the keyboard takes
   a third of the phone for the rest of the session.
+
+  **The bar's row is pinned to its safe area, not its edges.** The keyboard
+  spans the screen, and with the phone on its side the Dynamic Island sits on
+  one edge at the bar's height, so a row pinned to the bar's edges put its last
+  44 points under the island: Hide Keyboard out of sight on one rotation,
+  Outdent on the other. `safeAreaLayoutGuide` reaches into the keyboard's
+  window too.
 - **The web view is constrained to the keyboard, not to the safe area.** This
   is one line of Auto Layout and it was the largest single defect phase 6 found.
   A page pinned to the safe area keeps its full height when the keyboard
@@ -953,6 +960,16 @@ Four decisions follow:
   nothing**, because the layout moved between the touch and the click WebKit
   synthesizes after it, and the click landed on whatever had slid under the
   finger. The desktop suite could never have caught it: it presses Enter.
+
+  **The root view wears the page's color.** The web view is pinned inside the
+  safe areas on every edge, so the root view shows beside it: 59 points on
+  each side with the phone on its side, and under the home indicator always.
+  `.systemBackground` there is pure black against the page's dark, a visible
+  band. The page publishes its background as `<meta name="theme-color">`
+  (`mainview/lib/theme.ts`, re-stamped with the appearance), and `WebHost`
+  observes the web view's `themeColor` and paints the root view with it. The
+  page's own layout still stops at the safe area, which is what a native app
+  does with a notch: the background reaches the edge and the content does not.
 
   The install is the ugly part and is confined to one function. The first
   responder while you type in a web page is not the `WKWebView` but a private
@@ -1145,14 +1162,15 @@ written for: a three-pane layout restored onto a 390-point screen is the
 failure it prevents. The phone writes a single-pane tree of its own and the
 Mac never sees it.
 
-**One pane at a time, and the rule is a width rather than a device**
-(`mainview/lib/viewport.ts`). Below 640 points the sidebar and the right-hand
-panel stop taking width and cover the editor instead: a 280-point drawer over
-a scrim, dismissed by a tap on what it covers, by Escape, or by picking
-something out of it. The editor keeps the full width underneath either way, so
-opening and closing a drawer reflows nothing.
+**One pane at a time, and the rule is a shape rather than a device**
+(`mainview/lib/viewport.ts`). Below 640 points of width, or on a screen whose
+shorter side is under 500 points, the sidebar and the right-hand panel stop
+taking width and cover the editor instead: a 280-point drawer over a scrim,
+dismissed by a tap on what it covers, by Escape, or by picking something out
+of it. The editor keeps the full width underneath either way, so opening and
+closing a drawer reflows nothing.
 
-Three things follow, and each is a test in `e2e/phone.spec.ts`:
+Four things follow, and each is a test in `e2e/phone.spec.ts`:
 
 - **The drawer starts shut**, because a phone that booted showing its chrome
   would not be showing the note the last session left focused. Phase 2 shipped
@@ -1167,6 +1185,29 @@ Three things follow, and each is a test in `e2e/phone.spec.ts`:
   query is on width alone and deliberately not on `(pointer: coarse)`: a
   touchscreen laptop is a coarse pointer at 1920 points, and covering its editor
   because it can be touched would be the wrong answer to the right question.
+- **A phone on its side is still a phone.** Turned over, an iPhone is 734 to
+  814 points wide after the safe areas, which clears 640, and 372 to 410 tall,
+  which the side-by-side arrangement cannot use: the sidebar's rows that never
+  scroll (the connection bar, Trash, New Workspace, New Note) are 44 points
+  each on touch and took the whole column, the note list was left no height,
+  and the page overflowed the window so that WebKit scrolled the app itself.
+  So the second clause of the rule is the screen's shorter side, and a phone
+  gets the drawer whichever way it is turned. That is Obsidian's shape on a
+  phone, and Blink's reason to allow the rotation at all: a running block gets
+  the full width for its columns and the keyboard is wider. The clause reads
+  `screen`, not the viewport's height, because the web view is constrained to
+  the keyboard (§7): its height halves when the keyboard comes up, and a height
+  query would have flipped an iPad's arrangement mid-word. Nothing is locked in
+  `Info.plist`; the iPad keeps its panes in both orientations.
+
+  The drawer at that height is 324 points tall, and the sidebar answers with a
+  second rule of its own (`workspace/Sidebar.tsx`): under 480 points of height
+  it stops splitting into two scrolling sections and stacks, the strip above
+  the note list at their natural heights, one column that scrolls. The divider
+  goes with the split. A Mac window shrunk that short gets the same column, and
+  the strip's height is clamped against the sidebar on every layout rather than
+  only when the divider is dragged, so shrinking a window can no longer push
+  the note list's rows off the bottom.
 
 What did NOT change is focus. Opening a note from a list row shows it without
 taking focus off the row (`workspace/PaneTree.tsx`), and the drawer keeps that

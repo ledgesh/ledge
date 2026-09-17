@@ -2,7 +2,7 @@ import { useSyncExternalStore } from "react";
 
 // How wide the window has to be before the panes sit side by side. Below it
 // the sidebar and the right-hand panel stop taking width and cover the editor
-// instead. The rule is a width and not a device. A phone is the case it was
+// instead. The rule is a shape and not a device. A phone is the case it was
 // written for, and a Mac window dragged this narrow takes the same branch. The
 // e2e phone project is desktop WebKit at 390 points (playwright.config.ts),
 // and it must take the phone's branch or it tests a layout nobody ships.
@@ -12,10 +12,29 @@ import { useSyncExternalStore } from "react";
 // (744) that §7 wants on the pane branch.
 export const PANES_MIN_WIDTH = 640;
 
-/** Whether a window shows one pane at a time, as a function of width alone. */
-export function isSinglePane(width: number): boolean {
-  return width < PANES_MIN_WIDTH;
+// The shape's other axis. A phone turned on its side is 734 to 840 points wide
+// and clears the width rule, but it is 372 to 410 points tall, and the sidebar
+// beside the editor cannot fit its own rows in that (ios.md §9). The test is
+// the SCREEN's shorter side, not the viewport's height: the web view is
+// constrained to the keyboard (ios/Sources/WebHost.swift), so its height
+// drops by half whenever the keyboard comes up, and a height query would flip
+// an iPad's arrangement mid-word. The screen never changes with the keyboard.
+// 500 sits between the widest phone (440) and the narrowest iPad (744), and a
+// Mac has no screen that small.
+export const PHONE_SCREEN_MAX = 500;
+
+/** Whether a window shows one pane at a time: too narrow for two, or on a
+ * screen too small for two whichever way it is turned. */
+export function isSinglePane(width: number, screenShortSide = Infinity): boolean {
+  return width < PANES_MIN_WIDTH || screenShortSide < PHONE_SCREEN_MAX;
 }
+
+// Read on every snapshot rather than once. A device's screen never changes
+// while the page lives, but Playwright's WebKit reports the viewport as the
+// screen, so the e2e harness's screen follows setViewportSize and a stale read
+// would keep the phone project on one pane at 1200 points (phone.spec.ts).
+const shortSide = () =>
+  typeof screen !== "undefined" ? Math.min(screen.width, screen.height) : Infinity;
 
 // The media query below tests width alone, not `(pointer: coarse)`. A
 // touchscreen laptop is a coarse pointer at 1920 points, and it keeps its
@@ -25,18 +44,27 @@ const media =
     ? window.matchMedia(`(max-width: ${PANES_MIN_WIDTH - 1}px)`)
     : null;
 
+// The resize listener is for the harness's screen, which moves with the
+// viewport (shortSide above); on a device only the media query ever fires.
 function subscribe(cb: () => void): () => void {
   media?.addEventListener("change", cb);
-  return () => media?.removeEventListener("change", cb);
+  window.addEventListener("resize", cb);
+  return () => {
+    media?.removeEventListener("change", cb);
+    window.removeEventListener("resize", cb);
+  };
 }
 
 /**
  * Whether the chrome shows one pane at a time. This subscribes to the media
  * query instead of taking a boot-time snapshot the way settings are read, so
- * rotating a phone or dragging a window across the breakpoint re-renders.
+ * dragging a window across the breakpoint re-renders. A phone's answer is the
+ * same in both orientations, so rotating one changes nothing here.
  */
 export function useSinglePane(): boolean {
-  return useSyncExternalStore(subscribe, () => media?.matches ?? false);
+  return useSyncExternalStore(subscribe, () =>
+    isSinglePane(media?.matches ? 0 : PANES_MIN_WIDTH, shortSide()),
+  );
 }
 
 // Whether the pointer is a finger. A different question from the width above,

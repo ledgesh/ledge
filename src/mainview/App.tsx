@@ -119,8 +119,8 @@ function Shell() {
   const { state, dispatch, selected } = useWorkspace();
   const { exec } = useCommands();
   // Whether the side panels take width or cover the editor (lib/viewport.ts).
-  // Live rather than boot-static, so a rotated phone and a dragged window both
-  // land in the arrangement that fits.
+  // Live rather than boot-static, so a window dragged across the breakpoint
+  // lands in the arrangement that fits. A phone is one pane either way up.
   const singlePane = useSinglePane();
   const [termOpen, setTermOpen] = useState(false);
   const [termHeight, setTermHeight] = useState(280);

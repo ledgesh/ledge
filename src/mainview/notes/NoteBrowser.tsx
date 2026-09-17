@@ -82,7 +82,9 @@ import type { NoteMeta, TrashMeta } from "./channel";
 // there, so the strip is a hint rather than a time limit on undoing.
 const UNDO_MS = 8000;
 
-export function NoteBrowser() {
+// `stacked`: the sidebar is one scrolling column (workspace/Sidebar.tsx), so
+// the browser takes its natural height and its list scrolls with the column.
+export function NoteBrowser({ stacked = false }: { stacked?: boolean } = {}) {
   const { state, dispatch, selected } = useWorkspace();
   const { exec } = useCommands();
   // The vault state drives the locked rows' glyph (closed vs open lock) and
@@ -337,7 +339,7 @@ export function NoteBrowser() {
   };
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className={cn("flex flex-col", stacked ? "shrink-0" : "min-h-0 flex-1")}>
       {/* The header doubles as the top level's drop target: dragging a note
           here files it out of whatever folder it is in. The top level is the
           one destination with no row of its own. */}
@@ -375,7 +377,7 @@ export function NoteBrowser() {
       <div
         {...nav.containerProps}
         data-testid="note-list"
-        className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-2"
+        className={cn("px-1.5 pb-2", stacked ? "shrink-0" : "min-h-0 flex-1 overflow-y-auto")}
         // A right-click below the last note opens the same menu the New Note
         // button's chevron does, since the blank space is the list itself
         // (interactions.md R6b). A click on a row opened that row's menu on

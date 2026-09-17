@@ -61,7 +61,26 @@ export function onAppearanceChange(fn: (a: Appearance) => void): () => void {
 function apply(): void {
   const next = resolveAppearance(settings().appearance.theme, media?.matches ?? false);
   document.documentElement.dataset.theme = next;
+  stampThemeColor();
   if (next === current) return;
   current = next;
   for (const fn of listeners) fn(next);
+}
+
+// The page's background, published as `theme-color` for the shell around it.
+// The iOS web view is pinned inside the safe areas (ios/Sources/WebHost.swift),
+// so the root view shows through beside a phone on its side and under the
+// home indicator, and it reads this back as the web view's `themeColor` to
+// paint itself the same. Read from the stamped palette rather than named
+// here, so a palette change cannot leave the bands a different dark.
+function stampThemeColor(): void {
+  const token = getComputedStyle(document.documentElement).getPropertyValue("--background").trim();
+  if (!token) return;
+  let meta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
+  if (!meta) {
+    meta = document.createElement("meta");
+    meta.name = "theme-color";
+    document.head.appendChild(meta);
+  }
+  meta.content = `hsl(${token})`;
 }

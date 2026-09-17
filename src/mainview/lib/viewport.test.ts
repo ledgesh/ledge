@@ -8,12 +8,21 @@ import { isSinglePane, PANES_MIN_WIDTH } from "./viewport";
 // its own width.
 describe("one pane or several", () => {
   test("a phone is one pane, in either orientation", () => {
-    expect(isSinglePane(390)).toBe(true); // iPhone 14 portrait
-    expect(isSinglePane(440)).toBe(true); // iPhone 16 Pro Max portrait
-    // A phone in landscape is wider than the breakpoint and keeps its panes.
-    // 844 points is a small desktop window rather than a phone shape, and the
-    // sidebar fits in it.
-    expect(isSinglePane(844)).toBe(false);
+    expect(isSinglePane(390, 390)).toBe(true); // iPhone 14 portrait
+    expect(isSinglePane(440, 440)).toBe(true); // iPhone 16 Pro Max portrait
+    // A phone on its side is wider than the breakpoint, and it is still a
+    // phone: 372 points tall, which the sidebar beside the editor cannot fit
+    // its rows in (ios.md §9). The screen's shorter side says so whichever
+    // way the phone is turned.
+    expect(isSinglePane(734, 390)).toBe(true); // iPhone 14 landscape
+    expect(isSinglePane(814, 440)).toBe(true); // iPhone 16 Pro Max landscape
+  });
+
+  test("a Mac window is judged by its width alone", () => {
+    // The screen clause never fires on a Mac: no monitor is under 500 points.
+    expect(isSinglePane(390, 900)).toBe(true); // dragged narrow
+    expect(isSinglePane(844, 900)).toBe(false); // a small window
+    expect(isSinglePane(844)).toBe(false); // no screen known at all
   });
 
   test("an iPad in portrait keeps its panes", () => {
@@ -21,8 +30,8 @@ describe("one pane or several", () => {
     // keeps its panes. ios.md §9 wants that: §7 treats an iPad with a
     // hardware keyboard as a Mac-shaped client, whose existing keymap is
     // already right for it.
-    expect(isSinglePane(744)).toBe(false); // iPad mini
-    expect(isSinglePane(768)).toBe(false); // iPad
+    expect(isSinglePane(744, 744)).toBe(false); // iPad mini
+    expect(isSinglePane(768, 768)).toBe(false); // iPad
     expect(isSinglePane(1024)).toBe(false);
   });
 

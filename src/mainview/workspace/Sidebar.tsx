@@ -34,22 +34,44 @@ import { countTabs, leafIds, type Workspace } from "./tree";
 const STRIP_DEFAULT = 200;
 const STRIP_MIN = 88;
 const NOTES_MIN = 120;
+// Below this height the sidebar stops splitting and stacks instead: one column
+// that scrolls, the strip above the note list at their natural heights. Two
+// sections that each scroll need room for a few rows apiece plus the rows that
+// never scroll (the connection bar, Trash, New Workspace, New Note, 44 points
+// each on touch), and under 480 there is none. A phone on its side has 324
+// (ios.md §9); a Mac window this short gets the same answer.
+const STACK_BELOW = 480;
 
 // The sidebar: the workspace strip on top, the note list below, divided by a
 // draggable handle. The strip lists the workspaces, each of which is a
 // collection of tabs and panes. The browser lists the selected workspace's
-// notes (NoteBrowser.tsx). Both sections stay visible at once.
+// notes (NoteBrowser.tsx). Both sections stay visible at once where there is
+// height for both; where there is not, the sidebar is one scrolling column.
 export function Sidebar() {
   const [stripHeight, setStripHeight] = useState(STRIP_DEFAULT);
+  // The sidebar's live height, measured because the split depends on it and
+  // the strip's height is clamped against it. Null until the first layout.
+  const [avail, setAvail] = useState<number | null>(null);
   const ref = useRef<HTMLDivElement>(null);
 
-  // resize clamps the height against the live container height, so neither
-  // section collapses away. App.tsx measures the same way for the terminal
-  // drawer.
-  const resize = useCallback((h: number) => {
-    const avail = ref.current?.clientHeight ?? window.innerHeight;
-    setStripHeight(Math.max(STRIP_MIN, Math.min(h, avail - NOTES_MIN)));
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const measure = () => setAvail(el.clientHeight);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
   }, []);
+
+  // The strip's height is clamped against the container on every layout, not
+  // only when the divider is dragged, so a window that shrinks after the
+  // sidebar mounted cannot push the note list's rows off the bottom and out
+  // of reach. App.tsx measures the same way for the terminal drawer.
+  const resize = useCallback((h: number) => setStripHeight(h), []);
+  const stacked = avail !== null && avail < STACK_BELOW;
+  const height =
+    avail === null ? stripHeight : Math.max(STRIP_MIN, Math.min(stripHeight, avail - NOTES_MIN));
 
   // In the manual's window the sidebar shows the manual's contents at full
   // height (remote.md §8a). The strip would be an empty list under a heading,
@@ -65,16 +87,25 @@ export function Sidebar() {
   }
 
   return (
-    <aside ref={ref} className="flex h-full w-full min-w-0 flex-col bg-muted/20">
+    <aside
+      ref={ref}
+      data-stacked={stacked || undefined}
+      className={cn("flex h-full w-full min-w-0 flex-col bg-muted/20", stacked && "overflow-y-auto")}
+    >
       {/* The connection bar sits above the strip because it scopes it: the
           workspaces below, their notes, and their shells all belong to the
           machine named here (remote.md §8). */}
       <ConnectionBar />
-      <div style={{ height: stripHeight }} className="flex min-h-0 shrink-0 flex-col">
-        <WorkspaceStrip />
+      <div
+        style={stacked ? undefined : { height }}
+        className="flex min-h-0 shrink-0 flex-col"
+      >
+        <WorkspaceStrip stacked={stacked} />
       </div>
-      <ResizeHandle axis="y" current={stripHeight} onResize={resize} title="Drag to resize" />
-      <NoteBrowser />
+      {!stacked && (
+        <ResizeHandle axis="y" current={height} onResize={resize} title="Drag to resize" />
+      )}
+      <NoteBrowser stacked={stacked} />
     </aside>
   );
 }
@@ -89,7 +120,9 @@ export function Sidebar() {
 // re-render.
 let draggingWs: string | null = null;
 
-function WorkspaceStrip() {
+// `stacked`: the sidebar is one scrolling column (Sidebar above), so the list
+// takes its natural height and scrolls with the column instead of within it.
+function WorkspaceStrip({ stacked }: { stacked: boolean }) {
   const { state, dispatch } = useWorkspace();
   const { exec } = useCommands();
   const cmdHeld = useCmdHeld();
@@ -196,7 +229,7 @@ function WorkspaceStrip() {
       <div
         {...nav.containerProps}
         data-testid="workspace-strip"
-        className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-2"
+        className={cn("px-1.5 pb-2", stacked ? "shrink-0" : "min-h-0 flex-1 overflow-y-auto")}
         onDragOver={onDragOver}
         onDrop={onDrop}
         onDragLeave={onDragLeave}
