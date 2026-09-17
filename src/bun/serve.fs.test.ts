@@ -290,11 +290,15 @@ test("the app can ask a daemon to retire, or stop it, by its pid file", async ()
       client: "probe-1",
     });
 
+  // Sampled before the dial, not after `ready`: the hello and the presence
+  // push can arrive in one chunk, and the client's reader handles every frame
+  // in that chunk before the `await` resumes. Sampling after would count the
+  // push as already heard and then wait for a second one that never comes.
+  const heard = pushes.length;
   const first = dialled();
   await first.ready;
   // Registered, and not only greeted: the presence push follows the
   // daemon's registration of this client (daemon.fs.test.ts says why).
-  const heard = pushes.length;
   expect(await until(() => pushes.slice(heard).some(([m]) => m === "presence"))).toBe(true);
   const pid = daemonPid(pidPath);
   expect(pid).not.toBeNull();
