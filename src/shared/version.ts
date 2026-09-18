@@ -5,4 +5,4 @@
 // call that. The handshake still has to name a build, so the number lives
 // here too. release.test.ts fails the build when this number disagrees with
 // package.json and electrobun.config.ts.
-export const BUILD_VERSION = "0.0.3";
+export const BUILD_VERSION = "0.1.0";
